@@ -174,11 +174,6 @@ muster:
   # with the crds/-dir copy. Stays as a guard regardless of the muster version below.
   crds:
     install: false
-  # muster does not currently support OTLP push; ServiceMonitor is the
-  # primary observability path. Enable below once muster gains an otlpEndpoint
-  # knob. Filed: https://github.com/giantswarm/muster/issues/726 (probe gap).
-  serviceMonitor:
-    enabled: true
   # Muster's NetworkPolicy mirrors the umbrella's flavor split (`cilium` vs
   # `kubernetes`). Defaults stay aligned with `networkPolicy.flavor` at the
   # umbrella top level — flip `flavor: kubernetes` here too when running on
@@ -225,6 +220,20 @@ muster:
             # of install namespace. Override for an out-of-band Valkey.
             url: muster-valkey:6379
             secretKeyPassword: valkey-password
+    # Prometheus metrics for the GS Observability Platform. Since muster
+    # v1.4.0 the serviceMonitor toggle alone enables the whole scrape path:
+    # it implies the prometheus exporter, so the chart serves /metrics,
+    # exposes the metrics port on the Service, and renders the
+    # ServiceMonitor. The tenant label routes the series to the correct
+    # Mimir tenant.
+    observability:
+      metrics:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 60s
+            labels:
+              observability.giantswarm.io/tenant: giantswarm
 
 # Bundled giantswarm/valkey-app for muster's OAuth session storage.
 # Wrapper chart exposes three top-level blocks consumed here:
