@@ -220,12 +220,12 @@ muster:
             # of install namespace. Override for an out-of-band Valkey.
             url: muster-valkey:6379
             secretKeyPassword: valkey-password
-    # Prometheus metrics for the GS Observability Platform. Since muster
-    # v1.4.0 the serviceMonitor toggle alone enables the whole scrape path:
-    # it implies the prometheus exporter, so the chart serves /metrics,
-    # exposes the metrics port on the Service, and renders the
-    # ServiceMonitor. The tenant label routes the series to the correct
-    # Mimir tenant.
+    # Prometheus metrics for the GS Observability Platform. The
+    # serviceMonitor toggle alone enables the whole scrape path: it
+    # implies the prometheus exporter, so the muster chart serves
+    # /metrics, exposes the metrics port on the Service, and renders
+    # the ServiceMonitor. The tenant label routes the series to the
+    # correct Mimir tenant.
     observability:
       metrics:
         prometheus:
