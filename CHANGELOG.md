@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- muster metrics are now actually scraped. Both charts (umbrella + connectivity) passed `serviceMonitor.enabled: true` at the top level of the muster values — a key the muster chart never had, so it was silently ignored: no `/metrics` endpoint, no metrics port, no ServiceMonitor on any installation. The toggle now lives at the real path, `muster.observability.metrics.prometheus.serviceMonitor.enabled` (muster ≥ `v1.4.0` derives the prometheus exporter from it), with a `60s` interval and the `observability.giantswarm.io/tenant: giantswarm` label so the series land in the giantswarm Mimir tenant.
+
 ### Changed
 
 - `klausGateway.*` forwarded sub-blocks in both `values.schema.json` (umbrella + connectivity) relaxed to `additionalProperties: true`: `crd`, `observability`, `slack`, `cli`, `agentgatewayRoute`, `obo`, `obo.persistence`, `obo.connectors`. These mirror klaus-gateway subchart config forwarded via `forwardAllValues`, so the subchart's own schema is the source of truth; the umbrella no longer re-validates them. New klaus-gateway keys stop failing the meta-package HelmRelease schema check before they can be mirrored by hand (the recurring `Additional property ... is not allowed` break, e.g. [#209](https://github.com/giantswarm/agentic-platform/pull/209)/[#210](https://github.com/giantswarm/agentic-platform/pull/210)/[#211](https://github.com/giantswarm/agentic-platform/pull/211)). This aligns `klausGateway` with the other forwarded components (`kagent`, `muster`, `mcps`, `agentgateway`), which are already permissive or undeclared. Meta-package-owned blocks (`postgres`, `gateway`, `ingress`, `networkPolicy`, `global`) stay `additionalProperties: false`.
