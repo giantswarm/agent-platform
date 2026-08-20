@@ -1,8 +1,8 @@
 # app-test-suite config. Consumed by the generated `run-tests-with-ats`
-# CircleCI job (execute-chart-tests for the agentic-platform meta-package chart).
-# The agentic-platform-crds bundle chart has been retired (app-owned CRDs).
+# CircleCI job (execute-chart-tests for the agent-platform meta-package chart).
+# The agent-platform-crds bundle chart has been retired (app-owned CRDs).
 #
-# The cluster test steps are skipped on purpose. agentic-platform is an
+# The cluster test steps are skipped on purpose. agent-platform is an
 # app-of-apps platform meta-package: it always installs the muster subchart and
 # renders CRs for ~9 external CRD families (Cilium, Kyverno, CAPI, CNPG,
 # Gateway API, kagent, agentgateway, muster, Prometheus-operator). A standalone
@@ -19,7 +19,7 @@
 # Gateway API CRD and deploys the chart with tests/test-values.yaml (which
 # already trims the render to core resources + a single HTTPRoute).
 app-tests-app-config-file: tests/test-values.yaml
-app-tests-deploy-namespace: agentic-platform
+app-tests-deploy-namespace: agent-platform
 
 smoke-tests-cluster-type: kind
 

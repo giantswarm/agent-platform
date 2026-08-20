@@ -1,0 +1,32 @@
+ingress:
+  mode: agentgateway-muster
+  parentRefs:
+    - name: giantswarm-default
+      namespace: envoy-gateway-system
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - muster.ci.example.com
+  backendTrafficPolicy:
+    enabled: true
+
+agentgateway:
+  enabled: true
+
+mcps:
+  enabled: true
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory
+
+agent-platform-mcps:
+  agentgateway:
+    viaMuster: true
+
+valkey:
+  enabled: false

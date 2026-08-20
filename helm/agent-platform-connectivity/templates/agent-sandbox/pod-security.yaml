@@ -1,0 +1,74 @@
+{{- if and .Values.agentSandbox.enabled .Values.agentSandbox.podSecurity.enabled }}
+# ============================ TEMPORARY — REMOVE AT v0.5.0 ============================
+# This whole Kyverno mutate policy is a STOPGAP. Every other component in this chart
+# (muster, kagent, valkey, agentgateway) is "born compliant" — it sets its
+# securityContext through plain subchart values. agent-sandbox can't yet: the GS
+# giantswarm/agent-sandbox chart vendors upstream kubernetes-sigs/agent-sandbox
+# *v0.4.6*, whose controller Deployment template exposes NO securityContext knob.
+# So instead of setting values, we inject the restricted-PSS fields at admission via
+# this mutate policy so the Deployment passes Kyverno / PSA on Giant Swarm clusters.
+#
+# WHY THIS IS BRITTLE (and needs `helm.sh/resource-policy: keep`, below):
+#   This policy and the controller Deployment it mutates ship in the SAME Helm
+#   release. Kyverno can't load a brand-new ClusterPolicy before the Deployment in
+#   that same release is admitted, so on a GS cluster (fail-closed restricted-PSS)
+#   the first install of the Deployment is rejected and the release rolls back.
+#   `keep` makes this policy survive that rollback; Kyverno then loads it, and Flux's
+#   next upgrade retry re-applies the Deployment — now mutated, so it passes. Without
+#   `keep` the rollback deletes the policy too and the install never converges (loops).
+#
+# WHEN TO REMOVE:
+#   Upstream added podSecurityContext / containerSecurityContext values to the
+#   controller chart in the v0.5.x line (commit kubernetes-sigs/agent-sandbox@b974d2e,
+#   already in v0.5.0rc1). Once giantswarm/agent-sandbox bumps vendir to v0.5.0
+#   *stable* and republishes, do the born-compliant migration and DELETE this file:
+#     1. set `agent-sandbox.podSecurityContext` + `agent-sandbox.containerSecurityContext`
+#        in values.yaml (forwarded to the subchart, like kagent/valkey/agentgateway)
+#     2. delete this template AND the `agentSandbox.podSecurity` block in values.yaml
+#        (+ its values.schema.json / README entries)
+#
+# MANUAL CLEANUP REQUIRED ON REMOVAL:
+#   Because of `helm.sh/resource-policy: keep`, Helm will NOT prune this ClusterPolicy
+#   when this template is removed (keep blocks deletion on upgrade, not just uninstall).
+#   The migration MUST manually delete the orphan on every cluster that ran this:
+#     kubectl --context <ctx> delete clusterpolicy <release>-agent-sandbox-pod-security
+#   (default name: agent-platform-agent-sandbox-pod-security)
+# =====================================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ include "name" . }}-agent-sandbox-pod-security
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+  annotations:
+    # TEMPORARY: survive the first-install rollback so the mutate policy converges
+    # (see the WHY THIS IS BRITTLE note above). Removing this template later requires
+    # a manual `kubectl delete clusterpolicy` — keep does NOT auto-prune. Drop both
+    # this annotation and the template at the v0.5.0 born-compliant migration.
+    helm.sh/resource-policy: keep
+    policies.kyverno.io/title: agent-sandbox controller pod security
+    policies.kyverno.io/description: >-
+      Adds restricted-PSS securityContext fields to the agent-sandbox-controller
+      Deployment in the {{ .Values.agentSandbox.podSecurity.namespace }} namespace,
+      since the vendored upstream chart exposes no securityContext knob.
+spec:
+  rules:
+  - name: add-controller-security-context
+    match:
+      any:
+      - resources:
+          kinds: ["apps/v1/Deployment"]
+          names: ["agent-sandbox-controller"]
+          namespaces: ["{{ .Values.agentSandbox.podSecurity.namespace }}"]
+    mutate:
+      patchStrategicMerge:
+        spec:
+          template:
+            spec:
+              +(securityContext):
+                {{- toYaml .Values.agentSandbox.podSecurity.podSecurityContext | nindent 16 }}
+              containers:
+              - (name): agent-sandbox-controller
+                +(securityContext):
+                  {{- toYaml .Values.agentSandbox.podSecurity.containerSecurityContext | nindent 18 }}
+{{- end }}

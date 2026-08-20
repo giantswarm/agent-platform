@@ -1,6 +1,6 @@
 # Authentication flow
 
-How a request authenticates against the agentic platform. This document covers
+How a request authenticates against the Agent Platform. This document covers
 **only authentication** — TLS termination details and the broader
 networking/NetworkPolicy model are described elsewhere (`README.md` →
 *Ingress topology* and the `networkpolicy-dataplane-*` templates).
@@ -105,7 +105,7 @@ sequenceDiagram
     M-->>C: resource = agentgateway-host/mcp  ← matches the URL dialled
 
     C->>A: GET /.well-known/oauth-authorization-server
-    A->>M: proxied (standard HTTPRoute, agentic-platform-mcps)
+    A->>M: proxied (standard HTTPRoute, agent-platform-mcps)
     M-->>C: auth-server metadata (DCR endpoint, token endpoint, …)
 
     C->>M: DCR / CIMD directly at muster-host
@@ -122,7 +122,7 @@ Notes:
   reachable on `muster-host`. agentgateway only proxies `/mcp` — Gateway API
   path-specificity (`/mcp` beats `/`) keeps every other path on muster directly.
 - Step 5 (`oauth-authorization-server` via agentgateway) is the proxy route
-  added by [agentic-platform-mcps](https://github.com/giantswarm/agentic-platform-mcps),
+  added by [agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps),
   so the client can do the whole flow against the single agentgateway hostname.
 
 ---
@@ -131,7 +131,7 @@ Notes:
 
 Once a valid token reaches muster, muster aggregates many downstream MCP servers
 behind one endpoint. Each server entry declares **how** its token is obtained.
-This is per-server config in the `agentic-platform-mcps` `mcpServers` list, not a
+This is per-server config in the `agent-platform-mcps` `mcpServers` list, not a
 gateway concern.
 
 ```mermaid
@@ -155,7 +155,7 @@ flowchart TD
 Example (`exchange` against a spoke cluster's Dex):
 
 ```yaml
-agentic-platform-mcps:
+agent-platform-mcps:
   mcpServers:
     - cluster: <spoke>
       group: kubernetes

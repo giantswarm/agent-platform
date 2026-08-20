@@ -4,8 +4,8 @@
 
 ##@ Custom
 
-CHART_DIR ?= helm/agentic-platform
-CONNECTIVITY_DIR ?= helm/agentic-platform-connectivity
+CHART_DIR ?= helm/agent-platform
+CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 
 # parentRefs[0].name satisfies the all-modes ingress guard so a single guard is
 # isolated under test. Neither chart has subcharts anymore, so no `helm
@@ -28,7 +28,7 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		echo "FAIL: direct-mode failed for the wrong reason"; cat /tmp/vm-direct.out; exit 1; \
 	else echo "ok: direct blocked"; fi
 	@echo "--> agentgateway-muster + viaMuster:false must fail"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agentic-platform-mcps.agentgateway.viaMuster=false >/tmp/vm-via.out 2>&1; then \
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=false >/tmp/vm-via.out 2>&1; then \
 		echo "FAIL: viaMuster guard did not fire"; exit 1; \
 	elif ! grep -q "viaMuster=true" /tmp/vm-via.out; then \
 		echo "FAIL: viaMuster check failed for the wrong reason"; cat /tmp/vm-via.out; exit 1; \
@@ -46,9 +46,13 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		echo "FAIL: dep-condition check failed for the wrong reason"; cat /tmp/vm-dep.out; exit 1; \
 	else echo "ok: dep-condition guard"; fi
 	@echo "--> positive: a valid agentgateway-muster config must render"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agentic-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
+	@echo "--> deprecated agentic-platform-mcps key still satisfies the viaMuster guard"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agentic-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
+		echo "ok: legacy key honored"; \
+	else echo "FAIL: overrides under the deprecated agentic-platform-mcps key were ignored by the guard"; exit 1; fi
 	@echo "All mode guards verified."
 
 .PHONY: verify-meta
@@ -63,9 +67,9 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -q 'kind: OCIRepository' /tmp/ap-flux.out || { echo "FAIL: no OCIRepository"; exit 1; }
 	@grep -q 'kind: HelmRelease'   /tmp/ap-flux.out || { echo "FAIL: no HelmRelease"; exit 1; }
 	@grep -q 'semver: "0.x"'       /tmp/ap-flux.out || { echo "FAIL: muster range not rendered as a value"; exit 1; }
-	@grep -q 'name: agentic-platform-connectivity' /tmp/ap-flux.out || { echo "FAIL: connectivity release missing"; exit 1; }
+	@grep -q 'name: agent-platform-connectivity' /tmp/ap-flux.out || { echo "FAIL: connectivity release missing"; exit 1; }
 	@grep -qE '^  name: dicebear$$' /tmp/ap-flux.out || { echo "FAIL: dicebear avatar component not rendered"; exit 1; }
-	@if grep -q 'agentic-platform-crds' /tmp/ap-flux.out; then echo "FAIL: retired agentic-platform-crds bundle still referenced"; exit 1; else echo "ok: no agentic-platform-crds bundle (app-owned CRDs)"; fi
+	@if grep -q 'platform-crds' /tmp/ap-flux.out; then echo "FAIL: retired platform-crds bundle still referenced"; exit 1; else echo "ok: no platform-crds bundle (app-owned CRDs)"; fi
 	@grep -q 'crds: CreateReplace' /tmp/ap-flux.out || { echo "FAIL: app-owned CRDs (crds: CreateReplace) not rendered"; exit 1; }
 	@grep -qE '^    - name: agentgateway$$' /tmp/ap-flux.out || { echo "FAIL: a CR consumer no longer dependsOn its CRD-owning component (agentgateway)"; exit 1; }
 	@echo "ok: flux render"
@@ -90,11 +94,11 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@if grep -qE 'semver: "[0-9]+\.x"' /tmp/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agentic-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agent-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
 	@if grep -E '^  namespace:' /tmp/ap-ns.out | grep -vq 'flux-giantswarm'; then \
 		echo "FAIL: a rendered CR is not in the gitops.namespace"; grep -E '^  namespace:' /tmp/ap-ns.out | grep -v 'flux-giantswarm'; exit 1; \
 	else echo "ok: all CRs in flux-giantswarm"; fi
-	@grep -q 'targetNamespace: agentic-platform' /tmp/ap-ns.out || { echo "FAIL: HelmRelease targetNamespace not routed"; exit 1; }
+	@grep -q 'targetNamespace: agent-platform' /tmp/ap-ns.out || { echo "FAIL: HelmRelease targetNamespace not routed"; exit 1; }
 	@echo "ok: gitops namespace routing"
 	@echo "--> components.<name>.enabled=false skips that component's release"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.kagent.enabled=false >/tmp/ap-noc.out 2>&1 || { cat /tmp/ap-noc.out; exit 1; }
@@ -102,6 +106,10 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -q 'name: muster' /tmp/ap-noc.out || { echo "FAIL: disabling kagent dropped other components"; exit 1; }
 	@echo "--> a dependsOn ref to a disabled component is dropped (no dangling dependency)"
 	@if grep -qE '^    - name: kagent$$' /tmp/ap-noc.out; then echo "FAIL: connectivity still dependsOn disabled kagent (would block forever)"; exit 1; else echo "ok: dangling dependsOn dropped"; fi
+	@echo "--> overrides under the deprecated agentic-platform-mcps key reach the mcps release values"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set mcps.enabled=true --set agentic-platform-mcps.legacyProbe=probed >/tmp/ap-legacy.out 2>&1 || { cat /tmp/ap-legacy.out; exit 1; }
+	@grep -q 'legacyProbe: probed' /tmp/ap-legacy.out || { echo "FAIL: legacyValuesFrom merge dropped the deprecated-key override"; exit 1; }
+	@echo "ok: legacy values key honored"
 	@echo "--> connectivity chart owns the wiring (renders an HTTPRoute)"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/ci-values.yaml >/tmp/ap-conn.out 2>&1 || { cat /tmp/ap-conn.out; exit 1; }
 	@grep -q 'kind: HTTPRoute' /tmp/ap-conn.out || { echo "FAIL: connectivity did not render the muster HTTPRoute"; exit 1; }

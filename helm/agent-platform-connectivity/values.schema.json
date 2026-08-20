@@ -1,0 +1,939 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/giantswarm/agent-platform/helm/agent-platform-connectivity/values.schema.json",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registry": {
+          "type": "string",
+          "description": "Default container image registry. Override to point at a private mirror."
+        },
+        "imagePullSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "required": [
+        "name",
+        "gatewayClassName"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "gatewayClassName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "listeners": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "serviceType": {
+              "type": "string",
+              "enum": [
+                "ClusterIP",
+                "NodePort",
+                "LoadBalancer"
+              ],
+              "description": "Service type for the data-plane Service. Default ClusterIP \u2014 the controller hardcodes LoadBalancer; this overlay forces the override."
+            },
+            "podSecurityContext": {
+              "type": "object"
+            },
+            "containerSecurityContext": {
+              "type": "object"
+            },
+            "dataPlaneEnv": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "dataPlaneVolumes": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "dataPlaneVolumeMounts": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "dataPlaneResources": {
+              "type": "object"
+            }
+          }
+        },
+        "jwksEgress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer"
+            },
+            "podSelector": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "muster-direct",
+            "agentgateway-muster",
+            "agentgateway-direct"
+          ]
+        },
+        "parentRefs": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "hostnames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "httpRoute": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "annotations": {
+              "type": "object"
+            },
+            "labels": {
+              "type": "object"
+            },
+            "muster": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Per-route overrides for the muster `/` route, merged over the shared annotations/labels.",
+              "properties": {
+                "annotations": {
+                  "type": "object"
+                },
+                "labels": {
+                  "type": "object"
+                }
+              }
+            },
+            "mcp": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Per-route overrides for the agentgateway `/mcp` route, merged over the shared annotations/labels.",
+              "properties": {
+                "annotations": {
+                  "type": "object"
+                },
+                "labels": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "backendTrafficPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "timeout": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "labels": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "extraObjects": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Arbitrary manifests rendered through `tpl` alongside the umbrella's templates. Each entry is any Kubernetes object."
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "flavor": {
+          "type": "string",
+          "enum": [
+            "cilium",
+            "kubernetes"
+          ]
+        },
+        "additionalEgressCIDRs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "additionalEgressFQDNs": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "cilium flavor only \u2014 vanilla NetworkPolicy has no FQDN equivalent."
+        },
+        "musterInClusterMcpPorts": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Extra in-cluster egress ports for muster \u2192 MCP backends on a ClusterIP whose pod listens on a non-80/443 port (cilium flavor only). Renders a supplementary CiliumNetworkPolicy; [] disables it."
+        },
+        "kubernetes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "apiServerCIDR": {
+              "type": "string"
+            },
+            "worldExcludedCIDRs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "kagent": {
+      "type": "object",
+      "description": "kagent subchart values (pass-through) plus umbrella routing config. Subchart keys are forwarded to the kagent chart; `controllerRoute` and `uiRoute` are consumed by umbrella templates only.",
+      "additionalProperties": true,
+      "properties": {
+        "controllerRoute": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Expose kagent controller API through agentgateway (JWT-validated). Creates AgentgatewayBackend + two HTTPRoutes: inner (agentgateway data plane) and outer (public TLS-terminating Gateway).",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "pathPrefix": {
+              "type": "string"
+            },
+            "hostname": {
+              "type": "string"
+            },
+            "parentRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                }
+              }
+            },
+            "jwtAuthentication": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "JWT validation on the inner kagent-controller HTTPRoute. Renders an AgentgatewayPolicy (validation mode set by .mode, dex issuer, no required audiences) plus a static AgentgatewayBackend for the JWKS endpoint.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["Strict", "Optional", "Permissive"],
+                  "description": "AgentgatewayPolicy jwtAuthentication mode. Strict rejects requests with a missing or invalid token; Optional validates a token when present but allows requests with none; Permissive validates but never rejects. Defaults to Strict."
+                },
+                "issuer": {
+                  "type": "string"
+                },
+                "jwks": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "host": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Install the kagent subchart. The kagent.dev + kmcp CRDs ship with the kagent component chart itself (app-owned CRDs), so enabling kagent installs them too."
+        },
+        "modelConfigs": {
+          "type": "array",
+          "description": "Additional ModelConfig CRs to create in the kagent namespace - the model catalog beyond the subchart-created default-model-config. Agents reference one by name via spec.declarative.modelConfig.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "provider",
+              "model",
+              "apiKeySecret"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "ModelConfig name; agents reference it via spec.declarative.modelConfig."
+              },
+              "displayName": {
+                "type": "string",
+                "description": "Optional human-friendly name, rendered as the ui.giantswarm.io/display-name annotation."
+              },
+              "provider": {
+                "type": "string",
+                "description": "Model provider, e.g. Anthropic."
+              },
+              "model": {
+                "type": "string",
+                "description": "Model identifier, e.g. claude-sonnet-4-6."
+              },
+              "apiKeySecret": {
+                "type": "string",
+                "description": "Pre-existing Secret in the kagent namespace holding the API key."
+              },
+              "apiKeySecretKey": {
+                "type": "string",
+                "description": "Key within apiKeySecret. Defaults to ANTHROPIC_API_KEY."
+              }
+            }
+          }
+        },
+        "namespaceOverride": {
+          "type": "string",
+          "description": "Target namespace for all kagent resources. Must match postgres.namespace when postgres.enabled is true."
+        },
+        "remoteMcpServers": {
+          "type": "array",
+          "description": "Additional RemoteMCPServer CRs to create in the kagent namespace, beyond the template-owned shared muster server. Agents reference them by name.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "url"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "RemoteMCPServer name; agents reference it via their tool entries."
+              },
+              "url": {
+                "type": "string",
+                "description": "MCP server URL (Streamable HTTP)."
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional description; defaults to '<name> MCP server'."
+              },
+              "tokenSecret": {
+                "type": "string",
+                "description": "Optional pre-existing Secret with key 'token' holding 'Bearer <token>' for servers that need a static credential; omit for servers reached with the propagated token."
+              }
+            }
+          }
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "ServiceMonitor for controller-runtime Prometheus metrics. Requires Prometheus Operator CRDs.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "interval": {
+              "type": "string"
+            },
+            "labels": {
+              "type": "object",
+              "description": "Extra labels on the ServiceMonitor. Use observability.giantswarm.io/tenant to route to the correct Mimir instance."
+            }
+          }
+        },
+        "uiRoute": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Expose kagent UI on the public Gateway. Pair with oauth2-proxy.enabled: true and Dex credentials.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "hostname": {
+              "type": "string"
+            },
+            "parentRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                }
+              }
+            },
+            "backendTrafficPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "timeout": {
+                  "type": "string"
+                },
+                "annotations": {
+                  "type": "object"
+                },
+                "labels": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "agentSandbox": {
+      "type": "object",
+      "description": "agent-sandbox controller toggle and umbrella-owned pod-security config. `enabled` is the `condition: agentSandbox.enabled` dependency gate (kept outside the agent-sandbox value namespace, whose strict schema rejects extra keys). `podSecurity` feeds the Kyverno mutate policy that injects restricted-PSS into the controller Deployment.",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Install the agent-sandbox controller subchart. The agent-sandbox CRDs ship with the agent-sandbox component chart itself (app-owned CRDs), so enabling it installs them too. It is the runtime kagent's SandboxAgent delegates to.",
+          "default": false
+        },
+        "podSecurity": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Restricted-PSS securityContext injected into the agent-sandbox-controller Deployment via a Kyverno mutate policy, since the vendored upstream chart exposes no securityContext knob.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "namespace": {
+              "type": "string",
+              "description": "Namespace the controller Deployment runs in. Must match the agent-sandbox chart's namespace.name."
+            },
+            "podSecurityContext": {
+              "type": "object",
+              "description": "Pod-level securityContext merged onto the controller pod template."
+            },
+            "containerSecurityContext": {
+              "type": "object",
+              "description": "Container-level securityContext merged onto the agent-sandbox-controller container."
+            }
+          }
+        }
+      }
+    },
+    "agent-sandbox": {
+      "type": "object",
+      "description": "agent-sandbox subchart values (pass-through). The chart nests the upstream controller under its own `agent-sandbox:` key. Usually empty \u2014 the chart defaults the gsoci-mirrored image.",
+      "additionalProperties": true
+    },
+    "klausGateway": {
+      "type": "object",
+      "description": "klaus-gateway subchart values (pass-through). Subchart keys are forwarded; only the umbrella-controlled keys are validated here.",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Install the klaus-gateway subchart.",
+          "default": false
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "registry": {
+              "type": "string"
+            }
+          }
+        },
+        "agentgateway": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Sub-chart's own agentgateway dependency. Keep false to reuse the umbrella's bundled agentgateway."
+            }
+          }
+        },
+        "crd": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "install": {
+              "type": "boolean",
+              "description": "Manage the ChannelRoute CRD inline. No companion crds chart needed."
+            }
+          }
+        },
+        "routing": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "store": {
+              "type": "string",
+              "enum": [
+                "memory",
+                "crd"
+              ],
+              "description": "Route persistence. memory is stateless; crd requires the controller."
+            },
+            "defaultTTL": {
+              "type": "string"
+            }
+          }
+        },
+        "lifecycle": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "driver": {
+              "type": "string",
+              "enum": [
+                "operator",
+                "static"
+              ],
+              "description": "operator provisions Klaus instances via the Klaus operator; static uses staticInstances."
+            },
+            "staticInstances": {
+              "type": "string",
+              "description": "Comma-separated static instance URLs. Required when driver is static."
+            }
+          }
+        },
+        "upstream": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "agentgatewayURL": {
+              "type": "string",
+              "description": "Data-plane agentgateway service URL. Empty disables proxying."
+            }
+          }
+        },
+        "observability": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "otlpEndpoint": {
+              "type": "string",
+              "description": "OTLP trace export endpoint. Empty disables tracing."
+            }
+          }
+        },
+        "slack": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "secretName": {
+              "type": "string",
+              "description": "Secret containing bot-token, signing-secret, and app-token. Required when slack.enabled is true."
+            },
+            "channelMode": {
+              "type": "string",
+              "enum": ["", "all", "allowlist", "none"],
+              "description": "Forwarded to the klaus-gateway subchart (SLACK_CHANNEL_MODE). Unused by this chart; accepted so the umbrella's forwardAllValues passes through."
+            },
+            "channelAllowlist": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Forwarded to the klaus-gateway subchart (SLACK_CHANNEL_ALLOWLIST). Unused by this chart; accepted so the umbrella's forwardAllValues passes through."
+            },
+            "dmMode": {
+              "type": "string",
+              "enum": ["", "serve", "redirect", "ignore"],
+              "description": "Forwarded to the klaus-gateway subchart (SLACK_DM_MODE). Unused by this chart; accepted so the umbrella's forwardAllValues passes through."
+            },
+            "botToken": {
+              "type": "string",
+              "description": "Forwarded to the klaus-gateway subchart. Unused by this chart; accepted so the umbrella's forwardAllValues passes through."
+            },
+            "signingSecret": {
+              "type": "string",
+              "description": "Forwarded to the klaus-gateway subchart. Unused by this chart; accepted so the umbrella's forwardAllValues passes through."
+            },
+            "appToken": {
+              "type": "string",
+              "description": "Forwarded to the klaus-gateway subchart. Unused by this chart; accepted so the umbrella's forwardAllValues passes through."
+            }
+          }
+        },
+        "cli": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "a2a": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "defaultAgent": {
+              "type": "string",
+              "description": "Fallback agentRef when the channel does not supply one."
+            },
+            "url": {
+              "type": "string",
+              "description": "A2A base URL (without trailing agent name). Traffic is routed through the agentgateway data-plane to kagent. Required when a2a.enabled is true."
+            },
+            "saToken": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "audience": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "agentgatewayRoute": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "hostname": {
+              "type": "string"
+            }
+          }
+        },
+        "obo": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Slack on-behalf-of (OBO) muster account linking via CIMD. Forwarded to the klaus-gateway subchart; this chart also renders the public OBO route from callbackBaseUrl.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "musterUrl": {
+              "type": "string",
+              "description": "muster authorization-server base URL (RFC 8414 discovery)."
+            },
+            "callbackBaseUrl": {
+              "type": "string",
+              "description": "Gateway's public base URL. The muster redirect URI, the CIMD client_id, and the OBO route hostname are all derived from it."
+            },
+            "storePath": {
+              "type": "string",
+              "description": "Encrypted bolt link-store path. Empty uses an in-memory store."
+            },
+            "persistence": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Back the link store with a PVC so links survive pod recreation (rollouts, node drains), not just in-process restarts. Forwarded to the klaus-gateway subchart.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "size": {
+                  "type": "string"
+                },
+                "accessMode": {
+                  "type": "string"
+                },
+                "storageClass": {
+                  "type": "string"
+                },
+                "existingClaim": {
+                  "type": "string"
+                }
+              }
+            },
+            "stateKey": {
+              "type": "string",
+              "description": "HMAC key signing link state. Required when obo.enabled is true; provide SOPS-encrypted."
+            },
+            "storeKey": {
+              "type": "string",
+              "description": "AES-256 key for the encrypted link store. Required only when storePath is set; provide SOPS-encrypted."
+            },
+            "connectors": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Reactive Slack connector UX: the gateway offers a \"Connect <backend>\" button from a core_auth_login challenge in the agent's response stream. Forwarded to the klaus-gateway subchart.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "postgres": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "CloudNativePG Cluster for the platform. The CNPG operator and CRDs are a cluster-level prerequisite (not shipped here). Set enabled: false to use kagent's bundled Postgres or an external DSN.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for the CNPG Cluster and its generated Secrets. Must match kagent.namespaceOverride so the DSN Secret is co-located with the kagent controller."
+        },
+        "clusterName": {
+          "type": "string"
+        },
+        "instances": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "size": {
+              "type": "string"
+            },
+            "storageClass": {
+              "type": "string"
+            }
+          }
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Operand image name. Leave empty for CNPG operator default. Supply a pgvector-bundled image when vector.enabled and vector.extensionImage.reference is unset."
+            }
+          }
+        },
+        "vector": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "extensionImage": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "reference": {
+                  "type": "string",
+                  "description": "CNPG 1.29+/PG18 ImageVolume reference. When set, the pgvector binary is mounted from this OCI image and CNPG creates the extension via a Database CR. Example: ghcr.io/cloudnative-pg/pgvector:0.8.2-18-trixie"
+                }
+              }
+            }
+          }
+        },
+        "applicationDatabase": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "schema": {
+              "type": "string",
+              "description": "Named schema created in postInitApplicationSQL. kagent tables land here instead of public."
+            }
+          }
+        },
+        "sessionsDatabase": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "Bundled Valkey requires `valkey.enabled: true` together with `muster.muster.oauth.server.storage.type: valkey`. Conversely, switching muster's storage to valkey requires either the bundled `valkey.enabled: true` or an external `muster.muster.oauth.server.storage.valkey.url`.",
+      "if": {
+        "properties": {
+          "muster": {
+            "properties": {
+              "muster": {
+                "properties": {
+                  "oauth": {
+                    "properties": {
+                      "server": {
+                        "properties": {
+                          "storage": {
+                            "properties": {
+                              "type": {
+                                "const": "valkey"
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "valkey": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "valkey"
+            ]
+          },
+          {
+            "properties": {
+              "muster": {
+                "properties": {
+                  "muster": {
+                    "properties": {
+                      "oauth": {
+                        "properties": {
+                          "server": {
+                            "properties": {
+                              "storage": {
+                                "properties": {
+                                  "valkey": {
+                                    "properties": {
+                                      "url": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "url"
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

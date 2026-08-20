@@ -20,7 +20,7 @@ workflows:
         name: build-chart
         app_catalog: giantswarm-catalog
         app_catalog_test: giantswarm-test-catalog
-        chart: agentic-platform
+        chart: agent-platform
         push_to_appcatalog: false
         push_to_oci_registry: false
         persist_chart_archive: true
@@ -65,7 +65,7 @@ workflows:
         name: push-chart-release
         app_catalog: giantswarm-catalog
         app_catalog_test: giantswarm-test-catalog
-        chart: agentic-platform
+        chart: agent-platform
         requires:
         - execute-chart-tests-release
         filters:

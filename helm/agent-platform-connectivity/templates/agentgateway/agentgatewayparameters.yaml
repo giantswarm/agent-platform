@@ -1,0 +1,47 @@
+{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.gateway.parameters.enabled }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: {{ include "agent-platform.parametersName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  {{- with .Values.agentgateway.proxy.image }}
+  image:
+    registry: {{ .registry }}
+    repository: {{ .repository }}
+    {{- with .tag }}
+    tag: {{ . }}
+    {{- end }}
+  {{- end }}
+  service:
+    type: {{ .Values.gateway.parameters.serviceType }}
+  deployment:
+    spec:
+      template:
+        spec:
+          automountServiceAccountToken: true
+          securityContext:
+            {{- toYaml .Values.gateway.parameters.podSecurityContext | nindent 12 }}
+          {{- with .Values.gateway.parameters.dataPlaneVolumes }}
+          volumes:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: agentgateway
+              securityContext:
+                {{- toYaml .Values.gateway.parameters.containerSecurityContext | nindent 16 }}
+              {{- with .Values.gateway.parameters.dataPlaneResources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.gateway.parameters.dataPlaneEnv }}
+              env:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.gateway.parameters.dataPlaneVolumeMounts }}
+              volumeMounts:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+{{- end }}

@@ -5,17 +5,17 @@
 #
 # Generated job names available to reference in `requires`: build-chart,
 # execute-chart-tests, execute-chart-tests-release, push-chart-release (all for
-# the primary `agentic-platform` chart).
+# the primary `agent-platform` chart).
 #
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-meta` checks on
 #     branches (ingress-mode guards + app-of-apps meta-package render)
-#   - the standalone agentic-platform-connectivity chart (build, tag push), the
+#   - the standalone agent-platform-connectivity chart (build, tag push), the
 #     consumer-side wiring rendered by the meta-package as a HelmRelease
-#   versioned in lockstep with agentic-platform off the same git tag. This
+#   versioned in lockstep with agent-platform off the same git tag. This
 #   repo has no Dockerfile, so no chart depends on an image build.
 #
-# The agentic-platform-crds chart has been RETIRED — every component now ships
+# The agent-platform-crds chart has been RETIRED — every component now ships
 # its own CRDs (app-owned CRDs), so there is no longer a CRD-bundle chart to
 # build/test/publish here.
 version: 2.1
@@ -58,10 +58,10 @@ workflows:
           tags:
             ignore: /.*/
 
-    # ---- agentic-platform-connectivity: the consumer-side wiring chart, versioned
-    #      in lockstep with agentic-platform off the same git tag. Build + lint
+    # ---- agent-platform-connectivity: the consumer-side wiring chart, versioned
+    #      in lockstep with agent-platform off the same git tag. Build + lint
     #      (persist, no push) on branches; push on tags. No ATS smoke job: like the
-    #      generated agentic-platform pipeline this repo does not kind-install, and
+    #      generated agent-platform pipeline this repo does not kind-install, and
     #      the chart renders CRs whose CRDs (agentgateway/kagent) are absent on bare
     #      kind — build-chart is the gate. No Dockerfile, so no image dependency.
     - architect/push-to-app-catalog:
@@ -70,7 +70,7 @@ workflows:
         name: build-connectivity-chart
         app_catalog: giantswarm-catalog
         app_catalog_test: giantswarm-test-catalog
-        chart: agentic-platform-connectivity
+        chart: agent-platform-connectivity
         explicit_allow_chart_name_mismatch: true
         push_to_appcatalog: false
         push_to_oci_registry: false
@@ -88,7 +88,7 @@ workflows:
         name: push-connectivity-chart-release
         app_catalog: giantswarm-catalog
         app_catalog_test: giantswarm-test-catalog
-        chart: agentic-platform-connectivity
+        chart: agent-platform-connectivity
         explicit_allow_chart_name_mismatch: true
         requires:
         - build-connectivity-chart

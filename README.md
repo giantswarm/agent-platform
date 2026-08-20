@@ -1,9 +1,9 @@
-[![CircleCI](https://dl.circleci.com/status-badge/img/gh/giantswarm/agentic-platform/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/giantswarm/agentic-platform/tree/main)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/giantswarm/agentic-platform/badge)](https://securityscorecards.dev/viewer/?uri=github.com/giantswarm/agentic-platform)
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/giantswarm/agent-platform/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/giantswarm/agent-platform/tree/main)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/giantswarm/agent-platform/badge)](https://securityscorecards.dev/viewer/?uri=github.com/giantswarm/agent-platform)
 
-# agentic-platform
+# agent-platform
 
-The agentic platform is Giant Swarm's MCP gateway deploy unit. It ships [muster](https://github.com/giantswarm/muster) (MCP gateway / aggregator) and [agentgateway](https://github.com/agentgateway/agentgateway) (MCP data plane) together, plus the consumer-side `Gateway`, `AgentgatewayParameters`, and network policies that wire them up.
+The Agent Platform is Giant Swarm's MCP gateway deploy unit. It ships [muster](https://github.com/giantswarm/muster) (MCP gateway / aggregator) and [agentgateway](https://github.com/agentgateway/agentgateway) (MCP data plane) together, plus the consumer-side `Gateway`, `AgentgatewayParameters`, and network policies that wire them up.
 
 Owner: team-bumblebee.
 
@@ -11,42 +11,42 @@ This repo publishes **two** charts:
 
 | Chart | What it is |
 |---|---|
-| `agentic-platform` | the **meta-package** — an app-of-apps that renders each component and the connectivity layer as Flux `OCIRepository` + `HelmRelease` (or Argo `Application`). The single thing you install. |
-| `agentic-platform-connectivity` | the consumer-side **wiring** the meta-package renders as a child release: the public muster route, the agentgateway data-plane `Gateway` + `AgentgatewayParameters` + `HTTPRoute`s + `BackendTrafficPolicy`s, the `NetworkPolicy`s, the kagent/klaus-gateway routes, the admin-owned kagent shared resources (the shared muster `RemoteMCPServer`, `ModelConfig`s), and the CNPG `Cluster`. Agents themselves are created with the generic [`agent` chart](https://github.com/giantswarm/agent), one release per agent. |
+| `agent-platform` | the **meta-package** — an app-of-apps that renders each component and the connectivity layer as Flux `OCIRepository` + `HelmRelease` (or Argo `Application`). The single thing you install. |
+| `agent-platform-connectivity` | the consumer-side **wiring** the meta-package renders as a child release: the public muster route, the agentgateway data-plane `Gateway` + `AgentgatewayParameters` + `HTTPRoute`s + `BackendTrafficPolicy`s, the `NetworkPolicy`s, the kagent/klaus-gateway routes, the admin-owned kagent shared resources (the shared muster `RemoteMCPServer`, `ModelConfig`s), and the CNPG `Cluster`. Agents themselves are created with the generic [`agent` chart](https://github.com/giantswarm/agent), one release per agent. |
 
-> **CRDs are app-owned.** There is no longer a standalone `agentic-platform-crds` bundle chart — each component (muster, agentgateway, kagent, agent-sandbox) ships its own CRDs in its chart's `crds/` dir and upgrades them atomically with the app via Flux `CreateReplace`. A CR consumer `dependsOn` the component that owns the CRD it needs. See [CRD lifecycle](#crd-lifecycle).
+> **CRDs are app-owned.** There is no longer a standalone `agent-platform-crds` bundle chart — each component (muster, agentgateway, kagent, agent-sandbox) ships its own CRDs in its chart's `crds/` dir and upgrades them atomically with the app via Flux `CreateReplace`. A CR consumer `dependsOn` the component that owns the CRD it needs. See [CRD lifecycle](#crd-lifecycle).
 
 ## Meta-package release flow
 
-> Implements [giantswarm/giantswarm#36875](https://github.com/giantswarm/giantswarm/issues/36875). Concept write-up: klaus-lab `architecture/agentic-platform-meta-package.md`.
+> Implements [giantswarm/giantswarm#36875](https://github.com/giantswarm/giantswarm/issues/36875). Concept write-up: klaus-lab `architecture/agent-platform-meta-package.md`.
 
-The `agentic-platform` chart no longer bundles its components as pinned Helm subcharts. It is an **app-of-apps meta-package**: `templates/components.yaml` renders, per entry in `.Values.components`, a Flux `OCIRepository` + `HelmRelease` — or an Argo `Application` when `gitops.engine: argo`. It emits **only** those objects (a *pure* renderer — no raw CRs of its own).
+The `agent-platform` chart no longer bundles its components as pinned Helm subcharts. It is an **app-of-apps meta-package**: `templates/components.yaml` renders, per entry in `.Values.components`, a Flux `OCIRepository` + `HelmRelease` — or an Argo `Application` when `gitops.engine: argo`. It emits **only** those objects (a *pure* renderer — no raw CRs of its own).
 
 The decisive change: each component's version is a **constraint expressed as a value** (`components.<name>.versionRange`), not a `Chart.yaml` pin. Flux re-resolves the range on every reconcile, so a new component release rolls forward **with no PR to this chart and no umbrella re-package**.
 
-- **One gitops entry.** You install the meta-package (one `OCIRepository` + `HelmRelease`). It renders each component release and the `agentic-platform-connectivity` release for you.
+- **One gitops entry.** You install the meta-package (one `OCIRepository` + `HelmRelease`). It renders each component release and the `agent-platform-connectivity` release for you.
 - **CRD-before-CR ordering is preserved** — each component ships its own CRDs (app-owned CRDs), and a CR consumer `dependsOn` the component that owns the CRD it needs (Flux) / orders after it via `argocd.argoproj.io/sync-wave` (Argo). A `dependsOn` reference to a component that is toggled off is dropped at render time, so an always-on consumer never blocks on a release that was never rendered. Because the connectivity CRs live in their own release (not in the meta-package's own manifest), they only apply after the CRDs are Established — the meta-package itself ships no CR that could race a CRD.
-- **On/off and per-component values are unchanged** — the existing `muster:`, `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agentic-platform-mcps:`/`mcps:` blocks and `*.enabled` toggles still drive each component; the connectivity wiring blocks (`ingress:`, `gateway:`, `networkPolicy:`, `postgres:`, `extraObjects:`) still drive the wiring. Each `components.<name>` entry names its source block via `valuesFrom` (connectivity uses `forwardAllValues`); `values.schema.json` is unchanged.
-- **Dev vs customer track** — keep the `components.*.versionRange` values **wide** for the internal/dogfooding track (continuous auto-update, the default). **Pin** them to exact versions for a customer **bill-of-materials**; see [`helm/agentic-platform/examples/customer-bom.yaml`](helm/agentic-platform/examples/customer-bom.yaml). A "product release" is that pinned values snapshot.
+- **On/off and per-component values are unchanged** — the existing `muster:`, `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:`/`mcps:` blocks and `*.enabled` toggles still drive each component; the connectivity wiring blocks (`ingress:`, `gateway:`, `networkPolicy:`, `postgres:`, `extraObjects:`) still drive the wiring. Each `components.<name>` entry names its source block via `valuesFrom` (connectivity uses `forwardAllValues`); `values.schema.json` is unchanged.
+- **Dev vs customer track** — keep the `components.*.versionRange` values **wide** for the internal/dogfooding track (continuous auto-update, the default). **Pin** them to exact versions for a customer **bill-of-materials**; see [`helm/agent-platform/examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml). A "product release" is that pinned values snapshot.
 
 ```bash
-helm template r helm/agentic-platform -f helm/agentic-platform/ci/ci-values.yaml                          # flux objects, wide ranges
-helm template r helm/agentic-platform -f helm/agentic-platform/ci/ci-values.yaml --set gitops.engine=argo
-helm template r helm/agentic-platform -f helm/agentic-platform/ci/ci-values.yaml -f helm/agentic-platform/examples/customer-bom.yaml
+helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml                          # flux objects, wide ranges
+helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml --set gitops.engine=argo
+helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml -f helm/agent-platform/examples/customer-bom.yaml
 make verify-meta verify-modes
 ```
 
 ## Prerequisites
 
 - Kubernetes ≥ 1.33 on the install target.
-- Gateway API v1 CRDs (`gateways.gateway.networking.k8s.io`, `httproutes.gateway.networking.k8s.io`, `gatewayclasses.gateway.networking.k8s.io`) installed cluster-wide. The agentic platform does **not** install them.
+- Gateway API v1 CRDs (`gateways.gateway.networking.k8s.io`, `httproutes.gateway.networking.k8s.io`, `gatewayclasses.gateway.networking.k8s.io`) installed cluster-wide. The Agent Platform does **not** install them.
 - No separate CRD chart to install first — every component ships its own CRDs (`AgentgatewayParameters` / `AgentgatewayPolicy` / `AgentgatewayBackend` with the agentgateway component, `MCPServer` / `Workflow` with muster, the kagent + agent-sandbox CRDs with their components). The meta-package orders each CR consumer after the CRD-owning component for you; see [CRD lifecycle](#crd-lifecycle).
 - A `GatewayClass` CR named `agentgateway` (`status.conditions[type=Accepted]=True`). The bundled `agentgateway` sub-chart creates it on install; operators managing the controller out-of-band must ensure the `GatewayClass` exists.
 - Cilium CNI for `networkPolicy.flavor: cilium` (default). Vanilla Kubernetes clusters: set `networkPolicy.flavor: kubernetes` **AND** `muster.networkPolicy.flavor: kubernetes` **AND** `valkey.ciliumNetworkPolicy.enabled: false` (the bundled valkey wrapper's CNP has no kubernetes-flavor counterpart). Opt out entirely with `networkPolicy.enabled: false` + `muster.networkPolicy.enabled: false` + `valkey.ciliumNetworkPolicy.enabled: false`.
 
 ## Installing
 
-**One gitops entry.** Install the `agentic-platform` meta-package; it renders the per-component and `agentic-platform-connectivity` releases for you (each component ships its own CRDs, and a CR consumer `dependsOn` the CRD-owning component so CRDs Establish before any CR applies). Flux (`gitops.engine: flux`, default) or Argo (`gitops.engine: argo`) is required on the install target — the meta-package's output is Flux/Argo objects.
+**One gitops entry.** Install the `agent-platform` meta-package; it renders the per-component and `agent-platform-connectivity` releases for you (each component ships its own CRDs, and a CR consumer `dependsOn` the CRD-owning component so CRDs Establish before any CR applies). Flux (`gitops.engine: flux`, default) or Argo (`gitops.engine: argo`) is required on the install target — the meta-package's output is Flux/Argo objects.
 
 ### Flux
 
@@ -54,34 +54,34 @@ make verify-meta verify-modes
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: agentic-platform
+  name: agent-platform
   namespace: muster
 spec:
   interval: 1h
-  url: oci://gsoci.azurecr.io/charts/giantswarm/agentic-platform
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform
   ref:
     semver: ">=1.0.0"   # pin a tag for a customer release
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: agentic-platform
+  name: agent-platform
   namespace: muster
 spec:
   interval: 10m
-  chartRef: { kind: OCIRepository, name: agentic-platform }
+  chartRef: { kind: OCIRepository, name: agent-platform }
   install:
     createNamespace: true
   valuesFrom:
     - kind: Secret
-      name: agentic-platform-values
+      name: agent-platform-values
 ```
 
-The meta-package then renders, in the same namespace: an `OCIRepository` + `HelmRelease` for each enabled component and for `agentic-platform-connectivity`. Each component ships its own CRDs. Component `versionRange`s default to **wide** (continuous auto-update); pin them in your values for a reproducible release.
+The meta-package then renders, in the same namespace: an `OCIRepository` + `HelmRelease` for each enabled component and for `agent-platform-connectivity`. Each component ships its own CRDs. Component `versionRange`s default to **wide** (continuous auto-update); pin them in your values for a reproducible release.
 
 ### Raw Helm (no GitOps controller)
 
-The meta-package renders Flux/Argo objects, so a raw `helm install` of it needs a controller present. For a controller-free install, drive the components directly from a pinned bill-of-materials — install each component chart (which ships its own CRDs) then `agentic-platform-connectivity`, at the exact versions in [`examples/customer-bom.yaml`](helm/agentic-platform/examples/customer-bom.yaml):
+The meta-package renders Flux/Argo objects, so a raw `helm install` of it needs a controller present. For a controller-free install, drive the components directly from a pinned bill-of-materials — install each component chart (which ships its own CRDs) then `agent-platform-connectivity`, at the exact versions in [`examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml):
 
 ```bash
 # Each component chart ships its own CRDs in crds/ (app-owned CRDs). Helm applies
@@ -90,8 +90,8 @@ The meta-package renders Flux/Argo objects, so a raw `helm install` of it needs 
 helm install muster      oci://gsoci.azurecr.io/charts/giantswarm/muster      --version <muster-version>      --namespace muster --create-namespace
 helm install agentgateway oci://gsoci.azurecr.io/charts/giantswarm/agentgateway --version <agentgateway-version> --namespace muster
 # kagent, agent-sandbox, … as needed, then the consumer-side wiring:
-helm install agentic-platform-connectivity \
-  oci://gsoci.azurecr.io/charts/giantswarm/agentic-platform-connectivity \
+helm install agent-platform-connectivity \
+  oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-connectivity \
   --version <connectivity-version> --namespace muster -f values.yaml
 ```
 
@@ -118,8 +118,8 @@ helm install agentic-platform-connectivity \
 | `muster.*` | passes through to muster | See [muster chart README](https://github.com/giantswarm/muster/blob/main/helm/muster/README.md). |
 | `agentgateway.*` | passes through to upstream agentgateway | See [agentgateway docs](https://agentgateway.dev). |
 | `valkey.enabled` | `true` | Bundle [giantswarm/valkey-app](https://github.com/giantswarm/valkey-app) for muster OAuth session storage. |
-| `mcps.enabled` | `false` | Bundle [giantswarm/agentic-platform-mcps](https://github.com/giantswarm/agentic-platform-mcps) to render the platform's MCP server CRs. Toggle is separate from the value namespace — see [Bundled MCP servers](#bundled-mcp-servers). |
-| `agentic-platform-mcps.mcpServers` | `[]` | Abstract list of MCP servers rendered into `MCPServer` / `AgentgatewayBackend` CRs. Renders nothing until populated. |
+| `mcps.enabled` | `false` | Bundle [giantswarm/agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps) to render the platform's MCP server CRs. Toggle is separate from the value namespace — see [Bundled MCP servers](#bundled-mcp-servers). |
+| `agent-platform-mcps.mcpServers` | `[]` | Abstract list of MCP servers rendered into `MCPServer` / `AgentgatewayBackend` CRs. Renders nothing until populated. |
 | `agentSandbox.enabled` | `false` | Bundle the [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) controller — the Sandbox runtime kagent's `SandboxAgent` requires. Toggle is separate from the value namespace — see [Agent sandbox](#agent-sandbox). |
 | `dicebear.route.parentRefs` | `[]` | **Required.** The public `Gateway`(s) the avatar `HTTPRoute` attaches to — typically the same as `ingress.parentRefs`. The [dicebear](https://github.com/giantswarm/dicebear) avatar renderer is a force-enabled component (deployed on every install) and its public route is on by default, so the child release fails to render if this is empty. See [giantswarm/giantswarm#37211](https://github.com/giantswarm/giantswarm/issues/37211). |
 | `dicebear.route.hostnames` | `[]` | **Required.** Hostname(s) the avatar endpoint is served on, e.g. `avatars.<domain>`. Consumers fetch `https://<hostname>/v1/<agent-name>.png`. |
@@ -127,7 +127,7 @@ helm install agentic-platform-connectivity \
 | `muster.muster.oauth.server.storage.type` | `valkey` | Muster storage backend default. Pairs with `valkey.enabled: true`; flip to `memory` for dev. |
 | `muster.muster.oauth.server.storage.valkey.url` | `muster-valkey:6379` | Bundled-valkey Service. Override to point at an out-of-band Valkey. |
 
-Full schema: [`helm/agentic-platform/values.schema.json`](./helm/agentic-platform/values.schema.json).
+Full schema: [`helm/agent-platform/values.schema.json`](./helm/agent-platform/values.schema.json).
 
 ### Gateway API CR ownership
 
@@ -208,20 +208,20 @@ Operators with an out-of-band Valkey leave `valkey.enabled: false` and override 
 
 ### Bundled MCP servers
 
-`mcps.enabled: true` bundles [giantswarm/agentic-platform-mcps](https://github.com/giantswarm/agentic-platform-mcps), which renders the platform's MCP server CRs from one abstract, vendor-neutral `mcpServers` list — muster `MCPServer` CRs by default, and/or agentgateway `AgentgatewayBackend` + `AgentgatewayPolicy` CRs. Like the umbrella's other CRs, these consume app-owned CRDs (`MCPServer` rides the muster component, the agentgateway CRs ride the agentgateway component); this sub-chart ships **no** CRDs of its own, and its release `dependsOn` muster and agentgateway so the CRDs Establish first.
+`mcps.enabled: true` bundles [giantswarm/agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps), which renders the platform's MCP server CRs from one abstract, vendor-neutral `mcpServers` list — muster `MCPServer` CRs by default, and/or agentgateway `AgentgatewayBackend` + `AgentgatewayPolicy` CRs. Like the umbrella's other CRs, these consume app-owned CRDs (`MCPServer` rides the muster component, the agentgateway CRs ride the agentgateway component); this sub-chart ships **no** CRDs of its own, and its release `dependsOn` muster and agentgateway so the CRDs Establish first.
 
 ```yaml
 mcps:
   enabled: true
 
-agentic-platform-mcps:
+agent-platform-mcps:
   mcpServers:
     - cluster: <cluster>
       group: kubernetes
       url: https://mcp.<cluster>.<base-domain>/mcp
 ```
 
-The `mcps.enabled` toggle deliberately lives in its **own** top-level block rather than under `agentic-platform-mcps.enabled`: the sub-chart's `values.schema.json` is strict (`additionalProperties: false`) and rejects an `enabled` key. Everything under `agentic-platform-mcps.*` is passed through to the sub-chart verbatim — see its [values reference](https://github.com/giantswarm/agentic-platform-mcps) for `defaults`, `identityProviders`, per-entry `auth`, and the `muster` / `agentgateway` rendering toggles. Even when enabled, the chart renders nothing until `mcpServers` is populated.
+The `mcps.enabled` toggle deliberately lives in its **own** top-level block rather than under `agent-platform-mcps.enabled`: the sub-chart's `values.schema.json` is strict (`additionalProperties: false`) and rejects an `enabled` key. Everything under `agent-platform-mcps.*` is passed through to the sub-chart verbatim — see its [values reference](https://github.com/giantswarm/agent-platform-mcps) for `defaults`, `identityProviders`, per-entry `auth`, and the `muster` / `agentgateway` rendering toggles. Even when enabled, the chart renders nothing until `mcpServers` is populated.
 
 ### Agent sandbox
 
@@ -315,7 +315,7 @@ gateway:
 
 ## Reference workloads (not bundled)
 
-These MCP servers and agent runtimes integrate with the agentic platform but are maintained by other teams and are not bundled in this umbrella.
+These MCP servers and agent runtimes integrate with the Agent Platform but are maintained by other teams and are not bundled in this umbrella.
 
 | Component | Team | Purpose |
 |---|---|---|
@@ -369,7 +369,7 @@ The data-plane pod template hardcodes `sysctls: [net.ipv4.ip_unprivileged_port_s
 
 ## CRD lifecycle
 
-**CRDs are app-owned.** There is no standalone CRD chart. Each component ships its own CRDs in its chart's `crds/` directory and owns their version; the `agentic-platform` meta-package itself installs **no** CRDs — it only renders the per-component releases (which carry the CRDs) and the CRs that consume them.
+**CRDs are app-owned.** There is no standalone CRD chart. Each component ships its own CRDs in its chart's `crds/` directory and owns their version; the `agent-platform` meta-package itself installs **no** CRDs — it only renders the per-component releases (which carry the CRDs) and the CRs that consume them.
 
 | CRDs | Owned by (ships them in its chart `crds/` dir) |
 |---|---|
@@ -381,13 +381,13 @@ The data-plane pod template hardcodes `sysctls: [net.ipv4.ip_unprivileged_port_s
 
 Each component sets `crds: CreateReplace` on its `HelmRelease` (rendered by the meta-package), so Flux applies and upgrades the `crds/`-dir CRDs atomically with the app at the same resolved version — Helm on its own never upgrades `crds/`-dir CRDs. All these CRDs carry `helm.sh/resource-policy: keep`, so they survive a component uninstall (the CRs are never cascade-deleted).
 
-`helm uninstall agentic-platform` (the meta-package) leaves everything intact — it owns no CRDs or CRs. Uninstalling a **component** release leaves its `keep`-annotated CRDs (and their CRs) in place; to remove a CRD you must delete it explicitly.
+`helm uninstall agent-platform` (the meta-package) leaves everything intact — it owns no CRDs or CRs. Uninstalling a **component** release leaves its `keep`-annotated CRDs (and their CRs) in place; to remove a CRD you must delete it explicitly.
 
 ### Upgrading CRDs
 
 CRDs migrate with their owning component release — a new component version (resolved by `components.<name>.versionRange`) ships the matching CRD schema and `CreateReplace` applies it. No separate CRD-chart upgrade step.
 
-> **History.** Through `1.9.x` these CRDs shipped in a standalone `agentic-platform-crds` bundle chart that every release `dependsOn`. That bundle has been retired in favour of app-owned CRDs; the staged, non-destructive migration (the live CRDs were first re-annotated with `helm.sh/resource-policy: keep` so dropping the bundle never cascade-deletes a CR) is documented in [UPGRADE.md](./UPGRADE.md).
+> **History.** Through `1.9.x` these CRDs shipped in a standalone `agent-platform-crds` bundle chart that every release `dependsOn`. That bundle has been retired in favour of app-owned CRDs; the staged, non-destructive migration (the live CRDs were first re-annotated with `helm.sh/resource-policy: keep` so dropping the bundle never cascade-deletes a CR) is documented in [UPGRADE.md](./UPGRADE.md).
 
 ## Compatibility
 

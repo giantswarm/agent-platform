@@ -1,0 +1,34 @@
+apiVersion: v2
+name: agent-platform-connectivity
+type: application
+description: |
+  Giant Swarm Agent Platform — connectivity / integration layer. Renders the
+  consumer-side wiring that turns the platform components into a working whole on
+  a cluster: the public muster route and the agentgateway data-plane Gateway +
+  AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
+  the kagent and klaus-gateway routes, the kagent declarative-agent wiring, and the
+  CloudNativePG Cluster. Ships NO workloads of its own — those are separate releases
+  rendered by the agent-platform meta-chart. The CRDs these CRs consume are
+  app-owned: each component (agentgateway, kagent, …) ships its own CRDs, so this
+  chart's HelmRelease dependsOn those CRD-owning component releases.
+home: https://github.com/giantswarm/agent-platform
+icon: https://s.giantswarm.io/app-icons/giantswarm/1/light.svg
+sources:
+  - https://github.com/giantswarm/agent-platform
+appVersion: "0.1.0"
+version: 1.1.35
+annotations:
+  io.giantswarm.application.audience: all
+  io.giantswarm.application.managed: "true"
+  io.giantswarm.application.team: bumblebee
+# CONNECTIVITY chart: intentionally NO `dependencies:` block.
+#
+# This chart renders only the consumer-side integration CRs (Gateway,
+# AgentgatewayParameters, HTTPRoutes, BackendTrafficPolicies, NetworkPolicies,
+# kagent/klaus-gateway routes, kagent declarative-agent wiring, CNPG Cluster).
+# The components it wires (muster, agentgateway, kagent, …) are installed as
+# separate releases by the agent-platform meta-chart, which renders THIS chart
+# as a HelmRelease that `dependsOn` the agentgateway + kagent component releases
+# (each ships its own CRDs — app-owned CRDs) — so every CRD these CRs consume is
+# Established before they apply. The dependsOn entries for components toggled off
+# are dropped at render time, since no CR needing that CRD is rendered then.
