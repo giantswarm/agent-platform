@@ -1,0 +1,20 @@
+# ats test dependencies as a uv project. Mirrors the pins previously carried in
+# the devctl-generated Pipfile; ats runs `uv sync` (pipenv is gone in the new ats).
+[project]
+name = "agentic-platform-ats-tests"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pytest-helm-charts==1.3.4",
+    "pytest==8.4.2",
+    "pykube-ng==23.6.0",
+    "pytest-rerunfailures==16.3",
+    "requests==2.34.2",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "smoke: fast sanity checks run first",
+    "functional: full feature tests",
+    "upgrade: run during upgrade scenario (before and after helm upgrade)",
+]

@@ -1,0 +1,6 @@
+# Stacked by app-test-suite on the Argo engine leg. Selects the meta-package's
+# Argo render layer; project and destination server default to the permissive
+# `default` AppProject and in-cluster API server that ats provisions on the test
+# cluster, so no further overrides are needed here.
+gitops:
+  engine: argo

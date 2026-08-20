@@ -1,0 +1,5 @@
+# Stacked by app-test-suite on the Flux engine leg (auto-discovered as
+# ci/gitops-values-<engine>.yaml and merged onto tests/test-values.yaml).
+# Selects the meta-package's Flux render layer.
+gitops:
+  engine: flux

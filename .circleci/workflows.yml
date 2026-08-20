@@ -37,6 +37,10 @@ workflows:
     # push avoids an ImagePullBackOff race.
     - architect/run-tests-with-ats:
         name: execute-chart-tests
+        # EXPERIMENT (do not merge): pin the ats dev build carrying the GitOps
+        # bundle testing feature incl. the Argo CD engine (app-test-suite
+        # #664-#667 + #672).
+        app-test-suite_container_tag: "0.15.1-dev.gitops-argo-runner.2026-07-07.11-26-29.hd1d1d56"
         requires:
         - build-chart
         filters:

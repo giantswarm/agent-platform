@@ -21,6 +21,31 @@
 app-tests-app-config-file: tests/test-values.yaml
 app-tests-deploy-namespace: agentic-platform
 
+# EXPERIMENT (do not merge): run all three scenarios under live Flux and Argo CD
+# engines on kind, using the new ats GitOps bundle testing. For each engine ats
+# installs it, deploys the bundle into agentic-platform-<engine> (stacking
+# ci/gitops-values-<engine>.yaml to switch the render layer), and waits for every
+# HelmRelease/OCIRepository (Flux) or Application (Argo) to become ready. Short
+# bundle-ready timeout so a non-converging render fails fast instead of hanging the
+# job. The tests in tests/ats (bundle component readiness) are the keep-worthy
+# change; this engine/upgrade config is experiment-only.
 smoke-tests-cluster-type: kind
+functional-tests-cluster-type: kind
+upgrade-tests-cluster-type: kind
 
-skip-steps: [smoke,functional,upgrade]
+smoke-tests-gitops-engines: flux,argo
+functional-tests-gitops-engines: flux,argo
+upgrade-tests-gitops-engines: flux,argo
+
+smoke-tests-gitops-bundle-ready-timeout: 5m
+functional-tests-gitops-bundle-ready-timeout: 5m
+upgrade-tests-gitops-bundle-ready-timeout: 5m
+
+# Upgrade from the latest published stable, deployed with the same trimmed
+# values as the candidate so the stable release also renders the 2-component
+# bundle (without this the stable deploy renders the full meta-package and can't
+# converge on kind).
+upgrade-tests-app-catalog-url: https://giantswarm.github.io/giantswarm-catalog
+upgrade-tests-app-version: stable
+upgrade-tests-app-config-file: tests/test-values.yaml
+upgrade-tests-save-metadata: false
