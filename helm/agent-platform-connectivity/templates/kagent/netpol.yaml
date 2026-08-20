@@ -1,0 +1,354 @@
+{{- if and .Values.kagent.enabled .Values.networkPolicy.enabled }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $controllerPort := "8083" }}
+{{- $clusterName := .Values.postgres.clusterName }}
+
+{{- if eq .Values.networkPolicy.flavor "cilium" }}
+---
+# Egress from agentgateway data-plane to the kagent controller (cross-namespace).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-dataplane-to-kagent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+---
+# Ingress to the kagent controller: agentgateway (cross-namespace) + intra-namespace.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-kagent-from-agentgateway
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+    # Intra-namespace clients of the controller API: agent pods (A2A / tool calls)
+    # and the kagent UI backend. The controller runs under trusted-proxy and trusts
+    # forwarded identity headers, so ingress is restricted to these identities on the
+    # API port rather than the whole namespace.
+    - fromEndpoints:
+        - matchLabels:
+            app: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+        - matchLabels:
+            app.kubernetes.io/name: kagent
+            app.kubernetes.io/component: ui
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+---
+# Egress from the kagent controller: DNS, Postgres, Kubernetes API, OTLP.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-kagent-controller-egress
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- if and .Values.kagent.enabled .Values.muster.enabled }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ include "agent-platform.musterServicePort" . | quote }}
+              protocol: TCP
+    {{- end }}
+    - toEndpoints:
+        - matchLabels:
+            app: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# CNPG cluster policies: inter-instance egress for streaming replication,
+# and ingress from the kagent controller.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $clusterName }}-cluster
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ $clusterName }}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: {{ $clusterName }}
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: {{ $clusterName }}
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+
+{{- if and .Values.kagent.enabled .Values.muster.enabled }}
+---
+# Egress from all kagent-managed agent pods to muster (MCP tool calls)
+# and to the Anthropic API (model inference). DNS included.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-kagent-agent-muster-egress
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: kagent
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ include "agent-platform.musterServicePort" . | quote }}
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # muster's OAuth/STS endpoints (well-known + /oauth/token) are served only on
+    # the public ingress hostname, which resolves to the internal Envoy LB VIP (a
+    # private IP, classified as cluster). The agent's STS token exchange for OBO
+    # needs this path. 443 = LB VIP; 10443 = Envoy listener after Azure LB DNAT.
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "10443"
+              protocol: TCP
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+{{- end }}
+{{- if index .Values.kagent "oauth2-proxy" "enabled" }}
+---
+# Ingress to oauth2-proxy: envoy (proxy port) + Prometheus (metrics port).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-oauth2-proxy-ingress
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: envoy
+            io.kubernetes.pod.namespace: envoy-gateway-system
+      toPorts:
+        - ports:
+            - port: "4180"
+              protocol: TCP
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "44180"
+              protocol: TCP
+---
+# Allow oauth2-proxy: DNS, Dex OIDC (world:443), kagent UI backend.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-oauth2-proxy-egress
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: kagent
+            app.kubernetes.io/component: ui
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # world: public Dex hostname resolves to a public IP (e.g. AWS public NLB).
+    # cluster: same hostname resolves to a private-range LB VIP (e.g. Azure
+    # internal LB at 10.x) — Cilium classifies private IPs as cluster, not world.
+    # Port 443 covers world (direct TLS) and cluster (LB VIP before DNAT).
+    # Port 10443 covers cluster after Azure LB DNAT: kube-proxy rewrites
+    # LB:443 → nodeport → Envoy pod:10443 (Envoy Gateway uses listener+10000
+    # internally to avoid root-privilege ports), so Cilium intercepts port 10443.
+    - toEntities:
+        - world
+        - cluster
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "10443"
+              protocol: TCP
+---
+# Allow oauth2-proxy to reach the kagent UI.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-kagent-ui-ingress
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: kagent
+      app.kubernetes.io/component: ui
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: oauth2-proxy
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+{{- end }}
+{{- else if eq .Values.networkPolicy.flavor "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-kagent-controller-ingress
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+      ports:
+        - port: {{ $controllerPort | int }}
+          protocol: TCP
+    # Intra-namespace clients of the controller API: agent pods (A2A / tool calls)
+    # and the kagent UI backend. Restricted to these identities on the API port
+    # rather than the whole namespace, since the controller trusts forwarded
+    # identity headers under trusted-proxy.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: kagent
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kagent
+              app.kubernetes.io/component: ui
+      ports:
+        - port: {{ $controllerPort | int }}
+          protocol: TCP
+{{- end }}
+
+{{- end }}

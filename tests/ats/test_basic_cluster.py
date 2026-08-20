@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def test_api_working(kube_cluster: Cluster) -> None:
     """Placeholder smoke test.
 
-    The smoke step is skipped via .ats/main.yaml because the agentic-platform
+    The smoke step is skipped via .ats/main.yaml because the agent-platform
     umbrella is an app-of-apps meta-package that cannot install on a bare kind
     cluster without ~9 external CRD families. This test only asserts the cluster
     API is reachable, and exists so the tests/ats directory is present if the

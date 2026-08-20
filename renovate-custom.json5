@@ -1,14 +1,14 @@
 {
-  // Repo-specific Renovate rules for agentic-platform. This file is owned by the
+  // Repo-specific Renovate rules for agent-platform. This file is owned by the
   // repo and never touched by `devctl gen renovate`; it is pulled in as the last
   // `extends` entry of the generated renovate.json5. Class-wide rules belong in
   // giantswarm/renovate-presets instead.
   //
   // No chart in this repo has a Chart.yaml `dependencies:` block anymore: the
-  // agentic-platform meta-package and agentic-platform-connectivity render their
+  // agent-platform meta-package and agent-platform-connectivity render their
   // children as Flux/Argo objects (component versions are `components.*.versionRange`
   // VALUES re-resolved by Flux on every reconcile, not Renovate-managed pins), and
-  // the agentic-platform-crds CRD-bundle chart has been retired in favour of
+  // the agent-platform-crds CRD-bundle chart has been retired in favour of
   // app-owned CRDs. So the helmv3 manager has nothing to manage here — the only
   // custom rule left tracks the component image tags pinned in values.yaml.
   "customManagers": [

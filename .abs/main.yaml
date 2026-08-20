@@ -1,4 +1,4 @@
 replace-chart-version-with-git: true
 generate-metadata: true
-chart-dir: ./helm/agentic-platform
+chart-dir: ./helm/agent-platform
 destination: ./build

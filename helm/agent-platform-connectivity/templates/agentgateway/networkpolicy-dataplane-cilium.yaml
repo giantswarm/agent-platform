@@ -1,0 +1,87 @@
+{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq .Values.networkPolicy.flavor "cilium") }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-dataplane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+  ingress:
+    - fromEntities: ["cluster"]
+      toPorts:
+        - ports:
+            - port: "{{ (index .Values.gateway.listeners 0).port }}"
+              protocol: TCP
+  egress:
+    - toEntities: ["kube-apiserver"]
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities: ["world"]
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEntities: ["cluster"]
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+      toPorts:
+        - ports:
+            - port: "8090"
+              protocol: TCP
+    # xDS to the agentgateway controller. agentgateway runs as its own release
+    # (separate from this connectivity release), so match on the controller-only
+    # `agentgateway: agentgateway` label rather than a release-scoped instance.
+    - toEndpoints:
+        - matchLabels:
+            agentgateway: agentgateway
+            app.kubernetes.io/name: agentgateway
+      toPorts:
+        - ports:
+            - port: "9978"
+              protocol: TCP
+    {{- with .Values.gateway.jwksEgress }}
+    {{- if .enabled }}
+    # Allow the data-plane to fetch JWKS for JWT validation (oauthMode: validate).
+    # The JWKS service is typically Dex, running on a non-standard port that the
+    # default cluster egress rules (80/443) do not cover.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ .namespace | quote }}
+            {{- with .podSelector }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ .port | toString | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressFQDNs }}
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+{{- end }}

@@ -1,0 +1,95 @@
+{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq .Values.networkPolicy.flavor "kubernetes") }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-dataplane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: {{ (index .Values.gateway.listeners 0).port }}
+          protocol: TCP
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - key: k8s-app
+                operator: In
+                values: [kube-dns, coredns, k8s-dns-node-cache]
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+        - port: 1053
+          protocol: UDP
+        - port: 1053
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+      ports:
+        - port: 80
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+      ports:
+        - port: 8090
+          protocol: TCP
+    # xDS to the agentgateway controller (its own release; match the
+    # controller-only `agentgateway: agentgateway` label, not the release name).
+    - to:
+        - podSelector:
+            matchLabels:
+              agentgateway: agentgateway
+              app.kubernetes.io/name: agentgateway
+      ports:
+        - port: 9978
+          protocol: TCP
+    {{- with .Values.gateway.jwksEgress }}
+    {{- if .enabled }}
+    # Allow the data-plane to fetch JWKS for JWT validation (oauthMode: validate).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace | quote }}
+          {{- with .podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - port: {{ .port }}
+          protocol: TCP
+    {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+{{- end }}

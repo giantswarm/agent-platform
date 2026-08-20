@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Charts renamed: `agentic-platform` is now `agent-platform` and `agentic-platform-connectivity` is now `agent-platform-connectivity`. The published OCI paths change to `oci://gsoci.azurecr.io/charts/giantswarm/agent-platform` and `.../agent-platform-connectivity`; the last release under the old names is 2.5.4. The GitHub repository is now `giantswarm/agent-platform`.
+- The mcps values key is renamed from `agentic-platform-mcps` to `agent-platform-mcps`, following the `agent-platform-mcps` chart rename (first new-name release 0.7.0, still within the `0.x` range). Overrides still set under the deprecated `agentic-platform-mcps` key keep working for a transition window and take precedence over the new key; the fallback will be removed once all deployments have migrated.
+- Namespace-derived defaults now assume the `agent-platform` namespace: `agent-platform-mcps.muster.musterUrl` and `kagent.a2a.url`. Deployments in a different namespace must override them (unchanged requirement, new default value).
+- The default Postgres cluster name (when `postgres.clusterName` is unset) is `agent-platform-pg` instead of `agentic-platform-pg`.
+
 ### Fixed
 
 - muster metrics are now actually scraped. Both charts (umbrella + connectivity) passed `serviceMonitor.enabled: true` at the top level of the muster values — a key the muster chart never had, so it was silently ignored: no `/metrics` endpoint, no metrics port, no ServiceMonitor on any installation. The toggle now lives at the real path, `muster.observability.metrics.prometheus.serviceMonitor.enabled` (muster ≥ `v1.4.0` derives the prometheus exporter from it), with a `60s` interval and the `observability.giantswarm.io/tenant: giantswarm` label so the series land in the giantswarm Mimir tenant.
