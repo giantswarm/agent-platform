@@ -124,7 +124,7 @@ components:
     # GS-vendored wrapper chart (giantswarm/kagent-app): upstream kagent controller
     # vendored as a subchart, shipping the kagent.dev + kmcp CRDs in its own crds/
     # dir (app-owned CRDs). Wrapping the upstream chart as a subchart keeps the
-    # subchart's `.Chart.Version` a clean pinned 0.9.9 even when helm-controller
+    # subchart's `.Chart.Version` a clean pinned version even when helm-controller
     # appends the OCI +digest to THIS umbrella's version, so the
     # app.kubernetes.io/version label is no longer corrupted — the postRenderer
     # kustomize hack and the version pin the meta-package needed for the upstream
@@ -580,14 +580,12 @@ kagent:
   # Pull kagent images from the GS-retagged registry (retagger uses override_repo_name
   # so the repository paths are flat, not the upstream kagent-dev/kagent/* hierarchy).
   registry: gsoci.azurecr.io/giantswarm
-  # Explicit image tag. The chart otherwise falls back to `.Chart.Version` for the
-  # image tag (coalesce controller.image.tag / .Values.tag / .Chart.Version), but
-  # helm-controller appends the OCI digest as SemVer build metadata when sourcing
-  # via OCIRepository (0.9.9+<digest>), and `+` is illegal in an image tag → the
-  # controller/ui pods land in InvalidImageName. ponytail: must track the pinned
-  # chart version below (components.kagent.versionRange) — bump both together, and
-  # drop once kagent sanitizes the tag upstream or is vendored by GS.
-  tag: "0.9.9"
+  # No image tag pin. The upstream chart coalesces its image tag to
+  # `.Chart.Version`, and since kagent-app vendors it as a subchart that is the
+  # clean pinned upstream version — helm-controller appends the OCI +digest to the
+  # kagent-app umbrella version, not to the subchart, so the tag no longer ends up
+  # with an illegal `+` in it. Pinning here would silently hold the images at an
+  # older release than the wrapper chart ships.
   controller:
     image:
       repository: kagent-controller

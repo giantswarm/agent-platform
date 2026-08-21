@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- kagent images are no longer held at `0.9.9`. `kagent.tag: "0.9.9"` was still pinned in the meta-package values, overriding the wrapper chart and keeping `kagent-controller` and `kagent-ui` on `0.9.9` even though `kagent-app` has vendored upstream `0.9.12` since chart `0.1.32`. The pin was a workaround for pulling the upstream chart directly via `OCIRepository`, where helm-controller appended the OCI digest to the chart version and `+` is illegal in an image tag; now that `kagent-app` vendors the upstream chart as a subchart, its `.Chart.Version` stays clean and the upstream tag coalesce resolves correctly on its own.
+- The example customer BOM pinned `kagent` to `versionRange: "0.9.9"`, a version the wrapper chart never publishes (`kagent-app` ships `0.1.x`), so the example could not resolve. Pinned to `0.1.33`.
 - muster metrics are now actually scraped. Both charts (umbrella + connectivity) passed `serviceMonitor.enabled: true` at the top level of the muster values — a key the muster chart never had, so it was silently ignored: no `/metrics` endpoint, no metrics port, no ServiceMonitor on any installation. The toggle now lives at the real path, `muster.observability.metrics.prometheus.serviceMonitor.enabled` (muster ≥ `v1.4.0` derives the prometheus exporter from it), with a `60s` interval and the `observability.giantswarm.io/tenant: giantswarm` label so the series land in the giantswarm Mimir tenant.
 
 ### Changed
