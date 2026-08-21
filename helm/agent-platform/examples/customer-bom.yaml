@@ -18,7 +18,7 @@ components:
   agentgateway:                  { versionRange: "v1.3.0" }
   valkey:                        { versionRange: "0.1.2" }
   agent-platform-mcps:         { versionRange: "0.4.3" }
-  kagent:                        { versionRange: "0.9.9" }
+  kagent:                        { versionRange: "0.1.33" }
   klaus-gateway:                 { versionRange: "0.2.4" }
   agent-sandbox:                 { versionRange: "0.1.2" }
   dicebear:                      { versionRange: "0.3.0" }
