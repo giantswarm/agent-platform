@@ -59,12 +59,12 @@ gitops:
 # agent-platform-mcps:/mcps:, agentSandbox:) and the connectivity wiring blocks
 # (ingress:, gateway:, networkPolicy:, postgres:, extraObjects:) — unchanged, so
 # every existing override path and values.schema.json still applies.
-components:
+components:  # @schema additionalProperties: true
   # NOTE: there is no longer an agent-platform-crds component. Every component
   # ships its own CRDs in its chart's crds/ dir (app-owned CRDs) and sets
   # `crds: CreateReplace`; its CR consumers dependsOn it directly. The standalone
   # CRD bundle has been retired — see CHANGELOG / UPGRADE.
-  muster:
+  muster:  # @schema additionalProperties: true
     chart: muster
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "1.x"
@@ -75,7 +75,7 @@ components:
     # on its own). It owns their version, so no CRD dependsOn; consumers of its CR
     # kinds (agent-platform-mcps) dependsOn muster instead.
     crds: CreateReplace
-  agentgateway:
+  agentgateway:  # @schema additionalProperties: true
     chart: agentgateway
     # GS-vendored wrapper chart (upstream agentgateway controller as a subchart),
     # shipping the agentgateway.dev CRDs in its own crds/ dir (app-owned CRDs).
@@ -93,7 +93,7 @@ components:
     # for AgentgatewayBackend/Policy, agent-platform-connectivity for
     # AgentgatewayParameters) dependsOn this component instead.
     crds: CreateReplace
-  valkey:
+  valkey:  # @schema additionalProperties: true
     chart: valkey
     # Pull from gsoci (the primary GS registry every other component uses); the
     # giantswarmpublic catalog ACR has an IP-allowlist firewall that rejects many
@@ -103,7 +103,7 @@ components:
     versionRange: "0.x"
     valuesFrom: valkey
     enabledFrom: valkey.enabled
-  agent-platform-mcps:
+  agent-platform-mcps:  # @schema additionalProperties: true
     chart: agent-platform-mcps
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.x"
@@ -119,7 +119,7 @@ components:
     # directly. The agentgateway reference is dropped at render time when the
     # agentgateway component is off (no agentgateway CRs are rendered then anyway).
     dependsOn: [muster, agentgateway]
-  kagent:
+  kagent:  # @schema additionalProperties: true
     chart: kagent
     # GS-vendored wrapper chart (giantswarm/kagent-app): upstream kagent controller
     # vendored as a subchart, shipping the kagent.dev + kmcp CRDs in its own crds/
@@ -145,13 +145,13 @@ components:
     # (agent-platform-connectivity for the kagent RemoteMCPServer/ModelConfig
     # CRs) dependsOn this component instead.
     crds: CreateReplace
-  klaus-gateway:
+  klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.x"
     valuesFrom: klausGateway
     enabledFrom: klausGateway.enabled
-  agent-sandbox:
+  agent-sandbox:  # @schema additionalProperties: true
     chart: agent-sandbox
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.x"
@@ -163,7 +163,7 @@ components:
     # when enabled. It owns their version, so no CRD dependsOn.
     # No valuesKey: this component forwards no values (uses the chart's GS defaults).
     crds: CreateReplace
-  dicebear:
+  dicebear:  # @schema additionalProperties: true
     chart: dicebear
     # Self-hosted DiceBear avatar API + the public avatar HTTPRoute. Lives in its
     # own repo/chart (giantswarm/dicebear); pulled here by range like every component.
@@ -173,7 +173,7 @@ components:
     # Strict values.schema.json (additionalProperties:false); the chart consumes
     # registry.domain, not global — so do not inject global.
     injectGlobal: false
-  agent-platform-connectivity:
+  agent-platform-connectivity:  # @schema additionalProperties: true
     chart: agent-platform-connectivity
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: ">=1.0.0"          # this repo's own wiring chart
@@ -519,6 +519,13 @@ valkey:
 mcps:
   enabled: false
 
+# -- Deprecated former name of the `agent-platform-mcps` block. Overrides set
+# under this key are merged OVER `agent-platform-mcps` (legacyValuesFrom /
+# the connectivity _helpers.tpl merge) so consumers still setting the old key
+# keep working. Free-form on purpose: the schema must keep accepting those
+# overrides until the key is retired.
+agentic-platform-mcps: {}  # @schema additionalProperties: true
+
 # Values passed through to the agent-platform-mcps sub-chart. Only keys it
 # declares are allowed (muster, agentgateway, defaults, identityProviders,
 # mcpServers). The `mcps.enabled` toggle above is intentionally separate.
@@ -572,7 +579,10 @@ agent-platform-mcps:
 #             items: [{ key: uri, path: uri }]
 #       volumeMounts:
 #         - { name: cnpg-dsn, mountPath: /etc/cnpg, readOnly: true }
-kagent:
+# kagent is forwarded verbatim to the kagent component release (an upstream
+# chart with many more keys than mirrored here), so unknown keys must stay
+# allowed.
+kagent:  # @schema additionalProperties: true
   enabled: false
   # Pin the release-independent name so the controller Service is always
   # `kagent-controller` regardless of the umbrella release name.
@@ -586,7 +596,10 @@ kagent:
   # kagent-app umbrella version, not to the subchart, so the tag no longer ends up
   # with an illegal `+` in it. Pinning here would silently hold the images at an
   # older release than the wrapper chart ships.
-  controller:
+  # controller is upstream kagent chart config forwarded verbatim (e.g. the
+  # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
+  # must stay allowed.
+  controller:  # @schema additionalProperties: true
     image:
       repository: kagent-controller
     agentImage:

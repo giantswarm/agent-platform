@@ -252,6 +252,11 @@
                 }
             }
         },
+        "agentic-platform-mcps": {
+            "type": "object",
+            "description": "Deprecated former name of the `agent-platform-mcps` block. Overrides set under this key are merged OVER `agent-platform-mcps` (legacyValuesFrom / the connectivity _helpers.tpl merge) so consumers still setting the old key keep working. Free-form on purpose: the schema must keep accepting those overrides until the key is retired.",
+            "additionalProperties": true
+        },
         "extraObjects": {
             "type": "array"
         },
@@ -524,7 +529,7 @@
         },
         "kagent": {
             "type": "object",
-            "additionalProperties": false,
+            "additionalProperties": true,
             "properties": {
                 "argo-rollouts-agent": {
                     "type": "object",
@@ -576,7 +581,7 @@
                 },
                 "controller": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "agentImage": {
                             "type": "object",

@@ -252,13 +252,18 @@
                 }
             }
         },
+        "agentic-platform-mcps": {
+            "type": "object",
+            "description": "Deprecated former name of the `agent-platform-mcps` block. Overrides set under this key are merged OVER `agent-platform-mcps` (legacyValuesFrom / the connectivity _helpers.tpl merge) so consumers still setting the old key keep working. Free-form on purpose: the schema must keep accepting those overrides until the key is retired.",
+            "additionalProperties": true
+        },
         "components": {
             "type": "object",
-            "additionalProperties": false,
+            "additionalProperties": true,
             "properties": {
                 "agent-platform-connectivity": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -282,7 +287,7 @@
                 },
                 "agent-platform-mcps": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -315,7 +320,7 @@
                 },
                 "agent-sandbox": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -339,7 +344,7 @@
                 },
                 "agentgateway": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -366,7 +371,7 @@
                 },
                 "dicebear": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -387,7 +392,7 @@
                 },
                 "kagent": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -414,7 +419,7 @@
                 },
                 "klaus-gateway": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -435,7 +440,7 @@
                 },
                 "muster": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -456,7 +461,7 @@
                 },
                 "valkey": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
@@ -782,7 +787,7 @@
         },
         "kagent": {
             "type": "object",
-            "additionalProperties": false,
+            "additionalProperties": true,
             "properties": {
                 "argo-rollouts-agent": {
                     "type": "object",
@@ -834,7 +839,7 @@
                 },
                 "controller": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "agentImage": {
                             "type": "object",
