@@ -325,6 +325,13 @@ valkey:
 mcps:
   enabled: false
 
+# -- Deprecated former name of the `agent-platform-mcps` block. Overrides set
+# under this key are merged OVER `agent-platform-mcps` (legacyValuesFrom /
+# the connectivity _helpers.tpl merge) so consumers still setting the old key
+# keep working. Free-form on purpose: the schema must keep accepting those
+# overrides until the key is retired.
+agentic-platform-mcps: {}  # @schema additionalProperties: true
+
 # Values passed through to the agent-platform-mcps sub-chart. Only keys it
 # declares are allowed (muster, agentgateway, defaults, identityProviders,
 # mcpServers). The `mcps.enabled` toggle above is intentionally separate.
@@ -378,7 +385,10 @@ agent-platform-mcps:
 #             items: [{ key: uri, path: uri }]
 #       volumeMounts:
 #         - { name: cnpg-dsn, mountPath: /etc/cnpg, readOnly: true }
-kagent:
+# kagent is forwarded verbatim to the kagent component release (an upstream
+# chart with many more keys than mirrored here), so unknown keys must stay
+# allowed.
+kagent:  # @schema additionalProperties: true
   enabled: false
   # Pin the release-independent name so the controller Service is always
   # `kagent-controller` regardless of the umbrella release name.
@@ -386,7 +396,10 @@ kagent:
   # Pull kagent images from the GS-retagged registry (retagger uses override_repo_name
   # so the repository paths are flat, not the upstream kagent-dev/kagent/* hierarchy).
   registry: gsoci.azurecr.io/giantswarm
-  controller:
+  # controller is upstream kagent chart config forwarded verbatim (e.g. the
+  # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
+  # must stay allowed.
+  controller:  # @schema additionalProperties: true
     image:
       repository: kagent-controller
     agentImage:
