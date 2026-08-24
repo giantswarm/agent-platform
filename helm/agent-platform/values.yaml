@@ -1174,8 +1174,9 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   enabled: false
   fullnameOverride: agentgateway-controller
   image:
+    # No tag: the controller image follows the vendored subchart's appVersion,
+    # which is the version its templates and env-var contract are written for.
     registry: gsoci.azurecr.io
-    tag: v1.2.1
   controller:
     image:
       repository: giantswarm/agentgateway-controller
