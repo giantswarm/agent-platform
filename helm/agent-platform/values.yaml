@@ -80,7 +80,7 @@ components:  # @schema additionalProperties: true
     # GS-vendored wrapper chart (upstream agentgateway controller as a subchart),
     # shipping the agentgateway.dev CRDs in its own crds/ dir (app-owned CRDs).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.x"
+    versionRange: "1.x"
     valuesFrom: agentgateway
     # The wrapper vendors the upstream chart under a subchart named `agentgateway`,
     # so the forwarded block must be nested under that key.
