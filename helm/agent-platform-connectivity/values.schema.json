@@ -20,6 +20,37 @@
             "description": "Deprecated former name of the `agent-platform-mcps` block. Overrides set under this key are merged OVER `agent-platform-mcps` (legacyValuesFrom / the connectivity _helpers.tpl merge) so consumers still setting the old key keep working. Free-form on purpose: the schema must keep accepting those overrides until the key is retired.",
             "additionalProperties": true
         },
+        "baseDomain": {
+            "type": "string"
+        },
+        "bootstrapMode": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "chartOperator": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "ciliumNetworkPolicy": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "cluster": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "clusterCA": {
+            "type": "string"
+        },
+        "clusterCIDR": {
+            "type": "string"
+        },
+        "clusterDNSIP": {
+            "type": "string"
+        },
+        "clusterID": {
+            "type": "string"
+        },
         "dicebear": {
             "type": "object",
             "additionalProperties": true
@@ -204,6 +235,9 @@
                     }
                 }
             }
+        },
+        "gcpProject": {
+            "type": "string"
         },
         "global": {
             "type": "object",
@@ -435,6 +469,12 @@
                     }
                 }
             }
+        },
+        "provider": {
+            "type": "string"
+        },
+        "subscriptionID": {
+            "type": "string"
         },
         "valkey": {
             "type": "object",
