@@ -154,7 +154,11 @@ networkPolicy:
 #         valkey-password: REPLACE_ME
 extraObjects: []
 
-muster:
+# Dicebear avatar service values. Consumed by the dicebear component chart and
+# forwarded here via forwardAllValues; declared so the schema accepts the block.
+dicebear: {}  # @schema skipProperties: true; additionalProperties: true
+
+muster:  # @schema skipProperties: true; additionalProperties: true
   enabled: true
   image:
     registry: gsoci.azurecr.io
@@ -241,7 +245,7 @@ muster:
 #   .ciliumNetworkPolicy  — wrapper's CNP (independent of umbrella networkPolicy.flavor)
 #   .vpa                  — wrapper's VerticalPodAutoscaler (off by default)
 # Single-pod Deployment + PVC; writable Service at muster-valkey.<ns>.svc:6379.
-valkey:
+valkey:  # @schema skipProperties: true; additionalProperties: true
   enabled: true
   ciliumNetworkPolicy:
     enabled: true
@@ -322,7 +326,7 @@ valkey:
 # The on/off toggle lives here, OUTSIDE the `agent-platform-mcps` namespace,
 # because the sub-chart's strict values.schema.json (additionalProperties: false)
 # rejects an `enabled` key. This is the `condition: mcps.enabled` dependency gate.
-mcps:
+mcps:  # @schema skipProperties: true; additionalProperties: true
   enabled: false
 
 # -- Deprecated former name of the `agent-platform-mcps` block. Overrides set
@@ -335,7 +339,7 @@ agentic-platform-mcps: {}  # @schema additionalProperties: true
 # Values passed through to the agent-platform-mcps sub-chart. Only keys it
 # declares are allowed (muster, agentgateway, defaults, identityProviders,
 # mcpServers). The `mcps.enabled` toggle above is intentionally separate.
-agent-platform-mcps:
+agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
   agentgateway:
     # enabled: true  — agentgateway is always active in this umbrella; it sits
     # in front of muster as the observability choke point for every MCP call
@@ -388,7 +392,7 @@ agent-platform-mcps:
 # kagent is forwarded verbatim to the kagent component release (an upstream
 # chart with many more keys than mirrored here), so unknown keys must stay
 # allowed.
-kagent:  # @schema additionalProperties: true
+kagent:  # @schema skipProperties: true; additionalProperties: true
   enabled: false
   # Pin the release-independent name so the controller Service is always
   # `kagent-controller` regardless of the umbrella release name.
@@ -832,7 +836,7 @@ postgres:
 # umbrella already manages the agentgateway controller via the `agentgateway`
 # dependency above; set upstream.agentgatewayURL to the data-plane service
 # URL once the agentgateway deployment is known (typically post-install).
-klausGateway:
+klausGateway:  # @schema skipProperties: true; additionalProperties: true
   enabled: false
 
   image:
@@ -948,7 +952,7 @@ klausGateway:
     # Example: agentgateway.<cluster>.<base-domain>
     hostname: ""
 
-agentgateway:
+agentgateway:  # @schema skipProperties: true; additionalProperties: true
   # Controller dependency install switch. Must be true for agentgateway-* ingress modes (validated against ingress.mode).
   enabled: false
   fullnameOverride: agentgateway-controller
@@ -991,7 +995,7 @@ agentgateway:
 # the agent-sandbox chart's value namespace because that chart's strict
 # values.schema.json (additionalProperties: false) rejects an `enabled` key —
 # same pattern as `mcps.enabled` above.
-agentSandbox:
+agentSandbox:  # @schema skipProperties: true; additionalProperties: true
   enabled: false
   # The agent-sandbox chart is kept vendor-agnostic (no securityContext knob on
   # the upstream v0.4.6 controller), so restricted-PSS is injected here at
