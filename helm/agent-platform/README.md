@@ -376,7 +376,6 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | agentgateway.enabled | bool | `false` |  |
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
-| agentgateway.image.tag | string | `"v1.2.1"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
