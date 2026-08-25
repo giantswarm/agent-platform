@@ -50,7 +50,6 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | components.agent-platform-mcps.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agent-platform-mcps.versionRange | string | `"0.x"` |  |
 | components.agent-platform-mcps.valuesFrom | string | `"agent-platform-mcps"` |  |
-| components.agent-platform-mcps.legacyValuesFrom | string | `"agentic-platform-mcps"` |  |
 | components.agent-platform-mcps.enabledFrom | string | `"mcps.enabled"` |  |
 | components.agent-platform-mcps.injectGlobal | bool | `false` |  |
 | components.agent-platform-mcps.dependsOn[0] | string | `"muster"` |  |
@@ -190,7 +189,6 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | valkey.valkey.metrics.exporter.securityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.metrics.exporter.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | mcps.enabled | bool | `false` |  |
-| agentic-platform-mcps | object | `{}` | Deprecated former name of the `agent-platform-mcps` block. Overrides set under this key are merged OVER `agent-platform-mcps` (legacyValuesFrom / the connectivity _helpers.tpl merge) so consumers still setting the old key keep working. Free-form on purpose: the schema must keep accepting those overrides until the key is retired. |
 | agent-platform-mcps.agentgateway.enabled | bool | `true` |  |
 | agent-platform-mcps.agentgateway.viaMuster | bool | `false` |  |
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
