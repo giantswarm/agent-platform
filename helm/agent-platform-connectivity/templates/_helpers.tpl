@@ -117,9 +117,7 @@ inconsistent. Rendered exactly once via templates/validate.yaml.
 {{- /* viaMuster only matters when the mcps sub-chart is installed; with no MCP
 servers there is nothing to route, so the consistency check is scoped to mcps.enabled. */ -}}
 {{- if .Values.mcps.enabled -}}
-{{- /* Overrides under the deprecated `agentic-platform-mcps` key win over the
-`agent-platform-mcps` block, mirroring the umbrella's legacyValuesFrom merge. */ -}}
-{{- $mcpsVals := mergeOverwrite (deepCopy (index .Values "agent-platform-mcps" | default dict)) (index .Values "agentic-platform-mcps" | default dict) -}}
+{{- $mcpsVals := index .Values "agent-platform-mcps" | default dict -}}
 {{- $viaMuster := dig "agentgateway" "viaMuster" false $mcpsVals -}}
 {{- if eq $mode "agentgateway-muster" -}}
 {{- if not (or (eq $viaMuster true) (eq (toString $viaMuster) "true")) -}}

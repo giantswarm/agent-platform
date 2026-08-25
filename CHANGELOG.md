@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The deprecated `agentic-platform-mcps` values key. Overrides must live under `agent-platform-mcps`. The `legacyValuesFrom` component field that carried the fallback is gone too, along with the free-form `agentic-platform-mcps` property in both `values.schema.json` files: setting the old key is now a schema error rather than a silent override.
+
 ### Changed
 
 - Charts renamed: `agentic-platform` is now `agent-platform` and `agentic-platform-connectivity` is now `agent-platform-connectivity`. The published OCI paths change to `oci://gsoci.azurecr.io/charts/giantswarm/agent-platform` and `.../agent-platform-connectivity`; the last release under the old names is 2.5.4. The GitHub repository is now `giantswarm/agent-platform`.
-- The mcps values key is renamed from `agentic-platform-mcps` to `agent-platform-mcps`, following the `agent-platform-mcps` chart rename (first new-name release 0.7.0, still within the `0.x` range). Overrides still set under the deprecated `agentic-platform-mcps` key keep working for a transition window and take precedence over the new key; the fallback will be removed once all deployments have migrated.
+- The mcps values key is renamed from `agentic-platform-mcps` to `agent-platform-mcps`, following the `agent-platform-mcps` chart rename (first new-name release 0.7.0, still within the `0.x` range).
 - Namespace-derived defaults now assume the `agent-platform` namespace: `agent-platform-mcps.muster.musterUrl` and `kagent.a2a.url`. Deployments in a different namespace must override them (unchanged requirement, new default value).
 - The default Postgres cluster name (when `postgres.clusterName` is unset) is `agent-platform-pg` instead of `agentic-platform-pg`.
 

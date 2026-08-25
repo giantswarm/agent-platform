@@ -13,9 +13,6 @@ knowledge:
       optional, for dev-tag streams).
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
-  legacyValuesFrom: deprecated former name of the valuesFrom block. Overrides
-      found under it are merged OVER the valuesFrom block, so consumers that
-      still set the old key keep working until they migrate.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
       being forwarded (e.g. valuesKey: kagent → {kagent: {…block…}}). Needed for
       GS wrapper charts that vendor an upstream chart as a SUBCHART of the same
@@ -79,10 +76,6 @@ component to a cluster prerequisite (e.g. crds shipped by the platform base) */ 
 {{- $vals = omit $root.Values "gitops" "components" }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $root.Values . | default dict }}{{- end }}
-{{- /* legacyValuesFrom: overrides still living under a renamed (deprecated)
-top-level key win over the new block, reproducing the pre-rename merge the
-consumer saw when its overrides and the chart defaults shared one key. */ -}}
-{{- with $c.legacyValuesFrom }}{{- $vals = mergeOverwrite (deepCopy $vals) (index $root.Values . | default dict) }}{{- end }}
 {{- /* GS wrapper charts vendor the upstream chart as a subchart of the same name;
 nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- with $c.valuesKey }}{{- $vals = dict . $vals }}{{- end }}

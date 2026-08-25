@@ -329,13 +329,6 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
 mcps:  # @schema skipProperties: true; additionalProperties: true
   enabled: false
 
-# -- Deprecated former name of the `agent-platform-mcps` block. Overrides set
-# under this key are merged OVER `agent-platform-mcps` (legacyValuesFrom /
-# the connectivity _helpers.tpl merge) so consumers still setting the old key
-# keep working. Free-form on purpose: the schema must keep accepting those
-# overrides until the key is retired.
-agentic-platform-mcps: {}  # @schema additionalProperties: true
-
 # Values passed through to the agent-platform-mcps sub-chart. Only keys it
 # declares are allowed (muster, agentgateway, defaults, identityProviders,
 # mcpServers). The `mcps.enabled` toggle above is intentionally separate.

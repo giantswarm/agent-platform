@@ -108,9 +108,6 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.x"
     valuesFrom: agent-platform-mcps
-    # Deprecated key, honored until every deployment has moved its overrides to
-    # `agent-platform-mcps`. Overrides found here win over the new block.
-    legacyValuesFrom: agentic-platform-mcps
     enabledFrom: mcps.enabled
     injectGlobal: false              # strict values.schema.json
     # Creates muster.giantswarm.io/MCPServer CRs (CRD owned by the muster app) and,
@@ -518,13 +515,6 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
 # rejects an `enabled` key. This is the `condition: mcps.enabled` dependency gate.
 mcps:  # @schema skipProperties: true; additionalProperties: true
   enabled: false
-
-# -- Deprecated former name of the `agent-platform-mcps` block. Overrides set
-# under this key are merged OVER `agent-platform-mcps` (legacyValuesFrom /
-# the connectivity _helpers.tpl merge) so consumers still setting the old key
-# keep working. Free-form on purpose: the schema must keep accepting those
-# overrides until the key is retired.
-agentic-platform-mcps: {}  # @schema additionalProperties: true
 
 # Values passed through to the agent-platform-mcps sub-chart. Only keys it
 # declares are allowed (muster, agentgateway, defaults, identityProviders,

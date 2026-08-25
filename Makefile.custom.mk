@@ -49,10 +49,6 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
-	@echo "--> deprecated agentic-platform-mcps key still satisfies the viaMuster guard"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agentic-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
-		echo "ok: legacy key honored"; \
-	else echo "FAIL: overrides under the deprecated agentic-platform-mcps key were ignored by the guard"; exit 1; fi
 	@echo "All mode guards verified."
 
 .PHONY: verify-meta
@@ -106,10 +102,6 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -q 'name: muster' /tmp/ap-noc.out || { echo "FAIL: disabling kagent dropped other components"; exit 1; }
 	@echo "--> a dependsOn ref to a disabled component is dropped (no dangling dependency)"
 	@if grep -qE '^    - name: kagent$$' /tmp/ap-noc.out; then echo "FAIL: connectivity still dependsOn disabled kagent (would block forever)"; exit 1; else echo "ok: dangling dependsOn dropped"; fi
-	@echo "--> overrides under the deprecated agentic-platform-mcps key reach the mcps release values"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set mcps.enabled=true --set agentic-platform-mcps.legacyProbe=probed >/tmp/ap-legacy.out 2>&1 || { cat /tmp/ap-legacy.out; exit 1; }
-	@grep -q 'legacyProbe: probed' /tmp/ap-legacy.out || { echo "FAIL: legacyValuesFrom merge dropped the deprecated-key override"; exit 1; }
-	@echo "ok: legacy values key honored"
 	@echo "--> connectivity chart owns the wiring (renders an HTTPRoute)"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/ci-values.yaml >/tmp/ap-conn.out 2>&1 || { cat /tmp/ap-conn.out; exit 1; }
 	@grep -q 'kind: HTTPRoute' /tmp/ap-conn.out || { echo "FAIL: connectivity did not render the muster HTTPRoute"; exit 1; }
