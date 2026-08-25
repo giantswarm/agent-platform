@@ -11,6 +11,13 @@ Each entry is fully self-describing; this template has no per-component
 knowledge:
   chart/repository/versionRange — where to pull and which versions (filterTags
       optional, for dev-tag streams).
+  versionFromChart — pin the component to THIS chart's own version instead of a
+      range. For a sibling chart released from this repo off the same git tag
+      (agent-platform-connectivity), which must never resolve across a release
+      boundary from its meta-package: both sides resolve their own range on their
+      own schedule, so a range lets the pair straddle two releases and the newer
+      side then rejects values the older side still sends. An explicit
+      versionRange still wins, so a customer BOM pins it like any other component.
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
@@ -92,6 +99,13 @@ that CRD either, so the dependency is moot. */ -}}
 {{- $deps = append $deps . }}
 {{- end }}
 {{- end }}
+{{- /* An explicit range wins; versionFromChart falls back to this chart's own
+version, which a sibling chart released off the same git tag always carries. */ -}}
+{{- $version := $c.versionRange }}
+{{- if and (not $version) $c.versionFromChart }}
+{{- $version = include "agent-platform.chartVersion" $root }}
+{{- end }}
+{{- $version = required (printf "components.%s.versionRange is required" $key) $version }}
 {{- if eq $g.engine "flux" }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -105,7 +119,7 @@ spec:
   interval: {{ $g.interval }}
   url: {{ printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart }}
   ref:
-    semver: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
+    semver: {{ $version | quote }}
     {{- with $c.filterTags }}
     filterTags:
       pattern: {{ .pattern | quote }}
@@ -178,7 +192,7 @@ spec:
   source:
     repoURL: {{ trimPrefix "oci://" $c.repository | quote }}
     chart: {{ $c.chart }}
-    targetRevision: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
+    targetRevision: {{ $version | quote }}
     helm:
       valuesObject:
         {{- toYaml $vals | nindent 8 }}

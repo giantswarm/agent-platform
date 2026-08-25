@@ -79,7 +79,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | components.dicebear.injectGlobal | bool | `false` |  |
 | components.agent-platform-connectivity.chart | string | `"agent-platform-connectivity"` |  |
 | components.agent-platform-connectivity.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-connectivity.versionRange | string | `">=1.0.0"` |  |
+| components.agent-platform-connectivity.versionFromChart | bool | `true` |  |
 | components.agent-platform-connectivity.forwardAllValues | bool | `true` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"kagent"` |  |

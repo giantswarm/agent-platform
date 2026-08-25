@@ -14,6 +14,15 @@ Create chart name and version as used by the chart label.
 {{- end -}}
 
 {{/*
+This chart's own version, with any build metadata stripped. helm-controller
+appends the OCI +digest to .Chart.Version when the chart is pulled through an
+OCIRepository, which no version constraint can resolve.
+*/}}
+{{- define "agent-platform.chartVersion" -}}
+{{- splitList "+" .Chart.Version | first -}}
+{{- end -}}
+
+{{/*
 Common labels
 */}}
 {{- define "labels.common" -}}

@@ -44,8 +44,13 @@ gitops:
 #       (or .filterTags for dev-tag streams). WIDE here = the GS dogfooding track
 #       (continuous auto-update, zero PRs). Pin exactly for a customer BOM.
 #   valuesFrom   — top-level values block forwarded to this release's values.
+#   versionFromChart — pin the component to THIS chart's version instead of a
+#       range, for a sibling chart released from this repo off the same git tag.
+#       An explicit versionRange still wins (customer BOM).
 #   forwardAllValues — forward the whole values tree (connectivity reads many
-#       blocks). injectGlobal — inject .Values.global (default true; false for
+#       blocks). Every top-level key defined here is then part of the forwarded
+#       chart's schema contract, so pin that chart with versionFromChart.
+#       injectGlobal — inject .Values.global (default true; false for
 #       strict-schema charts that reject an unexpected `global` key).
 #   enabledFrom  — existing on/off toggle path. dependsOn — CRD-before-CR order
 #       (a reference to a toggled-off component is dropped at render time).
@@ -173,7 +178,12 @@ components:  # @schema additionalProperties: true
   agent-platform-connectivity:  # @schema additionalProperties: true
     chart: agent-platform-connectivity
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: ">=1.0.0"          # this repo's own wiring chart
+    # Released from this repo off the same git tag as this chart, and fed the whole
+    # values tree below, so its schema and these defaults are one contract. Pinned
+    # to this chart's version rather than resolved by range: each side resolves its
+    # own range on its own schedule, so a range lets the pair straddle two releases
+    # and the newer side then rejects values the older side still sends.
+    versionFromChart: true
     forwardAllValues: true
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app) and the kagent RemoteMCPServer/ModelConfig CRs

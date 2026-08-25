@@ -102,6 +102,17 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -q 'name: muster' /tmp/ap-noc.out || { echo "FAIL: disabling kagent dropped other components"; exit 1; }
 	@echo "--> a dependsOn ref to a disabled component is dropped (no dangling dependency)"
 	@if grep -qE '^    - name: kagent$$' /tmp/ap-noc.out; then echo "FAIL: connectivity still dependsOn disabled kagent (would block forever)"; exit 1; else echo "ok: dangling dependsOn dropped"; fi
+	@echo "--> connectivity is pinned to this chart's own version, not a range"
+	@ver=$$(awk '/^version:/ { print $$2 }' $(CHART_DIR)/Chart.yaml); \
+		grep -q "semver: \"$$ver\"" /tmp/ap-flux.out || { \
+			echo "FAIL: connectivity is not pinned to chart version $$ver (a range lets the pair straddle a release)"; exit 1; }
+	@echo "ok: connectivity pinned"
+	@echo "--> every top-level key the meta-package forwards is accepted by the connectivity schema"
+	@for k in $$(awk '/^[a-zA-Z][a-zA-Z0-9_.-]*:/ { sub(/:.*/, ""); print }' $(CHART_DIR)/values.yaml | grep -vE '^(gitops|components)$$'); do \
+		grep -q "\"$$k\":" $(CONNECTIVITY_DIR)/values.schema.json || { \
+			echo "FAIL: the meta-package forwards $$k, which the connectivity schema rejects"; exit 1; }; \
+	done
+	@echo "ok: forwarded keys accepted"
 	@echo "--> connectivity chart owns the wiring (renders an HTTPRoute)"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/ci-values.yaml >/tmp/ap-conn.out 2>&1 || { cat /tmp/ap-conn.out; exit 1; }
 	@grep -q 'kind: HTTPRoute' /tmp/ap-conn.out || { echo "FAIL: connectivity did not render the muster HTTPRoute"; exit 1; }

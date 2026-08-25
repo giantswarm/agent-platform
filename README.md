@@ -77,7 +77,7 @@ spec:
       name: agent-platform-values
 ```
 
-The meta-package then renders, in the same namespace: an `OCIRepository` + `HelmRelease` for each enabled component and for `agent-platform-connectivity`. Each component ships its own CRDs. Component `versionRange`s default to **wide** (continuous auto-update); pin them in your values for a reproducible release.
+The meta-package then renders, in the same namespace: an `OCIRepository` + `HelmRelease` for each enabled component and for `agent-platform-connectivity`. Each component ships its own CRDs. Component `versionRange`s default to **wide** (continuous auto-update); pin them in your values for a reproducible release. `agent-platform-connectivity` is the exception: it ships from this repo off the same git tag and receives the whole values tree, so the meta-package pins it to its own version (`versionFromChart`) and the two never straddle a release. A `versionRange` in your values still overrides that, as the customer bill-of-materials does.
 
 ### Raw Helm (no GitOps controller)
 
