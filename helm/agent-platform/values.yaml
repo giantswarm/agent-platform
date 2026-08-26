@@ -123,7 +123,7 @@ components:  # @schema additionalProperties: true
     dependsOn: [muster, agentgateway]
   kagent:  # @schema additionalProperties: true
     chart: kagent
-    # GS-vendored wrapper chart (giantswarm/kagent-app): upstream kagent controller
+    # GS-vendored wrapper chart (giantswarm/kagent): upstream kagent controller
     # vendored as a subchart, shipping the kagent.dev + kmcp CRDs in its own crds/
     # dir (app-owned CRDs). Wrapping the upstream chart as a subchart keeps the
     # subchart's `.Chart.Version` a clean pinned version even when helm-controller
@@ -629,9 +629,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # so the repository paths are flat, not the upstream kagent-dev/kagent/* hierarchy).
   registry: gsoci.azurecr.io/giantswarm
   # No image tag pin. The upstream chart coalesces its image tag to
-  # `.Chart.Version`, and since kagent-app vendors it as a subchart that is the
+  # `.Chart.Version`, and since the kagent chart vendors it as a subchart that is the
   # clean pinned upstream version — helm-controller appends the OCI +digest to the
-  # kagent-app umbrella version, not to the subchart, so the tag no longer ends up
+  # kagent chart umbrella version, not to the subchart, so the tag no longer ends up
   # with an illegal `+` in it. Pinning here would silently hold the images at an
   # older release than the wrapper chart ships.
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
