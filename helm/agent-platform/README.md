@@ -31,7 +31,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | gitops.argo.server | string | `"https://kubernetes.default.svc"` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `"2.x"` |  |
+| components.muster.versionRange | string | `"3.x"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
