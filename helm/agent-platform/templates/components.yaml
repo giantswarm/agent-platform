@@ -37,12 +37,12 @@ knowledge:
       before its CR consumers). References that name a component which is toggled
       off are dropped at render time (see the componentEnabled helper) so an
       always-on consumer never blocks on a HelmRelease that was never rendered.
-  syncWave      — explicit Argo sync wave (argo engine only; Flux orders on
-      dependsOn itself). Rarely needed: the wave is derived from dependsOn, one
-      wave behind the deepest dependency (see the componentWave helper), so a
-      chain of dependencies already lands in a chain of waves. Set it for a
-      component whose real prerequisite this chart cannot see (a cluster-level
-      object, another Application set); setting it also stops the walk.
+  syncWave      — explicit Argo sync wave, overriding the dependsOn-derived default
+      (argo engine only; Flux orders on dependsOn itself). The default is binary:
+      wave 1 with dependencies, wave 0 without. That cannot express a chain, so a
+      component whose dependency ALSO has dependencies (and therefore also lands in
+      wave 1) must state its own wave. Set it whenever a dependsOn entry is not a
+      pure CRD owner.
   postRenderers — optional Flux helm-controller postRenderers passed straight to
       the child HelmRelease (flux engine only). Used to work around upstream chart
       bugs without forking — e.g. kagent stamps the chart version into
@@ -173,10 +173,10 @@ metadata:
   labels:
     {{- include "labels.common" $root | nindent 4 }}
   annotations:
-    # dependsOn has no Argo equivalent; the wave is derived from it, one wave
-    # behind the deepest enabled dependency (CRD owners in wave 0 apply and
-    # Establish before their consumers in wave 1).
-    argocd.argoproj.io/sync-wave: {{ include "agent-platform.componentWave" (dict "root" $root "name" $key) | quote }}
+    # dependsOn has no Argo equivalent; CRDs (wave 0) apply and Establish before
+    # their consumers (wave 1). components.<name>.syncWave overrides that default
+    # for a dependency chain the two waves cannot express.
+    argocd.argoproj.io/sync-wave: {{ $c.syncWave | default (ternary "1" "0" (gt (len $deps) 0)) | quote }}
 spec:
   project: {{ $g.argo.project }}
   destination:

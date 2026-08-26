@@ -129,6 +129,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "syncWave": {
+                            "type": "string"
+                        },
                         "versionRange": {
                             "type": "string"
                         }

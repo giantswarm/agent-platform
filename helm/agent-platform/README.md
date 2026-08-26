@@ -73,6 +73,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | components.agent-sandbox.injectGlobal | bool | `false` |  |
 | components.agent-sandbox.crds | string | `"CreateReplace"` |  |
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
+| components.agent-sandbox.syncWave | string | `"2"` |  |
 | components.dicebear.chart | string | `"dicebear"` |  |
 | components.dicebear.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.dicebear.versionRange | string | `"0.x"` |  |
