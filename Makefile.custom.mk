@@ -13,8 +13,12 @@ CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 VM := --set ingress.parentRefs[0].name=x
 
 # Every component that owns a kyverno.io object, so the policy-engine assertions
-# see the full set. GOLDEN_REF is the ref the default render must still match.
+# see the full set.
 PE := $(VM) --set kagent.enabled=true --set agentSandbox.enabled=true
+# The golden render deliberately leaves agentSandbox off: its ClusterPolicy dropped
+# helm.sh/resource-policy: keep, the one intended render change. GOLDEN_REF is the ref
+# the rest of the default render must still match byte for byte.
+PE_GOLDEN := $(VM) --set kagent.enabled=true
 GOLDEN_REF ?= origin/main
 
 .PHONY: verify-modes
@@ -70,14 +74,18 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	elif ! grep -q "policyEngine.type must be one of" /tmp/vm-pe-enum.out; then \
 		echo "FAIL: policyEngine.type check failed for the wrong reason"; cat /tmp/vm-pe-enum.out; exit 1; \
 	else echo "ok: policyEngine.type enum"; fi
+	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it)"
+	@if grep -q "helm.sh/resource-policy" /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: helm.sh/resource-policy is back; the policy would be orphaned on removal"; exit 1; \
+	else echo "ok: prunable"; fi
 	@echo "--> golden: the default render is byte-identical to $(GOLDEN_REF)"
 	@if ! git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
 		echo "skip: $(GOLDEN_REF) is not available (set GOLDEN_REF= to pick another ref)"; \
 	else \
 		tree=$$(mktemp -d); \
 		git worktree add -q --detach $$tree $(GOLDEN_REF) || { echo "FAIL: cannot check out $(GOLDEN_REF)"; exit 1; }; \
-		helm template t $$tree/$(CONNECTIVITY_DIR) $(PE) >/tmp/vm-golden.out 2>&1; \
-		helm template t $(CONNECTIVITY_DIR) $(PE) >/tmp/vm-head.out 2>&1; \
+		helm template t $$tree/$(CONNECTIVITY_DIR) $(PE_GOLDEN) >/tmp/vm-golden.out 2>&1; \
+		helm template t $(CONNECTIVITY_DIR) $(PE_GOLDEN) >/tmp/vm-head.out 2>&1; \
 		git worktree remove --force $$tree; \
 		if diff -u /tmp/vm-golden.out /tmp/vm-head.out; then echo "ok: default render unchanged"; \
 		else echo "FAIL: the default render drifted from $(GOLDEN_REF)"; exit 1; fi; \
