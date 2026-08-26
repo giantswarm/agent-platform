@@ -361,6 +361,32 @@ muster:  # @schema skipProperties: true; additionalProperties: true
   # with the crds/-dir copy. Stays as a guard regardless of the muster version below.
   crds:
     install: false
+  # Who may register MCPServers and author Workflows through muster's
+  # writes-as-caller path. The muster sub-chart defaults both editor
+  # RoleBindings to system:authenticated (single-team fit); on a shared
+  # platform MC every registered server and authored workflow is visible to
+  # and routed through by other users, so the umbrella narrows both bindings
+  # explicitly to the Giant Swarm admin groups (the same groups the config
+  # default layer feeds rbac-operator as oidc.giantswarm.write_all_group/
+  # _groups). Installations wanting customer self-service widen subjects via
+  # their gitops values.
+  rbac:
+    mcpServerEditor:
+      subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+    workflowEditor:
+      subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
   # Muster's NetworkPolicy mirrors the umbrella's flavor split (`cilium` vs
   # `kubernetes`). Defaults stay aligned with `networkPolicy.flavor` at the
   # umbrella top level — flip `flavor: kubernetes` here too when running on
