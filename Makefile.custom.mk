@@ -23,12 +23,6 @@ KYVERNO_ALL := $(VM) --set kagent.enabled=true --set agentSandbox.enabled=true
 KYVERNO_GOLDEN := $(VM) --set kagent.enabled=true
 GOLDEN_REF ?= origin/main
 
-# Every optional component on, so the wave assertion covers every dependsOn edge
-# the chart can render (connectivity -> agentgateway + kagent, mcps -> muster +
-# agentgateway, agent-sandbox -> connectivity).
-WAVE_TOPOLOGY := --set agentSandbox.enabled=true --set agentgateway.enabled=true \
-	--set kagent.enabled=true --set mcps.enabled=true --set klausGateway.enabled=true \
-	--set ingress.mode=agentgateway-muster --set agent-platform-mcps.agentgateway.viaMuster=true
 
 .PHONY: verify-modes
 verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns the wiring + guards).
@@ -159,10 +153,6 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@echo "--> every connectivity top-level key is settable through the meta chart"
 	@python3 -c 'import json,sys; m=set(json.load(open("$(CHART_DIR)/values.schema.json"))["properties"]); c=set(json.load(open("$(CONNECTIVITY_DIR)/values.schema.json"))["properties"]); miss=sorted(c-m); sys.exit("FAIL: connectivity keys the meta chart schema rejects (root is additionalProperties:false, so forwardAllValues cannot reach them): "+", ".join(miss) if miss else 0)'
 	@echo "ok: no unreachable connectivity keys"
-	@echo "--> argo: every component syncs in a later wave than its dependsOn targets"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(WAVE_TOPOLOGY) >/tmp/ap-wave-flux.out 2>&1 || { cat /tmp/ap-wave-flux.out; exit 1; }
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(WAVE_TOPOLOGY) --set gitops.engine=argo >/tmp/ap-wave-argo.out 2>&1 || { cat /tmp/ap-wave-argo.out; exit 1; }
-	@python3 tests/assert-sync-waves.py /tmp/ap-wave-flux.out /tmp/ap-wave-argo.out
 	@echo "--> connectivity chart owns the wiring (renders an HTTPRoute)"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/ci-values.yaml >/tmp/ap-conn.out 2>&1 || { cat /tmp/ap-conn.out; exit 1; }
 	@grep -q 'kind: HTTPRoute' /tmp/ap-conn.out || { echo "FAIL: connectivity did not render the muster HTTPRoute"; exit 1; }

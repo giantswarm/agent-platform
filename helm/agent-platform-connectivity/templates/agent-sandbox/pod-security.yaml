@@ -13,8 +13,7 @@
 #   the Deployment ships in the agent-sandbox component release, this chart ships no
 #   workloads. On a GS cluster (fail-closed restricted-PSS) the Deployment is rejected
 #   until Kyverno has loaded this policy, so the agent-sandbox HelmRelease dependsOn
-#   this release (components.agent-sandbox.dependsOn in the meta-package; on the argo
-#   engine the same order comes from components.agent-sandbox.syncWave).
+#   this release (components.agent-sandbox.dependsOn in the meta-package, flux engine).
 #   dependsOn is a best effort, not a barrier: it waits for THIS release to go Ready,
 #   which means the ClusterPolicy applied, not that Kyverno compiled it and its
 #   webhook serves it. The HelmRelease retries cover the remaining window.

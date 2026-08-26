@@ -49,9 +49,6 @@ gitops:
 #       strict-schema charts that reject an unexpected `global` key).
 #   enabledFrom  — existing on/off toggle path. dependsOn — CRD-before-CR order
 #       (a reference to a toggled-off component is dropped at render time).
-#   syncWave     — explicit Argo sync wave, overriding the dependsOn-derived default
-#       (wave 1 with dependencies, 0 without). Needed when the dependency itself has
-#       dependencies, so both would otherwise land in wave 1 (argo engine only).
 #   crds         — Helm CRD lifecycle (CreateReplace) for a component that ships its
 #       own CRDs in its chart's crds/ dir (app-owned CRDs). Such a component owns its
 #       CRD version; its CR consumers dependsOn it instead. Flux-only (Argo applies
@@ -173,9 +170,6 @@ components:  # @schema additionalProperties: true
     # cluster it is admitted only once Kyverno has loaded the mutate policy in
     # agent-platform-connectivity (templates/agent-sandbox/pod-security.yaml).
     dependsOn: [agent-platform-connectivity]
-    # connectivity is not a CRD owner: it dependsOn agentgateway + kagent itself and
-    # then renders in wave 1, so the derived default would put both in the same wave.
-    syncWave: "2"
   dicebear:  # @schema additionalProperties: true
     chart: dicebear
     # Self-hosted DiceBear avatar API + the public avatar HTTPRoute. Lives in its
