@@ -31,7 +31,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | gitops.argo.server | string | `"https://kubernetes.default.svc"` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `"4.x"` |  |
+| components.muster.versionRange | string | `">=4.1.0 <5.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
@@ -157,6 +157,8 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | bool | `true` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.interval | string | `"60s"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| muster.muster.observability.metrics.prometheus.prometheusRule.enabled | bool | `true` |  |
+| muster.muster.observability.metrics.prometheus.prometheusRule.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | valkey.enabled | bool | `true` |  |
 | valkey.ciliumNetworkPolicy.enabled | bool | `true` |  |
 | valkey.vpa.enabled | bool | `false` |  |

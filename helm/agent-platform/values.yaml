@@ -67,7 +67,12 @@ components:  # @schema additionalProperties: true
   muster:  # @schema additionalProperties: true
     chart: muster
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "4.x"
+    # Floor, not just a major: the muster values below set
+    # observability.metrics.prometheus.prometheusRule, which the muster
+    # chart only accepts from 4.1.0 (it validates values against its own
+    # schema with additionalProperties: false). Keeping the upper bound
+    # open means minor releases still roll forward on their own.
+    versionRange: ">=4.1.0 <5.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -414,6 +419,23 @@ muster:  # @schema skipProperties: true; additionalProperties: true
           serviceMonitor:
             enabled: true
             interval: 60s
+            labels:
+              observability.giantswarm.io/tenant: giantswarm
+          # MCPServer connection-state alerts (MusterMCPServerFailed,
+          # MusterMCPServerFlapping) on muster's own
+          # muster_mcpserver_state metric. Off in the muster chart's own
+          # defaults; on here because every installation running this
+          # umbrella already ships the ServiceMonitor above, so the
+          # series the rules need are reaching Mimir. Same tenant label:
+          # observability-operator uses it to sync the rule group to the
+          # right Mimir ruler tenant.
+          #
+          # Requires the muster chart to carry
+          # templates/prometheusrule.yaml -- it validates values against
+          # its own schema with additionalProperties: false, so this key
+          # must not be set for a muster older than 4.1.0.
+          prometheusRule:
+            enabled: true
             labels:
               observability.giantswarm.io/tenant: giantswarm
 
