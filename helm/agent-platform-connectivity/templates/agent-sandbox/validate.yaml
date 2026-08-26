@@ -3,14 +3,24 @@ Render-time guard for the agent-sandbox pod-security wiring. Fails `helm templat
 (and therefore CI lint + install) early with an actionable message instead of
 producing a silently-broken release.
 
-The Kyverno mutate policy in pod-security.yaml targets the controller Deployment
-by namespace via agentSandbox.podSecurity.namespace. That value is independent of
+Two failures are guarded here.
+
+FIRST: the policy must exist at all. kyvernoPolicies.enabled: false drops it, and
+the upstream controller chart exposes no securityContext knob, so the Deployment
+then carries no securityContext from anywhere and PSA rejects it. Turning
+agentSandbox.podSecurity.enabled off is the explicit way to accept that.
+
+SECOND: the policy must match. It targets the controller Deployment by namespace
+via agentSandbox.podSecurity.namespace. That value is independent of
 the namespace the agent-sandbox subchart actually deploys into
 (agent-sandbox.agent-sandbox.namespace.name). If the two drift, the policy never
 matches, the controller pod ships without the restricted-PSS securityContext, and
 PSA silently rejects it. Keep them in lockstep.
 */ -}}
 {{- if and .Values.agentSandbox.enabled .Values.agentSandbox.podSecurity.enabled }}
+  {{- if not .Values.kyvernoPolicies.enabled }}
+    {{- fail "agentSandbox.podSecurity.enabled requires kyvernoPolicies.enabled: the securityContext reaches the controller Deployment through the Kyverno mutate policy and through nothing else. Set agentSandbox.podSecurity.enabled: false to run the controller without a securityContext (only safe where nothing enforces restricted PSS), or agentSandbox.enabled: false." }}
+  {{- end }}
   {{- $controllerNs := "agent-sandbox-system" }}
   {{- $sandbox := index .Values "agent-sandbox" }}
   {{- if $sandbox }}

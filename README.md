@@ -42,6 +42,7 @@ make verify-meta verify-modes
 - Gateway API v1 CRDs (`gateways.gateway.networking.k8s.io`, `httproutes.gateway.networking.k8s.io`, `gatewayclasses.gateway.networking.k8s.io`) installed cluster-wide. The Agent Platform does **not** install them.
 - No separate CRD chart to install first — every component ships its own CRDs (`AgentgatewayParameters` / `AgentgatewayPolicy` / `AgentgatewayBackend` with the agentgateway component, `MCPServer` / `Workflow` with muster, the kagent + agent-sandbox CRDs with their components). The meta-package orders each CR consumer after the CRD-owning component for you; see [CRD lifecycle](#crd-lifecycle).
 - A `GatewayClass` CR named `agentgateway` (`status.conditions[type=Accepted]=True`). The bundled `agentgateway` sub-chart creates it on install; operators managing the controller out-of-band must ensure the `GatewayClass` exists.
+- Kyverno for the four `kyverno.io` objects the connectivity chart renders (default on). Clusters without Kyverno: set `kyvernoPolicies.enabled: false`, and `agentSandbox.enabled: false` too where restricted PSS is enforced through PSA labels; see [Kyverno](#kyverno).
 - Cilium CNI for `networkPolicy.flavor: cilium` (default). Vanilla Kubernetes clusters: set `networkPolicy.flavor: kubernetes` **AND** `muster.networkPolicy.flavor: kubernetes` **AND** `valkey.ciliumNetworkPolicy.enabled: false` (the bundled valkey wrapper's CNP has no kubernetes-flavor counterpart). Opt out entirely with `networkPolicy.enabled: false` + `muster.networkPolicy.enabled: false` + `valkey.ciliumNetworkPolicy.enabled: false`.
 
 ## Installing
@@ -236,6 +237,8 @@ The `agentSandbox.enabled` toggle lives in its **own** top-level block, not unde
 
 The agent-sandbox chart is kept vendor-agnostic and the upstream controller exposes no `securityContext` knob, so the umbrella injects restricted-PSS fields into the controller Deployment at admission via a Kyverno mutate policy (`agentSandbox.podSecurity.*`). Override `agentSandbox.podSecurity.enabled: false` to drop the policy, or tune the `podSecurityContext` / `containerSecurityContext` blocks. The policy matches the `agent-sandbox-controller` Deployment in `agentSandbox.podSecurity.namespace` (default `agent-sandbox-system`), which must match the chart's namespace.
 
+That policy is the controller's only source of a `securityContext`. So `kyvernoPolicies.enabled: false` (see [Kyverno](#kyverno)) fails the render while `agentSandbox.podSecurity.enabled` is on, and the failure names the two ways out: `agentSandbox.enabled: false` on a cluster that enforces restricted PSS, or `agentSandbox.podSecurity.enabled: false` where nothing enforces it and a controller pod without a `securityContext` is acceptable. The `agent-sandbox` release `dependsOn` the connectivity release (on the argo engine, a later sync wave), so Kyverno holds the policy before the Deployment applies.
+
 ### Ingress topology
 
 > For the end-to-end authentication story — the request path, OAuth discovery,
@@ -391,7 +394,15 @@ CRDs migrate with their owning component release — a new component version (re
 
 ## Compatibility
 
-Targets Giant Swarm workload clusters running Kubernetes ≥ 1.33 with Cilium and Kyverno. The `kubernetes` NetworkPolicy flavor works on any CNI but is best-effort (no entity selectors, no FQDN egress).
+Targets Giant Swarm workload clusters running Kubernetes ≥ 1.33 with Cilium and Kyverno. The `kubernetes` NetworkPolicy flavor works on any CNI but is best-effort (no entity selectors, no FQDN egress). Kyverno is optional, see below.
+
+### Kyverno
+
+The connectivity chart renders four `kyverno.io` objects: two ClusterPolicies that give the bundled declarative agents their securityContext, a PolicyException that lifts the seccomp restriction those agents need, and the agent-sandbox pod-security ClusterPolicy. On a cluster with no Kyverno the install fails on an unknown API group, so set `kyvernoPolicies.enabled: false` there. It renders none of the four.
+
+The PolicyException targets a policy this chart does not own, so its names must match the target cluster. They default to the Giant Swarm names (`policyExceptionNamespace: policy-exceptions`, `seccompPolicyName: restrict-seccomp-strict`, `seccompRuleNames`); a cluster that names its policies differently must override them, or the exception matches nothing.
+
+A cluster that enforces restricted PSS through PSA labels instead of Kyverno must also set `agentSandbox.enabled: false` (see [agent-sandbox](#agent-sandbox)).
 
 ## Credit
 

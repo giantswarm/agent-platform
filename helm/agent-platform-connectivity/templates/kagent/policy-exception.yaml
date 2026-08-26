@@ -1,5 +1,9 @@
 {{- if and .Values.kagent.enabled .Values.kyvernoPolicies.enabled }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $ruleNames := .Values.kyvernoPolicies.seccompRuleNames | default list }}
+{{- if or (not $ruleNames) (ne (len (compact $ruleNames)) (len $ruleNames)) }}
+{{- fail "kyvernoPolicies.seccompRuleNames must name at least one non-empty rule of kyvernoPolicies.seccompPolicyName; an exception that names no rule matches nothing, and the declarative agents then fail on the seccomp policy" }}
+{{- end }}
 # GS clusters enforce restrict-seccomp-strict: every pod must declare
 # seccompProfile RuntimeDefault or Localhost.
 #
@@ -37,7 +41,7 @@ spec:
   exceptions:
   - policyName: {{ .Values.kyvernoPolicies.seccompPolicyName }}
     ruleNames:
-    {{- toYaml .Values.kyvernoPolicies.seccompRuleNames | nindent 4 }}
+    {{- toYaml $ruleNames | nindent 4 }}
   match:
     any:
     - resources:

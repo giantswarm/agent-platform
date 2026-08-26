@@ -63,6 +63,45 @@ true
 {{- end -}}
 
 {{/*
+Argo sync wave for a component: one wave behind its deepest enabled dependsOn
+target, so a chain of dependencies lands in a chain of waves. Argo has no
+dependsOn equivalent, and the flux engine ignores waves entirely, so this is the
+only place the install order of the argo engine is stated. A component with no
+dependency renders in wave 0.
+
+components.<key>.syncWave overrides the derived value for a component whose real
+prerequisite this chart cannot see (a cluster-level object, another Application
+set). Setting it also stops the walk: the override is the component's wave.
+
+A dependsOn cycle would recurse forever, so the walk fails past depth 10.
+Usage: include "agent-platform.componentWave" (dict "root" $root "name" "agent-sandbox")
+*/}}
+{{- define "agent-platform.componentWave" -}}
+{{- $root := .root -}}
+{{- $depth := .depth | default 0 -}}
+{{- if gt $depth 10 -}}
+{{- fail (printf "components.%s: dependsOn is more than 10 deep, which is almost certainly a cycle; break it or set components.<key>.syncWave explicitly" .name) -}}
+{{- end -}}
+{{- $c := index $root.Values.components .name -}}
+{{- $wave := 0 -}}
+{{- if $c -}}
+{{- if $c.syncWave -}}
+{{- $wave = int $c.syncWave -}}
+{{- else -}}
+{{- range ($c.dependsOn | default list) -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" $root "name" .) -}}
+{{- $depWave := int (include "agent-platform.componentWave" (dict "root" $root "name" . "depth" (add1 $depth))) -}}
+{{- if ge $depWave $wave -}}
+{{- $wave = add1 $depWave -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $wave -}}
+{{- end -}}
+
+{{/*
 Name of the AgentgatewayParameters CR — defaults to release name.
 */}}
 {{- define "agent-platform.parametersName" -}}
