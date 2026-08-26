@@ -140,27 +140,19 @@ networkPolicy:
       - 169.254.0.0/16
 
 # === Admission policy engine ===
-# Which admission policy engine the target cluster runs. Giant Swarm clusters
-# run Kyverno, so `kyverno` is the default and the fleet render is unchanged.
+# kyverno — render this chart's kyverno.io objects. The default; GS clusters run
+#           Kyverno.
+# none    — render none of them, for a cluster without Kyverno, where they fail the
+#           install on an unknown API group.
 #
-#   kyverno — render the chart's kyverno.io objects (the kagent declarative-agent
-#             mutate policies, the seccomp PolicyException, and the agent-sandbox
-#             pod-security policy).
-#   none    — render no kyverno.io object at all. Use it on a cluster that has no
-#             Kyverno installed, where those objects fail the install on an
-#             unknown API group.
-#
-# The kyverno.* keys below name cluster-owned objects that this chart does not
-# create. They carry the Giant Swarm names; a cluster with different cluster
-# policy names must override them, otherwise the PolicyException matches nothing.
+# The kyverno.* keys name cluster-owned objects this chart does not create, so they
+# must match the target cluster; the defaults are the GS names. On GS clusters
+# restrict-polex-namespaces confines the PolicyException to policy-exceptions,
+# giantswarm, flux-giantswarm or kube-system.
 policyEngine:
   type: kyverno  # @schema enum:[kyverno, none]
   kyverno:
-    # Namespace that holds the PolicyException. On GS clusters
-    # restrict-polex-namespaces permits only policy-exceptions, giantswarm,
-    # flux-giantswarm and kube-system.
     policyExceptionNamespace: policy-exceptions
-    # Cluster policy (and its rules) that the kagent seccomp exception targets.
     seccompPolicyName: restrict-seccomp-strict
     seccompRuleNames:
       - check-seccomp-strict

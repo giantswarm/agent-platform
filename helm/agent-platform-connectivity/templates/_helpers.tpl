@@ -169,5 +169,5 @@ renders a kyverno.io object is gated on this:
   {{- if (include "agent-platform.kyverno" .) }}
 */}}
 {{- define "agent-platform.kyverno" -}}
-{{- if eq (dig "type" "kyverno" (.Values.policyEngine | default dict)) "kyverno" -}}true{{- end -}}
+{{- if eq .Values.policyEngine.type "kyverno" -}}true{{- end -}}
 {{- end -}}
