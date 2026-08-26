@@ -129,6 +129,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "syncWave": {
+                            "type": "string"
+                        },
                         "versionRange": {
                             "type": "string"
                         }
@@ -570,6 +573,27 @@
         "klausGateway": {
             "type": "object",
             "additionalProperties": true
+        },
+        "kyvernoPolicies": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "policyExceptionNamespace": {
+                    "type": "string"
+                },
+                "seccompPolicyName": {
+                    "type": "string"
+                },
+                "seccompRuleNames": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
         },
         "mcps": {
             "type": "object",
