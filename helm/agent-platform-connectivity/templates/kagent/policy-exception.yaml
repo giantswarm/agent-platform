@@ -1,4 +1,4 @@
-{{- if and .Values.kagent.enabled (include "agent-platform.kyverno" .) }}
+{{- if and .Values.kagent.enabled .Values.kyvernoPolicies.enabled }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 # GS clusters enforce restrict-seccomp-strict: every pod must declare
 # seccompProfile RuntimeDefault or Localhost.
@@ -30,14 +30,14 @@ apiVersion: kyverno.io/v2
 kind: PolicyException
 metadata:
   name: kagent-declarative-seccomp
-  namespace: {{ .Values.policyEngine.kyverno.policyExceptionNamespace }}
+  namespace: {{ .Values.kyvernoPolicies.policyExceptionNamespace }}
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   exceptions:
-  - policyName: {{ .Values.policyEngine.kyverno.seccompPolicyName }}
+  - policyName: {{ .Values.kyvernoPolicies.seccompPolicyName }}
     ruleNames:
-    {{- toYaml .Values.policyEngine.kyverno.seccompRuleNames | nindent 4 }}
+    {{- toYaml .Values.kyvernoPolicies.seccompRuleNames | nindent 4 }}
   match:
     any:
     - resources:

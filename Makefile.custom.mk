@@ -58,22 +58,16 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
-	@echo "--> policyEngine.type=none renders no kyverno.io object"
-	@helm template t $(CONNECTIVITY_DIR) $(PE) --set policyEngine.type=none >/tmp/vm-pe-none.out 2>&1 || { cat /tmp/vm-pe-none.out; exit 1; }
+	@echo "--> kyvernoPolicies.enabled=false renders no kyverno.io object"
+	@helm template t $(CONNECTIVITY_DIR) $(PE) --set kyvernoPolicies.enabled=false >/tmp/vm-pe-none.out 2>&1 || { cat /tmp/vm-pe-none.out; exit 1; }
 	@if grep -q "kyverno.io" /tmp/vm-pe-none.out; then \
-		echo "FAIL: kyverno.io objects still render under policyEngine.type=none"; grep -n "kyverno.io" /tmp/vm-pe-none.out; exit 1; \
+		echo "FAIL: kyverno.io objects still render under kyvernoPolicies.enabled=false"; grep -n "kyverno.io" /tmp/vm-pe-none.out; exit 1; \
 	else echo "ok: no kyverno.io kinds"; fi
 	@echo "--> the default (kyverno) render still carries all four kyverno.io objects"
 	@helm template t $(CONNECTIVITY_DIR) $(PE) >/tmp/vm-pe-kyverno.out 2>&1 || { cat /tmp/vm-pe-kyverno.out; exit 1; }
 	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "4" ]; then \
 		echo "FAIL: expected 4 kyverno.io objects, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; exit 1; \
 	else echo "ok: 4 kyverno.io objects"; fi
-	@echo "--> a bogus policyEngine.type must fail"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set policyEngine.type=bogus >/tmp/vm-pe-enum.out 2>&1; then \
-		echo "FAIL: policyEngine.type enum did not fire"; exit 1; \
-	elif ! grep -q "policyEngine.type must be one of" /tmp/vm-pe-enum.out; then \
-		echo "FAIL: policyEngine.type check failed for the wrong reason"; cat /tmp/vm-pe-enum.out; exit 1; \
-	else echo "ok: policyEngine.type enum"; fi
 	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it)"
 	@if grep -q "helm.sh/resource-policy" /tmp/vm-pe-kyverno.out; then \
 		echo "FAIL: helm.sh/resource-policy is back; the policy would be orphaned on removal"; exit 1; \

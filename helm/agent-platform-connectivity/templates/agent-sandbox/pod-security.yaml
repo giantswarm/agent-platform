@@ -1,4 +1,4 @@
-{{- if and .Values.agentSandbox.enabled .Values.agentSandbox.podSecurity.enabled (include "agent-platform.kyverno" .) }}
+{{- if and .Values.agentSandbox.enabled .Values.agentSandbox.podSecurity.enabled .Values.kyvernoPolicies.enabled }}
 # ============================ TEMPORARY — REMOVE AT v0.5.0 ============================
 # This whole Kyverno mutate policy is a STOPGAP. Every other component in this chart
 # (muster, kagent, valkey, agentgateway) is "born compliant" — it sets its
