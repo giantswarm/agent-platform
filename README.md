@@ -376,7 +376,7 @@ The data-plane pod template hardcodes `sysctls: [net.ipv4.ip_unprivileged_port_s
 | `gateways.gateway.networking.k8s.io`, `httproutes…`, `gatewayclasses…` | Gateway API upstream — cluster prerequisite (not shipped by any of these charts) |
 | `agentgatewayparameters.agentgateway.dev`, `agentgatewaybackends…`, `agentgatewaypolicies…` | the **agentgateway** component chart (`giantswarm/agentgateway` GS wrapper) |
 | `mcpservers.muster.giantswarm.io`, `workflows.muster.giantswarm.io` | the **muster** component chart |
-| `agents.kagent.dev`, `modelconfigs…`, `remotemcpservers…`, `toolservers…`, `sandboxagents…`, … plus the `kmcp` CRDs | the **kagent** component chart (`giantswarm/kagent-app` GS wrapper) |
+| `agents.kagent.dev`, `modelconfigs…`, `remotemcpservers…`, `toolservers…`, `sandboxagents…`, … plus the `kmcp` CRDs | the **kagent** component chart (`giantswarm/kagent` GS wrapper) |
 | `sandboxes.agents.x-k8s.io`, `sandboxtemplates…`, `sandboxclaims…`, `sandboxwarmpools.extensions.agents.x-k8s.io` | the **agent-sandbox** component chart (`giantswarm/agent-sandbox`) |
 
 Each component sets `crds: CreateReplace` on its `HelmRelease` (rendered by the meta-package), so Flux applies and upgrades the `crds/`-dir CRDs atomically with the app at the same resolved version — Helm on its own never upgrades `crds/`-dir CRDs. All these CRDs carry `helm.sh/resource-policy: keep`, so they survive a component uninstall (the CRs are never cascade-deleted).
