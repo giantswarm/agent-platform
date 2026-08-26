@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The `kagent-pg` CNPG Cluster now sets `inheritedMetadata.labels` with
+  `observability.giantswarm.io/tenant: giantswarm`, which the operator copies
+  onto the PodMonitor it generates. Without it the PodMonitor carried only
+  CNPG's stock labels and matched neither of alloy-metrics' discovery
+  selectors, so it was created and silently never scraped (zero `cnpg_*`
+  series in Mimir). The previous `podMonitorRelabelings` attempt is removed:
+  it rewrote scraped series, not the PodMonitor object's labels, so it could
+  never make the monitor discoverable.
+
 ### Changed
 
 - `components.muster.versionRange` default changed from `"3.x"` to `"4.x"`. muster `v4.0.0` ([muster#1075](https://github.com/giantswarm/muster/pull/1075), [muster#1069](https://github.com/giantswarm/muster/issues/1069)) routes Workflow spec mutations (`core_workflow_create`/`_update`/`_delete`) through the same caller-identity gate MCPServer writes got in `v2.0.0`: in Kubernetes mode the write carries the session's own dex id_token, authorized by k8s RBAC via the chart-shipped `workflow-editor` role (bound to all authenticated users by default, mirroring `mcpserver-editor`). **No installation needs to act:** sessions already must carry the dex-k8s-authenticator audience for MCPServer writes since the `2.x` crossing (same gate, same token), the `workflow-editor` Role/RoleBinding ships in the muster chart itself, and no fleet installation overrides `rbac.mcpServerEditor` or disables muster `rbac.create` (checked via org-wide code search). The crossing also *fixes* `core_workflow_update` on Kubernetes installations — the old path sent an update without a `resourceVersion`, which the apiserver rejects for CRs, so the tool never worked there.
