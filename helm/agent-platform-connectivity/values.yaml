@@ -139,6 +139,33 @@ networkPolicy:
       - 192.168.0.0/16
       - 169.254.0.0/16
 
+# === Admission policy engine ===
+# Which admission policy engine the target cluster runs. Giant Swarm clusters
+# run Kyverno, so `kyverno` is the default and the fleet render is unchanged.
+#
+#   kyverno — render the chart's kyverno.io objects (the kagent declarative-agent
+#             mutate policies, the seccomp PolicyException, and the agent-sandbox
+#             pod-security policy).
+#   none    — render no kyverno.io object at all. Use it on a cluster that has no
+#             Kyverno installed, where those objects fail the install on an
+#             unknown API group.
+#
+# The kyverno.* keys below name cluster-owned objects that this chart does not
+# create. They carry the Giant Swarm names; a cluster with different cluster
+# policy names must override them, otherwise the PolicyException matches nothing.
+policyEngine:
+  type: kyverno  # @schema enum:[kyverno, none]
+  kyverno:
+    # Namespace that holds the PolicyException. On GS clusters
+    # restrict-polex-namespaces permits only policy-exceptions, giantswarm,
+    # flux-giantswarm and kube-system.
+    policyExceptionNamespace: policy-exceptions
+    # Cluster policy (and its rules) that the kagent seccomp exception targets.
+    seccompPolicyName: restrict-seccomp-strict
+    seccompRuleNames:
+      - check-seccomp-strict
+      - autogen-check-seccomp-strict
+
 # Arbitrary manifests rendered through `tpl` alongside the chart. Useful for
 # shipping the muster OAuth Secret in the same Helm release. Example:
 #   extraObjects:

@@ -12,6 +12,11 @@ CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 # dependency build` and no subchart-fail quieting is needed.
 VM := --set ingress.parentRefs[0].name=x
 
+# Every component that owns a kyverno.io object, so the policy-engine assertions
+# see the full set. GOLDEN_REF is the ref the default render must still match.
+PE := $(VM) --set kagent.enabled=true --set agentSandbox.enabled=true
+GOLDEN_REF ?= origin/main
+
 .PHONY: verify-modes
 verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns the wiring + guards).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
@@ -49,6 +54,34 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
+	@echo "--> policyEngine.type=none renders no kyverno.io object"
+	@helm template t $(CONNECTIVITY_DIR) $(PE) --set policyEngine.type=none >/tmp/vm-pe-none.out 2>&1 || { cat /tmp/vm-pe-none.out; exit 1; }
+	@if grep -q "kyverno.io" /tmp/vm-pe-none.out; then \
+		echo "FAIL: kyverno.io objects still render under policyEngine.type=none"; grep -n "kyverno.io" /tmp/vm-pe-none.out; exit 1; \
+	else echo "ok: no kyverno.io kinds"; fi
+	@echo "--> the default (kyverno) render still carries all four kyverno.io objects"
+	@helm template t $(CONNECTIVITY_DIR) $(PE) >/tmp/vm-pe-kyverno.out 2>&1 || { cat /tmp/vm-pe-kyverno.out; exit 1; }
+	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "4" ]; then \
+		echo "FAIL: expected 4 kyverno.io objects, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; exit 1; \
+	else echo "ok: 4 kyverno.io objects"; fi
+	@echo "--> a bogus policyEngine.type must fail"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set policyEngine.type=bogus >/tmp/vm-pe-enum.out 2>&1; then \
+		echo "FAIL: policyEngine.type enum did not fire"; exit 1; \
+	elif ! grep -q "policyEngine.type must be one of" /tmp/vm-pe-enum.out; then \
+		echo "FAIL: policyEngine.type check failed for the wrong reason"; cat /tmp/vm-pe-enum.out; exit 1; \
+	else echo "ok: policyEngine.type enum"; fi
+	@echo "--> golden: the default render is byte-identical to $(GOLDEN_REF)"
+	@if ! git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
+		echo "skip: $(GOLDEN_REF) is not available (set GOLDEN_REF= to pick another ref)"; \
+	else \
+		tree=$$(mktemp -d); \
+		git worktree add -q --detach $$tree $(GOLDEN_REF) || { echo "FAIL: cannot check out $(GOLDEN_REF)"; exit 1; }; \
+		helm template t $$tree/$(CONNECTIVITY_DIR) $(PE) >/tmp/vm-golden.out 2>&1; \
+		helm template t $(CONNECTIVITY_DIR) $(PE) >/tmp/vm-head.out 2>&1; \
+		git worktree remove --force $$tree; \
+		if diff -u /tmp/vm-golden.out /tmp/vm-head.out; then echo "ok: default render unchanged"; \
+		else echo "FAIL: the default render drifted from $(GOLDEN_REF)"; exit 1; fi; \
+	fi
 	@echo "All mode guards verified."
 
 .PHONY: verify-meta

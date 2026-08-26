@@ -161,3 +161,13 @@ Rendered as a YAML list item; the caller must provide the surrounding `egress:` 
         - port: "53"
           protocol: TCP
 {{- end -}}
+
+{{/*
+Truthy (emits "true") when the cluster runs Kyverno, i.e. policyEngine.type is
+kyverno. Otherwise emits nothing (empty string = falsy). Every template that
+renders a kyverno.io object is gated on this:
+  {{- if (include "agent-platform.kyverno" .) }}
+*/}}
+{{- define "agent-platform.kyverno" -}}
+{{- if eq (dig "type" "kyverno" (.Values.policyEngine | default dict)) "kyverno" -}}true{{- end -}}
+{{- end -}}
