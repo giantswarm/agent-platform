@@ -55,6 +55,18 @@ spec:
   # CNPG Barman supports S3, Azure Blob, GCS, and S3-compatible (MinIO via
   # endpointURL) — pick credentials per cloud (IRSA on EKS, azureCredentials on
   # Azure, static key for MinIO).
+  # Labels the operator copies onto every object it creates for this Cluster,
+  # including the generated PodMonitor. Giant Swarm's monitoring agent
+  # (alloy-metrics) discovers PodMonitors by a label on the PodMonitor
+  # *object* -- observability.giantswarm.io/tenant In [<tenant>], or the
+  # legacy application.giantswarm.io/team Exists -- and a PodMonitor matching
+  # neither selector is created and silently never scraped. CNPG's stock
+  # PodMonitor labels carry neither, so the tenant label must be inherited
+  # here; a podMonitorRelabelings entry cannot do this, it only rewrites
+  # scraped series, not the object's labels.
+  inheritedMetadata:
+    labels:
+      observability.giantswarm.io/tenant: giantswarm
   # Enable built-in CNPG PodMonitor for metrics scraping.
   # Requires the Prometheus Operator CRDs (monitoring.coreos.com/v1).
   monitoring:
@@ -63,7 +75,4 @@ spec:
       - sourceLabels: [__name__]
         regex: cnpg_.*
         action: keep
-    podMonitorRelabelings:
-      - targetLabel: observability_giantswarm_io_tenant
-        replacement: giantswarm
 {{- end }}

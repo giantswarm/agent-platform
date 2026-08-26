@@ -67,12 +67,29 @@ components:  # @schema additionalProperties: true
   muster:  # @schema additionalProperties: true
     chart: muster
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # Floor, not just a major: the muster values below set
-    # observability.metrics.prometheus.prometheusRule, which the muster
-    # chart only accepts from 4.1.0 (it validates values against its own
-    # schema with additionalProperties: false). Keeping the upper bound
-    # open means minor releases still roll forward on their own.
-    versionRange: ">=4.1.0 <5.0.0"
+    # muster v5 is the current line, and this range crosses that major
+    # deliberately. The muster values below still set
+    # observability.metrics.prometheus.prometheusRule, which the muster chart
+    # only accepts from 4.1.0 (it validates values against its own schema with
+    # additionalProperties: false) — every 5.x clears that, so the range no
+    # longer needs a sub-major floor on top of the major.
+    #
+    # The v5.0.0 break (muster#1078) does not affect this umbrella. It keys
+    # unauthenticated sessions by MCP transport session instead of collapsing
+    # every concurrent client onto one `default-user` placeholder, so for
+    # muster instances running WITHOUT their own OAuth a session now ends with
+    # the connection (a reconnecting client re-runs core_auth_login). Every
+    # installation of this umbrella runs muster.muster.oauth.server.enabled:
+    # true — the default below, overridden nowhere in the fleet — so a real
+    # token-family session ID still wins and the change is a no-op there.
+    #
+    # v5.1.0 (muster#1079) also FAILS the render on an explicitly emptied
+    # rbac.mcpServerEditor/workflowEditor.subjects. Both are bound to the
+    # Giant Swarm admin groups below, so the guard is satisfied.
+    #
+    # Keeping the upper bound at the next major means minor releases still
+    # roll forward on their own.
+    versionRange: "5.x"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -123,7 +140,7 @@ components:  # @schema additionalProperties: true
     dependsOn: [muster, agentgateway]
   kagent:  # @schema additionalProperties: true
     chart: kagent
-    # GS-vendored wrapper chart (giantswarm/kagent-app): upstream kagent controller
+    # GS-vendored wrapper chart (giantswarm/kagent): upstream kagent controller
     # vendored as a subchart, shipping the kagent.dev + kmcp CRDs in its own crds/
     # dir (app-owned CRDs). Wrapping the upstream chart as a subchart keeps the
     # subchart's `.Chart.Version` a clean pinned version even when helm-controller
@@ -657,9 +674,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # so the repository paths are flat, not the upstream kagent-dev/kagent/* hierarchy).
   registry: gsoci.azurecr.io/giantswarm
   # No image tag pin. The upstream chart coalesces its image tag to
-  # `.Chart.Version`, and since kagent-app vendors it as a subchart that is the
+  # `.Chart.Version`, and since the kagent chart vendors it as a subchart that is the
   # clean pinned upstream version — helm-controller appends the OCI +digest to the
-  # kagent-app umbrella version, not to the subchart, so the tag no longer ends up
+  # kagent chart umbrella version, not to the subchart, so the tag no longer ends up
   # with an illegal `+` in it. Pinning here would silently hold the images at an
   # older release than the wrapper chart ships.
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
