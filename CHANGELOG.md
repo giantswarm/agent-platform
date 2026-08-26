@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `kyvernoPolicies.enabled` (default `true`) in both charts. Set it to `false` on a cluster that has no Kyverno: the connectivity chart then renders none of its `kyverno.io` objects (the two kagent declarative-agent ClusterPolicies, the kagent seccomp PolicyException, the agent-sandbox pod-security ClusterPolicy), which otherwise fail the install on an unknown API group. **No installation needs to act.** A cluster that enforces restricted PSS through PSA labels instead of Kyverno must set `agentSandbox.enabled: false` as well, or `agentSandbox.podSecurity.enabled: false` where nothing enforces restricted PSS; the render now fails with that instruction instead of shipping a controller Deployment with no securityContext.
+- `kyvernoPolicies.policyExceptionNamespace` (`policy-exceptions`), `kyvernoPolicies.seccompPolicyName` (`restrict-seccomp-strict`) and `kyvernoPolicies.seccompRuleNames`, the cluster-owned names the seccomp PolicyException targets. They default to the Giant Swarm cluster policy names; a cluster that names its policies differently must override them, or the exception matches nothing.
+
+### Changed
+
+- `kyvernoPolicies.seccompRuleNames` must hold at least one non-empty name, and the connectivity chart fails the render when `agentSandbox.podSecurity.enabled` is on without `kyvernoPolicies.enabled`. Both configurations used to render an object that silently matched nothing.
+- The agent-sandbox pod-security ClusterPolicy no longer carries `helm.sh/resource-policy: keep`. Helm prunes it now whenever it stops rendering (`kyvernoPolicies.enabled: false`, `agentSandbox.podSecurity.enabled: false`, or the planned v0.5.0 removal of the template), instead of leaving an orphan ClusterPolicy that has to be deleted by hand.
+- The `agent-sandbox` component `dependsOn` the `agent-platform-connectivity` release, so Kyverno holds the mutate policy that carries the controller Deployment's securityContext before the Deployment applies. The agent-sandbox release no longer fails its first install on a restricted-PSS cluster and then converges on a retry. The window is narrowed, not closed: `dependsOn` waits for the ClusterPolicy to apply, not for the Kyverno webhook to serve it, so the release retries still cover the rest. The agent-sandbox release now also waits on the whole connectivity release, so a connectivity failure holds it back. Flux only: the argo engine has no `dependsOn`, and its sync waves do not express this order yet.
+
 ### Fixed
 
 - The `kagent-pg` CNPG Cluster now sets `inheritedMetadata.labels` with

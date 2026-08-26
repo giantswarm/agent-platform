@@ -139,6 +139,29 @@ networkPolicy:
       - 192.168.0.0/16
       - 169.254.0.0/16
 
+# The chart's kyverno.io objects: the kagent declarative-agent mutate policies, the
+# kagent seccomp PolicyException, and the agent-sandbox pod-security policy. Requires
+# Kyverno on the cluster. Set enabled: false on a cluster without it, where these
+# objects fail the install on an unknown API group.
+#
+# A cluster that enforces restricted PSS without Kyverno (PSA labels only) must set
+# agentSandbox.enabled: false as well: the upstream agent-sandbox controller chart
+# exposes no securityContext knob, so with the mutate policy gone the Deployment
+# carries no securityContext from anywhere and PSA rejects it. See the v0.5.0 note
+# in templates/agent-sandbox/pod-security.yaml.
+#
+# The three name keys point at cluster-owned objects this chart does not create, so
+# they must match the target cluster; the defaults are the Giant Swarm names. On GS
+# clusters restrict-polex-namespaces confines the PolicyException to
+# policy-exceptions, giantswarm, flux-giantswarm or kube-system.
+kyvernoPolicies:
+  enabled: true
+  policyExceptionNamespace: policy-exceptions
+  seccompPolicyName: restrict-seccomp-strict
+  seccompRuleNames:  # @schema minItems: 1; item: string; uniqueItems: true
+    - check-seccomp-strict
+    - autogen-check-seccomp-strict
+
 # Arbitrary manifests rendered through `tpl` alongside the chart. Useful for
 # shipping the muster OAuth Secret in the same Helm release. Example:
 #   extraObjects:

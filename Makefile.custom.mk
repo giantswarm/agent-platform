@@ -12,6 +12,18 @@ CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 # dependency build` and no subchart-fail quieting is needed.
 VM := --set ingress.parentRefs[0].name=x
 
+# The two components that own a kyverno.io object (kagent: two ClusterPolicies + the
+# seccomp PolicyException; agentSandbox: the pod-security ClusterPolicy), so the
+# kyvernoPolicies assertions below see all four objects.
+KYVERNO_ALL := $(VM) --set kagent.enabled=true --set agentSandbox.enabled=true
+# The golden render deliberately leaves agentSandbox off: its ClusterPolicy dropped
+# helm.sh/resource-policy: keep, the one intended render change. GOLDEN_REF is the ref
+# the rest of the default render must still match byte for byte; GOLDEN_REF= (empty)
+# opts out for a clone that has no such ref.
+KYVERNO_GOLDEN := $(VM) --set kagent.enabled=true
+GOLDEN_REF ?= origin/main
+
+
 .PHONY: verify-modes
 verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns the wiring + guards).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
@@ -49,6 +61,42 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
+	@echo "--> agentSandbox.podSecurity.enabled with no kyverno policies must fail"
+	@if helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set kyvernoPolicies.enabled=false >/tmp/vm-pe-guard.out 2>&1; then \
+		echo "FAIL: the sandbox lost its only securityContext source and the render succeeded"; exit 1; \
+	elif ! grep -q "agentSandbox.podSecurity.enabled requires kyvernoPolicies.enabled" /tmp/vm-pe-guard.out; then \
+		echo "FAIL: the sandbox pod-security guard failed for the wrong reason"; cat /tmp/vm-pe-guard.out; exit 1; \
+	else echo "ok: sandbox pod-security guard"; fi
+	@echo "--> kyvernoPolicies.enabled=false renders no kyverno.io object"
+	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set kyvernoPolicies.enabled=false --set agentSandbox.podSecurity.enabled=false >/tmp/vm-pe-none.out 2>&1 || { cat /tmp/vm-pe-none.out; exit 1; }
+	@if grep -q "kyverno.io" /tmp/vm-pe-none.out; then \
+		echo "FAIL: kyverno.io objects still render under kyvernoPolicies.enabled=false"; grep -n "kyverno.io" /tmp/vm-pe-none.out; exit 1; \
+	else echo "ok: no kyverno.io kinds"; fi
+	@echo "--> the default (kyverno) render still carries all four kyverno.io objects"
+	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) >/tmp/vm-pe-kyverno.out 2>&1 || { cat /tmp/vm-pe-kyverno.out; exit 1; }
+	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "4" ]; then \
+		echo "FAIL: expected 4 kyverno.io objects, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; exit 1; \
+	else echo "ok: 4 kyverno.io objects"; fi
+	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it)"
+	@if grep -q "helm.sh/resource-policy" /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: helm.sh/resource-policy is back; the policy would be orphaned on removal"; exit 1; \
+	else echo "ok: prunable"; fi
+	@echo "--> golden: the default render is byte-identical to $(GOLDEN_REF)"
+	@if [ -z "$(GOLDEN_REF)" ]; then \
+		echo "skip: GOLDEN_REF is empty (explicit opt-out)"; \
+	elif ! git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
+		echo "FAIL: GOLDEN_REF=$(GOLDEN_REF) does not resolve; fetch it, point GOLDEN_REF at another ref, or run with GOLDEN_REF= to opt out"; exit 1; \
+	else \
+		out=$$(mktemp -d); tree=$$(mktemp -d); \
+		git worktree add -q --detach $$tree $(GOLDEN_REF) || { echo "FAIL: cannot check out $(GOLDEN_REF)"; exit 1; }; \
+		helm template t $$tree/$(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN) >$$out/golden 2>&1 \
+			|| { echo "FAIL: the $(GOLDEN_REF) render failed"; cat $$out/golden; git worktree remove --force $$tree; exit 1; }; \
+		git worktree remove --force $$tree; \
+		helm template t $(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN) >$$out/head 2>&1 \
+			|| { echo "FAIL: the working-tree render failed"; cat $$out/head; exit 1; }; \
+		if diff -u $$out/golden $$out/head; then echo "ok: default render unchanged"; \
+		else echo "FAIL: the default render drifted from $(GOLDEN_REF)"; exit 1; fi; \
+	fi
 	@echo "All mode guards verified."
 
 .PHONY: verify-meta
@@ -102,6 +150,9 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -q 'name: muster' /tmp/ap-noc.out || { echo "FAIL: disabling kagent dropped other components"; exit 1; }
 	@echo "--> a dependsOn ref to a disabled component is dropped (no dangling dependency)"
 	@if grep -qE '^    - name: kagent$$' /tmp/ap-noc.out; then echo "FAIL: connectivity still dependsOn disabled kagent (would block forever)"; exit 1; else echo "ok: dangling dependsOn dropped"; fi
+	@echo "--> every connectivity top-level key is settable through the meta chart"
+	@python3 -c 'import json,sys; m=set(json.load(open("$(CHART_DIR)/values.schema.json"))["properties"]); c=set(json.load(open("$(CONNECTIVITY_DIR)/values.schema.json"))["properties"]); miss=sorted(c-m); sys.exit("FAIL: connectivity keys the meta chart schema rejects (root is additionalProperties:false, so forwardAllValues cannot reach them): "+", ".join(miss) if miss else 0)'
+	@echo "ok: no unreachable connectivity keys"
 	@echo "--> connectivity chart owns the wiring (renders an HTTPRoute)"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/ci-values.yaml >/tmp/ap-conn.out 2>&1 || { cat /tmp/ap-conn.out; exit 1; }
 	@grep -q 'kind: HTTPRoute' /tmp/ap-conn.out || { echo "FAIL: connectivity did not render the muster HTTPRoute"; exit 1; }

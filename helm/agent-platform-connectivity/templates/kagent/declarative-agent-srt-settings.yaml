@@ -1,4 +1,4 @@
-{{- if .Values.kagent.enabled }}
+{{- if and .Values.kagent.enabled .Values.kyvernoPolicies.enabled }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 # Even after the seccomp restriction is lifted (see policy-exception.yaml), bwrap
 # hits a second failure inside unprivileged containers:

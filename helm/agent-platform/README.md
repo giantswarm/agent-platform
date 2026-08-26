@@ -72,6 +72,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | components.agent-sandbox.enabledFrom | string | `"agentSandbox.enabled"` |  |
 | components.agent-sandbox.injectGlobal | bool | `false` |  |
 | components.agent-sandbox.crds | string | `"CreateReplace"` |  |
+| components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.dicebear.chart | string | `"dicebear"` |  |
 | components.dicebear.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.dicebear.versionRange | string | `"0.x"` |  |
@@ -136,6 +137,11 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | networkPolicy.kubernetes.worldExcludedCIDRs[1] | string | `"172.16.0.0/12"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[2] | string | `"192.168.0.0/16"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
+| kyvernoPolicies.enabled | bool | `true` |  |
+| kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
+| kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
+| kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
+| kyvernoPolicies.seccompRuleNames[1] | string | `"autogen-check-seccomp-strict"` |  |
 | extraObjects | list | `[]` |  |
 | muster.enabled | bool | `true` |  |
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |

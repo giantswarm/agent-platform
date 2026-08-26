@@ -331,6 +331,29 @@
             "type": "object",
             "additionalProperties": true
         },
+        "kyvernoPolicies": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "policyExceptionNamespace": {
+                    "type": "string"
+                },
+                "seccompPolicyName": {
+                    "type": "string"
+                },
+                "seccompRuleNames": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                }
+            }
+        },
         "mcps": {
             "type": "object",
             "additionalProperties": true

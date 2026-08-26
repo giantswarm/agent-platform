@@ -74,6 +74,11 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | networkPolicy.kubernetes.worldExcludedCIDRs[1] | string | `"172.16.0.0/12"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[2] | string | `"192.168.0.0/16"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
+| kyvernoPolicies.enabled | bool | `true` |  |
+| kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
+| kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
+| kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
+| kyvernoPolicies.seccompRuleNames[1] | string | `"autogen-check-seccomp-strict"` |  |
 | extraObjects | list | `[]` |  |
 | dicebear | object | `{}` |  |
 | muster.enabled | bool | `true` |  |
