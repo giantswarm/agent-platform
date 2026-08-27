@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (agentgateway moves to the flattened 2.x chart)
+
+The `agentgateway` chart 2.0.0 flattened the upstream controller chart onto its chart root: upstream keys moved from `agentgateway.*` to the top level. The meta-package no longer nests the forwarded block, and it tracks the `2.x` range.
+
+The top-level `agentgateway:` values block of THIS chart does not change. It stays flat, as it always was, and the connectivity chart keeps reading `agentgateway.enabled` and `agentgateway.proxy.image` from it.
+
+### Operator action
+
+- None, if you only set `agentgateway.enabled` (the fleet default through `shared-configs`). The upgrade is in place: no resource is renamed, and the rendered output is unchanged apart from three non-selector labels.
+- Pin `components.agentgateway.versionRange` to a `2.x` version if you pin ranges through a BOM. A `1.x` pin with this wiring installs the old chart with un-nested values, and its schema rejects them.
+- `application.giantswarm.io/team` is new on every resource the agentgateway chart renders. It used to be a pod annotation only.
+
 ## \<current\> → \<next\> (the `agentic-platform-mcps` values key is removed)
 
 The transition fallback from the chart rename is gone. Overrides under `agentic-platform-mcps` are no longer merged over `agent-platform-mcps`; both `values.schema.json` files reject the key.
