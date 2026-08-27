@@ -21,7 +21,13 @@ knowledge:
       the connectivity chart's reads of it) stays flat — only the copy handed to
       this release is wrapped. global is injected at the wrapped top level so the
       subchart still inherits it. Omit for charts whose values are already at top
-      level (muster, the GS-owned connectivity/crds charts).
+      level (muster, agentgateway, the GS-owned connectivity/crds charts).
+  omitKeys      — keys dropped from the forwarded block. For a component whose
+      top-level block holds a key that belongs to THIS umbrella rather than to
+      the chart (e.g. agentgateway's `enabled` toggle, which enabledFrom and the
+      connectivity chart read), and whose chart validates values with
+      additionalProperties: false and would reject it. Applied after valuesKey,
+      so it always addresses the block's own keys.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
       a single block. Used by agent-platform-connectivity, which reads many
       blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …).
@@ -76,6 +82,9 @@ component to a cluster prerequisite (e.g. crds shipped by the platform base) */ 
 {{- $vals = omit $root.Values "gitops" "components" }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $root.Values . | default dict }}{{- end }}
+{{- /* Drop keys that belong to this umbrella and not to the chart, before the
+optional nesting so the list addresses the block's own keys. */ -}}
+{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
 {{- /* GS wrapper charts vendor the upstream chart as a subchart of the same name;
 nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- with $c.valuesKey }}{{- $vals = dict . $vals }}{{- end }}

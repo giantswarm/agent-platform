@@ -36,10 +36,10 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agentgateway.versionRange | string | `"1.x"` |  |
+| components.agentgateway.versionRange | string | `"2.x"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
-| components.agentgateway.valuesKey | string | `"agentgateway"` |  |
 | components.agentgateway.enabledFrom | string | `"agentgateway.enabled"` |  |
+| components.agentgateway.omitKeys[0] | string | `"enabled"` |  |
 | components.agentgateway.crds | string | `"CreateReplace"` |  |
 | components.valkey.chart | string | `"valkey"` |  |
 | components.valkey.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |

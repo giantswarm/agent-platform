@@ -99,15 +99,22 @@ components:  # @schema additionalProperties: true
     crds: CreateReplace
   agentgateway:  # @schema additionalProperties: true
     chart: agentgateway
-    # GS-vendored wrapper chart (upstream agentgateway controller as a subchart),
-    # shipping the agentgateway.dev CRDs in its own crds/ dir (app-owned CRDs).
+    # GS-vendored chart (upstream agentgateway controller flattened onto the
+    # chart root), shipping the agentgateway.dev CRDs in its own crds/ dir
+    # (app-owned CRDs).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "1.x"
+    # 2.0.0 flattened the chart: upstream keys moved from `agentgateway.*` to the
+    # chart root, so the forwarded block is no longer nested (no valuesKey) and
+    # the 1.x range cannot be used with this wiring.
+    versionRange: "2.x"
     valuesFrom: agentgateway
-    # The wrapper vendors the upstream chart under a subchart named `agentgateway`,
-    # so the forwarded block must be nested under that key.
-    valuesKey: agentgateway
     enabledFrom: agentgateway.enabled
+    # The flattened chart validates values against its own schema with
+    # additionalProperties: false, and `enabled` is not one of its keys. It is
+    # this umbrella's toggle (read by enabledFrom above and by the connectivity
+    # chart), so it stays in the top-level block and is dropped on the way out.
+    omitKeys:
+      - enabled
     # App-owned CRDs: the wrapper chart ships the agentgateway.dev CRDs (with
     # helm.sh/resource-policy: keep) in its own crds/ dir; CreateReplace upgrades
     # them atomically with the app on every release. It owns their version, so it
