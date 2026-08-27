@@ -21,8 +21,8 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # the rest of the default render must still match byte for byte; GOLDEN_REF= (empty)
 # opts out for a clone that has no such ref.
 KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true
-# The same render, expressed the way GOLDEN_REF's chart reads the kagent toggle.
-KYVERNO_GOLDEN_REF := $(VM) --set kagent.enabled=true
+# GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
+KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
 
 
