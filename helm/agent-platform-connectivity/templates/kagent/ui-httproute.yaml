@@ -1,4 +1,4 @@
-{{- if and .Values.kagent.enabled .Values.kagent.uiRoute.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.uiRoute.enabled }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $uiRoute := .Values.kagent.uiRoute }}
 {{- $oauth2proxyEnabled := index .Values.kagent "oauth2-proxy" "enabled" | default false }}

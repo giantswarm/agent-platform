@@ -1,4 +1,4 @@
-{{- if and .Values.kagent.enabled .Values.kagent.controllerRoute.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.controllerRoute.enabled }}
 {{- $route := .Values.kagent.controllerRoute }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $kagentFullname := .Values.kagent.fullnameOverride | default .Release.Name }}

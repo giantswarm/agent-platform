@@ -1,4 +1,4 @@
-{{- if .Values.kagent.enabled }}
+{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $musterUrl := printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) }}
 {{- if .Values.muster.enabled }}

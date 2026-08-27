@@ -1,6 +1,12 @@
 # The network policies only render in agentgateway-* modes, where parentRefs is
 # required. Select such a mode so the kubernetes-flavor policies below render
 # and are linted.
+components:
+  agentgateway:
+    enabled: true
+  kagent:
+    enabled: true
+
 ingress:
   mode: agentgateway-muster
   parentRefs:
@@ -10,9 +16,6 @@ ingress:
       kind: Gateway
   hostnames:
     - muster.ci.example.com
-
-agentgateway:
-  enabled: true
 
 networkPolicy:
   enabled: true
@@ -26,7 +29,6 @@ networkPolicy:
 
 # Exercise the kubernetes-flavor NetworkPolicy for the kagent controller.
 kagent:
-  enabled: true
   namespaceOverride: kagent
   database:
     postgres:
@@ -40,6 +42,3 @@ muster:
         enabled: false
         storage:
           type: memory
-
-valkey:
-  enabled: false

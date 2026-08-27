@@ -1,6 +1,10 @@
 # The agentgateway data-plane (AgentgatewayParameters) only renders in
 # agentgateway-* modes, where parentRefs is required. Select such a mode so the
 # restricted security contexts below are actually rendered and linted.
+components:
+  agentgateway:
+    enabled: true
+
 ingress:
   mode: agentgateway-muster
   parentRefs:
@@ -10,9 +14,6 @@ ingress:
       kind: Gateway
   hostnames:
     - muster.ci.example.com
-
-agentgateway:
-  enabled: true
 
 gateway:
   parameters:

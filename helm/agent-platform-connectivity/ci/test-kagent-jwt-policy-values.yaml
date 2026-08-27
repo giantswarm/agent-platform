@@ -1,7 +1,12 @@
 # kagent controllerRoute with the JWT policy enabled: renders the
 # AgentgatewayPolicy + kagent-controller-jwks AgentgatewayBackend alongside the routes.
+components:
+  agentgateway:
+    enabled: true
+  kagent:
+    enabled: true
+
 kagent:
-  enabled: true
   namespaceOverride: kagent
   controllerRoute:
     enabled: true
@@ -25,9 +30,6 @@ gateway:
   jwksEgress:
     enabled: true
 
-agentgateway:
-  enabled: true
-
 muster:
   muster:
     oauth:
@@ -35,6 +37,3 @@ muster:
         enabled: false
         storage:
           type: memory
-
-valkey:
-  enabled: false

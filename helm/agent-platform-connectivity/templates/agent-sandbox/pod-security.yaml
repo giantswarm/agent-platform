@@ -1,4 +1,4 @@
-{{- if and .Values.agentSandbox.enabled .Values.agentSandbox.podSecurity.enabled .Values.kyvernoPolicies.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "agent-sandbox")) .Values.agentSandbox.podSecurity.enabled .Values.kyvernoPolicies.enabled }}
 # ============================ TEMPORARY — REMOVE AT v0.5.0 ============================
 # This whole Kyverno mutate policy is a STOPGAP. Every other component in this chart
 # (muster, kagent, valkey, agentgateway) is "born compliant" — it sets its
@@ -20,7 +20,7 @@
 #
 #   kyvernoPolicies.enabled: false drops this policy, so the Deployment then carries
 #   no securityContext from anywhere. A cluster that enforces restricted PSS without
-#   Kyverno must set agentSandbox.enabled: false too.
+#   Kyverno must set components.agent-sandbox.enabled: false too.
 #
 # WHEN TO REMOVE:
 #   Upstream added podSecurityContext / containerSecurityContext values to the

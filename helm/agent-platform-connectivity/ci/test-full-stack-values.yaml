@@ -1,3 +1,9 @@
+components:
+  agent-platform-mcps:
+    enabled: true
+  agentgateway:
+    enabled: true
+
 ingress:
   mode: agentgateway-muster
   parentRefs:
@@ -10,12 +16,6 @@ ingress:
   backendTrafficPolicy:
     enabled: true
 
-agentgateway:
-  enabled: true
-
-mcps:
-  enabled: true
-
 muster:
   muster:
     oauth:
@@ -27,6 +27,3 @@ muster:
 agent-platform-mcps:
   agentgateway:
     viaMuster: true
-
-valkey:
-  enabled: false

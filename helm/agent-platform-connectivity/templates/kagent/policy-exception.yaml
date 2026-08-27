@@ -1,4 +1,4 @@
-{{- if and .Values.kagent.enabled .Values.kyvernoPolicies.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kyvernoPolicies.enabled }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $ruleNames := .Values.kyvernoPolicies.seccompRuleNames | default list }}
 {{- if or (not $ruleNames) (ne (len (compact $ruleNames)) (len $ruleNames)) }}

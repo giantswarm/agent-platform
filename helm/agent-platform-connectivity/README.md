@@ -22,6 +22,11 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 |-----|------|---------|-------------|
 | global.registry | string | `"gsoci.azurecr.io"` |  |
 | global.imagePullSecrets | list | `[]` |  |
+| components.agentgateway.enabled | bool | `false` |  |
+| components.agent-platform-mcps.enabled | bool | `false` |  |
+| components.kagent.enabled | bool | `false` |  |
+| components.klaus-gateway.enabled | bool | `false` |  |
+| components.agent-sandbox.enabled | bool | `false` |  |
 | ingress.mode | string | `"muster-direct"` |  |
 | ingress.parentRefs | list | `[]` |  |
 | ingress.hostnames | list | `[]` |  |
@@ -101,7 +106,6 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | bool | `true` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.interval | string | `"60s"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
-| valkey.enabled | bool | `true` |  |
 | valkey.ciliumNetworkPolicy.enabled | bool | `true` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
@@ -132,12 +136,10 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | valkey.valkey.metrics.exporter.securityContext.runAsNonRoot | bool | `true` |  |
 | valkey.valkey.metrics.exporter.securityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.metrics.exporter.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
-| mcps.enabled | bool | `false` |  |
 | agent-platform-mcps.agentgateway.enabled | bool | `true` |  |
 | agent-platform-mcps.agentgateway.viaMuster | bool | `false` |  |
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
-| kagent.enabled | bool | `false` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"gsoci.azurecr.io/giantswarm"` |  |
 | kagent.controller.image.repository | string | `"kagent-controller"` |  |
@@ -278,7 +280,6 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
-| klausGateway.enabled | bool | `false` |  |
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | klausGateway.agentgateway.enabled | bool | `false` |  |
 | klausGateway.crd.install | bool | `true` |  |
@@ -308,7 +309,6 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | klausGateway.a2a.saToken.audience | string | `"kagent"` |  |
 | klausGateway.agentgatewayRoute.enabled | bool | `false` |  |
 | klausGateway.agentgatewayRoute.hostname | string | `""` |  |
-| agentgateway.enabled | bool | `false` |  |
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.image.tag | string | `"v1.2.1"` |  |
@@ -328,7 +328,6 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | agentgateway.resources.requests.memory | string | `"128Mi"` |  |
 | agentgateway.resources.limits.cpu | string | `"500m"` |  |
 | agentgateway.resources.limits.memory | string | `"512Mi"` |  |
-| agentSandbox.enabled | bool | `false` |  |
 | agentSandbox.podSecurity.enabled | bool | `true` |  |
 | agentSandbox.podSecurity.namespace | string | `"agent-sandbox-system"` |  |
 | agentSandbox.podSecurity.podSecurityContext.runAsNonRoot | bool | `true` |  |

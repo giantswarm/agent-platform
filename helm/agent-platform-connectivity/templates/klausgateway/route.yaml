@@ -1,4 +1,4 @@
-{{- if and .Values.klausGateway.enabled .Values.klausGateway.agentgatewayRoute.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled }}
 {{- $route := .Values.klausGateway.agentgatewayRoute }}
 {{- $ns := .Values.klausGateway.namespaceOverride | default .Release.Namespace }}
 {{- $fullname := .Values.klausGateway.fullnameOverride | default "klaus-gateway" }}
@@ -79,7 +79,7 @@ spec:
     {{- end }}
 {{- end }}
 {{- end }}
-{{- if and .Values.klausGateway.enabled .Values.klausGateway.obo.enabled .Values.ingress.parentRefs }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.obo.enabled .Values.ingress.parentRefs }}
 {{- $fullname := .Values.klausGateway.fullnameOverride | default "klaus-gateway" }}
 {{- $oboHost := .Values.klausGateway.obo.callbackBaseUrl | default "" | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" }}
 ---

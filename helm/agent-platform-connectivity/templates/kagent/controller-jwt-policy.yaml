@@ -1,5 +1,5 @@
 {{- $route := .Values.kagent.controllerRoute }}
-{{- if and .Values.kagent.enabled $route.enabled ($route.jwtAuthentication).enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) $route.enabled ($route.jwtAuthentication).enabled }}
 {{- $jwt := $route.jwtAuthentication }}
 # AgentgatewayBackend — static backend for the issuer's JWKS endpoint. Lives in
 # the release namespace so the policy's jwks backendRef needs no ReferenceGrant

@@ -24,8 +24,8 @@ knowledge:
       level (muster, agentgateway, the GS-owned connectivity/crds charts).
   omitKeys      — keys dropped from the forwarded block. For a component whose
       top-level block holds a key that belongs to THIS umbrella rather than to
-      the chart (e.g. agentgateway's `enabled` toggle, which enabledFrom and the
-      connectivity chart read), and whose chart validates values with
+      the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs, which only
+      the connectivity chart reads), and whose chart validates values with
       additionalProperties: false and would reject it. Applied after valuesKey,
       so it always addresses the block's own keys.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
@@ -35,10 +35,13 @@ knowledge:
       true). Set false for components whose strict values.schema.json
       (additionalProperties:false) rejects an unexpected `global` key
       (agent-platform-mcps, agent-sandbox).
-  enabledFrom   — dotted path (two levels) to the existing on/off toggle. Omit to
-      force-enable (crds, muster, connectivity).
-  enabled       — explicit on/off, overrides enabledFrom. Set false to delegate a
-      component to a cluster prerequisite (e.g. crds shipped by the platform base).
+  enabled       — the component's only on/off switch. Omit to force-enable
+      (muster, dicebear, connectivity). Set false to leave a component out, or to
+      delegate it to a cluster prerequisite. Every answer is also forwarded as
+      part of the forwarded values, under this same key path, so a chart that
+      renders a component's wiring (agent-platform-connectivity) gates on the
+      same answer that decided whether the release exists. The forwarded copy
+      holds only `enabled`.
   dependsOn     — Flux dependsOn / Argo sync-wave ordering (CRD-owning component
       before its CR consumers). References that name a component which is toggled
       off are dropped at render time (see the componentEnabled helper) so an
@@ -56,6 +59,7 @@ knowledge:
       owns its CRD version itself; its CR consumers dependsOn it instead. Argo
       applies crds/ unconditionally, so this field is flux-only.
 */ -}}
+{{- include "agent-platform.validateLegacyToggles" . -}}
 {{- $root := . -}}
 {{- $g := .Values.gitops -}}
 {{- if not (or (eq $g.engine "flux") (eq $g.engine "argo")) -}}
@@ -68,18 +72,22 @@ rejected by the flux-multi-tenancy admission policy. gitops.targetNamespace
 then routes the actual workloads to a separate namespace. */ -}}
 {{- $ns := $g.namespace | default $root.Release.Namespace -}}
 {{- $targetNs := $g.targetNamespace | default $root.Release.Namespace -}}
+{{- /* The component roster, stripped to enablement, for a chart that renders
+another component's wiring. It carries the same key path this chart reads
+(components.<name>.enabled), so the two can never spell the answer differently.
+The source coordinates (chart/repository/versionRange/...) are meta-package
+plumbing and are dropped. */ -}}
+{{- $roster := dict -}}
+{{- range $key, $c := .Values.components -}}
+{{- $_ := set $roster $key (dict "enabled" (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" $key)) "true")) -}}
+{{- end -}}
 {{- range $key, $c := .Values.components }}
-{{- $on := true }}
-{{- with $c.enabledFrom }}{{- $on = index $root.Values (first (splitList "." .)) (last (splitList "." .)) }}{{- end }}
-{{- /* explicit `enabled` overrides enabledFrom — lets a deployment delegate a
-component to a cluster prerequisite (e.g. crds shipped by the platform base) */ -}}
-{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}{{- end }}
-{{- if $on }}
+{{- if (index $roster $key).enabled }}
 {{- $name := $c.chart }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}
 {{- if $c.forwardAllValues }}
-{{- $vals = omit $root.Values "gitops" "components" }}
+{{- $vals = mergeOverwrite (deepCopy (omit $root.Values "gitops" "components")) (dict "components" $roster) }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $root.Values . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the

@@ -15,12 +15,14 @@ VM := --set ingress.parentRefs[0].name=x
 # The two components that own a kyverno.io object (kagent: two ClusterPolicies + the
 # seccomp PolicyException; agentSandbox: the pod-security ClusterPolicy), so the
 # kyvernoPolicies assertions below see all four objects.
-KYVERNO_ALL := $(VM) --set kagent.enabled=true --set agentSandbox.enabled=true
+KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent-sandbox.enabled=true
 # The golden render deliberately leaves agentSandbox off: its ClusterPolicy dropped
 # helm.sh/resource-policy: keep, the one intended render change. GOLDEN_REF is the ref
 # the rest of the default render must still match byte for byte; GOLDEN_REF= (empty)
 # opts out for a clone that has no such ref.
-KYVERNO_GOLDEN := $(VM) --set kagent.enabled=true
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true
+# The same render, expressed the way GOLDEN_REF's chart reads the kagent toggle.
+KYVERNO_GOLDEN_REF := $(VM) --set kagent.enabled=true
 GOLDEN_REF ?= origin/main
 
 
@@ -40,7 +42,7 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		echo "FAIL: direct-mode failed for the wrong reason"; cat /tmp/vm-direct.out; exit 1; \
 	else echo "ok: direct blocked"; fi
 	@echo "--> agentgateway-muster + viaMuster:false must fail"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=false >/tmp/vm-via.out 2>&1; then \
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.agent-platform-mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=false >/tmp/vm-via.out 2>&1; then \
 		echo "FAIL: viaMuster guard did not fire"; exit 1; \
 	elif ! grep -q "viaMuster=true" /tmp/vm-via.out; then \
 		echo "FAIL: viaMuster check failed for the wrong reason"; cat /tmp/vm-via.out; exit 1; \
@@ -51,14 +53,14 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	elif ! grep -q "must be one of" /tmp/vm-enum.out; then \
 		echo "FAIL: enum check failed for the wrong reason"; cat /tmp/vm-enum.out; exit 1; \
 	else echo "ok: enum guard"; fi
-	@echo "--> agentgateway-muster + agentgateway.enabled:false must fail"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=false >/tmp/vm-dep.out 2>&1; then \
+	@echo "--> agentgateway-muster + components.agentgateway.enabled:false must fail"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=false >/tmp/vm-dep.out 2>&1; then \
 		echo "FAIL: dep-condition guard did not fire"; exit 1; \
-	elif ! grep -q "agentgateway.enabled must be true" /tmp/vm-dep.out; then \
+	elif ! grep -q "components.agentgateway.enabled must be true" /tmp/vm-dep.out; then \
 		echo "FAIL: dep-condition check failed for the wrong reason"; cat /tmp/vm-dep.out; exit 1; \
 	else echo "ok: dep-condition guard"; fi
 	@echo "--> positive: a valid agentgateway-muster config must render"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set agentgateway.enabled=true --set mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.agent-platform-mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
 	@echo "--> agentSandbox.podSecurity.enabled with no kyverno policies must fail"
@@ -81,6 +83,12 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if grep -q "helm.sh/resource-policy" /tmp/vm-pe-kyverno.out; then \
 		echo "FAIL: helm.sh/resource-policy is back; the policy would be orphaned on removal"; exit 1; \
 	else echo "ok: prunable"; fi
+	@echo "--> a component toggle left in its old per-chart block must fail loudly"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set kagent.enabled=true >/tmp/vm-legacy.out 2>&1; then \
+		echo "FAIL: a removed toggle rendered silently; the component would be off with no warning"; exit 1; \
+	elif ! grep -q "components.kagent.enabled" /tmp/vm-legacy.out; then \
+		echo "FAIL: the legacy-toggle guard failed for the wrong reason"; cat /tmp/vm-legacy.out; exit 1; \
+	else echo "ok: legacy-toggle guard"; fi
 	@echo "--> golden: the default render is byte-identical to $(GOLDEN_REF)"
 	@if [ -z "$(GOLDEN_REF)" ]; then \
 		echo "skip: GOLDEN_REF is empty (explicit opt-out)"; \
@@ -89,7 +97,7 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	else \
 		out=$$(mktemp -d); tree=$$(mktemp -d); \
 		git worktree add -q --detach $$tree $(GOLDEN_REF) || { echo "FAIL: cannot check out $(GOLDEN_REF)"; exit 1; }; \
-		helm template t $$tree/$(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN) >$$out/golden 2>&1 \
+		helm template t $$tree/$(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN_REF) >$$out/golden 2>&1 \
 			|| { echo "FAIL: the $(GOLDEN_REF) render failed"; cat $$out/golden; git worktree remove --force $$tree; exit 1; }; \
 		git worktree remove --force $$tree; \
 		helm template t $(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN) >$$out/head 2>&1 \
@@ -154,6 +162,9 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -q 'name: muster' /tmp/ap-noc.out || { echo "FAIL: disabling kagent dropped other components"; exit 1; }
 	@echo "--> a dependsOn ref to a disabled component is dropped (no dangling dependency)"
 	@if grep -qE '^    - name: kagent$$' /tmp/ap-noc.out; then echo "FAIL: connectivity still dependsOn disabled kagent (would block forever)"; exit 1; else echo "ok: dangling dependsOn dropped"; fi
+	@echo "--> the meta chart forwards the RESOLVED enablement to the connectivity chart"
+	@python3 tests/verify-component-enablement.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: a disabled component renders neither a release nor its wiring"
 	@echo "--> every connectivity top-level key is settable through the meta chart"
 	@python3 -c 'import json,sys; m=set(json.load(open("$(CHART_DIR)/values.schema.json"))["properties"]); c=set(json.load(open("$(CONNECTIVITY_DIR)/values.schema.json"))["properties"]); miss=sorted(c-m); sys.exit("FAIL: connectivity keys the meta chart schema rejects (root is additionalProperties:false, so forwardAllValues cannot reach them): "+", ".join(miss) if miss else 0)'
 	@echo "ok: no unreachable connectivity keys"

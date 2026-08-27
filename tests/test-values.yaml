@@ -19,8 +19,9 @@ ingress:
 networkPolicy:
   enabled: false
 
-valkey:
-  enabled: false
+components:
+  valkey:
+    enabled: false
 
 muster:
   networkPolicy:

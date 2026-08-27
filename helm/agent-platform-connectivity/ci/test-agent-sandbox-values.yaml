@@ -1,9 +1,13 @@
-# Exercises the opt-in agent-sandbox controller: the `agentSandbox.enabled`
+# Exercises the opt-in agent-sandbox controller: the `agent-sandbox`
 # dependency gate plus the umbrella Kyverno mutate policy that injects
 # restricted-PSS into the controller Deployment. The umbrella must still ship
 # zero CRDs (the agent-sandbox subchart has crds/ stripped).
 #
 # Mode is muster-direct (no agentgateway), OAuth/valkey off — the simplest stack.
+components:
+  agent-sandbox:
+    enabled: true
+
 ingress:
   mode: muster-direct
   parentRefs:
@@ -21,9 +25,3 @@ muster:
         enabled: false
         storage:
           type: memory
-
-valkey:
-  enabled: false
-
-agentSandbox:
-  enabled: true
