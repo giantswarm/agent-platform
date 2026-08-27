@@ -1,5 +1,8 @@
+components:
+  kagent:
+    enabled: true
+
 kagent:
-  enabled: true
   namespaceOverride: kagent
   # CNPG DSN wiring — connects kagent to the platform Postgres instead of its
   # bundled postgres:18.3-alpine. The CNPG Cluster generates Secret
@@ -62,6 +65,3 @@ muster:
         enabled: false
         storage:
           type: memory
-
-valkey:
-  enabled: false

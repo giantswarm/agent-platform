@@ -47,7 +47,11 @@ gitops:
 #   forwardAllValues — forward the whole values tree (connectivity reads many
 #       blocks). injectGlobal — inject .Values.global (default true; false for
 #       strict-schema charts that reject an unexpected `global` key).
-#   enabledFrom  — existing on/off toggle path. dependsOn — CRD-before-CR order
+#   enabled      — whether this component gets a release at all. This is the ONLY
+#       on/off switch. templates/components.yaml forwards the roster, stripped to
+#       enablement, to agent-platform-connectivity, which reads this same key
+#       path, so the wiring cannot disagree with the release.
+#   dependsOn    — CRD-before-CR order
 #       (a reference to a toggled-off component is dropped at render time).
 #   crds         — Helm CRD lifecycle (CreateReplace) for a component that ships its
 #       own CRDs in its chart's crds/ dir (app-owned CRDs). Such a component owns its
@@ -108,13 +112,7 @@ components:  # @schema additionalProperties: true
     # the 1.x range cannot be used with this wiring.
     versionRange: "2.x"
     valuesFrom: agentgateway
-    enabledFrom: agentgateway.enabled
-    # The flattened chart validates values against its own schema with
-    # additionalProperties: false, and `enabled` is not one of its keys. It is
-    # this umbrella's toggle (read by enabledFrom above and by the connectivity
-    # chart), so it stays in the top-level block and is dropped on the way out.
-    omitKeys:
-      - enabled
+    enabled: false
     # App-owned CRDs: the wrapper chart ships the agentgateway.dev CRDs (with
     # helm.sh/resource-policy: keep) in its own crds/ dir; CreateReplace upgrades
     # them atomically with the app on every release. It owns their version, so it
@@ -131,13 +129,13 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.x"
     valuesFrom: valkey
-    enabledFrom: valkey.enabled
+    enabled: true
   agent-platform-mcps:  # @schema additionalProperties: true
     chart: agent-platform-mcps
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.x"
     valuesFrom: agent-platform-mcps
-    enabledFrom: mcps.enabled
+    enabled: false
     injectGlobal: false              # strict values.schema.json
     # Creates muster.giantswarm.io/MCPServer CRs (CRD owned by the muster app) and,
     # when agentgateway is enabled, agentgateway.dev CRs (CRDs owned by the
@@ -163,7 +161,7 @@ components:  # @schema additionalProperties: true
     # per-cluster SOPS overrides that target the same flat paths) must be nested
     # under that key.
     valuesKey: kagent
-    enabledFrom: kagent.enabled
+    enabled: false
     # App-owned CRDs: the wrapper chart ships the kagent.dev + kmcp CRDs (with
     # helm.sh/resource-policy: keep) in its own crds/ dir; CreateReplace upgrades
     # them atomically with the app on every release. It owns their version, so it
@@ -176,12 +174,12 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.x"
     valuesFrom: klausGateway
-    enabledFrom: klausGateway.enabled
+    enabled: false
   agent-sandbox:  # @schema additionalProperties: true
     chart: agent-sandbox
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.x"
-    enabledFrom: agentSandbox.enabled
+    enabled: false
     injectGlobal: false              # strict values.schema.json
     # App-owned CRDs: the GS agent-sandbox chart ships its CRDs in its own crds/
     # dir (the standalone agent-sandbox-crds chart is retired). The CRDs carry
@@ -233,7 +231,7 @@ dicebear:  # @schema skipProperties: true; additionalProperties: true
 # mode selects the whole request topology. What each mode renders/consumes:
 #   muster-direct        client -> muster. Only ingress.parentRefs/hostnames used.
 #   agentgateway-muster  client -> agentgateway /mcp -> muster. Adds agentgateway
-#                        controller (agentgateway.enabled), data-plane Gateway
+#                        controller (components.agentgateway.enabled), data-plane Gateway
 #                        (gateway.*), /mcp route, optional ingress.backendTrafficPolicy.
 #                        Requires agent-platform-mcps.agentgateway.viaMuster: true.
 #   agentgateway-direct  client -> agentgateway /mcp -> servers. As above plus
@@ -361,7 +359,7 @@ networkPolicy:
 # it, where these objects fail the install on an unknown API group.
 #
 # A cluster that enforces restricted PSS without Kyverno (PSA labels only) must set
-# agentSandbox.enabled: false as well: the upstream agent-sandbox controller chart
+# components.agent-sandbox.enabled: false as well: the upstream agent-sandbox controller chart
 # exposes no securityContext knob, so with the mutate policy gone the Deployment
 # carries no securityContext from anywhere and PSA rejects it. See the v0.5.0 note
 # in the connectivity chart's templates/agent-sandbox/pod-security.yaml.
@@ -524,7 +522,6 @@ muster:  # @schema skipProperties: true; additionalProperties: true
 #   .vpa                  — wrapper's VerticalPodAutoscaler (off by default)
 # Single-pod Deployment + PVC; writable Service at muster-valkey.<ns>.svc:6379.
 valkey:  # @schema skipProperties: true; additionalProperties: true
-  enabled: true
   ciliumNetworkPolicy:
     enabled: true
   vpa:
@@ -610,15 +607,10 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
 # `agent-platform-mcps.mcpServers` is populated.
 # Full value reference: https://github.com/giantswarm/agent-platform-mcps
 #
-# The on/off toggle lives here, OUTSIDE the `agent-platform-mcps` namespace,
-# because the sub-chart's strict values.schema.json (additionalProperties: false)
-# rejects an `enabled` key. This is the `condition: mcps.enabled` dependency gate.
-mcps:  # @schema skipProperties: true; additionalProperties: true
-  enabled: false
-
 # Values passed through to the agent-platform-mcps sub-chart. Only keys it
 # declares are allowed (muster, agentgateway, defaults, identityProviders,
-# mcpServers). The `mcps.enabled` toggle above is intentionally separate.
+# mcpServers). The on/off toggle is
+# `components.agent-platform-mcps.enabled` on the meta chart.
 agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
   agentgateway:
     # enabled: true  — agentgateway is always active in this umbrella; it sits
@@ -673,7 +665,6 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
 # chart with many more keys than mirrored here), so unknown keys must stay
 # allowed.
 kagent:  # @schema skipProperties: true; additionalProperties: true
-  enabled: false
   # Pin the release-independent name so the controller Service is always
   # `kagent-controller` regardless of the umbrella release name.
   fullnameOverride: kagent
@@ -1033,8 +1024,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Tenant agents — created with the generic agent chart
   # (https://github.com/giantswarm/agent), one release per agent, per the
   # creating-agents PRD — reference these by name. The shared muster
-  # RemoteMCPServer is template-owned: rendered when kagent.enabled +
-  # muster.enabled, in the release namespace, its name/namespace fixed as the
+  # RemoteMCPServer is template-owned: rendered when the kagent component is on
+  # and muster.enabled, in the release namespace, its name/namespace fixed as the
   # platform contract the agent chart's default serverRef depends on.
 
   # Additional ModelConfig CRs — the model catalog beyond the
@@ -1117,14 +1108,12 @@ postgres:
     owner: sessions
 
 # Klaus Gateway — channel front door (Slack, CLI, web) for Klaus instances.
-# Disabled by default; set klausGateway.enabled: true to deploy.
+# Disabled by default; set components.klaus-gateway.enabled: true to deploy.
 # The chart's own agentgateway sub-dependency is disabled here because the
 # umbrella already manages the agentgateway controller via the `agentgateway`
 # dependency above; set upstream.agentgatewayURL to the data-plane service
 # URL once the agentgateway deployment is known (typically post-install).
 klausGateway:  # @schema skipProperties: true; additionalProperties: true
-  enabled: false
-
   image:
     registry: gsoci.azurecr.io
 
@@ -1260,8 +1249,6 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     hostname: ""
 
 agentgateway:  # @schema skipProperties: true; additionalProperties: true
-  # Controller dependency install switch. Must be true for agentgateway-* ingress modes (validated against ingress.mode).
-  enabled: false
   fullnameOverride: agentgateway-controller
   image:
     registry: gsoci.azurecr.io
@@ -1295,13 +1282,11 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
       memory: 512Mi
 
 # agent-sandbox controller (kubernetes-sigs/agent-sandbox) — the Sandbox runtime
-# that kagent's SandboxAgent delegates pod isolation to. Opt-in. The `enabled`
-# key is the `condition: agentSandbox.enabled` dependency gate and lives OUTSIDE
-# the agent-sandbox chart's value namespace because that chart's strict
-# values.schema.json (additionalProperties: false) rejects an `enabled` key —
-# same pattern as `mcps.enabled` above.
+# that kagent's SandboxAgent delegates pod isolation to. Opt-in through
+# components.agent-sandbox.enabled. These values are NOT forwarded to the
+# agent-sandbox chart (its strict values.schema.json rejects them); the
+# connectivity chart reads them for the Kyverno mutate policy below.
 agentSandbox:  # @schema skipProperties: true; additionalProperties: true
-  enabled: false
   # The agent-sandbox chart is kept vendor-agnostic (no securityContext knob on
   # the upstream v0.4.6 controller), so restricted-PSS is injected here at
   # admission via the Kyverno mutate policy in

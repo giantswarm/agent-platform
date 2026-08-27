@@ -1,4 +1,4 @@
-{{- if and .Values.kagent.enabled .Values.networkPolicy.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.networkPolicy.enabled }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $controllerPort := "8083" }}
 {{- $clusterName := .Values.postgres.clusterName }}
@@ -102,7 +102,7 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    {{- if and .Values.kagent.enabled .Values.muster.enabled }}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.muster.enabled }}
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: muster
@@ -165,7 +165,7 @@ spec:
             - port: "5432"
               protocol: TCP
 
-{{- if and .Values.kagent.enabled .Values.muster.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.muster.enabled }}
 ---
 # Egress from all kagent-managed agent pods to muster (MCP tool calls)
 # and to the Anthropic API (model inference). DNS included.

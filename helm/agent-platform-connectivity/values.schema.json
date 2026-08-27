@@ -46,6 +46,57 @@
         "clusterID": {
             "type": "string"
         },
+        "components": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+                "agent-platform-mcps": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "agent-sandbox": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "agentgateway": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "kagent": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "klaus-gateway": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                }
+            }
+        },
         "dicebear": {
             "type": "object",
             "additionalProperties": true
@@ -353,10 +404,6 @@
                     "uniqueItems": true
                 }
             }
-        },
-        "mcps": {
-            "type": "object",
-            "additionalProperties": true
         },
         "muster": {
             "type": "object",

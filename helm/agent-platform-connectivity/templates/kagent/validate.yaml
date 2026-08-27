@@ -3,7 +3,7 @@ Render-time guards for the kagent / postgres wiring. These fail `helm template`
 (and therefore CI lint + install) early with an actionable message instead of
 producing a silently-broken release.
 */ -}}
-{{- if .Values.kagent.enabled }}
+{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
   {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 
   {{- /* An HTTPRoute with no hostname on the shared public Gateway matches ALL

@@ -1,6 +1,10 @@
 # Exercises the klaus-gateway connectivity routes, including the Slack OBO/CIMD
 # public route. muster-direct keeps agentgateway off (the klausgateway routes do
 # not depend on the ingress mode); parentRefs is required in every mode.
+components:
+  klaus-gateway:
+    enabled: true
+
 ingress:
   mode: muster-direct
   parentRefs:
@@ -19,11 +23,7 @@ muster:
         storage:
           type: memory
 
-valkey:
-  enabled: false
-
 klausGateway:
-  enabled: true
   agentgatewayRoute:
     enabled: true
     hostname: agentgateway.ci.example.com

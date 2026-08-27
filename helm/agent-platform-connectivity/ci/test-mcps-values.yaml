@@ -1,9 +1,13 @@
-# Exercises the bundled agent-platform-mcps sub-chart: the `mcps.enabled`
+# Exercises the bundled agent-platform-mcps sub-chart: the `agent-platform-mcps`
 # dependency gate plus a sample muster MCPServer rendered from the abstract
 # `mcpServers` list. The umbrella must still ship zero CRDs.
 #
 # Mode is muster-direct, so viaMuster stays at its default (false) — setting it
 # true here would trip the ingress.mode consistency guard.
+components:
+  agent-platform-mcps:
+    enabled: true
+
 ingress:
   mode: muster-direct
   parentRefs:
@@ -21,12 +25,6 @@ muster:
         enabled: false
         storage:
           type: memory
-
-valkey:
-  enabled: false
-
-mcps:
-  enabled: true
 
 agent-platform-mcps:
   mcpServers:

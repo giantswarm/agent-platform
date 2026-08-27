@@ -1,4 +1,4 @@
-{{- if and .Values.kagent.enabled .Values.kagent.modelConfigs }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.modelConfigs }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- range .Values.kagent.modelConfigs }}
 ---

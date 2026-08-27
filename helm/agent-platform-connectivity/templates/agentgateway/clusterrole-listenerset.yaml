@@ -1,4 +1,4 @@
-{{- if .Values.agentgateway.enabled }}
+{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "agentgateway")) }}
 {{- /*
 TODO: drop this file once the agentgateway subchart is bumped past the fix in
 https://github.com/agentgateway/agentgateway/commit/cde3b1b3 (Gateway API v1.5.0, chart

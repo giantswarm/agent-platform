@@ -1,4 +1,4 @@
-{{- if and .Values.kagent.enabled .Values.kyvernoPolicies.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kyvernoPolicies.enabled }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 # Declarative agents created by bundled kagent subcharts (cilium-policy-agent,
 # promql-agent, etc.) do not set securityContext in their Agent CR spec, so the

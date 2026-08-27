@@ -17,9 +17,9 @@ the namespace the agent-sandbox subchart actually deploys into
 matches, the controller pod ships without the restricted-PSS securityContext, and
 PSA silently rejects it. Keep them in lockstep.
 */ -}}
-{{- if and .Values.agentSandbox.enabled .Values.agentSandbox.podSecurity.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "agent-sandbox")) .Values.agentSandbox.podSecurity.enabled }}
   {{- if not .Values.kyvernoPolicies.enabled }}
-    {{- fail "agentSandbox.podSecurity.enabled requires kyvernoPolicies.enabled: the securityContext reaches the controller Deployment through the Kyverno mutate policy and through nothing else. Set agentSandbox.podSecurity.enabled: false to run the controller without a securityContext (only safe where nothing enforces restricted PSS), or agentSandbox.enabled: false." }}
+    {{- fail "agentSandbox.podSecurity.enabled requires kyvernoPolicies.enabled: the securityContext reaches the controller Deployment through the Kyverno mutate policy and through nothing else. Set agentSandbox.podSecurity.enabled: false to run the controller without a securityContext (only safe where nothing enforces restricted PSS), or components.agent-sandbox.enabled: false." }}
   {{- end }}
   {{- $controllerNs := "agent-sandbox-system" }}
   {{- $sandbox := index .Values "agent-sandbox" }}

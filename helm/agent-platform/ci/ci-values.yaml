@@ -4,15 +4,16 @@
 # every component here exercises the full render path in chart-testing.
 gitops:
   engine: flux
-agentgateway:
-  enabled: true
-valkey:
-  enabled: true
-kagent:
-  enabled: true
-klausGateway:
-  enabled: true
-agentSandbox:
-  enabled: true
-mcps:
-  enabled: true
+components:
+  agentgateway:
+    enabled: true
+  valkey:
+    enabled: true
+  kagent:
+    enabled: true
+  klaus-gateway:
+    enabled: true
+  agent-sandbox:
+    enabled: true
+  agent-platform-mcps:
+    enabled: true

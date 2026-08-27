@@ -1,5 +1,10 @@
+components:
+  agentgateway:
+    enabled: true
+  kagent:
+    enabled: true
+
 kagent:
-  enabled: true
   namespaceOverride: kagent
   controllerRoute:
     enabled: true
@@ -29,7 +34,7 @@ kagent:
 
 # agentgateway-muster: kagent.controllerRoute registers an AgentgatewayBackend +
 # HTTPRoute on the data-plane Gateway, so the agentgateway controller must be
-# installed. agentgateway.enabled must match the mode (validate.yaml guard).
+# installed. The agentgateway component must match the mode (validate.yaml guard).
 ingress:
   mode: agentgateway-muster
   parentRefs:
@@ -40,9 +45,6 @@ ingress:
   hostnames:
     - muster.ci.example.com
 
-agentgateway:
-  enabled: true
-
 muster:
   muster:
     oauth:
@@ -50,6 +52,3 @@ muster:
         enabled: false
         storage:
           type: memory
-
-valkey:
-  enabled: false

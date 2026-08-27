@@ -1,4 +1,4 @@
-{{- if and .Values.klausGateway.enabled .Values.klausGateway.a2a.enabled .Values.networkPolicy.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.a2a.enabled .Values.networkPolicy.enabled }}
 {{- $agentgatewayPort := "8080" }}
 {{- if eq .Values.networkPolicy.flavor "cilium" }}
 ---
@@ -48,7 +48,7 @@ spec:
           protocol: TCP
 {{- end }}
 {{- end }}
-{{- if and .Values.klausGateway.enabled .Values.klausGateway.obo.enabled .Values.networkPolicy.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.obo.enabled .Values.networkPolicy.enabled }}
 {{- if eq .Values.networkPolicy.flavor "cilium" }}
 ---
 # Allow klausgateway Slack-OBO egress: DNS + the muster authorization server on
@@ -110,7 +110,7 @@ spec:
           protocol: TCP
 {{- end }}
 {{- end }}
-{{- if and .Values.klausGateway.enabled .Values.klausGateway.agentgatewayRoute.enabled .Values.networkPolicy.enabled }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled .Values.networkPolicy.enabled }}
 {{- $klausgatewayPort := "8080" }}
 {{- $fullname := .Values.klausGateway.fullnameOverride | default "klaus-gateway" }}
 {{- if eq .Values.networkPolicy.flavor "cilium" }}

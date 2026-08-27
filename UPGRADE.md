@@ -2,15 +2,42 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (component toggles move into `components.<name>.enabled`)
+
+A component's on/off switch is now `components.<name>.enabled`, and nothing else. The six per-chart toggles are removed.
+
+`components.<name>.enabled` already existed and already won over the old `enabledFrom` indirection, so a component could be turned off two ways, and the connectivity chart only saw one of them. `components.agentgateway.enabled: false` together with `agentgateway.enabled: true` gave a cluster with no agentgateway release, an agentgateway ListenerSet ClusterRole for a controller that was never installed, and an ingress-mode guard that still believed the controller was there. Both charts now read `components.<name>.enabled`, the meta chart forwards its answers under that same key, and `make verify-meta` fails if the two ever disagree again.
+
+### Operator action
+
+Move each key you set. `<name>` is the `components:` key, which is the chart name, not the values-block name:
+
+| Before | After |
+|---|---|
+| `agentgateway.enabled` | `components.agentgateway.enabled` |
+| `valkey.enabled` | `components.valkey.enabled` |
+| `mcps.enabled` | `components.agent-platform-mcps.enabled` |
+| `kagent.enabled` | `components.kagent.enabled` |
+| `klausGateway.enabled` | `components.klaus-gateway.enabled` |
+| `agentSandbox.enabled` | `components.agent-sandbox.enabled` |
+
+Move them **before** you upgrade. A leftover key fails the render with the message above, in both charts, and names the key to move. It is a hard failure on purpose: those value blocks accept unknown keys, so an ignored `enabled` would silently turn the component **off**, not on.
+
+The `mcps:` block held nothing but its toggle and is removed. The chart's own values stay under `agent-platform-mcps:`.
+
+Values that stay where they are: everything else in those blocks, including `agentSandbox.podSecurity.*`, `kagent.uiRoute.*`, `kagent.controllerRoute.*`, `klausGateway.a2a.*` and `klausGateway.obo.*`. Only the `enabled` key moves.
+
+If you install `agent-platform-connectivity` on its own, without the meta chart, set the same `components.<name>.enabled` keys on it. Under the meta chart they are forwarded for you, and anything you set on the child release is overwritten.
+
 ## \<current\> → \<next\> (agentgateway moves to the flattened 2.x chart)
 
 The `agentgateway` chart 2.0.0 flattened the upstream controller chart onto its chart root: upstream keys moved from `agentgateway.*` to the top level. The meta-package no longer nests the forwarded block, and it tracks the `2.x` range.
 
-The top-level `agentgateway:` values block of THIS chart does not change. It stays flat, as it always was, and the connectivity chart keeps reading `agentgateway.enabled` and `agentgateway.proxy.image` from it.
+The top-level `agentgateway:` values block of THIS chart stays flat, as it always was, and the connectivity chart keeps reading `agentgateway.proxy.image` from it. The `enabled` toggle moves out of it in the same release — see the section below.
 
 ### Operator action
 
-- None, if you only set `agentgateway.enabled` (the fleet default through `shared-configs`). The upgrade is in place: no resource is renamed, and the rendered output is unchanged apart from three non-selector labels.
+- Move `agentgateway.enabled` to `components.agentgateway.enabled` (see below). Otherwise the upgrade is in place: no resource is renamed, and the rendered output is unchanged apart from three non-selector labels.
 - Pin `components.agentgateway.versionRange` to a `2.x` version if you pin ranges through a BOM. A `1.x` pin with this wiring installs the old chart with un-nested values, and its schema rejects them.
 - `application.giantswarm.io/team` is new on every resource the agentgateway chart renders. It used to be a pod annotation only.
 

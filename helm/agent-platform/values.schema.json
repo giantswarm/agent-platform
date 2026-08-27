@@ -87,8 +87,8 @@
                                 "type": "string"
                             }
                         },
-                        "enabledFrom": {
-                            "type": "string"
+                        "enabled": {
+                            "type": "boolean"
                         },
                         "injectGlobal": {
                             "type": "boolean"
@@ -120,8 +120,8 @@
                                 "type": "string"
                             }
                         },
-                        "enabledFrom": {
-                            "type": "string"
+                        "enabled": {
+                            "type": "boolean"
                         },
                         "injectGlobal": {
                             "type": "boolean"
@@ -144,14 +144,8 @@
                         "crds": {
                             "type": "string"
                         },
-                        "enabledFrom": {
-                            "type": "string"
-                        },
-                        "omitKeys": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
+                        "enabled": {
+                            "type": "boolean"
                         },
                         "repository": {
                             "type": "string"
@@ -195,8 +189,8 @@
                         "crds": {
                             "type": "string"
                         },
-                        "enabledFrom": {
-                            "type": "string"
+                        "enabled": {
+                            "type": "boolean"
                         },
                         "repository": {
                             "type": "string"
@@ -219,8 +213,8 @@
                         "chart": {
                             "type": "string"
                         },
-                        "enabledFrom": {
-                            "type": "string"
+                        "enabled": {
+                            "type": "boolean"
                         },
                         "repository": {
                             "type": "string"
@@ -261,8 +255,8 @@
                         "chart": {
                             "type": "string"
                         },
-                        "enabledFrom": {
-                            "type": "string"
+                        "enabled": {
+                            "type": "boolean"
                         },
                         "repository": {
                             "type": "string"
@@ -596,10 +590,6 @@
                     "uniqueItems": true
                 }
             }
-        },
-        "mcps": {
-            "type": "object",
-            "additionalProperties": true
         },
         "muster": {
             "type": "object",

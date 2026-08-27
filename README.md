@@ -26,8 +26,23 @@ The decisive change: each component's version is a **constraint expressed as a v
 
 - **One gitops entry.** You install the meta-package (one `OCIRepository` + `HelmRelease`). It renders each component release and the `agent-platform-connectivity` release for you.
 - **CRD-before-CR ordering is preserved** — each component ships its own CRDs (app-owned CRDs), and a CR consumer `dependsOn` the component that owns the CRD it needs (Flux) / orders after it via `argocd.argoproj.io/sync-wave` (Argo). A `dependsOn` reference to a component that is toggled off is dropped at render time, so an always-on consumer never blocks on a release that was never rendered. Because the connectivity CRs live in their own release (not in the meta-package's own manifest), they only apply after the CRDs are Established — the meta-package itself ships no CR that could race a CRD.
-- **On/off and per-component values are unchanged** — the existing `muster:`, `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:`/`mcps:` blocks and `*.enabled` toggles still drive each component; the connectivity wiring blocks (`ingress:`, `gateway:`, `networkPolicy:`, `postgres:`, `extraObjects:`) still drive the wiring. Each `components.<name>` entry names its source block via `valuesFrom` (connectivity uses `forwardAllValues`); `values.schema.json` is unchanged.
+- **Per-component values keep their blocks; the on/off switch does not** — the existing `muster:`, `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:` blocks still drive each component's configuration, and the connectivity wiring blocks (`ingress:`, `gateway:`, `networkPolicy:`, `postgres:`, `extraObjects:`) still drive the wiring. Whether a component is installed at all is `components.<name>.enabled` — see [Enabling and disabling components](#enabling-and-disabling-components). Each `components.<name>` entry names its source block via `valuesFrom` (connectivity uses `forwardAllValues`).
 - **Dev vs customer track** — keep the `components.*.versionRange` values **wide** for the internal/dogfooding track (continuous auto-update, the default). **Pin** them to exact versions for a customer **bill-of-materials**; see [`helm/agent-platform/examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml). A "product release" is that pinned values snapshot.
+
+### Enabling and disabling components
+
+`components.<name>.enabled` is the only switch. It decides whether the component gets a release, and the render loop forwards the roster, stripped to enablement, into the `agent-platform-connectivity` release, which reads the same key path. The wiring that chart renders for a component (ClusterRoles, NetworkPolicies, routes, CRs) therefore cannot disagree with whether the component is installed. `<name>` is the `components:` key, which is also the chart name:
+
+| Component | Key | Default |
+|---|---|---|
+| agentgateway controller | `components.agentgateway.enabled` | `false` |
+| Valkey | `components.valkey.enabled` | `true` |
+| MCP server CRs | `components.agent-platform-mcps.enabled` | `false` |
+| kagent | `components.kagent.enabled` | `false` |
+| klaus-gateway | `components.klaus-gateway.enabled` | `false` |
+| agent-sandbox | `components.agent-sandbox.enabled` | `false` |
+
+A component with no `enabled` key is always installed (`muster`, `dicebear`, `agent-platform-connectivity`). The `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:` and `agent-platform-mcps:` blocks hold that component's values and no longer hold an `enabled` key; `make verify-meta` fails if the two ever diverge again.
 
 ```bash
 helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml                          # flux objects, wide ranges
@@ -42,7 +57,7 @@ make verify-meta verify-modes
 - Gateway API v1 CRDs (`gateways.gateway.networking.k8s.io`, `httproutes.gateway.networking.k8s.io`, `gatewayclasses.gateway.networking.k8s.io`) installed cluster-wide. The Agent Platform does **not** install them.
 - No separate CRD chart to install first — every component ships its own CRDs (`AgentgatewayParameters` / `AgentgatewayPolicy` / `AgentgatewayBackend` with the agentgateway component, `MCPServer` / `Workflow` with muster, the kagent + agent-sandbox CRDs with their components). The meta-package orders each CR consumer after the CRD-owning component for you; see [CRD lifecycle](#crd-lifecycle).
 - A `GatewayClass` CR named `agentgateway` (`status.conditions[type=Accepted]=True`). The bundled `agentgateway` sub-chart creates it on install; operators managing the controller out-of-band must ensure the `GatewayClass` exists.
-- Kyverno for the four `kyverno.io` objects the connectivity chart renders (default on). Clusters without Kyverno: set `kyvernoPolicies.enabled: false`, and `agentSandbox.enabled: false` too where restricted PSS is enforced through PSA labels; see [Kyverno](#kyverno).
+- Kyverno for the four `kyverno.io` objects the connectivity chart renders (default on). Clusters without Kyverno: set `kyvernoPolicies.enabled: false`, and `components.agent-sandbox.enabled: false` too where restricted PSS is enforced through PSA labels; see [Kyverno](#kyverno).
 - Cilium CNI for `networkPolicy.flavor: cilium` (default). Vanilla Kubernetes clusters: set `networkPolicy.flavor: kubernetes` **AND** `muster.networkPolicy.flavor: kubernetes` **AND** `valkey.ciliumNetworkPolicy.enabled: false` (the bundled valkey wrapper's CNP has no kubernetes-flavor counterpart). Opt out entirely with `networkPolicy.enabled: false` + `muster.networkPolicy.enabled: false` + `valkey.ciliumNetworkPolicy.enabled: false`.
 
 ## Installing
@@ -107,7 +122,7 @@ helm install agent-platform-connectivity \
 | `ingress.parentRefs` | `[]` | **All modes (required).** The public `Gateway`(s) both rendered routes attach to (typically `envoy-gateway-system/giantswarm-default`). Render fails if empty — the muster `/` route always attaches to it. |
 | `ingress.hostnames` | `[]` | **All modes.** muster's public hostname(s); must match the OAuth callback URL. |
 | `ingress.backendTrafficPolicy.enabled` | `false` | Render route-scoped `BackendTrafficPolicy` objects (preserve `WWW-Authenticate`, set `requestTimeout: 0s`): one over muster's `/` route in **all** modes, plus one over the agentgateway `/mcp` route in `agentgateway-*` modes. |
-| `agentgateway.enabled` | `false` | Install the agentgateway controller dependency. Must be `true` in `agentgateway-*` modes. |
+| `components.agentgateway.enabled` | `false` | Install the agentgateway controller component. Must be `true` in `agentgateway-*` modes. |
 | `gateway.name` | `agentgateway` | `agentgateway-*` modes only. Data-plane `Gateway` resource name. |
 | `gateway.gatewayClassName` | `agentgateway` | `agentgateway-*` modes only. The `GatewayClass` the data plane attaches to. |
 | `gateway.listeners` | `[{name: http, port: 8080, protocol: HTTP}]` | `agentgateway-*` modes only. Listener spec passed verbatim. |
@@ -118,14 +133,16 @@ helm install agent-platform-connectivity \
 | `extraObjects` | `[]` | Arbitrary manifests rendered through `tpl` alongside the chart. |
 | `muster.*` | passes through to muster | See [muster chart README](https://github.com/giantswarm/muster/blob/main/helm/muster/README.md). |
 | `agentgateway.*` | passes through to upstream agentgateway | See [agentgateway docs](https://agentgateway.dev). |
-| `valkey.enabled` | `true` | Bundle [giantswarm/valkey-app](https://github.com/giantswarm/valkey-app) for muster OAuth session storage. |
-| `mcps.enabled` | `false` | Bundle [giantswarm/agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps) to render the platform's MCP server CRs. Toggle is separate from the value namespace — see [Bundled MCP servers](#bundled-mcp-servers). |
+| `components.valkey.enabled` | `true` | Bundle [giantswarm/valkey-app](https://github.com/giantswarm/valkey-app) for muster OAuth session storage. |
+| `components.agent-platform-mcps.enabled` | `false` | Bundle [giantswarm/agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps) to render the platform's MCP server CRs. See [Bundled MCP servers](#bundled-mcp-servers). |
+| `components.kagent.enabled` | `false` | Install the kagent controller component. |
+| `components.klaus-gateway.enabled` | `false` | Install [klaus-gateway](https://github.com/giantswarm/klaus-gateway), the channel front door. |
 | `agent-platform-mcps.mcpServers` | `[]` | Abstract list of MCP servers rendered into `MCPServer` / `AgentgatewayBackend` CRs. Renders nothing until populated. |
-| `agentSandbox.enabled` | `false` | Bundle the [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) controller — the Sandbox runtime kagent's `SandboxAgent` requires. Toggle is separate from the value namespace — see [Agent sandbox](#agent-sandbox). |
+| `components.agent-sandbox.enabled` | `false` | Bundle the [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) controller — the Sandbox runtime kagent's `SandboxAgent` requires. See [Agent sandbox](#agent-sandbox). |
 | `dicebear.route.parentRefs` | `[]` | **Required.** The public `Gateway`(s) the avatar `HTTPRoute` attaches to — typically the same as `ingress.parentRefs`. The [dicebear](https://github.com/giantswarm/dicebear) avatar renderer is a force-enabled component (deployed on every install) and its public route is on by default, so the child release fails to render if this is empty. See [giantswarm/giantswarm#37211](https://github.com/giantswarm/giantswarm/issues/37211). |
 | `dicebear.route.hostnames` | `[]` | **Required.** Hostname(s) the avatar endpoint is served on, e.g. `avatars.<domain>`. Consumers fetch `https://<hostname>/v1/<agent-name>.png`. |
 | `muster.muster.oauth.server.enabled` | `true` | OAuth resource-server protection on the muster API. Requires `baseUrl`, `dex.{issuerUrl,clientId}`, and a Secret carrying `dex-client-secret` / `registration-token` / `oauth-encryption-key` / `valkey-password`. |
-| `muster.muster.oauth.server.storage.type` | `valkey` | Muster storage backend default. Pairs with `valkey.enabled: true`; flip to `memory` for dev. |
+| `muster.muster.oauth.server.storage.type` | `valkey` | Muster storage backend default. Pairs with `components.valkey.enabled: true`; flip to `memory` for dev. |
 | `muster.muster.oauth.server.storage.valkey.url` | `muster-valkey:6379` | Bundled-valkey Service. Override to point at an out-of-band Valkey. |
 
 Full schema: [`helm/agent-platform/values.schema.json`](./helm/agent-platform/values.schema.json).
@@ -183,7 +200,7 @@ Random auto-generation via Helm `lookup` is intentionally not supported — ever
 
 ### Bundled Valkey
 
-`valkey.enabled: true` bundles [giantswarm/valkey-app](https://github.com/giantswarm/valkey-app) (a Giant Swarm wrapper around upstream `valkey-io/valkey-helm`) with persistent storage. Single-pod Deployment behind a Service named `muster-valkey` (via `fullnameOverride`). Muster's storage defaults to `type: valkey` + `url: muster-valkey:6379`, so enabling the bundled chart alongside `oauth.server.enabled: true` is the only flip needed — no `url` override required.
+`components.valkey.enabled: true` bundles [giantswarm/valkey-app](https://github.com/giantswarm/valkey-app) (a Giant Swarm wrapper around upstream `valkey-io/valkey-helm`) with persistent storage. Single-pod Deployment behind a Service named `muster-valkey` (via `fullnameOverride`). Muster's storage defaults to `type: valkey` + `url: muster-valkey:6379`, so enabling the bundled chart alongside `oauth.server.enabled: true` is the only flip needed — no `url` override required.
 
 ```yaml
 valkey:
@@ -205,11 +222,11 @@ muster:
 
 ACL authentication is enabled by default for the `default` user (`~* &* +@all`), with the cleartext password read from `valkey-password` in the operator-supplied Secret. Muster sends `AUTH <password>` against the default user, which is the standard backwards-compatible form.
 
-Operators with an out-of-band Valkey leave `valkey.enabled: false` and override `muster.muster.oauth.server.storage.valkey.url` to point at the external endpoint. See [UPGRADE.md](./UPGRADE.md) for migration notes from a previously-existing standalone Valkey.
+Operators with an out-of-band Valkey leave `components.valkey.enabled: false` and override `muster.muster.oauth.server.storage.valkey.url` to point at the external endpoint. See [UPGRADE.md](./UPGRADE.md) for migration notes from a previously-existing standalone Valkey.
 
 ### Bundled MCP servers
 
-`mcps.enabled: true` bundles [giantswarm/agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps), which renders the platform's MCP server CRs from one abstract, vendor-neutral `mcpServers` list — muster `MCPServer` CRs by default, and/or agentgateway `AgentgatewayBackend` + `AgentgatewayPolicy` CRs. Like the umbrella's other CRs, these consume app-owned CRDs (`MCPServer` rides the muster component, the agentgateway CRs ride the agentgateway component); this sub-chart ships **no** CRDs of its own, and its release `dependsOn` muster and agentgateway so the CRDs Establish first.
+`components.agent-platform-mcps.enabled: true` bundles [giantswarm/agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps), which renders the platform's MCP server CRs from one abstract, vendor-neutral `mcpServers` list — muster `MCPServer` CRs by default, and/or agentgateway `AgentgatewayBackend` + `AgentgatewayPolicy` CRs. Like the umbrella's other CRs, these consume app-owned CRDs (`MCPServer` rides the muster component, the agentgateway CRs ride the agentgateway component); this sub-chart ships **no** CRDs of its own, and its release `dependsOn` muster and agentgateway so the CRDs Establish first.
 
 ```yaml
 mcps:
@@ -222,22 +239,22 @@ agent-platform-mcps:
       url: https://mcp.<cluster>.<base-domain>/mcp
 ```
 
-The `mcps.enabled` toggle deliberately lives in its **own** top-level block rather than under `agent-platform-mcps.enabled`: the sub-chart's `values.schema.json` is strict (`additionalProperties: false`) and rejects an `enabled` key. Everything under `agent-platform-mcps.*` is passed through to the sub-chart verbatim — see its [values reference](https://github.com/giantswarm/agent-platform-mcps) for `defaults`, `identityProviders`, per-entry `auth`, and the `muster` / `agentgateway` rendering toggles. Even when enabled, the chart renders nothing until `mcpServers` is populated.
+The toggle is `components.agent-platform-mcps.enabled`, not a key inside the chart's own value namespace: the sub-chart's `values.schema.json` is strict (`additionalProperties: false`) and rejects an `enabled` key. Everything under `agent-platform-mcps.*` is passed through to the sub-chart verbatim — see its [values reference](https://github.com/giantswarm/agent-platform-mcps) for `defaults`, `identityProviders`, per-entry `auth`, and the `muster` / `agentgateway` rendering toggles. Even when enabled, the chart renders nothing until `mcpServers` is populated.
 
 ### Agent sandbox
 
-`agentSandbox.enabled: true` bundles the [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) controller, which reconciles `Sandbox` resources into isolated pods. This is the runtime **kagent's `SandboxAgent` delegates pod isolation to** — the `SandboxAgent` CRD ships with the kagent component and the `Sandbox*` CRDs ship with the agent-sandbox component (app-owned CRDs), but the feature is inert until this controller runs, so enabling it is the prerequisite for sandboxed agents.
+`components.agent-sandbox.enabled: true` bundles the [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) controller, which reconciles `Sandbox` resources into isolated pods. This is the runtime **kagent's `SandboxAgent` delegates pod isolation to** — the `SandboxAgent` CRD ships with the kagent component and the `Sandbox*` CRDs ship with the agent-sandbox component (app-owned CRDs), but the feature is inert until this controller runs, so enabling it is the prerequisite for sandboxed agents.
 
 ```yaml
 agentSandbox:
   enabled: true
 ```
 
-The `agentSandbox.enabled` toggle lives in its **own** top-level block, not under the `agent-sandbox` value namespace, for the same reason as `mcps.enabled`: the bundled `agent-sandbox` chart's `values.schema.json` is strict (`additionalProperties: false`) and rejects an `enabled` key. The agent-sandbox CRDs (`Sandbox` / `SandboxTemplate` / `SandboxClaim` / `SandboxWarmPool`) ship with the agent-sandbox component chart itself (app-owned CRDs), so enabling the controller installs them too.
+The toggle is `components.agent-sandbox.enabled`; the `agentSandbox:` block holds only values the connectivity chart reads, because the bundled `agent-sandbox` chart's `values.schema.json` is strict (`additionalProperties: false`) and rejects everything it does not declare. The agent-sandbox CRDs (`Sandbox` / `SandboxTemplate` / `SandboxClaim` / `SandboxWarmPool`) ship with the agent-sandbox component chart itself (app-owned CRDs), so enabling the controller installs them too.
 
 The agent-sandbox chart is kept vendor-agnostic and the upstream controller exposes no `securityContext` knob, so the umbrella injects restricted-PSS fields into the controller Deployment at admission via a Kyverno mutate policy (`agentSandbox.podSecurity.*`). Override `agentSandbox.podSecurity.enabled: false` to drop the policy, or tune the `podSecurityContext` / `containerSecurityContext` blocks. The policy matches the `agent-sandbox-controller` Deployment in `agentSandbox.podSecurity.namespace` (default `agent-sandbox-system`), which must match the chart's namespace.
 
-That policy is the controller's only source of a `securityContext`. So `kyvernoPolicies.enabled: false` (see [Kyverno](#kyverno)) fails the render while `agentSandbox.podSecurity.enabled` is on, and the failure names the two ways out: `agentSandbox.enabled: false` on a cluster that enforces restricted PSS, or `agentSandbox.podSecurity.enabled: false` where nothing enforces it and a controller pod without a `securityContext` is acceptable. On the flux engine the `agent-sandbox` release `dependsOn` the connectivity release, so Kyverno holds the policy before the Deployment applies.
+That policy is the controller's only source of a `securityContext`. So `kyvernoPolicies.enabled: false` (see [Kyverno](#kyverno)) fails the render while `agentSandbox.podSecurity.enabled` is on, and the failure names the two ways out: `components.agent-sandbox.enabled: false` on a cluster that enforces restricted PSS, or `agentSandbox.podSecurity.enabled: false` where nothing enforces it and a controller pod without a `securityContext` is acceptable. On the flux engine the `agent-sandbox` release `dependsOn` the connectivity release, so Kyverno holds the policy before the Deployment applies.
 
 ### Ingress topology
 
@@ -276,7 +293,7 @@ ingress:
     labels: {}
 ```
 
-In an `agentgateway-*` mode, also set `agentgateway.enabled: true` and the shared `ingress.parentRefs` / `ingress.hostnames`:
+In an `agentgateway-*` mode, also set `components.agentgateway.enabled: true` and the shared `ingress.parentRefs` / `ingress.hostnames`:
 
 ```yaml
 agentgateway:
@@ -337,7 +354,7 @@ All images default to `gsoci.azurecr.io/giantswarm/*`:
 | `gsoci.azurecr.io/giantswarm/muster:0.1.197` | `gsoci.azurecr.io/giantswarm/muster` (native GS image) |
 | `gsoci.azurecr.io/giantswarm/agentgateway-controller:v1.2.1` | `cr.agentgateway.dev/controller` |
 | `gsoci.azurecr.io/giantswarm/agentgateway:v1.2.1` | `cr.agentgateway.dev/agentgateway` |
-| `gsoci.azurecr.io/giantswarm/agent-sandbox-controller:v0.4.6` | `registry.k8s.io/agent-sandbox/agent-sandbox-controller` (only when `agentSandbox.enabled`) |
+| `gsoci.azurecr.io/giantswarm/agent-sandbox-controller:v0.4.6` | `registry.k8s.io/agent-sandbox/agent-sandbox-controller` (only when `components.agent-sandbox.enabled`) |
 
 To pull from a private mirror, override the registry on every image (neither subchart exposes a `global.registry` that propagates to all images):
 
@@ -402,7 +419,7 @@ The connectivity chart renders four `kyverno.io` objects: two ClusterPolicies th
 
 The PolicyException targets a policy this chart does not own, so its names must match the target cluster. They default to the Giant Swarm names (`policyExceptionNamespace: policy-exceptions`, `seccompPolicyName: restrict-seccomp-strict`, `seccompRuleNames`); a cluster that names its policies differently must override them, or the exception matches nothing.
 
-A cluster that enforces restricted PSS through PSA labels instead of Kyverno must also set `agentSandbox.enabled: false` (see [agent-sandbox](#agent-sandbox)).
+A cluster that enforces restricted PSS through PSA labels instead of Kyverno must also set `components.agent-sandbox.enabled: false` (see [agent-sandbox](#agent-sandbox)).
 
 ## Credit
 

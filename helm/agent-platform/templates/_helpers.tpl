@@ -34,11 +34,10 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
 
 {{/*
-Whether a component is enabled — mirrors the enable logic in
-templates/components.yaml (enabledFrom path, then an explicit `enabled`
-override). `name` is the components.<key> name, which equals the component's
-chart name and is therefore what a dependsOn entry references. Emits "true" when
-on, empty string otherwise.
+Whether a component is enabled — reads `components.<name>.enabled`, the single
+on/off switch. `name` is the components.<key> name, which equals the component's
+chart name and is therefore what a dependsOn entry references. A component with
+no `enabled` key is force-enabled. Emits "true" when on, empty string otherwise.
 
 Used to drop a dependsOn reference to a component that is toggled off, so a
 consumer does not wait forever on a HelmRelease that was never rendered. With
@@ -54,11 +53,36 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- $c := index $root.Values.components .name -}}
 {{- if $c -}}
 {{- $on := true -}}
-{{- with $c.enabledFrom }}{{- $on = index $root.Values (first (splitList "." .)) (last (splitList "." .)) }}{{- end }}
 {{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}{{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
 true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Fail the render when a component's on/off toggle is still set the old way, inside
+the component's own values block. Those blocks are additionalProperties: true, so
+a leftover `enabled` key validates and is then ignored — the component silently
+falls back to the `components.<name>.enabled` default, which is off for five of
+the six. This turns that into a loud failure naming the new key. The removed
+`mcps:` block needs no entry: the root schema rejects it already.
+*/}}
+{{- define "agent-platform.validateLegacyToggles" -}}
+{{- $moved := list
+      (list "agentgateway" "components.agentgateway.enabled")
+      (list "valkey" "components.valkey.enabled")
+      (list "kagent" "components.kagent.enabled")
+      (list "klausGateway" "components.klaus-gateway.enabled")
+      (list "agentSandbox" "components.agent-sandbox.enabled") -}}
+{{- $found := list -}}
+{{- range $moved -}}
+{{- if hasKey (index $.Values (first .) | default dict) "enabled" -}}
+{{- $found = append $found (printf "%s.enabled -> %s" (first .) (last .)) -}}
+{{- end -}}
+{{- end -}}
+{{- with $found -}}
+{{- fail (printf "component toggles moved into components.<name>.enabled and the old keys are ignored; move %s (see UPGRADE.md)" (join ", " .)) -}}
 {{- end -}}
 {{- end -}}
 
@@ -142,8 +166,9 @@ inconsistent. Rendered exactly once via templates/validate.yaml.
 {{- fail "ingress.parentRefs is required in all modes — the umbrella-owned muster `/` route (and the agentgateway `/mcp` route in agentgateway-* modes) attaches to it; an empty parentRefs renders a route bound to no Gateway, leaving muster unreachable while install reports success" -}}
 {{- end -}}
 {{- /* viaMuster only matters when the mcps sub-chart is installed; with no MCP
-servers there is nothing to route, so the consistency check is scoped to mcps.enabled. */ -}}
-{{- if .Values.mcps.enabled -}}
+servers there is nothing to route, so the consistency check is scoped to the
+agent-platform-mcps component. */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps") -}}
 {{- $mcpsVals := index .Values "agent-platform-mcps" | default dict -}}
 {{- $viaMuster := dig "agentgateway" "viaMuster" false $mcpsVals -}}
 {{- if eq $mode "agentgateway-muster" -}}
@@ -156,12 +181,12 @@ servers there is nothing to route, so the consistency check is scoped to mcps.en
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- $agentgatewayEnabled := or (eq .Values.agentgateway.enabled true) (eq (toString .Values.agentgateway.enabled) "true") -}}
+{{- $agentgatewayEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway") -}}
 {{- if and $isAgentgateway (not $agentgatewayEnabled) -}}
-{{- fail "agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
+{{- fail "components.agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
 {{- if and (eq $mode "muster-direct") $agentgatewayEnabled -}}
-{{- fail "agentgateway.enabled must be false in muster-direct mode; the controller dependency condition must match ingress.mode" -}}
+{{- fail "components.agentgateway.enabled must be false in muster-direct mode; the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
 {{- end -}}
 
