@@ -180,6 +180,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
+| valkey.valkey.deploymentStrategy | string | `"Recreate"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |

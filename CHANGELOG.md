@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `valkey` component ships `deploymentStrategy: Recreate`. The single pod owns an RWO PVC, so under `RollingUpdate` every values or chart change deadlocked the rollout: with one replica `maxUnavailable` is 0, the new pod waited on `Multi-Attach` for a volume the old pod held, and Helm timed out after 5 minutes. An installation that pinned `valkey.valkey.deploymentStrategy` keeps its own value. The store is a cache, so the restart gap between the two pods costs nothing.
 - The `agentgateway` component tracks the `2.x` chart line, which flattened the upstream keys onto the chart root. The forwarded values block is no longer nested under an `agentgateway` key. **The top-level `agentgateway:` values block otherwise keeps its shape**, so only the toggle moves. `examples/customer-bom.yaml` pins `2.0.0`.
 - `kyvernoPolicies.seccompRuleNames` must hold at least one non-empty name, and the connectivity chart fails the render when `agentSandbox.podSecurity.enabled` is on without `kyvernoPolicies.enabled`. Both configurations used to render an object that silently matched nothing.
 - The agent-sandbox pod-security ClusterPolicy no longer carries `helm.sh/resource-policy: keep`. Helm prunes it now whenever it stops rendering (`kyvernoPolicies.enabled: false`, `agentSandbox.podSecurity.enabled: false`, or the planned v0.5.0 removal of the template), instead of leaving an orphan ClusterPolicy that has to be deleted by hand.
