@@ -118,14 +118,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -qE '^    - name: agentgateway$$' /tmp/ap-flux.out || { echo "FAIL: a CR consumer no longer dependsOn its CRD-owning component (agentgateway)"; exit 1; }
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
-	@python3 -c 'import sys,yaml; \
-docs=[d for d in yaml.safe_load_all(open("/tmp/ap-flux.out")) if d]; \
-hr=[d for d in docs if d.get("kind")=="HelmRelease" and d["metadata"]["name"]=="agentgateway"]; \
-sys.exit("FAIL: no agentgateway HelmRelease rendered") if not hr else None; \
-v=hr[0]["spec"]["values"]; \
-sys.exit("FAIL: agentgateway values still nested under an agentgateway key; the 2.x chart is flat") if "agentgateway" in v else None; \
-sys.exit("FAIL: `enabled` forwarded to the agentgateway chart, whose schema is additionalProperties:false") if "enabled" in v else None; \
-sys.exit("FAIL: agentgateway values lost controller.image.repository") if v.get("controller",{}).get("image",{}).get("repository")!="giantswarm/agentgateway-controller" else 0'
+	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
 	@grep -q 'semver: "2.x"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not 2.x (the flattened chart line)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> PURE app-of-apps: root emits ONLY OCIRepository + HelmRelease (no raw CRs)"
