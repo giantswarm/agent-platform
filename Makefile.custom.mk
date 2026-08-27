@@ -24,6 +24,8 @@ KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true
 # The same render, expressed the way GOLDEN_REF's chart reads the kagent toggle.
 KYVERNO_GOLDEN_REF := $(VM) --set kagent.enabled=true
 GOLDEN_REF ?= origin/main
+# Any reference is enough: the assertions read the rendered exception, not the image.
+PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
 
 .PHONY: verify-modes
@@ -79,6 +81,23 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "4" ]; then \
 		echo "FAIL: expected 4 kyverno.io objects, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; exit 1; \
 	else echo "ok: 4 kyverno.io objects"; fi
+	@echo "--> the CNPG ImageVolume exception renders only with an extension image"
+	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true >/tmp/vm-pe-noimg.out 2>&1 || { cat /tmp/vm-pe-noimg.out; exit 1; }
+	@if grep -q "image-volume" /tmp/vm-pe-noimg.out; then \
+		echo "FAIL: the volume-types exception renders with no image volume to except"; exit 1; \
+	else echo "ok: no exception without an extension image"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) >/tmp/vm-pe-img.out 2>&1 || { cat /tmp/vm-pe-img.out; exit 1; }
+	@if ! grep -q "name: kagent-pg-image-volume" /tmp/vm-pe-img.out; then \
+		echo "FAIL: no volume-types exception for the ImageVolume pgvector path; CNPG instance pods would be denied admission"; exit 1; \
+	elif ! grep -q "cnpg.io/cluster: kagent-pg" /tmp/vm-pe-img.out; then \
+		echo "FAIL: the exception is not scoped to the Cluster's own pods"; exit 1; \
+	else echo "ok: ImageVolume exception scoped to cnpg.io/cluster"; fi
+	@echo "--> an exception naming no rule must fail (it would match nothing)"
+	@if helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) --set 'kyvernoPolicies.volumeTypesRuleNames[0]=' >/tmp/vm-pe-rule.out 2>&1; then \
+		echo "FAIL: the empty-rule guard did not fire"; exit 1; \
+	elif ! grep -q "volumeTypesRuleNames must name at least one non-empty rule" /tmp/vm-pe-rule.out; then \
+		echo "FAIL: the empty-rule guard failed for the wrong reason"; cat /tmp/vm-pe-rule.out; exit 1; \
+	else echo "ok: empty-rule guard"; fi
 	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it)"
 	@if grep -q "helm.sh/resource-policy" /tmp/vm-pe-kyverno.out; then \
 		echo "FAIL: helm.sh/resource-policy is back; the policy would be orphaned on removal"; exit 1; \

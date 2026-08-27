@@ -84,6 +84,9 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
 | kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
 | kyvernoPolicies.seccompRuleNames[1] | string | `"autogen-check-seccomp-strict"` |  |
+| kyvernoPolicies.volumeTypesPolicyName | string | `"restrict-volume-types"` |  |
+| kyvernoPolicies.volumeTypesRuleNames[0] | string | `"restricted-volumes"` |  |
+| kyvernoPolicies.volumeTypesRuleNames[1] | string | `"autogen-restricted-volumes"` |  |
 | extraObjects | list | `[]` |  |
 | dicebear | object | `{}` |  |
 | muster.enabled | bool | `true` |  |
