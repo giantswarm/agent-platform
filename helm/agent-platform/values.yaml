@@ -537,6 +537,12 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
   valkey:
     fullnameOverride: muster-valkey
     replicaCount: 1
+    # The single pod owns an RWO PVC. Under RollingUpdate with one replica
+    # maxUnavailable rounds down to 0, so the new pod waits for a volume the old
+    # pod still holds and the rollout deadlocks on Multi-Attach until Helm times
+    # out. Recreate stops the old pod first. The store is a cache, so the restart
+    # gap costs nothing.
+    deploymentStrategy: Recreate
     # Persistence is intentionally RDB-only (no valkeyConfig appendonly). The
     # muster-valkey store is a CACHE: every critical record is reconstructable
     # at startup (see the muster chart's storage "Persistence model" doc and
