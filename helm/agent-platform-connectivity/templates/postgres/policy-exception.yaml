@@ -1,0 +1,47 @@
+{{- if and .Values.postgres.enabled .Values.kyvernoPolicies.enabled }}
+{{- if and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference }}
+{{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
+{{- $clusterName := .Values.postgres.clusterName }}
+{{- $ruleNames := .Values.kyvernoPolicies.volumeTypesRuleNames | default list }}
+{{- if or (not $ruleNames) (ne (len (compact $ruleNames)) (len $ruleNames)) }}
+{{- fail "kyvernoPolicies.volumeTypesRuleNames must name at least one non-empty rule of kyvernoPolicies.volumeTypesPolicyName; an exception that names no rule matches nothing, and the CNPG instance pods then fail the volume-types policy" }}
+{{- end }}
+# GS clusters enforce restrict-volume-types: a pod may mount only configMap, csi,
+# downwardAPI, emptyDir, ephemeral, persistentVolumeClaim, projected and secret.
+#
+# postgres.vector.extensionImage.reference mounts the pgvector binary from an
+# ImageVolume (volume type `image`, CNPG 1.29+ / PG 18). That type is not in the
+# allow-list, so admission rejects every instance pod the operator creates and the
+# Cluster never reaches an active instance. kagent's controller then crashloops on
+# its pgvector migration check, because there is no database to connect to.
+#
+# Scope: the cnpg.io/cluster label the operator sets on this Cluster's instance
+# pods and on its own bootstrap/join Jobs. Both carry the ImageVolume.
+#
+# PolicyExceptions must live in policy-exceptions, giantswarm, flux-giantswarm or
+# kube-system — restrict-polex-namespaces enforces this.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: {{ $clusterName }}-image-volume
+  namespace: {{ .Values.kyvernoPolicies.policyExceptionNamespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  exceptions:
+  - policyName: {{ .Values.kyvernoPolicies.volumeTypesPolicyName }}
+    ruleNames:
+    {{- toYaml $ruleNames | nindent 4 }}
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - Job
+        namespaces:
+        - {{ $ns }}
+        selector:
+          matchLabels:
+            cnpg.io/cluster: {{ $clusterName }}
+{{- end }}
+{{- end }}
