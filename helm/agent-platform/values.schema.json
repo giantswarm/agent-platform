@@ -588,6 +588,17 @@
                     },
                     "minItems": 1,
                     "uniqueItems": true
+                },
+                "volumeTypesPolicyName": {
+                    "type": "string"
+                },
+                "volumeTypesRuleNames": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
                 }
             }
         },

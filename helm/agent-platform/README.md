@@ -141,6 +141,9 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
 | kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
 | kyvernoPolicies.seccompRuleNames[1] | string | `"autogen-check-seccomp-strict"` |  |
+| kyvernoPolicies.volumeTypesPolicyName | string | `"restrict-volume-types"` |  |
+| kyvernoPolicies.volumeTypesRuleNames[0] | string | `"restricted-volumes"` |  |
+| kyvernoPolicies.volumeTypesRuleNames[1] | string | `"autogen-restricted-volumes"` |  |
 | extraObjects | list | `[]` |  |
 | muster.enabled | bool | `true` |  |
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
