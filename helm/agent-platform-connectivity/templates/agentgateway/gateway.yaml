@@ -10,6 +10,26 @@ spec:
   gatewayClassName: {{ .Values.gateway.gatewayClassName }}
   listeners:
     {{- toYaml .Values.gateway.listeners | nindent 4 }}
+    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
+    # Public edge listener: terminates TLS for *.<global.domain>. Routes from
+    # every namespace attach here (the kagent UI route lives in the kagent
+    # namespace). The umbrella-owned public routes pin themselves to this
+    # listener via sectionName, so the plaintext listener above never serves
+    # public hostnames through the edge's LoadBalancer Service (the
+    # data-plane NetworkPolicy admits world traffic on 443 only).
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: {{ printf "*.%s" (include "agent-platform.domain" (dict "ctx" . "for" "gatewayApi.gateway.create")) | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: {{ .Values.gatewayApi.gateway.tls.secretName }}
+      allowedRoutes:
+        namespaces:
+          from: All
+    {{- end }}
   {{- if .Values.gateway.parameters.enabled }}
   infrastructure:
     parametersRef:

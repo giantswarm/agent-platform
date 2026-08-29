@@ -11,6 +11,10 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" . | nindent 4 }}
+  annotations:
+    # The database outlives the release: an uninstall or a postgres.enabled
+    # flip must not drop the platform's data.
+    helm.sh/resource-policy: keep
 spec:
   instances: {{ .Values.postgres.instances | default 3 }}
   {{- if .Values.postgres.image.name }}
@@ -55,6 +59,11 @@ spec:
   # CNPG Barman supports S3, Azure Blob, GCS, and S3-compatible (MinIO via
   # endpointURL) — pick credentials per cloud (IRSA on EKS, azureCredentials on
   # Azure, static key for MinIO).
+  {{- /* Gated with the other monitor objects on
+  global.observability.metrics.serviceMonitor.enabled: a cluster without the
+  monitoring.coreos.com CRDs cannot admit the generated PodMonitor. */ -}}
+  {{- if (include "agent-platform.serviceMonitor" .) }}
+  {{- $monitorLabels := .Values.global.observability.metrics.serviceMonitor.labels | default (dict "observability.giantswarm.io/tenant" "giantswarm") }}
   # Labels the operator copies onto every object it creates for this Cluster,
   # including the generated PodMonitor. Giant Swarm's monitoring agent
   # (alloy-metrics) discovers PodMonitors by a label on the PodMonitor
@@ -63,10 +72,12 @@ spec:
   # neither selector is created and silently never scraped. CNPG's stock
   # PodMonitor labels carry neither, so the tenant label must be inherited
   # here; a podMonitorRelabelings entry cannot do this, it only rewrites
-  # scraped series, not the object's labels.
+  # scraped series, not the object's labels. The labels come from
+  # global.observability.metrics.serviceMonitor.labels, defaulting to the
+  # Giant Swarm tenant label.
   inheritedMetadata:
     labels:
-      observability.giantswarm.io/tenant: giantswarm
+      {{- toYaml $monitorLabels | nindent 6 }}
   # Enable built-in CNPG PodMonitor for metrics scraping.
   # Requires the Prometheus Operator CRDs (monitoring.coreos.com/v1).
   monitoring:
@@ -75,4 +86,5 @@ spec:
       - sourceLabels: [__name__]
         regex: cnpg_.*
         action: keep
+  {{- end }}
 {{- end }}

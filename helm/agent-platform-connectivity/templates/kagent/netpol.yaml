@@ -120,6 +120,7 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+{{- if .Values.postgres.enabled }}
 ---
 # CNPG cluster policies: inter-instance egress for streaming replication,
 # and ingress from the kagent controller.
@@ -164,6 +165,7 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+{{- end }}
 
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.muster.enabled }}
 ---

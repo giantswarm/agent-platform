@@ -1,0 +1,53 @@
+# Edge mode: the chart-owned agentgateway data-plane Gateway is also the public
+# edge (gatewayApi.gateway.create) — it grows an HTTPS :443 listener for
+# *.<global.domain>, the public routes pin to it via sectionName, the layer-1
+# routes are suppressed, and the data-plane Service becomes a LoadBalancer.
+# The shape a standalone install without a front Gateway (kind, vanilla
+# clusters) uses; the fleet never sets gatewayApi.gateway.create.
+global:
+  registry: gsoci.azurecr.io
+  domain: 127.0.0.1.nip.io
+  identity:
+    issuerUrl: https://dex.127.0.0.1.nip.io
+
+components:
+  agent-platform-mcps:
+    enabled: true
+  agentgateway:
+    enabled: true
+  kagent:
+    enabled: true
+
+ingress:
+  mode: agentgateway-muster
+
+gatewayApi:
+  gateway:
+    create: true
+    tls:
+      secretName: agent-platform-wildcard-tls
+    serviceType: LoadBalancer
+
+agent-platform-mcps:
+  agentgateway:
+    viaMuster: true
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory
+
+kagent:
+  controllerRoute:
+    enabled: true
+    parentRef:
+      name: ""
+      namespace: ""
+  uiRoute:
+    enabled: true
+    parentRef:
+      name: ""
+      namespace: ""

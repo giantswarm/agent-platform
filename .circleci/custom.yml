@@ -41,12 +41,13 @@ jobs:
           sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
           helm version
     - run:
-        name: verify ingress-mode guards + meta-package render
-        # verify-modes (connectivity chart ingress guards) and verify-meta (root
+        name: verify ingress-mode guards + global contract + meta-package render
+        # verify-modes (connectivity chart ingress guards), verify-global (the
+        # global.* contract behaviors and their guards) and verify-meta (root
         # app-of-apps render: no Chart.yaml pins, ranges as values, both engines,
         # pure renderer, pinned BOM) are the single source of truth, also run
         # locally. Neither chart has subcharts, so no `helm dependency build`.
-        command: make verify-modes verify-meta
+        command: make verify-modes verify-global verify-meta
 
 workflows:
   build:

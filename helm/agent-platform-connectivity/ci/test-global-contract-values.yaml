@@ -1,0 +1,70 @@
+# The global.* contract: no ingress.parentRefs / hostnames / per-route keys —
+# every public hostname derives from global.domain, every route attaches to
+# global.gatewayApi.parentRefs, the kagent JWT issuer comes from
+# global.identity, and the observability blocks replace the per-component
+# monitor / OTLP settings.
+global:
+  registry: gsoci.azurecr.io
+  domain: ci.example.com
+  identity:
+    issuerUrl: https://dex.ci.example.com
+    clientId: agent-platform
+  gatewayApi:
+    parentRefs:
+      - name: giantswarm-default
+        namespace: envoy-gateway-system
+        group: gateway.networking.k8s.io
+        kind: Gateway
+  observability:
+    metrics:
+      serviceMonitor:
+        enabled: true
+        interval: 30s
+        labels:
+          observability.giantswarm.io/tenant: giantswarm
+    traces:
+      otlp:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        protocol: grpc
+        headers:
+          X-Scope-OrgID: giantswarm
+
+components:
+  agent-platform-mcps:
+    enabled: true
+  agentgateway:
+    enabled: true
+  kagent:
+    enabled: true
+
+ingress:
+  mode: agentgateway-muster
+  httpRoute:
+    timeouts:
+      request: "0s"
+
+agent-platform-mcps:
+  agentgateway:
+    viaMuster: true
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory
+
+kagent:
+  controllerRoute:
+    enabled: true
+    parentRef:
+      name: ""
+      namespace: ""
+    jwtAuthentication:
+      enabled: true
+  uiRoute:
+    enabled: false
+gateway:
+  jwksEgress:
+    enabled: true

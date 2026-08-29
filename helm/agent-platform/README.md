@@ -21,6 +21,17 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 |-----|------|---------|-------------|
 | global.registry | string | `"gsoci.azurecr.io"` |  |
 | global.imagePullSecrets | list | `[]` |  |
+| global.domain | string | `""` |  |
+| global.identity.issuerUrl | string | `""` |  |
+| global.identity.clientId | string | `""` |  |
+| global.identity.existingSecret | string | `""` |  |
+| global.gatewayApi.parentRefs | list | `[]` |  |
+| global.observability.metrics.serviceMonitor.enabled | bool | `true` |  |
+| global.observability.metrics.serviceMonitor.interval | string | `""` |  |
+| global.observability.metrics.serviceMonitor.labels | object | `{}` |  |
+| global.observability.traces.otlp.endpoint | string | `""` |  |
+| global.observability.traces.otlp.protocol | string | `""` |  |
+| global.observability.traces.otlp.headers | object | `{}` |  |
 | gitops.engine | string | `"flux"` |  |
 | gitops.interval | string | `"10m"` |  |
 | gitops.namespace | string | `""` |  |
@@ -95,6 +106,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | ingress.httpRoute.muster.labels | object | `{}` |  |
 | ingress.httpRoute.mcp.annotations | object | `{}` |  |
 | ingress.httpRoute.mcp.labels | object | `{}` |  |
+| ingress.httpRoute.timeouts | object | `{}` |  |
 | ingress.backendTrafficPolicy.enabled | bool | `false` |  |
 | ingress.backendTrafficPolicy.timeout | string | `"0s"` |  |
 | ingress.backendTrafficPolicy.annotations | object | `{}` |  |
@@ -125,6 +137,9 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | gateway.parameters.dataPlaneEnv[1].value | string | `"grpc"` |  |
 | gateway.parameters.dataPlaneVolumes | list | `[]` |  |
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
+| gatewayApi.gateway.create | bool | `false` |  |
+| gatewayApi.gateway.tls.secretName | string | `""` |  |
+| gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
 | networkPolicy.enabled | bool | `true` |  |
 | networkPolicy.flavor | string | `"cilium"` |  |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
