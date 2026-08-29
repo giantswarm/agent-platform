@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The legacy-toggle guard (`validateLegacyToggles`, both charts) is coalescing-safe. In a layout where a component block feeds a real Helm dependency (the standalone umbrella copies this helper), Helm coalesces that chart's own top-level `enabled: true` default into the block once the dependency is on (klaus-gateway ships one), so the plain `hasKey` probe could not tell an operator-set value from the chart default and was skipped exactly where it mattered. The guard now reports a legacy key when it is provably the operator's: always while the component is off, and while it is on when the value is an explicit `false` — the case where the operator believes the component is off while it runs anyway. A leftover `enabled: true` under a component that is on is indistinguishable from a coalesced chart default and passes.
 - The CNPG cluster CiliumNetworkPolicy (`<clusterName>-cluster`: replication egress, controller ingress) is gated on `postgres.enabled`. It used to render for every kagent install under the cilium flavor, naming a Postgres cluster that does not exist.
 - The kagent `uiRoute`/`controllerRoute` `parentRef` overrides fail the render when `.name` is set without `.namespace` — the Gateway API CRD rejects an empty namespace, which used to break the route silently after install.
 - The `kagent-pg` CNPG Cluster now sets `inheritedMetadata.labels` with

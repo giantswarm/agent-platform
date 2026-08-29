@@ -110,6 +110,16 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	elif ! grep -q "components.kagent.enabled" /tmp/vm-legacy.out; then \
 		echo "FAIL: the legacy-toggle guard failed for the wrong reason"; cat /tmp/vm-legacy.out; exit 1; \
 	else echo "ok: legacy-toggle guard"; fi
+	@echo "--> a legacy false under a component that is on must fail loudly (coalescing-safe probe)"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.klaus-gateway.enabled=true --set klausGateway.enabled=false >/tmp/vm-legacy-on.out 2>&1; then \
+		echo "FAIL: klausGateway.enabled=false rendered silently while components.klaus-gateway.enabled=true"; exit 1; \
+	elif ! grep -q "components.klaus-gateway.enabled" /tmp/vm-legacy-on.out; then \
+		echo "FAIL: the on+false legacy-toggle guard failed for the wrong reason"; cat /tmp/vm-legacy-on.out; exit 1; \
+	else echo "ok: on+false legacy-toggle guard"; fi
+	@echo "--> a legacy true under a component that is on passes (indistinguishable from a coalesced chart default)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.klaus-gateway.enabled=true --set klausGateway.enabled=true >/tmp/vm-legacy-true.out 2>&1 || { \
+		echo "FAIL: on+true must pass — a coalesced chart default would trip it on every install"; cat /tmp/vm-legacy-true.out; exit 1; }
+	@echo "ok: on+true passes"
 	@echo "--> golden: the default render is byte-identical to $(GOLDEN_REF)"
 	@if [ -z "$(GOLDEN_REF)" ]; then \
 		echo "skip: GOLDEN_REF is empty (explicit opt-out)"; \
