@@ -58,8 +58,18 @@ Fail the render when a component's on/off toggle is still set the old way, insid
 the component's own values block. Those blocks are additionalProperties: true, so
 a leftover `enabled` key validates and is then ignored — the component silently
 falls back to the `components.<name>.enabled` default, which is off for five of
-the six. This turns that into a loud failure naming the new key. The removed
-`mcps:` block needs no entry: the root schema rejects it already.
+the six. This turns that into a loud failure naming the new key.
+The probe is coalescing-safe: in a layout where a block feeds a real Helm
+dependency (the standalone umbrella copies this helper), Helm coalesces that
+chart's own top-level `enabled: true` default into the block once the dependency
+is on (klaus-gateway ships one), so hasKey cannot tell an operator-set value from
+the chart default. A legacy key is therefore reported when it is provably the
+operator's: always while the component is off (a disabled dependency's block is
+never coalesced), and while it is on when the value is an explicit false (the
+only coalesced default is true) — exactly the case where the operator believes
+the component is off while it runs anyway. On + true is indistinguishable from a
+coalesced default and passes. The removed `mcps:` block needs no entry: the root
+schema rejects it already.
 */}}
 {{- define "agent-platform.validateLegacyToggles" -}}
 {{- $moved := list
@@ -70,8 +80,12 @@ the six. This turns that into a loud failure naming the new key. The removed
       (list "agentSandbox" "components.agent-sandbox.enabled") -}}
 {{- $found := list -}}
 {{- range $moved -}}
-{{- if hasKey (index $.Values (first .) | default dict) "enabled" -}}
+{{- $block := index $.Values (first .) | default dict -}}
+{{- if hasKey $block "enabled" -}}
+{{- $on := include "agent-platform.componentEnabled" (dict "root" $ "name" (index (splitList "." (last .)) 1)) -}}
+{{- if or (not $on) (not (index $block "enabled")) -}}
 {{- $found = append $found (printf "%s.enabled -> %s" (first .) (last .)) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- with $found -}}
