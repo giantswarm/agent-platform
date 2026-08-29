@@ -1,8 +1,12 @@
 {{ .Chart.Name }} {{ .Chart.Version }} installed in namespace {{ .Release.Namespace }}.
 
 Gateway:        {{ .Values.gateway.name }} (class {{ .Values.gateway.gatewayClassName }})
+{{- if (include "agent-platform.edgeIsDataPlane" .) }}
+Public edge:    this Gateway, HTTPS listener for *.{{ .Values.global.domain }} (Service type {{ .Values.gatewayApi.gateway.serviceType }})
+{{- else }}
 Listener port:  {{ (index .Values.gateway.listeners 0).port }}
 Service type:   {{ .Values.gateway.parameters.serviceType }} (data-plane Service forced via AgentgatewayParameters overlay)
+{{- end }}
 
 Prerequisite check (run BEFORE installing the Agent Platform):
   kubectl get crd gateways.gateway.networking.k8s.io

@@ -1,4 +1,5 @@
-{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.ingress.backendTrafficPolicy.enabled }}
+{{- /* Targets the layer-1 /mcp route, so it is suppressed with it in edge mode. */ -}}
+{{- if and (include "agent-platform.ingress.agentgateway" .) (not (include "agent-platform.edgeIsDataPlane" .)) .Values.ingress.backendTrafficPolicy.enabled }}
 {{- $fullName := .Values.gateway.name }}
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy

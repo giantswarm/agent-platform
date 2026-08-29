@@ -7,19 +7,31 @@ producing a silently-broken release.
   {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 
   {{- /* An HTTPRoute with no hostname on the shared public Gateway matches ALL
-         traffic to that Gateway and forwards it to the kagent UI/oauth2-proxy. */ -}}
-  {{- if and .Values.kagent.uiRoute.enabled (not .Values.kagent.uiRoute.hostname) }}
-    {{- fail "kagent.uiRoute.enabled is true but kagent.uiRoute.hostname is empty. An HTTPRoute with no hostname on the shared public Gateway would capture all traffic to that Gateway. Set kagent.uiRoute.hostname (e.g. kagent.<cluster>.<base-domain>)." }}
+         traffic to that Gateway and forwards it to the kagent UI/oauth2-proxy.
+         The hostname helper derives kagent.<global.domain> when the override
+         is empty, and fails the render when neither is set. */ -}}
+  {{- if .Values.kagent.uiRoute.enabled }}
+    {{- $_ := include "agent-platform.hostname" (dict "ctx" . "prefix" "kagent" "override" .Values.kagent.uiRoute.hostname "key" "kagent.uiRoute.hostname") }}
   {{- end }}
 
   {{- /* Same footgun on the agentgateway path. */ -}}
-  {{- if and .Values.kagent.controllerRoute.enabled (not .Values.kagent.controllerRoute.hostname) }}
-    {{- fail "kagent.controllerRoute.enabled is true but kagent.controllerRoute.hostname is empty. Set kagent.controllerRoute.hostname to the agentgateway Gateway hostname (e.g. agentgateway.<cluster>.<base-domain>)." }}
+  {{- if .Values.kagent.controllerRoute.enabled }}
+    {{- $_ := include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" .Values.kagent.controllerRoute.hostname "key" "kagent.controllerRoute.hostname") }}
   {{- end }}
 
-  {{- /* A JWT policy without an issuer validates nothing dex-shaped. */ -}}
+  {{- /* A parentRef override needs both halves: a route with namespace ""
+         is rejected by the Gateway API CRD, silently breaking the install. */ -}}
+  {{- range $key, $route := dict "uiRoute" .Values.kagent.uiRoute "controllerRoute" .Values.kagent.controllerRoute }}
+    {{- if and $route.enabled $route.parentRef.name (not $route.parentRef.namespace) }}
+      {{- fail (printf "kagent.%s.parentRef.name is set but .namespace is empty. Set both (the Gateway API CRD rejects an empty namespace), or clear .name to fall back to the chart-owned edge / global.gatewayApi.parentRefs." $key) }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* A JWT policy without an issuer validates nothing dex-shaped. The
+         issuer defaults from global.identity.issuerUrl; the helper fails the
+         render when both are empty. */ -}}
   {{- if and .Values.kagent.controllerRoute.enabled ((.Values.kagent.controllerRoute.jwtAuthentication).enabled) (not .Values.kagent.controllerRoute.jwtAuthentication.issuer) }}
-    {{- fail "kagent.controllerRoute.jwtAuthentication.enabled is true but .issuer is empty. Set it to the dex issuer URL exactly as it appears in token iss claims (e.g. https://dex.<cluster>.<base-domain>)." }}
+    {{- $_ := include "agent-platform.issuerUrl" (dict "ctx" . "for" "kagent.controllerRoute.jwtAuthentication (or set its .issuer)") }}
   {{- end }}
 
   {{- /* The data plane can only fetch the JWKS from dex on 5556 when jwksEgress

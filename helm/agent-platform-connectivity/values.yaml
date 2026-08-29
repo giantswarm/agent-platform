@@ -1,6 +1,58 @@
 global:
   registry: gsoci.azurecr.io
   imagePullSecrets: []
+  # The one hostname input. Public hostnames derive from it by convention
+  # (muster., agentgateway., kagent.<domain>), each overridable next to its
+  # route. Empty keeps the pre-contract behavior: every hostname is set
+  # explicitly (ingress.hostnames, kagent.uiRoute.hostname, ...). TLS and DNS
+  # for *.<domain> stay outside the chart.
+  domain: ""
+  # The platform's login identity provider: one OIDC provider per installation.
+  # Read by the kagent JWT policy (issuer default) and checked against muster's
+  # own muster.oauth.server.* keys — the render fails when the two disagree.
+  # All keys empty keeps the pre-contract behavior: each component names its
+  # issuer itself.
+  identity:
+    # OIDC issuer URL exactly as it appears in token iss claims. Example:
+    # https://dex.<domain>
+    issuerUrl: ""
+    # OAuth client registered at the provider for the platform.
+    clientId: ""
+    # Secret in the release namespace with the platform credentials
+    # (dex-client-secret, registration-token, oauth-encryption-key,
+    # valkey-password).
+    existingSecret: ""
+  gatewayApi:
+    # The public Gateway every route attaches to when neither the route's own
+    # parentRefs/parentRef override nor the chart-owned edge
+    # (gatewayApi.gateway.create) names one. Empty keeps the pre-contract
+    # behavior: ingress.parentRefs and the per-route parentRef keys are
+    # required.
+    parentRefs: []
+  observability:
+    metrics:
+      # Gates the monitor objects this chart renders: the kagent controller
+      # ServiceMonitor (+ its metrics Service) and the CNPG Cluster's built-in
+      # PodMonitor. enabled: false removes them all; the per-component keys
+      # (kagent.serviceMonitor.*) keep working underneath and can still
+      # disable or tune their own object. Needs the monitoring.coreos.com
+      # CRDs when on; metrics endpoints stay exposed either way.
+      serviceMonitor:
+        enabled: true
+        # Scrape interval; empty falls back to the per-component interval.
+        interval: ""
+        # Labels on every monitor object (e.g. the Giant Swarm tenant label);
+        # empty keeps the per-component labels.
+        labels: {}  # @schema type: object; additionalProperties: true
+    traces:
+      # OTLP exporter env (OTEL_EXPORTER_OTLP_*) for the agentgateway data
+      # plane. An empty endpoint renders nothing and
+      # gateway.parameters.dataPlaneEnv applies unchanged; a set endpoint wins
+      # over same-named entries in that list.
+      otlp:
+        endpoint: ""
+        protocol: ""
+        headers: {}  # @schema type: object; additionalProperties: true
 
 # === Components ===
 # Whether each platform component has a release on this cluster. This chart gates
@@ -50,6 +102,13 @@ ingress:
     mcp:
       annotations: {}
       labels: {}
+    # Portable Gateway API rule timeouts on the umbrella-owned routes (the
+    # muster `/` route, the agentgateway `/mcp` route, the kagent UI and
+    # public controller routes). `request: 0s` asks the implementation to
+    # disable the request timeout so MCP/SSE streams stay open. Empty renders
+    # nothing (the pre-contract behavior); Envoy-specific policies stay
+    # opt-in under ingress.backendTrafficPolicy.
+    timeouts: {}  # @schema type: object; additionalProperties: true
   backendTrafficPolicy:        # agentgateway-* modes only; preserves WWW-Authenticate
     enabled: false
     timeout: "0s"
@@ -117,6 +176,30 @@ gateway:
         ephemeral-storage: 50Mi
       limits:
         ephemeral-storage: 512Mi
+
+# Chart-owned public edge (agentgateway-* modes only): the agentgateway
+# data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
+# instead of sitting behind a separate TLS-terminating front Gateway. Off by
+# default — the Giant Swarm fleet fronts the platform with the cluster's
+# shared Envoy Gateway and never sets this; a standalone install without one
+# (kind, vanilla clusters) turns it on. When on:
+#   - gateway.yaml adds an HTTPS :443 listener for *.<global.domain>,
+#   - the umbrella-owned public routes attach to it pinned to that listener
+#     via sectionName (the plaintext :8080 listener stays cluster-internal),
+#   - the layer-1 routes that would forward a front Gateway to the
+#     agentgateway Service are suppressed (the data plane must not proxy to
+#     itself), and
+#   - the data-plane Service type switches to gatewayApi.gateway.serviceType.
+gatewayApi:
+  gateway:
+    create: false
+    # Wildcard certificate Secret for *.<global.domain>, in the release
+    # namespace. Required when create is true.
+    tls:
+      secretName: ""
+    # Service type of the data-plane Service when it is the edge (overrides
+    # gateway.parameters.serviceType).
+    serviceType: LoadBalancer
 
 networkPolicy:
   enabled: true

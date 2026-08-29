@@ -17,6 +17,17 @@ spec:
       ports:
         - port: {{ (index .Values.gateway.listeners 0).port }}
           protocol: TCP
+    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
+    # The data plane is the public edge: the HTTPS listener takes traffic from
+    # outside the cluster. World traffic is admitted on 443 only — the
+    # plaintext listener above stays cluster-internal.
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
   egress:
     - to:
         - ipBlock:

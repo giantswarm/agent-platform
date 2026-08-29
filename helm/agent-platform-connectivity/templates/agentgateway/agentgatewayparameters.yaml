@@ -1,4 +1,21 @@
 {{- if and (include "agent-platform.ingress.agentgateway" .) .Values.gateway.parameters.enabled }}
+{{- /* Data-plane env: OTEL_* from global.observability.traces.otlp first, then
+gateway.parameters.dataPlaneEnv minus entries the global block already named —
+so a set global endpoint wins over the defaults without duplicating env names. */ -}}
+{{- $otlp := list }}
+{{- with (include "agent-platform.otlpEnv" .) }}
+{{- $otlp = . | fromYamlArray }}
+{{- end }}
+{{- $otlpNames := dict }}
+{{- range $otlp }}
+{{- $_ := set $otlpNames .name true }}
+{{- end }}
+{{- $env := $otlp }}
+{{- range (.Values.gateway.parameters.dataPlaneEnv | default list) }}
+{{- if not (hasKey $otlpNames .name) }}
+{{- $env = append $env . }}
+{{- end }}
+{{- end }}
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters
 metadata:
@@ -16,7 +33,11 @@ spec:
     {{- end }}
   {{- end }}
   service:
+    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
+    type: {{ .Values.gatewayApi.gateway.serviceType }}
+    {{- else }}
     type: {{ .Values.gateway.parameters.serviceType }}
+    {{- end }}
   deployment:
     spec:
       template:
@@ -36,7 +57,7 @@ spec:
               resources:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
-              {{- with .Values.gateway.parameters.dataPlaneEnv }}
+              {{- with $env }}
               env:
                 {{- toYaml . | nindent 16 }}
               {{- end }}

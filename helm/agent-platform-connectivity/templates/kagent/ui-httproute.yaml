@@ -19,19 +19,21 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   parentRefs:
-    - name: {{ $uiRoute.parentRef.name }}
-      namespace: {{ $uiRoute.parentRef.namespace }}
-      group: gateway.networking.k8s.io
-      kind: Gateway
-  {{- if $uiRoute.hostname }}
+    {{- $override := list }}
+    {{- if $uiRoute.parentRef.name }}
+    {{- $override = list (dict "name" $uiRoute.parentRef.name "namespace" $uiRoute.parentRef.namespace "group" "gateway.networking.k8s.io" "kind" "Gateway") }}
+    {{- end }}
+    {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $override "key" "kagent.uiRoute.parentRef") | nindent 4 }}
   hostnames:
-    - {{ $uiRoute.hostname | quote }}
-  {{- end }}
+    - {{ include "agent-platform.hostname" (dict "ctx" . "prefix" "kagent" "override" $uiRoute.hostname "key" "kagent.uiRoute.hostname") | quote }}
   rules:
     - matches:
         - path:
             type: PathPrefix
             value: /
+      {{- with (include "agent-platform.routeTimeouts" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
       backendRefs:
         {{- if $oauth2proxyEnabled }}
         - name: {{ index .Values.kagent "oauth2-proxy" "fullnameOverride" | default (printf "%s-oauth2-proxy" .Release.Name) }}

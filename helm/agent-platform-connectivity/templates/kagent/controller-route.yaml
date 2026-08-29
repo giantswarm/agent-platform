@@ -62,12 +62,14 @@ spec:
         - name: kagent
           kind: AgentgatewayBackend
           group: agentgateway.dev
+{{- if not (include "agent-platform.edgeIsDataPlane" .) }}
 ---
 # HTTPRoute — exposes the kagent API on the outer public Gateway (TLS-terminating).
 # Forwards <pathPrefix>/* on the public hostname to the agentgateway Service,
 # which then applies JWT validation and the inner URLRewrite before forwarding
 # to the kagent controller. No URLRewrite here: the prefix strip happens at the
-# inner hop only.
+# inner hop only. Not rendered when the data plane is the edge itself: the inner
+# route above then serves <pathPrefix> on the HTTPS listener directly.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -77,20 +79,23 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   parentRefs:
-    - name: {{ $route.parentRef.name }}
-      namespace: {{ $route.parentRef.namespace }}
-      group: gateway.networking.k8s.io
-      kind: Gateway
-  {{- if $route.hostname }}
+    {{- $override := list }}
+    {{- if $route.parentRef.name }}
+    {{- $override = list (dict "name" $route.parentRef.name "namespace" $route.parentRef.namespace "group" "gateway.networking.k8s.io" "kind" "Gateway") }}
+    {{- end }}
+    {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $override "key" "kagent.controllerRoute.parentRef") | nindent 4 }}
   hostnames:
-    - {{ $route.hostname | quote }}
-  {{- end }}
+    - {{ include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" $route.hostname "key" "kagent.controllerRoute.hostname") | quote }}
   rules:
     - matches:
         - path:
             type: PathPrefix
             value: {{ $route.pathPrefix }}
+      {{- with (include "agent-platform.routeTimeouts" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
       backendRefs:
         - name: {{ .Values.gateway.name }}
           port: 8080
+{{- end }}
 {{- end }}

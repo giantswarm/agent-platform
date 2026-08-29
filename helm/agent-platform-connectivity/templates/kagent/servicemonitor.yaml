@@ -1,6 +1,11 @@
-{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.serviceMonitor.enabled }}
+{{- /* Both gates apply: global.observability.metrics.serviceMonitor.enabled
+switches every monitor object this chart renders (a vanilla cluster has no
+monitoring.coreos.com CRDs); kagent.serviceMonitor.enabled keeps working
+underneath as this object's own toggle. */ -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) (include "agent-platform.serviceMonitor" .) .Values.kagent.serviceMonitor.enabled }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $releaseName := .Release.Name }}
+{{- $monitor := .Values.global.observability.metrics.serviceMonitor }}
 # Headless Service exposing the kagent controller metrics port (:8080).
 # The upstream controller-service.yaml only exposes port 8083 (API). We add a
 # separate Service here so the ServiceMonitor below can target it without
@@ -37,7 +42,7 @@ metadata:
   namespace: {{ $kagentNs }}
   labels:
     {{- include "labels.common" . | nindent 4 }}
-    {{- with .Values.kagent.serviceMonitor.labels }}
+    {{- with ($monitor.labels | default .Values.kagent.serviceMonitor.labels) }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
@@ -53,5 +58,5 @@ spec:
     - port: metrics
       path: /metrics
       scheme: http
-      interval: {{ .Values.kagent.serviceMonitor.interval | default "60s" }}
+      interval: {{ $monitor.interval | default .Values.kagent.serviceMonitor.interval | default "60s" }}
 {{- end }}

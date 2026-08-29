@@ -16,11 +16,13 @@ VM := --set ingress.parentRefs[0].name=x
 # seccomp PolicyException; agentSandbox: the pod-security ClusterPolicy), so the
 # kyvernoPolicies assertions below see all four objects.
 KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent-sandbox.enabled=true
-# The golden render deliberately leaves agentSandbox off: its ClusterPolicy dropped
-# helm.sh/resource-policy: keep, the one intended render change. GOLDEN_REF is the ref
-# the rest of the default render must still match byte for byte; GOLDEN_REF= (empty)
-# opts out for a clone that has no such ref.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true
+# The golden render deliberately uses the kubernetes networkPolicy flavor: the
+# cilium flavor's CNPG section is now gated on postgres.enabled, the one intended
+# render change (verify-global asserts that gate both ways). It also leaves
+# agentSandbox off (see the 1.1.x note about its dropped resource-policy).
+# GOLDEN_REF is the ref the rest of the default render must still match byte for
+# byte; GOLDEN_REF= (empty) opts out for a clone that has no such ref.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -31,10 +33,10 @@ PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 .PHONY: verify-modes
 verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns the wiring + guards).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> muster-direct with empty parentRefs must fail"
+	@echo "--> muster-direct with no Gateway named anywhere must fail"
 	@if helm template t $(CONNECTIVITY_DIR) --set ingress.mode=muster-direct >/tmp/vm-parents.out 2>&1; then \
 		echo "FAIL: empty-parentRefs guard did not fire (render succeeded)"; cat /tmp/vm-parents.out; exit 1; \
-	elif ! grep -q "ingress.parentRefs is required in all modes" /tmp/vm-parents.out; then \
+	elif ! grep -q "no public Gateway for ingress.parentRefs" /tmp/vm-parents.out; then \
 		echo "FAIL: empty-parentRefs check failed for the wrong reason"; cat /tmp/vm-parents.out; exit 1; \
 	else echo "ok: empty-parentRefs guard"; fi
 	@echo "--> agentgateway-direct must be blocked with the DCR message"
@@ -125,6 +127,91 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		else echo "FAIL: the default render drifted from $(GOLDEN_REF)"; exit 1; fi; \
 	fi
 	@echo "All mode guards verified."
+
+# The global.* contract inputs a standalone install sets; the fleet sets none of
+# them, which the golden check above pins to a byte-identical render.
+GLOBAL_VM := --set global.domain=ci.example.com --set 'global.gatewayApi.parentRefs[0].name=giantswarm-default' --set 'global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system'
+# A valid edge-mode config: the chart-owned Gateway is the public edge.
+EDGE_VM := --set global.domain=ci.example.com --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls
+
+.PHONY: verify-global
+verify-global: ## Assert the global.* contract behaviors (derived hostnames, gateway fallback, observability gates, edge mode) and their guards.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> hostnames derive from global.domain, routes attach to global.gatewayApi.parentRefs"
+	@helm template t $(CONNECTIVITY_DIR) $(GLOBAL_VM) >/tmp/vg-derive.out 2>&1 || { cat /tmp/vg-derive.out; exit 1; }
+	@grep -q 'muster.ci.example.com' /tmp/vg-derive.out || { echo "FAIL: muster hostname not derived from global.domain"; exit 1; }
+	@grep -q 'name: giantswarm-default' /tmp/vg-derive.out || { echo "FAIL: routes do not attach to global.gatewayApi.parentRefs"; exit 1; }
+	@echo "ok: derived hostname + Gateway fallback"
+	@echo "--> explicit ingress.hostnames / parentRefs still win over global.*"
+	@helm template t $(CONNECTIVITY_DIR) $(GLOBAL_VM) $(VM) --set 'ingress.hostnames[0]=own.example.org' >/tmp/vg-override.out 2>&1 || { cat /tmp/vg-override.out; exit 1; }
+	@grep -q 'own.example.org' /tmp/vg-override.out || { echo "FAIL: ingress.hostnames override lost"; exit 1; }
+	@if grep -q 'muster.ci.example.com' /tmp/vg-override.out; then echo "FAIL: derived hostname rendered next to the override"; exit 1; fi
+	@grep -q 'name: x' /tmp/vg-override.out || { echo "FAIL: ingress.parentRefs override lost"; exit 1; }
+	@echo "ok: per-route overrides win"
+	@echo "--> ingress.httpRoute.timeouts lands on the muster route"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set 'ingress.httpRoute.timeouts.request=0s' 2>/dev/null | grep -A1 'timeouts:' | grep -q 'request: 0s' || { echo "FAIL: HTTPRoute timeouts missing"; exit 1; }
+	@echo "ok: route timeouts"
+	@echo "--> global.observability.metrics.serviceMonitor.enabled=false removes every monitor object"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true --set global.observability.metrics.serviceMonitor.enabled=false >/tmp/vg-mon.out 2>&1 || { cat /tmp/vg-mon.out; exit 1; }
+	@for pattern in 'kind: ServiceMonitor' 'enablePodMonitor' 'inheritedMetadata'; do \
+		if grep -q "$$pattern" /tmp/vg-mon.out; then echo "FAIL: monitor-gated render still contains $$pattern"; exit 1; fi; \
+	done
+	@echo "ok: monitor gate"
+	@echo "--> the default render keeps the ServiceMonitor and the CNPG PodMonitor (fleet behavior)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true >/tmp/vg-mon-on.out 2>&1 || { cat /tmp/vg-mon-on.out; exit 1; }
+	@grep -q 'kind: ServiceMonitor' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the kagent ServiceMonitor"; exit 1; }
+	@grep -q 'enablePodMonitor: true' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the CNPG PodMonitor"; exit 1; }
+	@grep -q 'observability.giantswarm.io/tenant: giantswarm' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the tenant label"; exit 1; }
+	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-on.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
+	@echo "ok: fleet monitor defaults + CNPG keep"
+	@echo "--> the CNPG CiliumNetworkPolicy renders only when postgres.enabled"
+	@grep -q 'cnpg.io/cluster' /tmp/vg-mon-on.out || { echo "FAIL: no CNPG network policy with postgres.enabled=true"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vg-nopg.out 2>&1 || { cat /tmp/vg-nopg.out; exit 1; }
+	@if grep -q 'cnpg.io/cluster' /tmp/vg-nopg.out; then echo "FAIL: CNPG network policy rendered for a postgres cluster that does not exist"; exit 1; fi
+	@echo "ok: CNPG netpol gate"
+	@echo "--> global.observability.traces.otlp.endpoint replaces the default OTEL env (no duplicate names)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set global.observability.traces.otlp.endpoint=http://collector:4317 >/tmp/vg-otlp.out 2>&1 || { cat /tmp/vg-otlp.out; exit 1; }
+	@grep -q 'value: http://collector:4317' /tmp/vg-otlp.out || { echo "FAIL: OTLP endpoint not rendered"; exit 1; }
+	@if grep -q 'otlp-gateway.kube-system' /tmp/vg-otlp.out; then echo "FAIL: default OTEL env rendered next to the global one (duplicate env names)"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true 2>/dev/null | grep -q 'otlp-gateway.kube-system' || { echo "FAIL: default OTEL env lost with global.* unset"; exit 1; }
+	@echo "ok: OTLP env"
+	@echo "--> the kagent JWT policy defaults its issuer from global.identity.issuerUrl"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set kagent.controllerRoute.hostname=agw.example.com --set kagent.controllerRoute.jwtAuthentication.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com 2>/dev/null | grep -q 'issuer: "https://dex.ci.example.com"' || { echo "FAIL: JWT issuer not defaulted from global.identity"; exit 1; }
+	@echo "ok: JWT issuer default"
+	@echo "--> a muster issuer that differs from global.identity fails"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set global.identity.issuerUrl=https://dex.ci.example.com --set muster.muster.oauth.server.enabled=true --set muster.muster.oauth.server.dex.issuerUrl=https://other.example.com >/tmp/vg-idp.out 2>&1; then \
+		echo "FAIL: muster issuer differing from global.identity accepted"; exit 1; \
+	elif ! grep -q "differs from global.identity.issuerUrl" /tmp/vg-idp.out; then \
+		echo "FAIL: identity consistency check failed for the wrong reason"; cat /tmp/vg-idp.out; exit 1; \
+	else echo "ok: identity consistency guard"; fi
+	@echo "--> edge mode renders the HTTPS listener, pins public routes to it, and suppresses the layer-1 routes"
+	@helm template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true >/tmp/vg-edge.out 2>&1 || { cat /tmp/vg-edge.out; exit 1; }
+	@grep -q 'hostname: "\*.ci.example.com"' /tmp/vg-edge.out || { echo "FAIL: edge HTTPS listener missing"; exit 1; }
+	@grep -q 'sectionName: https' /tmp/vg-edge.out || { echo "FAIL: public routes not pinned to the HTTPS listener (plaintext 8080 would ride the LB)"; exit 1; }
+	@grep -q 'type: LoadBalancer' /tmp/vg-edge.out || { echo "FAIL: edge data-plane Service is not gatewayApi.gateway.serviceType"; exit 1; }
+	@if grep -q 'name: kagent-controller-public' /tmp/vg-edge.out; then echo "FAIL: layer-1 kagent route rendered with the edge as data plane"; exit 1; fi
+	@if grep -qE '^      value: /mcp' /tmp/vg-edge.out; then echo "FAIL: layer-1 /mcp route rendered with the edge as data plane"; exit 1; fi
+	@grep -B4 -A4 '"world", "cluster"' /tmp/vg-edge.out | grep -q '"443"' || { echo "FAIL: edge network policy does not admit world traffic on 443"; exit 1; }
+	@echo "ok: edge mode"
+	@echo "--> edge guards: the certificate Secret and the agentgateway mode are required"
+	@if helm template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set gatewayApi.gateway.tls.secretName= >/tmp/vg-tls.out 2>&1; then \
+		echo "FAIL: gateway.create without tls.secretName accepted"; exit 1; \
+	elif ! grep -q "gatewayApi.gateway.tls.secretName is empty" /tmp/vg-tls.out; then \
+		echo "FAIL: tls guard failed for the wrong reason"; cat /tmp/vg-tls.out; exit 1; \
+	else echo "ok: tls guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) --set global.domain=ci.example.com --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls >/tmp/vg-mode.out 2>&1; then \
+		echo "FAIL: gateway.create in muster-direct mode accepted"; exit 1; \
+	elif ! grep -q "ingress.mode is muster-direct" /tmp/vg-mode.out; then \
+		echo "FAIL: edge mode guard failed for the wrong reason"; cat /tmp/vg-mode.out; exit 1; \
+	else echo "ok: edge mode guard"; fi
+	@echo "--> kagent uiRoute derives its hostname from global.domain (and still fails with neither set)"
+	@helm template t $(CONNECTIVITY_DIR) $(GLOBAL_VM) --set components.kagent.enabled=true --set kagent.uiRoute.enabled=true 2>/dev/null | grep -q '"kagent.ci.example.com"' || { echo "FAIL: kagent UI hostname not derived"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.uiRoute.enabled=true >/tmp/vg-uihost.out 2>&1; then \
+		echo "FAIL: uiRoute with no hostname and no global.domain accepted (route would capture all traffic)"; exit 1; \
+	elif ! grep -q "global.domain is empty and kagent.uiRoute.hostname is not set" /tmp/vg-uihost.out; then \
+		echo "FAIL: uiRoute hostname guard failed for the wrong reason"; cat /tmp/vg-uihost.out; exit 1; \
+	else echo "ok: uiRoute hostname derivation + guard"; fi
+	@echo "All global.* contract behaviors verified."
 
 .PHONY: verify-meta
 verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, ranges as values, both engines, pinned BOM).

@@ -432,6 +432,33 @@
                 }
             }
         },
+        "gatewayApi": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "gateway": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "create": {
+                            "type": "boolean"
+                        },
+                        "serviceType": {
+                            "type": "string"
+                        },
+                        "tls": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "secretName": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "gcpProject": {
             "type": "string"
         },
@@ -475,8 +502,85 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "domain": {
+                    "type": "string"
+                },
+                "gatewayApi": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "parentRefs": {
+                            "type": "array"
+                        }
+                    }
+                },
+                "identity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "clientId": {
+                            "type": "string"
+                        },
+                        "existingSecret": {
+                            "type": "string"
+                        },
+                        "issuerUrl": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "imagePullSecrets": {
                     "type": "array"
+                },
+                "observability": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "metrics": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "serviceMonitor": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "enabled": {
+                                            "type": "boolean"
+                                        },
+                                        "interval": {
+                                            "type": "string"
+                                        },
+                                        "labels": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "traces": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "otlp": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "endpoint": {
+                                            "type": "string"
+                                        },
+                                        "headers": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        },
+                                        "protocol": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
                 "registry": {
                     "type": "string"
@@ -549,6 +653,10 @@
                                     "additionalProperties": false
                                 }
                             }
+                        },
+                        "timeouts": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 },

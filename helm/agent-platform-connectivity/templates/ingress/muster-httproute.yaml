@@ -13,17 +13,31 @@ metadata:
     {{- . | nindent 4 }}
   {{- end }}
 spec:
+  {{- /* In edge mode (gatewayApi.gateway.create) this hostname-specific `/`
+  route attaches to the data-plane Gateway itself and therefore also serves
+  muster.<domain>/mcp: Gateway API precedence puts hostname specificity first,
+  so requests go straight to the muster Service instead of through the
+  hostname-less MCP route (the AgentgatewayBackend multiplexing layer). muster
+  serves /mcp itself, so the MCP path degrades to muster-direct semantics on
+  this hostname. Accepted for the standalone edge; behavioral acceptance is
+  owned by the standalone kind smoke. */}}
   parentRefs:
-    {{- toYaml .Values.ingress.parentRefs | nindent 4 }}
-  {{- with .Values.ingress.hostnames }}
+    {{- include "agent-platform.parentRefs" (dict "ctx" . "override" .Values.ingress.parentRefs "key" "ingress.parentRefs") | nindent 4 }}
+  {{- if .Values.ingress.hostnames }}
   hostnames:
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml .Values.ingress.hostnames | nindent 4 }}
+  {{- else if .Values.global.domain }}
+  hostnames:
+    - {{ include "agent-platform.hostname" (dict "ctx" . "prefix" "muster" "key" "ingress.hostnames") | quote }}
   {{- end }}
   rules:
     - matches:
         - path:
             type: PathPrefix
             value: /
+      {{- with (include "agent-platform.routeTimeouts" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
       backendRefs:
         - name: {{ include "agent-platform.musterFullname" . }}
           port: {{ include "agent-platform.musterServicePort" . }}
