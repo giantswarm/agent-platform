@@ -599,6 +599,25 @@ muster:  # @schema skipProperties: true; additionalProperties: true
             enabled: true
             labels:
               observability.giantswarm.io/tenant: giantswarm
+      # The "Muster / MCP Gateway" Grafana dashboard (uid muster): MCP
+      # server fleet state, per-server/per-tool usage and latency from
+      # the downstream dispatch metrics, aggregator boundary traffic,
+      # and workflow executions. Off in the muster chart's own defaults;
+      # on here for the same reason as prometheusRule — the
+      # ServiceMonitor above already ships the series it reads.
+      # giantswarm.enabled makes the GS observability platform pick the
+      # ConfigMap up (app.giantswarm.io/kind: dashboard) and load it
+      # into the "Giant Swarm" Grafana organization, which reads the
+      # giantswarm Mimir tenant the ServiceMonitor routes to.
+      #
+      # Requires the muster chart to carry
+      # templates/grafana-dashboard.yaml (muster#1116, v5.7.0) — the
+      # chart validates values with additionalProperties: false, so
+      # this key must not be set for an older muster.
+      grafanaDashboard:
+        enabled: true
+        giantswarm:
+          enabled: true
 
 # Bundled giantswarm/valkey-app for muster's OAuth session storage.
 # Wrapper chart exposes three top-level blocks consumed here:

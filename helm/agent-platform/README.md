@@ -194,6 +194,8 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | muster.muster.observability.metrics.prometheus.prometheusRule.enabled | bool | `true` |  |
 | muster.muster.observability.metrics.prometheus.prometheusRule.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| muster.muster.observability.grafanaDashboard.enabled | bool | `true` |  |
+| muster.muster.observability.grafanaDashboard.giantswarm.enabled | bool | `true` |  |
 | valkey.ciliumNetworkPolicy.enabled | bool | `true` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
