@@ -33,11 +33,15 @@ spec:
     {{- end }}
   {{- end }}
   service:
-    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
-    type: {{ .Values.gatewayApi.gateway.serviceType }}
-    {{- else }}
-    type: {{ .Values.gateway.parameters.serviceType }}
-    {{- end }}
+    {{- /* The CRD embeds the Service customization as a ServiceSpec under
+    spec.service.spec; a `type` directly under `service` is not in the
+    schema (pruned client-side, rejected by server-side apply). */}}
+    spec:
+      {{- if (include "agent-platform.edgeIsDataPlane" .) }}
+      type: {{ .Values.gatewayApi.gateway.serviceType }}
+      {{- else }}
+      type: {{ .Values.gateway.parameters.serviceType }}
+      {{- end }}
   deployment:
     spec:
       template:
