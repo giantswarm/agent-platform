@@ -348,10 +348,15 @@ untouched. */ -}}
 
 {{/*
 Cilium DNS egress rule for kube-dns and node-local-dns.
+CoreDNS is labeled k8s-app: kube-dns upstream (kubeadm) and k8s-app: coredns
+on Giant Swarm clusters; match both so either fleet shape resolves.
 Rendered as a YAML list item; the caller must provide the surrounding `egress:` key.
 */}}
 {{- define "agent-platform.dnsEgress" -}}
 - toEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.namespace: kube-system
+        k8s-app: kube-dns
     - matchLabels:
         io.kubernetes.pod.namespace: kube-system
         k8s-app: coredns
