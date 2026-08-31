@@ -1082,7 +1082,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway
-      tag: v1.4.1
+      tag: v1.5.0
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
