@@ -8,8 +8,9 @@
 # the primary `agent-platform` chart).
 #
 # What this file carries beyond the golden (single-chart) pipeline:
-#   - test-ingress-modes: the `make verify-modes` + `make verify-meta` checks on
-#     branches (ingress-mode guards + app-of-apps meta-package render)
+#   - test-ingress-modes: the `make verify-modes` + `make verify-meta` +
+#     `make verify-llm-routing` checks on branches (ingress-mode guards,
+#     app-of-apps meta-package render, LLM routing)
 #   - the standalone agent-platform-connectivity chart (build, tag push), the
 #     consumer-side wiring rendered by the meta-package as a HelmRelease
 #   versioned in lockstep with agent-platform off the same git tag. This
@@ -41,13 +42,15 @@ jobs:
           sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
           helm version
     - run:
-        name: verify ingress-mode guards + global contract + meta-package render
+        name: verify ingress-mode guards + global contract + meta-package render + LLM routing
         # verify-modes (connectivity chart ingress guards), verify-global (the
-        # global.* contract behaviors and their guards) and verify-meta (root
+        # global.* contract behaviors and their guards), verify-meta (root
         # app-of-apps render: no Chart.yaml pins, ranges as values, both engines,
-        # pure renderer, pinned BOM) are the single source of truth, also run
-        # locally. Neither chart has subcharts, so no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta
+        # pure renderer, pinned BOM) and verify-llm-routing (the llmRouting
+        # toggle, both states, and its guards) are the single source of truth,
+        # also run locally. Neither chart has subcharts, so no
+        # `helm dependency build`.
+        command: make verify-modes verify-global verify-meta verify-llm-routing
 
 workflows:
   build:

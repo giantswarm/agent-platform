@@ -389,6 +389,97 @@ gatewayApi:
     # gateway.parameters.serviceType).
     serviceType: LoadBalancer
 
+# === LLM routing ===
+# All agent inference traffic through the installation's agentgateway, so the
+# data plane emits GenAI metrics (tokens by type, cost in USD, request duration,
+# time to first token) for every model call. The gateway holds NO provider
+# credential: agent pods keep their own ANTHROPIC_API_KEY and the client
+# `x-api-key` header passes through untouched, so reach to the listener grants
+# no spend.
+#
+# Two values turn it on, and the order matters:
+#   1. llmRouting.enabled: true  — renders the `llm` listener on the data-plane
+#      Gateway plus the AgentgatewayBackend / HTTPRoute / AgentgatewayPolicy
+#      that carry the traffic, and the model-price ConfigMap. Nothing routes
+#      through it yet.
+#   2. kagent.providers.anthropic.config.baseUrl:
+#        http://<gateway.name>.<release namespace>.svc:<llmRouting.listener.port>
+#      — points kagent's default ModelConfig at the listener. This is the
+#      cutover; rollback is the removal of this second value.
+# Requires the agentgateway component (an agentgateway-* ingress.mode). The
+# render fails when llmRouting.enabled is true and that component is off.
+# Consumed by the connectivity chart; see its values.yaml for the rendered
+# behavior.
+llmRouting:
+  enabled: false
+  # One more entry in the data-plane Gateway's listener list. HTTP and
+  # cluster-internal: the data-plane NetworkPolicy admits world traffic on 443
+  # only, and the LLM HTTPRoute pins itself to this listener by sectionName so
+  # it never attaches to the public HTTPS listener in edge mode.
+  listener:
+    name: llm
+    port: 8081
+  # The Anthropic AgentgatewayBackend. No host, port or model override: the
+  # provider defaults resolve to api.anthropic.com:443 with system-trust TLS
+  # and the /v1/messages path suffix. No backend auth — see above.
+  backend:
+    name: anthropic
+    provider: anthropic
+  # Client path -> body format the gateway parses, on the Gateway-scoped
+  # AgentgatewayPolicy. Mandatory: without it an `ai` backend parses every body
+  # as OpenAI Completions and mis-parses Anthropic bodies. Keys match the client
+  # path by suffix, so the "*" entry forwards every other path unchanged
+  # instead of falling back to Completions.
+  routes:  # @schema type: object; additionalProperties: true
+    "/v1/messages": Messages
+    "/v1/messages/count_tokens": AnthropicTokenCount
+    "*": Passthrough
+  # Custom Prometheus labels on every metric the data plane emits: which agent
+  # made the call. The expression resolves the caller by source IP against the
+  # agentgateway controller's own workload store (built from cluster Pods, no
+  # Istio). The identity is NOT cryptographic — it is adequate for accounting
+  # and must never be used for authorization. An unknown caller IP, or a failed
+  # expression, renders the label value `unknown` and keeps the series.
+  # Cardinality equals the number of agents; pod name is deliberately absent.
+  # At most 16 entries (the CRD's limit).
+  metricLabels:
+    - name: agent
+      expression: source.unverifiedWorkload.serviceAccount
+    - name: agent_namespace
+      expression: source.unverifiedWorkload.namespace
+  # USD per one million tokens, by provider and model. The deployed gateway
+  # ships no built-in price catalog: with no source configured every lookup
+  # reports NoCatalog and no cost sample is emitted at all. This block renders a
+  # ConfigMap that the Gateway's AgentgatewayParameters references and the data
+  # plane hot-reloads, so a price change needs no gateway release. The values
+  # mirror the catalog JSON one to one (providers -> models -> rates); team
+  # bumblebee owns the list, and the dashboard's lookup-status panel
+  # (agentgateway_cost_catalog_lookups_total) exposes drift and missing models.
+  # Lookup is an exact, provider-scoped model-name match on the response model,
+  # then the request model.
+  modelCatalog:
+    enabled: true
+    # ConfigMap name; empty derives <release>-model-catalog.
+    name: ""
+    key: catalog.json
+    providers:  # @schema type: object; additionalProperties: true
+      anthropic:
+        models:
+          claude-haiku-4-5:
+            rates: {input: "1", output: "5", cacheRead: "0.1", cacheWrite: "1.25"}
+          claude-opus-4-5:
+            rates: {input: "5", output: "25", cacheRead: "0.5", cacheWrite: "6.25"}
+          claude-opus-5:
+            rates: {input: "5", output: "25", cacheRead: "0.5", cacheWrite: "6.25"}
+          claude-sonnet-4-5:
+            rates: {input: "3", output: "15", cacheRead: "0.3", cacheWrite: "3.75"}
+          claude-sonnet-4-6:
+            rates: {input: "3", output: "15", cacheRead: "0.3", cacheWrite: "3.75"}
+          claude-sonnet-5:
+            rates: {input: "2", output: "10", cacheRead: "0.2", cacheWrite: "2.5"}
+          claude-fable-5-1:
+            rates: {input: "10", output: "50", cacheRead: "0.25", cacheWrite: "12.5"}
+
 networkPolicy:
   enabled: true
   # cilium     — CiliumNetworkPolicy (entity selectors + FQDN egress)

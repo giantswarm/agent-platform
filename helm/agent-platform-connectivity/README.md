@@ -16,6 +16,95 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 
 * <https://github.com/giantswarm/agent-platform>
 
+## LLM routing
+
+All agent inference traffic can go through the installation's agentgateway, so
+that one component observes every model call. The data plane then emits GenAI
+metrics for each request — tokens by type, cost in USD, request duration and
+time to first token — with the calling agent as a label. The `agent-platform`
+Grafana dashboard in `giantswarm/dashboards` reads them.
+
+The gateway holds no provider credential. Agent pods keep their own
+`ANTHROPIC_API_KEY`, and the client `x-api-key` header passes through
+untouched, so network reach to the LLM listener grants no spend.
+
+The feature needs the agentgateway data plane (`ingress.mode:
+agentgateway-muster`). The render fails when `llmRouting.enabled` is true and
+that component is off.
+
+### Rollout
+
+Two values turn the path on, and the order matters.
+
+1. Render the listener and the routing resources:
+
+   ```yaml
+   llmRouting:
+     enabled: true
+   ```
+
+   This adds an `llm` listener to the data-plane Gateway, an
+   `AgentgatewayBackend` for the provider, an `HTTPRoute` pinned to that
+   listener, one Gateway-scoped `AgentgatewayPolicy` (the route-type map and
+   the metric labels), and the model-price ConfigMap the cost counter reads.
+   Nothing routes through it yet.
+
+   Verify the listener answers before you continue. From a pod in the release
+   namespace:
+
+   ```console
+   curl -sS -o /dev/null -w '%{http_code}\n' \
+     -X POST http://agentgateway.<release namespace>.svc:8081/v1/messages \
+     -H 'content-type: application/json' \
+     -H "x-api-key: $ANTHROPIC_API_KEY" \
+     -H 'anthropic-version: 2023-06-01' \
+     -d '{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
+   ```
+
+2. Point kagent's default ModelConfig at the listener. This is the cutover:
+
+   ```yaml
+   kagent:
+     providers:
+       anthropic:
+         config:
+           baseUrl: http://agentgateway.<release namespace>.svc:8081
+   ```
+
+   The base URL lands in each agent's config Secret and the pod template
+   carries a config hash, so one rolling update replaces the agent pods.
+
+Roll back by removing the second value. The listener may stay.
+
+### Acceptance
+
+On the installation, after the cutover:
+
+- `agentgateway_gen_ai_client_token_usage` carries `agent` and
+  `agent_namespace` labels in the `giantswarm` Mimir tenant.
+- `agentgateway_cost_catalog_lookups_total{status="Exact"}` grows. A
+  `NoCatalog` or `Missing` status means the model has no price in
+  `llmRouting.modelCatalog`.
+- The Usage dashboard panels are populated.
+
+### Notes
+
+- The `llm` listener is cluster-internal. The data-plane network policy admits
+  world traffic on 443 only, and the LLM route pins itself to its own listener
+  by `sectionName`, so it never attaches to the public HTTPS listener in edge
+  mode.
+- Agent pods keep their `world:443` egress, so a direct call to the provider
+  still works. The listener is the paved road, not a wall. Egress tightening is
+  a separate change.
+- Only one metrics policy may target a Gateway: custom labels replace rather
+  than merge, and when two policies target the same Gateway the one with the
+  lexicographically lowest policy key wins while the other is silently dropped.
+- An extra `kagent.modelConfigs[]` entry calls the provider directly unless it
+  sets its own `baseUrl`.
+- The data-plane `PodMonitor` is gated on the agentgateway component, not on
+  `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
+  before the cutover.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -83,6 +172,49 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
+| llmRouting.enabled | bool | `false` |  |
+| llmRouting.listener.name | string | `"llm"` |  |
+| llmRouting.listener.port | int | `8081` |  |
+| llmRouting.backend.name | string | `"anthropic"` |  |
+| llmRouting.backend.provider | string | `"anthropic"` |  |
+| llmRouting.routes./v1/messages | string | `"Messages"` |  |
+| llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
+| llmRouting.routes.* | string | `"Passthrough"` |  |
+| llmRouting.metricLabels[0].name | string | `"agent"` |  |
+| llmRouting.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
+| llmRouting.metricLabels[1].name | string | `"agent_namespace"` |  |
+| llmRouting.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| llmRouting.modelCatalog.enabled | bool | `true` |  |
+| llmRouting.modelCatalog.name | string | `""` |  |
+| llmRouting.modelCatalog.key | string | `"catalog.json"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-haiku-4-5.rates.input | string | `"1"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-haiku-4-5.rates.output | string | `"5"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-haiku-4-5.rates.cacheRead | string | `"0.1"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-haiku-4-5.rates.cacheWrite | string | `"1.25"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-4-5.rates.input | string | `"5"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-4-5.rates.output | string | `"25"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-4-5.rates.cacheRead | string | `"0.5"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-4-5.rates.cacheWrite | string | `"6.25"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.input | string | `"5"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.output | string | `"25"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.cacheRead | string | `"0.5"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.cacheWrite | string | `"6.25"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.input | string | `"3"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.output | string | `"15"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.cacheRead | string | `"0.3"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.cacheWrite | string | `"3.75"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-6.rates.input | string | `"3"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-6.rates.output | string | `"15"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-6.rates.cacheRead | string | `"0.3"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-6.rates.cacheWrite | string | `"3.75"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.input | string | `"2"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.output | string | `"10"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.cacheRead | string | `"0.2"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.cacheWrite | string | `"2.5"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.input | string | `"10"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.output | string | `"50"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.cacheRead | string | `"0.25"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.cacheWrite | string | `"12.5"` |  |
 | networkPolicy.enabled | bool | `true` |  |
 | networkPolicy.flavor | string | `"cilium"` |  |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |

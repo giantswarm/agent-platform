@@ -24,6 +24,15 @@ metadata:
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
+  {{- if (include "agent-platform.modelCatalog" .) }}
+  {{- /* Prices for the cost counter. Without a source the catalog is empty,
+  every lookup reports NoCatalog and no cost sample is emitted. */}}
+  modelCatalog:
+    sources:
+      - configMap:
+          name: {{ include "agent-platform.modelCatalogName" . }}
+          key: {{ .Values.llmRouting.modelCatalog.key }}
+  {{- end }}
   {{- with .Values.agentgateway.proxy.image }}
   image:
     registry: {{ .registry }}

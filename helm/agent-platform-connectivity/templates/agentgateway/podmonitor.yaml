@@ -1,0 +1,41 @@
+{{- /* The data plane serves Prometheus text on pod port 15020 under /metrics.
+The controller-provisioned data-plane Service exposes listener ports only, so a
+ServiceMonitor would match nothing: a PodMonitor is the only scrape path.
+
+Gated on the agentgateway component, NOT on llmRouting.enabled — the MCP path's
+HTTP metrics deserve the same scrape, and the object must exist before the LLM
+cutover so the first inference call is already observed. `podTargetLabels` are
+not needed: the GenAI and HTTP metrics already carry a `gateway` label.
+
+The pod selector uses gateway.name verbatim, like every other data-plane
+selector in this chart. The controller truncates the label value for Gateway
+names over 63 characters, which no supported gateway.name reaches. */ -}}
+{{- if and (include "agent-platform.ingress.agentgateway" .) (include "agent-platform.serviceMonitor" .) }}
+{{- $monitor := .Values.global.observability.metrics.serviceMonitor }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "name" . }}-agentgateway-dataplane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    {{- /* alloy-metrics discovers monitors by this object label; without it the
+    series never reach the tenant's Mimir and the monitor is silently ignored.
+    Same expression as the kagent ServiceMonitor, so both monitors carry the
+    fleet's tenant label by default and one global override moves both. */}}
+    {{- with ($monitor.labels | default .Values.kagent.serviceMonitor.labels) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      scheme: http
+      interval: {{ $monitor.interval | default "60s" }}
+{{- end }}
