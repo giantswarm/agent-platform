@@ -235,6 +235,17 @@ llmRouting:
   backend:
     name: anthropic
     provider: anthropic
+  # Client path prefixes the LLM HTTPRoute matches. They must be MORE specific
+  # than `/`: agent-platform-mcps renders a catch-all route on the same Gateway
+  # that attaches to every listener, and on an equal match the older,
+  # alphabetically earlier MCP route wins — every inference call would answer
+  # `mcp: client must accept both application/json and text/event-stream`.
+  # Character count in the path match outranks those tiebreaks, so one prefix
+  # covering the provider's API is enough (`/v1` for Anthropic and every
+  # OpenAI-compatible provider). A path outside these prefixes reaches the MCP
+  # backend, not the provider.
+  pathPrefixes:
+    - /v1
   # Client path -> body format the gateway parses, on the Gateway-scoped
   # AgentgatewayPolicy. Mandatory: without it an `ai` backend parses every body
   # as OpenAI Completions and mis-parses Anthropic bodies. Keys match the client

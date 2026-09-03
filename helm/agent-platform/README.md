@@ -145,6 +145,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | llmRouting.listener.port | int | `8081` |  |
 | llmRouting.backend.name | string | `"anthropic"` |  |
 | llmRouting.backend.provider | string | `"anthropic"` |  |
+| llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
 | llmRouting.routes.* | string | `"Passthrough"` |  |

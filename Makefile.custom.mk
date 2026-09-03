@@ -318,6 +318,25 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@grep -A3 '^  ai:' /tmp/vl-on.out | grep -q 'anthropic: {}' || { echo "FAIL: the AI backend is not the Anthropic provider with its defaults"; exit 1; }
 	@if grep -q 'policies:' /tmp/vl-on.out; then echo "FAIL: the AI backend carries backend policies; the gateway must hold no credential"; exit 1; fi
 	@echo "ok: listener + pinned route + credential-free AI backend"
+	@echo "--> the LLM route matches the provider path prefixes, never a bare / (the MCP catch-all wins that tie)"
+	@grep -A6 'sectionName: llm' /tmp/vl-on.out | grep -q 'value: "/v1"' || { echo "FAIL: the LLM route does not match the provider path prefix"; exit 1; }
+	@if grep -A6 'sectionName: llm' /tmp/vl-on.out | grep -qE 'value: "?/"?$$'; then \
+		echo "FAIL: the LLM route matches a bare /; agent-platform-mcps renders a catch-all route on the same Gateway that wins an equal match, so every inference call would reach the MCP backend"; exit 1; \
+	fi
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set 'llmRouting.pathPrefixes[0]=/openai/v1' >/tmp/vl-prefix.out 2>&1 || { cat /tmp/vl-prefix.out; exit 1; }
+	@grep -A6 'sectionName: llm' /tmp/vl-prefix.out | grep -q 'value: "/openai/v1"' || { echo "FAIL: llmRouting.pathPrefixes does not reach the route matches"; exit 1; }
+	@echo "ok: path prefixes"
+	@echo "--> guard: a bare / prefix, and an empty prefix list, must fail"
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set 'llmRouting.pathPrefixes[0]=/' >/tmp/vl-slash.out 2>&1; then \
+		echo "FAIL: the bare-/ guard did not fire; the MCP catch-all would swallow every inference call"; exit 1; \
+	elif ! grep -q "must be more specific" /tmp/vl-slash.out; then \
+		echo "FAIL: the bare-/ guard failed for the wrong reason"; cat /tmp/vl-slash.out; exit 1; \
+	else echo "ok: bare-/ guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set llmRouting.pathPrefixes=null >/tmp/vl-empty.out 2>&1; then \
+		echo "FAIL: the empty-prefix-list guard did not fire; the route would match nothing"; exit 1; \
+	elif ! grep -q "must list at least one prefix" /tmp/vl-empty.out; then \
+		echo "FAIL: the empty-prefix-list guard failed for the wrong reason"; cat /tmp/vl-empty.out; exit 1; \
+	else echo "ok: empty-prefix-list guard"; fi
 	@echo "--> the Gateway policy carries the route-type map INCLUDING the wildcard, and both metric labels"
 	@grep -q '"/v1/messages": Messages' /tmp/vl-on.out || { echo "FAIL: no Messages route type; the gateway would parse Anthropic bodies as OpenAI Completions"; exit 1; }
 	@grep -q '"/v1/messages/count_tokens": AnthropicTokenCount' /tmp/vl-on.out || { echo "FAIL: no AnthropicTokenCount route type"; exit 1; }

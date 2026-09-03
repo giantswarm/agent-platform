@@ -93,6 +93,15 @@ On the installation, after the cutover:
   world traffic on 443 only, and the LLM route pins itself to its own listener
   by `sectionName`, so it never attaches to the public HTTPS listener in edge
   mode.
+- Pinning is not enough on its own: `agent-platform-mcps` renders a catch-all
+  `HTTPRoute` (`PathPrefix: /`, no `sectionName`, no hostname) that attaches to
+  every listener of the same Gateway. An equal match is broken by creation
+  timestamp and then alphabetically, both of which that route wins, so the LLM
+  route matches `llmRouting.pathPrefixes` (`/v1`) instead — character count in
+  the path match outranks both tiebreaks. A path outside those prefixes reaches
+  the MCP backend and answers `mcp: client must accept both application/json
+  and text/event-stream`, so `"*": Passthrough` in `llmRouting.routes` covers
+  the other provider paths *under* the prefixes, not every path on the port.
 - Agent pods keep their `world:443` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
@@ -177,6 +186,7 @@ On the installation, after the cutover:
 | llmRouting.listener.port | int | `8081` |  |
 | llmRouting.backend.name | string | `"anthropic"` |  |
 | llmRouting.backend.provider | string | `"anthropic"` |  |
+| llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
 | llmRouting.routes.* | string | `"Passthrough"` |  |

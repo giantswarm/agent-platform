@@ -425,5 +425,19 @@ and every agent would lose inference at the cutover. Fail the render instead.
 {{- fail (printf "llmRouting.listener.port %d is already taken by the %s listener in gateway.listeners" $port .name) -}}
 {{- end -}}
 {{- end -}}
+{{- /* An empty list renders a route that matches nothing; a bare "/" ties with
+the agent-platform-mcps catch-all route on the same Gateway and loses the
+tiebreak, so every inference call would reach the MCP backend instead. */ -}}
+{{- if not .Values.llmRouting.pathPrefixes -}}
+{{- fail "llmRouting.pathPrefixes must list at least one prefix; an empty list renders an LLM route that matches nothing" -}}
+{{- end -}}
+{{- range .Values.llmRouting.pathPrefixes -}}
+{{- if eq . "/" -}}
+{{- fail "llmRouting.pathPrefixes must be more specific than \"/\": the agent-platform-mcps catch-all route attaches to the same Gateway and wins an equal match, so every inference call would reach the MCP backend" -}}
+{{- end -}}
+{{- if not (hasPrefix "/" .) -}}
+{{- fail (printf "llmRouting.pathPrefixes entry %q must start with /" .) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}

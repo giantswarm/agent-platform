@@ -957,6 +957,12 @@
                         }
                     }
                 },
+                "pathPrefixes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "routes": {
                     "type": "object",
                     "additionalProperties": true,
