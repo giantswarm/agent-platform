@@ -3,7 +3,15 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+        "agent-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "agent-platform-mcps": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "agentManager": {
             "type": "object",
             "additionalProperties": true
         },
@@ -50,6 +58,33 @@
             "type": "object",
             "additionalProperties": true,
             "properties": {
+                "agent-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "agent-platform-connectivity": {
                     "type": "object",
                     "additionalProperties": true,
@@ -212,6 +247,33 @@
                     "properties": {
                         "chart": {
                             "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "model-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "enabled": {
                             "type": "boolean"
@@ -709,6 +771,14 @@
                     "uniqueItems": true
                 }
             }
+        },
+        "model-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "modelManager": {
+            "type": "object",
+            "additionalProperties": true
         },
         "muster": {
             "type": "object",

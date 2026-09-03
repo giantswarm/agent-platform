@@ -17,3 +17,7 @@ components:
     enabled: true
   agent-platform-mcps:
     enabled: true
+  model-manager:
+    enabled: true
+  agent-manager:
+    enabled: true

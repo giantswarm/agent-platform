@@ -22,4 +22,6 @@ components:
   klaus-gateway:                 { versionRange: "0.2.4" }
   agent-sandbox:                 { versionRange: "0.1.2" }
   dicebear:                      { versionRange: "0.3.0" }
+  model-manager:                 { versionRange: "0.14.0" }
+  agent-manager:                 { versionRange: "0.2.0" }
   agent-platform-connectivity: { versionRange: "1.5.0" }

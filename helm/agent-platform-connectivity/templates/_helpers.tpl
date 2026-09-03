@@ -374,3 +374,78 @@ Rendered as a YAML list item; the caller must provide the surrounding `egress:` 
         - port: "53"
           protocol: TCP
 {{- end -}}
+
+{{/*
+Cilium DNS egress rule with the DNS proxy clause. Same selectors as dnsEgress,
+plus `rules.dns` so Cilium learns the name -> address mappings the policy's
+toFQDNs selectors need; without the clause a toFQDNs rule matches nothing on a
+cluster that has no cluster-wide DNS visibility policy. Rendered as a YAML list
+item; the caller must provide the surrounding `egress:` key.
+*/}}
+{{- define "agent-platform.dnsEgressWithProxy" -}}
+- toEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.namespace: kube-system
+        k8s-app: kube-dns
+    - matchLabels:
+        io.kubernetes.pod.namespace: kube-system
+        k8s-app: coredns
+    - matchLabels:
+        io.kubernetes.pod.namespace: kube-system
+        k8s-app: k8s-dns-node-cache
+  toPorts:
+    - ports:
+        - port: "1053"
+          protocol: UDP
+        - port: "1053"
+          protocol: TCP
+        - port: "53"
+          protocol: UDP
+        - port: "53"
+          protocol: TCP
+      rules:
+        dns:
+          - matchPattern: "*"
+{{- end -}}
+
+{{/*
+The host of an issuer URL (scheme and port stripped); empty when the URL is
+empty or has no host. Usage: include "agent-platform.urlHost" $url
+*/}}
+{{- define "agent-platform.urlHost" -}}
+{{- if . -}}
+{{- $u := urlParse . -}}
+{{- regexReplaceAll ":[0-9]+$" ($u.host | default "") "" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Cilium egress rules from a platform service to the login identity provider:
+the issuer's JWKS (validating the id_tokens muster and the portal forward) and
+its token endpoint. By name on 443 (through the DNS proxy rule the caller
+renders), plus the cluster entity on 443 and 10443 — an issuer served through
+an in-cluster Gateway whose LoadBalancer address Cilium translates to the
+data-plane pods (the Envoy edge listens on 10443), or an in-cluster issuer
+Service, is `cluster` at policy time, not the name. Mirrors the klaus-gateway
+OBO and oauth2-proxy egress. Rendered as YAML list items; the caller provides
+`egress:` and the indentation.
+Usage: include "agent-platform.idpEgress.cilium" (dict "issuerUrl" $url)
+*/}}
+{{- define "agent-platform.idpEgress.cilium" -}}
+{{- with (include "agent-platform.urlHost" .issuerUrl) }}
+- toFQDNs:
+    - matchName: {{ . }}
+  toPorts:
+    - ports:
+        - port: "443"
+          protocol: TCP
+{{- end }}
+- toEntities:
+    - cluster
+  toPorts:
+    - ports:
+        - port: "443"
+          protocol: TCP
+        - port: "10443"
+          protocol: TCP
+{{- end -}}

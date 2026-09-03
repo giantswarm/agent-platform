@@ -8,8 +8,10 @@
 # the primary `agent-platform` chart).
 #
 # What this file carries beyond the golden (single-chart) pipeline:
-#   - test-ingress-modes: the `make verify-modes` + `make verify-meta` checks on
-#     branches (ingress-mode guards + app-of-apps meta-package render)
+#   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
+#     `make verify-managers` + `make verify-meta` checks on branches (ingress-mode
+#     guards, the global.* contract, the model-manager / agent-manager wiring,
+#     app-of-apps meta-package render)
 #   - the standalone agent-platform-connectivity chart (build, tag push), the
 #     consumer-side wiring rendered by the meta-package as a HelmRelease
 #   versioned in lockstep with agent-platform off the same git tag. This
@@ -43,11 +45,12 @@ jobs:
     - run:
         name: verify ingress-mode guards + global contract + meta-package render
         # verify-modes (connectivity chart ingress guards), verify-global (the
-        # global.* contract behaviors and their guards) and verify-meta (root
+        # global.* contract behaviors and their guards), verify-managers (the
+        # model-manager / agent-manager wiring and guards) and verify-meta (root
         # app-of-apps render: no Chart.yaml pins, ranges as values, both engines,
         # pure renderer, pinned BOM) are the single source of truth, also run
         # locally. Neither chart has subcharts, so no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta
+        command: make verify-modes verify-global verify-meta verify-managers
 
 workflows:
   build:

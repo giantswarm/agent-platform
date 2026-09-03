@@ -1,0 +1,76 @@
+{{- $route := .Values.modelManager.route }}
+{{- if and (include "agent-platform.modelManager.enabled" .) $route.enabled ($route.jwtAuthentication).enabled }}
+{{- $jwt := $route.jwtAuthentication }}
+# AgentgatewayBackend — static backend for the issuer's JWKS endpoint. Lives in
+# the release namespace so the policy's jwks backendRef needs no ReferenceGrant
+# into the issuer's namespace.
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: model-manager-jwks
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelManager.labels" . | nindent 4 }}
+spec:
+  {{- if ($jwt.jwks.tls).enabled }}
+  {{- /* An issuer serving its JWKS over TLS (a Dex with web.https): originate
+  TLS and verify against the named CA Secret (key ca.crt), defaulting to the
+  platform's identity CA (global.identity.ca.secretName, the standalone
+  contract); with neither, the data plane's system trust. SNI and the verified
+  SAN follow the host above. */}}
+  policies:
+    tls:
+      {{- $ca := $jwt.jwks.tls.caSecretName | default (dig "identity" "ca" "secretName" "" .Values.global) }}
+      {{- if $ca }}
+      caCertificateRefs:
+        - kind: Secret
+          name: {{ $ca }}
+      {{- else }}
+      {}
+      {{- end }}
+  {{- end }}
+  static:
+    host: {{ $jwt.jwks.host }}
+    port: {{ $jwt.jwks.port }}
+---
+# AgentgatewayPolicy — verifies the bearer JWT (signature, issuer, expiry)
+# against the issuer on the inner model-manager HTTPRoute before forwarding —
+# the same boundary as the kagent controller route, in front of the service's
+# own validation. Without a token the gateway answers 401.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: model-manager-jwt
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelManager.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: model-manager
+  traffic:
+    jwtAuthentication:
+      mode: {{ $jwt.mode | default "Strict" }}
+      providers:
+        {{- /* Assigned via if, not `default`: template functions evaluate
+        arguments eagerly, so the helper's fail-on-empty would fire even with
+        an explicit issuer set. */ -}}
+        {{- $issuer := $jwt.issuer }}
+        {{- if not $issuer }}
+        {{- $issuer = include "agent-platform.issuerUrl" (dict "ctx" . "for" "modelManager.route.jwtAuthentication") }}
+        {{- end }}
+        - issuer: {{ $issuer | quote }}
+          # No audiences: any audience the issuer minted is accepted. dex
+          # id_tokens carry the originating client id as aud, which varies per
+          # caller (the portal's, a CLI's); requiring one would break the
+          # human path. The service checks the audience itself.
+          jwks:
+            remote:
+              backendRef:
+                group: agentgateway.dev
+                kind: AgentgatewayBackend
+                name: model-manager-jwks
+              jwksPath: {{ $jwt.jwks.path | quote }}
+{{- end }}
