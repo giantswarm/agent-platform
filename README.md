@@ -12,7 +12,7 @@ This repo publishes **two** charts:
 | Chart | What it is |
 |---|---|
 | `agent-platform` | the **meta-package** — an app-of-apps that renders each component and the connectivity layer as Flux `OCIRepository` + `HelmRelease` (or Argo `Application`). The single thing you install. |
-| `agent-platform-connectivity` | the consumer-side **wiring** the meta-package renders as a child release: the public muster route, the agentgateway data-plane `Gateway` + `AgentgatewayParameters` + `HTTPRoute`s + `BackendTrafficPolicy`s, the `NetworkPolicy`s, the kagent/klaus-gateway routes, the admin-owned kagent shared resources (the shared muster `RemoteMCPServer`, `ModelConfig`s), and the CNPG `Cluster`. Agents themselves are created with the generic [`agent` chart](https://github.com/giantswarm/agent), one release per agent. |
+| `agent-platform-connectivity` | the consumer-side **wiring** the meta-package renders as a child release: the public muster route, the agentgateway data-plane `Gateway` + `AgentgatewayParameters` + `HTTPRoute`s + `BackendTrafficPolicy`s, the `NetworkPolicy`s, the kagent/klaus-gateway/model-manager/agent-manager routes, the admin-owned kagent shared resources (the shared muster `RemoteMCPServer`, `ModelConfig`s), and the CNPG `Cluster`. Agents themselves are created with the generic [`agent` chart](https://github.com/giantswarm/agent), one release per agent. |
 
 > **CRDs are app-owned.** There is no longer a standalone `agent-platform-crds` bundle chart — each component (muster, agentgateway, kagent, agent-sandbox) ships its own CRDs in its chart's `crds/` dir and upgrades them atomically with the app via Flux `CreateReplace`. A CR consumer `dependsOn` the component that owns the CRD it needs. See [CRD lifecycle](#crd-lifecycle).
 
@@ -41,8 +41,10 @@ The decisive change: each component's version is a **constraint expressed as a v
 | kagent | `components.kagent.enabled` | `false` |
 | klaus-gateway | `components.klaus-gateway.enabled` | `false` |
 | agent-sandbox | `components.agent-sandbox.enabled` | `false` |
+| model-manager | `components.model-manager.enabled` | `false` |
+| agent-manager | `components.agent-manager.enabled` | `false` |
 
-A component with no `enabled` key is always installed (`muster`, `dicebear`, `agent-platform-connectivity`). The `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:` and `agent-platform-mcps:` blocks hold that component's values and no longer hold an `enabled` key; `make verify-meta` fails if the two ever diverge again.
+A component with no `enabled` key is always installed (`muster`, `dicebear`, `agent-platform-connectivity`). The `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:`, `model-manager:` and `agent-manager:` blocks hold that component's values and no longer hold an `enabled` key; `make verify-meta` fails if the two ever diverge again.
 
 ```bash
 helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml                          # flux objects, wide ranges
@@ -139,6 +141,9 @@ helm install agent-platform-connectivity \
 | `components.klaus-gateway.enabled` | `false` | Install [klaus-gateway](https://github.com/giantswarm/klaus-gateway), the channel front door. |
 | `agent-platform-mcps.mcpServers` | `[]` | Abstract list of MCP servers rendered into `MCPServer` / `AgentgatewayBackend` CRs. Renders nothing until populated. |
 | `components.agent-sandbox.enabled` | `false` | Bundle the [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) controller — the Sandbox runtime kagent's `SandboxAgent` requires. See [Agent sandbox](#agent-sandbox). |
+| `components.model-manager.enabled` | `false` | Install [model-manager](https://github.com/giantswarm/model-manager), model inventory / pull / load / unload / delete and kagent `ModelConfig` wiring on an Ollama or KServe backend, as REST and MCP (`x_model-manager_*` through muster). See [Model manager and agent manager](#model-manager-and-agent-manager). |
+| `components.agent-manager.enabled` | `false` | Install [agent-manager](https://github.com/giantswarm/agent-manager), the agent write surface: create / update / delete / inspect kagent agents as Flux `HelmRelease`s of the agent chart, as REST and MCP (`x_agent-manager_*` through muster). Needs kagent and Flux. See [Model manager and agent manager](#model-manager-and-agent-manager). |
+| `modelManager.route.enabled`, `agentManager.route.enabled` | `false` | Expose the service's REST API on the agentgateway data plane at `https://agentgateway.<domain>/model-manager` / `/agent-manager` (the portal's path), with an optional JWT policy in front (`…route.jwtAuthentication`). `agentgateway-*` modes only. |
 | `dicebear.route.parentRefs` | `[]` | **Required.** The public `Gateway`(s) the avatar `HTTPRoute` attaches to — typically the same as `ingress.parentRefs`. The [dicebear](https://github.com/giantswarm/dicebear) avatar renderer is a force-enabled component (deployed on every install) and its public route is on by default, so the child release fails to render if this is empty. See [giantswarm/giantswarm#37211](https://github.com/giantswarm/giantswarm/issues/37211). |
 | `dicebear.route.hostnames` | `[]` | **Required.** Hostname(s) the avatar endpoint is served on, e.g. `avatars.<domain>`. Consumers fetch `https://<hostname>/v1/<agent-name>.png`. |
 | `muster.muster.oauth.server.enabled` | `true` | OAuth resource-server protection on the muster API. Requires `baseUrl`, `dex.{issuerUrl,clientId}`, and a Secret carrying `dex-client-secret` / `registration-token` / `oauth-encryption-key` / `valkey-password`. |
@@ -146,6 +151,17 @@ helm install agent-platform-connectivity \
 | `muster.muster.oauth.server.storage.valkey.url` | `muster-valkey:6379` | Bundled-valkey Service. Override to point at an out-of-band Valkey. |
 
 Full schema: [`helm/agent-platform/values.schema.json`](./helm/agent-platform/values.schema.json).
+
+### Model manager and agent manager
+
+Two platform services, off by default, each a component with the same shape: a component release (`components.model-manager` / `components.agent-manager`, chart values in the `model-manager:` / `agent-manager:` blocks, forwarded verbatim) plus the wiring the connectivity chart renders for it from the `modelManager:` / `agentManager:` blocks — the agentgateway route and JWT policy (`route.*`, the same shape as `kagent.controllerRoute`), the network policies in both flavors (ingress from the data plane, muster and the kubelet's probes; egress to DNS, the Kubernetes API, the identity provider and the service's own backends), and render-time guards that fail the install with an actionable message instead of shipping a service that cannot work.
+
+- **[model-manager](https://github.com/giantswarm/model-manager)** manages models for the agents: inventory, pull, load/unload, delete, and the kagent `ModelConfig` wiring. `model-manager.backend` selects the serving driver — `ollama` proxies an Ollama reached at `model-manager.ollama.endpoint` (required, as reached from pods), `kserve` manages `InferenceService`s on a KServe the cluster already has (the Agent Platform does not bundle it; the render fails while the `serving.kserve.io` API is missing unless `modelManager.kserve.requireApi: false`). ModelConfigs land in `model-manager.kagent.namespace`, which must be the kagent component's namespace; without kagent set `model-manager.kagent.disableWiring: true`.
+- **[agent-manager](https://github.com/giantswarm/agent-manager)** is the agent write surface: it composes a kagent agent the way the portal's create flow does — a Flux `HelmRelease` of the [agent chart](https://github.com/giantswarm/agent) plus the shared per-namespace `OCIRepository` — validates the values against the chart's `values.schema.json` before applying, and reads agents back from the `Agent`, its `HelmRelease` and the workload. It needs the kagent component and Flux's helm and source controllers; the HelmReleases it writes carry `agent-manager.flux.helmReleaseServiceAccount` (`kagent-flux`, the ServiceAccount the management-cluster base provisions for the Flux multi-tenancy admission policy). An agent whose `HelmRelease` a GitOps Kustomization owns is reported as `managed: gitops` and refused for update/delete unless forced.
+
+Both register their MCP endpoint with muster through the chart's own `MCPServer` CR (tools appear as `x_model-manager_*` / `x_agent-manager_*`), and both **act as the user, not as a ServiceAccount**: `oauth.enabled` makes the service an OAuth 2.1 resource server in front of its MCP endpoint and REST API, muster forwards the session's IdP id_token (the CR's `auth.forwardToken`) and requests `requiredAudiences` at login — the cross-client audience the kube-apiserver trusts (`dex-k8s-authenticator` on Giant Swarm clusters) — so `oauth.downstream` presents the same token to the Kubernetes API and the user's RBAC governs; the ServiceAccount holds no permissions (the charts render no RBAC). The issuer, client, secret and base URL fall back to `global.identity` / `global.domain` inside the charts; an installation that sets no `global.*` names them in the block (`oauth.baseURL`, `oauth.dex.issuerURL`, `oauth.dex.clientID`, `oauth.existingSecret` with the key `dex-client-secret` — the same Dex client muster logs users in with — and that client in `oauth.trustedAudiences`). The guards fail the render when any of them is missing.
+
+`make verify-managers` covers the wiring, both flavors and every guard.
 
 ### Gateway API CR ownership
 

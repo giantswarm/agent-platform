@@ -35,6 +35,18 @@ WIRING = {
         ["--set", "klausGateway.agentgatewayRoute.enabled=true"],
     ),
     "agent-sandbox": ("agent-platform-connectivity-agent-sandbox-pod-security", [], []),
+    # The egress policy renders whenever the component is on (networkPolicy is
+    # on by default); the guards need a backend endpoint / the kagent runtime.
+    "model-manager": (
+        "agent-platform-connectivity-model-manager-egress",
+        ["--set", "model-manager.ollama.endpoint=http://10.0.0.1:11434", "--set", "components.kagent.enabled=true", "--set", "model-manager.oauth.enabled=false"],
+        [],
+    ),
+    "agent-manager": (
+        "agent-platform-connectivity-agent-manager-egress",
+        ["--set", "components.kagent.enabled=true", "--set", "agent-manager.oauth.enabled=false"],
+        [],
+    ),
 }
 
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
