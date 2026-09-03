@@ -1,0 +1,18 @@
+{{- /* Price catalog for the cost counter. The deployed gateway ships no
+built-in catalog: with no source configured every lookup reports NoCatalog and
+no cost sample is emitted at all, so this ConfigMap is not an override but the
+only way to get cost. The Gateway's AgentgatewayParameters references it (see
+agentgateway/agentgatewayparameters.yaml) and the data plane hot-reloads the
+file, so a price change needs no gateway release. */ -}}
+{{- if (include "agent-platform.modelCatalog" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent-platform.modelCatalogName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+data:
+  {{ .Values.llmRouting.modelCatalog.key }}: |
+    {{- dict "providers" .Values.llmRouting.modelCatalog.providers | toPrettyJson | nindent 4 }}
+{{- end }}

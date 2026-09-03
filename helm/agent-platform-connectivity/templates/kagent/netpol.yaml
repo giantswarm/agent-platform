@@ -200,6 +200,19 @@ spec:
         - ports:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
+    {{- if (include "agent-platform.llmRouting" .) }}
+    # Model inference through the agentgateway LLM listener. Additive: the
+    # world:443 rule below still stands, so a direct call to the provider keeps
+    # working. Egress tightening is a separate change.
+    - toEndpoints:
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ .Values.llmRouting.listener.port | quote }}
+              protocol: TCP
+    {{- end }}
     - toEntities:
         - world
       toPorts:

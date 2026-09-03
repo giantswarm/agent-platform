@@ -524,6 +524,276 @@
                 }
             }
         },
+        "llmRouting": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "backend": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "name": {
+                            "type": "string"
+                        },
+                        "provider": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "listener": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "name": {
+                            "type": "string"
+                        },
+                        "port": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "metricLabels": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "expression": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "modelCatalog": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "key": {
+                            "type": "string"
+                        },
+                        "name": {
+                            "type": "string"
+                        },
+                        "providers": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "anthropic": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "models": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "claude-fable-5-1": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "rates": {
+                                                            "type": "object",
+                                                            "additionalProperties": false,
+                                                            "properties": {
+                                                                "cacheRead": {
+                                                                    "type": "string"
+                                                                },
+                                                                "cacheWrite": {
+                                                                    "type": "string"
+                                                                },
+                                                                "input": {
+                                                                    "type": "string"
+                                                                },
+                                                                "output": {
+                                                                    "type": "string"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "claude-haiku-4-5": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "rates": {
+                                                            "type": "object",
+                                                            "additionalProperties": false,
+                                                            "properties": {
+                                                                "cacheRead": {
+                                                                    "type": "string"
+                                                                },
+                                                                "cacheWrite": {
+                                                                    "type": "string"
+                                                                },
+                                                                "input": {
+                                                                    "type": "string"
+                                                                },
+                                                                "output": {
+                                                                    "type": "string"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "claude-opus-4-5": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "rates": {
+                                                            "type": "object",
+                                                            "additionalProperties": false,
+                                                            "properties": {
+                                                                "cacheRead": {
+                                                                    "type": "string"
+                                                                },
+                                                                "cacheWrite": {
+                                                                    "type": "string"
+                                                                },
+                                                                "input": {
+                                                                    "type": "string"
+                                                                },
+                                                                "output": {
+                                                                    "type": "string"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "claude-opus-5": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "rates": {
+                                                            "type": "object",
+                                                            "additionalProperties": false,
+                                                            "properties": {
+                                                                "cacheRead": {
+                                                                    "type": "string"
+                                                                },
+                                                                "cacheWrite": {
+                                                                    "type": "string"
+                                                                },
+                                                                "input": {
+                                                                    "type": "string"
+                                                                },
+                                                                "output": {
+                                                                    "type": "string"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "claude-sonnet-4-5": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "rates": {
+                                                            "type": "object",
+                                                            "additionalProperties": false,
+                                                            "properties": {
+                                                                "cacheRead": {
+                                                                    "type": "string"
+                                                                },
+                                                                "cacheWrite": {
+                                                                    "type": "string"
+                                                                },
+                                                                "input": {
+                                                                    "type": "string"
+                                                                },
+                                                                "output": {
+                                                                    "type": "string"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "claude-sonnet-4-6": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "rates": {
+                                                            "type": "object",
+                                                            "additionalProperties": false,
+                                                            "properties": {
+                                                                "cacheRead": {
+                                                                    "type": "string"
+                                                                },
+                                                                "cacheWrite": {
+                                                                    "type": "string"
+                                                                },
+                                                                "input": {
+                                                                    "type": "string"
+                                                                },
+                                                                "output": {
+                                                                    "type": "string"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "claude-sonnet-5": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "rates": {
+                                                            "type": "object",
+                                                            "additionalProperties": false,
+                                                            "properties": {
+                                                                "cacheRead": {
+                                                                    "type": "string"
+                                                                },
+                                                                "cacheWrite": {
+                                                                    "type": "string"
+                                                                },
+                                                                "input": {
+                                                                    "type": "string"
+                                                                },
+                                                                "output": {
+                                                                    "type": "string"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "pathPrefixes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "routes": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "*": {
+                            "type": "string"
+                        },
+                        "/v1/messages": {
+                            "type": "string"
+                        },
+                        "/v1/messages/count_tokens": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "muster": {
             "type": "object",
             "additionalProperties": true

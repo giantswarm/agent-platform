@@ -374,3 +374,70 @@ Rendered as a YAML list item; the caller must provide the surrounding `egress:` 
         - port: "53"
           protocol: TCP
 {{- end -}}
+
+{{/*
+Truthy (emits "true") when LLM routing is on, i.e. the chart renders the `llm`
+listener and the routing resources that carry agent inference traffic to the
+provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
+  {{- if (include "agent-platform.llmRouting" .) }}
+*/}}
+{{- define "agent-platform.llmRouting" -}}
+{{- if .Values.llmRouting.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Name of the model-price ConfigMap — defaults to <release>-model-catalog.
+*/}}
+{{- define "agent-platform.modelCatalogName" -}}
+{{- default (printf "%s-model-catalog" .Release.Name) .Values.llmRouting.modelCatalog.name -}}
+{{- end -}}
+
+{{/*
+Truthy when the model-price ConfigMap is rendered and referenced: LLM routing
+is on, the block is enabled, and it names at least one provider. An empty
+provider map would mount an empty catalog, which reports NoCatalog on every
+lookup — the same state as no ConfigMap at all, but with an object to explain.
+*/}}
+{{- define "agent-platform.modelCatalog" -}}
+{{- if and (include "agent-platform.llmRouting" .) .Values.llmRouting.modelCatalog.enabled .Values.llmRouting.modelCatalog.providers -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Validate the LLM routing block. Rendered exactly once via templates/validate.yaml.
+
+The feature has no data plane of its own: it adds a listener to the
+agentgateway Gateway and a policy the agentgateway controller reconciles. With
+the component off (which includes the default ingress.mode: muster-direct) the
+listener would exist in values only, kagent's base URL would point at nothing,
+and every agent would lose inference at the cutover. Fail the render instead.
+*/}}
+{{- define "agent-platform.validateLlmRouting" -}}
+{{- if (include "agent-platform.llmRouting" .) -}}
+{{- if not (include "agent-platform.ingress.agentgateway" .) -}}
+{{- fail (printf "llmRouting.enabled requires the agentgateway data plane: ingress.mode is %s, set it to agentgateway-muster" .Values.ingress.mode) -}}
+{{- end -}}
+{{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) -}}
+{{- fail "llmRouting.enabled requires components.agentgateway.enabled: true; the LLM listener is reconciled by the agentgateway controller" -}}
+{{- end -}}
+{{- $port := .Values.llmRouting.listener.port | int -}}
+{{- range .Values.gateway.listeners -}}
+{{- if eq (.port | int) $port -}}
+{{- fail (printf "llmRouting.listener.port %d is already taken by the %s listener in gateway.listeners" $port .name) -}}
+{{- end -}}
+{{- end -}}
+{{- /* An empty list renders a route that matches nothing; a bare "/" ties with
+the agent-platform-mcps catch-all route on the same Gateway and loses the
+tiebreak, so every inference call would reach the MCP backend instead. */ -}}
+{{- if not .Values.llmRouting.pathPrefixes -}}
+{{- fail "llmRouting.pathPrefixes must list at least one prefix; an empty list renders an LLM route that matches nothing" -}}
+{{- end -}}
+{{- range .Values.llmRouting.pathPrefixes -}}
+{{- if eq . "/" -}}
+{{- fail "llmRouting.pathPrefixes must be more specific than \"/\": the agent-platform-mcps catch-all route attaches to the same Gateway and wins an equal match, so every inference call would reach the MCP backend" -}}
+{{- end -}}
+{{- if not (hasPrefix "/" .) -}}
+{{- fail (printf "llmRouting.pathPrefixes entry %q must start with /" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

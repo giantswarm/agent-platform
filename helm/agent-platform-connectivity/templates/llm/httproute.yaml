@@ -1,0 +1,45 @@
+{{- /* The route pins itself to the LLM listener with sectionName: the kagent
+controller route attaches to every listener of its parent, and in edge mode
+copying that would put agent inference on the public HTTPS listener.
+
+It must also WIN on that listener. agent-platform-mcps renders a catch-all
+HTTPRoute (PathPrefix `/`, no sectionName, no hostname) that attaches to every
+listener of the same Gateway, and equal matches are broken by creation
+timestamp and then alphabetically — both of which the older, alphabetically
+earlier MCP route wins. So the provider paths are matched explicitly:
+`llmRouting.pathPrefixes` is longer than `/`, and character count in the path
+match outranks both tiebreaks. A path outside the prefixes reaches the MCP
+backend, not the provider. */ -}}
+{{- if (include "agent-platform.llmRouting" .) }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "name" . }}-llm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ .Release.Namespace }}
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      sectionName: {{ .Values.llmRouting.listener.name }}
+  rules:
+    - matches:
+        {{- /* validateLlmRouting rejects an empty list and a bare "/". */}}
+        {{- range .Values.llmRouting.pathPrefixes }}
+        - path:
+            type: PathPrefix
+            value: {{ . | quote }}
+        {{- end }}
+      {{- /* Streamed completions stay open under the shared route timeouts
+      (request: 0s asks the implementation to disable the request timeout). */}}
+      {{- with (include "agent-platform.routeTimeouts" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: {{ .Values.llmRouting.backend.name }}
+{{- end }}

@@ -292,3 +292,89 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -q 'kind: HTTPRoute' /tmp/ap-conn.out || { echo "FAIL: connectivity did not render the muster HTTPRoute"; exit 1; }
 	@echo "ok: connectivity wiring"
 	@echo "meta-package render verified."
+
+# LLM routing on, with the agentgateway data plane the listener rides on.
+LLM_VM := $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set llmRouting.enabled=true
+
+.PHONY: verify-llm-routing
+verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on renders the listener + routing + metrics, and the guards fire.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> off (default): no LLM listener, route, backend, policy or price ConfigMap"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true >/tmp/vl-off.out 2>&1 || { cat /tmp/vl-off.out; exit 1; }
+	@for pattern in 'AgentgatewayBackend' 'AgentgatewayPolicy' 'sectionName: llm' 'model-catalog' 'modelCatalog'; do \
+		if grep -q "$$pattern" /tmp/vl-off.out; then echo "FAIL: llmRouting is off but the render still contains $$pattern"; exit 1; fi; \
+	done
+	@if grep -qE '^      port: 8081$$' /tmp/vl-off.out; then echo "FAIL: the LLM listener renders with llmRouting off"; exit 1; fi
+	@echo "ok: nothing renders"
+	@echo "--> off, agentgateway on: the data-plane PodMonitor still renders (the MCP path is scraped too)"
+	@grep -q 'kind: PodMonitor' /tmp/vl-off.out || { echo "FAIL: the data-plane PodMonitor is gated on llmRouting; the MCP path would never be scraped"; exit 1; }
+	@grep -A12 'agentgateway-dataplane' /tmp/vl-off.out | grep -q 'observability.giantswarm.io/tenant: giantswarm' || { echo "FAIL: the PodMonitor lost the tenant label; alloy-metrics would ignore it"; exit 1; }
+	@echo "ok: PodMonitor + tenant label"
+	@echo "--> on: the llm listener, the pinned route, the AI backend, the Gateway policy and the price catalog"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true >/tmp/vl-on.out 2>&1 || { cat /tmp/vl-on.out; exit 1; }
+	@grep -q 'name: llm' /tmp/vl-on.out || { echo "FAIL: no llm listener on the Gateway"; exit 1; }
+	@grep -q 'sectionName: llm' /tmp/vl-on.out || { echo "FAIL: the LLM route is not pinned to its listener; in edge mode it would attach to the public HTTPS listener"; exit 1; }
+	@grep -A4 'kind: AgentgatewayBackend' /tmp/vl-on.out >/dev/null || { echo "FAIL: no AgentgatewayBackend"; exit 1; }
+	@grep -A3 '^  ai:' /tmp/vl-on.out | grep -q 'anthropic: {}' || { echo "FAIL: the AI backend is not the Anthropic provider with its defaults"; exit 1; }
+	@if grep -q 'policies:' /tmp/vl-on.out; then echo "FAIL: the AI backend carries backend policies; the gateway must hold no credential"; exit 1; fi
+	@echo "ok: listener + pinned route + credential-free AI backend"
+	@echo "--> the LLM route matches the provider path prefixes, never a bare / (the MCP catch-all wins that tie)"
+	@grep -A6 'sectionName: llm' /tmp/vl-on.out | grep -q 'value: "/v1"' || { echo "FAIL: the LLM route does not match the provider path prefix"; exit 1; }
+	@if grep -A6 'sectionName: llm' /tmp/vl-on.out | grep -qE 'value: "?/"?$$'; then \
+		echo "FAIL: the LLM route matches a bare /; agent-platform-mcps renders a catch-all route on the same Gateway that wins an equal match, so every inference call would reach the MCP backend"; exit 1; \
+	fi
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set 'llmRouting.pathPrefixes[0]=/openai/v1' >/tmp/vl-prefix.out 2>&1 || { cat /tmp/vl-prefix.out; exit 1; }
+	@grep -A6 'sectionName: llm' /tmp/vl-prefix.out | grep -q 'value: "/openai/v1"' || { echo "FAIL: llmRouting.pathPrefixes does not reach the route matches"; exit 1; }
+	@echo "ok: path prefixes"
+	@echo "--> guard: a bare / prefix, and an empty prefix list, must fail"
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set 'llmRouting.pathPrefixes[0]=/' >/tmp/vl-slash.out 2>&1; then \
+		echo "FAIL: the bare-/ guard did not fire; the MCP catch-all would swallow every inference call"; exit 1; \
+	elif ! grep -q "must be more specific" /tmp/vl-slash.out; then \
+		echo "FAIL: the bare-/ guard failed for the wrong reason"; cat /tmp/vl-slash.out; exit 1; \
+	else echo "ok: bare-/ guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set llmRouting.pathPrefixes=null >/tmp/vl-empty.out 2>&1; then \
+		echo "FAIL: the empty-prefix-list guard did not fire; the route would match nothing"; exit 1; \
+	elif ! grep -q "must list at least one prefix" /tmp/vl-empty.out; then \
+		echo "FAIL: the empty-prefix-list guard failed for the wrong reason"; cat /tmp/vl-empty.out; exit 1; \
+	else echo "ok: empty-prefix-list guard"; fi
+	@echo "--> the Gateway policy carries the route-type map INCLUDING the wildcard, and both metric labels"
+	@grep -q '"/v1/messages": Messages' /tmp/vl-on.out || { echo "FAIL: no Messages route type; the gateway would parse Anthropic bodies as OpenAI Completions"; exit 1; }
+	@grep -q '"/v1/messages/count_tokens": AnthropicTokenCount' /tmp/vl-on.out || { echo "FAIL: no AnthropicTokenCount route type"; exit 1; }
+	@grep -q '"\*": Passthrough' /tmp/vl-on.out || { echo "FAIL: no wildcard route type; any other path would fall back to Completions parsing"; exit 1; }
+	@grep -q 'expression: source.unverifiedWorkload.serviceAccount' /tmp/vl-on.out || { echo "FAIL: no agent attribution label"; exit 1; }
+	@grep -q 'expression: source.unverifiedWorkload.namespace' /tmp/vl-on.out || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
+	@if [ "$$(grep -c 'kind: AgentgatewayPolicy' /tmp/vl-on.out)" != "1" ]; then \
+		echo "FAIL: more than one AgentgatewayPolicy targets the Gateway; the loser is silently dropped"; exit 1; \
+	else echo "ok: one policy, route-type map + metric labels"; fi
+	@echo "--> the price ConfigMap renders and the AgentgatewayParameters references it"
+	@grep -q 'name: t-model-catalog' /tmp/vl-on.out || { echo "FAIL: no model-price ConfigMap; every cost lookup would report NoCatalog"; exit 1; }
+	@grep -A4 '^  modelCatalog:' /tmp/vl-on.out | grep -q 'key: catalog.json' || { echo "FAIL: AgentgatewayParameters does not reference the price ConfigMap"; exit 1; }
+	@grep -q '"claude-sonnet-4-6"' /tmp/vl-on.out || { echo "FAIL: the platform's default model is unpriced"; exit 1; }
+	@echo "ok: price catalog wired"
+	@echo "--> the network policies admit the LLM port in both flavors"
+	@grep -A24 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-on.out | grep -q '"8081"' || { echo "FAIL: the cilium data-plane policy does not admit the LLM port"; exit 1; }
+	@grep -A40 'kagent-agent-muster-egress' /tmp/vl-on.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' || { echo "FAIL: agent pods have no egress to the data plane's LLM port"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes >/tmp/vl-k8s.out 2>&1 || { cat /tmp/vl-k8s.out; exit 1; }
+	@grep -A24 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-k8s.out | grep -q 'port: 8081' || { echo "FAIL: the kubernetes data-plane policy does not admit the LLM port"; exit 1; }
+	@echo "ok: network policies"
+	@echo "--> guard: llmRouting on with no agentgateway data plane must fail"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set llmRouting.enabled=true >/tmp/vl-guard.out 2>&1; then \
+		echo "FAIL: llmRouting rendered with no data plane; the cutover would take every agent offline"; exit 1; \
+	elif ! grep -q "llmRouting.enabled requires the agentgateway data plane" /tmp/vl-guard.out; then \
+		echo "FAIL: the llmRouting guard failed for the wrong reason"; cat /tmp/vl-guard.out; exit 1; \
+	else echo "ok: data-plane guard"; fi
+	@echo "--> guard: an LLM port that collides with an existing listener must fail"
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set llmRouting.listener.port=8080 >/tmp/vl-port.out 2>&1; then \
+		echo "FAIL: the port-collision guard did not fire"; exit 1; \
+	elif ! grep -q "is already taken by the http listener" /tmp/vl-port.out; then \
+		echo "FAIL: the port-collision guard failed for the wrong reason"; cat /tmp/vl-port.out; exit 1; \
+	else echo "ok: port-collision guard"; fi
+	@echo "--> the CI scenario renders, and a chart-owned ModelConfig can ride the listener"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >/tmp/vl-ci.out 2>&1 || { cat /tmp/vl-ci.out; exit 1; }
+	@grep -A3 'anthropic:' /tmp/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: kagent.modelConfigs[].baseUrl does not reach the rendered ModelConfig; that agent would bypass the listener"; exit 1; }
+	@echo "ok: CI scenario"
+	@echo "--> the meta chart forwards the cutover value to the kagent release"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.providers.anthropic.config.baseUrl=http://agentgateway.default.svc:8081 >/tmp/vl-meta.out 2>&1 || { cat /tmp/vl-meta.out; exit 1; }
+	@grep -A2 '^          config:$$' /tmp/vl-meta.out | grep -q 'baseUrl: http://agentgateway.default.svc:8081' || { echo "FAIL: the cutover value never reaches the kagent HelmRelease; the default ModelConfig would stay direct"; exit 1; }
+	@echo "ok: cutover forwarded"
+	@echo "All llmRouting behaviors verified."

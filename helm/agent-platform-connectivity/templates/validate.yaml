@@ -1,3 +1,4 @@
 {{- include "agent-platform.validateLegacyToggles" . -}}
 {{- include "agent-platform.validateIngress" . -}}
 {{- include "agent-platform.validateGlobal" . -}}
+{{- include "agent-platform.validateLlmRouting" . -}}
