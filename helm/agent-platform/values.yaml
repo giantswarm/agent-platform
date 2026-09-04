@@ -1565,6 +1565,19 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
   # Egress: DNS, the Kubernetes API, the identity provider (oauth on), the
   # Ollama endpoint (ollama backend) or the Hugging Face Hub (kserve backend).
   networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to the platform's own (the
+      # agentgateway data plane with route on, muster with the MCPServer on):
+      # a list of pod label maps (matchLabels), every one a workload in the
+      # release namespace. cilium flavor: one fromEndpoints entry per item with
+      # io.kubernetes.pod.namespace pinned to the release namespace; kubernetes
+      # flavor: one podSelector per item. A non-empty list also counts as a
+      # platform caller (no placeholder peer renders). Empty, the default,
+      # admits no one else. For an umbrella that runs a portal next to the
+      # managers:
+      #   additionalPeers:
+      #     - app.kubernetes.io/name: backstage
+      additionalPeers: []
     huggingFace:
       # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) for the
       # kserve backend's Hub calls (search, fit checks, revision lookups),
@@ -1680,6 +1693,19 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
   # provider (oauth on), and 443 to the agent chart's registry (derived from
   # agent-manager.agentChart.ociUrl) plus the names below.
   networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to the platform's own (the
+      # agentgateway data plane with route on, muster with the MCPServer on):
+      # a list of pod label maps (matchLabels), every one a workload in the
+      # release namespace. cilium flavor: one fromEndpoints entry per item with
+      # io.kubernetes.pod.namespace pinned to the release namespace; kubernetes
+      # flavor: one podSelector per item. A non-empty list also counts as a
+      # platform caller (no placeholder peer renders). Empty, the default,
+      # admits no one else. For an umbrella that runs a portal next to the
+      # managers:
+      #   additionalPeers:
+      #     - app.kubernetes.io/name: backstage
+      additionalPeers: []
     egress:
       # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) next to
       # the registry host, resolved through the DNS proxy rule the policy

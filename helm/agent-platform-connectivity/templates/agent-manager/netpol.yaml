@@ -5,6 +5,15 @@
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.agentManager.oauthEnabled" . }}
+{{- /* Extra same-namespace callers admitted on the Service port
+(agentManager.networkPolicy.ingress.additionalPeers): pod label maps, each
+rendered as one more ingress peer in the flavor's own dialect. */ -}}
+{{- $peers := $am.networkPolicy.ingress.additionalPeers }}
+{{- range $peers }}
+{{- if or (not (kindIs "map" .)) (not .) }}
+{{- fail (printf "agentManager.networkPolicy.ingress.additionalPeers: every item is a non-empty pod label map (matchLabels), e.g. {app.kubernetes.io/name: backstage}; got %v" .) }}
+{{- end }}
+{{- end }}
 {{- $egress := $am.networkPolicy.egress }}
 {{- $registryHost := include "agent-platform.agentManager.registryHost" . }}
 
@@ -37,7 +46,12 @@ spec:
             app.kubernetes.io/name: muster
             io.kubernetes.pod.namespace: {{ .Release.Namespace }}
         {{- end }}
-        {{- if not (or $am.route.enabled $mcpOn) }}
+        {{- range $peers }}
+        - matchLabels:
+            {{- toYaml . | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ $.Release.Namespace }}
+        {{- end }}
+        {{- if not (or $am.route.enabled $mcpOn $peers) }}
         # No platform caller is on: nothing reaches the API but the probes.
         - matchLabels:
             io.kubernetes.pod.namespace: {{ .Release.Namespace }}
@@ -193,7 +207,12 @@ spec:
             matchLabels:
               app.kubernetes.io/name: muster
         {{- end }}
-        {{- if not (or $am.route.enabled $mcpOn) }}
+        {{- range $peers }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
+        {{- if not (or $am.route.enabled $mcpOn $peers) }}
         # No platform caller is on: nothing reaches the API but the probes.
         - podSelector:
             matchLabels:
