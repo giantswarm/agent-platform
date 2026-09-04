@@ -1461,8 +1461,9 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # targets, like muster.fullnameOverride. `backend` selects the serving driver:
 # `ollama` proxies an Ollama reached at ollama.endpoint (REQUIRED as reached
 # from pods; the chart's own default is a Docker Desktop guess), `kserve`
-# manages InferenceServices on a KServe the cluster already has (the Agent
-# Platform does not bundle it), configured through the chart's kserve.* keys.
+# manages InferenceServices on the KServe control plane the cluster runs (a
+# prerequisite of that backend; nothing under this key installs it),
+# configured through the chart's kserve.* keys.
 # ModelConfigs are wired into kagent.namespace, which must be the kagent
 # component's namespace (kagent.namespaceOverride); an install without kagent
 # sets kagent.disableWiring: true. The MCP endpoint is registered with muster
