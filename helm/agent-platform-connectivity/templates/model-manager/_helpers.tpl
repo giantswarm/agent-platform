@@ -99,14 +99,23 @@ identity provider.
 {{- end -}}
 
 {{/*
+The identity provider the component validates tokens with
+(model-manager.oauth.provider): dex (the default) or google.
+*/}}
+{{- define "agent-platform.modelManager.oauthProvider" -}}
+{{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
+{{- dig "oauth" "provider" "dex" $chart -}}
+{{- end -}}
+
+{{/*
 The issuer URL the component validates tokens against: the dex provider's
 model-manager.oauth.dex.issuerURL, else global.identity.issuerUrl (the chart's
-own fallback). Empty for the google provider (public Google endpoints) and
-when neither is set.
+own fallback). Empty for the google provider (whose public endpoints
+agent-platform.idpHosts names from the provider alone) and when neither is set.
 */}}
 {{- define "agent-platform.modelManager.issuerUrl" -}}
 {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
-{{- if eq (dig "oauth" "provider" "dex" $chart) "dex" -}}
+{{- if eq (include "agent-platform.modelManager.oauthProvider" .) "dex" -}}
 {{- dig "oauth" "dex" "issuerURL" "" $chart | default .Values.global.identity.issuerUrl -}}
 {{- end -}}
 {{- end -}}
