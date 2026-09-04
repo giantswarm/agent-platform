@@ -390,6 +390,24 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=lemonade --set model-manager.lemonade.endpoint=http://lemonade.lan:13305 >/tmp/vmg-lemonade-fqdn.out 2>&1 || { cat /tmp/vmg-lemonade-fqdn.out; exit 1; }
 	@grep -q 'matchName: lemonade.lan' /tmp/vmg-lemonade-fqdn.out || { echo "FAIL: a hostname Lemonade endpoint is not opened by name"; exit 1; }
 	@echo "ok: lemonade egress"
+	@echo "--> backends list: one model-manager in front of Ollama AND Lemonade opens both host endpoints, in both flavors"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=lemonade' --set model-manager.lemonade.endpoint=http://10.0.0.2:13305 >/tmp/vmg-multi.out 2>&1 || { cat /tmp/vmg-multi.out; exit 1; }
+	@grep -q '10.0.0.1/32' /tmp/vmg-multi.out || { echo "FAIL: backends list: the Ollama endpoint is not opened"; exit 1; }
+	@grep -q '10.0.0.2/32' /tmp/vmg-multi.out || { echo "FAIL: backends list: the Lemonade endpoint is not opened"; exit 1; }
+	@grep -q 'port: "11434"' /tmp/vmg-multi.out || { echo "FAIL: backends list: the Ollama port is not opened"; exit 1; }
+	@grep -q 'port: "13305"' /tmp/vmg-multi.out || { echo "FAIL: backends list: the Lemonade port is not opened"; exit 1; }
+	@if grep -q 'huggingface.co' /tmp/vmg-multi.out; then echo "FAIL: Hugging Face egress rendered without kserve in the backends list"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set networkPolicy.flavor=kubernetes --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=lemonade' --set model-manager.lemonade.endpoint=http://10.0.0.2:13305 >/tmp/vmg-multi-k8s.out 2>&1 || { cat /tmp/vmg-multi-k8s.out; exit 1; }
+	@grep -q 'cidr: 10.0.0.1/32' /tmp/vmg-multi-k8s.out || { echo "FAIL: kubernetes backends list: the Ollama endpoint is not opened"; exit 1; }
+	@grep -q 'cidr: 10.0.0.2/32' /tmp/vmg-multi-k8s.out || { echo "FAIL: kubernetes backends list: the Lemonade endpoint is not opened"; exit 1; }
+	@echo "--> backends list with kserve: the Ollama endpoint AND the Hub"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=kserve' --set modelManager.kserve.requireApi=false >/tmp/vmg-multi-kserve.out 2>&1 || { cat /tmp/vmg-multi-kserve.out; exit 1; }
+	@grep -q 'matchName: huggingface.co' /tmp/vmg-multi-kserve.out || { echo "FAIL: backends list with kserve: no Hugging Face egress"; exit 1; }
+	@grep -q '10.0.0.1/32' /tmp/vmg-multi-kserve.out || { echo "FAIL: backends list with kserve: the Ollama endpoint is not opened"; exit 1; }
+	@echo "--> backends list: the one-element list renders as the single backend does"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set 'model-manager.backends[0]=ollama' >/tmp/vmg-multi-one.out 2>&1 || { cat /tmp/vmg-multi-one.out; exit 1; }
+	@awk '/^kind: (CiliumNetworkPolicy|HTTPRoute|AgentgatewayBackend|AgentgatewayPolicy)$$/,/^---/' /tmp/vmg-cilium.out | grep -v 'model-manager:' >/tmp/vmg-multi-one-want.out; awk '/^kind: (CiliumNetworkPolicy|HTTPRoute|AgentgatewayBackend|AgentgatewayPolicy)$$/,/^---/' /tmp/vmg-multi-one.out | grep -v 'model-manager:' >/tmp/vmg-multi-one-got.out; cmp -s /tmp/vmg-multi-one-want.out /tmp/vmg-multi-one-got.out || { echo "FAIL: backends: [ollama] renders differently from backend: ollama"; diff /tmp/vmg-multi-one-want.out /tmp/vmg-multi-one-got.out | head; exit 1; }
+	@echo "ok: backends list"
 	@echo "--> kubernetes flavor: NetworkPolicy objects, no cilium.io kinds"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set networkPolicy.flavor=kubernetes >/tmp/vmg-k8s.out 2>&1 || { cat /tmp/vmg-k8s.out; exit 1; }
 	@if grep -q 'cilium.io' /tmp/vmg-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavor"; exit 1; fi
@@ -423,6 +441,12 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	$(call managers_must_fail,lemonade endpoint required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=lemonade,model-manager.lemonade.endpoint is empty)
 	$(call managers_must_fail,lemonade endpoint must be a URL,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=lemonade --set model-manager.lemonade.endpoint=172.21.0.1:13305,must be an http(s) URL)
 	$(call managers_must_fail,kserve API required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve,serving.kserve.io/v1beta1 API)
+	$(call managers_must_fail,backends list name enum,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=bogus',must be one of: ollama)
+	$(call managers_must_fail,backends list duplicate,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=ollama',lists a driver twice)
+	$(call managers_must_fail,backends list lemonade endpoint required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=lemonade',model-manager.lemonade.endpoint is empty)
+	$(call managers_must_fail,backends list ollama endpoint required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set 'model-manager.backends[0]=lemonade' --set 'model-manager.backends[1]=ollama' --set model-manager.lemonade.endpoint=http://10.0.0.2:13305,model-manager.ollama.endpoint is empty)
+	$(call managers_must_fail,backends list kserve API required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=kserve',serving.kserve.io/v1beta1 API)
+	$(call managers_must_pass,backends list kserve API present,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=kserve' --api-versions serving.kserve.io/v1beta1)
 	$(call managers_must_pass,kserve API present,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --api-versions serving.kserve.io/v1beta1)
 	$(call managers_must_fail,model-manager wiring needs kagent,$(VM) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=s --set global.domain=ci.example.com,model-manager wires kagent ModelConfigs but components.kagent.enabled is false)
 	$(call managers_must_pass,model-manager without kagent when wiring is off,$(VM) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set model-manager.kagent.disableWiring=true --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=s --set global.domain=ci.example.com)

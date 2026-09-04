@@ -46,11 +46,30 @@ The port the model-manager Service listens on (model-manager.service.port, defau
 {{- end -}}
 
 {{/*
-The serving backend the chart is configured with (model-manager.backend).
+The serving backend the chart is configured with (model-manager.backend) — the
+one-backend form; with model-manager.backends set, the default (first) backend.
 */}}
 {{- define "agent-platform.modelManager.backend" -}}
+{{- index (include "agent-platform.modelManager.backends" . | fromJsonArray) 0 -}}
+{{- end -}}
+
+{{/*
+The serving backends the component runs, as a JSON list: model-manager.backends
+when set (one model-manager in front of several servers, e.g. ollama and
+lemonade), else [model-manager.backend]. The first is the default backend.
+*/}}
+{{- define "agent-platform.modelManager.backends" -}}
 {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
-{{- dig "backend" "ollama" $chart -}}
+{{- $list := dig "backends" (list) $chart -}}
+{{- if $list }}{{ $list | toJson }}{{ else }}{{ list (dig "backend" "ollama" $chart) | toJson }}{{ end -}}
+{{- end -}}
+
+{{/*
+Truthy when the named driver is among the component's backends.
+Usage: include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "kserve")
+*/}}
+{{- define "agent-platform.modelManager.hasBackend" -}}
+{{- if has .name (include "agent-platform.modelManager.backends" .root | fromJsonArray) }}true{{ end -}}
 {{- end -}}
 
 {{/*
@@ -110,6 +129,26 @@ an empty JSON object for kserve.
 {{- define "agent-platform.modelManager.hostTarget" -}}
 {{- $endpoint := include "agent-platform.modelManager.hostEndpoint" . -}}
 {{- if $endpoint -}}{{ include "agent-platform.modelManager.endpointTarget" $endpoint }}{{- else -}}{}{{- end -}}
+{{- end -}}
+
+{{/*
+Every host model server among the component's backends (ollama, lemonade),
+split for network policies, as a JSON list of
+  { "backend": "<name>", "host": "<host>", "port": <int>, "isIP": bool }
+in the order of the backends list. Empty when none is listed (kserve alone).
+*/}}
+{{- define "agent-platform.modelManager.hostTargets" -}}
+{{- $out := list -}}
+{{- range $name := include "agent-platform.modelManager.backends" . | fromJsonArray -}}
+{{- $endpoint := "" -}}
+{{- if eq $name "ollama" -}}{{- $endpoint = include "agent-platform.modelManager.ollamaEndpoint" $ -}}
+{{- else if eq $name "lemonade" -}}{{- $endpoint = include "agent-platform.modelManager.lemonadeEndpoint" $ -}}
+{{- end -}}
+{{- if $endpoint -}}
+{{- $out = append $out (merge (dict "backend" $name) (include "agent-platform.modelManager.endpointTarget" $endpoint | fromJson)) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/*
