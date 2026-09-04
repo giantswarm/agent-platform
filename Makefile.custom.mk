@@ -378,6 +378,18 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@grep -q 'matchName: huggingface.co' /tmp/vmg-kserve.out || { echo "FAIL: no Hugging Face egress for the kserve backend"; exit 1; }
 	@if grep -q '10.0.0.1/32' /tmp/vmg-kserve.out; then echo "FAIL: Ollama egress rendered for the kserve backend"; exit 1; fi
 	@echo "ok: kserve egress"
+	@echo "--> lemonade backend: egress to the host Lemonade Server instead of Ollama, in both flavors"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=lemonade --set model-manager.lemonade.endpoint=http://10.0.0.2:13305 >/tmp/vmg-lemonade.out 2>&1 || { cat /tmp/vmg-lemonade.out; exit 1; }
+	@grep -q '10.0.0.2/32' /tmp/vmg-lemonade.out || { echo "FAIL: model-manager egress does not pin the Lemonade endpoint address"; exit 1; }
+	@grep -q 'port: "13305"' /tmp/vmg-lemonade.out || { echo "FAIL: model-manager egress does not open the Lemonade port"; exit 1; }
+	@if grep -q '10.0.0.1/32' /tmp/vmg-lemonade.out; then echo "FAIL: Ollama egress rendered for the lemonade backend"; exit 1; fi
+	@if grep -q 'huggingface.co' /tmp/vmg-lemonade.out; then echo "FAIL: Hugging Face egress rendered for the lemonade backend"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set networkPolicy.flavor=kubernetes --set model-manager.backend=lemonade --set model-manager.lemonade.endpoint=http://10.0.0.2:13305 >/tmp/vmg-lemonade-k8s.out 2>&1 || { cat /tmp/vmg-lemonade-k8s.out; exit 1; }
+	@grep -q 'cidr: 10.0.0.2/32' /tmp/vmg-lemonade-k8s.out || { echo "FAIL: kubernetes model-manager egress does not pin the Lemonade endpoint address"; exit 1; }
+	@grep -q 'port: 13305' /tmp/vmg-lemonade-k8s.out || { echo "FAIL: kubernetes model-manager egress does not open the Lemonade port"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=lemonade --set model-manager.lemonade.endpoint=http://lemonade.lan:13305 >/tmp/vmg-lemonade-fqdn.out 2>&1 || { cat /tmp/vmg-lemonade-fqdn.out; exit 1; }
+	@grep -q 'matchName: lemonade.lan' /tmp/vmg-lemonade-fqdn.out || { echo "FAIL: a hostname Lemonade endpoint is not opened by name"; exit 1; }
+	@echo "ok: lemonade egress"
 	@echo "--> kubernetes flavor: NetworkPolicy objects, no cilium.io kinds"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set networkPolicy.flavor=kubernetes >/tmp/vmg-k8s.out 2>&1 || { cat /tmp/vmg-k8s.out; exit 1; }
 	@if grep -q 'cilium.io' /tmp/vmg-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavor"; exit 1; fi
@@ -408,6 +420,8 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@echo "--> guards"
 	$(call managers_must_fail,ollama endpoint required,$(MANAGERS_MIN) --set components.model-manager.enabled=true,model-manager.ollama.endpoint is empty)
 	$(call managers_must_fail,backend enum,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=bogus,must be one of: ollama)
+	$(call managers_must_fail,lemonade endpoint required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=lemonade,model-manager.lemonade.endpoint is empty)
+	$(call managers_must_fail,lemonade endpoint must be a URL,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=lemonade --set model-manager.lemonade.endpoint=172.21.0.1:13305,must be an http(s) URL)
 	$(call managers_must_fail,kserve API required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve,serving.kserve.io/v1beta1 API)
 	$(call managers_must_pass,kserve API present,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --api-versions serving.kserve.io/v1beta1)
 	$(call managers_must_fail,model-manager wiring needs kagent,$(VM) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=s --set global.domain=ci.example.com,model-manager wires kagent ModelConfigs but components.kagent.enabled is false)
