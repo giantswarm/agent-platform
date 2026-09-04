@@ -21,6 +21,4 @@
 app-tests-app-config-file: tests/test-values.yaml
 app-tests-deploy-namespace: agent-platform
 
-smoke-tests-cluster-type: kind
-
 skip-steps: [smoke,functional,upgrade]
