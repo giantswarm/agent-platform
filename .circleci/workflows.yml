@@ -5,7 +5,7 @@
 # workflow in .circleci/config.yml merges into this file at pipeline runtime.
 version: 2.1
 orbs:
-  architect: giantswarm/architect@10.1.0
+  architect: giantswarm/architect@10.3.0
 
 workflows:
   build:
@@ -44,21 +44,14 @@ workflows:
             ignore:
             - main
 
-    # Tag: run chart tests after the release image is pushed, for the same
-    # image-availability reason as the branch job above.
-    - architect/run-tests-with-ats:
-        name: execute-chart-tests-release
-        requires:
-        - build-chart
-        filters:
-          tags:
-            only: /^v.*/
-          branches:
-            ignore: /.*/
-
-    # Tag: push chart after tests + the gsoci image. Intentionally does NOT
-    # depend on sync-china-registry so the chart catalog can publish even if
-    # the in-China Aliyun mirror is slow or fails.
+    # Tag: push the chart after build-chart (+ the gsoci image). The chart
+    # tests ran on the branch (execute-chart-tests) and the tag is cut from the
+    # merge commit of a PR whose branch run tested this tree, so they are not
+    # re-run here (atsOnRelease brings the tag-time run back). Make the
+    # ci/circleci statuses required checks on the default branch, with
+    # up-to-date branches (strict), so a PR cannot merge before that run is
+    # green. Intentionally does NOT depend on sync-china-registry so the chart
+    # catalog can publish even if the in-China Aliyun mirror is slow or fails.
     - architect/push-to-app-catalog:
         executor: app-build-suite
         context: architect
@@ -67,7 +60,7 @@ workflows:
         app_catalog_test: giantswarm-test-catalog
         chart: agent-platform
         requires:
-        - execute-chart-tests-release
+        - build-chart
         filters:
           tags:
             only: /^v.*/
