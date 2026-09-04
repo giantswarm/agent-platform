@@ -17,10 +17,10 @@ rendered as one more ingress peer in the flavor's own dialect. */ -}}
 {{- end }}
 {{- $hf := $mm.networkPolicy.huggingFace }}
 {{- $egress := $mm.networkPolicy.egress }}
-{{- $ollama := dict }}
-{{- if eq $backend "ollama" }}
-{{- $ollama = include "agent-platform.modelManager.ollamaTarget" . | fromJson }}
-{{- end }}
+{{- /* The host-proxying backends (ollama, lemonade) need egress to their
+server: the endpoint split into host, port and whether it is an address. */ -}}
+{{- $hostBackend := or (eq $backend "ollama") (eq $backend "lemonade") }}
+{{- $server := include "agent-platform.modelManager.hostTarget" . | fromJson }}
 
 {{- if eq .Values.networkPolicy.flavor "cilium" }}
 ---
@@ -80,7 +80,7 @@ spec:
 # InferenceServices, download Jobs — as the caller), the identity provider
 # (model-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
 # Dex issuer by name, or the three Google hosts for the google provider), for
-# the ollama backend the host Ollama endpoint, for the kserve backend the
+# the ollama and lemonade backends the host model server's endpoint, for the kserve backend the
 # Hugging Face Hub, and the names and blocks of modelManager.networkPolicy
 # .egress.
 apiVersion: cilium.io/v2
@@ -157,30 +157,30 @@ spec:
             - port: "443"
               protocol: TCP
     {{- end }}
-    {{- if eq $backend "ollama" }}
-    {{- if $ollama.isIP }}
-    # The host Ollama, an IP endpoint: exactly that address and port.
+    {{- if $hostBackend }}
+    {{- if $server.isIP }}
+    # The host model server (Ollama, Lemonade), an IP endpoint: exactly that address and port.
     - toCIDR:
-        - {{ $ollama.host }}/32
+        - {{ $server.host }}/32
       toPorts:
         - ports:
-            - port: {{ $ollama.port | quote }}
+            - port: {{ $server.port | quote }}
               protocol: TCP
     {{- else }}
-    # The host Ollama, named by hostname: by name outside the cluster (through
-    # the DNS proxy rule above) and, for an in-cluster Ollama Service, the
+    # The host model server, named by hostname: by name outside the cluster
+    # (through the DNS proxy rule above) and, for an in-cluster Service, the
     # cluster entity, on the endpoint's port.
     - toFQDNs:
-        - matchName: {{ $ollama.host }}
+        - matchName: {{ $server.host }}
       toPorts:
         - ports:
-            - port: {{ $ollama.port | quote }}
+            - port: {{ $server.port | quote }}
               protocol: TCP
     - toEntities:
         - cluster
       toPorts:
         - ports:
-            - port: {{ $ollama.port | quote }}
+            - port: {{ $server.port | quote }}
               protocol: TCP
     {{- end }}
     {{- end }}
@@ -283,7 +283,7 @@ spec:
 # NetworkPolicy has no FQDN selector — every public destination on 443 (the
 # identity provider, Dex or Google; the Hugging Face Hub for the kserve
 # backend; modelManager.networkPolicy.huggingFace.cidrs narrows the latter),
-# plus for the ollama backend the host Ollama endpoint. A private identity
+# plus for the ollama and lemonade backends the host model server's endpoint. A private identity
 # provider needs its address in modelManager.networkPolicy.egress.cidrs or
 # networkPolicy.additionalEgressCIDRs.
 apiVersion: networking.k8s.io/v1
@@ -366,24 +366,24 @@ spec:
         - port: 443
           protocol: TCP
     {{- end }}
-    {{- if eq $backend "ollama" }}
-    {{- if $ollama.isIP }}
-    # The host Ollama, an IP endpoint: exactly that address and port.
+    {{- if $hostBackend }}
+    {{- if $server.isIP }}
+    # The host model server (Ollama, Lemonade), an IP endpoint: exactly that address and port.
     - to:
         - ipBlock:
-            cidr: {{ $ollama.host }}/32
+            cidr: {{ $server.host }}/32
       ports:
-        - port: {{ $ollama.port | int }}
+        - port: {{ $server.port | int }}
           protocol: TCP
     {{- else }}
-    # The host Ollama, named by hostname: vanilla NetworkPolicy has no FQDN
+    # The host model server, named by hostname: vanilla NetworkPolicy has no FQDN
     # selector, so the port is opened to every destination. Use an IP
     # endpoint for a tighter policy.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
       ports:
-        - port: {{ $ollama.port | int }}
+        - port: {{ $server.port | int }}
           protocol: TCP
     {{- end }}
     {{- end }}

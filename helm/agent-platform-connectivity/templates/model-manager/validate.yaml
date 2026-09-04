@@ -12,8 +12,8 @@ route the API server rejects, or an MCPServer CR without its CRD.
 
   {{- /* The chart's schema types `backend` as a free string; a typo would
          start the service with a driver it does not have. */ -}}
-  {{- if not (or (eq $backend "ollama") (eq $backend "kserve")) }}
-    {{- fail (printf "model-manager.backend=%q is invalid; must be one of: ollama, kserve" $backend) }}
+  {{- if not (or (eq $backend "ollama") (eq $backend "kserve") (eq $backend "lemonade")) }}
+    {{- fail (printf "model-manager.backend=%q is invalid; must be one of: ollama, kserve, lemonade" $backend) }}
   {{- end }}
 
   {{- /* The ollama backend proxies a host Ollama: the endpoint is the one
@@ -26,6 +26,19 @@ route the API server rejects, or an MCPServer CR without its CRD.
     {{- end }}
     {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
       {{- fail (printf "model-manager.ollama.endpoint (%q) must be an http(s) URL with a host, e.g. http://ollama.models.svc.cluster.local:11434" $endpoint) }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* The lemonade backend proxies a host Lemonade Server (FastFlowLM on
+         AMD Ryzen AI NPUs, llama.cpp): the endpoint is the one input an
+         install must provide, as for ollama. */ -}}
+  {{- if eq $backend "lemonade" }}
+    {{- $endpoint := include "agent-platform.modelManager.lemonadeEndpoint" . }}
+    {{- if not $endpoint }}
+      {{- fail "model-manager.backend is lemonade but model-manager.lemonade.endpoint is empty: set the Lemonade Server base URL as reached from pods (e.g. http://172.21.0.1:13305 — Lemonade listens on 13305 by default)" }}
+    {{- end }}
+    {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
+      {{- fail (printf "model-manager.lemonade.endpoint (%q) must be an http(s) URL with a host, e.g. http://172.21.0.1:13305" $endpoint) }}
     {{- end }}
   {{- end }}
 

@@ -1460,7 +1460,11 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # pinned Service name is what the wiring below (route, network policies)
 # targets, like muster.fullnameOverride. `backend` selects the serving driver:
 # `ollama` proxies an Ollama reached at ollama.endpoint (REQUIRED as reached
-# from pods; the chart's own default is a Docker Desktop guess), `kserve`
+# from pods; the chart's own default is a Docker Desktop guess), `lemonade`
+# proxies a Lemonade Server — FastFlowLM on AMD Ryzen AI NPUs, llama.cpp on
+# GPU/CPU — reached at lemonade.endpoint (REQUIRED likewise; Lemonade listens
+# on 13305 by default; its models are wired with kagent's OpenAI provider
+# against <endpoint>/api/v1), `kserve`
 # manages InferenceServices on the KServe control plane the cluster runs (a
 # prerequisite of that backend; nothing under this key installs it),
 # configured through the chart's kserve.* keys.
@@ -1486,6 +1490,9 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: model-manager
   backend: ollama
   ollama:
+    endpoint: ""
+    agentHost: ""
+  lemonade:
     endpoint: ""
     agentHost: ""
   kagent:
