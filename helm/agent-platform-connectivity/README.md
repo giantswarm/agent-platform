@@ -386,6 +386,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | modelManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | modelManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | modelManager.kserve.requireApi | bool | `true` |  |
+| modelManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
@@ -421,6 +422,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
+| agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | agentManager.networkPolicy.egress.fqdns[1].matchName | string | `"api.github.com"` |  |
 | agentManager.networkPolicy.egress.cidrs | list | `[]` |  |
