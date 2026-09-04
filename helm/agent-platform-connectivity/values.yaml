@@ -1252,8 +1252,10 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
   # Network policy inputs. The policies render under networkPolicy (enabled +
   # flavor) like every other component's wiring. Ingress: the agentgateway
   # data plane (route on), muster (MCPServer on) and the kubelet's probes.
-  # Egress: DNS, the Kubernetes API, the identity provider (oauth on), the
-  # Ollama endpoint (ollama backend) or the Hugging Face Hub (kserve backend).
+  # Egress: DNS, the Kubernetes API, the identity provider (oauth on: the Dex
+  # issuer by name, or for model-manager.oauth.provider google its discovery,
+  # JWKS/userinfo and token hosts), the Ollama endpoint (ollama backend) or the
+  # Hugging Face Hub (kserve backend), plus the names and blocks of egress.
   networkPolicy:
     ingress:
       # Callers admitted on the Service port next to the platform's own (the
@@ -1286,6 +1288,19 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs. A list here narrows the
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
+      cidrs: []
+    # Further destinations of the service on 443, whatever the backend — the
+    # same knob as agentManager.networkPolicy.egress: a private identity
+    # provider, a model mirror.
+    egress:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders. Ignored by the
+      # kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks, opened on 443 in both flavors. In the kubernetes flavor the
+      # policy already opens every public destination while oauth is on, so
+      # this is where a private address (one of
+      # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
 
 # === Agent manager (agent-manager) ===
@@ -1380,7 +1395,9 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
   # Network policy inputs; the policies render under networkPolicy (enabled +
   # flavor). Ingress: the agentgateway data plane (route on), muster (MCPServer
   # on) and the kubelet's probes. Egress: DNS, the Kubernetes API, the identity
-  # provider (oauth on), and 443 to the agent chart's registry (derived from
+  # provider (oauth on: the Dex issuer by name, or for
+  # agent-manager.oauth.provider google its discovery, JWKS/userinfo and token
+  # hosts), and 443 to the agent chart's registry (derived from
   # agent-manager.agentChart.ociUrl) plus the names below.
   networkPolicy:
     ingress:

@@ -348,7 +348,31 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@grep -B2 -A2 'matchPattern: "\*"' /tmp/vmg-cilium.out | grep -q 'dns:' || { echo "FAIL: the FQDN policies carry no DNS proxy rule"; exit 1; }
 	@grep -q '\- remote-node' /tmp/vmg-cilium.out || { echo "FAIL: the ingress policies do not admit the kubelet probes"; exit 1; }
 	@if grep -q 'huggingface.co' /tmp/vmg-cilium.out; then echo "FAIL: Hugging Face egress rendered for the ollama backend"; exit 1; fi
+	@if grep -q 'matchName: .*google' /tmp/vmg-cilium.out; then echo "FAIL: Google endpoints rendered for the dex provider"; exit 1; fi
 	@echo "ok: cilium egress"
+	@echo "--> cilium, google provider: the IdP egress names Google's discovery, JWKS/userinfo and token hosts, not a Dex issuer"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.oauth.provider=google --set agent-manager.oauth.provider=google >/tmp/vmg-google.out 2>&1 || { cat /tmp/vmg-google.out; exit 1; }
+	@for n in model-manager agent-manager; do \
+		awk "/^  name: agent-platform-connectivity-$$n-egress$$/,/^---/" /tmp/vmg-google.out >/tmp/vmg-google-$$n.out; \
+		for h in accounts.google.com www.googleapis.com oauth2.googleapis.com; do \
+			grep -q "matchName: $$h$$" /tmp/vmg-google-$$n.out || { echo "FAIL: $$n egress lacks $$h for the google provider"; exit 1; }; \
+		done; \
+		if grep -q 'matchName: dex.ci.example.com' /tmp/vmg-google-$$n.out; then echo "FAIL: $$n egress names the Dex issuer for the google provider"; exit 1; fi; \
+		grep -q '\- cluster' /tmp/vmg-google-$$n.out || { echo "FAIL: $$n egress lost the cluster entity for the google provider"; exit 1; }; \
+	done
+	@echo "ok: google IdP egress"
+	@echo "--> modelManager.networkPolicy.egress: names and blocks on 443 (cilium), blocks (kubernetes), whatever the backend; the chart-wide additional egress renders for the ollama backend too"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set 'modelManager.networkPolicy.egress.fqdns[0].matchName=idp.example.internal' --set 'modelManager.networkPolicy.egress.fqdns[1].matchPattern=*.mirror.example.internal' --set 'modelManager.networkPolicy.egress.cidrs[0]=198.51.100.0/24' --set 'networkPolicy.additionalEgressFQDNs[0].matchName=extra.example.internal' --set 'networkPolicy.additionalEgressCIDRs[0]=203.0.113.0/24' >/tmp/vmg-mm-egress.out 2>&1 || { cat /tmp/vmg-mm-egress.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-model-manager-egress$$/,/^---/' /tmp/vmg-mm-egress.out >/tmp/vmg-mm-egress-policy.out
+	@for pattern in 'matchName: idp.example.internal' "matchPattern: '\*.mirror.example.internal'" '\- 198.51.100.0/24' 'matchName: extra.example.internal' '\- 203.0.113.0/24' '\- 10.0.0.1/32'; do \
+		grep -q -e "$$pattern" /tmp/vmg-mm-egress-policy.out || { echo "FAIL: cilium model-manager egress lacks $$pattern"; exit 1; }; \
+	done
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set networkPolicy.flavor=kubernetes --set 'modelManager.networkPolicy.egress.cidrs[0]=198.51.100.0/24' --set 'networkPolicy.additionalEgressCIDRs[0]=203.0.113.0/24' >/tmp/vmg-mm-egress-k8s.out 2>&1 || { cat /tmp/vmg-mm-egress-k8s.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-model-manager-egress$$/,/^---/' /tmp/vmg-mm-egress-k8s.out >/tmp/vmg-mm-egress-k8s-policy.out
+	@for pattern in 'cidr: "198.51.100.0/24"' 'cidr: "203.0.113.0/24"'; do \
+		grep -q -e "$$pattern" /tmp/vmg-mm-egress-k8s-policy.out || { echo "FAIL: kubernetes model-manager egress lacks $$pattern"; exit 1; }; \
+	done
+	@echo "ok: model-manager egress knob"
 	@echo "--> cilium, kserve backend: Hugging Face egress instead of the Ollama endpoint"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=kserve --set modelManager.kserve.requireApi=false >/tmp/vmg-kserve.out 2>&1 || { cat /tmp/vmg-kserve.out; exit 1; }
 	@grep -q 'matchName: huggingface.co' /tmp/vmg-kserve.out || { echo "FAIL: no Hugging Face egress for the kserve backend"; exit 1; }

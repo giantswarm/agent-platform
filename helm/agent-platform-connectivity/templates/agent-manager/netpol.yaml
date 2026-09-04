@@ -73,9 +73,11 @@ spec:
 # Egress from agent-manager: DNS (with Cilium's proxy clause so the FQDN
 # selectors below resolve), the Kubernetes API (HelmReleases, OCIRepositories,
 # Agents, ModelConfigs, workloads — as the caller), the identity provider
-# (agent-manager.oauth: the issuer's JWKS and token endpoint), the agent
-# chart's OCI registry (versions, values schema; blob downloads redirect to the
-# registry's storage front) and GitHub (skill discovery) — by name, on 443.
+# (agent-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
+# Dex issuer by name, or the three Google hosts for the google provider), the
+# agent chart's OCI registry (versions, values schema; blob downloads redirect
+# to the registry's storage front) and GitHub (skill discovery) — by name, on
+# 443.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -92,7 +94,7 @@ spec:
     - toEntities:
         - kube-apiserver
     {{- if $oauthOn }}
-    {{- include "agent-platform.idpEgress.cilium" (dict "issuerUrl" (include "agent-platform.agentManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.agentManager.oauthProvider" .) "issuerUrl" (include "agent-platform.agentManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
     - toFQDNs:
         - matchName: {{ $registryHost }}
@@ -224,9 +226,9 @@ spec:
 ---
 # Egress from agent-manager: DNS, the Kubernetes API, and — vanilla
 # NetworkPolicy has no FQDN selector — every public destination on 443 for the
-# identity provider, the chart registry and GitHub (agentManager.networkPolicy
-# .egress.cidrs narrows it; a private identity provider needs its address in
-# networkPolicy.additionalEgressCIDRs).
+# identity provider (Dex or Google), the chart registry and GitHub
+# (agentManager.networkPolicy.egress.cidrs narrows it; a private identity
+# provider needs its address in networkPolicy.additionalEgressCIDRs).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
