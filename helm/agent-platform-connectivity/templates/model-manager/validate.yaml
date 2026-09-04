@@ -7,22 +7,35 @@ route the API server rejects, or an MCPServer CR without its CRD.
 {{- if (include "agent-platform.modelManager.enabled" .) }}
   {{- $mm := .Values.modelManager }}
   {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson }}
-  {{- $backend := include "agent-platform.modelManager.backend" . }}
+  {{- $backends := include "agent-platform.modelManager.backends" . | fromJsonArray }}
+  {{- /* One model-manager runs one or several backends (model-manager.backends,
+         else [model-manager.backend]); every guard below applies to every
+         listed driver. $backend keeps the kserve API guard — which the
+         standalone umbrella patches by text — keyed on one name: kserve when
+         it is listed, else the default (first) backend. */ -}}
+  {{- $backend := index $backends 0 }}
+  {{- if has "kserve" $backends }}{{- $backend = "kserve" }}{{- end }}
   {{- $_ := include "agent-platform.modelManager.fullname" . }}
 
-  {{- /* The chart's schema types `backend` as a free string; a typo would
-         start the service with a driver it does not have. */ -}}
-  {{- if not (or (eq $backend "ollama") (eq $backend "kserve") (eq $backend "lemonade")) }}
-    {{- fail (printf "model-manager.backend=%q is invalid; must be one of: ollama, kserve, lemonade" $backend) }}
+  {{- /* The chart's schema types `backend` as a free string and `backends` as
+         strings; a typo would start the service with a driver it does not
+         have, a repeated name a process that refuses to start. */ -}}
+  {{- range $name := $backends }}
+    {{- if not (or (eq $name "ollama") (eq $name "kserve") (eq $name "lemonade")) }}
+      {{- fail (printf "model-manager backend %q (model-manager.backends / model-manager.backend) is invalid; must be one of: ollama, kserve, lemonade" $name) }}
+    {{- end }}
+  {{- end }}
+  {{- if ne (len $backends) (len (uniq $backends)) }}
+    {{- fail (printf "model-manager.backends (%s) lists a driver twice: one model-manager runs each driver at most once" (join ", " $backends)) }}
   {{- end }}
 
   {{- /* The ollama backend proxies a host Ollama: the endpoint is the one
          input an install must provide (the chart's own default,
          host.docker.internal, is a Docker Desktop guess). */ -}}
-  {{- if eq $backend "ollama" }}
+  {{- if include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "ollama") }}
     {{- $endpoint := include "agent-platform.modelManager.ollamaEndpoint" . }}
     {{- if not $endpoint }}
-      {{- fail "model-manager.backend is ollama but model-manager.ollama.endpoint is empty: set the Ollama API base URL as reached from pods (e.g. http://ollama.models.svc.cluster.local:11434)" }}
+      {{- fail "ollama is among the model-manager backends but model-manager.ollama.endpoint is empty: set the Ollama API base URL as reached from pods (e.g. http://ollama.models.svc.cluster.local:11434)" }}
     {{- end }}
     {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
       {{- fail (printf "model-manager.ollama.endpoint (%q) must be an http(s) URL with a host, e.g. http://ollama.models.svc.cluster.local:11434" $endpoint) }}
@@ -32,10 +45,10 @@ route the API server rejects, or an MCPServer CR without its CRD.
   {{- /* The lemonade backend proxies a host Lemonade Server (FastFlowLM on
          AMD Ryzen AI NPUs, llama.cpp): the endpoint is the one input an
          install must provide, as for ollama. */ -}}
-  {{- if eq $backend "lemonade" }}
+  {{- if include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "lemonade") }}
     {{- $endpoint := include "agent-platform.modelManager.lemonadeEndpoint" . }}
     {{- if not $endpoint }}
-      {{- fail "model-manager.backend is lemonade but model-manager.lemonade.endpoint is empty: set the Lemonade Server base URL as reached from pods (e.g. http://172.21.0.1:13305 — Lemonade listens on 13305 by default)" }}
+      {{- fail "lemonade is among the model-manager backends but model-manager.lemonade.endpoint is empty: set the Lemonade Server base URL as reached from pods (e.g. http://172.21.0.1:13305 — Lemonade listens on 13305 by default)" }}
     {{- end }}
     {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
       {{- fail (printf "model-manager.lemonade.endpoint (%q) must be an http(s) URL with a host, e.g. http://172.21.0.1:13305" $endpoint) }}

@@ -1488,6 +1488,12 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # off; the connectivity chart renders the policies (modelManager below).
 model-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: model-manager
+  # The serving backend, or several at once: `backends: [ollama, lemonade]`
+  # (model-manager >= 0.17) runs one process in front of every server the
+  # host has — the first is the default backend, every listed driver reads its
+  # own block (ollama, lemonade, kserve) and the guards and network policies
+  # below apply to every listed driver. `backend` alone is the one-backend
+  # form; a set `backends` wins over it.
   backend: ollama
   ollama:
     endpoint: ""
