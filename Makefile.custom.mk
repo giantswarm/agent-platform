@@ -364,7 +364,7 @@ endef
 # and off in the golden render, so the default render is unchanged.
 KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent
 .PHONY: verify-kagent-netpol
-verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-in tool server renders iff kagent.kagent-tools.enabled, in the tools namespace and port.
+verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-in tool server renders iff kagent.kagent-tools.enabled, in the tools namespace and port; and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> kagent-tools off (the default): no tool-server egress"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-off.out 2>&1 || { cat /tmp/vkn-off.out; exit 1; }
@@ -386,6 +386,23 @@ verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-
 	@echo "--> kubernetes flavor: renders, and has no kagent egress policy to extend"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes --set kagent.kagent-tools.enabled=true >/tmp/vkn-k8s.out 2>&1 || { cat /tmp/vkn-k8s.out; exit 1; }
 	@if grep -q 'kagent-tools' /tmp/vkn-k8s.out; then echo "FAIL: kubernetes flavor renders a tool-server rule it has no egress policy for"; exit 1; else echo "ok: kubernetes flavor untouched"; fi
+	@echo "--> oauth2-proxy ingress: only the Gateway's Envoy pods by default; kagent.oauth2ProxyIngress.additionalPeers adds callers on the proxy port"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set 'kagent.oauth2-proxy.enabled=true' >/tmp/vkn-o2p-off.out 2>&1 || { cat /tmp/vkn-o2p-off.out; exit 1; }
+	@awk "/^  name: agent-platform-connectivity-oauth2-proxy-ingress$$/,/^---/" /tmp/vkn-o2p-off.out >/tmp/vkn-o2p-off-pol.out
+	@[ "$$(grep -c 'fromEndpoints:' /tmp/vkn-o2p-off-pol.out)" = "1" ] || { echo "FAIL: oauth2-proxy ingress admits more than the Envoy pods by default"; cat /tmp/vkn-o2p-off-pol.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set 'kagent.oauth2-proxy.enabled=true' --set-json 'kagent.oauth2ProxyIngress.additionalPeers=[{"app":"teleport-kube-agent","io.kubernetes.pod.namespace":"kube-system"}]' >/tmp/vkn-o2p-on.out 2>&1 || { cat /tmp/vkn-o2p-on.out; exit 1; }
+	@awk "/^  name: agent-platform-connectivity-oauth2-proxy-ingress$$/,/^---/" /tmp/vkn-o2p-on.out >/tmp/vkn-o2p-on-pol.out
+	@[ "$$(grep -c 'fromEndpoints:' /tmp/vkn-o2p-on-pol.out)" = "2" ] || { echo "FAIL: additionalPeers did not add a peer to the oauth2-proxy ingress"; cat /tmp/vkn-o2p-on-pol.out; exit 1; }
+	@grep -A1 'app: teleport-kube-agent' /tmp/vkn-o2p-on-pol.out | grep -q 'io.kubernetes.pod.namespace: kube-system' || { echo "FAIL: the extra peer's labels are not rendered verbatim"; cat /tmp/vkn-o2p-on-pol.out; exit 1; }
+	@grep -A5 'app: teleport-kube-agent' /tmp/vkn-o2p-on-pol.out | grep -q 'port: "4180"' || { echo "FAIL: the extra peer is not limited to the proxy port"; cat /tmp/vkn-o2p-on-pol.out; exit 1; }
+	@if grep -q 'teleport-kube-agent' /tmp/vkn-o2p-off.out; then echo "FAIL: a peer renders without being configured"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set 'kagent.oauth2-proxy.enabled=true' --set-json 'kagent.oauth2ProxyIngress.additionalPeers=["teleport-kube-agent"]' >/tmp/vkn-o2p-bad.out 2>&1; then \
+		echo "FAIL: a non-map oauth2-proxy peer was accepted"; exit 1; \
+	elif ! grep -q 'additionalPeers: every item is a non-empty pod label map' /tmp/vkn-o2p-bad.out; then \
+		echo "FAIL: the oauth2-proxy peer guard failed for the wrong reason"; cat /tmp/vkn-o2p-bad.out; exit 1; \
+	else echo "ok: oauth2-proxy ingress peers"; fi
+	@echo "--> oauth2-proxy off: no oauth2-proxy policy, peers ignored"
+	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.oauth2ProxyIngress.additionalPeers=[{"app":"teleport-kube-agent"}]' 2>&1 | grep -q 'teleport-kube-agent'; then echo "FAIL: oauth2-proxy peers render while oauth2-proxy is off"; exit 1; else echo "ok: inert while oauth2-proxy is off"; fi
 
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.

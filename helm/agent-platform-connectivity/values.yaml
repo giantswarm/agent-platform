@@ -802,6 +802,24 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     enabled: false
     namespaceOverride: kagent
 
+  # --- Network policy peers (read by umbrella templates/kagent/netpol.yaml, not passed to subchart) ---
+  oauth2ProxyIngress:
+    # Callers admitted on oauth2-proxy's proxy port (4180) next to the public
+    # Gateway's Envoy pods, cilium flavor only (the kubernetes flavor renders no
+    # oauth2-proxy policy): a list of pod label maps (matchLabels), each rendered
+    # as one more fromEndpoints entry on that port. A peer in another namespace
+    # must carry io.kubernetes.pod.namespace; without it Cilium matches pods of
+    # the kagent namespace only. Empty, the default, admits no one else.
+    #
+    # For an installation whose kagent hostname sits on a private edge LB and is
+    # reached from elsewhere through a Teleport tunnel instead: the local
+    # teleport-kube-agent proxies the tunnel's requests to oauth2-proxy, so it
+    # is the caller the policy has to admit.
+    #   additionalPeers:
+    #     - app: teleport-kube-agent
+    #       io.kubernetes.pod.namespace: kube-system
+    additionalPeers: []
+
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose kagent controller API through agentgateway (JWT-validated).
   # Creates AgentgatewayBackend + HTTPRoute in the release namespace.

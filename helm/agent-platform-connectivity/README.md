@@ -264,6 +264,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | kagent.cilium-debug-agent.namespaceOverride | string | `"kagent"` |  |
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
+| kagent.oauth2ProxyIngress.additionalPeers | list | `[]` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.pathPrefix | string | `"/kagent"` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
