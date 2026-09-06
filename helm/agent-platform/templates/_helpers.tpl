@@ -101,6 +101,80 @@ schema rejects it already.
 {{- end -}}
 
 {{/*
+Key paths (dot-joined, "block.path") of credentials set INLINE in the values,
+joined by ", ". Empty when none is set. Only the paths are emitted, never the
+values, so the string is safe to print in a fail message.
+
+A component's credentials belong in a pre-created Secret the component chart
+references (kagent providers.<name>.apiKeySecretRef / oauth2-proxy
+config.existingSecret, muster oauth.server.existingSecret /
+storage.valkey.existingSecret, valkey auth.usersExistingSecret, klaus-gateway
+slack.secretName / obo.existingSecret, model-manager and agent-manager
+oauth.existingSecret). Set inline, they are forwarded verbatim into that
+component's HelmRelease spec.values (Argo: valuesObject) and into Helm's
+release storage, readable by anyone allowed to get HelmReleases there.
+*/}}
+{{- define "agent-platform.inlineSecretPaths" -}}
+{{- $v := .Values -}}
+{{- $found := list -}}
+{{- /* Fixed paths: the top-level block, then the path inside it. */ -}}
+{{- $paths := list
+      (list "kagent" (list "oauth2-proxy" "config" "clientSecret"))
+      (list "kagent" (list "oauth2-proxy" "config" "cookieSecret"))
+      (list "muster" (list "muster" "oauth" "server" "dex" "clientSecret"))
+      (list "muster" (list "muster" "oauth" "server" "google" "clientSecret"))
+      (list "muster" (list "muster" "oauth" "server" "registrationToken"))
+      (list "muster" (list "muster" "oauth" "server" "encryptionKeyValue"))
+      (list "muster" (list "muster" "oauth" "server" "storage" "valkey" "password"))
+      (list "klausGateway" (list "slack" "botToken"))
+      (list "klausGateway" (list "slack" "signingSecret"))
+      (list "klausGateway" (list "slack" "appToken"))
+      (list "klausGateway" (list "obo" "stateKey"))
+      (list "klausGateway" (list "obo" "storeKey"))
+      (list "model-manager" (list "oauth" "dex" "clientSecret"))
+      (list "agent-manager" (list "oauth" "dex" "clientSecret")) -}}
+{{- range $paths -}}
+{{- $cur := index $v (first .) | default dict -}}
+{{- $ok := kindIs "map" $cur -}}
+{{- range (last .) -}}
+{{- if and $ok (kindIs "map" $cur) (hasKey $cur .) -}}
+{{- $cur = index $cur . -}}
+{{- else -}}
+{{- $ok = false -}}
+{{- end -}}
+{{- end -}}
+{{- if and $ok $cur -}}
+{{- $found = append $found (printf "%s.%s" (first .) (join "." (last .))) -}}
+{{- end -}}
+{{- end -}}
+{{- /* Every kagent model provider: providers.<name>.apiKey (providers.default is a string). */ -}}
+{{- range $name, $p := (dig "providers" dict (index $v "kagent" | default dict)) -}}
+{{- if and (kindIs "map" $p) (hasKey $p "apiKey") (index $p "apiKey") -}}
+{{- $found = append $found (printf "kagent.providers.%s.apiKey" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- /* Every valkey ACL user: valkey.auth.aclUsers.<user>.password. */ -}}
+{{- range $user, $spec := (dig "valkey" "auth" "aclUsers" dict (index $v "valkey" | default dict)) -}}
+{{- if and (kindIs "map" $spec) (hasKey $spec "password") (index $spec "password") -}}
+{{- $found = append $found (printf "valkey.valkey.auth.aclUsers.%s.password" $user) -}}
+{{- end -}}
+{{- end -}}
+{{- join ", " $found -}}
+{{- end -}}
+
+{{/*
+gitops.forbidInlineSecrets: fail the render when a credential is set inline.
+The message names the key paths only.
+*/}}
+{{- define "agent-platform.validateInlineSecrets" -}}
+{{- if .Values.gitops.forbidInlineSecrets -}}
+{{- with (include "agent-platform.inlineSecretPaths" .) -}}
+{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent providers.<name>.apiKeySecretRef with an empty apiKey, kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the AgentgatewayParameters CR — defaults to release name.
 */}}
 {{- define "agent-platform.parametersName" -}}

@@ -543,6 +543,9 @@
                 "engine": {
                     "type": "string"
                 },
+                "forbidInlineSecrets": {
+                    "type": "boolean"
+                },
                 "interval": {
                     "type": "string"
                 },

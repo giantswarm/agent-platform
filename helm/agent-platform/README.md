@@ -38,6 +38,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | gitops.targetNamespace | string | `""` |  |
 | gitops.serviceAccountName | string | `""` |  |
 | gitops.retries | int | `5` |  |
+| gitops.forbidInlineSecrets | bool | `false` |  |
 | gitops.argo.project | string | `"default"` |  |
 | gitops.argo.server | string | `"https://kubernetes.default.svc"` |  |
 | components.muster.chart | string | `"muster"` |  |
@@ -463,6 +464,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | klausGateway.obo.storePath | string | `""` |  |
 | klausGateway.obo.persistence.enabled | bool | `false` |  |
 | klausGateway.obo.persistence.size | string | `"64Mi"` |  |
+| klausGateway.obo.existingSecret | string | `""` |  |
 | klausGateway.obo.stateKey | string | `""` |  |
 | klausGateway.obo.storeKey | string | `""` |  |
 | klausGateway.obo.connectors.enabled | bool | `false` |  |
