@@ -60,6 +60,7 @@ knowledge:
       applies crds/ unconditionally, so this field is flux-only.
 */ -}}
 {{- include "agent-platform.validateLegacyToggles" . -}}
+{{- include "agent-platform.validateInlineSecrets" . -}}
 {{- $root := . -}}
 {{- $g := .Values.gitops -}}
 {{- if not (or (eq $g.engine "flux") (eq $g.engine "argo")) -}}

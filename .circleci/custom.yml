@@ -51,11 +51,13 @@ jobs:
         # model-manager / agent-manager wiring and guards), verify-kagent-netpol
         # (the kagent controller/agent egress to the built-in tool server),
         # verify-meta (root app-of-apps render: no Chart.yaml pins, ranges as
-        # values, both engines, pure renderer, pinned BOM) and verify-postgres
-        # (the postgres.backup wiring and guards) are the single source of
-        # truth, also run locally. Neither chart has subcharts, so no `helm
+        # values, both engines, pure renderer, pinned BOM), verify-postgres
+        # (the postgres.backup wiring and guards) and verify-secrets
+        # (gitops.forbidInlineSecrets: off by default, names only the inline
+        # credential paths, passes on referenced Secrets) are the single source
+        # of truth, also run locally. Neither chart has subcharts, so no `helm
         # dependency build`.
-        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol verify-postgres
+        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol verify-postgres verify-secrets
 
 workflows:
   build:

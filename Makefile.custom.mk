@@ -226,6 +226,46 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	else echo "ok: uiRoute hostname derivation + guard"; fi
 	@echo "All global.* contract behaviors verified."
 
+# Every credential key the guard knows, set to one canary value. The value must
+# never appear in the failure message; the paths must all appear.
+INLINE_SECRET_PATHS := kagent.providers.anthropic.apiKey kagent.oauth2-proxy.config.clientSecret kagent.oauth2-proxy.config.cookieSecret muster.muster.oauth.server.dex.clientSecret muster.muster.oauth.server.registrationToken muster.muster.oauth.server.encryptionKeyValue muster.muster.oauth.server.storage.valkey.password valkey.valkey.auth.aclUsers.default.password klausGateway.slack.botToken klausGateway.slack.signingSecret klausGateway.obo.stateKey klausGateway.obo.storeKey model-manager.oauth.dex.clientSecret agent-manager.oauth.dex.clientSecret
+INLINE_SECRET_SETS := --set kagent.providers.anthropic.apiKey=LEAK-CANARY-VALUE --set kagent.oauth2-proxy.config.clientSecret=LEAK-CANARY-VALUE --set kagent.oauth2-proxy.config.cookieSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.dex.clientSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.registrationToken=LEAK-CANARY-VALUE --set muster.muster.oauth.server.encryptionKeyValue=LEAK-CANARY-VALUE --set muster.muster.oauth.server.storage.valkey.password=LEAK-CANARY-VALUE --set valkey.valkey.auth.aclUsers.default.password=LEAK-CANARY-VALUE --set klausGateway.slack.botToken=LEAK-CANARY-VALUE --set klausGateway.slack.signingSecret=LEAK-CANARY-VALUE --set klausGateway.obo.stateKey=LEAK-CANARY-VALUE --set klausGateway.obo.storeKey=LEAK-CANARY-VALUE --set model-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set agent-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE
+# The same installation on referenced Secrets: the knobs an operator sets instead.
+REFERENCED_SECRET_SETS := --set kagent.providers.anthropic.apiKeySecretRef=kagent-anthropic-key --set kagent.oauth2-proxy.config.existingSecret=kagent-oauth2-proxy-credentials --set muster.muster.oauth.server.existingSecret=muster-oauth-credentials --set muster.muster.oauth.server.storage.valkey.existingSecret=muster-valkey-credentials --set valkey.valkey.auth.usersExistingSecret=muster-valkey-credentials --set valkey.valkey.auth.aclUsers.default.passwordKey=valkey-password --set klausGateway.slack.secretName=klaus-gateway-slack-credentials --set klausGateway.obo.existingSecret=klaus-gateway-obo-keys
+
+.PHONY: verify-secrets
+verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the render naming (only) the inline credential paths, passes on referenced Secrets.
+	@echo "====> $@ ($(CHART_DIR))"
+	@echo "--> default (forbidInlineSecrets: false): an inline credential still renders and is forwarded (the pre-existing behavior)"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(INLINE_SECRET_SETS) >/tmp/vs-default.out 2>&1 || { cat /tmp/vs-default.out; exit 1; }
+	@grep -q 'LEAK-CANARY-VALUE' /tmp/vs-default.out || { echo "FAIL: the inline credential did not reach a child HelmRelease (test setup)"; exit 1; }
+	@echo "ok: default render unchanged"
+	@echo "--> forbidInlineSecrets: true fails on every known inline credential path"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidInlineSecrets=true $(INLINE_SECRET_SETS) >/tmp/vs-forbid.out 2>&1; then \
+		echo "FAIL: the inline-secret guard did not fire"; exit 1; fi
+	@grep -q "gitops.forbidInlineSecrets is true" /tmp/vs-forbid.out || { echo "FAIL: the render failed for the wrong reason"; cat /tmp/vs-forbid.out; exit 1; }
+	@for p in $(INLINE_SECRET_PATHS); do \
+		grep -q "$$p" /tmp/vs-forbid.out || { echo "FAIL: the guard did not name $$p"; cat /tmp/vs-forbid.out; exit 1; }; \
+	done
+	@echo "ok: every inline path named"
+	@echo "--> the failure message carries the key paths, never the values"
+	@if grep -q 'LEAK-CANARY-VALUE' /tmp/vs-forbid.out; then echo "FAIL: the guard's message leaked a credential value"; exit 1; else echo "ok: no value in the message"; fi
+	@echo "--> a single inline key is enough to fail, and is the only one named"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidInlineSecrets=true --set kagent.providers.anthropic.apiKey=LEAK-CANARY-VALUE >/tmp/vs-one.out 2>&1; then \
+		echo "FAIL: one inline key passed the guard"; exit 1; fi
+	@grep -q 'kagent.providers.anthropic.apiKey' /tmp/vs-one.out || { echo "FAIL: the single key was not named"; cat /tmp/vs-one.out; exit 1; }
+	@if grep -q 'klausGateway.slack.botToken' /tmp/vs-one.out; then echo "FAIL: an unset key was named"; exit 1; fi
+	@echo "ok: single key"
+	@echo "--> forbidInlineSecrets: true with referenced Secrets renders, and no child HelmRelease carries a credential"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidInlineSecrets=true $(REFERENCED_SECRET_SETS) >/tmp/vs-ref.out 2>&1 || { cat /tmp/vs-ref.out; exit 1; }
+	@if grep -E '^\s*(apiKey|clientSecret|cookieSecret|botToken|signingSecret|appToken|stateKey|storeKey|registrationToken|encryptionKeyValue|password): ' /tmp/vs-ref.out | grep -vqE ': ""$$'; then \
+		echo "FAIL: a child HelmRelease still carries a non-empty credential key:"; grep -nE '^\s*(apiKey|clientSecret|cookieSecret|botToken|signingSecret|appToken|stateKey|storeKey|registrationToken|encryptionKeyValue|password): ' /tmp/vs-ref.out | grep -vE ': ""$$'; exit 1; fi
+	@grep -q 'existingSecret: klaus-gateway-obo-keys' /tmp/vs-ref.out || { echo "FAIL: klausGateway.obo.existingSecret was not forwarded to the klaus-gateway release"; exit 1; }
+	@grep -q 'apiKeySecretRef: kagent-anthropic-key' /tmp/vs-ref.out || { echo "FAIL: kagent.providers.anthropic.apiKeySecretRef was not forwarded"; exit 1; }
+	@echo "ok: referenced Secrets render clean"
+	@echo "--> the flag itself is meta-package plumbing and is not forwarded to any child release"
+	@if grep -q 'forbidInlineSecrets' /tmp/vs-ref.out; then echo "FAIL: gitops.forbidInlineSecrets leaked into a child HelmRelease's values"; exit 1; else echo "ok: flag not forwarded"; fi
+
 .PHONY: verify-meta
 verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, ranges as values, both engines, pinned BOM).
 	@echo "====> $@ ($(CHART_DIR))"

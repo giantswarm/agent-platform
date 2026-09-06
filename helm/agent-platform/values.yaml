@@ -86,6 +86,26 @@ gitops:
   # before another has created its namespace) instead of stalling after one
   # attempt. -1 = retry forever.
   retries: 5
+  # Refuse credentials given inline in these values. Every component chart can
+  # read its credentials from a pre-created Secret instead: kagent
+  # providers.<name>.apiKeySecretRef (with an empty apiKey) and
+  # oauth2-proxy.config.existingSecret; muster.muster.oauth.server.existingSecret
+  # and .storage.valkey.existingSecret; valkey.valkey.auth.usersExistingSecret;
+  # klausGateway.slack.secretName (with an empty botToken) and
+  # klausGateway.obo.existingSecret; model-manager / agent-manager
+  # oauth.existingSecret. A credential set inline is copied verbatim into that
+  # component's HelmRelease spec.values (Argo: valuesObject) and into Helm's
+  # release storage, readable by anyone allowed to get HelmReleases in
+  # `namespace`. With true the render fails and names the offending key paths
+  # (never their values); false keeps the pre-existing behavior. The keys it
+  # checks: kagent.providers.*.apiKey, kagent.oauth2-proxy.config.clientSecret
+  # and .cookieSecret, muster.muster.oauth.server.dex.clientSecret,
+  # .google.clientSecret, .registrationToken, .encryptionKeyValue and
+  # .storage.valkey.password, valkey.valkey.auth.aclUsers.*.password,
+  # klausGateway.slack.botToken, .signingSecret and .appToken,
+  # klausGateway.obo.stateKey and .storeKey, model-manager.oauth.dex.clientSecret,
+  # agent-manager.oauth.dex.clientSecret.
+  forbidInlineSecrets: false
   argo:
     project: default
     server: https://kubernetes.default.svc
@@ -679,10 +699,12 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     #     the enabling deploy. Safe enablement needs a runtime CONFIG SET.
     auth:
       enabled: true
-      # Required: name of the Secret with key `valkey-password`. Conventionally
-      # Valkey password is set via per-cluster secret-values override:
-      # valkey.valkey.auth.aclUsers.default.password (same value as
-      # muster.muster.oauth.server.storage.valkey.password).
+      # Name of a pre-created Secret holding the default user's password under
+      # aclUsers.default.passwordKey (e.g. valkey-password). Point
+      # muster.muster.oauth.server.storage.valkey.existingSecret at the same
+      # Secret so muster and Valkey read one value. The inline alternative,
+      # aclUsers.default.password, lands in the HelmRelease values and Helm
+      # release storage (gitops.forbidInlineSecrets rejects it).
       usersExistingSecret: ""
       aclUsers:
         default:
@@ -882,9 +904,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       type: RuntimeDefault
 
   # Model provider — Anthropic by default.
-  # Set kagent.providers.anthropic.apiKey in the per-cluster secret values
-  # (SOPS-encrypted). When apiKey is set alongside apiKeySecretRef, the chart
-  # creates the Secret automatically — no manual pre-creation needed.
+  # Pre-create the Secret named by apiKeySecretRef in the kagent namespace with
+  # the key apiKeySecretKey and leave apiKey empty: the chart then renders no
+  # Secret and the default ModelConfig references the pre-created one. An apiKey
+  # set inline makes the chart create the Secret, but also copies the key into
+  # this component's HelmRelease values and Helm release storage
+  # (gitops.forbidInlineSecrets rejects it).
   providers:
     default: anthropic
     anthropic:
@@ -892,7 +917,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       model: claude-sonnet-4-6
       apiKeySecretRef: kagent-anthropic
       apiKeySecretKey: ANTHROPIC_API_KEY
-      apiKey: ""  # Set per-cluster in secret-values; chart creates the Secret
+      apiKey: ""  # Leave empty; pre-create the apiKeySecretRef Secret instead
 
   # ServiceMonitor for controller-runtime Prometheus metrics.
   # Requires the Prometheus Operator CRDs (monitoring.coreos.com/v1).
@@ -952,7 +977,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         mountPath: /templates
         readOnly: true
     config:
-      existingSecret: ""  # set clientID/clientSecret/cookieSecret via secret values instead
+      # Name of the pre-created Secret (client-id, client-secret, cookie-secret).
+      # Prefer it over the three inline keys below, which land in the HelmRelease
+      # values and Helm release storage (gitops.forbidInlineSecrets rejects them).
+      existingSecret: ""
       clientID: ""
       clientSecret: ""
       cookieSecret: ""
@@ -1443,10 +1471,12 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # channelAllowlist lists the Slack channel IDs served when channelMode is
     # "allowlist". Rendered as SLACK_CHANNEL_ALLOWLIST.
     channelAllowlist: []
-    # botToken / signingSecret / appToken: when set (SOPS-encrypted via the
-    # per-cluster secret-values patch) the klaus-gateway chart renders the
-    # secretName Secret from them. Leave empty to reference an externally-managed
-    # Secret. appToken is socketmode only.
+    # botToken / signingSecret / appToken: leave empty and pre-create the
+    # secretName Secret (keys bot-token, signing-secret, app-token) out of band.
+    # When set, the klaus-gateway chart renders the Secret from them, which also
+    # copies the tokens into this component's HelmRelease values and Helm release
+    # storage (gitops.forbidInlineSecrets rejects them). appToken is socketmode
+    # only.
     botToken: ""
     signingSecret: ""
     appToken: ""
@@ -1481,13 +1511,18 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     persistence:
       enabled: false
       size: 64Mi
+    # Name of a pre-created Secret holding the OBO keys (state-key, and store-key
+    # when storePath is set); forwarded to the klaus-gateway chart (>= 0.39.0),
+    # which then renders no Secret of its own. Prefer it over the two inline keys
+    # below, which land in the HelmRelease values and Helm release storage
+    # (gitops.forbidInlineSecrets rejects them).
+    existingSecret: ""
     # HMAC key signing link state (CSRF + Slack-user binding). Required when
-    # obo.enabled is true. Provide SOPS-encrypted via per-cluster secret values.
+    # obo.enabled is true and existingSecret is empty.
     stateKey: ""
     # AES-256 key for the encrypted link store, required only when storePath is
-    # set. Accepts 32 raw bytes or a base64/hex encoding of 32 bytes (a
-    # SOPS-staged base64 value works directly). Provide SOPS-encrypted via
-    # per-cluster secret values.
+    # set and existingSecret is empty. Accepts 32 raw bytes or a base64/hex
+    # encoding of 32 bytes (a SOPS-staged base64 value works directly).
     storeKey: ""
     # Reactive Slack connector UX: the gateway detects a core_auth_login
     # challenge in the agent's response stream and offers a "Connect <backend>"
