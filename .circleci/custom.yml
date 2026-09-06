@@ -9,7 +9,8 @@
 #
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
-#     `make verify-managers` + `make verify-meta` checks on branches (ingress-mode
+#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-meta`
+#     checks on branches (ingress-mode
 #     guards, the global.* contract, the model-manager / agent-manager wiring,
 #     app-of-apps meta-package render)
 #   - the standalone agent-platform-connectivity chart (build, tag push), the
@@ -46,11 +47,13 @@ jobs:
         name: verify ingress-mode guards + global contract + meta-package render
         # verify-modes (connectivity chart ingress guards), verify-global (the
         # global.* contract behaviors and their guards), verify-managers (the
-        # model-manager / agent-manager wiring and guards) and verify-meta (root
-        # app-of-apps render: no Chart.yaml pins, ranges as values, both engines,
-        # pure renderer, pinned BOM) are the single source of truth, also run
-        # locally. Neither chart has subcharts, so no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-managers
+        # model-manager / agent-manager wiring and guards), verify-kagent-netpol
+        # (the kagent controller/agent egress to the built-in tool server) and
+        # verify-meta (root app-of-apps render: no Chart.yaml pins, ranges as
+        # values, both engines, pure renderer, pinned BOM) are the single source
+        # of truth, also run locally. Neither chart has subcharts, so no `helm
+        # dependency build`.
+        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol
 
 workflows:
   build:

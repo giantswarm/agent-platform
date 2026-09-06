@@ -316,6 +316,37 @@ define managers_must_pass
 	@echo "ok: $(1)"
 endef
 
+# kagent's built-in tool server (kagent.kagent-tools.enabled) is an MCP endpoint
+# the controller discovers and the agents call directly; both run under the
+# default-deny egress lists above, so the chart has to open the path or the
+# kagent-tool-server RemoteMCPServer never becomes Accepted (SYN dropped, "Policy
+# denied") and the agents that reference it run without tools. Off by default
+# and off in the golden render, so the default render is unchanged.
+KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent
+.PHONY: verify-kagent-netpol
+verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-in tool server renders iff kagent.kagent-tools.enabled, in the tools namespace and port.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> kagent-tools off (the default): no tool-server egress"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-off.out 2>&1 || { cat /tmp/vkn-off.out; exit 1; }
+	@if grep -q 'kagent-tools' /tmp/vkn-off.out; then echo "FAIL: tool-server egress renders while kagent-tools is off"; grep -n 'kagent-tools' /tmp/vkn-off.out | head; exit 1; else echo "ok: inert while off"; fi
+	@echo "--> kagent-tools on: controller and agent egress to the kagent-tools pods on 8084 in the kagent namespace"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true >/tmp/vkn-on.out 2>&1 || { cat /tmp/vkn-on.out; exit 1; }
+	@for n in kagent-controller-egress kagent-agent-muster-egress; do \
+		awk "/^  name: agent-platform-connectivity-$$n$$/,/^---/" /tmp/vkn-on.out >/tmp/vkn-on-$$n.out; \
+		grep -q 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out || { echo "FAIL: $$n has no egress to the kagent-tools pods"; exit 1; }; \
+		grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out | grep -q 'io.kubernetes.pod.namespace: kagent$$' || { echo "FAIL: $$n tool-server egress is not pinned to the kagent namespace"; exit 1; }; \
+		grep -A4 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out | grep -q 'port: "8084"' || { echo "FAIL: $$n tool-server egress does not open port 8084"; exit 1; }; \
+	done
+	@echo "ok: both policies open the tool server"
+	@echo "--> an explicit kagent.kagent-tools.namespaceOverride / service.ports.tools.targetPort follows into the rules"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true --set kagent.kagent-tools.namespaceOverride=tools-ns --set kagent.kagent-tools.service.ports.tools.targetPort=9084 >/tmp/vkn-override.out 2>&1 || { cat /tmp/vkn-override.out; exit 1; }
+	@[ "$$(grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-override.out | grep -c 'io.kubernetes.pod.namespace: tools-ns$$')" = "2" ] || { echo "FAIL: the tool-server egress does not follow kagent.kagent-tools.namespaceOverride"; exit 1; }
+	@[ "$$(grep -A4 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-override.out | grep -c 'port: "9084"')" = "2" ] || { echo "FAIL: the tool-server egress does not follow the tools targetPort"; exit 1; }
+	@echo "ok: namespace and port overrides"
+	@echo "--> kubernetes flavor: renders, and has no kagent egress policy to extend"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes --set kagent.kagent-tools.enabled=true >/tmp/vkn-k8s.out 2>&1 || { cat /tmp/vkn-k8s.out; exit 1; }
+	@if grep -q 'kagent-tools' /tmp/vkn-k8s.out; then echo "FAIL: kubernetes flavor renders a tool-server rule it has no egress policy for"; exit 1; else echo "ok: kubernetes flavor untouched"; fi
+
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
