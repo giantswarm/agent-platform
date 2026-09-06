@@ -549,6 +549,7 @@ verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + Sche
 	@if grep -q '^        serverName:' /tmp/vp-minio.out; then echo "FAIL: serverName rendered while unset (must default to the Cluster name)"; exit 1; fi
 	@awk '/^  name: kagent-pg-cluster$$/,/^---/' /tmp/vp-minio.out >/tmp/vp-minio-cnp.out
 	@grep -q '\- world' /tmp/vp-minio-cnp.out || { echo "FAIL: the CNPG policy has no world egress for the store"; exit 1; }
+	@grep -A6 'endpointSelector:' /tmp/vp-minio-cnp.out | grep -q '\- kagent-pg-restore$$' || { echo "FAIL: the CNPG policy does not select the <clusterName>-restore scratch Cluster"; exit 1; }
 	@grep -q '\- cluster' /tmp/vp-minio-cnp.out || { echo "FAIL: an in-cluster endpointURL did not add the cluster entity"; exit 1; }
 	@grep -q 'k8s-app: kube-dns' /tmp/vp-minio-cnp.out || { echo "FAIL: the CNPG policy has no DNS egress for the store"; exit 1; }
 	@grep -q 'port: "443"' /tmp/vp-minio-cnp.out || { echo "FAIL: the store egress does not open 443"; exit 1; }
