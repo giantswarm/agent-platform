@@ -620,6 +620,283 @@
                         }
                     }
                 },
+                "backup": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "crossplane": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "aws": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "accountId": {
+                                            "type": "string"
+                                        },
+                                        "bucketName": {
+                                            "type": "string"
+                                        },
+                                        "lifecycleDays": {
+                                            "type": "integer"
+                                        },
+                                        "oidcProvider": {
+                                            "type": "string"
+                                        },
+                                        "roleName": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "azure": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "containerName": {
+                                            "type": "string"
+                                        },
+                                        "lifecycleDays": {
+                                            "type": "integer"
+                                        },
+                                        "private": {
+                                            "type": "boolean"
+                                        },
+                                        "privateDnsZoneRef": {
+                                            "type": "string"
+                                        },
+                                        "replicationType": {
+                                            "type": "string"
+                                        },
+                                        "resourceGroup": {
+                                            "type": "string"
+                                        },
+                                        "storageAccountName": {
+                                            "type": "string"
+                                        },
+                                        "subnetName": {
+                                            "type": "string"
+                                        },
+                                        "subscriptionId": {
+                                            "type": "string"
+                                        },
+                                        "vnetName": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "observeOnly": {
+                                    "type": "boolean"
+                                },
+                                "provider": {
+                                    "type": "string"
+                                },
+                                "providerConfigRef": {
+                                    "type": "string"
+                                },
+                                "region": {
+                                    "type": "string"
+                                },
+                                "tags": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "immediate": {
+                            "type": "boolean"
+                        },
+                        "method": {
+                            "type": "string"
+                        },
+                        "networkPolicy": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "cidrs": {
+                                    "type": "array"
+                                },
+                                "fqdns": {
+                                    "type": "array"
+                                },
+                                "ports": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "minItems": 1
+                                }
+                            }
+                        },
+                        "objectStore": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "azure": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "connectionString": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "key": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        "inheritFromAzureAD": {
+                                            "type": "boolean"
+                                        },
+                                        "storageAccount": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "key": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        "storageKey": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "key": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "data": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "compression": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "destinationPath": {
+                                    "type": "string"
+                                },
+                                "endpointURL": {
+                                    "type": "string"
+                                },
+                                "existingName": {
+                                    "type": "string"
+                                },
+                                "retentionPolicy": {
+                                    "type": "string"
+                                },
+                                "s3": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "accessKeyId": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "key": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        "inheritFromIAMRole": {
+                                            "type": "boolean"
+                                        },
+                                        "secretAccessKey": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "key": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "sidecar": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "resources": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        }
+                                    }
+                                },
+                                "wal": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "compression": {
+                                            "type": "string"
+                                        },
+                                        "maxParallel": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "schedule": {
+                            "type": "string"
+                        },
+                        "serverName": {
+                            "type": "string"
+                        },
+                        "serviceAccount": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "annotations": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        },
+                        "suspend": {
+                            "type": "boolean"
+                        },
+                        "volumeSnapshot": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "className": {
+                                    "type": "string"
+                                },
+                                "online": {
+                                    "type": "boolean"
+                                },
+                                "walClassName": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                },
                 "clusterName": {
                     "type": "string"
                 },

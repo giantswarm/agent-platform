@@ -1,0 +1,130 @@
+{{- if eq (include "agent-platform.postgres.crossplane" .) "azure" }}
+{{- $xp := .Values.postgres.backup.crossplane }}
+{{- $az := $xp.azure }}
+{{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
+{{- $account := $az.storageAccountName }}
+{{- $container := $az.containerName }}
+{{- $tags := include "agent-platform.postgres.crossplaneTags" . | fromYaml }}
+{{- $vnet := $az.vnetName | default (printf "%s-vnet" $az.resourceGroup) }}
+{{- $dnsZoneRef := $az.privateDnsZoneRef | default (printf "%s-privatelink.blob.core.windows.net" $az.resourceGroup) }}
+---
+# The storage account. Its connection strings land in the Secret
+# <clusterName>-backup-store in the Cluster's namespace, which the ObjectStore
+# reads (azureCredentials.connectionString). Never deleted by Crossplane (no
+# Delete management policy) and kept by Helm: the backups outlive the release.
+apiVersion: storage.azure.upbound.io/v1beta2
+kind: Account
+metadata:
+  name: {{ $account }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+  annotations:
+    crossplane.io/external-name: {{ $account }}
+    helm.sh/resource-policy: keep
+spec:
+  managementPolicies:
+    {{- include "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" . | nindent 4 }}
+  forProvider:
+    accountKind: StorageV2
+    accountReplicationType: {{ $az.replicationType }}
+    accountTier: Standard
+    allowNestedItemsToBePublic: false
+    enableHttpsTrafficOnly: true
+    location: {{ $xp.region }}
+    minTlsVersion: TLS1_2
+    publicNetworkAccessEnabled: {{ not $az.private }}
+    resourceGroupName: {{ $az.resourceGroup }}
+    tags:
+      {{- toYaml $tags | nindent 6 }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+  writeConnectionSecretToRef:
+    name: {{ include "agent-platform.postgres.azureAccountSecret" . }}
+    namespace: {{ $ns }}
+---
+apiVersion: storage.azure.upbound.io/v1beta1
+kind: Container
+metadata:
+  name: {{ $container }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+  annotations:
+    crossplane.io/external-name: {{ $container }}
+    helm.sh/resource-policy: keep
+spec:
+  managementPolicies:
+    {{- include "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" . | nindent 4 }}
+  forProvider:
+    containerAccessType: private
+    metadata:
+      {{- toYaml $tags | nindent 6 }}
+    storageAccountNameRef:
+      name: {{ $account }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+---
+# Blobs are deleted lifecycleDays after their last modification, a safety net
+# above the plugin's retention.
+apiVersion: storage.azure.upbound.io/v1beta2
+kind: ManagementPolicy
+metadata:
+  name: {{ $account }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+spec:
+  managementPolicies:
+    {{- include "agent-platform.postgres.crossplaneManagementPolicies" . | nindent 4 }}
+  forProvider:
+    rule:
+      - name: DeleteOldBlobs
+        enabled: true
+        filters:
+          blobTypes:
+            - blockBlob
+        actions:
+          baseBlob:
+            deleteAfterDaysSinceModificationGreaterThan: {{ $az.lifecycleDays | int }}
+    storageAccountIdRef:
+      name: {{ $account }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+{{- if $az.private }}
+---
+# Private installation: the account has no public network access, so the
+# instance pods reach it through a private endpoint in the cluster's node subnet,
+# resolved by the existing privatelink.blob.core.windows.net zone.
+apiVersion: network.azure.upbound.io/v1beta1
+kind: PrivateEndpoint
+metadata:
+  name: {{ $container }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+  annotations:
+    crossplane.io/external-name: {{ $container }}
+spec:
+  managementPolicies:
+    {{- include "agent-platform.postgres.crossplaneManagementPolicies" . | nindent 4 }}
+  forProvider:
+    location: {{ $xp.region }}
+    privateDnsZoneGroup:
+      - name: default
+        privateDnsZoneIdsRefs:
+          - name: {{ $dnsZoneRef }}
+    privateServiceConnection:
+      - isManualConnection: false
+        name: {{ $container }}
+        privateConnectionResourceId: /subscriptions/{{ $az.subscriptionId }}/resourceGroups/{{ $az.resourceGroup }}/providers/Microsoft.Storage/storageAccounts/{{ $account }}
+        subresourceNames:
+          - blob
+    resourceGroupName: {{ $az.resourceGroup }}
+    subnetId: /subscriptions/{{ $az.subscriptionId }}/resourceGroups/{{ $az.resourceGroup }}/providers/Microsoft.Network/virtualNetworks/{{ $vnet }}/subnets/{{ $az.subnetName }}
+    tags:
+      {{- toYaml $tags | nindent 6 }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+{{- end }}
+{{- end }}

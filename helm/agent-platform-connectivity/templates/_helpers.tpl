@@ -472,3 +472,111 @@ Usage: include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerU
         - port: "10443"
           protocol: TCP
 {{- end -}}
+
+{{/*
+Postgres backup helpers (templates/postgres/*). backupEnabled is non-empty when
+the Cluster renders AND postgres.backup.enabled is set.
+*/}}
+{{- define "agent-platform.postgres.backupEnabled" -}}
+{{- if and .Values.postgres.enabled .Values.postgres.backup.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/* "aws" or "azure" while postgres.backup.crossplane renders the store, else "". */}}
+{{- define "agent-platform.postgres.crossplane" -}}
+{{- $b := .Values.postgres.backup -}}
+{{- if and (include "agent-platform.postgres.backupEnabled" .) (eq $b.method "plugin") $b.crossplane.enabled -}}
+{{- $b.crossplane.provider -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The ObjectStore the Cluster's plugin entry names. */}}
+{{- define "agent-platform.postgres.objectStoreName" -}}
+{{- .Values.postgres.backup.objectStore.existingName | default (printf "%s-backup" .Values.postgres.clusterName) -}}
+{{- end -}}
+
+{{/* The Secret the Crossplane Azure Account writes its connection strings to. */}}
+{{- define "agent-platform.postgres.azureAccountSecret" -}}
+{{- printf "%s-backup-store" .Values.postgres.clusterName -}}
+{{- end -}}
+
+{{/* arn:aws, or arn:aws-cn in the China partition. */}}
+{{- define "agent-platform.postgres.awsPartition" -}}
+{{- if hasPrefix "cn-" .Values.postgres.backup.crossplane.region -}}arn:aws-cn{{- else -}}arn:aws{{- end -}}
+{{- end -}}
+
+{{/* The IAM role the Crossplane AWS block renders. */}}
+{{- define "agent-platform.postgres.awsRoleName" -}}
+{{- $aws := .Values.postgres.backup.crossplane.aws -}}
+{{- $aws.roleName | default $aws.bucketName -}}
+{{- end -}}
+
+{{- define "agent-platform.postgres.awsRoleArn" -}}
+{{- printf "%s:iam::%s:role/%s" (include "agent-platform.postgres.awsPartition" .) .Values.postgres.backup.crossplane.aws.accountId (include "agent-platform.postgres.awsRoleName" .) -}}
+{{- end -}}
+
+{{/*
+destinationPath: the explicit value, else derived from the Crossplane store
+(s3://<bucket>/ or https://<account>.blob.core.windows.net/<container>/).
+*/}}
+{{- define "agent-platform.postgres.destinationPath" -}}
+{{- $b := .Values.postgres.backup -}}
+{{- $xp := include "agent-platform.postgres.crossplane" . -}}
+{{- if $b.objectStore.destinationPath -}}
+{{- $b.objectStore.destinationPath -}}
+{{- else if eq $xp "aws" -}}
+{{- printf "s3://%s/" $b.crossplane.aws.bucketName -}}
+{{- else if eq $xp "azure" -}}
+{{- printf "https://%s.blob.core.windows.net/%s/" $b.crossplane.azure.storageAccountName $b.crossplane.azure.containerName -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Annotations for the Cluster's ServiceAccount: the values, plus the IRSA role
+annotation when the Crossplane AWS block renders the role. YAML map or "".
+*/}}
+{{- define "agent-platform.postgres.serviceAccountAnnotations" -}}
+{{- $ann := deepCopy (.Values.postgres.backup.serviceAccount.annotations | default dict) -}}
+{{- if eq (include "agent-platform.postgres.crossplane" .) "aws" -}}
+{{- $_ := set $ann "eks.amazonaws.com/role-arn" (include "agent-platform.postgres.awsRoleArn" .) -}}
+{{- end -}}
+{{- if $ann -}}{{- toYaml $ann -}}{{- end -}}
+{{- end -}}
+
+{{/* Crossplane managementPolicies: everything, or Observe only. */}}
+{{- define "agent-platform.postgres.crossplaneManagementPolicies" -}}
+{{- if .Values.postgres.backup.crossplane.observeOnly -}}
+- Observe
+{{- else -}}
+- "*"
+{{- end -}}
+{{- end -}}
+
+{{/* Same, for data-bearing objects: never Delete, so an uninstall keeps the data. */}}
+{{- define "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" -}}
+{{- if .Values.postgres.backup.crossplane.observeOnly -}}
+- Observe
+{{- else -}}
+- Create
+- Update
+- LateInitialize
+- Observe
+{{- end -}}
+{{- end -}}
+
+{{/* Tags on the cloud resources: chart defaults under the installation's own. */}}
+{{- define "agent-platform.postgres.crossplaneTags" -}}
+{{- $tags := dict "app" "agent-platform-postgres" "managed-by" "crossplane" "name" (include "agent-platform.postgres.crossplaneStoreName" .) -}}
+{{- $tags = merge (deepCopy (.Values.postgres.backup.crossplane.tags | default dict)) $tags -}}
+{{- if eq .Values.postgres.backup.crossplane.provider "azure" -}}
+{{- $clean := dict -}}
+{{- range $k, $v := $tags -}}{{- $_ := set $clean ($k | replace "-" "_") $v -}}{{- end -}}
+{{- $tags = $clean -}}
+{{- end -}}
+{{- toYaml $tags -}}
+{{- end -}}
+
+{{/* The bucket (aws) or container (azure) name. */}}
+{{- define "agent-platform.postgres.crossplaneStoreName" -}}
+{{- $xp := .Values.postgres.backup.crossplane -}}
+{{- if eq $xp.provider "azure" -}}{{- $xp.azure.containerName -}}{{- else -}}{{- $xp.aws.bucketName -}}{{- end -}}
+{{- end -}}

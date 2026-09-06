@@ -1245,6 +1245,147 @@ postgres:
     enabled: false
     name: sessions
     owner: sessions
+  # Backups. Off by default: a Cluster rendered without them is protected by
+  # its PVCs alone, carries the annotation
+  # agent-platform.giantswarm.io/backup: none and NOTES warns about it. Turn
+  # this on before the installation holds data it cannot lose.
+  backup:
+    enabled: false
+    # plugin         — Barman Cloud plugin (CNPG-I): continuous WAL archiving plus
+    #                  scheduled base backups to an object store, point-in-time
+    #                  recovery. Needs the plugin (barman-cloud.cloudnative-pg.io)
+    #                  installed next to the CNPG operator.
+    # volumeSnapshot — CSI VolumeSnapshots of the data volume: no WAL archive,
+    #                  restore to a snapshot only. Needs a VolumeSnapshotClass.
+    method: plugin
+    # ScheduledBackup schedule, CNPG cron with seconds first (six fields). Daily
+    # at 02:00 UTC; WAL archiving covers the time in between.
+    schedule: "0 0 2 * * *"
+    # Take the first backup as soon as the ScheduledBackup exists.
+    immediate: true
+    suspend: false
+    # The Barman server name, the folder under destinationPath. Defaults to
+    # postgres.clusterName. Give a cluster restored from this store a new name
+    # when it archives back into the same store, so the two histories stay apart.
+    serverName: ""
+    # The object store the plugin writes to (method: plugin), rendered as an
+    # ObjectStore (barmancloud.cnpg.io/v1) named <clusterName>-backup.
+    objectStore:
+      # Use an ObjectStore that already exists in postgres.namespace instead of
+      # rendering one. The other objectStore keys are ignored then.
+      existingName: ""
+      # s3://<bucket>/<prefix>/ or https://<account>.blob.core.windows.net/<container>/.
+      # Derived from crossplane.* when that block renders the bucket.
+      destinationPath: ""
+      # S3-compatible endpoint (MinIO, Ceph RGW). Empty for AWS and Azure.
+      endpointURL: ""
+      # Recovery window. Base backups older than the first one that still covers
+      # the window are deleted after the next backup. <n>d, <n>w or <n>m.
+      retentionPolicy: 30d
+      wal:
+        compression: gzip
+        # Parallel WAL uploads per archive_command invocation.
+        maxParallel: 1
+      data:
+        compression: gzip
+      # Exactly one credential source, matching destinationPath.
+      s3:
+        # IRSA: the plugin sidecar assumes the role annotated on the Cluster's
+        # ServiceAccount (serviceAccount.annotations below).
+        inheritFromIAMRole: false
+        # Static keys, each a key of a Secret in postgres.namespace.
+        accessKeyId:
+          name: ""
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: ""
+          key: ACCESS_SECRET_KEY
+      azure:
+        # Azure AD workload identity on the Cluster's ServiceAccount.
+        inheritFromAzureAD: false
+        # A blob connection string held in a Secret. Derived from the Crossplane
+        # Account's connection Secret when crossplane.* renders the storage.
+        connectionString:
+          name: ""
+          key: ""
+        # Or storage account name and key, each a key of a Secret.
+        storageAccount:
+          name: ""
+          key: ""
+        storageKey:
+          name: ""
+          key: ""
+      # The plugin sidecar that runs in every instance pod.
+      sidecar:
+        resources: {}  # @schema skipProperties: true; additionalProperties: true
+    # method: volumeSnapshot
+    volumeSnapshot:
+      className: ""
+      # Class for the WAL volume when walStorage is used; empty = className.
+      walClassName: ""
+      online: true
+    # Annotations for the Cluster's ServiceAccount: the IRSA role
+    # (eks.amazonaws.com/role-arn) or the Azure workload identity client id.
+    # The IRSA role is derived when crossplane.aws renders it.
+    serviceAccount:
+      annotations: {}  # @schema additionalProperties: true
+    # Egress the instance pods get for the object store, cilium flavor (the
+    # kubernetes flavor renders no policy for the CNPG pods): DNS, world on the
+    # ports below, the cluster entity when endpointURL names an in-cluster store,
+    # and optional names and blocks for a store behind a fixed address.
+    networkPolicy:
+      ports:  # @schema minItems: 1; item: string
+        - "443"
+      fqdns: []
+      cidrs: []
+    # Render the bucket and its access as Crossplane managed resources, the way
+    # the fleet provisions object storage for its own components. Off by default;
+    # needs the upbound AWS or Azure provider and a ProviderConfig on the cluster.
+    # Bucket and storage objects are created but never deleted by Crossplane
+    # (no Delete management policy) and carry helm.sh/resource-policy: keep.
+    crossplane:
+      enabled: false
+      # aws   — S3 Bucket with a lifecycle rule, a public-access block and a
+      #         TLS-only bucket policy, plus an IAM Role with an inline S3 policy
+      #         trusted by the Cluster's ServiceAccount (and <clusterName>-restore*
+      #         for scratch restore clusters) through the cluster's IRSA OIDC
+      #         provider. Sets s3.inheritFromIAMRole and the role annotation.
+      # azure — Storage Account, Container and a lifecycle ManagementPolicy, plus a
+      #         PrivateEndpoint on private installations. The Account's connection
+      #         Secret (<clusterName>-backup-store) feeds azure.connectionString.
+      provider: aws
+      providerConfigRef: ""
+      region: ""
+      # Adopt existing cloud resources without changing them.
+      observeOnly: false
+      tags: {}  # @schema additionalProperties: true
+      aws:
+        bucketName: ""
+        # The AWS account that holds the OIDC provider and the role.
+        accountId: ""
+        # IRSA OIDC provider host, e.g. irsa.<cluster>.<base-domain>.
+        oidcProvider: ""
+        # IAM role name. Defaults to bucketName.
+        roleName: ""
+        # Objects expire after this many days, a safety net above retentionPolicy.
+        lifecycleDays: 45
+      azure:
+        # 3 to 24 lowercase letters and digits, globally unique.
+        storageAccountName: ""
+        containerName: ""
+        resourceGroup: ""
+        replicationType: LRS
+        # Blobs are deleted this many days after their last modification.
+        lifecycleDays: 45
+        # Private installation: no public network access on the Account and a
+        # PrivateEndpoint in the cluster's node subnet. Needs subscriptionId.
+        private: false
+        subscriptionId: ""
+        # PrivateEndpoint wiring. Empty values derive from resourceGroup:
+        # <resourceGroup>-vnet and <resourceGroup>-privatelink.blob.core.windows.net.
+        vnetName: ""
+        subnetName: node-subnet
+        privateDnsZoneRef: ""
 
 # Klaus Gateway — channel front door (Slack, CLI, web) for Klaus instances.
 # Disabled by default; set components.klaus-gateway.enabled: true to deploy.

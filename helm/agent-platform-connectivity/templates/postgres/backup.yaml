@@ -1,0 +1,91 @@
+{{- if include "agent-platform.postgres.backupEnabled" . }}
+{{- $b := .Values.postgres.backup }}
+{{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
+{{- $clusterName := .Values.postgres.clusterName }}
+{{- $xp := include "agent-platform.postgres.crossplane" . }}
+{{- if and (eq $b.method "plugin") (not $b.objectStore.existingName) }}
+{{- $os := $b.objectStore }}
+---
+# The object store the Barman Cloud plugin archives WAL to and writes base
+# backups into, one per Cluster. The plugin's serverName (the Cluster name unless
+# postgres.backup.serverName says otherwise) is the folder under destinationPath.
+# retentionPolicy is a recovery window: the sidecar deletes base backups older
+# than the first one that still covers it after every successful backup.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ include "agent-platform.postgres.objectStoreName" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  configuration:
+    destinationPath: {{ include "agent-platform.postgres.destinationPath" . | quote }}
+    {{- with $os.endpointURL }}
+    endpointURL: {{ . | quote }}
+    {{- end }}
+    {{- if or $os.s3.inheritFromIAMRole (eq $xp "aws") }}
+    s3Credentials:
+      inheritFromIAMRole: true
+    {{- else if $os.s3.accessKeyId.name }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ $os.s3.accessKeyId.name | quote }}
+        key: {{ $os.s3.accessKeyId.key | quote }}
+      secretAccessKey:
+        name: {{ $os.s3.secretAccessKey.name | quote }}
+        key: {{ $os.s3.secretAccessKey.key | quote }}
+    {{- else if $os.azure.inheritFromAzureAD }}
+    azureCredentials:
+      inheritFromAzureAD: true
+    {{- else if or $os.azure.connectionString.name (eq $xp "azure") }}
+    azureCredentials:
+      connectionString:
+        name: {{ $os.azure.connectionString.name | default (include "agent-platform.postgres.azureAccountSecret" .) | quote }}
+        key: {{ $os.azure.connectionString.key | default "attribute.primary_blob_connection_string" | quote }}
+    {{- else }}
+    azureCredentials:
+      storageAccount:
+        name: {{ $os.azure.storageAccount.name | quote }}
+        key: {{ $os.azure.storageAccount.key | quote }}
+      storageKey:
+        name: {{ $os.azure.storageKey.name | quote }}
+        key: {{ $os.azure.storageKey.key | quote }}
+    {{- end }}
+    wal:
+      compression: {{ $os.wal.compression }}
+      maxParallel: {{ $os.wal.maxParallel | int }}
+    data:
+      compression: {{ $os.data.compression }}
+  retentionPolicy: {{ $os.retentionPolicy | quote }}
+  {{- with $os.sidecar.resources }}
+  instanceSidecarConfiguration:
+    resources:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
+{{- end }}
+---
+# Scheduled base backups. immediate takes the first one as soon as this object
+# exists, so a freshly enabled backup is usable before the first cron tick.
+# backupOwnerReference: self lets a deleted ScheduledBackup take its Backup
+# objects with it; the data in the store follows retentionPolicy, not this.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ $clusterName }}-scheduled
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  schedule: {{ $b.schedule | quote }}
+  immediate: {{ $b.immediate }}
+  suspend: {{ $b.suspend }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ $clusterName }}
+  method: {{ $b.method }}
+  {{- if eq $b.method "plugin" }}
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  {{- end }}
+{{- end }}

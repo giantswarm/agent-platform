@@ -50,7 +50,7 @@ A component with no `enabled` key is always installed (`muster`, `dicebear`, `ag
 helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml                          # flux objects, wide ranges
 helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml --set gitops.engine=argo
 helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml -f helm/agent-platform/examples/customer-bom.yaml
-make verify-meta verify-modes
+make verify-meta verify-modes verify-postgres
 ```
 
 ## Prerequisites
@@ -256,6 +256,20 @@ agent-platform-mcps:
 ```
 
 The toggle is `components.agent-platform-mcps.enabled`, not a key inside the chart's own value namespace: the sub-chart's `values.schema.json` is strict (`additionalProperties: false`) and rejects an `enabled` key. Everything under `agent-platform-mcps.*` is passed through to the sub-chart verbatim — see its [values reference](https://github.com/giantswarm/agent-platform-mcps) for `defaults`, `identityProviders`, per-entry `auth`, and the `muster` / `agentgateway` rendering toggles. Even when enabled, the chart renders nothing until `mcpServers` is populated.
+
+### Postgres backups
+
+`postgres.enabled` renders the CloudNativePG `Cluster` the kagent controller uses (the CNPG operator is a cluster-level prerequisite). `postgres.backup` protects it; without the block the Cluster carries `agent-platform.giantswarm.io/backup: none` and NOTES warns that its PVCs are the only copy of the platform database (agents, sessions, tasks, tools). Do not read `ContinuousArchiving=True` on such a Cluster as a backup: CNPG's `wal-archive` command exits 0 when it has nowhere to archive to.
+
+- `postgres.backup.method: plugin` (default) uses the [Barman Cloud plugin](https://cloudnative-pg.io/plugin-barman-cloud/) — installed next to the CNPG operator, a prerequisite this chart does not ship — for continuous WAL archiving and scheduled base backups to an object store, giving point-in-time recovery. The chart renders the `ObjectStore` (`postgres.backup.objectStore.*`: `destinationPath`, credentials, `retentionPolicy`) and a `ScheduledBackup` (`postgres.backup.schedule`, daily by default).
+- `postgres.backup.crossplane.*` provisions the store as Crossplane managed resources (S3 bucket + IRSA role on AWS, Storage Account + Container on Azure, with a PrivateEndpoint on private installations) and derives the path and credentials for the `ObjectStore`. Installations without Crossplane set `destinationPath` and one credential source themselves.
+- `postgres.backup.method: volumeSnapshot` takes CSI snapshots instead (needs a `VolumeSnapshotClass`; no WAL archive).
+- Restore is a second Cluster bootstrapped with `recovery` from the same `ObjectStore` (`externalClusters[].plugin` with `serverName` = the source Cluster's name), never the live one; the AWS role trusts `<clusterName>-restore*` ServiceAccounts for that.
+
+```bash
+helm template r helm/agent-platform-connectivity -f helm/agent-platform-connectivity/ci/test-postgres-backup-aws-values.yaml
+make verify-postgres
+```
 
 ### Agent sandbox
 

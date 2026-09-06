@@ -510,3 +510,135 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@if grep -qE '^    - name: kagent$$' /tmp/vmg-meta-off.out; then echo "FAIL: a dependsOn on the disabled kagent survived"; exit 1; fi
 	@echo "ok: meta render"
 	@echo "All model-manager / agent-manager wiring verified."
+
+# postgres.backup: the Barman Cloud plugin wiring (ObjectStore, ScheduledBackup,
+# the Cluster's plugin entry and ServiceAccount identity, the object-store
+# egress), the Crossplane store on AWS and Azure, the volumeSnapshot method, the
+# "no backup" signal and every guard.
+PG_ON := $(VM) --set components.kagent.enabled=true --set postgres.enabled=true
+PG_BACKUP := $(PG_ON) --set postgres.backup.enabled=true
+PG_MINIO := $(PG_BACKUP) --set postgres.backup.objectStore.destinationPath=s3://kagent-pg-backups/ --set postgres.backup.objectStore.endpointURL=http://minio.minio.svc:9000 --set postgres.backup.objectStore.s3.accessKeyId.name=minio --set postgres.backup.objectStore.s3.secretAccessKey.name=minio
+PG_XP_AWS := $(PG_BACKUP) --set postgres.backup.crossplane.enabled=true --set postgres.backup.crossplane.providerConfigRef=ci --set postgres.backup.crossplane.region=eu-central-1 --set postgres.backup.crossplane.aws.bucketName=giantswarm-ci-kagent-pg --set-string postgres.backup.crossplane.aws.accountId=123456789012 --set postgres.backup.crossplane.aws.oidcProvider=irsa.ci.example.com
+PG_XP_AZURE := $(PG_BACKUP) --set postgres.backup.crossplane.enabled=true --set postgres.backup.crossplane.provider=azure --set postgres.backup.crossplane.providerConfigRef=ci --set postgres.backup.crossplane.region=westeurope --set postgres.backup.crossplane.azure.storageAccountName=giantswarmcikagentpg --set postgres.backup.crossplane.azure.containerName=giantswarm-ci-kagent-pg --set postgres.backup.crossplane.azure.resourceGroup=ci
+
+.PHONY: verify-postgres
+verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + ScheduledBackup, Crossplane store on AWS/Azure, volume snapshots, the no-backup signal) and its guards.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> postgres without backup: the Cluster says so, nothing else renders"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) >/tmp/vp-off.out 2>&1 || { cat /tmp/vp-off.out; exit 1; }
+	@grep -q 'agent-platform.giantswarm.io/backup: none' /tmp/vp-off.out || { echo "FAIL: a Cluster without backup does not carry agent-platform.giantswarm.io/backup: none"; exit 1; }
+	@if grep -qE 'kind: (ObjectStore|ScheduledBackup)|^  plugins:|serviceAccountTemplate' /tmp/vp-off.out; then echo "FAIL: backup objects render with postgres.backup.enabled=false"; exit 1; fi
+	@if awk '/^  name: kagent-pg-cluster$$/,/^---/' /tmp/vp-off.out | grep -q '\- world'; then echo "FAIL: the CNPG policy opens world egress without a backup"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.backup.enabled=true --set postgres.enabled=false >/tmp/vp-nopg.out 2>&1 || { cat /tmp/vp-nopg.out; exit 1; }
+	@if grep -qE 'kind: (ObjectStore|ScheduledBackup|Cluster)$$' /tmp/vp-nopg.out; then echo "FAIL: backup objects render without a Cluster"; exit 1; fi
+	@echo "ok: no-backup signal"
+	@echo "--> plugin to an S3-compatible store with static keys (MinIO shape)"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_MINIO) >/tmp/vp-minio.out 2>&1 || { cat /tmp/vp-minio.out; exit 1; }
+	@grep -q 'agent-platform.giantswarm.io/backup: plugin' /tmp/vp-minio.out || { echo "FAIL: the Cluster does not announce the plugin backup"; exit 1; }
+	@grep -A3 '^kind: ObjectStore$$' /tmp/vp-minio.out | grep -q '^  name: kagent-pg-backup$$' || { echo "FAIL: ObjectStore kagent-pg-backup missing"; exit 1; }
+	@grep -A3 '^kind: ScheduledBackup$$' /tmp/vp-minio.out | grep -q '^  name: kagent-pg-scheduled$$' || { echo "FAIL: ScheduledBackup kagent-pg-scheduled missing"; exit 1; }
+	@grep -q 'barmanObjectName: kagent-pg-backup' /tmp/vp-minio.out || { echo "FAIL: the Cluster's plugin entry does not name the ObjectStore"; exit 1; }
+	@grep -q 'isWALArchiver: true' /tmp/vp-minio.out || { echo "FAIL: the plugin is not the WAL archiver"; exit 1; }
+	@grep -q 'endpointURL: "http://minio.minio.svc:9000"' /tmp/vp-minio.out || { echo "FAIL: endpointURL missing"; exit 1; }
+	@grep -A1 'accessKeyId:' /tmp/vp-minio.out | grep -q 'name: "minio"' || { echo "FAIL: static S3 credentials missing"; exit 1; }
+	@if grep -q 'inheritFromIAMRole' /tmp/vp-minio.out; then echo "FAIL: IRSA rendered next to static keys"; exit 1; fi
+	@grep -q 'retentionPolicy: "30d"' /tmp/vp-minio.out || { echo "FAIL: default retention missing"; exit 1; }
+	@grep -q 'schedule: "0 0 2 \* \* \*"' /tmp/vp-minio.out || { echo "FAIL: default schedule missing"; exit 1; }
+	@grep -q 'immediate: true' /tmp/vp-minio.out || { echo "FAIL: the first backup is not immediate"; exit 1; }
+	@grep -q 'method: plugin' /tmp/vp-minio.out || { echo "FAIL: ScheduledBackup method is not plugin"; exit 1; }
+	@if grep -q '^        serverName:' /tmp/vp-minio.out; then echo "FAIL: serverName rendered while unset (must default to the Cluster name)"; exit 1; fi
+	@awk '/^  name: kagent-pg-cluster$$/,/^---/' /tmp/vp-minio.out >/tmp/vp-minio-cnp.out
+	@grep -q '\- world' /tmp/vp-minio-cnp.out || { echo "FAIL: the CNPG policy has no world egress for the store"; exit 1; }
+	@grep -q '\- cluster' /tmp/vp-minio-cnp.out || { echo "FAIL: an in-cluster endpointURL did not add the cluster entity"; exit 1; }
+	@grep -q 'k8s-app: kube-dns' /tmp/vp-minio-cnp.out || { echo "FAIL: the CNPG policy has no DNS egress for the store"; exit 1; }
+	@grep -q 'port: "443"' /tmp/vp-minio-cnp.out || { echo "FAIL: the store egress does not open 443"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set postgres.backup.serverName=kagent-pg-2 --set 'postgres.backup.networkPolicy.fqdns[0].matchName=minio.example.internal' --set 'postgres.backup.networkPolicy.cidrs[0]=198.51.100.0/24' --set-string 'postgres.backup.networkPolicy.ports[0]=9000' >/tmp/vp-minio2.out 2>&1 || { cat /tmp/vp-minio2.out; exit 1; }
+	@grep -q 'serverName: "kagent-pg-2"' /tmp/vp-minio2.out || { echo "FAIL: serverName override missing from the plugin entry"; exit 1; }
+	@grep -q 'matchName: minio.example.internal' /tmp/vp-minio2.out || { echo "FAIL: FQDN egress for the store missing"; exit 1; }
+	@grep -B2 -A2 'matchPattern: "\*"' /tmp/vp-minio2.out | grep -q 'dns:' || { echo "FAIL: FQDN egress without the DNS proxy rule"; exit 1; }
+	@grep -q '\- 198.51.100.0/24' /tmp/vp-minio2.out || { echo "FAIL: CIDR egress for the store missing"; exit 1; }
+	@grep -q 'port: "9000"' /tmp/vp-minio2.out || { echo "FAIL: store port override missing"; exit 1; }
+	@echo "ok: plugin + static keys"
+	@echo "--> Crossplane AWS: bucket, lifecycle, public-access block, TLS policy, IRSA role; derived destinationPath and role annotation"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_XP_AWS) >/tmp/vp-aws.out 2>&1 || { cat /tmp/vp-aws.out; exit 1; }
+	@for obj in "Bucket giantswarm-ci-kagent-pg" "BucketLifecycleConfiguration giantswarm-ci-kagent-pg" "BucketPublicAccessBlock giantswarm-ci-kagent-pg" "BucketPolicy giantswarm-ci-kagent-pg" "Role giantswarm-ci-kagent-pg" "ObjectStore kagent-pg-backup" "ScheduledBackup kagent-pg-scheduled"; do \
+		kind=$${obj% *}; n=$${obj#* }; \
+		grep -A3 "^kind: $$kind$$" /tmp/vp-aws.out | grep -q "^  name: $$n$$" || { echo "FAIL: $$kind $$n missing from the AWS render"; exit 1; }; \
+	done
+	@grep -q 'destinationPath: "s3://giantswarm-ci-kagent-pg/"' /tmp/vp-aws.out || { echo "FAIL: destinationPath not derived from the bucket"; exit 1; }
+	@grep -q 'inheritFromIAMRole: true' /tmp/vp-aws.out || { echo "FAIL: IRSA not selected by the AWS store"; exit 1; }
+	@grep -q 'eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/giantswarm-ci-kagent-pg' /tmp/vp-aws.out || { echo "FAIL: the Cluster ServiceAccount does not carry the derived role"; exit 1; }
+	@grep -q '"irsa.ci.example.com:sub": "system:serviceaccount:kagent:kagent-pg"' /tmp/vp-aws.out || { echo "FAIL: the role does not trust the Cluster ServiceAccount"; exit 1; }
+	@grep -q '"irsa.ci.example.com:sub": "system:serviceaccount:kagent:kagent-pg-restore\*"' /tmp/vp-aws.out || { echo "FAIL: the role does not trust scratch restore clusters"; exit 1; }
+	@grep -q 'arn:aws:iam::123456789012:oidc-provider/irsa.ci.example.com' /tmp/vp-aws.out || { echo "FAIL: the OIDC provider ARN is wrong"; exit 1; }
+	@grep -q 'helm.sh/resource-policy: keep' /tmp/vp-aws.out || { echo "FAIL: the Bucket lost helm.sh/resource-policy: keep"; exit 1; }
+	@awk '/^kind: Bucket$$/,/^---/' /tmp/vp-aws.out | grep -q 'LateInitialize' || { echo "FAIL: the Bucket management policy allows Delete"; exit 1; }
+	@if awk '/^kind: Bucket$$/,/^---/' /tmp/vp-aws.out | grep -q '"\*"'; then echo "FAIL: the Bucket management policy allows Delete"; exit 1; fi
+	@grep -q 'days: 45' /tmp/vp-aws.out || { echo "FAIL: lifecycle expiration missing"; exit 1; }
+	@grep -q 'aws:SecureTransport' /tmp/vp-aws.out || { echo "FAIL: TLS-only bucket policy missing"; exit 1; }
+	@grep -q 'managed-by: crossplane' /tmp/vp-aws.out || { echo "FAIL: default tags missing"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(PG_XP_AWS) --set postgres.backup.crossplane.region=cn-north-1 --set postgres.backup.crossplane.observeOnly=true >/tmp/vp-aws-cn.out 2>&1 || { cat /tmp/vp-aws-cn.out; exit 1; }
+	@grep -q 'arn:aws-cn:iam::123456789012:role/giantswarm-ci-kagent-pg' /tmp/vp-aws-cn.out || { echo "FAIL: China partition ARN missing"; exit 1; }
+	@grep -q '"sts.amazonaws.com.cn"' /tmp/vp-aws-cn.out || { echo "FAIL: China STS audience missing"; exit 1; }
+	@if grep -A1 'managementPolicies:' /tmp/vp-aws-cn.out | grep -q '"\*"'; then echo "FAIL: observeOnly still renders a full management policy"; exit 1; fi
+	@grep -A1 'managementPolicies:' /tmp/vp-aws-cn.out | grep -q '\- Observe' || { echo "FAIL: observeOnly renders no Observe policy"; exit 1; }
+	@echo "ok: Crossplane AWS"
+	@echo "--> Crossplane Azure: Account, Container, ManagementPolicy, PrivateEndpoint when private; derived destinationPath and connection Secret"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_XP_AZURE) >/tmp/vp-az.out 2>&1 || { cat /tmp/vp-az.out; exit 1; }
+	@for obj in "Account giantswarmcikagentpg" "Container giantswarm-ci-kagent-pg" "ManagementPolicy giantswarmcikagentpg" "ObjectStore kagent-pg-backup"; do \
+		kind=$${obj% *}; n=$${obj#* }; \
+		grep -A3 "^kind: $$kind$$" /tmp/vp-az.out | grep -q "^  name: $$n$$" || { echo "FAIL: $$kind $$n missing from the Azure render"; exit 1; }; \
+	done
+	@if grep -q 'kind: PrivateEndpoint' /tmp/vp-az.out; then echo "FAIL: PrivateEndpoint rendered for a public installation"; exit 1; fi
+	@grep -q 'destinationPath: "https://giantswarmcikagentpg.blob.core.windows.net/giantswarm-ci-kagent-pg/"' /tmp/vp-az.out || { echo "FAIL: destinationPath not derived from the container"; exit 1; }
+	@grep -A2 'connectionString:' /tmp/vp-az.out | grep -q 'name: "kagent-pg-backup-store"' || { echo "FAIL: azure credentials do not read the Account's connection Secret"; exit 1; }
+	@grep -q 'key: "attribute.primary_blob_connection_string"' /tmp/vp-az.out || { echo "FAIL: connection string key missing"; exit 1; }
+	@grep -A1 'writeConnectionSecretToRef:' /tmp/vp-az.out | grep -q 'name: kagent-pg-backup-store' || { echo "FAIL: the Account does not write kagent-pg-backup-store"; exit 1; }
+	@grep -q 'publicNetworkAccessEnabled: true' /tmp/vp-az.out || { echo "FAIL: a public installation lost public network access"; exit 1; }
+	@grep -q 'managed_by: crossplane' /tmp/vp-az.out || { echo "FAIL: Azure tags keep hyphens"; exit 1; }
+	@if grep -q 'serviceAccountTemplate' /tmp/vp-az.out; then echo "FAIL: a ServiceAccount identity rendered for connection-string credentials"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(PG_XP_AZURE) --set postgres.backup.crossplane.azure.private=true --set postgres.backup.crossplane.azure.subscriptionId=00000000-0000-0000-0000-000000000000 >/tmp/vp-az-priv.out 2>&1 || { cat /tmp/vp-az-priv.out; exit 1; }
+	@grep -A3 '^kind: PrivateEndpoint$$' /tmp/vp-az-priv.out | grep -q '^  name: giantswarm-ci-kagent-pg$$' || { echo "FAIL: PrivateEndpoint missing on a private installation"; exit 1; }
+	@grep -q 'publicNetworkAccessEnabled: false' /tmp/vp-az-priv.out || { echo "FAIL: a private installation keeps public network access"; exit 1; }
+	@grep -q 'subnetId: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ci/providers/Microsoft.Network/virtualNetworks/ci-vnet/subnets/node-subnet' /tmp/vp-az-priv.out || { echo "FAIL: subnet id not derived"; exit 1; }
+	@grep -q 'name: ci-privatelink.blob.core.windows.net' /tmp/vp-az-priv.out || { echo "FAIL: private DNS zone ref not derived"; exit 1; }
+	@echo "ok: Crossplane Azure"
+	@echo "--> volume snapshots and an existing ObjectStore"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_BACKUP) --set postgres.backup.method=volumeSnapshot --set postgres.backup.volumeSnapshot.className=ebs-vsc >/tmp/vp-vs.out 2>&1 || { cat /tmp/vp-vs.out; exit 1; }
+	@grep -q 'className: "ebs-vsc"' /tmp/vp-vs.out || { echo "FAIL: volumeSnapshot class missing from the Cluster"; exit 1; }
+	@grep -q 'method: volumeSnapshot' /tmp/vp-vs.out || { echo "FAIL: ScheduledBackup method is not volumeSnapshot"; exit 1; }
+	@grep -q 'agent-platform.giantswarm.io/backup: volumeSnapshot' /tmp/vp-vs.out || { echo "FAIL: the Cluster does not announce the snapshot backup"; exit 1; }
+	@if grep -qE 'kind: ObjectStore|pluginConfiguration|^  plugins:' /tmp/vp-vs.out; then echo "FAIL: plugin objects render for the volumeSnapshot method"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(PG_BACKUP) --set postgres.backup.objectStore.existingName=shared-store >/tmp/vp-existing.out 2>&1 || { cat /tmp/vp-existing.out; exit 1; }
+	@if grep -q 'kind: ObjectStore' /tmp/vp-existing.out; then echo "FAIL: an ObjectStore renders next to existingName"; exit 1; fi
+	@grep -q 'barmanObjectName: shared-store' /tmp/vp-existing.out || { echo "FAIL: the plugin entry does not name the existing store"; exit 1; }
+	@echo "ok: volumeSnapshot + existingName"
+	@echo "--> guards"
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_BACKUP) >/tmp/vp-g1.out 2>&1; then echo "FAIL: an empty destinationPath rendered"; exit 1; \
+	elif ! grep -q 'destinationPath is empty' /tmp/vp-g1.out; then echo "FAIL: empty destinationPath failed for the wrong reason"; cat /tmp/vp-g1.out; exit 1; else echo "ok: destinationPath guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_BACKUP) --set postgres.backup.objectStore.destinationPath=s3://b/ >/tmp/vp-g2.out 2>&1; then echo "FAIL: a store without credentials rendered"; exit 1; \
+	elif ! grep -q 'exactly one credential source' /tmp/vp-g2.out; then echo "FAIL: missing credentials failed for the wrong reason"; cat /tmp/vp-g2.out; exit 1; else echo "ok: credentials guard (none)"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set postgres.backup.objectStore.azure.inheritFromAzureAD=true >/tmp/vp-g3.out 2>&1; then echo "FAIL: two credential sources rendered"; exit 1; \
+	elif ! grep -q 'got 2' /tmp/vp-g3.out; then echo "FAIL: two credential sources failed for the wrong reason"; cat /tmp/vp-g3.out; exit 1; else echo "ok: credentials guard (two)"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_BACKUP) --set postgres.backup.objectStore.destinationPath=s3://b/ --set postgres.backup.objectStore.s3.inheritFromIAMRole=true >/tmp/vp-g4.out 2>&1; then echo "FAIL: IRSA without a role annotation rendered"; exit 1; \
+	elif ! grep -q 'carries no role' /tmp/vp-g4.out; then echo "FAIL: IRSA without a role failed for the wrong reason"; cat /tmp/vp-g4.out; exit 1; else echo "ok: IRSA role guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_BACKUP) --set postgres.backup.method=bogus >/tmp/vp-g5.out 2>&1; then echo "FAIL: a bogus method rendered"; exit 1; \
+	elif ! grep -q 'must be one of: plugin, volumeSnapshot' /tmp/vp-g5.out; then echo "FAIL: bogus method failed for the wrong reason"; cat /tmp/vp-g5.out; exit 1; else echo "ok: method guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_BACKUP) --set postgres.backup.method=volumeSnapshot >/tmp/vp-g6.out 2>&1; then echo "FAIL: volumeSnapshot without a class rendered"; exit 1; \
+	elif ! grep -q 'volumeSnapshot.className' /tmp/vp-g6.out; then echo "FAIL: volumeSnapshot without a class failed for the wrong reason"; cat /tmp/vp-g6.out; exit 1; else echo "ok: snapshot class guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set postgres.backup.objectStore.retentionPolicy=30 >/tmp/vp-g7.out 2>&1; then echo "FAIL: a bad retention rendered"; exit 1; \
+	elif ! grep -q 'retentionPolicy' /tmp/vp-g7.out; then echo "FAIL: bad retention failed for the wrong reason"; cat /tmp/vp-g7.out; exit 1; else echo "ok: retention guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_XP_AWS) --set-string postgres.backup.crossplane.aws.accountId= >/tmp/vp-g8.out 2>&1; then echo "FAIL: Crossplane AWS without an account rendered"; exit 1; \
+	elif ! grep -q 'crossplane.aws.accountId is required' /tmp/vp-g8.out; then echo "FAIL: missing account failed for the wrong reason"; cat /tmp/vp-g8.out; exit 1; else echo "ok: Crossplane AWS inputs guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_XP_AWS) --set postgres.backup.objectStore.destinationPath=s3://other-bucket/ >/tmp/vp-g9.out 2>&1; then echo "FAIL: a destinationPath outside the Crossplane bucket rendered"; exit 1; \
+	elif ! grep -q 'does not point into the Crossplane bucket' /tmp/vp-g9.out; then echo "FAIL: foreign destinationPath failed for the wrong reason"; cat /tmp/vp-g9.out; exit 1; else echo "ok: Crossplane AWS path guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_XP_AZURE) --set postgres.backup.crossplane.azure.storageAccountName=Bad-Name >/tmp/vp-g10.out 2>&1; then echo "FAIL: a bad storage account name rendered"; exit 1; \
+	elif ! grep -q '3 to 24 lowercase' /tmp/vp-g10.out; then echo "FAIL: bad storage account name failed for the wrong reason"; cat /tmp/vp-g10.out; exit 1; else echo "ok: Crossplane Azure name guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_XP_AZURE) --set postgres.backup.crossplane.azure.private=true >/tmp/vp-g11.out 2>&1; then echo "FAIL: a private Azure store without a subscription rendered"; exit 1; \
+	elif ! grep -q 'subscriptionId' /tmp/vp-g11.out; then echo "FAIL: private without subscription failed for the wrong reason"; cat /tmp/vp-g11.out; exit 1; else echo "ok: Crossplane Azure private guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_XP_AWS) --set postgres.backup.method=volumeSnapshot --set postgres.backup.volumeSnapshot.className=x >/tmp/vp-g12.out 2>&1; then echo "FAIL: Crossplane rendered for the volumeSnapshot method"; exit 1; \
+	elif ! grep -q 'method=volumeSnapshot does not use' /tmp/vp-g12.out; then echo "FAIL: crossplane+volumeSnapshot failed for the wrong reason"; cat /tmp/vp-g12.out; exit 1; else echo "ok: Crossplane vs volumeSnapshot guard"; fi
+	@echo "--> kubernetes flavor: no cilium.io object, the CNPG pods keep their unrestricted egress"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set networkPolicy.flavor=kubernetes >/tmp/vp-k8s.out 2>&1 || { cat /tmp/vp-k8s.out; exit 1; }
+	@if grep -q 'cilium.io' /tmp/vp-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavor"; exit 1; else echo "ok: kubernetes flavor"; fi
+	@echo "ok: $@"
