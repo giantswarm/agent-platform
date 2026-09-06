@@ -317,8 +317,19 @@ spec:
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
 {{- end }}
 {{- if index .Values.kagent "oauth2-proxy" "enabled" }}
+{{- /* Extra callers admitted on oauth2-proxy's proxy port next to the public
+Gateway's Envoy pods (kagent.oauth2ProxyIngress.additionalPeers): pod label maps,
+each rendered as one more fromEndpoints entry. A peer outside the kagent
+namespace carries its own io.kubernetes.pod.namespace label. */ -}}
+{{- $o2pPeers := dig "oauth2ProxyIngress" "additionalPeers" (list) .Values.kagent }}
+{{- range $o2pPeers }}
+{{- if or (not (kindIs "map" .)) (not .) }}
+{{- fail (printf "kagent.oauth2ProxyIngress.additionalPeers: every item is a non-empty pod label map (matchLabels), e.g. {app: teleport-kube-agent, io.kubernetes.pod.namespace: kube-system}; got %v" .) }}
+{{- end }}
+{{- end }}
 ---
-# Ingress to oauth2-proxy: envoy (proxy port) + Prometheus (metrics port).
+# Ingress to oauth2-proxy: envoy (proxy port), the installation's extra callers
+# (kagent.oauth2ProxyIngress.additionalPeers, proxy port) + Prometheus (metrics port).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -339,6 +350,15 @@ spec:
         - ports:
             - port: "4180"
               protocol: TCP
+    {{- range $o2pPeers }}
+    - fromEndpoints:
+        - matchLabels:
+            {{- toYaml . | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: "4180"
+              protocol: TCP
+    {{- end }}
     - fromEntities:
         - cluster
       toPorts:
