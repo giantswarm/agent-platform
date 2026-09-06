@@ -147,7 +147,12 @@ spec:
 {{- if .Values.postgres.enabled }}
 ---
 # CNPG cluster policies: inter-instance egress for streaming replication,
-# and ingress from the kagent controller.
+# and ingress from the kagent controller. The selector also covers a Cluster
+# named <clusterName>-restore: the scratch Cluster a restore test bootstraps
+# from the backup store (its full-recovery Job needs the Kubernetes API and the
+# store, and the operator's cluster-wide CNPG policies cover instance, initdb
+# and join pods but not recovery Jobs). It never selects the live Cluster's
+# pods for anything the restore Cluster could not do on its own.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -157,12 +162,20 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   endpointSelector:
-    matchLabels:
-      cnpg.io/cluster: {{ $clusterName }}
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: In
+        values:
+          - {{ $clusterName }}
+          - {{ $clusterName }}-restore
   egress:
     - toEndpoints:
-        - matchLabels:
-            cnpg.io/cluster: {{ $clusterName }}
+        - matchExpressions:
+            - key: cnpg.io/cluster
+              operator: In
+              values:
+                - {{ $clusterName }}
+                - {{ $clusterName }}-restore
       toPorts:
         - ports:
             - port: "5432"
@@ -215,8 +228,12 @@ spec:
     {{- end }}
   ingress:
     - fromEndpoints:
-        - matchLabels:
-            cnpg.io/cluster: {{ $clusterName }}
+        - matchExpressions:
+            - key: cnpg.io/cluster
+              operator: In
+              values:
+                - {{ $clusterName }}
+                - {{ $clusterName }}-restore
       toPorts:
         - ports:
             - port: "5432"
