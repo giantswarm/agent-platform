@@ -1,0 +1,86 @@
+{{- /*
+Render-time guards for postgres.backup. A backup that silently archives nowhere
+is worse than none: every misconfiguration below fails `helm template` with the
+key to fix.
+*/ -}}
+{{- if include "agent-platform.postgres.backupEnabled" . }}
+  {{- $b := .Values.postgres.backup }}
+  {{- $os := $b.objectStore }}
+  {{- $xp := $b.crossplane }}
+  {{- if not (has $b.method (list "plugin" "volumeSnapshot")) }}
+    {{- fail (printf "postgres.backup.method=%s is invalid; must be one of: plugin, volumeSnapshot" $b.method) }}
+  {{- end }}
+  {{- if not $b.schedule }}
+    {{- fail "postgres.backup.schedule must be a CNPG cron expression (six fields, seconds first), e.g. \"0 0 2 * * *\"" }}
+  {{- end }}
+  {{- if eq $b.method "volumeSnapshot" }}
+    {{- if not $b.volumeSnapshot.className }}
+      {{- fail "postgres.backup.method=volumeSnapshot needs postgres.backup.volumeSnapshot.className (a VolumeSnapshotClass for the Cluster's storage class)" }}
+    {{- end }}
+    {{- if $xp.enabled }}
+      {{- fail "postgres.backup.crossplane renders an object store, which method=volumeSnapshot does not use; set postgres.backup.method=plugin or postgres.backup.crossplane.enabled=false" }}
+    {{- end }}
+  {{- end }}
+  {{- if and (eq $b.method "plugin") (not $os.existingName) }}
+    {{- if not (regexMatch "^[1-9][0-9]*[dwm]$" $os.retentionPolicy) }}
+      {{- fail (printf "postgres.backup.objectStore.retentionPolicy=%q is invalid; use <n>d, <n>w or <n>m (e.g. 30d)" $os.retentionPolicy) }}
+    {{- end }}
+    {{- if not (include "agent-platform.postgres.destinationPath" .) }}
+      {{- fail "postgres.backup.objectStore.destinationPath is empty: set s3://<bucket>/<prefix>/ or https://<account>.blob.core.windows.net/<container>/, or let postgres.backup.crossplane render the store" }}
+    {{- end }}
+    {{- $sources := list }}
+    {{- if or $os.s3.inheritFromIAMRole (eq (include "agent-platform.postgres.crossplane" .) "aws") }}{{- $sources = append $sources "s3.inheritFromIAMRole" }}{{- end }}
+    {{- if $os.s3.accessKeyId.name }}{{- $sources = append $sources "s3.accessKeyId" }}{{- end }}
+    {{- if $os.azure.inheritFromAzureAD }}{{- $sources = append $sources "azure.inheritFromAzureAD" }}{{- end }}
+    {{- if or $os.azure.connectionString.name (eq (include "agent-platform.postgres.crossplane" .) "azure") }}{{- $sources = append $sources "azure.connectionString" }}{{- end }}
+    {{- if $os.azure.storageAccount.name }}{{- $sources = append $sources "azure.storageAccount" }}{{- end }}
+    {{- if ne (len $sources) 1 }}
+      {{- fail (printf "postgres.backup.objectStore needs exactly one credential source (s3.inheritFromIAMRole, s3.accessKeyId+secretAccessKey, azure.inheritFromAzureAD, azure.connectionString or azure.storageAccount+storageKey), got %d: %s" (len $sources) (join ", " $sources)) }}
+    {{- end }}
+    {{- if and $os.s3.accessKeyId.name (not $os.secretAccessKey) (not $os.s3.secretAccessKey.name) }}
+      {{- fail "postgres.backup.objectStore.s3.accessKeyId is set but s3.secretAccessKey.name is empty; static S3 credentials need both keys" }}
+    {{- end }}
+    {{- if and $os.azure.storageAccount.name (not $os.azure.storageKey.name) }}
+      {{- fail "postgres.backup.objectStore.azure.storageAccount is set but azure.storageKey.name is empty; account credentials need both" }}
+    {{- end }}
+    {{- if and (has "s3.inheritFromIAMRole" $sources) (not (include "agent-platform.postgres.serviceAccountAnnotations" .)) }}
+      {{- fail "postgres.backup.objectStore.s3.inheritFromIAMRole is set but postgres.backup.serviceAccount.annotations carries no role: set eks.amazonaws.com/role-arn (or let postgres.backup.crossplane.aws render the role)" }}
+    {{- end }}
+  {{- end }}
+  {{- if and (eq $b.method "plugin") $xp.enabled }}
+    {{- if not (has $xp.provider (list "aws" "azure")) }}
+      {{- fail (printf "postgres.backup.crossplane.provider=%s is invalid; must be one of: aws, azure" $xp.provider) }}
+    {{- end }}
+    {{- range $k := list "providerConfigRef" "region" }}
+      {{- if not (index $xp $k) }}
+        {{- fail (printf "postgres.backup.crossplane.%s is required when postgres.backup.crossplane.enabled" $k) }}
+      {{- end }}
+    {{- end }}
+    {{- if eq $xp.provider "aws" }}
+      {{- range $k := list "bucketName" "accountId" "oidcProvider" }}
+        {{- if not (index $xp.aws $k) }}
+          {{- fail (printf "postgres.backup.crossplane.aws.%s is required for provider aws" $k) }}
+        {{- end }}
+      {{- end }}
+      {{- if not (hasPrefix (printf "s3://%s/" $xp.aws.bucketName) (include "agent-platform.postgres.destinationPath" .)) }}
+        {{- fail (printf "postgres.backup.objectStore.destinationPath (%s) does not point into the Crossplane bucket s3://%s/; clear it to derive it, or make the two agree" (include "agent-platform.postgres.destinationPath" .) $xp.aws.bucketName) }}
+      {{- end }}
+    {{- end }}
+    {{- if eq $xp.provider "azure" }}
+      {{- range $k := list "storageAccountName" "containerName" "resourceGroup" }}
+        {{- if not (index $xp.azure $k) }}
+          {{- fail (printf "postgres.backup.crossplane.azure.%s is required for provider azure" $k) }}
+        {{- end }}
+      {{- end }}
+      {{- if not (regexMatch "^[a-z0-9]{3,24}$" $xp.azure.storageAccountName) }}
+        {{- fail (printf "postgres.backup.crossplane.azure.storageAccountName=%q must be 3 to 24 lowercase letters and digits" $xp.azure.storageAccountName) }}
+      {{- end }}
+      {{- if and $xp.azure.private (not $xp.azure.subscriptionId) }}
+        {{- fail "postgres.backup.crossplane.azure.private needs postgres.backup.crossplane.azure.subscriptionId (the PrivateEndpoint names the subnet and the storage account by id)" }}
+      {{- end }}
+      {{- if not (hasPrefix (printf "https://%s.blob.core.windows.net/%s" $xp.azure.storageAccountName $xp.azure.containerName) (include "agent-platform.postgres.destinationPath" .)) }}
+        {{- fail (printf "postgres.backup.objectStore.destinationPath (%s) does not point into the Crossplane container https://%s.blob.core.windows.net/%s/; clear it to derive it, or make the two agree" (include "agent-platform.postgres.destinationPath" .) $xp.azure.storageAccountName $xp.azure.containerName) }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}

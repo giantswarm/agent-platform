@@ -44,6 +44,20 @@ postgres:
     name: kagent
     owner: kagent
     schema: kagent
+  # Barman Cloud plugin to an S3-compatible store with static keys (the shape a
+  # kind cluster with MinIO uses; the fleet uses crossplane.* + IRSA instead).
+  backup:
+    enabled: true
+    objectStore:
+      destinationPath: s3://kagent-pg-backups/
+      endpointURL: http://minio.minio.svc:9000
+      s3:
+        accessKeyId:
+          name: kagent-pg-backup-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: kagent-pg-backup-s3
+          key: ACCESS_SECRET_KEY
 
 # muster-direct: this case exercises the kagent + postgres path, not routing
 # (kagent.controllerRoute/uiRoute stay disabled). parentRefs is still required

@@ -171,6 +171,48 @@ spec:
               protocol: TCP
     - toEntities:
         - kube-apiserver
+    {{- if and (include "agent-platform.postgres.backupEnabled" .) (eq .Values.postgres.backup.method "plugin") }}
+    {{- $np := .Values.postgres.backup.networkPolicy }}
+    # The Barman Cloud plugin sidecar reaches the object store: DNS, the world on
+    # the store's ports, the cluster entity when endpointURL names an in-cluster
+    # store, and any names or blocks the installation pins.
+    {{- if $np.fqdns }}
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- else }}
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- end }}
+    - toEntities:
+        - world
+        {{- if .Values.postgres.backup.objectStore.endpointURL }}
+        - cluster
+        {{- end }}
+      toPorts:
+        - ports:
+            {{- range $np.ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- with $np.fqdns }}
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $np.ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    {{- with $np.cidrs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $np.ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    {{- end }}
   ingress:
     - fromEndpoints:
         - matchLabels:

@@ -9,10 +9,11 @@
 #
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
-#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-meta`
-#     checks on branches (ingress-mode
-#     guards, the global.* contract, the model-manager / agent-manager wiring,
-#     app-of-apps meta-package render)
+#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-meta` +
+#     `make verify-postgres` checks on branches (ingress-mode guards, the
+#     global.* contract, the model-manager / agent-manager wiring, the kagent
+#     tool-server egress, app-of-apps meta-package render, the postgres.backup
+#     wiring and guards)
 #   - the standalone agent-platform-connectivity chart (build, tag push), the
 #     consumer-side wiring rendered by the meta-package as a HelmRelease
 #   versioned in lockstep with agent-platform off the same git tag. This
@@ -48,12 +49,13 @@ jobs:
         # verify-modes (connectivity chart ingress guards), verify-global (the
         # global.* contract behaviors and their guards), verify-managers (the
         # model-manager / agent-manager wiring and guards), verify-kagent-netpol
-        # (the kagent controller/agent egress to the built-in tool server) and
+        # (the kagent controller/agent egress to the built-in tool server),
         # verify-meta (root app-of-apps render: no Chart.yaml pins, ranges as
-        # values, both engines, pure renderer, pinned BOM) are the single source
-        # of truth, also run locally. Neither chart has subcharts, so no `helm
+        # values, both engines, pure renderer, pinned BOM) and verify-postgres
+        # (the postgres.backup wiring and guards) are the single source of
+        # truth, also run locally. Neither chart has subcharts, so no `helm
         # dependency build`.
-        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol
+        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol verify-postgres
 
 workflows:
   build:

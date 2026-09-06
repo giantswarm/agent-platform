@@ -28,3 +28,15 @@ component releases), then install this release.
 
 Verify the data-plane Deployment renders after the controller picks up the Gateway:
   kubectl -n {{ .Release.Namespace }} get gateway,deployment -l gateway.networking.k8s.io/gateway-name={{ .Values.gateway.name }}
+{{- if and .Values.postgres.enabled (not .Values.postgres.backup.enabled) }}
+
+WARNING: postgres.enabled is true and postgres.backup.enabled is false. The CNPG
+Cluster {{ .Values.postgres.namespace | default .Release.Namespace }}/{{ .Values.postgres.clusterName }}
+has NO backup: its PVCs are the only copy of the platform database (agents,
+sessions, tasks, tools). Set postgres.backup.* (Barman Cloud plugin to an object
+store, or CSI volume snapshots) before this installation holds data it cannot lose.
+{{- else if .Values.postgres.enabled }}
+
+Postgres backup:  {{ .Values.postgres.backup.method }} (ScheduledBackup {{ .Values.postgres.clusterName }}-scheduled, schedule {{ .Values.postgres.backup.schedule | quote }})
+  kubectl -n {{ .Values.postgres.namespace | default .Release.Namespace }} get backups.postgresql.cnpg.io -l cnpg.io/cluster={{ .Values.postgres.clusterName }}
+{{- end }}

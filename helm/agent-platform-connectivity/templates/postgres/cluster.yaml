@@ -15,8 +15,24 @@ metadata:
     # The database outlives the release: an uninstall or a postgres.enabled
     # flip must not drop the platform's data.
     helm.sh/resource-policy: keep
+    # What protects the data besides the PVCs. "none" is the honest answer for a
+    # Cluster rendered without postgres.backup; NOTES warns about it too.
+    {{- if include "agent-platform.postgres.backupEnabled" . }}
+    agent-platform.giantswarm.io/backup: {{ .Values.postgres.backup.method }}
+    {{- else }}
+    agent-platform.giantswarm.io/backup: none
+    {{- end }}
 spec:
   instances: {{ .Values.postgres.instances | default 3 }}
+  {{- with include "agent-platform.postgres.serviceAccountAnnotations" . }}
+  # The operator creates a ServiceAccount named after the Cluster; these
+  # annotations bind it to a cloud identity (IRSA role, Azure workload identity)
+  # the backup sidecar uses to reach the object store.
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        {{- . | nindent 8 }}
+  {{- end }}
   {{- if .Values.postgres.image.name }}
   imageName: {{ .Values.postgres.image.name | quote }}
   {{- end }}
@@ -54,11 +70,33 @@ spec:
         image:
           reference: {{ .Values.postgres.vector.extensionImage.reference | quote }}
   {{- end }}
-  # TODO(backup): add barmanObjectStore / ObjectStore once a target bucket exists.
-  # Backup is optional for function but needed for PITR on production clusters.
-  # CNPG Barman supports S3, Azure Blob, GCS, and S3-compatible (MinIO via
-  # endpointURL) — pick credentials per cloud (IRSA on EKS, azureCredentials on
-  # Azure, static key for MinIO).
+  {{- if include "agent-platform.postgres.backupEnabled" . }}
+  {{- if eq .Values.postgres.backup.method "plugin" }}
+  # Barman Cloud plugin (CNPG-I): archives every WAL segment to the ObjectStore
+  # and takes the base backups the ScheduledBackup (backup.yaml) asks for. The
+  # plugin runs as a sidecar in every instance pod. serverName is the folder
+  # under the store's destinationPath; unset it defaults to the Cluster name.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      enabled: true
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ include "agent-platform.postgres.objectStoreName" . }}
+        {{- with .Values.postgres.backup.serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
+  {{- else }}
+  # CSI volume snapshots: base backups only, no WAL archive, no point-in-time
+  # recovery. The ScheduledBackup (backup.yaml) uses method volumeSnapshot.
+  backup:
+    volumeSnapshot:
+      className: {{ .Values.postgres.backup.volumeSnapshot.className | quote }}
+      {{- with .Values.postgres.backup.volumeSnapshot.walClassName }}
+      walClassName: {{ . | quote }}
+      {{- end }}
+      online: {{ .Values.postgres.backup.volumeSnapshot.online }}
+  {{- end }}
+  {{- end }}
   {{- /* Gated with the other monitor objects on
   global.observability.metrics.serviceMonitor.enabled: a cluster without the
   monitoring.coreos.com CRDs cannot admit the generated PodMonitor. */ -}}

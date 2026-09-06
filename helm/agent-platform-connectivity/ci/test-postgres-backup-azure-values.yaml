@@ -1,0 +1,61 @@
+# kagent + CNPG Postgres with backups to an Azure Blob container the chart
+# provisions through Crossplane (upbound provider-azure) on a private
+# installation: Storage Account without public access, PrivateEndpoint in the
+# node subnet, credentials from the Account's connection Secret. destinationPath
+# and azure.connectionString derive from crossplane.azure.
+components:
+  kagent:
+    enabled: true
+
+kagent:
+  namespaceOverride: kagent
+  database:
+    postgres:
+      urlFile: /etc/cnpg/uri
+      vectorEnabled: true
+      bundled:
+        enabled: false
+
+postgres:
+  enabled: true
+  namespace: kagent
+  clusterName: kagent-pg
+  storage:
+    storageClass: managed-premium
+  image:
+    name: gsoci.azurecr.io/giantswarm/postgresql-cnpg:18.3
+  vector:
+    enabled: true
+    extensionImage:
+      reference: gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
+  backup:
+    enabled: true
+    crossplane:
+      enabled: true
+      provider: azure
+      providerConfigRef: ci
+      region: westeurope
+      azure:
+        storageAccountName: giantswarmcikagentpg
+        containerName: giantswarm-ci-kagent-pg
+        resourceGroup: ci
+        private: true
+        subscriptionId: 00000000-0000-0000-0000-000000000000
+
+ingress:
+  mode: muster-direct
+  parentRefs:
+    - name: giantswarm-default
+      namespace: envoy-gateway-system
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - muster.ci.example.com
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory
