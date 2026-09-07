@@ -7,6 +7,12 @@
 # known-good internal dev state. Upgrades are a deliberate edit here; nothing
 # auto-updates. (Not under ci/ on purpose, so chart-testing does not treat it as
 # an install test case.)
+#
+# Snapshot of the internal dogfooding track on 2026-09-07. The muster pin is the
+# floor of components.muster.versionRange: the toolset presets in values.yaml
+# select by the tool-group label, which a muster before 5.12.0 does not know
+# (it refuses to start), and which agent-platform-mcps, agent-manager and
+# model-manager stamp on their MCPServer CRs from the versions below.
 # =============================================================================
 
 gitops:
@@ -14,14 +20,14 @@ gitops:
   interval: 30m
 
 components:
-  muster:                        { versionRange: "0.9.0" }
-  agentgateway:                  { versionRange: "2.0.0" }
-  valkey:                        { versionRange: "0.1.2" }
-  agent-platform-mcps:         { versionRange: "0.4.3" }
-  kagent:                        { versionRange: "0.1.33" }
-  klaus-gateway:                 { versionRange: "0.2.4" }
-  agent-sandbox:                 { versionRange: "0.1.2" }
-  dicebear:                      { versionRange: "0.3.0" }
-  model-manager:                 { versionRange: "0.14.0" }
-  agent-manager:                 { versionRange: "0.2.0" }
-  agent-platform-connectivity: { versionRange: "1.5.0" }
+  muster:                        { versionRange: "5.12.0" }
+  agentgateway:                  { versionRange: "2.0.7" }
+  valkey:                        { versionRange: "0.1.4" }
+  agent-platform-mcps:         { versionRange: "0.9.0" }
+  kagent:                        { versionRange: "0.1.48" }
+  klaus-gateway:                 { versionRange: "0.39.0" }
+  agent-sandbox:                 { versionRange: "0.2.31" }
+  dicebear:                      { versionRange: "0.3.10" }
+  model-manager:                 { versionRange: "0.18.0" }
+  agent-manager:                 { versionRange: "0.4.0" }
+  agent-platform-connectivity: { versionRange: "3.10.0" }

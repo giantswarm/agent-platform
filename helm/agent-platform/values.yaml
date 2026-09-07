@@ -147,8 +147,8 @@ components:  # @schema additionalProperties: true
     # deliberately. The muster values below still set
     # observability.metrics.prometheus.prometheusRule, which the muster chart
     # only accepts from 4.1.0 (it validates values against its own schema with
-    # additionalProperties: false) — every 5.x clears that, so the range no
-    # longer needs a sub-major floor on top of the major.
+    # additionalProperties: false) — every 5.x clears that; the floor below
+    # comes from the toolset presets, not from this.
     #
     # The v5.0.0 break (muster#1078) does not affect this umbrella. It keys
     # unauthenticated sessions by MCP transport session instead of collapsing
@@ -163,9 +163,14 @@ components:  # @schema additionalProperties: true
     # rbac.mcpServerEditor/workflowEditor.subjects. Both are bound to the
     # Giant Swarm admin groups below, so the guard is satisfied.
     #
-    # Keeping the upper bound at the next major means minor releases still
-    # roll forward on their own.
-    versionRange: "5.x"
+    # Floor 5.12.0: the muster values below define toolsetPresets that select
+    # by the tool-group label (`label:` rules, muster#1168), and a muster
+    # before 5.12.0 refuses to start on such a preset. With the floor here the
+    # source re-resolves to a chart that has the rule before the release
+    # applies the values that need it, so the two never meet on a cluster.
+    # The upper bound stays at the next major so minor releases still roll
+    # forward on their own.
+    versionRange: ">=5.12.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -617,6 +622,36 @@ muster:  # @schema skipProperties: true; additionalProperties: true
             # of install namespace. Override for an out-of-band Valkey.
             url: muster-valkey:6379
             secretKeyPassword: valkey-password
+    # Toolset presets: the named tool selections an agent's toolset refers
+    # to as `preset:<name>` — through the agent chart's `toolset` value, the
+    # X-Muster-Toolset header, or agent-manager's `toolset` argument. muster
+    # builds read-only, none and full in; these two are the platform's. Both
+    # select by the tool-group label every platform-shipped MCPServer CR
+    # carries (agent-platform.giantswarm.io/tool-group, stamped by
+    # agent-platform-mcps ≥ 0.9.0, agent-manager ≥ 0.3.0, model-manager
+    # ≥ 0.18.0) and are resolved live on every request, so a new manager or a
+    # fourth infrastructure family joins its preset with no values change.
+    # Servers registered through the portal carry no label and stay outside
+    # both. The core_* rule is what makes agent-platform the meta agent's
+    # preset; no other shipped preset reaches muster's core tools.
+    #
+    # An installation adds its own next to these in its gitops values (Helm
+    # merges the map): a `test-clusters` preset over `server:` rules, for
+    # example — see docs/toolset-presets.md. Never name one read-only, none
+    # or full: muster refuses to start on a redefined built-in.
+    #
+    # Requires muster ≥ 5.12.0 (the `label:` rule); a 5.11.0 muster refuses
+    # to start on it, which is why components.muster.versionRange floors there.
+    toolsetPresets:
+      infrastructure:
+        description: The servers for the infrastructure underneath the platform (Giant Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
+        include:
+          - label: agent-platform.giantswarm.io/tool-group=infrastructure
+      agent-platform:
+        description: The platform's own management surface — agent-manager, model-manager, cluster-manager and muster's core tools.
+        include:
+          - label: agent-platform.giantswarm.io/tool-group=agent-platform
+          - pattern: core_*
     # Prometheus metrics for the GS Observability Platform. The
     # serviceMonitor toggle alone enables the whole scrape path: it
     # implies the prometheus exporter, so the muster chart serves

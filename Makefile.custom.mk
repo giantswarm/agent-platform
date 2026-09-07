@@ -305,7 +305,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	else echo "ok: engine guard"; fi
 	@echo "--> customer BOM pins every range to an exact version"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml >/tmp/ap-bom.out 2>&1 || { cat /tmp/ap-bom.out; exit 1; }
-	@grep -q 'semver: "0.9.0"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to 0.9.0"; exit 1; }
+	@grep -q 'semver: "5.12.0"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to 5.12.0"; exit 1; }
 	@if grep -qE 'semver: "[0-9]+\.x"' /tmp/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
@@ -700,3 +700,40 @@ verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + Sche
 	@helm template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set networkPolicy.flavor=kubernetes >/tmp/vp-k8s.out 2>&1 || { cat /tmp/vp-k8s.out; exit 1; }
 	@if grep -q 'cilium.io' /tmp/vp-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavor"; exit 1; else echo "ok: kubernetes flavor"; fi
 	@echo "ok: $@"
+
+# The muster chart version the platform toolset presets need: the first with the
+# `label:` preset rule (muster#1168). It is the floor of
+# components.muster.versionRange; a muster before it refuses to start on the
+# presets. The chart is pulled anonymously from gsoci to render its ConfigMap
+# with the values the meta chart forwards, so the check reads the real schema
+# and template of that version, not a copy.
+PRESETS_MUSTER_VERSION := 5.12.0
+# The muster chart's own render guards want the OAuth inputs an installation
+# supplies; these are placeholders for the render, not part of the assertion.
+PRESETS_MUSTER_SETS := --set muster.oauth.server.baseUrl=https://muster.ci.example.com --set muster.oauth.server.dex.issuerUrl=https://dex.ci.example.com --set muster.oauth.server.dex.clientId=platform --set muster.oauth.server.existingSecret=muster-oauth
+
+.PHONY: verify-presets
+verify-presets: ## Assert the infrastructure / agent-platform toolset presets reach muster: forwarded on its HelmRelease, accepted by the muster chart's own schema, rendered into its ConfigMap.
+	@echo "====> $@ ($(CHART_DIR))"
+	@echo "--> the muster HelmRelease values carry both presets, selecting by the tool-group label"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/vp-flux.out 2>&1 || { cat /tmp/vp-flux.out; exit 1; }
+	@python3 tests/verify-toolset-presets.py release-values /tmp/vp-flux.out >/tmp/vp-muster-values.yaml
+	@echo "--> components.muster.versionRange floors at the muster that has the label rule"
+	@grep -q 'semver: ">=$(PRESETS_MUSTER_VERSION) <6.0.0"' /tmp/vp-flux.out || { echo "FAIL: the muster range does not floor at $(PRESETS_MUSTER_VERSION)"; exit 1; }
+	@echo "ok: forwarded and floored"
+	@echo "--> the argo engine forwards the same presets"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=argo >/tmp/vp-argo.out 2>&1 || { cat /tmp/vp-argo.out; exit 1; }
+	@grep -q 'label: agent-platform.giantswarm.io/tool-group=infrastructure' /tmp/vp-argo.out || { echo "FAIL: argo Application lacks the infrastructure preset"; exit 1; }
+	@echo "ok: argo"
+	@echo "--> muster $(PRESETS_MUSTER_VERSION) accepts the forwarded values and renders the presets into its ConfigMap"
+	@rm -rf /tmp/vp-muster-chart && mkdir -p /tmp/vp-muster-chart
+	@helm pull oci://gsoci.azurecr.io/charts/giantswarm/muster --version $(PRESETS_MUSTER_VERSION) --untar --untardir /tmp/vp-muster-chart >/tmp/vp-pull.out 2>&1 || { cat /tmp/vp-pull.out; exit 1; }
+	@helm template muster /tmp/vp-muster-chart/muster --namespace agent-platform -f /tmp/vp-muster-values.yaml $(PRESETS_MUSTER_SETS) --show-only templates/configmap.yaml >/tmp/vp-cm.out 2>&1 || { cat /tmp/vp-cm.out; exit 1; }
+	@python3 tests/verify-toolset-presets.py configmap /tmp/vp-cm.out
+	@echo "--> a preset that redefines a built-in is refused by the meta chart before it reaches muster"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set-json 'muster.muster.toolsetPresets.full={"include":[{"pattern":"*"}]}' >/tmp/vp-builtin.out 2>&1; then \
+		echo "FAIL: a toolsetPresets entry named full passed the render"; exit 1; \
+	elif ! grep -q "built into muster" /tmp/vp-builtin.out; then \
+		echo "FAIL: the built-in guard failed for the wrong reason"; cat /tmp/vp-builtin.out; exit 1; \
+	else echo "ok: built-in names refused"; fi
+	@echo "ok: presets reach muster's config"

@@ -57,7 +57,7 @@ jobs:
         # credential paths, passes on referenced Secrets) are the single source
         # of truth, also run locally. Neither chart has subcharts, so no `helm
         # dependency build`.
-        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol verify-postgres verify-secrets
+        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol verify-postgres verify-secrets verify-presets
 
 workflows:
   build:
