@@ -478,6 +478,17 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=lemonade --set model-manager.lemonade.endpoint=http://lemonade.lan:13305 >/tmp/vmg-lemonade-fqdn.out 2>&1 || { cat /tmp/vmg-lemonade-fqdn.out; exit 1; }
 	@grep -q 'matchName: lemonade.lan' /tmp/vmg-lemonade-fqdn.out || { echo "FAIL: a hostname Lemonade endpoint is not opened by name"; exit 1; }
 	@echo "ok: lemonade egress"
+	@echo "--> lmstudio backend: egress to the host LM Studio, its own flags, and the guard on a missing endpoint"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=lmstudio --set model-manager.lmstudio.endpoint=http://10.0.0.3:1234 >/tmp/vmg-lmstudio.out 2>&1 || { cat /tmp/vmg-lmstudio.out; exit 1; }
+	@grep -q '10.0.0.3/32' /tmp/vmg-lmstudio.out || { echo "FAIL: model-manager egress does not pin the LM Studio endpoint address"; exit 1; }
+	@grep -q 'port: "1234"' /tmp/vmg-lmstudio.out || { echo "FAIL: model-manager egress does not open the LM Studio port"; exit 1; }
+	@if grep -q '10.0.0.1/32' /tmp/vmg-lmstudio.out; then echo "FAIL: Ollama egress rendered for the lmstudio backend"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set networkPolicy.flavor=kubernetes --set model-manager.backend=lmstudio --set model-manager.lmstudio.endpoint=http://10.0.0.3:1234 >/tmp/vmg-lmstudio-k8s.out 2>&1 || { cat /tmp/vmg-lmstudio-k8s.out; exit 1; }
+	@grep -q 'cidr: 10.0.0.3/32' /tmp/vmg-lmstudio-k8s.out || { echo "FAIL: kubernetes model-manager egress does not pin the LM Studio endpoint address"; exit 1; }
+	@grep -q 'port: 1234' /tmp/vmg-lmstudio-k8s.out || { echo "FAIL: kubernetes model-manager egress does not open the LM Studio port"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=lmstudio >/dev/null 2>&1; then echo "FAIL: lmstudio backend without an endpoint accepted"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=lmstudio --set model-manager.lmstudio.endpoint=lmstudio:1234 >/dev/null 2>&1; then echo "FAIL: lmstudio endpoint without a scheme accepted"; exit 1; fi
+	@echo "ok: lmstudio egress"
 	@echo "--> backends list: one model-manager in front of Ollama AND Lemonade opens both host endpoints, in both flavors"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=lemonade' --set model-manager.lemonade.endpoint=http://10.0.0.2:13305 >/tmp/vmg-multi.out 2>&1 || { cat /tmp/vmg-multi.out; exit 1; }
 	@grep -q '10.0.0.1/32' /tmp/vmg-multi.out || { echo "FAIL: backends list: the Ollama endpoint is not opened"; exit 1; }
