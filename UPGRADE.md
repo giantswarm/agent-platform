@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (toolset presets; the muster range floors at 5.12.0)
+
+The muster values gain `muster.muster.toolsetPresets` with the platform's two presets, `infrastructure` and `agent-platform`, selecting by the tool-group label (`agent-platform.giantswarm.io/tool-group`) the platform charts stamp on their `MCPServer` CRs. Agents refer to them as `preset:infrastructure` / `preset:agent-platform` in their `toolset`. muster reads the presets at startup, so the muster pod rolls once. See [docs/toolset-presets.md](./docs/toolset-presets.md).
+
+`components.muster.versionRange` moves from `5.x` to `>=5.12.0 <6.0.0`: the `label:` rule exists from muster 5.12.0, and an older muster refuses to start on a preset that uses it. The floor makes the OCIRepository resolve a chart that has the rule before the HelmRelease applies the values that need it.
+
+### Operator action
+
+- **Wide-range installations (the default): none.** Flux resolves the range, the muster release rolls to ≥ 5.12.0 first, then applies the presets.
+- **BOM-pinned installations:** pin `components.muster.versionRange` to `5.12.0` or later before or with this upgrade. A pin below 5.12.0 fails the muster pod's start with `toolsetPresets: … unknown rule "label"`. `examples/customer-bom.yaml` carries the current dogfooding snapshot. For the presets to resolve to anything, the label has to be on the CRs: agent-platform-mcps ≥ 0.9.0, agent-manager ≥ 0.3.0, model-manager ≥ 0.18.0; an older chart leaves the preset empty, not broken.
+- **Installations that already defined their own `toolsetPresets`:** Helm merges the map — yours stay, the two shipped ones join. If you named one `infrastructure` or `agent-platform`, your definition wins over the shipped one; if you named one `read-only`, `none` or `full`, the render now fails naming it (muster would refuse to start on it either way).
+
 ## \<current\> → \<next\> (component toggles move into `components.<name>.enabled`)
 
 A component's on/off switch is now `components.<name>.enabled`, and nothing else. The six per-chart toggles are removed.

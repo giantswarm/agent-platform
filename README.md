@@ -257,6 +257,17 @@ agent-platform-mcps:
 
 The toggle is `components.agent-platform-mcps.enabled`, not a key inside the chart's own value namespace: the sub-chart's `values.schema.json` is strict (`additionalProperties: false`) and rejects an `enabled` key. Everything under `agent-platform-mcps.*` is passed through to the sub-chart verbatim — see its [values reference](https://github.com/giantswarm/agent-platform-mcps) for `defaults`, `identityProviders`, per-entry `auth`, and the `muster` / `agentgateway` rendering toggles. Even when enabled, the chart renders nothing until `mcpServers` is populated.
 
+### Toolset presets
+
+An agent declares a **toolset** — the selectors that say which of the gateway's tools it is composed with (`preset:<name>`, `server:<name>`, `workflow:<name>`, `tool:<name>`; the agent chart's `toolset` value, agent-manager's `toolset` argument). muster resolves it per request, on top of the caller's own access. Presets are muster configuration, so this chart ships the platform's two under `muster.muster.toolsetPresets`, both selecting by the tool-group label every platform-shipped `MCPServer` carries (`agent-platform.giantswarm.io/tool-group`):
+
+| Preset | Selects |
+|---|---|
+| `infrastructure` | The mcp-kubernetes, mcp-capi and mcp-prometheus families (label `infrastructure`, stamped by agent-platform-mcps ≥ 0.9.0). |
+| `agent-platform` | agent-manager, model-manager and muster's `core_*` tools — the meta agent's preset (label `agent-platform`, stamped by agent-manager ≥ 0.3.0 and model-manager ≥ 0.18.0). |
+
+muster builds `read-only`, `none` and `full` in. An installation adds its own (`test-clusters`, …) next to the shipped ones in its gitops values. The `label:` rule needs muster ≥ 5.12.0, which is the floor of `components.muster.versionRange`. Details, the installation examples and the verification recipe: [docs/toolset-presets.md](./docs/toolset-presets.md); `make verify-presets` renders the real muster chart's ConfigMap from the forwarded values.
+
 ### Postgres backups
 
 `postgres.enabled` renders the CloudNativePG `Cluster` the kagent controller uses (the CNPG operator is a cluster-level prerequisite). `postgres.backup` protects it; without the block the Cluster carries `agent-platform.giantswarm.io/backup: none` and NOTES warns that its PVCs are the only copy of the platform database (agents, sessions, tasks, tools). Do not read `ContinuousArchiving=True` on such a Cluster as a backup: CNPG's `wal-archive` command exits 0 when it has nowhere to archive to.

@@ -175,6 +175,24 @@ The message names the key paths only.
 {{- end -}}
 
 {{/*
+muster.muster.toolsetPresets: a preset named like one of muster's built-ins
+(read-only, none, full) makes the muster pod refuse to start, out of sight in
+Flux. Fail the render here instead, naming the preset.
+*/}}
+{{- define "agent-platform.validateToolsetPresets" -}}
+{{- $presets := dig "muster" "toolsetPresets" dict (.Values.muster | default dict) -}}
+{{- $clash := list -}}
+{{- range $name, $_ := $presets -}}
+{{- if has $name (list "read-only" "none" "full") -}}
+{{- $clash = append $clash $name -}}
+{{- end -}}
+{{- end -}}
+{{- with $clash -}}
+{{- fail (printf "muster.muster.toolsetPresets redefines %s, which is built into muster and cannot be redefined by configuration (the muster pod would refuse to start, naming it); rename the preset" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the AgentgatewayParameters CR — defaults to release name.
 */}}
 {{- define "agent-platform.parametersName" -}}

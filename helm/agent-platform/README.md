@@ -43,7 +43,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | gitops.argo.server | string | `"https://kubernetes.default.svc"` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `"5.x"` |  |
+| components.muster.versionRange | string | `">=5.12.0 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
@@ -204,6 +204,11 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | muster.muster.oauth.server.storage.type | string | `"valkey"` |  |
 | muster.muster.oauth.server.storage.valkey.url | string | `"muster-valkey:6379"` |  |
 | muster.muster.oauth.server.storage.valkey.secretKeyPassword | string | `"valkey-password"` |  |
+| muster.muster.toolsetPresets.infrastructure.description | string | `"The servers for the infrastructure underneath the platform (Giant Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus."` |  |
+| muster.muster.toolsetPresets.infrastructure.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=infrastructure"` |  |
+| muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, cluster-manager and muster's core tools."` |  |
+| muster.muster.toolsetPresets.agent-platform.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=agent-platform"` |  |
+| muster.muster.toolsetPresets.agent-platform.include[1].pattern | string | `"core_*"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | bool | `true` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.interval | string | `"60s"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
