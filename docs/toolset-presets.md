@@ -66,7 +66,7 @@ muster:
           - pattern: "*_delete"
 ```
 
-The same, by a label the installation stamps itself (`agent-platform-mcps.mcpServers[].labels` or `muster.mcpServer.labels` on a chart that renders one CR):
+The same, by a label. `label:` matches `metadata.labels` on the `MCPServer` CR, so it fits servers whose CR the installation writes itself — a GitOps-managed `MCPServer`, or a chart with a labels knob such as `muster.mcpServer.labels` on the agent-manager and model-manager charts. agent-platform-mcps (0.9.0) has no free-form labels value: its CRs carry the template's fixed labels plus the tier label from `muster.families.<group>.toolGroup` / `mcpServers[].toolGroup`, so select its servers by `server:` as above, or by the tier label.
 
 ```yaml
       test-clusters:
@@ -75,20 +75,24 @@ The same, by a label the installation stamps itself (`agent-platform-mcps.mcpSer
           - label: example.com/pipeline=testing
 ```
 
-Composition — read-only tools of the infrastructure plus one workflow:
+Composition — the infrastructure preset without its writes, plus one workflow:
 
 ```yaml
       safe-ops:
-        description: Read-only infrastructure tools plus the incident-triage workflow
+        description: Infrastructure tools without apply, patch and delete, plus the incident-triage workflow
         include:
           - preset: infrastructure
-          - readOnly: true
           - workflow: incident-triage
+        exclude:
+          - pattern: "*_apply"
+          - pattern: "*_patch"
+          - pattern: "*_delete"
 ```
 
 Rules of the road:
 
 - A `server:` rule names the `MCPServer` CR (or family) as muster exposes it; a `pattern:` is a glob on the exposed tool name (`x_<server>_<tool>`, `workflow_<name>`, `core_*`).
+- `include` rules are a union, never an intersection: `preset: infrastructure` next to `readOnly: true` resolves to every infrastructure tool plus every read-only tool of the whole catalogue, not to the infrastructure's read-only tools. Narrow a set with `exclude` (by `pattern:` or `tool:`) as `safe-ops` does; `readOnly: false` is not a rule — muster rejects it at startup.
 - Never name a preset `read-only`, `none` or `full` — see above.
 - A preset that matches nothing is not an error: the agent simply has no tool from it. An agent naming a preset that does not exist gets an error on every meta-tool call — remove a preset only after no agent's `toolset` names it.
 
