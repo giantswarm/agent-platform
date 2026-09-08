@@ -40,6 +40,13 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | components.agent-sandbox.enabled | bool | `false` |  |
 | components.model-manager.enabled | bool | `false` |  |
 | components.agent-manager.enabled | bool | `false` |  |
+| components.backstage.enabled | bool | `false` |  |
+| components.mcp-kubernetes.enabled | bool | `false` |  |
+| components.cloudnative-pg.enabled | bool | `false` |  |
+| components.kserve-crd.enabled | bool | `false` |  |
+| components.kserve-resources.enabled | bool | `false` |  |
+| components.kserve-llmisvc-crd.enabled | bool | `false` |  |
+| components.kserve-llmisvc-resources.enabled | bool | `false` |  |
 | ingress.mode | string | `"muster-direct"` |  |
 | ingress.parentRefs | list | `[]` |  |
 | ingress.hostnames | list | `[]` |  |
@@ -487,3 +494,10 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | agentManager.networkPolicy.egress.fqdns[1].matchName | string | `"api.github.com"` |  |
 | agentManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| backstage | object | `{}` |  |
+| mcp-kubernetes | object | `{}` |  |
+| cloudnative-pg | object | `{}` |  |
+| kserve-crd | object | `{}` |  |
+| kserve-resources | object | `{}` |  |
+| kserve-llmisvc-crd | object | `{}` |  |
+| kserve-llmisvc-resources | object | `{}` |  |

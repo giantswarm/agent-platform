@@ -363,6 +363,18 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@echo "ok: connectivity wiring"
 	@echo "meta-package render verified."
 
+.PHONY: verify-components
+verify-components: ## Assert the roster entries of the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts): off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-components.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "component roster verified."
+
+.PHONY: verify-components-charts
+verify-components-charts: ## Pull the seven component charts (at the range's resolution and at the BOM pin) and render each with the values the meta chart forwards to it. Network: gsoci.azurecr.io, ghcr.io.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-components-charts.py $(CHART_DIR)
+	@echo "component charts accept the forwarded values."
+
 # The two platform services the connectivity chart wires — model-manager and
 # agent-manager (route + JWT policy + network policies + render-time guards). A
 # valid configuration of both on the agentgateway topology, with the identity

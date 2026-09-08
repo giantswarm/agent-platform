@@ -23,6 +23,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "backstage": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "baseDomain": {
             "type": "string"
         },
@@ -35,6 +39,10 @@
             "additionalProperties": true
         },
         "ciliumNetworkPolicy": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "cloudnative-pg": {
             "type": "object",
             "additionalProperties": true
         },
@@ -100,6 +108,12 @@
                         },
                         "forwardAllValues": {
                             "type": "boolean"
+                        },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "repository": {
                             "type": "string"
@@ -193,6 +207,55 @@
                         }
                     }
                 },
+                "backstage": {
+                    "type": "object",
+                    "description": "- The standalone chart's extras ------------------------------------------- The components the agent-platform-standalone umbrella carried as Helm dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the CloudNativePG operator and the KServe charts. Off by default: a management cluster runs each of them as its own app and keeps them off here, so the fleet render is unchanged; a cluster that has none of them turns them on from this roster (the quick-start values). None of the seven ships CRDs in a crds/ dir — kserve-crd, kserve-llmisvc-crd and cloudnative-pg render their CRDs as templates, upgraded with the release and annotated helm.sh/resource-policy: keep — so no `crds:` policy applies to them; the CRD-before-CR order is dependsOn. Their values blocks (backstage:, mcp-kubernetes:, cloudnative-pg:, kserve-*:) carry the standalone's defaults; the wiring the standalone rendered by hand for them (the Backstage app-config ConfigMap and route, the mcp-kubernetes MCPServer CR, the model serving runtimes) is the connectivity chart's, gated on these same toggles, and arrives in a following release.",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "cloudnative-pg": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "dicebear": {
                     "type": "object",
                     "additionalProperties": true,
@@ -245,6 +308,123 @@
                     }
                 },
                 "klaus-gateway": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "kserve-crd": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "kserve-llmisvc-crd": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "kserve-llmisvc-resources": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "kserve-resources": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "mcp-kubernetes": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
@@ -735,6 +915,22 @@
             "type": "object",
             "additionalProperties": true
         },
+        "kserve-crd": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kserve-llmisvc-crd": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kserve-llmisvc-resources": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kserve-resources": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "kyvernoPolicies": {
             "type": "object",
             "additionalProperties": false,
@@ -768,6 +964,10 @@
                     "uniqueItems": true
                 }
             }
+        },
+        "mcp-kubernetes": {
+            "type": "object",
+            "additionalProperties": true
         },
         "model-manager": {
             "type": "object",

@@ -11,6 +11,15 @@ Operator action required between releases. CHANGELOG.md captures the diff; UPGRA
 - **Flux installations (every installation today): none.** The Flux render is byte-identical to the previous release; `gitops.engine: flux` set explicitly keeps rendering exactly the default.
 - A values file that sets `gitops.engine: argo` fails the render — the schema first (`gitops.engine` must be `flux`), the template guard behind it with `gitops.engine=argo is not supported; flux is the only engine`. One that sets `gitops.argo.project` or `gitops.argo.server` fails the schema (`gitops` allows no additional property `argo`). Install Flux on the target (the cluster's own Flux, or the Flux Operator) and drop the keys. A non-GitOps install is not this chart's job; should one ever be needed, it is a plan of its own.
 
+## \<current\> → \<next\> (the standalone chart's extras join `components.*`, off by default)
+
+Backstage, mcp-kubernetes, the CloudNativePG operator and the four KServe charts are roster entries of this chart now (`components.backstage`, `components.mcp-kubernetes`, `components.cloudnative-pg`, `components.kserve-crd`, `components.kserve-resources`, `components.kserve-llmisvc-crd`, `components.kserve-llmisvc-resources`), all `enabled: false`, with their values in the new top-level blocks of the same names.
+
+### Operator action
+
+**No installation needs to act.** The default render adds nothing but seven `<name>: {enabled: false}` entries to the component roster inside the `agent-platform-connectivity` `HelmRelease`'s values, so that release gets one Helm revision with unchanged objects; no pod rolls. A management cluster keeps all seven off — it runs each of them as its own app. A BOM-pinned installation has nothing to pin unless it turns one on; `examples/customer-bom.yaml` carries the pins. An installation that turns Backstage or mcp-kubernetes on sets `global.domain` and `global.identity` first (README "Backstage, mcp-kubernetes, CloudNativePG and KServe").
+
+## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
 
 The `kagent` chart 0.2.0 flattened the upstream chart onto its chart root: upstream keys moved from `kagent.*` to the top level. The meta-package no longer nests the forwarded block, drops its own keys from it (`omitKeys`), and tracks the `0.2.x` range.
 

@@ -26,7 +26,13 @@ knowledge:
       the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs, which only
       the connectivity chart reads), and whose chart validates values with
       additionalProperties: false and would reject it. Applied after valuesKey,
-      so it always addresses the block's own keys.
+      so it always addresses the block's own keys. With forwardAllValues it
+      drops top-level blocks from the forwarded tree instead: a block the
+      connectivity chart does not read yet is held back until it does, because
+      that chart's root schema is additionalProperties: false and the fleet's
+      connectivity release re-resolves its chart on its own OCIRepository
+      interval — a block the live chart does not declare would fail that
+      release until the chart catches up, on every installation.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
       a single block. Used by agent-platform-connectivity, which reads many
       blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …).
@@ -92,6 +98,8 @@ plumbing and are dropped. */ -}}
 {{- $vals := dict }}
 {{- if $c.forwardAllValues }}
 {{- $vals = mergeOverwrite (deepCopy (omit $root.Values "gitops" "components")) (dict "components" $roster) }}
+{{- /* Hold back the top-level blocks the chart does not read yet (see omitKeys above). */ -}}
+{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $root.Values . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the

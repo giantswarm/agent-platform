@@ -285,8 +285,11 @@ components:  # @schema additionalProperties: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
     # and wires ModelConfigs into the kagent namespace, which the connectivity
     # release creates; both references are dropped at render time when the
-    # component is off.
-    dependsOn: [muster, kagent]
+    # component is off. With model-manager.backend kserve it manages
+    # InferenceServices on the KServe control plane; when the kserve-resources
+    # component provides that control plane it installs first (the reference
+    # is dropped while that component is off, as every other one).
+    dependsOn: [muster, kagent, kserve-resources]
   agent-manager:  # @schema additionalProperties: true
     chart: agent-manager
     # The agent write surface of the Agent Control Plane
@@ -301,6 +304,112 @@ components:  # @schema additionalProperties: true
     # and manages agents in the kagent namespace; both references are dropped
     # at render time when the component is off.
     dependsOn: [muster, kagent]
+  # --- The standalone chart's extras -------------------------------------------
+  # The components the agent-platform-standalone umbrella carried as Helm
+  # dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the
+  # CloudNativePG operator and the KServe charts. Off by default: a management
+  # cluster runs each of them as its own app and keeps them off here, so the
+  # fleet render is unchanged; a cluster that has none of them turns them on
+  # from this roster (the quick-start values). None of the seven ships CRDs in
+  # a crds/ dir — kserve-crd, kserve-llmisvc-crd and cloudnative-pg render their
+  # CRDs as templates, upgraded with the release and annotated
+  # helm.sh/resource-policy: keep — so no `crds:` policy applies to them; the
+  # CRD-before-CR order is dependsOn. Their values blocks (backstage:,
+  # mcp-kubernetes:, cloudnative-pg:, kserve-*:) carry the standalone's
+  # defaults; the wiring the standalone rendered by hand for them (the Backstage
+  # app-config ConfigMap and route, the mcp-kubernetes MCPServer CR, the model
+  # serving runtimes) is the connectivity chart's, gated on these same toggles,
+  # and arrives in a following release.
+  backstage:  # @schema additionalProperties: true
+    chart: backstage
+    # The Giant Swarm Backstage app (giantswarm/backstage): the portal with the
+    # Agent Platform pages. Needs global.domain and global.identity set (the
+    # values below mount the platform credentials Secret by that name).
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: "0.x"
+    valuesFrom: backstage
+    enabled: false
+    # Renders a CNPG Cluster for its database when backstage.database.engine is
+    # postgresql (the chart's default is sqlite); dropped at render time while
+    # the cloudnative-pg component is off.
+    dependsOn: [cloudnative-pg]
+  mcp-kubernetes:  # @schema additionalProperties: true
+    chart: mcp-kubernetes
+    # The Kubernetes MCP server (giantswarm/mcp-kubernetes), acting as the user:
+    # an OAuth 2.1 resource server against the platform identity provider,
+    # presenting the forwarded token to the kube-apiserver. Registered with
+    # muster through an MCPServer CR the connectivity chart renders.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # Floor 1.1.1: the mcp-kubernetes block below leaves the issuer, client,
+    # Secret and CA to the chart's global.identity fallbacks, which a chart
+    # before 1.1.1 does not have. The next major is the ceiling.
+    versionRange: ">=1.1.1 <2.0.0"
+    valuesFrom: mcp-kubernetes
+    enabled: false
+  cloudnative-pg:  # @schema additionalProperties: true
+    chart: cloudnative-pg
+    # The upstream CloudNativePG operator (cloudnative-pg/charts). The CNPG
+    # Cluster the connectivity chart renders under postgres.enabled and the
+    # Backstage database need its postgresql.cnpg.io API on the cluster; a
+    # management cluster runs the operator as its own app and keeps this off.
+    # The chart renders its CRDs as templates (crds.create), so they upgrade
+    # with the release.
+    repository: oci://ghcr.io/cloudnative-pg/charts
+    # One chart minor is one operator line (0.29.x ships CNPG 1.30), and an
+    # operator upgrade rolls every instance pod it manages, so the range holds
+    # the minor: moving to the next CNPG line is a deliberate edit here, not a
+    # reconcile.
+    versionRange: "0.29.x"
+    valuesFrom: cloudnative-pg
+    enabled: false
+  kserve-crd:  # @schema additionalProperties: true
+    chart: kserve-crd
+    # The KServe CRDs (giantswarm/kserve: InferenceService, ServingRuntime,
+    # ClusterServingRuntime, ...), rendered as templates annotated
+    # helm.sh/resource-policy: keep, so Helm upgrades them with the release and
+    # an uninstall leaves them and their CRs in place.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # The four kserve charts come from one repository and move together; the
+    # forwarded blocks below assume the 0.2.x key shape (createSharedResources,
+    # controller.deploymentMode), so the range holds the line like kagent's.
+    versionRange: "0.2.x"
+    valuesFrom: kserve-crd
+    enabled: false
+  kserve-resources:  # @schema additionalProperties: true
+    chart: kserve-resources
+    # The KServe controller (giantswarm/kserve): plain Deployments and Services
+    # per InferenceService (Standard mode), webhook certificates through
+    # cert-manager (a cluster prerequisite of this component).
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: "0.2.x"
+    valuesFrom: kserve-resources
+    enabled: false
+    # Its webhook configurations and default ClusterServingRuntimes need the
+    # CRDs Established first.
+    dependsOn: [kserve-crd]
+  kserve-llmisvc-crd:  # @schema additionalProperties: true
+    chart: kserve-llmisvc-crd
+    # The LLMInferenceService CRDs (giantswarm/kserve), rendered as templates
+    # annotated keep like kserve-crd. The standalone umbrella left this chart a
+    # prerequisite installed by hand because its 4.5 MB of CRD YAML did not fit
+    # next to everything else in one Helm release Secret; as its own release it
+    # does.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: "0.2.x"
+    valuesFrom: kserve-llmisvc-crd
+    enabled: false
+  kserve-llmisvc-resources:  # @schema additionalProperties: true
+    chart: kserve-llmisvc-resources
+    # The LLMInferenceService (llm-d) controller (giantswarm/kserve). It reuses
+    # the shared objects kserve-resources renders (the inferenceservice-config
+    # ConfigMap, the Issuer, the default ClusterStorageContainer — see
+    # kserve-llmisvc-resources.kserve.createSharedResources below) and ships the
+    # Gateway API Inference Extension CRDs as templates.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: "0.2.x"
+    valuesFrom: kserve-llmisvc-resources
+    enabled: false
+    dependsOn: [kserve-crd, kserve-llmisvc-crd, kserve-resources]
   dicebear:  # @schema additionalProperties: true
     chart: dicebear
     # Self-hosted DiceBear avatar API + the public avatar HTTPRoute. Lives in its
@@ -316,13 +425,35 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: ">=1.0.0"          # this repo's own wiring chart
     forwardAllValues: true
+    # The values blocks of the standalone chart's extras (below) are held back
+    # from this release until the connectivity chart reads them. Its root schema
+    # is additionalProperties: false, and while both charts release off one tag,
+    # the fleet's connectivity release re-resolves its chart on its own
+    # OCIRepository interval — a block the live chart does not declare would
+    # fail that release on every installation until the chart caught up. The
+    # connectivity values.yaml declares all seven already, so the release that
+    # adds their wiring drops them from this list with no such window.
+    omitKeys:
+      - backstage
+      - mcp-kubernetes
+      - cloudnative-pg
+      - kserve-crd
+      - kserve-resources
+      - kserve-llmisvc-crd
+      - kserve-llmisvc-resources
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app) and the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app). dependsOn those CRD-owning
     # components; both references are dropped at render time when the component is
     # off (in muster-direct mode neither renders, and connectivity's only CR then
     # is muster's public HTTPRoute, which needs the cluster-prereq Gateway API CRDs).
-    dependsOn: [agentgateway, kagent]
+    # Likewise the CNPG Cluster it renders under postgres.enabled
+    # (postgresql.cnpg.io, owned by the cloudnative-pg component) and the model
+    # serving objects (serving.kserve.io, owned by the kserve components): the
+    # operator and the KServe control plane come first when they are components
+    # of this chart, and the references are dropped while they are off — a
+    # management cluster provides both as its own apps.
+    dependsOn: [agentgateway, kagent, cloudnative-pg, kserve-resources]
 
 # === Agent avatars (DiceBear) ===
 # Forwarded verbatim to the dicebear component chart (see giantswarm/dicebear
@@ -1965,3 +2096,147 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
       cidrs: []
+
+# === The standalone chart's extras: values blocks ===
+# One block per component of the agent-platform-standalone umbrella that joined
+# the roster above (components.backstage, .mcp-kubernetes, .cloudnative-pg,
+# .kserve-crd, .kserve-resources, .kserve-llmisvc-crd, .kserve-llmisvc-resources),
+# each forwarded verbatim to that component's release, with global injected
+# (every one of the seven charts accepts it) and carrying the defaults the
+# standalone shipped. All seven components are off by default, so these blocks
+# reach no release on an installation that leaves them off. Unlike every other
+# block they are held back from the connectivity release for now
+# (components.agent-platform-connectivity.omitKeys) — the release that adds the
+# wiring which reads them forwards them.
+
+# === Backstage (the portal) ===
+# Values forwarded verbatim to the backstage component release
+# (giantswarm/backstage; see its values.yaml for the full surface). The
+# standalone's defaults: the chart's own Ingress and VerticalPodAutoscaler off
+# (the umbrella owns the route; the VPA CRD is not part of Kubernetes
+# conformance), the image's base configuration restated as --config flags (an
+# explicit --config replaces Backstage's default config set, and extraAppConfig
+# is passed as --config flags), and the Agent Platform app-config mounted from
+# the ConfigMap agent-platform-backstage-app-config, which the connectivity
+# chart renders for this component. The env and volume entries are rendered
+# through tpl against the backstage chart root, so the Secret names follow
+# global.identity: existingSecret must name the platform credentials Secret
+# (keys backstage-session-secret, dex-client-secret) — set global.identity for
+# this component, the chart has no default for it. NODE_EXTRA_CA_CERTS stays
+# empty (Node ignores it) unless a private identity-provider CA Secret is named
+# under global.identity.ca (read with dig: the key is optional in this chart's
+# contract), and the idp-ca volume is optional so a missing Secret does not
+# block the pod. The chart's database is sqlite unless backstage.database.engine
+# is postgresql, which renders a CNPG Cluster and needs the cloudnative-pg
+# component (or a cluster that runs the operator).
+backstage:  # @schema skipProperties: true; additionalProperties: true
+  ingress:
+    enabled: false
+  resources:
+    verticalPodAutoscaler:
+      enabled: false
+  backstage:
+    args:
+      - --config
+      - app-config.yaml
+      - --config
+      - app-config.production.yaml
+    extraAppConfig:
+      - filename: app-config.agent-platform.yaml
+        configMapRef: agent-platform-backstage-app-config
+    extraEnvVars:
+      - name: AUTH_SESSION_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: "{{ .Values.global.identity.existingSecret }}"
+            key: backstage-session-secret
+      - name: AGENT_PLATFORM_OIDC_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: "{{ .Values.global.identity.existingSecret }}"
+            key: dex-client-secret
+      - name: NODE_EXTRA_CA_CERTS
+        value: "{{ with (dig \"identity\" \"ca\" \"secretName\" \"\" .Values.global) }}/etc/agent-platform/idp-ca/{{ dig \"identity\" \"ca\" \"key\" \"ca.crt\" $.Values.global }}{{ end }}"
+    extraVolumes:
+      - name: idp-ca
+        secret:
+          secretName: "{{ dig \"identity\" \"ca\" \"secretName\" \"\" .Values.global | default \"agent-platform-idp-ca\" }}"
+          optional: true
+    extraVolumeMounts:
+      - name: idp-ca
+        mountPath: /etc/agent-platform/idp-ca
+        readOnly: true
+
+# === Kubernetes MCP server (mcp-kubernetes) ===
+# Values forwarded verbatim to the mcp-kubernetes component release
+# (giantswarm/mcp-kubernetes). The pinned Service name keeps the in-cluster
+# MCPServer URL the connectivity chart registers with muster stable regardless
+# of the release name. The user's identity, not a ServiceAccount: the server
+# runs as an OAuth 2.1 resource server (mcp-oauth) against the platform
+# identity provider; its issuer, client, Secret and CA fall back to
+# global.identity inside the chart (>= 1.1.1), the trusted audience to the
+# platform client — muster forwards the session's id_token and the server
+# validates it against the provider's JWKS. enableDownstreamOAuth presents
+# that token to the kube-apiserver, so every call runs with the user's RBAC
+# (the chart then grants the ServiceAccount nothing). The two private-IP
+# relaxations are for an in-cluster identity provider whose discovery and JWKS
+# resolve to cluster addresses; a public provider needs neither and ignores
+# them. The chart's own CiliumNetworkPolicy stays at its default (on), like
+# muster's and valkey's; a cluster without Cilium sets
+# mcp-kubernetes.ciliumNetworkPolicy.enabled: false next to the other
+# cluster-shape knobs (README "Prerequisites").
+mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: mcp-kubernetes
+  mcpKubernetes:
+    oauth:
+      enabled: true
+      provider: dex
+      allowPrivateURLs: true
+      sso:
+        allowPrivateIPs: true
+      enableDownstreamOAuth: true
+
+# === CloudNativePG operator (cloudnative-pg) ===
+# Values forwarded verbatim to the cloudnative-pg component release (the
+# upstream chart, cloudnative-pg/charts). Empty: the chart's defaults install
+# the operator cluster-wide with its CRDs (crds.create) and without a
+# PodMonitor (monitoring.podMonitorEnabled), the shape the standalone shipped.
+cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
+
+# === KServe (kserve-crd, kserve-resources, kserve-llmisvc-crd, kserve-llmisvc-resources) ===
+# Values forwarded verbatim to the four KServe component releases
+# (giantswarm/kserve, the vendored upstream charts). The two CRD charts take
+# only crd.keep, on by default (every CRD annotated helm.sh/resource-policy:
+# keep); nothing to set.
+kserve-crd: {}  # @schema skipProperties: true; additionalProperties: true
+kserve-llmisvc-crd: {}  # @schema skipProperties: true; additionalProperties: true
+# The KServe controller. Everything not set here is the chart's default: the
+# upstream multi-arch kserve/kserve-controller image at the KServe version the
+# chart vendors, the storage-initializer, the webhook certificates through
+# cert-manager.
+kserve-resources:  # @schema skipProperties: true; additionalProperties: true
+  kserve:
+    controller:
+      # Plain Deployments and Services per InferenceService ("Standard", the
+      # former RawDeployment). The Knative and ModelMesh modes need
+      # controllers this chart does not ship; the render fails on them.
+      deploymentMode: Standard
+      gateway:
+        # No per-model Ingress or HTTPRoute: agents and the platform reach a
+        # model through its predictor Service (<name>-predictor.<namespace>),
+        # which is what the portal and model-manager wire into kagent. An
+        # install that wants external per-model routes sets this false and
+        # the gateway domain / ingressGateway.* of the chart.
+        disableIngressCreation: true
+# The LLMInferenceService (llm-d) controller.
+kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties: true
+  kserve:
+    # kserve-resources renders the shared objects (the inferenceservice-config
+    # ConfigMap, the self-signed Issuer, the default ClusterStorageContainer);
+    # a second copy in the same namespace would conflict. Guarded by the chart.
+    createSharedResources: false
+    llmisvc:
+      # Ship the Gateway API Inference Extension CRDs (InferencePool, ...)
+      # with the controller. A cluster that already has them (an inference
+      # gateway installed them) sets this false: Helm cannot adopt them.
+      createGIECRDs: true

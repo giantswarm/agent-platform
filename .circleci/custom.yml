@@ -10,10 +10,12 @@
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
 #     `make verify-managers` + `make verify-kagent-netpol` + `make verify-meta` +
-#     `make verify-postgres` checks on branches (ingress-mode guards, the
-#     global.* contract, the model-manager / agent-manager wiring, the kagent
-#     tool-server egress, app-of-apps meta-package render, the postgres.backup
-#     wiring and guards)
+#     `make verify-postgres` + `make verify-components` checks on branches
+#     (ingress-mode guards, the global.* contract, the model-manager /
+#     agent-manager wiring, the kagent tool-server egress, app-of-apps
+#     meta-package render, the postgres.backup wiring and guards, the roster
+#     entries of the standalone chart's extras and the component charts'
+#     acceptance of the forwarded values)
 #   - the standalone agent-platform-connectivity chart (build, tag push), the
 #     consumer-side wiring rendered by the meta-package as a HelmRelease
 #   versioned in lockstep with agent-platform off the same git tag. This
@@ -54,10 +56,14 @@ jobs:
         # values, Flux the only engine, pure renderer, pinned BOM), verify-postgres
         # (the postgres.backup wiring and guards) and verify-secrets
         # (gitops.forbidInlineSecrets: off by default, names only the inline
-        # credential paths, passes on referenced Secrets) are the single source
-        # of truth, also run locally. Neither chart has subcharts, so no `helm
-        # dependency build`.
-        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol verify-postgres verify-secrets verify-presets
+        # credential paths, passes on referenced Secrets), verify-components
+        # (the standalone chart's extras as components: off by default, sources
+        # and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree
+        # against the connectivity schema) and verify-components-charts (pulls
+        # the seven component charts and renders each with the forwarded
+        # values) are the single source of truth, also run locally. Neither
+        # chart has subcharts, so no `helm dependency build`.
+        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol verify-postgres verify-secrets verify-presets verify-components verify-components-charts
 
 workflows:
   build:
