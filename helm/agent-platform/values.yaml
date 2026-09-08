@@ -56,24 +56,26 @@ global:
 
 # === Meta-package release flow ===
 # This chart no longer bundles subcharts. templates/components.yaml renders, per
-# entry below, a Flux OCIRepository + HelmRelease (or an Argo Application). The
-# version CONSTRAINT is a value, not a Chart.yaml pin — Flux re-resolves it on
-# every reconcile, so a new component release rolls forward with NO PR here.
+# entry below, a Flux OCIRepository + HelmRelease. The version CONSTRAINT is a
+# value, not a Chart.yaml pin — Flux re-resolves it on every reconcile, so a new
+# component release rolls forward with NO PR here.
 #
-# `gitops.engine` selects the render layer (flux ships now; argo renders the same
-# set as argoproj Applications).
+# `gitops.engine` names the render layer. Flux is the only engine: agents are
+# Flux objects on every path (the portal and agent-manager write an
+# OCIRepository + HelmRelease per agent), so nothing else could run the
+# platform. Any other value fails the schema and the render.
 gitops:
-  engine: flux                 # flux | argo
+  engine: flux  # @schema enum: [flux]
   interval: 10m                # cadence Flux re-evaluates the version range
-  # Namespace the rendered OCIRepository/HelmRelease (or Argo Application) objects
-  # are CREATED in. Empty = the release namespace. Set this to a namespace that is
-  # exempt from a multi-tenancy admission policy when one is enforced — on Giant
-  # Swarm clusters the flux-multi-tenancy Kyverno policy rejects HelmReleases that
-  # omit serviceAccountName everywhere EXCEPT flux-giantswarm/giantswarm/monitoring,
+  # Namespace the rendered OCIRepository/HelmRelease objects are CREATED in.
+  # Empty = the release namespace. Set this to a namespace that is exempt from a
+  # multi-tenancy admission policy when one is enforced — on Giant Swarm clusters
+  # the flux-multi-tenancy Kyverno policy rejects HelmReleases that omit
+  # serviceAccountName everywhere EXCEPT flux-giantswarm/giantswarm/monitoring,
   # so set `namespace: flux-giantswarm` there.
   namespace: ""
   # Namespace the child releases install their WORKLOADS into (HelmRelease
-  # targetNamespace / Argo destination.namespace). Empty = the release namespace.
+  # targetNamespace). Empty = the release namespace.
   # Pair with `namespace` above to render the Flux CRs in an exempt namespace while
   # the workloads land in the platform namespace (e.g. agent-platform).
   targetNamespace: ""
@@ -94,9 +96,8 @@ gitops:
   # klausGateway.slack.secretName (with an empty botToken) and
   # klausGateway.obo.existingSecret; model-manager / agent-manager
   # oauth.existingSecret. A credential set inline is copied verbatim into that
-  # component's HelmRelease spec.values (Argo: valuesObject) and into Helm's
-  # release storage, readable by anyone allowed to get HelmReleases in
-  # `namespace`. With true the render fails and names the offending key paths
+  # component's HelmRelease spec.values and into Helm's release storage,
+  # readable by anyone allowed to get HelmReleases in `namespace`. With true the render fails and names the offending key paths
   # (never their values); false keeps the pre-existing behavior. The keys it
   # checks: kagent.providers.*.apiKey, kagent.oauth2-proxy.config.clientSecret
   # and .cookieSecret, muster.muster.oauth.server.dex.clientSecret,
@@ -106,9 +107,6 @@ gitops:
   # klausGateway.obo.stateKey and .storeKey, model-manager.oauth.dex.clientSecret,
   # agent-manager.oauth.dex.clientSecret.
   forbidInlineSecrets: false
-  argo:
-    project: default
-    server: https://kubernetes.default.svc
 
 # Component source coordinates + version policy. Each entry is self-describing;
 # templates/components.yaml is a generic loop with no per-component knowledge.
@@ -127,8 +125,7 @@ gitops:
 #       (a reference to a toggled-off component is dropped at render time).
 #   crds         — Helm CRD lifecycle (CreateReplace) for a component that ships its
 #       own CRDs in its chart's crds/ dir (app-owned CRDs). Such a component owns its
-#       CRD version; its CR consumers dependsOn it instead. Flux-only (Argo applies
-#       crds/ unconditionally).
+#       CRD version; its CR consumers dependsOn it instead.
 #
 # The per-component VALUES + on/off toggles live in their existing top-level
 # blocks below (muster:, agentgateway:, kagent:, valkey:, klausGateway:,

@@ -3,11 +3,12 @@
 Giant Swarm Agent Platform — MCP gateway deploy unit, packaged as an
 app-of-apps meta-package. Renders each component (muster, agentgateway, kagent,
 klaus-gateway, valkey, agent-platform-mcps, agent-sandbox) and the consumer-side
-connectivity layer as a Flux OCIRepository + HelmRelease (or Argo Application),
-with each component's version expressed as a value RANGE rather than a Chart.yaml
-pin — so a component release rolls forward with no PR to this chart. Each component
-ships its own CRDs (app-owned CRDs, upgraded via Flux CreateReplace); the Gateway
-API CRDs and GatewayClass remain cluster-level prerequisites — see README.
+connectivity layer as a Flux OCIRepository + HelmRelease (Flux is the only
+render engine), with each component's version expressed as a value RANGE rather
+than a Chart.yaml pin — so a component release rolls forward with no PR to this
+chart. Each component ships its own CRDs (app-owned CRDs, upgraded via Flux
+CreateReplace); the Gateway API CRDs and GatewayClass remain cluster-level
+prerequisites — see README.
 
 **Homepage:** <https://github.com/giantswarm/agent-platform>
 
@@ -39,8 +40,6 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | gitops.serviceAccountName | string | `""` |  |
 | gitops.retries | int | `5` |  |
 | gitops.forbidInlineSecrets | bool | `false` |  |
-| gitops.argo.project | string | `"default"` |  |
-| gitops.argo.server | string | `"https://kubernetes.default.svc"` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.muster.versionRange | string | `">=5.12.0 <6.0.0"` |  |

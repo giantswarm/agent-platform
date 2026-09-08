@@ -267,7 +267,7 @@ verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the 
 	@if grep -q 'forbidInlineSecrets' /tmp/vs-ref.out; then echo "FAIL: gitops.forbidInlineSecrets leaked into a child HelmRelease's values"; exit 1; else echo "ok: flag not forwarded"; fi
 
 .PHONY: verify-meta
-verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, ranges as values, both engines, pinned BOM).
+verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, ranges as values, Flux the only engine, pinned BOM).
 	@echo "====> $@ ($(CHART_DIR))"
 	@echo "--> meta-package has NO Chart.yaml dependencies (no package-time pins)"
 	@if grep -q '^dependencies:' $(CHART_DIR)/Chart.yaml; then \
@@ -296,16 +296,42 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@if grep -E '^kind:' /tmp/ap-flux.out | grep -vqE '^kind: (OCIRepository|HelmRelease)$$'; then \
 		echo "FAIL: root rendered a non-app-of-apps kind:"; grep -E '^kind:' /tmp/ap-flux.out | grep -vE '^kind: (OCIRepository|HelmRelease)$$'; exit 1; \
 	else echo "ok: pure renderer (only OCIRepository/HelmRelease)"; fi
-	@echo "--> argo engine renders Applications with CRD-first sync-waves"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=argo >/tmp/ap-argo.out 2>&1 || { cat /tmp/ap-argo.out; exit 1; }
-	@grep -q 'kind: Application' /tmp/ap-argo.out || { echo "FAIL: no Argo Application"; exit 1; }
-	@grep -q 'sync-wave: "0"'    /tmp/ap-argo.out || { echo "FAIL: CRDs not in sync-wave 0"; exit 1; }
-	@echo "ok: argo render"
-	@echo "--> bogus engine must fail"
+	@echo "--> Flux is the only engine: the render carries no argoproj.io object"
+	@if grep -q 'argoproj.io' /tmp/ap-flux.out; then \
+		echo "FAIL: an argoproj.io object rendered; the Argo render engine was removed"; grep -n 'argoproj.io' /tmp/ap-flux.out; exit 1; \
+	else echo "ok: no argoproj.io object"; fi
+	@echo "--> gitops.engine=argo is refused by the schema (enum: flux)"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=argo >/tmp/ap-argo.out 2>&1; then \
+		echo "FAIL: gitops.engine=argo rendered; the Argo render engine was removed"; exit 1; \
+	elif ! grep -q "gitops" /tmp/ap-argo.out || ! grep -q "flux" /tmp/ap-argo.out; then \
+		echo "FAIL: gitops.engine=argo failed for the wrong reason (expected the schema enum naming flux)"; cat /tmp/ap-argo.out; exit 1; \
+	else echo "ok: argo refused by the schema"; fi
+	@echo "--> gitops.engine=argo is refused by the template guard too, naming flux as the only engine"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=argo --skip-schema-validation >/tmp/ap-argo-guard.out 2>&1; then \
+		echo "FAIL: gitops.engine=argo rendered past the schema; the template guard is gone"; exit 1; \
+	elif ! grep -q "gitops.engine=argo is not supported; flux is the only engine" /tmp/ap-argo-guard.out; then \
+		echo "FAIL: gitops.engine=argo failed for the wrong reason (expected the guard message)"; cat /tmp/ap-argo-guard.out; exit 1; \
+	else echo "ok: argo refused by the guard"; fi
+	@echo "--> gitops.argo.* is gone: the schema rejects the key"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.argo.project=x >/tmp/ap-argo-vals.out 2>&1; then \
+		echo "FAIL: gitops.argo.project passed the schema"; exit 1; \
+	elif ! grep -q "argo" /tmp/ap-argo-vals.out; then \
+		echo "FAIL: gitops.argo.project failed for the wrong reason"; cat /tmp/ap-argo-vals.out; exit 1; \
+	else echo "ok: gitops.argo.* refused by the schema"; fi
+	@echo "--> gitops.engine: flux set explicitly renders exactly the default"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=flux >/tmp/ap-flux-explicit.out 2>&1 || { cat /tmp/ap-flux-explicit.out; exit 1; }
+	@cmp -s /tmp/ap-flux.out /tmp/ap-flux-explicit.out || { echo "FAIL: an explicit gitops.engine=flux renders differently from the default"; exit 1; }
+	@echo "ok: explicit flux"
+	@echo "--> bogus engine must fail (schema, then the guard behind it)"
 	@if helm template t $(CHART_DIR) --set gitops.engine=bogus >/tmp/ap-eng.out 2>&1; then \
 		echo "FAIL: engine guard did not fire"; exit 1; \
-	elif ! grep -q "must be one of: flux, argo" /tmp/ap-eng.out; then \
-		echo "FAIL: engine guard failed for the wrong reason"; cat /tmp/ap-eng.out; exit 1; \
+	elif ! grep -q "flux" /tmp/ap-eng.out; then \
+		echo "FAIL: engine schema check failed for the wrong reason"; cat /tmp/ap-eng.out; exit 1; \
+	else echo "ok: engine schema"; fi
+	@if helm template t $(CHART_DIR) --set gitops.engine=bogus --skip-schema-validation >/tmp/ap-eng-guard.out 2>&1; then \
+		echo "FAIL: engine guard did not fire past the schema"; exit 1; \
+	elif ! grep -q "flux is the only engine" /tmp/ap-eng-guard.out; then \
+		echo "FAIL: engine guard failed for the wrong reason"; cat /tmp/ap-eng-guard.out; exit 1; \
 	else echo "ok: engine guard"; fi
 	@echo "--> customer BOM pins every range to an exact version"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml >/tmp/ap-bom.out 2>&1 || { cat /tmp/ap-bom.out; exit 1; }
@@ -751,10 +777,6 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 	@echo "--> components.muster.versionRange floors at the muster that has the label rule"
 	@grep -q 'semver: ">=$(PRESETS_MUSTER_VERSION) <6.0.0"' /tmp/vp-flux.out || { echo "FAIL: the muster range does not floor at $(PRESETS_MUSTER_VERSION)"; exit 1; }
 	@echo "ok: forwarded and floored"
-	@echo "--> the argo engine forwards the same presets"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=argo >/tmp/vp-argo.out 2>&1 || { cat /tmp/vp-argo.out; exit 1; }
-	@grep -q 'label: agent-platform.giantswarm.io/tool-group=infrastructure' /tmp/vp-argo.out || { echo "FAIL: argo Application lacks the infrastructure preset"; exit 1; }
-	@echo "ok: argo"
 	@echo "--> muster $(PRESETS_MUSTER_VERSION) accepts the forwarded values and renders the presets into its ConfigMap"
 	@rm -rf /tmp/vp-muster-chart && mkdir -p /tmp/vp-muster-chart
 	@helm pull oci://gsoci.azurecr.io/charts/giantswarm/muster --version $(PRESETS_MUSTER_VERSION) --untar --untardir /tmp/vp-muster-chart >/tmp/vp-pull.out 2>&1 || { cat /tmp/vp-pull.out; exit 1; }

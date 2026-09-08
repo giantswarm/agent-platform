@@ -2,7 +2,15 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
-## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
+## \<current\> → \<next\> (the Argo CD render engine is removed; Flux is the only engine)
+
+`templates/components.yaml` renders a Flux `OCIRepository` + `HelmRelease` per component and nothing else. The `gitops.engine: argo` branch — an Argo CD `Application` per component, ordered by `argocd.argoproj.io/sync-wave`, with `gitops.argo.project` / `gitops.argo.server` as its destination — is gone, and so are the two `gitops.argo.*` keys. It was never verified against a running Argo CD, no installation selected it, and the platform cannot run on Argo CD alone: agents are Flux objects on every path (the Backstage agent create flow and agent-manager write an `OCIRepository` + `HelmRelease` per agent). `gitops.engine` stays a key and accepts `flux` only (`enum: [flux]` in the schema, a template guard behind it).
+
+### Operator action
+
+- **Flux installations (every installation today): none.** The Flux render is byte-identical to the previous release; `gitops.engine: flux` set explicitly keeps rendering exactly the default.
+- A values file that sets `gitops.engine: argo` fails the render — the schema first (`gitops.engine` must be `flux`), the template guard behind it with `gitops.engine=argo is not supported; flux is the only engine`. One that sets `gitops.argo.project` or `gitops.argo.server` fails the schema (`gitops` allows no additional property `argo`). Install Flux on the target (the cluster's own Flux, or the Flux Operator) and drop the keys. A non-GitOps install is not this chart's job; should one ever be needed, it is a plan of its own.
+
 
 The `kagent` chart 0.2.0 flattened the upstream chart onto its chart root: upstream keys moved from `kagent.*` to the top level. The meta-package no longer nests the forwarded block, drops its own keys from it (`omitKeys`), and tracks the `0.2.x` range.
 

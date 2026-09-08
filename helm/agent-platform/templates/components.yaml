@@ -1,11 +1,10 @@
 {{- /*
 META-PACKAGE render loop (app-of-apps).
 
-For each enabled entry in `.Values.components`, emit either a Flux
-OCIRepository + HelmRelease (gitops.engine=flux) or an Argo Application
-(gitops.engine=argo). The version constraint comes from
-`components.<name>.versionRange` (a VALUE, resolved at reconcile time) — never
-from a Chart.yaml pin.
+For each enabled entry in `.Values.components`, emit a Flux OCIRepository +
+HelmRelease. Flux is the only render engine (`gitops.engine: flux`). The
+version constraint comes from `components.<name>.versionRange` (a VALUE,
+resolved at reconcile time) — never from a Chart.yaml pin.
 
 Each entry is fully self-describing; this template has no per-component
 knowledge:
@@ -42,32 +41,35 @@ knowledge:
       renders a component's wiring (agent-platform-connectivity) gates on the
       same answer that decided whether the release exists. The forwarded copy
       holds only `enabled`.
-  dependsOn     — Flux dependsOn / Argo sync-wave ordering (CRD-owning component
-      before its CR consumers). References that name a component which is toggled
+  dependsOn     — Flux dependsOn ordering (CRD-owning component before its CR
+      consumers). References that name a component which is toggled
       off are dropped at render time (see the componentEnabled helper) so an
       always-on consumer never blocks on a HelmRelease that was never rendered.
   postRenderers — optional Flux helm-controller postRenderers passed straight to
-      the child HelmRelease (flux engine only). Used to work around upstream chart
+      the child HelmRelease. Used to work around upstream chart
       bugs without forking — e.g. kagent stamps the chart version into
       app.kubernetes.io/version, which helm-controller corrupts with the OCI
       +digest build-metadata (invalid in a label); a kustomize patch overwrites it.
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
-      HelmRelease's spec.install.crds and spec.upgrade.crds (flux engine only).
-      Set to CreateReplace so the app's CRDs upgrade atomically with the app at the
-      same version (Helm otherwise never upgrades crds/-dir CRDs). Such a component
-      owns its CRD version itself; its CR consumers dependsOn it instead. Argo
-      applies crds/ unconditionally, so this field is flux-only.
+      HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
+      so the app's CRDs upgrade atomically with the app at the same version (Helm
+      otherwise never upgrades crds/-dir CRDs). Such a component owns its CRD
+      version itself; its CR consumers dependsOn it instead.
 */ -}}
 {{- include "agent-platform.validateLegacyToggles" . -}}
 {{- include "agent-platform.validateInlineSecrets" . -}}
 {{- include "agent-platform.validateToolsetPresets" . -}}
 {{- $root := . -}}
 {{- $g := .Values.gitops -}}
-{{- if not (or (eq $g.engine "flux") (eq $g.engine "argo")) -}}
-{{- fail (printf "gitops.engine=%s is invalid; must be one of: flux, argo" $g.engine) -}}
+{{- /* Flux is the only render engine. Agents are Flux objects on every path
+(the portal and agent-manager write an OCIRepository + HelmRelease per agent),
+so no other engine could run the platform; the schema pins the key to `flux`
+and this guard refuses anything else that gets past it. */ -}}
+{{- if ne $g.engine "flux" -}}
+{{- fail (printf "gitops.engine=%s is not supported; flux is the only engine" $g.engine) -}}
 {{- end -}}
-{{- /* Namespace the rendered Flux/Argo CRs live in. Defaults to the release
+{{- /* Namespace the rendered Flux CRs live in. Defaults to the release
 namespace; set gitops.namespace to a tenancy-exempt namespace (e.g.
 flux-giantswarm on Giant Swarm clusters) so the child HelmReleases are not
 rejected by the flux-multi-tenancy admission policy. gitops.targetNamespace
@@ -111,7 +113,6 @@ that CRD either, so the dependency is moot. */ -}}
 {{- $deps = append $deps . }}
 {{- end }}
 {{- end }}
-{{- if eq $g.engine "flux" }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
@@ -176,37 +177,5 @@ spec:
   {{- end }}
   values:
     {{- toYaml $vals | nindent 4 }}
-{{- else }}
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: {{ $name }}
-  namespace: {{ $ns }}
-  labels:
-    {{- include "labels.common" $root | nindent 4 }}
-  annotations:
-    # dependsOn has no Argo equivalent; CRDs (wave 0) apply and Establish before
-    # their consumers (wave 1).
-    argocd.argoproj.io/sync-wave: {{ if $deps }}"1"{{ else }}"0"{{ end }}
-spec:
-  project: {{ $g.argo.project }}
-  destination:
-    server: {{ $g.argo.server }}
-    namespace: {{ $targetNs }}
-  source:
-    repoURL: {{ trimPrefix "oci://" $c.repository | quote }}
-    chart: {{ $c.chart }}
-    targetRevision: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
-    helm:
-      valuesObject:
-        {{- toYaml $vals | nindent 8 }}
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-{{- end }}
 {{- end }}
 {{- end }}

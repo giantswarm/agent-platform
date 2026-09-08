@@ -5,11 +5,12 @@ description: |
   Giant Swarm Agent Platform — MCP gateway deploy unit, packaged as an
   app-of-apps meta-package. Renders each component (muster, agentgateway, kagent,
   klaus-gateway, valkey, agent-platform-mcps, agent-sandbox) and the consumer-side
-  connectivity layer as a Flux OCIRepository + HelmRelease (or Argo Application),
-  with each component's version expressed as a value RANGE rather than a Chart.yaml
-  pin — so a component release rolls forward with no PR to this chart. Each component
-  ships its own CRDs (app-owned CRDs, upgraded via Flux CreateReplace); the Gateway
-  API CRDs and GatewayClass remain cluster-level prerequisites — see README.
+  connectivity layer as a Flux OCIRepository + HelmRelease (Flux is the only
+  render engine), with each component's version expressed as a value RANGE rather
+  than a Chart.yaml pin — so a component release rolls forward with no PR to this
+  chart. Each component ships its own CRDs (app-owned CRDs, upgraded via Flux
+  CreateReplace); the Gateway API CRDs and GatewayClass remain cluster-level
+  prerequisites — see README.
 home: https://github.com/giantswarm/agent-platform
 icon: https://s.giantswarm.io/app-icons/giantswarm/1/light.svg
 sources:
@@ -28,8 +29,8 @@ annotations:
 # picking up a new component release required a bump PR + umbrella re-release +
 # gitops bump.
 #
-# Components are now rendered as per-component OCIRepository + HelmRelease (Flux)
-# or Application (Argo) by templates/components.yaml, with the version CONSTRAINT
+# Components are now rendered as per-component Flux OCIRepository + HelmRelease
+# by templates/components.yaml, with the version CONSTRAINT
 # expressed as a value (`components.<name>.versionRange`). Flux re-resolves the
 # range on every reconcile, so a component release rolls forward with NO PR to
 # this chart. The consumer-side wiring lives in the agent-platform-connectivity

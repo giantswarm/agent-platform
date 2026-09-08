@@ -11,7 +11,7 @@ This repo publishes **two** charts:
 
 | Chart | What it is |
 |---|---|
-| `agent-platform` | the **meta-package** — an app-of-apps that renders each component and the connectivity layer as Flux `OCIRepository` + `HelmRelease` (or Argo `Application`). The single thing you install. |
+| `agent-platform` | the **meta-package** — an app-of-apps that renders each component and the connectivity layer as Flux `OCIRepository` + `HelmRelease`. The single thing you install. |
 | `agent-platform-connectivity` | the consumer-side **wiring** the meta-package renders as a child release: the public muster route, the agentgateway data-plane `Gateway` + `AgentgatewayParameters` + `HTTPRoute`s + `BackendTrafficPolicy`s, the `NetworkPolicy`s, the kagent/klaus-gateway/model-manager/agent-manager routes, the admin-owned kagent shared resources (the shared muster `RemoteMCPServer`, `ModelConfig`s), and the CNPG `Cluster`. Agents themselves are created with the generic [`agent` chart](https://github.com/giantswarm/agent), one release per agent. |
 
 > **CRDs are app-owned.** There is no longer a standalone `agent-platform-crds` bundle chart — each component (muster, agentgateway, kagent, agent-sandbox) ships its own CRDs in its chart's `crds/` dir and upgrades them atomically with the app via Flux `CreateReplace`. A CR consumer `dependsOn` the component that owns the CRD it needs. See [CRD lifecycle](#crd-lifecycle).
@@ -20,12 +20,12 @@ This repo publishes **two** charts:
 
 > Implements [giantswarm/giantswarm#36875](https://github.com/giantswarm/giantswarm/issues/36875). Concept write-up: klaus-lab `architecture/agent-platform-meta-package.md`.
 
-The `agent-platform` chart no longer bundles its components as pinned Helm subcharts. It is an **app-of-apps meta-package**: `templates/components.yaml` renders, per entry in `.Values.components`, a Flux `OCIRepository` + `HelmRelease` — or an Argo `Application` when `gitops.engine: argo`. It emits **only** those objects (a *pure* renderer — no raw CRs of its own).
+The `agent-platform` chart no longer bundles its components as pinned Helm subcharts. It is an **app-of-apps meta-package**: `templates/components.yaml` renders, per entry in `.Values.components`, a Flux `OCIRepository` + `HelmRelease`. Flux is the only render engine (`gitops.engine` accepts `flux` only). It emits **only** those objects (a *pure* renderer — no raw CRs of its own).
 
 The decisive change: each component's version is a **constraint expressed as a value** (`components.<name>.versionRange`), not a `Chart.yaml` pin. Flux re-resolves the range on every reconcile, so a new component release rolls forward **with no PR to this chart and no umbrella re-package**.
 
 - **One gitops entry.** You install the meta-package (one `OCIRepository` + `HelmRelease`). It renders each component release and the `agent-platform-connectivity` release for you.
-- **CRD-before-CR ordering is preserved** — each component ships its own CRDs (app-owned CRDs), and a CR consumer `dependsOn` the component that owns the CRD it needs (Flux) / orders after it via `argocd.argoproj.io/sync-wave` (Argo). A `dependsOn` reference to a component that is toggled off is dropped at render time, so an always-on consumer never blocks on a release that was never rendered. Because the connectivity CRs live in their own release (not in the meta-package's own manifest), they only apply after the CRDs are Established — the meta-package itself ships no CR that could race a CRD.
+- **CRD-before-CR ordering is preserved** — each component ships its own CRDs (app-owned CRDs), and a CR consumer `dependsOn` the component that owns the CRD it needs. A `dependsOn` reference to a component that is toggled off is dropped at render time, so an always-on consumer never blocks on a release that was never rendered. Because the connectivity CRs live in their own release (not in the meta-package's own manifest), they only apply after the CRDs are Established — the meta-package itself ships no CR that could race a CRD.
 - **Per-component values keep their blocks; the on/off switch does not** — the existing `muster:`, `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:` blocks still drive each component's configuration, and the connectivity wiring blocks (`ingress:`, `gateway:`, `networkPolicy:`, `postgres:`, `extraObjects:`) still drive the wiring. Whether a component is installed at all is `components.<name>.enabled` — see [Enabling and disabling components](#enabling-and-disabling-components). Each `components.<name>` entry names its source block via `valuesFrom` (connectivity uses `forwardAllValues`).
 - **Dev vs customer track** — keep the `components.*.versionRange` values **wide** for the internal/dogfooding track (continuous auto-update, the default). **Pin** them to exact versions for a customer **bill-of-materials**; see [`helm/agent-platform/examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml). A "product release" is that pinned values snapshot.
 
@@ -48,7 +48,6 @@ A component with no `enabled` key is always installed (`muster`, `dicebear`, `ag
 
 ```bash
 helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml                          # flux objects, wide ranges
-helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml --set gitops.engine=argo
 helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml -f helm/agent-platform/examples/customer-bom.yaml
 make verify-meta verify-modes verify-postgres
 ```
@@ -64,7 +63,7 @@ make verify-meta verify-modes verify-postgres
 
 ## Installing
 
-**One gitops entry.** Install the `agent-platform` meta-package; it renders the per-component and `agent-platform-connectivity` releases for you (each component ships its own CRDs, and a CR consumer `dependsOn` the CRD-owning component so CRDs Establish before any CR applies). Flux (`gitops.engine: flux`, default) or Argo (`gitops.engine: argo`) is required on the install target — the meta-package's output is Flux/Argo objects.
+**One gitops entry.** Install the `agent-platform` meta-package; it renders the per-component and `agent-platform-connectivity` releases for you (each component ships its own CRDs, and a CR consumer `dependsOn` the CRD-owning component so CRDs Establish before any CR applies). Flux is required on the install target — the meta-package's output is Flux objects; `gitops.engine` accepts `flux` only.
 
 ### Flux
 
@@ -99,7 +98,7 @@ The meta-package then renders, in the same namespace: an `OCIRepository` + `Helm
 
 ### Raw Helm (no GitOps controller)
 
-The meta-package renders Flux/Argo objects, so a raw `helm install` of it needs a controller present. For a controller-free install, drive the components directly from a pinned bill-of-materials — install each component chart (which ships its own CRDs) then `agent-platform-connectivity`, at the exact versions in [`examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml):
+The meta-package renders Flux objects, so a raw `helm install` of it needs Flux present. For a controller-free install, drive the components directly from a pinned bill-of-materials — install each component chart (which ships its own CRDs) then `agent-platform-connectivity`, at the exact versions in [`examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml):
 
 ```bash
 # Each component chart ships its own CRDs in crds/ (app-owned CRDs). Helm applies
@@ -186,7 +185,7 @@ Three orthogonal paths. None replace the others — pick what matches your topol
 |---|---|---|
 | **Inline values** | `muster.muster.oauth.server.dex.clientSecret`, `registrationToken`, `encryptionKeyValue`, `storage.valkey.password` | Quick dev/test or GitOps with values-level encryption (sops + helm-secrets, Flux `decryption:`). No external Secret to manage. |
 | **`existingSecret`** | `muster.muster.oauth.server.existingSecret: <name>` (Secret pre-created out-of-band) | Production Giant Swarm pattern — SOPS-encrypted Secret in giantswarm-configs reconciled by Flux ahead of the platform; or `kubectl create secret` for manual ops. |
-| **`extraObjects`** | Umbrella-level `extraObjects: []` list (this chart) + muster `existingSecret` pointed at the rendered Secret | Single Helm release ships Secret + values together. Non-Flux operators (ArgoCD, vanilla Helm) who want one `helm upgrade` to manage everything. |
+| **`extraObjects`** | Umbrella-level `extraObjects: []` list (this chart) + muster `existingSecret` pointed at the rendered Secret | Single Helm release ships Secret + values together. Raw-Helm installs (no GitOps controller) that want one `helm upgrade` to manage everything. |
 
 Example using `extraObjects` + `existingSecret`:
 
