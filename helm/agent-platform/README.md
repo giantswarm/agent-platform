@@ -67,7 +67,7 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.kagent.versionRange | string | `"0.x"` |  |
+| components.kagent.versionRange | string | `"0.1.x"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.valuesKey | string | `"kagent"` |  |
 | components.kagent.enabled | bool | `false` |  |
