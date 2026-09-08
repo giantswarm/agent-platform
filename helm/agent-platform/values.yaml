@@ -231,7 +231,10 @@ components:  # @schema additionalProperties: true
     # kustomize hack and the version pin the meta-package needed for the upstream
     # chart are both gone.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.x"
+    # Held on the 0.1 line: kagent 0.2.0 flattens the upstream keys onto the
+    # chart root and forwards no nested `kagent:` block, so this wiring (valuesKey
+    # below) cannot follow it. The 0.2 line lands together with the wiring change.
+    versionRange: "0.1.x"
     valuesFrom: kagent
     # The wrapper vendors the upstream chart under a subchart named `kagent`, so the
     # forwarded block (controller/providers/oauth2-proxy/otel/… overrides, plus the
