@@ -415,6 +415,10 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | model-manager.backend | string | `"ollama"` |  |
 | model-manager.ollama.endpoint | string | `""` |  |
 | model-manager.ollama.agentHost | string | `""` |  |
+| model-manager.lemonade.endpoint | string | `""` |  |
+| model-manager.lemonade.agentHost | string | `""` |  |
+| model-manager.lmstudio.endpoint | string | `""` |  |
+| model-manager.lmstudio.agentHost | string | `""` |  |
 | model-manager.kagent.namespace | string | `"kagent"` |  |
 | model-manager.kagent.disableWiring | bool | `false` |  |
 | model-manager.mcp.enabled | bool | `true` |  |

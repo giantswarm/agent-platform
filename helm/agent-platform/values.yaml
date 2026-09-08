@@ -1678,7 +1678,11 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # proxies a Lemonade Server — FastFlowLM on AMD Ryzen AI NPUs, llama.cpp on
 # GPU/CPU — reached at lemonade.endpoint (REQUIRED likewise; Lemonade listens
 # on 13305 by default; its models are wired with kagent's OpenAI provider
-# against <endpoint>/api/v1), `kserve`
+# against <endpoint>/api/v1), `lmstudio` proxies an LM Studio — llama.cpp on
+# GPU/CPU, MLX on Apple silicon — reached at lmstudio.endpoint (REQUIRED
+# likewise; LM Studio listens on 1234 by default, needs 0.4.0 or newer, and
+# its models are wired with kagent's OpenAI provider against <endpoint>/v1;
+# it serves no delete, so that call answers 501), `kserve`
 # manages InferenceServices on the KServe control plane the cluster runs (a
 # prerequisite of that backend; nothing under this key installs it),
 # configured through the chart's kserve.* keys.
@@ -1705,7 +1709,7 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
   # The serving backend, or several at once: `backends: [ollama, lemonade]`
   # (model-manager >= 0.17) runs one process in front of every server the
   # host has — the first is the default backend, every listed driver reads its
-  # own block (ollama, lemonade, kserve) and the guards and network policies
+  # own block (ollama, lemonade, lmstudio, kserve) and the guards and network policies
   # below apply to every listed driver. `backend` alone is the one-backend
   # form; a set `backends` wins over it.
   backend: ollama
@@ -1713,6 +1717,9 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     endpoint: ""
     agentHost: ""
   lemonade:
+    endpoint: ""
+    agentHost: ""
+  lmstudio:
     endpoint: ""
     agentHost: ""
   kagent:

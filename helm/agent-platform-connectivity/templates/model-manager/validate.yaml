@@ -21,8 +21,8 @@ route the API server rejects, or an MCPServer CR without its CRD.
          strings; a typo would start the service with a driver it does not
          have, a repeated name a process that refuses to start. */ -}}
   {{- range $name := $backends }}
-    {{- if not (or (eq $name "ollama") (eq $name "kserve") (eq $name "lemonade")) }}
-      {{- fail (printf "model-manager backend %q (model-manager.backends / model-manager.backend) is invalid; must be one of: ollama, kserve, lemonade" $name) }}
+    {{- if not (or (eq $name "ollama") (eq $name "kserve") (eq $name "lemonade") (eq $name "lmstudio")) }}
+      {{- fail (printf "model-manager backend %q (model-manager.backends / model-manager.backend) is invalid; must be one of: ollama, kserve, lemonade, lmstudio" $name) }}
     {{- end }}
   {{- end }}
   {{- if ne (len $backends) (len (uniq $backends)) }}
@@ -52,6 +52,19 @@ route the API server rejects, or an MCPServer CR without its CRD.
     {{- end }}
     {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
       {{- fail (printf "model-manager.lemonade.endpoint (%q) must be an http(s) URL with a host, e.g. http://172.21.0.1:13305" $endpoint) }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* The lmstudio backend proxies a host LM Studio (llama.cpp, MLX on
+         Apple silicon): the endpoint is the one input an install must
+         provide, as for ollama. */ -}}
+  {{- if include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "lmstudio") }}
+    {{- $endpoint := include "agent-platform.modelManager.lmstudioEndpoint" . }}
+    {{- if not $endpoint }}
+      {{- fail "lmstudio is among the model-manager backends but model-manager.lmstudio.endpoint is empty: set the LM Studio base URL as reached from pods (e.g. http://172.21.0.1:1234 — LM Studio listens on 1234 by default)" }}
+    {{- end }}
+    {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
+      {{- fail (printf "model-manager.lmstudio.endpoint (%q) must be an http(s) URL with a host, e.g. http://172.21.0.1:1234" $endpoint) }}
     {{- end }}
   {{- end }}
 

@@ -513,6 +513,8 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | model-manager.ollama.agentHost | string | `""` |  |
 | model-manager.lemonade.endpoint | string | `""` |  |
 | model-manager.lemonade.agentHost | string | `""` |  |
+| model-manager.lmstudio.endpoint | string | `""` |  |
+| model-manager.lmstudio.agentHost | string | `""` |  |
 | model-manager.kagent.namespace | string | `"kagent"` |  |
 | model-manager.kagent.disableWiring | bool | `false` |  |
 | model-manager.mcp.enabled | bool | `true` |  |
