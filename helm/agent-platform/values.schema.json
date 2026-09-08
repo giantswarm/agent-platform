@@ -677,6 +677,30 @@
                                 }
                             }
                         },
+                        "dataPlaneResources": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "limits": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "ephemeral-storage": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "requests": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "ephemeral-storage": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        },
                         "dataPlaneVolumeMounts": {
                             "type": "array"
                         },

@@ -60,7 +60,9 @@ jobs:
         # never carries a static header),
         # verify-meta (root app-of-apps render: the flux-engine subchart the
         # only Chart.yaml dependency and no component pin, ranges as values,
-        # Flux the only engine, pure renderer with the engine off, pinned BOM),
+        # Flux the only engine, pure renderer with the engine off, pinned BOM,
+        # and the schema symmetry between the two charts down to every nested
+        # key — tests/verify-schema-symmetry.py, with its negative cases),
         # verify-engine (the bundled Flux engine's two shapes: engine off renders
         # no CRD/hook/operator/identity, engine on exactly the eleven CRDs, the
         # operator, the FluxInstance, agent-platform-flux on every HelmRelease

@@ -584,7 +584,8 @@ components:  # @schema additionalProperties: true
     forwardAllValues: true
     # The seven values blocks of the standalone chart's extras are no longer
     # held back from this release: every top-level block the connectivity chart
-    # reads is declared there (make verify-components asserts the symmetry). A
+    # reads is declared there (make verify-meta asserts the symmetry, nested keys
+    # included — tests/verify-schema-symmetry.py). A
     # NEW top-level key that the live connectivity chart does not declare yet
     # goes into this list until it does — its root schema is additionalProperties:
     # false, and while both charts release off one tag, the fleet's connectivity
@@ -731,6 +732,19 @@ gateway:
         value: grpc
     dataPlaneVolumes: []
     dataPlaneVolumeMounts: []
+    # Resources for the agentgateway data-plane container. ephemeral-storage
+    # requests+limits are required because the controller injects a writable
+    # `/tmp` emptyDir (readOnlyRootFilesystem) without a sizeLimit, which trips
+    # the `require-emptydir-requests-and-limits` Kyverno policy unless the
+    # mounting container declares ephemeral-storage. Merged onto the generated
+    # container via AgentgatewayParameters strategic-merge (by container name).
+    # The connectivity chart reads it; these are its defaults, so the render is
+    # unchanged until an installation overrides them.
+    dataPlaneResources:
+      requests:
+        ephemeral-storage: 50Mi
+      limits:
+        ephemeral-storage: 512Mi
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
