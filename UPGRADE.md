@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
+
+The `kagent` chart 0.2.0 flattened the upstream chart onto its chart root: upstream keys moved from `kagent.*` to the top level. The meta-package no longer nests the forwarded block, drops its own keys from it (`omitKeys`), and tracks the `0.2.x` range.
+
+The top-level `kagent:` values block of THIS chart does not change. It stays flat, as it always was, and the connectivity chart keeps reading `kagent.namespaceOverride`, `kagent.controllerRoute`, `kagent.uiRoute`, `kagent.modelConfigs`, `kagent.remoteMcpServers` and `kagent.serviceMonitor` from it.
+
+### Operator action
+
+- None, if you set only keys inside the top-level `kagent:` block (the fleet default through `shared-configs`). The upgrade is in place: no resource is renamed. The kagent controller and UI Deployments roll once, because `helm.sh/chart`, `app.kubernetes.io/version` and the new `application.giantswarm.io/team` label change on every kagent resource and the pod annotations that hash them change with them.
+- Pin `components.kagent.versionRange` to a `0.2.x` version if you pin ranges through a BOM. A `0.1.x` pin with this wiring installs the old chart with un-nested values, and it ignores them.
+- `kagent.querydoc` is gone from the values: upstream 0.10.0 ships no querydoc subchart and the flattened chart's schema rejects the key. No installation set it.
+
 ## \<current\> → \<next\> (toolset presets; the muster range floors at 5.12.0)
 
 The muster values gain `muster.muster.toolsetPresets` with the platform's two presets, `infrastructure` and `agent-platform`, selecting by the tool-group label (`agent-platform.giantswarm.io/tool-group`) the platform charts stamp on their `MCPServer` CRs. Agents refer to them as `preset:infrastructure` / `preset:agent-platform` in their `toolset`. muster reads the presets at startup, so the muster pod rolls once. See [docs/toolset-presets.md](./docs/toolset-presets.md).

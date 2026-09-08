@@ -14,14 +14,14 @@ knowledge:
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
-      being forwarded (e.g. valuesKey: kagent → {kagent: {…block…}}). Needed for
-      GS wrapper charts that vendor an upstream chart as a SUBCHART of the same
-      name: Helm only passes parent values to a subchart when they sit under the
-      subchart's key. The top-level block (and every per-cluster override path and
-      the connectivity chart's reads of it) stays flat — only the copy handed to
-      this release is wrapped. global is injected at the wrapped top level so the
-      subchart still inherits it. Omit for charts whose values are already at top
-      level (muster, agentgateway, the GS-owned connectivity/crds charts).
+      being forwarded (valuesKey: foo → {foo: {…block…}}). For a chart that
+      vendors an upstream chart as a SUBCHART of the same name: Helm only passes
+      parent values to a subchart when they sit under the subchart's key. The
+      top-level block (and every per-cluster override path and the connectivity
+      chart's reads of it) stays flat — only the copy handed to this release is
+      wrapped. global is injected at the wrapped top level so the subchart still
+      inherits it. No component uses it today: muster, agentgateway, kagent and
+      the GS-owned connectivity/crds charts all take their values at top level.
   omitKeys      — keys dropped from the forwarded block. For a component whose
       top-level block holds a key that belongs to THIS umbrella rather than to
       the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs, which only

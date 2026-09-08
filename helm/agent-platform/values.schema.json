@@ -227,13 +227,16 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
                         "valuesFrom": {
-                            "type": "string"
-                        },
-                        "valuesKey": {
                             "type": "string"
                         },
                         "versionRange": {
