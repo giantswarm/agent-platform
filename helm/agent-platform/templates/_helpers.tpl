@@ -555,3 +555,98 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Whether the bundled Flux engine is on — components.flux.enabled, read through
+the same helper as every other roster entry (a missing entry counts as on, as
+Helm treats a dependency whose condition path is absent). Emits "true" or "".
+*/}}
+{{- define "agent-platform.engineEnabled" -}}
+{{- include "agent-platform.componentEnabled" (dict "root" . "name" "flux") -}}
+{{- end -}}
+
+{{/*
+The tenant ServiceAccount the platform HelmReleases run under: the one the
+flux-engine subchart renders (agent-platform-flux) whenever the engine is on,
+nothing otherwise. gitops.serviceAccountName overrides it either way (see
+components.yaml). The name is fixed on both sides — the subchart renders it,
+this helper spells it — so the two cannot drift apart through a value.
+*/}}
+{{- define "agent-platform.tenantServiceAccountName" -}}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" -}}agent-platform-flux{{- end -}}
+{{- end -}}
+
+{{/*
+Render guard of the bundled engine. Two refusals, both only with the engine on:
+
+1. A cluster that already runs Flux. A second, locked-down helm-controller would
+   watch every namespace and reconcile every HelmRelease in the cluster as the
+   default account (measured), and the operator would take over the cluster's
+   Flux CRDs. Foreign = an apps/v1 Deployment labelled
+   app.kubernetes.io/component=helm-controller outside the release namespace
+   (the label Flux's distribution and the operator's manifests stamp — the
+   engine's own helm-controller lives in the release namespace), or a
+   FluxInstance outside the release namespace (the engine's is `flux` in the
+   release namespace; the FluxInstance kind is looked up only when the API is
+   served, so a cluster without the operator CRDs is not an error). `lookup` is
+   live under install/upgrade, --dry-run=server and helm-controller, and empty
+   under `helm template`, where this guard is therefore silent.
+2. gitops.namespace set to another namespace: the platform HelmReleases would
+   then name a tenant ServiceAccount (agent-platform-flux) that exists only in
+   the release namespace. The exempt-namespace layout is the fleet's, and the
+   fleet runs with the engine off.
+
+And one with the engine off: turning it off on an installation that runs it.
+`helm upgrade` deletes the objects that left the manifest in one pass — the
+operator together with the FluxInstance whose finalizer it processes — and
+hangs like an unordered uninstall would; the pre-delete hooks do not run on an
+upgrade. Looked up only when the FluxInstance API is served and gitops.namespace
+is empty (a CLI installation with the engine never sets it, see 2.), so the
+fleet's render — engine off, exempt namespace — makes no API call at all.
+*/}}
+{{- define "agent-platform.validateEngine" -}}
+{{- if ne (include "agent-platform.engineEnabled" .) "true" -}}
+{{- if and (not .Values.gitops.namespace) (.Capabilities.APIVersions.Has "fluxcd.controlplane.io/v1") -}}
+{{- $own := lookup "fluxcd.controlplane.io/v1" "FluxInstance" .Release.Namespace "flux" -}}
+{{- if and $own (eq (dig "metadata" "labels" "app.kubernetes.io/instance" "" $own) .Release.Name) -}}
+{{- fail (printf "components.flux.enabled=false on an installation that runs the bundled Flux engine (FluxInstance %s/flux belongs to release %s): the upgrade would delete the operator together with the FluxInstance it finalizes and hang. Uninstall the release instead (helm uninstall --wait tears it down in order), or delete the FluxInstance first" .Release.Namespace .Release.Name) -}}
+{{- end -}}
+{{- end -}}
+{{- else -}}
+{{- $ns := .Values.gitops.namespace -}}
+{{- if and $ns (ne $ns .Release.Namespace) -}}
+{{- fail (printf "gitops.namespace=%s cannot be combined with the bundled Flux engine: the platform HelmReleases run as the tenant ServiceAccount agent-platform-flux, which the engine renders in the release namespace (%s). Leave gitops.namespace empty, or set components.flux.enabled=false on a cluster that runs its own Flux" $ns .Release.Namespace) -}}
+{{- end -}}
+{{- $foreign := list -}}
+{{- range ((lookup "apps/v1" "Deployment" "" "").items | default list) -}}
+{{- if and (eq (dig "metadata" "labels" "app.kubernetes.io/component" "" .) "helm-controller") (ne .metadata.namespace $.Release.Namespace) -}}
+{{- $foreign = append $foreign (printf "Deployment %s/%s" .metadata.namespace .metadata.name) -}}
+{{- end -}}
+{{- end -}}
+{{- if .Capabilities.APIVersions.Has "fluxcd.controlplane.io/v1" -}}
+{{- range ((lookup "fluxcd.controlplane.io/v1" "FluxInstance" "" "").items | default list) -}}
+{{- if ne .metadata.namespace $.Release.Namespace -}}
+{{- $foreign = append $foreign (printf "FluxInstance %s/%s" .metadata.namespace .metadata.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- with $foreign -}}
+{{- fail (printf "this cluster runs Flux; set components.flux.enabled=false or install the chart through it (found %s)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Names of the platform HelmReleases this chart renders (every enabled roster
+entry with a chart), in roster order. The teardown hook deletes exactly these.
+Usage: include "agent-platform.platformReleaseNames" . | fromYamlArray
+*/}}
+{{- define "agent-platform.platformReleaseNames" -}}
+{{- $names := list -}}
+{{- range $key, $c := .Values.components -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $key)) (hasKey $c "chart") -}}
+{{- $names = append $names $c.chart -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $names -}}
+{{- end -}}

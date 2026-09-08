@@ -86,10 +86,23 @@ gitops:
   # Pair with `namespace` above to render the Flux CRs in an exempt namespace while
   # the workloads land in the platform namespace (e.g. agent-platform).
   targetNamespace: ""
-  # Optional serviceAccountName stamped on every rendered HelmRelease. Needed when
-  # the child releases live in a tenancy-guarded namespace (instead of using an
-  # exempt `namespace` above). Empty = omit.
+  # serviceAccountName stamped on every rendered HelmRelease. Needed when the
+  # child releases live in a tenancy-guarded namespace (instead of using an
+  # exempt `namespace` above). Empty = the bundled engine's tenant identity
+  # `agent-platform-flux` when components.flux.enabled is true (under the
+  # engine's multi-tenancy lockdown a HelmRelease without one runs as the
+  # rights-less default account and fails), omitted otherwise. Set a name to
+  # override either way.
   serviceAccountName: ""
+  # The Helm hook Jobs of this chart — the ordered teardown on `helm uninstall`
+  # (rendered only when components.flux.enabled is true). They run one plain
+  # kubectl command each, without a shell, in a distroless kubectl image;
+  # Renovate tracks the tag as a docker image pin.
+  hooks:
+    image:
+      registry: registry.k8s.io
+      repository: kubectl
+      tag: v1.36.4
   # install/upgrade remediation retries for every child HelmRelease. Lets the
   # children self-heal transient/ordering failures (e.g. a component installs
   # before another has created its namespace) instead of stalling after one
@@ -144,6 +157,27 @@ components:  # @schema additionalProperties: true
   # ships its own CRDs in its chart's crds/ dir (app-owned CRDs) and sets
   # `crds: CreateReplace`; its CR consumers dependsOn it directly. The standalone
   # CRD bundle has been retired — see CHANGELOG / UPGRADE.
+  #
+  # An entry WITHOUT a `chart` key is a feature switch, not a component: it takes
+  # part in the roster forwarded to agent-platform-connectivity and in the
+  # enabled/disabled logic like every other entry, but the render loop emits no
+  # OCIRepository/HelmRelease for it. `flux` is the only one.
+  flux:  # @schema additionalProperties: true
+    # The Flux engine this chart brings along: the flux-engine subchart
+    # (charts/flux-engine — Flux Operator, one FluxInstance running
+    # source-controller + helm-controller under the multi-tenancy lockdown, the
+    # tenant ServiceAccount agent-platform-flux) with the seven Flux CRDs and
+    # the four operator CRDs in its crds/. This value is the dependency's
+    # `condition` in Chart.yaml: with false, Helm and helm-controller drop the
+    # subchart before they collect crds/, so nothing of the engine reaches the
+    # cluster. Set it to false on a cluster that runs its own Flux (every Giant
+    # Swarm management cluster does) and install the chart through that Flux;
+    # with true on such a cluster the render fails: "this cluster runs Flux;
+    # set components.flux.enabled=false or install the chart through it". With
+    # the engine on, gitops.serviceAccountName defaults to agent-platform-flux
+    # and the pre-delete hooks tear the platform down in order (README
+    # "Uninstalling"). The engine's own values are under `flux-engine:`.
+    enabled: true
   muster:  # @schema additionalProperties: true
     chart: muster
     repository: oci://gsoci.azurecr.io/charts/giantswarm
@@ -449,6 +483,9 @@ components:  # @schema additionalProperties: true
       - kserve-resources
       - kserve-llmisvc-crd
       - kserve-llmisvc-resources
+      # The flux-engine subchart's values are the engine's, not wiring: never
+      # forwarded (Helm coalesces the subchart's defaults into this block).
+      - flux-engine
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app) and the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app). dependsOn those CRD-owning
@@ -462,6 +499,18 @@ components:  # @schema additionalProperties: true
     # of this chart, and the references are dropped while they are off — a
     # management cluster provides both as its own apps.
     dependsOn: [agentgateway, kagent, cloudnative-pg, kserve-resources]
+
+# === The Flux engine (flux-engine subchart) ===
+# Values of charts/flux-engine, handed to the subchart under this key when
+# components.flux.enabled is true (the switch itself is above, never here). The
+# subchart's values.yaml documents every key: flux-engine.operator.image (the
+# Flux Operator, a Renovate-managed pin), flux-engine.instance.distribution
+# (the Flux version range `2.x` and the registry the controller images come
+# from — a mirror of ghcr.io/fluxcd goes here), flux-engine.instance.components
+# (source-controller + helm-controller), flux-engine.instance.cluster (the
+# multi-tenancy lockdown) and flux-engine.instance.kustomizePatches. Nothing
+# to set for a default installation.
+flux-engine: {}  # @schema skipProperties: true; additionalProperties: true
 
 # === Agent avatars (DiceBear) ===
 # Forwarded to the dicebear component chart (see giantswarm/dicebear values.yaml

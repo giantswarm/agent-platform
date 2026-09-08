@@ -4,13 +4,16 @@ type: application
 description: |
   Giant Swarm Agent Platform — MCP gateway deploy unit, packaged as an
   app-of-apps meta-package. Renders each component (muster, agentgateway, kagent,
-  klaus-gateway, valkey, agent-platform-mcps, agent-sandbox) and the consumer-side
+  klaus-gateway, valkey, agent-platform-mcps, agent-sandbox, …) and the consumer-side
   connectivity layer as a Flux OCIRepository + HelmRelease (Flux is the only
   render engine), with each component's version expressed as a value RANGE rather
   than a Chart.yaml pin — so a component release rolls forward with no PR to this
-  chart. Each component ships its own CRDs (app-owned CRDs, upgraded via Flux
-  CreateReplace); the Gateway API CRDs and GatewayClass remain cluster-level
-  prerequisites — see README.
+  chart. Brings its own Flux engine (the flux-engine subchart: Flux Operator +
+  FluxInstance) where a cluster has none, so `helm install` yields a running
+  platform; a cluster that runs Flux sets components.flux.enabled=false. Each
+  component ships its own CRDs (app-owned CRDs, upgraded via Flux CreateReplace);
+  the Gateway API CRDs and GatewayClass remain cluster-level prerequisites — see
+  README.
 home: https://github.com/giantswarm/agent-platform
 icon: https://s.giantswarm.io/app-icons/giantswarm/1/light.svg
 sources:
@@ -21,7 +24,7 @@ annotations:
   io.giantswarm.application.audience: all
   io.giantswarm.application.managed: "true"
   io.giantswarm.application.team: bumblebee
-# META-PACKAGE (app-of-apps): intentionally NO `dependencies:` block.
+# META-PACKAGE (app-of-apps): the ONLY dependency is the engine, never a component.
 #
 # Previously this was a Helm umbrella that pinned each component (muster,
 # agentgateway, kagent, klaus-gateway, valkey, agent-platform-mcps, agent-sandbox)
@@ -37,3 +40,20 @@ annotations:
 # chart, rendered the same way. Each component ships its own CRDs (app-owned CRDs);
 # a CR consumer `dependsOn` the component that owns the CRD it needs (CRD-before-CR
 # ordering). See README "Meta-package release flow" and values.yaml `components`.
+#
+# flux-engine (charts/flux-engine, this repository, released with this chart) is
+# the Flux engine that reconciles those objects where a cluster has none: the
+# Flux Operator, one FluxInstance (source-controller + helm-controller under the
+# multi-tenancy lockdown) and the tenant identity `agent-platform-flux`. Its crds/
+# carry the seven Flux CRDs and the four operator CRDs. `components.flux.enabled`
+# (default true) is its condition: Helm and helm-controller evaluate dependency
+# conditions before they collect crds/, so a cluster that runs its own Flux sets
+# the value to false and gets neither the CRDs nor the engine — nothing of it can
+# be force-applied over that cluster's Flux. A value, not detection: crds/ are
+# processed before templates render, so no template could decide it. `make
+# verify-meta` asserts this is the only dependency and that it is not a component
+# pin; `repository` is left empty on purpose (the chart is a directory in charts/).
+dependencies:
+  - name: flux-engine
+    version: 0.1.0
+    condition: components.flux.enabled

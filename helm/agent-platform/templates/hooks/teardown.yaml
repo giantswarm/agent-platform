@@ -1,0 +1,27 @@
+{{- /*
+The ordered teardown (only with the bundled engine). Helm deletes a release's
+objects in one kind-sorted pass, so `helm uninstall --wait` would remove the
+engine together with the objects whose finalizers it processes and hang for its
+timeout (measured). Two pre-delete hooks run while the controllers still do:
+  weight 0  delete the platform HelmReleases this chart rendered — by name, in
+            gitops.namespace (the release namespace with the engine on) — and
+            wait for helm-controller to uninstall their releases;
+  weight 5  delete the FluxInstance and wait for the operator to uninstall Flux,
+            CRDs included, which takes every remaining HelmRelease object (the
+            agents' included) with it; their workloads and Helm storage stay.
+Helm then removes what is left: the operator, the identities, the OCIRepositories.
+Both tolerate objects that are already gone (--ignore-not-found). Without the
+engine (a cluster's own Flux) none of this applies: that Flux finalizes the
+platform HelmReleases, and this chart never touches it.
+*/ -}}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+{{- $ns := .Values.gitops.namespace | default .Release.Namespace }}
+{{- $releases := include "agent-platform.platformReleaseNames" . | fromYamlArray }}
+{{ include "agent-platform.hooks.job" (dict "root" . "name" "teardown-releases" "hook" "pre-delete" "weight" 0
+      "about" "delete the platform HelmReleases while helm-controller still runs, and wait for their releases to be uninstalled"
+      "args" (concat (list "delete" "helmreleases.helm.toolkit.fluxcd.io" "--namespace" $ns "--ignore-not-found" "--wait" "--timeout=5m") $releases)) }}
+---
+{{ include "agent-platform.hooks.job" (dict "root" . "name" "teardown-engine" "hook" "pre-delete" "weight" 5
+      "about" "delete the FluxInstance while the operator still runs, and wait for it to uninstall Flux and its CRDs"
+      "args" (list "delete" "fluxinstances.fluxcd.controlplane.io" "--namespace" .Release.Namespace "flux" "--ignore-not-found" "--wait" "--timeout=5m")) }}
+{{- end }}

@@ -277,6 +277,15 @@
                         }
                     }
                 },
+                "flux": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "kagent": {
                     "type": "object",
                     "additionalProperties": true,
@@ -523,6 +532,10 @@
         "extraObjects": {
             "type": "array"
         },
+        "flux-engine": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "gateway": {
             "type": "object",
             "additionalProperties": false,
@@ -719,6 +732,27 @@
                 },
                 "forbidInlineSecrets": {
                     "type": "boolean"
+                },
+                "hooks": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "image": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "registry": {
+                                    "type": "string"
+                                },
+                                "repository": {
+                                    "type": "string"
+                                },
+                                "tag": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
                 },
                 "interval": {
                     "type": "string"

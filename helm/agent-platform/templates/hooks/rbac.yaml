@@ -1,0 +1,41 @@
+{{- /*
+The identity the hook Jobs run as: a ServiceAccount in the release namespace
+bound to cluster-admin (the hooks delete HelmReleases and the FluxInstance and
+wait on their finalizers). Weight -10 so it exists before any hook Job; the
+hook-succeeded policy removes both once every hook of the event has succeeded.
+Rendered only with the bundled engine — without it this chart has no hooks.
+*/ -}}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "agent-platform.hooks.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "agent-platform.hooks.serviceAccountName" . }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "agent-platform.hooks.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

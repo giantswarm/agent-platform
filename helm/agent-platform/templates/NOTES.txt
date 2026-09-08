@@ -4,9 +4,22 @@ This chart ships no workloads itself. It rendered, as Flux OCIRepository + HelmR
 objects, one release per enabled component plus the connectivity layer:
 
 {{- range $key, $c := .Values.components }}
-{{- if include "agent-platform.componentEnabled" (dict "root" $ "name" $key) }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $key)) (hasKey $c "chart") }}
   - {{ $c.chart }} (versionRange {{ $c.versionRange }}{{ with $c.dependsOn }}, dependsOn {{ join "," . }}{{ end }})
 {{- end }}
+{{- end }}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+
+The Flux engine came with this release (components.flux.enabled: true): the Flux
+Operator and the FluxInstance `flux` in {{ .Release.Namespace }} run source-controller
+and helm-controller under the multi-tenancy lockdown; the platform HelmReleases
+run as the tenant ServiceAccount {{ include "agent-platform.tenantServiceAccountName" . }}.
+`helm uninstall --wait` tears the platform down in order (pre-delete hooks
+delete the platform HelmReleases, then the FluxInstance; the operator removes
+Flux and its CRDs); the four fluxcd.controlplane.io CRDs stay behind.
+{{- else }}
+
+This cluster's own Flux reconciles these objects (components.flux.enabled: false).
 {{- end }}
 
 Flux re-resolves each versionRange on every reconcile, so component releases roll

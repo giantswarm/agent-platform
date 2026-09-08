@@ -1,3 +1,10 @@
 vendor
 .vendir*
-helm/*/charts/
+# Packaged dependency archives Helm drops into charts/. The flux-engine subchart
+# is source of this repository (a directory, not an archive) and stays tracked.
+helm/*/charts/*
+!helm/agent-platform/charts/flux-engine/
+# `helm dependency build` writes a lock for the one local dependency; its digest
+# is a function of the Chart.yaml entry alone, so nothing is pinned by it.
+helm/*/Chart.lock
+__pycache__/
