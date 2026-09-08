@@ -218,7 +218,7 @@ def assert_platform_running(kube: Kube, helm: Helm) -> None:
         for name, hr in platform.items():
             assert is_ready(hr), f"HelmRelease {name} not Ready: {condition(hr)}"
             assert hr["spec"].get("serviceAccountName") == TENANT_SA, f"HelmRelease {name} does not run as {TENANT_SA}"
-        assert platform["kagent"]["spec"]["targetNamespace"] == KAGENT_NAMESPACE, "the kagent HelmRelease does not target the kagent namespace (the engine creates it)"
+        assert platform["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "the kagent HelmRelease must target the platform namespace (the pre-install hook creates the kagent namespace)"
         for name in CORE_DEPLOYMENTS:
             assert kube.deployment_ready(NAMESPACE, name), f"Deployment {name} is not ready"
         logger.info("deployed; FluxInstance Ready at %s; %d component HelmReleases Ready as %s", revision, len(platform), TENANT_SA)
@@ -246,7 +246,7 @@ def test_engine_objects(kube: Kube, app_deployment: float) -> None:
              lambda: "flux-operator" in kube.managers("crd", "helmreleases.helm.toolkit.fluxcd.io"), 120, interval=3)
     assert kube.get("serviceaccount", TENANT_SA, namespace=NAMESPACE), f"ServiceAccount {TENANT_SA} missing"
     assert kube.get("clusterrolebinding", TENANT_SA), f"ClusterRoleBinding {TENANT_SA} missing"
-    assert kube.get("namespace", KAGENT_NAMESPACE), "the engine did not create the kagent namespace"
+    assert kube.get("namespace", KAGENT_NAMESPACE), "the pre-install hook did not create the kagent namespace"
     # No hook object lingers after a successful install (Helm removes them once
     # every hook of the event succeeded, moments after the install returns; the
     # detached resumer Job is not a hook and stays for an hour to be read).

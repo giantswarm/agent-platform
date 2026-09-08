@@ -157,7 +157,6 @@ def platform_docs(ds):
         if k in ("OCIRepository", "HelmRelease"):
             d = re.sub(r"\A(---\n)+", "", d).rstrip("\n")  # separators and the final newline are splitting artifacts
             d = re.sub(r"^  serviceAccountName: \S+\n", "", d, flags=re.M)
-            d = re.sub(r"^  targetNamespace: \S+\n", "", d, flags=re.M)  # asserted separately: the engine targets a component's namespaceOverride
             d = re.sub(r"^      flux:\n        enabled: (true|false)\n", "", d, flags=re.M)
             out[(k, ns, n)] = d
     return out
@@ -340,33 +339,12 @@ def main(chart: str) -> int:
         fail("engine off with kagent on: the kagent namespace hook rendered (the pure render must not carry it; a cluster's own Flux gets the namespace out of band)")
     print(f"ok: kagent namespace hook — pre-install,pre-upgrade at -8 as {RELEASE}-hooks in {helm_ref}, create-if-missing / wait out Terminating / leave Active; no Namespace object; absent with kagent off, target namespace = kagent, namespaceOverride empty, engine off")
 
-    # --- the engine brings the namespaces its components live in: a component whose
-    #     forwarded values set a top-level namespaceOverride (kagent) gets its
-    #     HelmRelease targeted at that namespace, which install.createNamespace then
-    #     creates before the install (a fresh cluster deadlocked otherwise: the
-    #     connectivity release renders the namespace but dependsOn kagent). Without
-    #     the engine the cluster owns its namespaces and the fleet render is unchanged.
-    def target_ns(ds, name: str) -> str:
-        m = re.search(r"^  targetNamespace: (\S+)$", one(ds, "HelmRelease", name), re.M)
-        return m.group(1) if m else ""
-    if target_ns(on, "kagent") != "kagent" or "\n    createNamespace: true\n" not in one(on, "HelmRelease", "kagent"):
-        fail(f"engine on: the kagent HelmRelease does not target and create the kagent namespace (targetNamespace {target_ns(on, 'kagent')!r})")
-    if target_ns(off, "kagent") != NAMESPACE or target_ns(fleet, "kagent") != "agent-platform":
-        fail(f"engine off: the kagent HelmRelease no longer targets gitops.targetNamespace / the release namespace ({target_ns(off, 'kagent')!r}, fleet {target_ns(fleet, 'kagent')!r})")
-    for name in ("muster", "dicebear", "agent-platform-connectivity"):
-        if target_ns(on, name) != NAMESPACE:
-            fail(f"engine on: HelmRelease {name} targets {target_ns(on, name)!r}, not the release namespace (it sets no namespaceOverride)")
-    on_target = docs(helm(chart, [*ci, *SELF_OFF, "--set", "kagent.namespaceOverride=agents"]))
-    if target_ns(on_target, "kagent") != "agents":
-        fail("engine on: kagent.namespaceOverride does not steer the kagent HelmRelease's targetNamespace")
-    print("ok: engine on — the kagent HelmRelease targets kagent.namespaceOverride and creates it; engine off — every HelmRelease keeps gitops.targetNamespace")
-
     # --- the engine changes nothing else about the platform objects
     p_off, p_on = platform_docs(off), platform_docs(on)
     if p_off != p_on:
         diff = sorted(set(p_off) ^ set(p_on)) or [k for k in p_off if p_off[k] != p_on.get(k)]
-        fail(f"the engine changes platform objects beyond serviceAccountName, targetNamespace and the roster: {diff}")
-    print("ok: OCIRepository/HelmRelease documents identical across the shapes but for serviceAccountName, the kagent targetNamespace and the roster")
+        fail(f"the engine changes platform objects beyond serviceAccountName and the roster: {diff}")
+    print("ok: OCIRepository/HelmRelease documents identical across the shapes but for serviceAccountName and the roster")
 
     # --- offline guards and the default
     helm(chart, [*ci, "--set", "gitops.namespace=flux-giantswarm"], expect_fail="cannot be combined with the bundled Flux engine")

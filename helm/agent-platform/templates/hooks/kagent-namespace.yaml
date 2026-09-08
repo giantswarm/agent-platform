@@ -9,7 +9,7 @@ the namespace up, create it when it is missing, nothing else. An existing
 namespace is left exactly as it is. What the hook creates is a bare Namespace
 with no Helm ownership metadata — the same object the fleet's bases and the lab
 pre-create — which the connectivity release adopts on its install and owns
-from then on (its labels, its deletion with the release). pre-upgrade too: an
+from then on (its labels; it is kept on uninstall, helm.sh/resource-policy: keep). pre-upgrade too: an
 installation that turns kagent on later gets the namespace before the kagent
 HelmRelease appears. Without the engine nothing renders here.
 */ -}}
@@ -20,12 +20,12 @@ HelmRelease appears. Without the engine nothing renders here.
       "script" (include "agent-platform.kagent.namespaceScript" .)) }}
 {{- end }}
 
-{{- /* A namespace still Terminating is the reinstall right after an uninstall:
-the connectivity release owned the namespace and its uninstall deletes it,
-which takes as long as the kagent workloads in it take to go. Creating into a
-terminating namespace is refused and "exists" would be a lie that deadlocks
-the kagent install once more — so the hook waits for it to be gone, then
-creates it. */ -}}
+{{- /* A namespace still Terminating is a reinstall right after somebody deleted
+it (the connectivity release keeps it on uninstall, but an operator may remove
+it by hand), which takes as long as the kagent workloads in it take to go.
+Creating into a terminating namespace is refused and "exists" would be a lie
+that deadlocks the kagent install once more — so the hook waits for it to be
+gone, then creates it. */ -}}
 {{- define "agent-platform.kagent.namespaceScript" -}}
 ns={{ . | quote }}
 phase="$(kubectl get namespace "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || true)"

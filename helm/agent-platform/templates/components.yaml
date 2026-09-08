@@ -146,8 +146,6 @@ values and every component the same one flavor. */ -}}
 {{- $name := $c.chart }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}
-{{- /* the namespace the release targets: gitops.targetNamespace unless the component's own namespaceOverride wins (below) */ -}}
-{{- $workloadNs := $targetNs }}
 {{- if $c.forwardAllValues }}
 {{- $vals = mergeOverwrite (deepCopy $shaped) (dict "components" $roster) }}
 {{- /* Hold back the top-level blocks the chart does not read yet (see omitKeys above). */ -}}
@@ -158,21 +156,6 @@ values and every component the same one flavor. */ -}}
 {{- end }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
-{{- /* A chart whose block sets a top-level namespaceOverride puts its workloads
-there (kagent: `kagent`), not in the release's target namespace, and nothing
-installs that namespace ahead of it: the connectivity release renders it but
-dependsOn kagent for its CRDs, so a fresh cluster deadlocked — the kagent
-install failed with `namespaces "kagent" not found` and connectivity never ran.
-With the bundled engine the chart is alone on the cluster and brings the
-namespaces its components live in: the HelmRelease targets the override
-namespace and install.createNamespace creates it first (the kagent chart
-renders the same objects for either .Release.Namespace; Helm storage stays in
-the HelmRelease's namespace). Without the engine the cluster owns its
-namespaces (the fleet bases create `kagent` on every management cluster) and
-the release keeps gitops.targetNamespace — the fleet render is unchanged. */ -}}
-{{- if and (eq (include "agent-platform.engineEnabled" $root) "true") (kindIs "map" $vals) }}
-{{- with (dig "namespaceOverride" "" $vals) }}{{- $workloadNs = . }}{{- end }}
-{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
 {{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
@@ -229,7 +212,7 @@ metadata:
 spec:
   interval: {{ $g.interval }}
   releaseName: {{ $name }}
-  targetNamespace: {{ $workloadNs }}
+  targetNamespace: {{ $targetNs }}
   {{- with $sa }}
   serviceAccountName: {{ . }}
   {{- end }}
