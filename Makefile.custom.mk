@@ -401,9 +401,24 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "--> the meta chart forwards the RESOLVED enablement to the connectivity chart"
 	@python3 tests/verify-component-enablement.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: a disabled component renders neither a release nor its wiring"
-	@echo "--> every connectivity top-level key is settable through the meta chart"
-	@python3 -c 'import json,sys; m=set(json.load(open("$(CHART_DIR)/values.schema.json"))["properties"]); c=set(json.load(open("$(CONNECTIVITY_DIR)/values.schema.json"))["properties"]); miss=sorted(c-m); sys.exit("FAIL: connectivity keys the meta chart schema rejects (root is additionalProperties:false, so forwardAllValues cannot reach them): "+", ".join(miss) if miss else 0)'
-	@echo "ok: no unreachable connectivity keys"
+	@echo "--> schema symmetry: every key the connectivity chart declares is settable through the meta chart and every key the meta chart forwards is declared by connectivity — nested keys included, not only the top level"
+	@python3 tests/verify-schema-symmetry.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "--> the symmetry check has teeth both ways: a nested key one schema lacks fails it, naming the path"
+	@python3 -c 'import json; s=json.load(open("$(CHART_DIR)/values.schema.json")); del s["properties"]["gateway"]["properties"]["parameters"]["properties"]["dataPlaneResources"]; json.dump(s, open("/tmp/ap-sym-meta.json", "w"))'
+	@if python3 tests/verify-schema-symmetry.py $(CHART_DIR) $(CONNECTIVITY_DIR) --meta-schema /tmp/ap-sym-meta.json >/tmp/ap-sym-neg-meta.out 2>&1; then \
+		echo "FAIL: the symmetry check passed a meta schema without gateway.parameters.dataPlaneResources (the #303 shape)"; exit 1; \
+	elif ! grep -q 'gateway.parameters.dataPlaneResources' /tmp/ap-sym-neg-meta.out; then \
+		echo "FAIL: the symmetry check failed for the wrong reason"; cat /tmp/ap-sym-neg-meta.out; exit 1; \
+	else echo "ok: a nested connectivity key the meta schema lacks fails, naming gateway.parameters.dataPlaneResources"; fi
+	@python3 -c 'import json; s=json.load(open("$(CONNECTIVITY_DIR)/values.schema.json")); del s["properties"]["gateway"]["properties"]["parameters"]["properties"]["dataPlaneEnv"]; json.dump(s, open("/tmp/ap-sym-conn.json", "w"))'
+	@if python3 tests/verify-schema-symmetry.py $(CHART_DIR) $(CONNECTIVITY_DIR) --connectivity-schema /tmp/ap-sym-conn.json >/tmp/ap-sym-neg-conn.out 2>&1; then \
+		echo "FAIL: the symmetry check passed a connectivity schema without gateway.parameters.dataPlaneEnv"; exit 1; \
+	elif ! grep -q 'gateway.parameters.dataPlaneEnv' /tmp/ap-sym-neg-conn.out; then \
+		echo "FAIL: the symmetry check failed for the wrong reason"; cat /tmp/ap-sym-neg-conn.out; exit 1; \
+	else echo "ok: a nested meta key the connectivity schema lacks fails, naming gateway.parameters.dataPlaneEnv"; fi
+	@echo "--> gateway.parameters.dataPlaneResources is settable through the meta chart and the override reaches the connectivity release (#303)"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gateway.parameters.dataPlaneResources.limits.ephemeral-storage=1Gi >/tmp/ap-dpr.out 2>&1 || { cat /tmp/ap-dpr.out; exit 1; }
+	@python3 -c 'import re,sys; docs=open("/tmp/ap-dpr.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: agent-platform-connectivity$$", d, re.M)]; sys.exit("FAIL: connectivity HelmRelease not rendered") if not hr else None; v=hr[0][hr[0].index("\n  values:\n"):]; sys.exit("FAIL: dataPlaneResources did not reach the connectivity release values") if "dataPlaneResources:" not in v else None; sys.exit("FAIL: the 1Gi override did not reach the connectivity release (still the 512Mi default)") if "ephemeral-storage: 1Gi" not in v or "ephemeral-storage: 512Mi" in v else print("ok: the override reaches the connectivity release (limits.ephemeral-storage: 1Gi, the 512Mi default replaced)")'
 	@echo "--> connectivity chart owns the wiring (renders an HTTPRoute)"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/ci-values.yaml >/tmp/ap-conn.out 2>&1 || { cat /tmp/ap-conn.out; exit 1; }
 	@grep -q 'kind: HTTPRoute' /tmp/ap-conn.out || { echo "FAIL: connectivity did not render the muster HTTPRoute"; exit 1; }

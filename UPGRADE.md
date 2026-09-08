@@ -2,6 +2,15 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (`gateway.parameters.dataPlaneResources` is settable through the meta chart)
+
+The meta chart's schema accepts `gateway.parameters.dataPlaneResources` (giantswarm/agent-platform#303): the agentgateway data-plane container's resources, which the connectivity chart reads and applied with its own defaults all along. The meta chart declares the key with those same defaults (`requests.ephemeral-storage: 50Mi`, `limits.ephemeral-storage: 512Mi`).
+
+### Operator action
+
+- **None.** The rendered platform objects are unchanged: the connectivity `HelmRelease`'s values now carry the key at the defaults the connectivity chart applied anyway, so helm-controller runs one upgrade of that release whose manifest is identical — the `AgentgatewayParameters` and the data-plane pods do not change.
+- An installation that carried `gateway.parameters.dataPlaneResources` in its values for the standalone chart and dropped it to pass the meta chart's schema can set it again; an override reaches the data-plane container through the connectivity release as before.
+
 ## \<current\> → \<next\> (the kagent controller metrics Service selects kagent's own instance label; a first install with kagent on creates the kagent namespace)
 
 Two fixes from the first lab run of the meta chart (giantswarm/agent-platform#305, #306). The connectivity chart's kagent controller metrics `Service` selects the kagent pods by kagent's own release name (`app.kubernetes.io/instance: kagent`) instead of the connectivity release's, so its `ServiceMonitor` gets endpoints. With the bundled engine (`components.flux.enabled: true`) and kagent on, the meta chart runs a `pre-install,pre-upgrade` hook Job `<release>-kagent-namespace` that creates the `kagent` namespace when it does not exist, so a first install on a bare cluster converges.

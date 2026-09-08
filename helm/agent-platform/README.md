@@ -238,6 +238,8 @@ README.
 | gateway.parameters.dataPlaneEnv[1].value | string | `"grpc"` |  |
 | gateway.parameters.dataPlaneVolumes | list | `[]` |  |
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
+| gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
+| gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
