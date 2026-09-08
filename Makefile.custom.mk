@@ -37,8 +37,12 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # third intended change is the discovery opt-out label on the muster
 # RemoteMCPServer, derived from muster's OAuth toggle: both sides render with
 # that toggle off (a chart that predates the derivation reads nothing from it),
-# and verify-kagent-discovery asserts the label both ways.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false
+# and verify-kagent-discovery asserts the label both ways. The fourth is the
+# kagent controller metrics Service's selector (#305: kagent's own instance
+# label, not this release's): both sides render with the kagent ServiceMonitor
+# off — the metrics Service is gated on it — and verify-global asserts the
+# selector.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -198,6 +202,10 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	@grep -q 'observability.giantswarm.io/tenant: giantswarm' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the tenant label"; exit 1; }
 	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-on.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
 	@echo "ok: fleet monitor defaults + CNPG keep"
+	@echo "--> the kagent controller metrics Service selects kagent's own release instance (the pods' label), the ServiceMonitor this chart's Service"
+	@python3 -c 'import re,sys; docs=open("/tmp/vg-mon-on.out").read().split("\n---\n"); svc=[d for d in docs if "\nkind: Service\n" in d and re.search(r"^  name: t-kagent-controller-metrics$$", d, re.M)]; sys.exit("FAIL: the kagent controller metrics Service did not render") if len(svc)!=1 else None; sel=svc[0][svc[0].index("  selector:"):]; sys.exit("FAIL: the metrics Service does not select app.kubernetes.io/instance: kagent (the kagent release name the meta chart fixes):\n"+sel) if not re.search(r"^    app.kubernetes.io/instance: kagent$$", sel, re.M) else None; sys.exit("FAIL: the metrics Service selects this release (t) — under the meta chart that matches no pod (#305)") if re.search(r"^    app.kubernetes.io/instance: \"?t\"?$$", sel, re.M) else None; sm=[d for d in docs if "kind: ServiceMonitor" in d and "-kagent-controller\n" in d]; sys.exit("FAIL: the kagent ServiceMonitor did not render") if len(sm)!=1 else None; sys.exit("FAIL: the ServiceMonitor must select this chart\x27s Service (instance t)") if "      app.kubernetes.io/instance: \"t\"" not in sm[0] else None; print("ok: metrics Service selects instance kagent; the ServiceMonitor selects this release\x27s Service")'
+	@echo "--> no kagent-targeting selector, Service name or hostname in this chart derives from .Release.Name (the standalone umbrella's one-release assumption)"
+	@if grep -nE 'fullnameOverride \| default \.Release\.Name|fullnameOverride" \| default \(printf "%s-oauth2-proxy" \.Release\.Name' $(CONNECTIVITY_DIR)/templates/kagent/*.yaml; then echo "FAIL: a kagent template falls back to .Release.Name for a kagent-chart object; use agent-platform.kagent.fullname / agent-platform.kagent.releaseName"; exit 1; else echo "ok: kagent templates derive kagent names from the kagent helpers"; fi
 	@echo "--> the CNPG CiliumNetworkPolicy renders only when postgres.enabled"
 	@grep -q 'cnpg.io/cluster' /tmp/vg-mon-on.out || { echo "FAIL: no CNPG network policy with postgres.enabled=true"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vg-nopg.out 2>&1 || { cat /tmp/vg-nopg.out; exit 1; }

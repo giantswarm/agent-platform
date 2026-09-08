@@ -87,6 +87,38 @@ Usage: include "agent-platform.kagent.fluxServiceAccountName" .
 {{- end -}}
 
 {{/*
+The kagent component's Helm release name — the value of the pods'
+app.kubernetes.io/instance label the kagent chart stamps, and the name its
+fullname helper falls back to when kagent.fullnameOverride is empty. The meta
+chart names every component's release after its roster key (components.yaml:
+`releaseName: <key>`; the kagent entry's key, chart and values block are all
+`kagent`), and this chart is only ever installed by that meta chart. It is NOT
+this chart's .Release.Name: under the retired standalone umbrella every subchart
+shared one release name, so a selector on .Release.Name happened to match
+kagent's pods; under the meta chart each component is its own release and such
+a selector matches nothing (the kagent controller metrics Service had no
+endpoints, giantswarm/agent-platform#305). Every selector, Service name or
+hostname this chart derives for kagent's OWN objects goes through this helper
+or agent-platform.kagent.fullname, never through .Release.Name.
+Usage: include "agent-platform.kagent.releaseName" .
+*/}}
+{{- define "agent-platform.kagent.releaseName" -}}
+kagent
+{{- end -}}
+
+{{/*
+The kagent chart's fullname — what it prefixes its Services with
+(`<fullname>-controller`, `<fullname>-ui`): kagent.fullnameOverride (pinned to
+`kagent` in values.yaml), or, empty, the release name (the chart's fullname
+helper collapses `<release>-<chart>` to the release name when the two match, as
+they do under the meta chart).
+Usage: include "agent-platform.kagent.fullname" .
+*/}}
+{{- define "agent-platform.kagent.fullname" -}}
+{{- .Values.kagent.fullnameOverride | default (include "agent-platform.kagent.releaseName" .) -}}
+{{- end -}}
+
+{{/*
 Fail the render when a component's on/off toggle is still set the old way, inside
 the component's own values block. Those blocks are additionalProperties: true, so
 a leftover `enabled` key validates and is then ignored — the component silently

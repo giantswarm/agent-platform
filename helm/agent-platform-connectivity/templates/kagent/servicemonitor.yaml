@@ -6,10 +6,18 @@ underneath as this object's own toggle. */ -}}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $releaseName := .Release.Name }}
 {{- $monitor := .Values.global.observability.metrics.serviceMonitor }}
-# Headless Service exposing the kagent controller metrics port (:8080).
+# Service exposing the kagent controller metrics port (:8080).
 # The upstream controller-service.yaml only exposes port 8083 (API). We add a
 # separate Service here so the ServiceMonitor below can target it without
-# patching the subchart's single-port Service template.
+# patching the kagent chart's single-port Service template.
+#
+# The Service is THIS chart's object (named and labelled after this release,
+# which is what the ServiceMonitor's matchLabels select), but it selects the
+# kagent chart's pods, which carry kagent's OWN release name in their instance
+# label — `kagent`, the component key the meta chart fixes as the kagent release
+# name (agent-platform.kagent.releaseName). Selecting this release's name here
+# matched nothing under the meta chart: the Service had no endpoints and the
+# controller was never scraped (giantswarm/agent-platform#305).
 ---
 apiVersion: v1
 kind: Service
@@ -23,7 +31,7 @@ spec:
   type: ClusterIP
   selector:
     app.kubernetes.io/name: kagent
-    app.kubernetes.io/instance: {{ $releaseName }}
+    app.kubernetes.io/instance: {{ include "agent-platform.kagent.releaseName" . }}
     app.kubernetes.io/component: controller
   ports:
     - name: metrics
