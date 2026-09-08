@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `kagent.oauth2ProxyIngress` is dropped from the values forwarded to the kagent chart (`components.kagent.omitKeys`). It is read by the connectivity chart only, and the flattened kagent 0.2.x chart rejects it (`additional properties 'oauth2ProxyIngress' not allowed`), so an installation that set it (glean) failed the kagent upgrade to 0.2.0. `tests/verify-kagent-wiring.py` now derives the umbrella-only keys from what the connectivity templates read under `.Values.kagent`, so a new one cannot be forwarded unnoticed.
+
 ### Added
 
 - `muster.muster.toolsetPresets`: the platform's two toolset presets, forwarded into muster's config. `infrastructure` selects every `MCPServer` labelled `agent-platform.giantswarm.io/tool-group=infrastructure` (the mcp-kubernetes, mcp-capi and mcp-prometheus families, stamped by agent-platform-mcps ≥ 0.9.0); `agent-platform` selects the `agent-platform` label (agent-manager ≥ 0.3.0, model-manager ≥ 0.18.0) plus muster's `core_*` tools — the meta agent's preset. Agents name them as `preset:infrastructure` / `preset:agent-platform` in their `toolset`; muster resolves the label live on every request, so a new manager or infrastructure family joins its preset with no values change. Installations add their own next to them (Helm merges the map). A preset named like a built-in (`read-only`, `none`, `full`) fails the meta render, naming it, instead of failing the muster pod's start out of sight. Documented in [docs/toolset-presets.md](./docs/toolset-presets.md); `make verify-presets` asserts the presets on the muster HelmRelease (both engines), pulls the muster chart at the range floor and renders its ConfigMap from the forwarded values.

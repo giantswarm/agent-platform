@@ -240,6 +240,7 @@ components:  # @schema additionalProperties: true
     omitKeys:
       - controllerRoute
       - modelConfigs
+      - oauth2ProxyIngress
       - remoteMcpServers
       - serviceMonitor
       - uiRoute
