@@ -8,7 +8,10 @@ namespace the FluxInstance labels warns on anything less), as the hook
 ServiceAccount (rbac.yaml, cluster-admin, itself a pre-delete hook) or — the
 self-management hooks — as the regular ServiceAccount <release>-self
 (self/rbac.yaml, a namespaced Role). Hook weights in use:
-  -10  the hook ServiceAccount + ClusterRoleBinding (rbac.yaml, pre-delete)
+  -10  the hook ServiceAccount + ClusterRoleBinding (rbac.yaml, pre-delete; and
+       pre-install + pre-upgrade while the kagent namespace hook renders)
+   -8  create the namespace the kagent component installs into if it is
+       missing (hooks/kagent-namespace.yaml; pre-install, pre-upgrade)
    -6  stop a resumer Job still running from the last operation (hooks/self.yaml;
        pre-delete — and pre-upgrade when self-management is off, the hand-back)
    -5  suspend the chart's own HelmRelease and drop the values Secret

@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the kagent controller metrics Service selects kagent's own instance label; a first install with kagent on creates the kagent namespace)
+
+Two fixes from the first lab run of the meta chart (giantswarm/agent-platform#305, #306). The connectivity chart's kagent controller metrics `Service` selects the kagent pods by kagent's own release name (`app.kubernetes.io/instance: kagent`) instead of the connectivity release's, so its `ServiceMonitor` gets endpoints. With the bundled engine (`components.flux.enabled: true`) and kagent on, the meta chart runs a `pre-install,pre-upgrade` hook Job `<release>-kagent-namespace` that creates the `kagent` namespace when it does not exist, so a first install on a bare cluster converges.
+
+### Operator action
+
+- **None.** On a management cluster with kagent and the monitors on, the connectivity release updates the metrics Service's selector (one Helm revision; a Service update, no pod rolls) and kagent controller scraping starts working — the Service shows endpoints, the scrape pool has targets. Where kagent is off, or the monitors are, nothing renders differently.
+- **Giant Swarm management clusters (engine off): the meta chart's render is byte-identical.** The namespace hook renders only with the bundled engine; the fleet's bases keep creating the `kagent` namespace out of band and the connectivity release keeps adopting it.
+- **An engine-on installation** (the Helm CLI, or self-managed) gains the hook on its next upgrade: on an installation that already has the namespace it finds it and leaves it alone (a `helm upgrade` runs one more short Job); a fresh install no longer needs the namespace pre-created — labs that did so can stop. `helm uninstall` is unchanged: the connectivity release owns the namespace and deletes it with everything in it (the agents' objects and Secrets included), as before; a reinstall that starts while it is still terminating waits for it to be gone.
+
 ## \<current\> → \<next\> (the muster `RemoteMCPServer` opts out of controller-side tool discovery)
 
 The connectivity chart labels the shared `RemoteMCPServer agent-platform/muster` with `kagent.dev/discovery: disabled` whenever muster runs with OAuth on (`muster.muster.oauth.server.enabled`, the default). The kagent controller has no credential muster accepts when it lists the server's tools for the CR status, so every installation showed `Accepted=False (ReconcileFailed … Unauthorized)` on that CR (giantswarm/agent-platform#299). A kagent controller that knows the label reports `Accepted=True` (`DiscoveryDisabled`, empty inventory) instead; agents are unaffected either way — they resolve tools at run time with the propagated caller token. See docs/authentication.md, "Tool discovery by the kagent controller".

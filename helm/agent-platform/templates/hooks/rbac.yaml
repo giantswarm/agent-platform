@@ -1,11 +1,15 @@
 {{- /*
 The identity the hook Jobs run as: a ServiceAccount in the release namespace
 bound to cluster-admin (the hooks delete HelmReleases and the FluxInstance and
-wait on their finalizers). Weight -10 so it exists before any hook Job; the
-hook-succeeded policy removes both once every hook of the event has succeeded.
+wait on their finalizers; the kagent namespace hook creates a namespace).
+Weight -10 so it exists before any hook Job; the hook-succeeded policy removes
+both once every hook of the event has succeeded. Created for pre-delete (the
+ordered teardown) and — while the kagent namespace hook renders — for
+pre-install and pre-upgrade too (agent-platform.hooks.serviceAccountEvents).
 Rendered only with the bundled engine — without it this chart has no hooks.
 */ -}}
 {{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+{{- $events := include "agent-platform.hooks.serviceAccountEvents" . }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -15,7 +19,7 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
     app.kubernetes.io/component: hooks
   annotations:
-    helm.sh/hook: pre-delete
+    helm.sh/hook: {{ $events }}
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 ---
@@ -27,7 +31,7 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
     app.kubernetes.io/component: hooks
   annotations:
-    helm.sh/hook: pre-delete
+    helm.sh/hook: {{ $events }}
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 roleRef:

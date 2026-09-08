@@ -16,10 +16,22 @@ the fleet, the kind quick start or the sibling slices rely on:
   FluxInstance (two controllers, multitenant), the identity, the hook
   ServiceAccount at weight -10, the two teardown Jobs at weights 0 and 5, the
   self-management hooks at -6/-5 with their identity <release>-self (they
-  render whenever the engine is on) — and every platform HelmRelease naming
-  agent-platform-flux. The engine-on renders here set gitops.self.enabled=false
-  so the assertions stay about the engine; the self OCIRepository/HelmRelease,
-  the values hook and the admission policy are tests/verify-self.py's;
+  render whenever the engine is on), the kagent namespace hook at -8 (ci-values
+  turn kagent on) — and every platform HelmRelease naming agent-platform-flux.
+  The engine-on renders here set gitops.self.enabled=false so the assertions
+  stay about the engine; the self OCIRepository/HelmRelease, the values hook
+  and the admission policy are tests/verify-self.py's;
+- the kagent namespace hook (giantswarm/agent-platform#306): with the engine on
+  and kagent on, one pre-install,pre-upgrade Job <release>-kagent-namespace at
+  weight -8 in the helm image, as the hook ServiceAccount — whose own hook
+  events then include pre-install,pre-upgrade — that creates the namespace the
+  kagent component installs into (kagent.namespaceOverride) when it is missing,
+  waits out one that is terminating, and leaves an existing one alone; the
+  Namespace itself is never a rendered object of this chart (the connectivity
+  release tracks it). Not rendered with kagent off, with the namespace equal
+  to the HelmReleases' target namespace, with kagent.namespaceOverride empty —
+  the ServiceAccount is then back to pre-delete only — nor, with kagent on,
+  with the engine off (the pure render);
 - the engine changes nothing else: the OCIRepository/HelmRelease documents of
   both shapes are identical but for the serviceAccountName line and the roster;
 - Chart.yaml's only dependency is flux-engine, conditional on
@@ -221,6 +233,7 @@ def main(chart: str) -> int:
         ("Job", NAMESPACE, f"{RELEASE}-teardown-releases"), ("Job", NAMESPACE, f"{RELEASE}-teardown-engine"),
         ("ServiceAccount", NAMESPACE, f"{RELEASE}-self"), ("Role", NAMESPACE, f"{RELEASE}-self"), ("RoleBinding", NAMESPACE, f"{RELEASE}-self"),
         ("Job", NAMESPACE, f"{RELEASE}-self-stop-resumer"), ("Job", NAMESPACE, f"{RELEASE}-self-suspend"),
+        ("Job", NAMESPACE, f"{RELEASE}-kagent-namespace"),  # ci-values turn kagent on
     }
     engine = {(k, ns, n) for k, ns, n, _ in on if k not in ("OCIRepository", "HelmRelease", "CustomResourceDefinition")}
     if engine != expected:
@@ -266,13 +279,16 @@ def main(chart: str) -> int:
         if policy != "before-hook-creation,hook-succeeded":
             fail(f"hook {k} {n}: policy {policy!r}")
         events[(k, n)] = (hook, int(weight))
-    if events != {
-        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-delete", -10),
+    # the hook identity is created for pre-install,pre-upgrade too while the kagent namespace hook renders (ci-values turn kagent on)
+    expected_events = {
+        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,pre-delete", -10),
+        ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
         # the self-management hooks (verify-self.py): pre-upgrade too while self-management is off (the hand-back)
         ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-upgrade,pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-upgrade,pre-delete", -5),
         ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("pre-delete", 5),
-    }:
-        fail(f"hook events/weights differ: {events}")
+    }
+    if events != expected_events:
+        fail(f"hook events/weights differ:\n  got      {events}\n  expected {expected_events}")
     hr_names = sorted(n for k, _, n, _ in on if k == "HelmRelease")
     rel = job_args(one(on, "Job", f"{RELEASE}-teardown-releases"))
     if rel[:7] != ["delete", "helmreleases.helm.toolkit.fluxcd.io", "--namespace", NAMESPACE, "--ignore-not-found", "--wait", "--timeout=5m"] or sorted(rel[7:]) != hr_names:
@@ -291,7 +307,37 @@ def main(chart: str) -> int:
                 fail(f"hook Job {job} lacks {needle!r}")
         if "command:" in d:
             fail(f"hook Job {job} overrides the image entrypoint; hooks pass kubectl arguments only")
-    print(f"ok: hooks — SA/CRB at -10, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases by name), teardown-engine at 5, restricted pods running {image}")
+    print(f"ok: hooks — SA/CRB at -10, kagent namespace hook at -8, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases by name), teardown-engine at 5, restricted pods running {image}")
+
+    # --- the kagent namespace hook (giantswarm/agent-platform#306)
+    helm_image = re.search(r"^    helmImage:\n      registry: (\S+)\n      repository: (\S+)\n      tag: (\S+)$", values, re.M)
+    if not helm_image:
+        fail("gitops.hooks.helmImage is not a registry/repository/tag block")
+    helm_ref = "/".join(helm_image.group(1, 2)) + ":" + helm_image.group(3)
+    ns_job = one(on, "Job", f"{RELEASE}-kagent-namespace")
+    for needle in (f'image: "{helm_ref}"', 'command: ["/bin/sh", "-eu", "-c"]', f"serviceAccountName: {RELEASE}-hooks", 'ns="kagent"',
+                   'kubectl create namespace "$ns"', 'kubectl wait --for=delete "namespace/$ns"', "Terminating)", "left as it is",
+                   "restartPolicy: Never", "runAsNonRoot: true", "readOnlyRootFilesystem: true", "allowPrivilegeEscalation: false", "- ALL", "type: RuntimeDefault"):
+        if needle not in ns_job:
+            fail(f"the kagent namespace hook lacks {needle!r}")
+    if ("Namespace", "", "kagent") in {(k, ns, n) for k, ns, n, _ in on} or re.search(r"^kind: Namespace$", "\n---\n".join(d for *_, d in on), re.M):
+        fail("the meta chart renders a Namespace object; the kagent namespace is the connectivity release's and must only be created by the hook")
+    cases = {
+        "kagent off": ["--set", "components.kagent.enabled=false"],
+        "the namespace is the HelmReleases' target": ["--set", "gitops.targetNamespace=kagent"],
+        "kagent.namespaceOverride empty": ["--set", "kagent.namespaceOverride="],
+    }
+    for label, flags in cases.items():
+        ds = docs(helm(chart, [*ci, *SELF_OFF, *flags]))
+        if any(n == f"{RELEASE}-kagent-namespace" for _, _, n, _ in ds):
+            fail(f"{label}: the kagent namespace hook still renders")
+        for kind in ("ServiceAccount", "ClusterRoleBinding"):
+            if hook_meta(one(ds, kind, f"{RELEASE}-hooks"))[0] != "pre-delete":
+                fail(f"{label}: the hook {kind} is not back to pre-delete only")
+    kag_off = helm(chart, [*ci, *OFF, "--set", "components.kagent.enabled=true"])
+    if "kagent-namespace" in kag_off or "helm.sh/hook" in kag_off:
+        fail("engine off with kagent on: the kagent namespace hook rendered (the pure render must not carry it; a cluster's own Flux gets the namespace out of band)")
+    print(f"ok: kagent namespace hook — pre-install,pre-upgrade at -8 as {RELEASE}-hooks in {helm_ref}, create-if-missing / wait out Terminating / leave Active; no Namespace object; absent with kagent off, target namespace = kagent, namespaceOverride empty, engine off")
 
     # --- the engine changes nothing else about the platform objects
     p_off, p_on = platform_docs(off), platform_docs(on)
