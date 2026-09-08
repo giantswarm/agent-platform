@@ -671,6 +671,16 @@ The PolicyException targets a policy this chart does not own, so its names must 
 
 A cluster that enforces restricted PSS through PSA labels instead of Kyverno must also set `components.agent-sandbox.enabled: false` (see [agent-sandbox](#agent-sandbox)).
 
+## Development
+
+Two layers of checks, both in CI on every PR and both runnable locally.
+
+**Render assertions** (no cluster; `test-ingress-modes`, Helm 3.17.3): `make verify-modes verify-global verify-meta verify-engine verify-self verify-managers verify-kagent-netpol verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring` — `Makefile.custom.mk` describes each target. The three shapes of the chart map onto them: engine on + self on (the quick start) is `verify-self`'s; engine on + self off (the lab shape, the hand-back) is `verify-engine`'s and `verify-self`'s; engine off (the fleet: `--include-crds` renders no CRD, hook, operator or self object — the pure renderer) is `verify-engine`'s and `verify-meta`'s; the `auto` knobs — the vanilla shape without `--api-versions`, the fleet shape with the API groups passed — are `verify-auto`'s. `pre-commit run -a` regenerates the schemas and the helm-docs READMEs.
+
+**The ATS** (`execute-chart-tests`, a required check; [tests/ats/README.md](tests/ats/README.md)) runs two scenarios on one kind cluster on a 2-vCPU CircleCI machine: the **smoke** — the quick start on a bare cluster (the Gateway API CRDs, a lab Dex and an in-cluster registry the candidate is pushed to; `helm install --wait` with the bundled engine, muster with its OAuth server, dicebear, connectivity, kagent and agent-manager, self-management on against that registry), then the adoption, the auth round trip (the 401 discovery chain, a Dex user through the password grant and through muster's login flow), the agent round trips (a declarative `Agent` Ready; agent-manager's `create_agent` through muster → a `HelmRelease` of the agent chart executed as `kagent-flux` → the `Agent` Ready), the self-management fixpoint and values Secret, the refused `helm upgrade`, and the ordered teardown — and the **own-Flux scenario**: Flux's source-controller and helm-controller from the upstream manifest, the chart through a `HelmRelease` with `components.flux.enabled: false` (no operator, no second helm-controller, the Flux CRDs' field managers untouched, an agent through that Flux) and the render guard when the value is flipped on. The smoke found the fresh-install deadlock on the kagent namespace fixed in this release.
+
+Measured on the CI machine (`execute-chart-tests`, kind node `gsoci.azurecr.io/giantswarm/kind-node:v1.36.4`; each test logs `TIMING <phase>`): TIMINGS_PLACEHOLDER
+
 ## Credit
 
 - [muster](https://github.com/giantswarm/muster) — Giant Swarm, Apache 2.0.

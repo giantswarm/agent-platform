@@ -1,22 +1,33 @@
 """Shared fixtures and helpers of the agent-platform ATS (tests/ats/README.md).
 
-Three scenarios run on the one kind cluster the CI job creates, in this order:
+Two scenarios run on the one kind cluster the CI job creates, in this order:
 
-  smoke      test_smoke.py            the quick start in the lab shape: engine on,
-                                      self-management off, the auth and agent
-                                      round trips, the ordered teardown
-  functional test_self_management.py  the chart under test pushed to an in-cluster
-                                      registry and installed with self-management
-                                      on: adoption, fixpoint, the refused CLI
-             test_own_flux.py         a cluster that runs its own Flux: the chart
-                                      through a HelmRelease with the engine off,
-                                      and the render guard when it is flipped on
+  smoke       test_smoke.py     the quick start on a bare cluster: the chart under
+                                test pushed to an in-cluster registry and installed
+                                with the bundled engine and self-management ON
+                                against that registry — adoption, the auth round
+                                trip, the agent round trips (a declarative Agent,
+                                agent-manager's create_agent through muster), the
+                                fixpoint, the refused CLI, the ordered teardown
+  functional  test_own_flux.py  a cluster that runs its own Flux: the chart through
+                                a HelmRelease with the engine off (no operator, no
+                                second helm-controller, the Flux CRDs untouched, an
+                                agent through that Flux) and the render guard when
+                                the value is flipped on
 
-ATS runs `pytest -m smoke` then `pytest -m functional` in this directory with
-KUBECONFIG and ATS_CHART_PATH set (docs/TEST_CONTRACT.md in app-test-suite);
-``kube_cluster`` (pytest-helm-charts) carries the kubeconfig. Helm and kubectl
-come with the ATS image. Everything a scenario leaves on the cluster is what
-the next one expects to find (test_smoke.py's docstring says what stays).
+ATS runs `uv run pytest -m smoke` then `pytest -m functional` in this directory
+with KUBECONFIG, ATS_CHART_PATH and ATS_CHART_VERSION set (docs/TEST_CONTRACT.md
+in app-test-suite); ``kube_cluster`` (pytest-helm-charts) carries the
+kubeconfig. Helm 4 and kubectl come with the ATS image. What the smoke leaves on
+the cluster is what the functional scenario expects to find (the lab Dex, the
+registry with the chart, the four operator CRDs).
+
+Local run (a throwaway kind cluster; the lab URLs carry fixed ports, so 5554 and
+8090 must be free — ATS_MUSTER_PORT picks another muster port, see lab-dex.yaml):
+
+  helm package helm/agent-platform --version 3.99.0-dev.local -d dist
+  cd tests/ats && KUBECONFIG=… ATS_CHART_PATH=$PWD/../../dist/agent-platform-3.99.0-dev.local.tgz \
+    ATS_CHART_VERSION=3.99.0-dev.local ATS_CLUSTER_TYPE=kind uv run pytest -m smoke --log-cli-level info
 """
 
 import base64
@@ -86,9 +97,13 @@ REGISTRATION_TOKEN = "lab-only-registration-token"
 CROSS_CLIENT_AUDIENCE = "dex-k8s-authenticator"
 LOGIN_SCOPES = f"openid profile email groups audience:server:client_id:{CROSS_CLIENT_AUDIENCE}"
 # muster's OAuth base URL in the smoke values: a loopback address, reached
-# through the port-forward to svc/muster.
-MUSTER_BASE_URL = "http://localhost:8090"
-MUSTER_PORT = 8090
+# through the port-forward to svc/muster. The port is part of the URL, so it is
+# the same inside the values and outside: 8090 in CI (tests/ats/values-round-trips.yaml);
+# ATS_MUSTER_PORT=18090 on a developer machine where 8090 is taken (the lab Dex
+# client lists both callbacks, and the install then overrides the base URL).
+MUSTER_PORT = int(os.environ.get("ATS_MUSTER_PORT", "8090"))
+MUSTER_BASE_URL = f"http://localhost:{MUSTER_PORT}"
+MUSTER_BASE_URL_SETS = [] if MUSTER_PORT == 8090 else [f"muster.muster.oauth.server.baseUrl={MUSTER_BASE_URL}"]
 # Loopback redirect target of the smoke's OAuth client. Never served: the flow
 # stops at the redirect and parses the code from Location.
 CALLBACK = "http://127.0.0.1:18763/callback"
@@ -103,18 +118,25 @@ INSTALL_TIMEOUT = "12m"
 UNINSTALL_TIMEOUT = "5m"
 # The acceptance criterion of the ordered teardown: clean in under a minute.
 UNINSTALL_BUDGET_S = 60
+# Self-management in the smoke: the chart's own OCIRepository follows the
+# in-cluster registry the candidate was pushed to, at the candidate's exact
+# version. Exact, not the chart's derived range: a branch build carries a
+# prerelease version (3.19.1-dev.<branch>.<date>.h<sha>, abs), and Masterminds
+# semver — Flux's — never matches a prerelease against a release-only bound
+# (`>=X <4.0.0`), so the derived range would find no tag. A released chart
+# has no prerelease; verify-self asserts the derived range offline.
+SELF_INTERVAL = "1m"
+SELF_INTERVAL_S = 60
 
-# Scenario order inside one pytest run (the functional scenario runs two modules).
-MODULE_ORDER = ["test_smoke", "test_self_management", "test_own_flux"]
 
-
-def pytest_collection_modifyitems(items: List[pytest.Item]) -> None:
-    """Keep the phases in order: self-management before the own-Flux scenario."""
-    def rank(item: pytest.Item) -> int:
-        name = item.module.__name__ if item.module else ""
-        return MODULE_ORDER.index(name) if name in MODULE_ORDER else len(MODULE_ORDER)
-    items.sort(key=rank)
-
+def self_management_sets(version: str) -> List[str]:
+    return [
+        "gitops.self.enabled=true",
+        f"gitops.self.repository={REGISTRY_URL}",
+        "gitops.self.insecure=true",
+        f"gitops.self.interval={SELF_INTERVAL}",
+        f"gitops.self.versionRange={version}",
+    ]
 
 # ---------------------------------------------------------------------------
 # Processes, waiting, timing
@@ -358,13 +380,24 @@ def set_path(values: Dict[str, Any], dotted: str, value: Any) -> None:
     cur[keys[-1]] = value
 
 
-def load_values(files: List[Path], sets: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """The user-supplied values a `helm install -f … --set …` produces."""
+def helm_set_value(raw: str) -> Any:
+    """The type Helm gives a --set value: true/false booleans, integers, else a string."""
+    if raw in ("true", "false"):
+        return raw == "true"
+    if re.fullmatch(r"-?\d+", raw):
+        return int(raw)
+    return raw
+
+
+def load_values(files: List[Path], sets: Optional[List[str]] = None) -> Dict[str, Any]:
+    """The user-supplied values a `helm install -f … --set …` produces (what
+    `helm get values` prints and the values Secret must equal)."""
     merged: Dict[str, Any] = {}
     for f in files:
         merged = deep_merge(merged, yaml.safe_load(f.read_text()) or {})
-    for k, v in (sets or {}).items():
-        set_path(merged, k, v)
+    for item in sets or []:
+        k, _, v = item.partition("=")
+        set_path(merged, k, helm_set_value(v))
     return merged
 
 
@@ -391,15 +424,28 @@ class PortForward:
         )
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
-            if self._proc.poll() is not None:
-                err = (self._proc.stderr.read() if self._proc.stderr else "")[:500]
-                raise AssertionError(f"port-forward to {self.namespace}/{self.service} exited with {self._proc.returncode}: {err}")
+            self._raise_if_exited()
             try:
                 with socket.create_connection(("127.0.0.1", self.local_port), timeout=2):
-                    return self
+                    pass
             except OSError:
                 time.sleep(1)
+                continue
+            # Something answers on the port. Make sure it is OUR kubectl and not
+            # another process that held the port first (kubectl then exits with
+            # "address already in use" a moment later): the lab URLs are fixed,
+            # so a foreign listener would silently take every request.
+            time.sleep(1)
+            self._raise_if_exited()
+            return self
         raise AssertionError(f"port-forward to {self.namespace}/{self.service} did not start listening on {self.local_port}")
+
+    def _raise_if_exited(self) -> None:
+        if self._proc is not None and self._proc.poll() is not None:
+            err = (self._proc.stderr.read() if self._proc.stderr else "")[:500]
+            raise AssertionError(
+                f"port-forward to {self.namespace}/{self.service} on local port {self.local_port} exited with {self._proc.returncode}: {err}\n"
+                f"(a process already listening on {self.local_port}? the lab URLs carry the port — free it, or set ATS_MUSTER_PORT / ATS_DEX_PORT to a free one)")
 
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -560,7 +606,11 @@ class MusterSession:
 def unauthenticated_mcp_challenge(base_url: str) -> Dict[str, Any]:
     """No token -> 401 with the RFC 9728 WWW-Authenticate discovery chain;
     returns the authorization-server metadata the chain leads to."""
-    r = requests.post(f"{base_url}/mcp", timeout=30)
+    # A well-formed initialize without a token (muster validates the content
+    # type before the bearer: a bare POST is a 400, not the challenge).
+    r = requests.post(f"{base_url}/mcp", headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+                      data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                          "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "ats", "version": "1"}}}), timeout=30)
     assert r.status_code == 401, f"expected 401, got {r.status_code}: {r.text[:300]}"
     challenge = r.headers.get("WWW-Authenticate", "")
     prm_url = f"{base_url}/.well-known/oauth-protected-resource"
@@ -728,9 +778,20 @@ def dex_forward(kube: Kube, prerequisites: None) -> Iterator[PortForward]:
 @pytest.fixture(scope="module")
 def registry(kube: Kube) -> str:
     """The in-cluster registry (idempotent); returns its in-cluster OCI URL."""
+    started = time.monotonic()
     kube.apply_file(str(REGISTRY_MANIFEST))
     kube.wait_deployment(REGISTRY_NAMESPACE, "registry", timeout=300)
+    TIMINGS.record("registry (Deployment ready)", time.monotonic() - started)
     return REGISTRY_URL
+
+
+@pytest.fixture(scope="module")
+def muster_forward(kube: Kube) -> Iterator[PortForward]:
+    """http://localhost:<MUSTER_PORT> from the test: muster's OAuth base URL."""
+    wait_for_endpoints(kube, NAMESPACE, "muster")
+    pf = PortForward(kube.kubeconfig, NAMESPACE, "muster", MUSTER_PORT, 8090).start()
+    yield pf
+    pf.stop()
 
 
 @pytest.fixture(scope="module")
@@ -738,6 +799,7 @@ def pushed_chart(kube: Kube, helm: Helm, registry: str, chart_archive: Path, can
     """The chart under test in the in-cluster registry (pushed once; a second
     module finds the tag and skips the push). Returns the in-cluster OCI URL of
     the repository the chart is in."""
+    started = time.monotonic()
     wait_for_endpoints(kube, REGISTRY_NAMESPACE, "registry")
     pf = PortForward(kube.kubeconfig, REGISTRY_NAMESPACE, "registry", REGISTRY_PORT, REGISTRY_PORT).start()
     try:
@@ -751,4 +813,5 @@ def pushed_chart(kube: Kube, helm: Helm, registry: str, chart_archive: Path, can
             assert candidate_version in (tags.json().get("tags") or []), f"pushed tag not listed: {tags.text[:300]}"
     finally:
         pf.stop()
+    TIMINGS.record("chart push (helm push --plain-http through the port-forward)", time.monotonic() - started)
     return registry

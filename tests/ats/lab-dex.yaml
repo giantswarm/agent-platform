@@ -248,6 +248,10 @@ stringData:
         secret: lab-only-agent-platform-client-secret
         redirectURIs:
           - http://localhost:8090/oauth/callback
+          # A developer machine where 8090 is taken: ATS_MUSTER_PORT=18090
+          # (tests/ats/conftest.py) moves muster's base URL and the
+          # port-forward there; CI always uses 8090.
+          - http://localhost:18090/oauth/callback
       # Cross-client audience target. The platform's agent-manager MCPServer
       # requires the dex-k8s-authenticator audience on forwarded tokens
       # (agent-manager.muster.mcpServer.auth.requiredAudiences); Dex only
