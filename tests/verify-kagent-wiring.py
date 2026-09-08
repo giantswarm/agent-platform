@@ -8,9 +8,9 @@ the chart validates values with additionalProperties: false:
 
   * putting `valuesKey: kagent` back, which hands the chart a block it rejects
     as an unknown property;
-  * forwarding an umbrella-only key (`enabled`, `controllerRoute`, `uiRoute`,
-    `modelConfigs`, `remoteMcpServers`, `serviceMonitor`), which only this
-    umbrella and the connectivity chart read;
+  * forwarding an umbrella-only key (`controllerRoute`, `uiRoute`,
+    `modelConfigs`, `remoteMcpServers`, `serviceMonitor`), which only the
+    connectivity chart reads, or the component toggle `enabled`;
   * dropping `fullnameOverride` or `namespaceOverride`, which the chart AND the
     connectivity chart read, so the two would name different objects.
 

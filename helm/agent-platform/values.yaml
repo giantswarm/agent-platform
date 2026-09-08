@@ -233,14 +233,12 @@ components:  # @schema additionalProperties: true
     versionRange: "0.2.x"
     valuesFrom: kagent
     # The flattened chart validates values against its own schema with
-    # additionalProperties: false, and these keys are not upstream's: they are
-    # this umbrella's (enabled is the toggle; the rest are read by the
-    # connectivity chart), so they stay in the top-level block and are dropped
-    # on the way out. fullnameOverride and namespaceOverride are upstream keys
-    # the connectivity chart also reads, so they are forwarded.
+    # additionalProperties: false, and these keys are not upstream's: the
+    # connectivity chart reads them, so they stay in the top-level block and
+    # are dropped on the way out. fullnameOverride and namespaceOverride are
+    # upstream keys the connectivity chart also reads, so they are forwarded.
     omitKeys:
       - controllerRoute
-      - enabled
       - modelConfigs
       - remoteMcpServers
       - serviceMonitor

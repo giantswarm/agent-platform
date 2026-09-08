@@ -70,11 +70,10 @@ API CRDs and GatewayClass remain cluster-level prerequisites — see README.
 | components.kagent.versionRange | string | `"0.2.x"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
-| components.kagent.omitKeys[1] | string | `"enabled"` |  |
-| components.kagent.omitKeys[2] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[3] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[4] | string | `"serviceMonitor"` |  |
-| components.kagent.omitKeys[5] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[1] | string | `"modelConfigs"` |  |
+| components.kagent.omitKeys[2] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[3] | string | `"serviceMonitor"` |  |
+| components.kagent.omitKeys[4] | string | `"uiRoute"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent.crds | string | `"CreateReplace"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
