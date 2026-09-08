@@ -420,6 +420,12 @@ verify-self: ## Assert self-management's shapes: engine off renders nothing of i
 	@python3 tests/verify-self.py $(CHART_DIR)
 	@echo "self-management shapes verified."
 
+.PHONY: verify-labels
+verify-labels: ## Assert every label value stays valid at the versions the charts are installed under: helm-controller's +digest and a branch build's long prerelease, with the 63-character cut landing on each separator. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-labels.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "label values verified."
+
 .PHONY: verify-components
 verify-components: ## Assert the roster entries of the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts): off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
