@@ -48,6 +48,8 @@ The port the model-manager Service listens on (model-manager.service.port, defau
 {{/*
 The serving backend the chart is configured with (model-manager.backend) — the
 one-backend form; with model-manager.backends set, the default (first) backend.
+Nothing here reads it; the curated umbrella's own kserve guard does, so it is
+not dead.
 */}}
 {{- define "agent-platform.modelManager.backend" -}}
 {{- index (include "agent-platform.modelManager.backends" . | fromJsonArray) 0 -}}
@@ -97,16 +99,6 @@ The LM Studio base URL model-manager dials (model-manager.lmstudio.endpoint).
 {{- end -}}
 
 {{/*
-The endpoint of a host-proxying backend — ollama: model-manager.ollama.endpoint,
-lemonade: model-manager.lemonade.endpoint, lmstudio:
-model-manager.lmstudio.endpoint. Empty for kserve, which has none.
-*/}}
-{{- define "agent-platform.modelManager.hostEndpoint" -}}
-{{- $backend := include "agent-platform.modelManager.backend" . -}}
-{{- if eq $backend "ollama" -}}{{ include "agent-platform.modelManager.ollamaEndpoint" . }}{{- else if eq $backend "lemonade" -}}{{ include "agent-platform.modelManager.lemonadeEndpoint" . }}{{- else if eq $backend "lmstudio" -}}{{ include "agent-platform.modelManager.lmstudioEndpoint" . }}{{- end -}}
-{{- end -}}
-
-{{/*
 An endpoint URL (the argument) split for network policies, as JSON:
   { "host": "<host>", "port": <int>, "isIP": bool }
 The port defaults from the scheme (80 / 443) when the URL carries none.
@@ -125,22 +117,6 @@ The port defaults from the scheme (80 / 443) when the URL carries none.
 {{- end -}}
 
 {{/*
-The Ollama endpoint split for network policies (endpointTarget of ollamaEndpoint).
-*/}}
-{{- define "agent-platform.modelManager.ollamaTarget" -}}
-{{- include "agent-platform.modelManager.endpointTarget" (include "agent-platform.modelManager.ollamaEndpoint" .) -}}
-{{- end -}}
-
-{{/*
-The host backend's endpoint split for network policies — ollama, lemonade or
-lmstudio; an empty JSON object for kserve.
-*/}}
-{{- define "agent-platform.modelManager.hostTarget" -}}
-{{- $endpoint := include "agent-platform.modelManager.hostEndpoint" . -}}
-{{- if $endpoint -}}{{ include "agent-platform.modelManager.endpointTarget" $endpoint }}{{- else -}}{}{{- end -}}
-{{- end -}}
-
-{{/*
 Every host model server among the component's backends (ollama, lemonade,
 lmstudio), split for network policies, as a JSON list of
   { "backend": "<name>", "host": "<host>", "port": <int>, "isIP": bool }
@@ -156,6 +132,29 @@ in the order of the backends list. Empty when none is listed (kserve alone).
 {{- end -}}
 {{- if $endpoint -}}
 {{- $out = append $out (merge (dict "backend" $name) (include "agent-platform.modelManager.endpointTarget" $endpoint | fromJson)) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+Every host model server among the component's backends, split for network
+policies, as hostTargets does — but at the address AGENT PODS dial: the
+backend's agentHost, falling back to its endpoint the way the drivers do.
+model-manager's own policy opens the endpoint (it manages the models); this
+is what an agent needs to reach the model for inference, which nothing opened
+for any host backend before.
+*/}}
+{{- define "agent-platform.modelManager.agentHostTargets" -}}
+{{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
+{{- $out := list -}}
+{{- range $name := include "agent-platform.modelManager.backends" . | fromJsonArray -}}
+{{- $host := "" -}}
+{{- if or (eq $name "ollama") (eq $name "lemonade") (eq $name "lmstudio") -}}
+{{- $host = dig $name "agentHost" "" $chart | default (dig $name "endpoint" "" $chart) -}}
+{{- end -}}
+{{- if $host -}}
+{{- $out = append $out (merge (dict "backend" $name) (include "agent-platform.modelManager.endpointTarget" $host | fromJson)) -}}
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}

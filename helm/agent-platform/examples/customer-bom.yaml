@@ -17,13 +17,11 @@
 # whole model-manager block, `lmstudio` included, to every release, and that
 # key only exists from 0.19.0 — a chart before it rejects the values outright
 # (its schema is additionalProperties: false), whether or not the
-# installation uses LM Studio. Selecting that backend needs one more thing
-# this snapshot does not have: an agent-platform-connectivity newer than
-# 3.11.0, the release carrying the lmstudio render guard and the egress arm.
-# The 3.10.0 pin below predates both, so `backend: lmstudio` would fail the
-# render with "must be one of: ollama, kserve, lemonade" — bump that pin too
-# when the release exists. An installation that does not select lmstudio is
-# unaffected either way.
+# installation uses LM Studio. The agent-platform-connectivity pin is the
+# other half of that backend: 3.12.0 is the release carrying the lmstudio
+# render guard and its egress arm, so `backend: lmstudio` renders with this
+# snapshot. An installation that does not select lmstudio is unaffected
+# either way.
 # =============================================================================
 
 gitops:
@@ -41,7 +39,7 @@ components:
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.19.0" }
   agent-manager:                 { versionRange: "0.4.0" }
-  agent-platform-connectivity: { versionRange: "3.10.0" }
+  agent-platform-connectivity: { versionRange: "3.12.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the three kserve charts and the two
