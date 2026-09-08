@@ -238,16 +238,21 @@ def test_engine_objects(kube: Kube, app_deployment: float) -> None:
     crds = kube.crd_names()
     assert len(kube.flux_crds()) == 7, kube.flux_crds()
     assert OPERATOR_CRDS <= set(crds), sorted(OPERATOR_CRDS - set(crds))
-    # The operator adopted the CRDs the chart brought (Helm installed them, the operator manages them from here on).
-    managers = kube.managers("crd", "helmreleases.helm.toolkit.fluxcd.io")
-    assert "flux-operator" in managers, f"the operator does not manage the Flux CRDs: {sorted(managers)}"
+    # The operator adopted the CRDs the chart brought (Helm installed them, the
+    # operator manages them from here on — within its first reconcile).
+    wait_for("flux-operator among the Flux CRDs' field managers",
+             lambda: "flux-operator" in kube.managers("crd", "helmreleases.helm.toolkit.fluxcd.io"), 120, interval=3)
     assert kube.get("serviceaccount", TENANT_SA, namespace=NAMESPACE), f"ServiceAccount {TENANT_SA} missing"
     assert kube.get("clusterrolebinding", TENANT_SA), f"ClusterRoleBinding {TENANT_SA} missing"
     assert kube.get("namespace", KAGENT_NAMESPACE), "the engine did not create the kagent namespace"
-    # No hook object lingers after a successful install (the detached resumer
-    # Job is not a hook; it stays for an hour to be read).
-    hook_jobs = [j["metadata"]["name"] for j in kube.items("jobs", namespace=NAMESPACE) if "helm.sh/hook" in (j["metadata"].get("annotations") or {})]
-    assert not hook_jobs, f"hook Jobs left behind: {hook_jobs}"
+    # No hook object lingers after a successful install (Helm removes them once
+    # every hook of the event succeeded, moments after the install returns; the
+    # detached resumer Job is not a hook and stays for an hour to be read).
+
+    def hook_jobs() -> List[str]:
+        return [j["metadata"]["name"] for j in kube.items("jobs", namespace=NAMESPACE) if "helm.sh/hook" in (j["metadata"].get("annotations") or {})]
+
+    wait_for("the install's hook Jobs removed (hook-succeeded)", lambda: not hook_jobs(), 120, interval=3)
 
 
 # ---------------------------------------------------------------------------
@@ -490,8 +495,9 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     assert OPERATOR_CRDS <= set(crds), "the operator CRDs must remain (Helm never deletes crds/)"
     for name in ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager"):
         assert kube.get("deployment", name, namespace=NAMESPACE) is None, f"Deployment {name} survived the uninstall"
-    jobs = [j["metadata"]["name"] for j in kube.items("jobs", namespace=NAMESPACE)]
-    assert not jobs, f"Jobs left behind: {jobs}"
+    # No Job of the release is left (the lab Dex's cert-gen Job is the prerequisite's, not the chart's).
+    jobs = [j["metadata"]["name"] for j in kube.items("jobs", "-l", f"app.kubernetes.io/instance={RELEASE}", namespace=NAMESPACE)]
+    assert not jobs, f"Jobs of the release left behind: {jobs}"
     assert helm.releases_in_any_state() == [], helm.releases_in_any_state()
     assert kube.get("secret", VALUES_SECRET, namespace=NAMESPACE) is None, "the values Secret survived"
     wait_for("the admission policy gone (it lingers a second in the apiserver cache)",
