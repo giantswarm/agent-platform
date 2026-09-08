@@ -291,6 +291,15 @@ components:  # @schema additionalProperties: true
     # (agent-platform-connectivity for the kagent RemoteMCPServer/ModelConfig
     # CRs) dependsOn this component instead.
     crds: CreateReplace
+    # First install must not wait for the controller: with postgres.enabled the
+    # controller mounts the CNPG Secret (kagent-pg-app) that the connectivity
+    # release renders, and connectivity dependsOn this component for its CRDs.
+    # A waiting install never turns Ready (FailedMount), connectivity never
+    # installs, helm-controller uninstalls and retries — a deadlock on every
+    # fresh cluster. Reporting the install once the manifests (CRDs, Deployment)
+    # are applied lets connectivity proceed; the controller starts as soon as
+    # the Cluster exists. Upgrades keep waiting for the rollout.
+    installDisableWait: true
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm

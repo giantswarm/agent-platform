@@ -90,6 +90,7 @@ README.
 | components.kagent.omitKeys[6] | string | `"uiRoute"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent.crds | string | `"CreateReplace"` |  |
+| components.kagent.installDisableWait | bool | `true` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.klaus-gateway.versionRange | string | `"0.x"` |  |
