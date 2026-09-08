@@ -3,23 +3,38 @@
 # kind cluster and hands ATS its kubeconfig; helm and kubectl come with the ATS
 # image; the chart archive under test is copied to the working directory.
 #
-# The smoke (tests/ats/test_smoke.py) installs the chart itself: the chart
-# needs the Gateway API CRDs first, so ATS's own pre-test deploy is skipped and
-# the test runs `helm install --wait` of the candidate archive with
-# tests/test-values.yaml after applying them — the quick start's order and the
-# quick start's Helm CLI path. The values are the kind shape: the bundled Flux
-# engine on (the default), muster + dicebear + the connectivity wiring, valkey
-# and everything that needs a CRD family kind does not have off. The smoke
-# asserts what `helm install --wait` promises — the release `deployed`, the
-# FluxInstance Ready, every component HelmRelease Ready, one Helm revision —
-# then the ordered teardown (`helm uninstall --wait` clean in under a minute,
-# no Flux CRD left, the operator CRDs still there) and a clean reinstall.
+# Two scenarios on the one cluster, in order (tests/ats/README.md):
 #
-# functional and upgrade stay skipped: there is no second scenario yet (the
-# agent round trips arrive with the self-management slice), and the upgrade
-# from the last published chart is not a kind smoke's job here.
+#   smoke       tests/ats/test_smoke.py — the quick start on a bare cluster. The
+#               chart needs the Gateway API CRDs and an identity provider first,
+#               so ATS's own pre-test deploy is skipped and the test installs the
+#               candidate itself: prerequisites (Gateway API CRDs, the lab Dex,
+#               an in-cluster registry the archive is pushed to), then
+#               `helm install --wait` with tests/test-values.yaml +
+#               tests/ats/values-kagent.yaml + tests/ats/values-round-trips.yaml
+#               and self-management ON against that registry. It asserts what the
+#               install promises (deployed, FluxInstance Ready, component
+#               HelmReleases Ready as agent-platform-flux), the adoption, the
+#               auth round trip (401 chain, a Dex user through the password grant
+#               and through muster's login flow), the agent round trips (a
+#               declarative Agent Ready; agent-manager's create_agent through
+#               muster -> a HelmRelease as kagent-flux -> Agent Ready), the
+#               self-management fixpoint and the values Secret, the refused
+#               `helm upgrade`, then the ordered teardown (`helm uninstall
+#               --wait` clean in under a minute, no Flux CRD left, the operator
+#               CRDs still there).
+#   functional  tests/ats/test_own_flux.py — a cluster that runs its own Flux:
+#               source-controller + helm-controller from the upstream manifest,
+#               the chart THROUGH a HelmRelease with components.flux.enabled
+#               false (no operator, no second helm-controller, the Flux CRDs'
+#               field managers untouched, an agent through that Flux), the render
+#               guard when the value is flipped on, and the way back.
+#
+# upgrade stays skipped: the upgrade from the last published chart is not a
+# kind smoke's job here (self-management rolls a running installation forward
+# through its own HelmRelease; the smoke asserts that mechanism's fixpoint).
 app-tests-app-config-file: tests/test-values.yaml
 app-tests-deploy-namespace: agent-platform
 app-tests-skip-app-deploy: true
 
-skip-steps: [functional,upgrade]
+skip-steps: [upgrade]

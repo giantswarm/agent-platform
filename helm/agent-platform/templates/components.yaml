@@ -189,6 +189,9 @@ metadata:
 spec:
   interval: {{ $g.interval }}
   url: {{ printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart }}
+  {{- if $c.insecure }}
+  insecure: true
+  {{- end }}
   ref:
     semver: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
     {{- with $c.filterTags }}

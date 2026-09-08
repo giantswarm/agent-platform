@@ -9,8 +9,17 @@ Expand the name of the chart.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
+{{- /*
+The helm.sh/chart label: <name>-<version> as a valid label value. A label is at
+most 63 characters and must end on an alphanumeric: Helm's `+` build metadata
+(helm-controller appends the OCI digest to every chart version it installs,
+`3.20.0+8c89e1be4cbf`) becomes `_`, and after the cut every trailing `-`, `.`
+and `_` goes — a branch build's long prerelease version (abs:
+`3.19.1-dev.<branch>.<date>.h<sha>`) made the cut land on the `_` once, and the
+apiserver rejected every object of the release. tests/verify-labels.py.
+*/ -}}
 {{- define "chart" -}}
-{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-." -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-._" -}}
 {{- end -}}
 
 {{/*

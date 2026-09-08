@@ -1,0 +1,26 @@
+# The kagent runtime for the ATS agent round trips, layered over
+# tests/test-values.yaml (tests/ats/conftest.py): the kind smoke's declarative
+# Agent and agent-manager's create_agent need the controller; the own-Flux
+# scenario deploys a declarative agent through the cluster's own Flux with the
+# same file. Sized for the CI executor (two cores): modest CPU requests so the
+# controller and its bundled Postgres schedule next to the engine and the
+# platform pods; the kagent UI stays off (nothing in the smoke reaches it, and
+# its image is the largest pull of the install — the chart has no ui.enabled
+# switch, zero replicas keeps the Deployment without a pod).
+components:
+  kagent:
+    enabled: true
+
+kagent:
+  controller:
+    resources:
+      requests:
+        cpu: 50m
+  ui:
+    replicas: 0
+  database:
+    postgres:
+      bundled:
+        resources:
+          requests:
+            cpu: 50m

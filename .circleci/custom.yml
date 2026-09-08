@@ -10,7 +10,7 @@
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
 #     `make verify-managers` + `make verify-kagent-netpol` + `make verify-kagent-discovery` + `make verify-meta` +
-#     `make verify-engine` + `make verify-self` + `make verify-postgres` +
+#     `make verify-engine` + `make verify-self` + `make verify-labels` + `make verify-postgres` +
 #     `make verify-components` + `make verify-auto` + `make verify-identity` +
 #     `make verify-wiring` checks on branches (ingress-mode guards, the global.*
 #     contract, the model-manager / agent-manager wiring, the kagent tool-server
@@ -87,7 +87,7 @@ jobs:
         # single source of truth, also run locally. The meta chart's one
         # dependency is the flux-engine subchart, a directory in its charts/,
         # which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring
 
 workflows:
   build:

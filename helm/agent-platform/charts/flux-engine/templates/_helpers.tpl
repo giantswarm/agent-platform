@@ -21,7 +21,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
 app.kubernetes.io/part-of: agent-platform
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 application.giantswarm.io/team: {{ index .Chart.Annotations "io.giantswarm.application.team" | quote }}
-helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-." | quote }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-._" | quote }}
 {{- end -}}
 
 {{/*

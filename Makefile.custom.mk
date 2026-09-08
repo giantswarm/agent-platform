@@ -42,7 +42,9 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # label, not this release's): both sides render with the kagent ServiceMonitor
 # off — the metrics Service is gated on it — and verify-global asserts the
 # selector.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false
+# kagent.namespaceOverride=default (the release namespace of `helm template t`) drops the kagent Namespace object from both renders: this branch
+# keeps it (helm.sh/resource-policy: keep), an intended difference to GOLDEN_REF; every other kagent object renders alike on both sides.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -120,9 +122,9 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	elif ! grep -q "volumeTypesRuleNames must name at least one non-empty rule" /tmp/vm-pe-rule.out; then \
 		echo "FAIL: the empty-rule guard failed for the wrong reason"; cat /tmp/vm-pe-rule.out; exit 1; \
 	else echo "ok: empty-rule guard"; fi
-	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it)"
-	@if grep -q "helm.sh/resource-policy" /tmp/vm-pe-kyverno.out; then \
-		echo "FAIL: helm.sh/resource-policy is back; the policy would be orphaned on removal"; exit 1; \
+	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it; the kagent Namespace is the one kept object)"
+	@if awk 'BEGIN{RS="\n---\n"} /kind: ClusterPolicy/ && /helm.sh\/resource-policy/ {found=1} END{exit !found}' /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: helm.sh/resource-policy is back on a ClusterPolicy; the policy would be orphaned on removal"; exit 1; \
 	else echo "ok: prunable"; fi
 	@echo "--> a component toggle left in its old per-chart block must fail loudly"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set kagent.enabled=true >/tmp/vm-legacy.out 2>&1; then \
@@ -419,6 +421,22 @@ verify-self: ## Assert self-management's shapes: engine off renders nothing of i
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-self.py $(CHART_DIR)
 	@echo "self-management shapes verified."
+
+.PHONY: verify-insecure
+verify-insecure: ## Assert components.<name>.insecure renders OCIRepository.spec.insecure for that component only (a lab's plain-HTTP registry), and nothing by default.
+	@echo "====> $@ ($(CHART_DIR))"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false >/tmp/ap-insecure-off.out 2>&1 || { cat /tmp/ap-insecure-off.out; exit 1; }
+	@if grep -q '^  insecure: true' /tmp/ap-insecure-off.out; then echo "FAIL: an OCIRepository renders insecure by default"; exit 1; fi
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false --set components.muster.insecure=true --set components.muster.repository=oci://registry.registry.svc.cluster.local:5000/charts >/tmp/ap-insecure-on.out 2>&1 || { cat /tmp/ap-insecure-on.out; exit 1; }
+	@if [ "$$(grep -c '^  insecure: true' /tmp/ap-insecure-on.out)" != "1" ]; then echo "FAIL: components.muster.insecure must render exactly one insecure OCIRepository"; grep -n 'insecure' /tmp/ap-insecure-on.out; exit 1; fi
+	@if ! grep -q 'url: oci://registry.registry.svc.cluster.local:5000/charts/muster' /tmp/ap-insecure-on.out; then echo "FAIL: components.muster.repository did not steer the OCIRepository url"; exit 1; fi
+	@echo "components.<name>.insecure verified."
+
+.PHONY: verify-labels
+verify-labels: ## Assert every label value stays valid at the versions the charts are installed under: helm-controller's +digest and a branch build's long prerelease, with the 63-character cut landing on each separator. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-labels.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "label values verified."
 
 .PHONY: verify-components
 verify-components: ## Assert the roster entries of the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts): off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema.

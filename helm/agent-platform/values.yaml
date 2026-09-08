@@ -209,6 +209,9 @@ gitops:
 #       path, so the wiring cannot disagree with the release.
 #   dependsOn    — CRD-before-CR order
 #       (a reference to a toggled-off component is dropped at render time).
+#   insecure     — plain-HTTP registry (OCIRepository.spec.insecure), for a lab's
+#       in-cluster registry (the ATS pushes the charts under test to one). Never
+#       for a public registry.
 #   crds         — Helm CRD lifecycle (CreateReplace) for a component that ships its
 #       own CRDs in its chart's crds/ dir (app-owned CRDs). Such a component owns its
 #       CRD version; its CR consumers dependsOn it instead.

@@ -1,0 +1,70 @@
+# The in-cluster OCI registry of the ATS (tests/ats/conftest.py `registry`):
+# the chart under test is UNRELEASED, and two scenarios need it in a registry a
+# Flux source-controller can pull from — self-management (the chart's own
+# OCIRepository, gitops.self.repository) and the own-Flux scenario (the chart
+# installed THROUGH a cluster's Flux from an OCIRepository). The test pushes the
+# candidate archive with `helm push --plain-http` through a port-forward; the
+# controllers pull it by cluster DNS: oci://registry.registry.svc.cluster.local:5000/charts
+# (OCIRepository `insecure: true`, gitops.self.insecure: true). CNCF
+# Distribution from ghcr.io (no Docker Hub pull limits in CI), ephemeral
+# storage — the registry lives as long as the kind cluster. LAB ONLY.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: registry
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: registry
+  labels:
+    app: registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry
+  template:
+    metadata:
+      labels:
+        app: registry
+    spec:
+      containers:
+        - name: registry
+          image: ghcr.io/distribution/distribution:3.0.0
+          ports:
+            - name: http
+              containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: http
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: registry
+  labels:
+    app: registry
+spec:
+  selector:
+    app: registry
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
