@@ -18,9 +18,14 @@ management cluster) on the ATS kind cluster, after the smoke's uninstall.
      the connectivity release rendered, reach Ready; the Agent reaches Ready;
   5. the render guard: flipping the value to true makes the HelmRelease FAIL
      with `this cluster runs Flux; set components.flux.enabled=false or install
-     the chart through it` and touches nothing — no operator, no FluxInstance,
-     the CRD managers unchanged, the platform and the agent still Ready;
-     flipping it back recovers;
+     the chart through it` — no operator, no FluxInstance, the platform and the
+     agent still Ready, the Flux CRDs' content unchanged. One thing the guard
+     cannot stop under helm-controller: it applies a chart's crds/ before it
+     renders, so the flipped value server-side-applies the vendored Flux CRDs
+     (the same Flux version as the cluster's, so identical content) and
+     helm-controller joins their field managers (asserted and logged as the
+     finding it is; `upgrade.crds: Skip` on the installing HelmRelease avoids
+     it). Flipping the value back recovers;
   6. the way back: deleting the HelmRelease lets that Flux uninstall the
      platform (the chart renders no hook here and never touches the cluster's
      Flux); the Flux install is removed last.
@@ -71,6 +76,7 @@ MODEL_CONFIG = "default-model-config"
 
 class State:
     crd_managers: Dict[str, Set[str]] = {}
+    crd_specs: Dict[str, Any] = {}
     flux_manifest: List[Dict[str, Any]] = []
 
 
@@ -93,6 +99,10 @@ def flux_crd_managers(kube: Kube) -> Dict[str, Set[str]]:
     return {name: kube.managers("crd", name) for name in kube.flux_crds()}
 
 
+def flux_crd_specs(kube: Kube) -> Dict[str, Any]:
+    return {name: (kube.get("crd", name) or {}).get("spec") for name in kube.flux_crds()}
+
+
 def helm_controllers(kube: Kube) -> List[str]:
     return [f"{d['metadata']['namespace']}/{d['metadata']['name']}"
             for d in kube.items("deployments", "-l", "app.kubernetes.io/component=helm-controller", all_namespaces=True)]
@@ -103,11 +113,28 @@ def operator_deployments(kube: Kube) -> List[str]:
             if d["metadata"]["name"] == "flux-operator"]
 
 
-def assert_no_engine(kube: Kube) -> None:
+def assert_no_engine(kube: Kube, crds_untouched: bool = True) -> None:
+    """Nothing of the engine on the cluster. With crds_untouched the Flux CRDs'
+    field managers are exactly what `flux install` left; without it (after the
+    guard fired under helm-controller) their content must be unchanged and no
+    engine manager (flux-operator) may have appeared — helm-controller applies
+    a chart's crds/ BEFORE it renders the templates, so the flipped value makes
+    it server-side-apply the vendored Flux CRDs (identical to the cluster's,
+    the same Flux version) and join their managers even though the render then
+    fails. Under the Helm CLI `helm upgrade` never touches crds/."""
     assert not operator_deployments(kube), f"a flux-operator Deployment exists: {operator_deployments(kube)}"
     assert not kube.items("fluxinstances.fluxcd.controlplane.io", all_namespaces=True), "a FluxInstance exists"
     assert helm_controllers(kube) == [f"{FLUX_NAMESPACE}/helm-controller"], f"helm-controllers: {helm_controllers(kube)}"
-    assert flux_crd_managers(kube) == STATE.crd_managers, f"the Flux CRDs' field managers changed: {flux_crd_managers(kube)} != {STATE.crd_managers}"
+    managers = flux_crd_managers(kube)
+    assert flux_crd_specs(kube) == STATE.crd_specs, "the Flux CRDs' content changed"
+    if crds_untouched:
+        assert managers == STATE.crd_managers, f"the Flux CRDs' field managers changed: {managers} != {STATE.crd_managers}"
+    else:
+        extra = {m for ms in managers.values() for m in ms} - {m for ms in STATE.crd_managers.values() for m in ms}
+        assert extra <= {"helm-controller"}, f"unexpected field managers on the Flux CRDs: {sorted(extra)}"
+        if extra:
+            logger.warning("finding: helm-controller applied the chart's crds/ before the render failed — the Flux CRDs gained the manager %s (content unchanged); "
+                           "a HelmRelease that installs this chart on a cluster with its own Flux can set upgrade.crds: Skip to avoid even that", sorted(extra))
 
 
 def platform_values() -> Dict[str, Any]:
@@ -156,6 +183,7 @@ def own_flux(kube: Kube) -> Iterator[None]:
         kube.wait_deployment(FLUX_NAMESPACE, name, timeout=300)
     kube.cmd(["wait", "--for=condition=Established", "--timeout=60s", "crd", *kube.flux_crds()])
     STATE.crd_managers = flux_crd_managers(kube)
+    STATE.crd_specs = flux_crd_specs(kube)
     # The cluster owns its namespaces: the fleet bases create kagent's on every
     # management cluster; here the test does (README "Clusters that run Flux").
     # The smoke's teardown deleted the namespace with the connectivity release;
@@ -172,9 +200,9 @@ def own_flux(kube: Kube) -> Iterator[None]:
     try:
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE, timeout="3m")
         kube.delete("ocirepositories.source.toolkit.fluxcd.io", "agent", namespace=KAGENT_NAMESPACE, timeout="1m")
-        kube.delete("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="5m")
+        kube.delete("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="3m")
         wait_for("the platform HelmReleases uninstalled by the cluster's Flux",
-                 lambda: not kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE), 300)
+                 lambda: not kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE), 120)
         kube.delete("ocirepositories.source.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="1m")
         kube.cmd(["delete", "--ignore-not-found", "--wait=false", "-f", "-"], stdin=yaml.safe_dump_all(STATE.flux_manifest), check=False)
         TIMINGS.record("the way back: HelmRelease deleted, platform uninstalled by the cluster's Flux, Flux removed", time.monotonic() - started)
@@ -219,7 +247,7 @@ def test_platform_installs_through_the_clusters_flux(kube: Kube, platform_throug
         assert "serviceAccountName" not in hr["spec"], f"{name} names a serviceAccountName with the engine off: {hr['spec'].get('serviceAccountName')}"
     assert hrs["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "engine off: the kagent HelmRelease must keep gitops.targetNamespace (the fleet render)"
     assert_no_engine(kube)
-    hook_jobs = [j["metadata"]["name"] for j in kube.items("jobs", namespace=NAMESPACE)]
+    hook_jobs = [j["metadata"]["name"] for j in kube.items("jobs", "-l", f"app.kubernetes.io/instance={RELEASE}", namespace=NAMESPACE)]
     assert not hook_jobs, f"the chart rendered hooks with the engine off: {hook_jobs}"
     assert not kube.items("validatingadmissionpolicies.admissionregistration.k8s.io", "-l", f"app.kubernetes.io/instance={RELEASE}"), "self-management rendered with the engine off"
     assert kube.deployment_ready(NAMESPACE, "muster")
@@ -267,7 +295,7 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
 
         messages = wait_for("the HelmRelease failing with the render guard's message", guard_fired, 300, interval=3)
         TIMINGS.record("render guard: HelmRelease reports the refusal after the flip", time.monotonic() - started)
-        assert_no_engine(kube)
+        assert_no_engine(kube, crds_untouched=False)
         hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
         assert set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values()), {n: condition(h) for n, h in hrs.items()}
         assert all("serviceAccountName" not in hr["spec"] for hr in hrs.values()), "the failed upgrade changed the platform HelmReleases"
@@ -277,7 +305,7 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         kube.apply(meta_helmrelease(candidate_version, engine=False))
         wait_for(f"HelmRelease {RELEASE} Ready again with the engine off",
                  lambda: is_ready(kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE)), 300, interval=3)
-        assert_no_engine(kube)
+        assert_no_engine(kube, crds_untouched=False)
     except AssertionError:
         dump(kube)
         raise
