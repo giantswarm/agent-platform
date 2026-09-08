@@ -59,6 +59,19 @@ knowledge:
       renders a component's wiring (agent-platform-connectivity) gates on the
       same answer that decided whether the release exists. The forwarded copy
       holds only `enabled`.
+  feature switch — an entry WITHOUT `chart:` is a switch, not a component: the
+      loop renders no OCIRepository / HelmRelease for it and forwards its
+      `enabled` in the roster like every other entry, so a subchart condition
+      (components.flux, the flux-engine subchart) or the connectivity chart
+      (components.modelServing: the model serving objects are connectivity
+      templates with no chart of their own) gates on it. A top-level values
+      block named after a switch (modelServing:) travels with forwardAllValues
+      only while the switch is ON: while it is off nothing reads it, and a
+      live connectivity chart that predates the block would reject it
+      (additionalProperties: false) — the same window omitKeys closes for a
+      new key, closed here without a follow-up release. A dependsOn reference
+      to a switch is filtered like any other (it names no release, so keep
+      switches out of dependsOn lists).
   dependsOn     — Flux dependsOn ordering (CRD-owning component before its CR
       consumers). References that name a component which is toggled
       off are dropped at render time (see the componentEnabled helper) so an
@@ -128,7 +141,7 @@ values and every component the same one flavor. */ -}}
 {{- $shaped := deepCopy (omit $root.Values "gitops" "components") -}}
 {{- include "agent-platform.shape.apply" (dict "root" $root "values" $shaped) -}}
 {{- range $key, $c := .Values.components }}
-{{- /* An entry without a chart is a feature switch (components.flux): in the roster, no release. */ -}}
+{{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
 {{- $name := $c.chart }}
 {{- /* passthrough values */ -}}
@@ -137,6 +150,10 @@ values and every component the same one flavor. */ -}}
 {{- $vals = mergeOverwrite (deepCopy $shaped) (dict "components" $roster) }}
 {{- /* Hold back the top-level blocks the chart does not read yet (see omitKeys above). */ -}}
 {{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- /* A switch's values block travels only while the switch is on (see feature switch above). */ -}}
+{{- range $switch, $sw := $root.Values.components }}
+{{- if and (not (hasKey $sw "chart")) (not (index $roster $switch).enabled) (hasKey $vals $switch) }}{{- $vals = omit $vals $switch }}{{- end }}
+{{- end }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the

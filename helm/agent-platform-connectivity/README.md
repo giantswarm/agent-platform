@@ -4,11 +4,14 @@ Giant Swarm Agent Platform — connectivity / integration layer. Renders the
 consumer-side wiring that turns the platform components into a working whole on
 a cluster: the public muster route and the agentgateway data-plane Gateway +
 AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
-the kagent and klaus-gateway routes, the kagent declarative-agent wiring, and the
-CloudNativePG Cluster. Ships NO workloads of its own — those are separate releases
-rendered by the agent-platform meta-chart. The CRDs these CRs consume are
-app-owned: each component (agentgateway, kagent, …) ships its own CRDs, so this
-chart's HelmRelease dependsOn those CRD-owning component releases.
+the kagent and klaus-gateway routes, the kagent declarative-agent wiring, the
+CloudNativePG Cluster, and — gated on the component toggles — the Backstage
+app-config and route, the mcp-kubernetes MCPServer registration with muster and
+the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO
+workloads of its own — those are separate releases rendered by the agent-platform
+meta-chart. The CRDs these CRs consume are app-owned: each component
+(agentgateway, kagent, muster, …) ships its own CRDs, so this chart's HelmRelease
+dependsOn those CRD-owning component releases.
 
 **Homepage:** <https://github.com/giantswarm/agent-platform>
 
@@ -26,6 +29,8 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | global.identity.issuerUrl | string | `""` |  |
 | global.identity.clientId | string | `""` |  |
 | global.identity.existingSecret | string | `""` |  |
+| global.identity.ca.secretName | string | `""` |  |
+| global.identity.ca.key | string | `"ca.crt"` |  |
 | global.gatewayApi.parentRefs | list | `[]` |  |
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
@@ -47,6 +52,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | components.kserve-resources.enabled | bool | `false` |  |
 | components.kserve-llmisvc-crd.enabled | bool | `false` |  |
 | components.kserve-llmisvc-resources.enabled | bool | `false` |  |
+| components.modelServing.enabled | bool | `false` |  |
 | ingress.mode | string | `"muster-direct"` |  |
 | ingress.parentRefs | list | `[]` |  |
 | ingress.hostnames | list | `[]` |  |
@@ -494,10 +500,102 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | agentManager.networkPolicy.egress.fqdns[1].matchName | string | `"api.github.com"` |  |
 | agentManager.networkPolicy.egress.cidrs | list | `[]` |  |
-| backstage | object | `{}` |  |
-| mcp-kubernetes | object | `{}` |  |
+| backstage.hostname | string | `""` |  |
+| backstage.parentRefs | list | `[]` |  |
+| backstage.installationName | string | `"agent-platform"` |  |
+| backstage.extraScopes[0] | string | `"federated:id"` |  |
+| backstage.extraScopes[1] | string | `"audience:server:client_id:dex-k8s-authenticator"` |  |
+| backstage.startUrlSearchParams | object | `{}` |  |
+| backstage.enabledExtensions | list | `[]` |  |
+| backstage.disabledExtensions[0] | string | `"page:gs/clusters"` |  |
+| backstage.disabledExtensions[1] | string | `"nav-item:gs/clusters"` |  |
+| backstage.disabledExtensions[2] | string | `"page:gs/deployments"` |  |
+| backstage.disabledExtensions[3] | string | `"nav-item:gs/deployments"` |  |
+| backstage.disabledExtensions[4] | string | `"page:gs/installations"` |  |
+| backstage.disabledExtensions[5] | string | `"nav-item:gs/installations"` |  |
+| backstage.disabledExtensions[6] | string | `"page:flux"` |  |
+| backstage.disabledExtensions[7] | string | `"nav-item:flux"` |  |
+| backstage.disabledExtensions[8] | string | `"page:ai-chat"` |  |
+| backstage.disabledExtensions[9] | string | `"api:ai-chat/service"` |  |
+| backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
+| backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
+| backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| backstage.catalogs.version | string | `"v0.6.0"` |  |
+| backstage.configReload.enabled | bool | `true` |  |
+| backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
+| backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
+| backstage.configReload.image.version | string | `"v1.37.0"` |  |
+| mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
+| mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
+| mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kserve-crd | object | `{}` |  |
 | kserve-resources | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |
 | kserve-llmisvc-resources | object | `{}` |  |
+| modelServing.kserve.requireApi | bool | `true` |  |
+| modelServing.namespace.name | string | `"model-serving"` |  |
+| modelServing.namespace.create | bool | `true` |  |
+| modelServing.namespace.labels | object | `{}` |  |
+| modelServing.runtime.name | string | `"kserve-vllm"` |  |
+| modelServing.runtime.image.registry | string | `"docker.io"` |  |
+| modelServing.runtime.image.name | string | `"vllm/vllm-openai"` |  |
+| modelServing.runtime.image.version | string | `"v0.28.0"` |  |
+| modelServing.runtime.args[0] | string | `"--model"` |  |
+| modelServing.runtime.args[1] | string | `"/mnt/models"` |  |
+| modelServing.runtime.args[2] | string | `"--port"` |  |
+| modelServing.runtime.args[3] | string | `"8080"` |  |
+| modelServing.runtime.args[4] | string | `"--served-model-name"` |  |
+| modelServing.runtime.args[5] | string | `"{{.Name}}"` |  |
+| modelServing.runtime.env[0].name | string | `"HF_HUB_ENABLE_HF_TRANSFER"` |  |
+| modelServing.runtime.env[0].value | string | `"1"` |  |
+| modelServing.runtime.env[1].name | string | `"VLLM_CONFIG_ROOT"` |  |
+| modelServing.runtime.env[1].value | string | `"/tmp"` |  |
+| modelServing.runtime.resources.requests.cpu | string | `"2"` |  |
+| modelServing.runtime.resources.requests.memory | string | `"16Gi"` |  |
+| modelServing.runtime.resources.limits.cpu | string | `"8"` |  |
+| modelServing.runtime.resources.limits.memory | string | `"64Gi"` |  |
+| modelServing.runtime.shmSize | string | `"16Gi"` |  |
+| modelServing.runtime.startupProbe.initialDelaySeconds | int | `300` |  |
+| modelServing.runtime.startupProbe.periodSeconds | int | `30` |  |
+| modelServing.runtime.startupProbe.failureThreshold | int | `360` |  |
+| modelServing.runtime.annotations."prometheus.kserve.io/path" | string | `"/metrics"` |  |
+| modelServing.runtime.annotations."prometheus.kserve.io/port" | string | `"8080"` |  |
+| modelServing.runtime.supportedModelFormats[0].name | string | `"vLLM"` |  |
+| modelServing.runtime.supportedModelFormats[0].version | string | `"1"` |  |
+| modelServing.runtime.supportedModelFormats[0].autoSelect | bool | `true` |  |
+| modelServing.runtime.supportedModelFormats[0].priority | int | `1` |  |
+| modelServing.runtime.nodeSelector | object | `{}` |  |
+| modelServing.runtime.tolerations | list | `[]` |  |
+| modelServing.serving.gpuResourceName | string | `"nvidia.com/gpu"` |  |
+| modelServing.serving.runtimeClassName | string | `""` |  |
+| modelServing.serving.nodeSelector | object | `{}` |  |
+| modelServing.serving.deploymentStrategyType | string | `"Recreate"` |  |
+| modelServing.serving.timeoutSeconds | int | `1800` |  |
+| modelServing.presets | list | `[]` |  |
+| modelServing.shippedPresets.enabled | bool | `true` |  |
+| modelServing.shippedPresets.exclude | list | `[]` |  |
+| modelServing.cache.enabled | bool | `true` |  |
+| modelServing.cache.pvc.name | string | `"hf-cache"` |  |
+| modelServing.cache.pvc.existingClaim | string | `""` |  |
+| modelServing.cache.pvc.size | string | `"500Gi"` |  |
+| modelServing.cache.pvc.storageClassName | string | `""` |  |
+| modelServing.cache.pvc.volumeName | string | `""` |  |
+| modelServing.cache.pvc.accessModes[0] | string | `"ReadWriteOnce"` |  |
+| modelServing.policies.enabled | string | `"auto"` |  |
+| modelServing.policies.cacheInit.image.registry | string | `"gsoci.azurecr.io"` |  |
+| modelServing.policies.cacheInit.image.name | string | `"giantswarm/alpine"` |  |
+| modelServing.policies.cacheInit.image.version | string | `"3.24.1"` |  |
+| modelServing.policies.cacheInit.resources.requests.cpu | string | `"10m"` |  |
+| modelServing.policies.cacheInit.resources.requests.memory | string | `"16Mi"` |  |
+| modelServing.policies.cacheInit.resources.limits.cpu | string | `"100m"` |  |
+| modelServing.policies.cacheInit.resources.limits.memory | string | `"64Mi"` |  |
+| modelServing.policies.storageInitializerMemoryLimit | string | `"4Gi"` |  |
+| modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
+| modelServing.networkPolicy.predictor.port | int | `8080` |  |
+| modelServing.networkPolicy.predictor.additionalIngressNamespaces | list | `[]` |  |
+| modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
+| modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
+| modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
+| modelServing.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
+| modelServing.networkPolicy.huggingFace.cidrs | list | `[]` |  |

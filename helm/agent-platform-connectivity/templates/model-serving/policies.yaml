@@ -1,0 +1,220 @@
+{{- $ms := .Values.modelServing }}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.modelServingPolicies" .) }}
+{{- $ns := include "agent-platform.modelServing.namespace" . }}
+{{- $name := include "name" . }}
+{{- $init := $ms.policies.cacheInit }}
+{{- /* Kyverno variables, kept out of Helm's way: the InferenceService name
+       every predictor pod carries as a label, and the JMESPath that counts the
+       storage-initializer init containers KServe injected (a pod without one
+       — a custom container without storageUri — is left alone). The backtick
+       JMESPath literal cannot sit inside a Go raw string, hence printf. */ -}}
+{{- $isvc := `{{ request.object.metadata.labels."serving.kserve.io/inferenceservice" }}` }}
+{{- $backtick := "`" }}
+{{- $hasStorageInitializer := printf "{{ length(request.object.spec.initContainers[?name=='storage-initializer'] || %s[]%s) }}" $backtick $backtick }}
+# Admission-time wiring of every InferenceService pod in the serving namespace
+# (Kyverno mutate policies; rendered where kyverno.io/v1 is served —
+# modelServing.policies.enabled follows the resolved kyvernoPolicies.enabled).
+# Per rule:
+#   add-cache-init             an init container ahead of the KServe
+#                              storage-initializer creates the pod's cache
+#                              subdirectory (<claim>/<inferenceservice>)
+#                              world-writable — the kubelet would create a
+#                              missing subPath directory root-owned 0750,
+#                              which the storage-initializer's uid cannot
+#                              write, so a download would need someone with
+#                              node access to mkdir first.
+#   redirect-model-storage     the storage-initializer's and the runtime's
+#                              /mnt/models become that subdirectory instead of
+#                              the ephemeral emptyDir KServe mounts: a model
+#                              downloads once, a restart skips the download
+#                              (the storage-initializer detects the files).
+#   storage-initializer-memory a memory limit that survives multi-GB downloads
+#                              (KServe's default 1Gi is OOM-killed).
+# The rules mutate at CREATE only: a pod's init containers are immutable, and
+# the operation filter keeps later pod updates untouched. add-cache-init is the
+# LAST rule on purpose: Kyverno's strategic merge moves the init containers it
+# patched to the front of the list, so an insert at index 0 survives only when
+# no strategic merge runs after it (verified with `kyverno apply`).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ $name }}-model-serving-pods
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Model serving predictor pods
+    policies.kyverno.io/description: >-
+      Mounts the Hugging Face cache claim into every KServe predictor pod in
+      the {{ $ns }} namespace (one subdirectory per InferenceService, created
+      by an init container) and raises the storage-initializer memory limit.
+spec:
+  background: false
+  rules:
+    {{- if $ms.cache.enabled }}
+    - name: redirect-model-storage
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - {{ $ns }}
+              operations:
+                - CREATE
+              selector:
+                matchExpressions:
+                  - key: serving.kserve.io/inferenceservice
+                    operator: Exists
+      preconditions:
+        all:
+          - key: {{ $hasStorageInitializer | quote }}
+            operator: GreaterThan
+            value: 0
+      mutate:
+        patchStrategicMerge:
+          spec:
+            volumes:
+              - name: hf-cache
+                persistentVolumeClaim:
+                  claimName: {{ include "agent-platform.modelServing.claimName" . }}
+            # volumeMounts merge on mountPath: these replace KServe's emptyDir
+            # mounts at /mnt/models (the runtime's stays read-only).
+            initContainers:
+              - name: storage-initializer
+                volumeMounts:
+                  - name: hf-cache
+                    mountPath: /mnt/models
+                    subPath: {{ $isvc | quote }}
+            containers:
+              - name: kserve-container
+                volumeMounts:
+                  - name: hf-cache
+                    mountPath: /mnt/models
+                    subPath: {{ $isvc | quote }}
+    {{- end }}
+    {{- with $ms.policies.storageInitializerMemoryLimit }}
+    - name: storage-initializer-memory
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - {{ $ns }}
+              operations:
+                - CREATE
+              selector:
+                matchExpressions:
+                  - key: serving.kserve.io/inferenceservice
+                    operator: Exists
+      preconditions:
+        all:
+          - key: {{ $hasStorageInitializer | quote }}
+            operator: GreaterThan
+            value: 0
+      mutate:
+        patchStrategicMerge:
+          spec:
+            initContainers:
+              - name: storage-initializer
+                resources:
+                  limits:
+                    memory: {{ . | quote }}
+    {{- end }}
+    {{- if $ms.cache.enabled }}
+    - name: add-cache-init
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - {{ $ns }}
+              operations:
+                - CREATE
+              selector:
+                matchExpressions:
+                  - key: serving.kserve.io/inferenceservice
+                    operator: Exists
+      preconditions:
+        all:
+          - key: {{ $hasStorageInitializer | quote }}
+            operator: GreaterThan
+            value: 0
+      mutate:
+        patchesJson6902: |-
+          - op: add
+            path: /spec/initContainers/0
+            value:
+              name: hf-cache-init
+              image: {{ printf "%s/%s:%s" $init.image.registry $init.image.name $init.image.version | quote }}
+              command:
+                - sh
+                - -ec
+                - mkdir -p "/cache/$MODEL_DIR" && chmod 0777 "/cache/$MODEL_DIR"
+              env:
+                - name: MODEL_DIR
+                  # squote, not quote: this block scalar is YAML that Kyverno
+                  # parses later, and an escaped inner quote is a JMESPath
+                  # syntax error there.
+                  value: {{ $isvc | squote }}
+              securityContext:
+                # The claim's root directory is root-owned: creating the
+                # per-model directory needs root; nothing else does.
+                runAsUser: 0
+                runAsNonRoot: false
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+                  add:
+                    - CHOWN
+                    - DAC_OVERRIDE
+                    - FOWNER
+              resources:
+                {{- toYaml $init.resources | nindent 16 }}
+              volumeMounts:
+                - name: hf-cache
+                  mountPath: /cache
+    {{- end }}
+{{- if gt (int $ms.policies.progressDeadlineSeconds) 0 }}
+---
+# KServe exposes no progressDeadlineSeconds on the InferenceService; the
+# Kubernetes default (600s) is shorter than a first model download and fires
+# rollout-stuck alerts while the pod is healthy and busy.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ $name }}-model-serving-deployments
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Model serving predictor Deployments
+    policies.kyverno.io/description: >-
+      Sets progressDeadlineSeconds on every InferenceService Deployment in the
+      {{ $ns }} namespace, long enough for a first model download.
+spec:
+  background: false
+  rules:
+    - name: progress-deadline
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+              namespaces:
+                - {{ $ns }}
+              operations:
+                - CREATE
+                - UPDATE
+              selector:
+                matchExpressions:
+                  - key: serving.kserve.io/inferenceservice
+                    operator: Exists
+      mutate:
+        patchStrategicMerge:
+          spec:
+            progressDeadlineSeconds: {{ int $ms.policies.progressDeadlineSeconds }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,38 @@
+# Qwen3.5 35B-A3B, BF16. Mixture of experts: 35B total, 3B active per token.
+# Multimodal (text + vision).
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-5-35b-a3b
+spec:
+  displayName: Qwen3.5 35B-A3B (MoE)
+  description: |
+    Fast MoE chat model: 35B parameters loaded (~70 GiB at BF16), 3B active
+    per token, so decode is quick for its size. Thinking disabled by default
+    for snappy chat. Tuned on a single-GPU 128 GB unified-memory node
+    (--gpu-memory-utilization=0.72).
+  model:
+    id: Qwen/Qwen3.5-35B-A3B
+    storageUri: hf://Qwen/Qwen3.5-35B-A3B
+    format: vLLM
+    contextLength: 8192
+    capabilities: [chat, tools, vision]
+    license: apache-2.0
+  args:
+    - --gpu-memory-utilization=0.72
+    - --max-model-len=8192
+    - --enforce-eager
+    - --no-enable-log-requests
+    - --default-chat-template-kwargs
+    - '{"enable_thinking": false}'
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 48Gi
+    limits:
+      cpu: "8"
+      memory: 64Gi
+  requirements:
+    weightsGiB: 70
+    overheadGiB: 30

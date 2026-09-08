@@ -1,0 +1,212 @@
+{{- if (include "agent-platform.backstage.enabled" .) }}
+{{- $backstage := .Values.backstage | default dict }}
+{{- /* The domain is required whenever Backstage is on: baseDomain and the
+avatars CSP entry derive from it even when backstage.hostname overrides the
+route hostname. */}}
+{{- $domain := required "global.domain is empty but the Backstage component is on: the app-config's baseDomain and avatars CSP entry derive from it" .Values.global.domain }}
+{{- $hostname := include "agent-platform.backstage.hostname" . }}
+{{- $issuer := include "agent-platform.issuerUrl" (dict "ctx" . "for" "the Backstage login provider") }}
+{{- $installation := include "agent-platform.backstage.installationName" . }}
+{{- $provider := "oidc-agent-platform" }}
+{{- $musterHostname := "" }}
+{{- if .Values.ingress.hostnames }}
+{{- $musterHostname = index .Values.ingress.hostnames 0 }}
+{{- else }}
+{{- $musterHostname = include "agent-platform.hostname" (dict "ctx" . "prefix" "muster" "key" "ingress.hostnames") }}
+{{- end }}
+{{- $fluxSa := include "agent-platform.kagent.fluxServiceAccountName" . }}
+# Backstage app-config layered on the image's own: the login provider from
+# global.identity, one installation (backstage.installationName, default the
+# release name), the matching in-cluster Kubernetes entry (the frontend mints
+# the kagent token from it), the muster installation, the pg database block
+# when the Backstage chart's postgresql engine is on, app.extensions limited to
+# the Agent Platform pages, and the Agent Platform plugin's own block (the
+# tenant identity of the agents' HelmReleases, the skill repositories, the
+# kagent and model-manager API routes). The backstage chart mounts it through
+# backstage.extraAppConfig; the ConfigMap name and the file name are fixed
+# there. The Backstage release's pod checksums never see this ConfigMap —
+# changes here reach the running pod through the config-reload hook
+# (config-reload-hook.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-backstage-app-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.backstage.labels" . | nindent 4 }}
+data:
+  app-config.agent-platform.yaml: |
+    app:
+      title: Agent Platform
+      baseUrl: https://{{ $hostname }}
+      rootRedirect: /agent-platform
+      extensions:
+        - page:agent-platform
+        - nav-item:agent-platform
+        {{- range ($backstage.enabledExtensions | default list) }}
+        - {{ . }}
+        {{- end }}
+        {{- /* enabledExtensions wins: an extension listed in both is enabled. */}}
+        {{- range ($backstage.disabledExtensions | default list) }}
+        {{- if not (has . ($backstage.enabledExtensions | default list)) }}
+        - {{ . }}: false
+        {{- end }}
+        {{- end }}
+    backend:
+      baseUrl: https://{{ $hostname }}
+      cors:
+        origin: https://{{ $hostname }}
+      csp:
+        {{- /* Backstage replaces (does not merge) config arrays, so this list
+        supersedes the image's default img-src. It must therefore carry every
+        host the portal's own plugins load images from: the Giant Swarm app-icon
+        CDN (the muster plugin's dashboard renders the muster icon from
+        s.giantswarm.io/app-icons/) and this deployment's DiceBear avatars host
+        (agent avatars). Without the CDN entry the browser blocks the icon with a
+        CSP violation and the dashboard shows a broken image. */}}
+        img-src:
+          - "'self'"
+          - "data:"
+          - https://s.giantswarm.io
+          - https://avatars.{{ $domain }}
+      {{- if eq (dig "database" "engine" "" $backstage) "postgresql" }}
+      {{- /* backstage.database.engine=postgresql makes the Backstage chart
+      deploy the CNPG Cluster, the POSTGRES_* env and the CA mount — but no
+      config file ever selects pg: the image's base config pins better-sqlite3
+      and its production config has no database block, so without this the
+      backend silently runs on in-memory sqlite ("Database is not PostgreSQL,
+      using memory store") and loses all catalog/session state on every pod
+      restart. Schema division mode, because CNPG's `app` role owns only the
+      `app` database and may not CREATE DATABASE, which the default database
+      division mode requires. */}}
+      database:
+        client: pg
+        pluginDivisionMode: schema
+        connection:
+          host: ${POSTGRES_HOST}
+          port: ${POSTGRES_PORT}
+          user: ${POSTGRES_USER}
+          password: ${POSTGRES_PASSWORD}
+      {{- end }}
+    {{- with (dig "catalogs" "version" "" $backstage) }}
+    {{- /* The agent create flow's deploy step runs the hidden agent-deployment
+    scaffolder template; without this location the scaffolder answers 404
+    ("Template template:default/agent-deployment not found"). The image's base
+    app-config already allows kind Template in catalog.rules, so the location
+    entry is all this overlay needs. */}}
+    catalog:
+      locations:
+        - type: url
+          target: https://github.com/giantswarm/backstage-catalogs/blob/{{ . }}/templates/agent-deployment/template.yaml
+    {{- end }}
+    auth:
+      environment: production
+      session:
+        secret: ${AUTH_SESSION_SECRET}
+      providers:
+        {{ $provider }}:
+          production:
+            metadataUrl: {{ $issuer }}/.well-known/openid-configuration
+            clientId: {{ .Values.global.identity.clientId }}
+            clientSecret: ${AGENT_PLATFORM_OIDC_CLIENT_SECRET}
+            {{- /* Unset, the Backstage oidc authenticator sends prompt=none
+            on every authorize request. Dex ignores it, but a spec-strict
+            IdP (Google) answers a fresh login with error=interaction_required
+            — surfaced misleadingly as "iss missing from the response",
+            because the error redirect carries no RFC 9207 iss parameter and
+            openid-client checks that first. auto lets the IdP decide. */}}
+            prompt: auto
+            {{- with $backstage.startUrlSearchParams }}
+            {{- /* Extra authorize-request query parameters (see values.yaml).
+            Google needs access_type=offline + prompt=consent here to issue a
+            refresh token; without one, sessions cannot be restored and every
+            page reload forces a fresh login. A prompt in this map wins over
+            the auto above: the authenticator only applies its configured
+            prompt when it is not auto. */}}
+            startUrlSearchParams:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+    gs:
+      authProvider: {{ $provider }}
+      {{- with $backstage.extraScopes }}
+      auth:
+        extraScopes:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      installations:
+        {{ $installation }}:
+          authProvider: oidc
+          oidcTokenProvider: {{ $provider }}
+          pipeline: stable
+          baseDomain: {{ $domain }}
+          {{- /* This installation has no Giant Swarm observability stack at
+          observability.<baseDomain>. Backstage >= 0.200.26 reads this and
+          renders neutral "metrics unavailable" states instead of querying
+          Mimir and erroring; older versions ignore the key. */}}
+          mimirEnabled: false
+    kubernetes:
+      serviceLocatorMethod:
+        type: multiTenant
+      clusterLocatorMethods:
+        - type: config
+          clusters:
+            - name: {{ $installation }}
+              url: https://kubernetes.default.svc
+              caFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              authProvider: oidc
+              oidcTokenProvider: {{ $provider }}
+    muster:
+      installations:
+        - name: {{ $installation }}
+          {{- /* The full MCP endpoint, not the bare hostname: the muster
+          backend plugin POSTs MCP Streamable-HTTP to this URL verbatim, and
+          muster serves MCP at /mcp (the bare origin answers 404). */}}
+          url: https://{{ $musterHostname }}/mcp
+          authProvider: {{ $provider }}
+    {{- $kagentRoute := dict }}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.controllerRoute.enabled }}
+    {{- $kagentRoute = .Values.kagent.controllerRoute }}
+    {{- end }}
+    {{- $modelManagerRoute := dict }}
+    {{- if and (include "agent-platform.modelManager.enabled" .) .Values.modelManager.route.enabled }}
+    {{- $modelManagerRoute = .Values.modelManager.route }}
+    {{- end }}
+    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute $modelManagerRoute }}
+    agentPlatform:
+      {{- with $fluxSa }}
+      {{- /* The tenant identity of the agents' HelmReleases: the ONE value
+      kagent.fluxServiceAccountName, rendered as ServiceAccount + RoleBinding by
+      templates/kagent/flux-service-account.yaml and derived into agent-manager
+      by the meta chart. The portal's create flow names it as
+      spec.serviceAccountName on every HelmRelease it writes. */}}
+      fluxServiceAccountName: {{ . }}
+      {{- end }}
+      {{- with $backstage.skillsRepositories }}
+      skills:
+        repositories:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      {{- if $kagentRoute }}
+      {{- /* Without this the plugin derives kagent.<baseDomain>/api — the
+      kagent UI hostname, which the platform fronts with oauth2-proxy at
+      most, never with the controller API. The controller API lives on the
+      controllerRoute: <hostname><pathPrefix>/* with the prefix stripped
+      before kagent, so its /api sits at <hostname><pathPrefix>/api. */}}
+      kagent:
+        installations:
+          {{ $installation }}:
+            apiBaseUrl: https://{{ include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" $kagentRoute.hostname "key" "kagent.controllerRoute.hostname") }}{{ $kagentRoute.pathPrefix }}/api
+      {{- end }}
+      {{- if $modelManagerRoute }}
+      {{- /* The model-manager API of this installation, through the
+      agentgateway route (templates/model-manager/route.yaml): the prefix is
+      stripped before model-manager, so its REST API sits at
+      <hostname><pathPrefix>/api/v1. The portal backend forwards the user's
+      Dex ID token; the route's JWT policy is the identity boundary. */}}
+      modelManager:
+        installations:
+          {{ $installation }}:
+            apiBaseUrl: https://{{ include "agent-platform.modelManager.hostname" . }}{{ $modelManagerRoute.pathPrefix }}
+      {{- end }}
+    {{- end }}
+{{- end }}

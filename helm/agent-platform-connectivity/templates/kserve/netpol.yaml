@@ -1,0 +1,95 @@
+{{- if and (include "agent-platform.kserve.enabled" .) .Values.networkPolicy.enabled }}
+{{- /*
+Network policies of the KServe controller (and, when on, the llmisvc
+controller) in the release namespace — the kserve-resources and
+kserve-llmisvc-resources releases target the same namespace as this one. Both
+are admission webhooks + controllers: the kube-apiserver calls their webhook
+port (9443), the kubelet probes their health port (8081), a metrics scraper the
+kube-rbac-proxy (8443); they talk to DNS and the Kubernetes API and nothing
+else. The API server has no pod identity a NetworkPolicy could select, so the
+webhook and probe ports admit every source in the kubernetes flavor and the
+cluster/host entities in the cilium flavor.
+*/ -}}
+{{- $controllers := list (dict "name" "kserve-controller" "selector" "kserve-controller-manager") }}
+{{- if (include "agent-platform.kserve.llmisvcEnabled" .) }}
+{{- $controllers = append $controllers (dict "name" "llmisvc-controller" "selector" "llmisvc-controller-manager") }}
+{{- end }}
+{{- range $c := $controllers }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" $) "cilium" }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" $ }}-{{ $c.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "agent-platform.kserve.labels" $ | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      control-plane: {{ $c.selector }}
+  ingress:
+    # The admission and conversion webhooks, called by the kube-apiserver,
+    # and the metrics proxy.
+    - fromEntities:
+        - cluster
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
+            - port: "8443"
+              protocol: TCP
+    # kubelet probes (host and remote-node: enforce-always denies them).
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8081"
+              protocol: TCP
+            - port: "9443"
+              protocol: TCP
+            - port: "8443"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" $ | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+{{- else }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" $ }}-{{ $c.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "agent-platform.kserve.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      control-plane: {{ $c.selector }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # The admission and conversion webhooks (kube-apiserver), the kubelet
+    # probes and the metrics proxy: no pod selector fits the callers.
+    - ports:
+        - port: 9443
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+        - port: 8081
+          protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" $ | nindent 4 }}
+    - to:
+        - ipBlock:
+            cidr: {{ $.Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

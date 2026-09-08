@@ -1,0 +1,69 @@
+{{- /*
+Render-time guards of the modelServing wiring. They fail `helm template` (and
+therefore CI lint + install) with an actionable message instead of shipping
+objects the API server rejects or a preset the portal cannot use.
+*/ -}}
+{{- if (include "agent-platform.modelServing.enabled" .) }}
+  {{- $ms := .Values.modelServing }}
+  {{- /* The KServe control plane the runtime and the InferenceServices need:
+         the platform's own (components.kserve-crd + kserve-resources — the
+         connectivity release dependsOn kserve-resources, so the CRDs and the
+         webhook are Established before these objects apply), or a KServe the
+         cluster already runs, which Helm sees through .Capabilities.APIVersions
+         on install/upgrade (an offline `helm template` has to be told with
+         --api-versions). Neither: fail, naming the toggles. */ -}}
+  {{- if and $ms.kserve.requireApi (not (include "agent-platform.modelServing.kserveBundled" .)) (not (include "agent-platform.modelServing.kserveApiPresent" .)) }}
+    {{- fail "components.modelServing.enabled is true but the KServe control plane is not: turn on components.kserve-crd and components.kserve-resources (the platform's KServe; the model serving objects apply after them), or install KServe first — the serving.kserve.io/v1alpha1 (ClusterServingRuntime) and serving.kserve.io/v1beta1 (InferenceService) APIs are not served on this cluster. For an offline render pass --api-versions serving.kserve.io/v1alpha1 --api-versions serving.kserve.io/v1beta1, or set modelServing.kserve.requireApi=false to skip this check." }}
+  {{- end }}
+  {{- /* The Kyverno cache policies are Kyverno mutate policies: an explicit
+         policies.enabled: true needs the kyverno.io objects to render (auto
+         follows the resolved kyvernoPolicies.enabled and never trips this). */ -}}
+  {{- if and (include "agent-platform.modelServingPolicies" .) (not (include "agent-platform.kyvernoPolicies" .)) }}
+    {{- fail "modelServing.policies.enabled is true but kyvernoPolicies.enabled resolves to false: the cache policies are Kyverno ClusterPolicies and need kyverno.io/v1 on the cluster. Set modelServing.policies.enabled: auto (follows kyvernoPolicies.enabled) or false, or turn kyvernoPolicies.enabled on where Kyverno runs." }}
+  {{- end }}
+  {{- if not $ms.runtime.name }}
+    {{- fail "modelServing.runtime.name is empty: the ClusterServingRuntime needs a name, and every preset without a runtime of its own runs on it" }}
+  {{- end }}
+  {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ms.runtime.name) }}
+    {{- fail (printf "modelServing.runtime.name (%q) must be a lowercase DNS-1123 label" $ms.runtime.name) }}
+  {{- end }}
+  {{- if and $ms.cache.enabled (not $ms.cache.pvc.existingClaim) (not $ms.cache.pvc.name) }}
+    {{- fail "modelServing.cache.pvc.name is empty: name the cache claim, or set cache.pvc.existingClaim" }}
+  {{- end }}
+  {{- /* Every preset in effect must resolve: the helpers fail on a bad name,
+         a missing required field or an unresolvable chat template. */ -}}
+  {{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}
+  {{- range $name, $entry := $presets }}
+    {{- $_ := include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name" $name "entry" $entry) }}
+  {{- end }}
+  {{- /* The network-policy inputs, checked only while the policies render
+         (networkPolicy.enabled): a typo would otherwise ship a selector that
+         matches nothing or an object the API server rejects. */ -}}
+  {{- if .Values.networkPolicy.enabled }}
+    {{- $np := $ms.networkPolicy }}
+    {{- $port := int $np.predictor.port }}
+    {{- if or (lt $port 1) (gt $port 65535) }}
+      {{- fail (printf "modelServing.networkPolicy.predictor.port (%v) must be a TCP port (1-65535): the port the runtime container listens on" $np.predictor.port) }}
+    {{- end }}
+    {{- range $i, $n := $np.predictor.additionalIngressNamespaces }}
+      {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString $n)) }}
+        {{- fail (printf "modelServing.networkPolicy.predictor.additionalIngressNamespaces[%d] (%q) must be a namespace name (lowercase DNS-1123 label)" $i (toString $n)) }}
+      {{- end }}
+    {{- end }}
+    {{- range $i, $f := $np.huggingFace.fqdns }}
+      {{- if not (kindIs "map" $f) }}
+        {{- fail (printf "modelServing.networkPolicy.huggingFace.fqdns[%d] must be a mapping with matchName or matchPattern (a Cilium FQDN selector)" $i) }}
+      {{- end }}
+      {{- $matchName := get $f "matchName" | default "" }}
+      {{- $matchPattern := get $f "matchPattern" | default "" }}
+      {{- if or (ne (len (keys $f)) 1) (not (or $matchName $matchPattern)) }}
+        {{- fail (printf "modelServing.networkPolicy.huggingFace.fqdns[%d] must be exactly one of matchName or matchPattern, non-empty (a Cilium FQDN selector)" $i) }}
+      {{- end }}
+    {{- end }}
+    {{- range $i, $c := $np.huggingFace.cidrs }}
+      {{- if not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$|^[0-9a-fA-F:]+/[0-9]{1,3}$" (toString $c)) }}
+        {{- fail (printf "modelServing.networkPolicy.huggingFace.cidrs[%d] (%q) must be a CIDR, e.g. 203.0.113.0/24" $i (toString $c)) }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}

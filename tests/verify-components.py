@@ -20,6 +20,16 @@ roster that the fleet, the quick-start values or the connectivity wiring rely on
   the meta chart forwards but the connectivity chart does not declare fails the
   connectivity release on every installation — for as long as the fleet's
   connectivity OCIRepository has not re-resolved to a chart that declares it;
+- the seven blocks REACH the connectivity release (nothing is held back any
+  more: the connectivity chart reads them for the wiring it renders — the
+  Backstage app-config and route, the mcp-kubernetes MCPServer, the model
+  serving objects, the KServe controllers' network policies), off and on;
+- the wiring's own keys under backstage: / mcp-kubernetes: (the keys the
+  standalone kept under components.<name>) never reach the component chart's
+  release (components.<name>.omitKeys — both charts validate strictly);
+- components.modelServing is a feature switch: no chart, so no release when on,
+  but its answer is in the roster forwarded to connectivity, and its values
+  block (modelServing:) travels only while the switch is on;
 - every top-level key of the meta chart's schema except gitops is a key of the
   connectivity chart's schema, for the same reason.
 
@@ -37,7 +47,7 @@ GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 # component -> (repository, versionRange, dependsOn, a line only the standalone's
 # defaults put into the forwarded values, or None when the block is empty)
 NEW = {
-    "backstage": (GSOCI, "0.x", ["cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
+    "backstage": (GSOCI, "0.x", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
     "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://ghcr.io/cloudnative-pg/charts", "0.29.x", [], None),
     "kserve-crd": (GSOCI, "0.2.x", [], None),
@@ -50,15 +60,23 @@ NEW = {
 
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
-    "agent-platform-connectivity": ["cloudnative-pg", "kserve-resources"],
+    "agent-platform-connectivity": ["muster", "cloudnative-pg", "kserve-resources"],
     "model-manager": ["kserve-resources"],
 }
 
-# Blocks held back from the connectivity release (components.agent-platform-
-# connectivity.omitKeys) until the connectivity chart reads them. When a slice
-# adds wiring that reads one, drop it from omitKeys in values.yaml AND from this
-# list; the connectivity values.yaml already declares all seven.
-HELD_BACK = sorted(NEW)
+# The wiring's own keys that live in a component chart's block and must be
+# dropped from the values forwarded to that chart (components.<name>.omitKeys).
+WIRING_KEYS = {
+    "backstage": [
+        "hostname", "parentRefs", "installationName", "extraScopes", "startUrlSearchParams",
+        "enabledExtensions", "disabledExtensions", "skillsRepositories", "catalogs", "configReload",
+    ],
+    "mcp-kubernetes": ["kubernetesAudience"],
+}
+
+# Feature switches of the roster: an entry without chart:, no release, forwarded
+# like every other flag.
+SWITCHES = ["modelServing"]
 
 ON = [f"--set=components.{n}.enabled=true" for n in NEW]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
@@ -119,17 +137,22 @@ def main(meta: str, connectivity: str) -> int:
                 fail(f"components.{name} is not off by default: its {kind} rendered with the CI values")
         if ro.get(name) is not False:
             fail(f"the roster forwarded to connectivity lacks {name}: enabled: false (got {ro.get(name)!r})")
+        if not re.search(rf"^{re.escape(name)}:", conn_off, re.M):
+            fail(f"the {name} block did not reach the connectivity release (held back by omitKeys?); its wiring reads it")
+    for name in SWITCHES:
+        if ro.get(name) is not False:
+            fail(f"the roster forwarded to connectivity lacks the switch {name}: enabled: false (got {ro.get(name)!r})")
         if re.search(rf"^{re.escape(name)}:", conn_off, re.M):
-            fail(f"the {name} block reached the connectivity release while held back (omitKeys)")
+            fail(f"the {name} block reached the connectivity release while the switch is off (a live chart that predates the block would reject it)")
     for (kind, name), d in off.items():
         if kind == "HelmRelease":
             dangling = [x for x in depends_on(d) if x in NEW]
             if dangling:
                 fail(f"{name} dependsOn {dangling} while those components are off (would block forever)")
-    print("ok: the seven are off by default — no release, no dangling dependsOn, roster says false, blocks held back")
+    print("ok: the seven are off by default — no release, no dangling dependsOn, roster says false, blocks forwarded")
 
     # --- all on ---------------------------------------------------------------
-    on_manifest = render(meta, [*ci, *ON])
+    on_manifest = render(meta, [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]])
     kinds = set(re.findall(r"^kind: (\S+)$", on_manifest, re.M))
     if kinds - {"OCIRepository", "HelmRelease"}:
         fail(f"the seven-on render is not a pure app-of-apps render: {sorted(kinds)}")
@@ -156,14 +179,25 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"{name} release values lack the standalone default {marker!r}")
         if ron.get(name) is not True:
             fail(f"the roster forwarded to connectivity does not say {name}: enabled: true")
-        if re.search(rf"^{re.escape(name)}:", conn_on_values, re.M) and name in HELD_BACK:
-            fail(f"the {name} block reached the connectivity release although it is held back (omitKeys)")
+        if not re.search(rf"^{re.escape(name)}:", conn_on_values, re.M):
+            fail(f"the {name} block did not reach the connectivity release (held back by omitKeys?); its wiring reads it")
+        for key in WIRING_KEYS.get(name, []):
+            if re.search(rf"^{re.escape(key)}:", vals, re.M):
+                fail(f"{name} release values carry the wiring key {key}, which the {name} chart rejects; add it to components.{name}.omitKeys")
+    for name in SWITCHES:
+        for kind in ("OCIRepository", "HelmRelease"):
+            if (kind, name) in on:
+                fail(f"components.{name} is a feature switch (no chart:) but rendered a {kind}")
+        if ron.get(name) is not True:
+            fail(f"the roster forwarded to connectivity does not say {name}: enabled: true (a switch is forwarded like a component)")
+        if not re.search(rf"^{re.escape(name)}:", conn_on_values, re.M):
+            fail(f"the {name} block did not reach the connectivity release with the switch on; its wiring reads it")
     for consumer, deps in CONSUMERS.items():
         have = depends_on(on[("HelmRelease", consumer)])
         missing = [d for d in deps if d not in have]
         if missing:
             fail(f"{consumer} does not dependsOn {missing} with those components on (got {have})")
-    print("ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn")
+    print("ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release")
 
     # --- the BOM pins every one exactly ------------------------------------------
     bom_file = open(f"{meta}/examples/customer-bom.yaml").read()
@@ -182,16 +216,29 @@ def main(meta: str, connectivity: str) -> int:
     # --- the forwarded tree validates against the connectivity chart --------------
     # The meta chart's defaults plus the one input every render needs; the CI
     # values would trip connectivity's ingress-mode guards, which is not the point.
-    for label, extra in (("off", []), ("on", ON)):
+    # With the seven (and the modelServing switch) on, the wiring needs the
+    # quick-start inputs Backstage takes by design: global.domain, global.identity
+    # and a public Gateway for its route.
+    quickstart = [
+        "--set", "global.domain=example.com",
+        "--set", "global.identity.issuerUrl=https://dex.example.com",
+        "--set", "global.identity.clientId=agent-platform",
+        "--set", "global.identity.existingSecret=agent-platform-idp",
+        "--set", "global.gatewayApi.parentRefs[0].name=gw",
+        "--set", "global.gatewayApi.parentRefs[0].namespace=gw-system",
+    ]
+    switches_on = [f"--set=components.{n}.enabled=true" for n in SWITCHES]
+    for label, extra in (("off", []), ("on", [*ON, *switches_on, *quickstart])):
         tree = hr_values(docs(render(meta, [*PARENT_REF, *extra]))[("HelmRelease", "agent-platform-connectivity")])
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write(tree)
         render(connectivity, ["-f", f.name])
-    print("ok: the forwarded values tree (roster included) validates against the connectivity chart, seven off and on")
+    print("ok: the forwarded values tree (roster included) validates against the connectivity chart, seven off and on (with the wiring's quick-start inputs)")
 
     # --- schema symmetry ------------------------------------------------------------
     # gitops is never forwarded; a block named in the connectivity entry's omitKeys
-    # is held back (the flux-engine subchart's values, the seven until their wiring).
+    # is held back (the flux-engine subchart's values; the seven blocks of the
+    # standalone's extras are forwarded — the connectivity chart reads them).
     omit = re.search(r"^    omitKeys:\n((?:      .*\n)+)", open(f"{meta}/values.yaml").read()[open(f"{meta}/values.yaml").read().index("  agent-platform-connectivity:"):], re.M)
     held = set(re.findall(r"^      - (\S+)$", omit.group(1), re.M)) if omit else set()
     meta_keys = set(json.load(open(f"{meta}/values.schema.json"))["properties"]) - {"gitops"} - held

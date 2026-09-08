@@ -1,0 +1,44 @@
+# The standalone umbrella's extras on: Backstage (the app-config ConfigMap, the
+# public route, the config-reload hook), the mcp-kubernetes MCPServer
+# registration and the KServe/vLLM model serving layer, on the KServe control
+# plane the kserve-crd / kserve-resources components install. Render-valid for
+# `ct lint` (no --api-versions: the cluster-shape knobs resolve to the vanilla
+# shape, and the modelServing guard is satisfied by the components being on).
+global:
+  domain: ci.example.com
+  identity:
+    issuerUrl: https://dex.ci.example.com
+    clientId: agent-platform
+    existingSecret: agent-platform-idp
+  gatewayApi:
+    parentRefs:
+      - name: giantswarm-default
+        namespace: envoy-gateway-system
+
+components:
+  agentgateway:
+    enabled: true
+  kagent:
+    enabled: true
+  backstage:
+    enabled: true
+  mcp-kubernetes:
+    enabled: true
+  kserve-crd:
+    enabled: true
+  kserve-resources:
+    enabled: true
+  modelServing:
+    enabled: true
+
+ingress:
+  mode: agentgateway-muster
+
+kagent:
+  controllerRoute:
+    enabled: true
+
+kserve-resources:
+  kserve:
+    controller:
+      deploymentMode: Standard

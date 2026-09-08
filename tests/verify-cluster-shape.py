@@ -4,8 +4,9 @@
 The knobs that describe what a cluster can admit default to `auto`:
 kyvernoPolicies.enabled (kyverno.io/v1), networkPolicy.flavor (cilium.io/v2 ->
 cilium, else kubernetes), global.observability.metrics.serviceMonitor.enabled
-(monitoring.coreos.com/v1), dicebear.route.enabled (gateway.envoyproxy.io/v1alpha1)
-and agentSandbox.podSecurity.enabled (follows the resolved kyvernoPolicies). The
+(monitoring.coreos.com/v1), dicebear.route.enabled (gateway.envoyproxy.io/v1alpha1),
+agentSandbox.podSecurity.enabled and modelServing.policies.enabled (both follow
+the resolved kyvernoPolicies). The
 meta chart resolves them once from .Capabilities.APIVersions and derives the
 component copies (muster's flavor and monitors, valkey's Cilium policy and
 PodMonitor, kagent's OTel exporters, oauth2-proxy monitor and OTLP header) before
@@ -53,6 +54,11 @@ ON = [
     "--set", "components.kagent.enabled=true",
     "--set", "components.agent-sandbox.enabled=true",
     "--set", "postgres.enabled=true",
+    # The modelServing switch with its KServe prerequisites: its values block
+    # (and the policies knob) travels to connectivity only while it is on.
+    "--set", "components.modelServing.enabled=true",
+    "--set", "components.kserve-crd.enabled=true",
+    "--set", "components.kserve-resources.enabled=true",
 ]
 # The fleet's values, written out: what `auto` has to resolve to under FLEET_APIS.
 EXPLICIT_FLEET_KNOBS = [
@@ -60,6 +66,7 @@ EXPLICIT_FLEET_KNOBS = [
     "--set", "networkPolicy.flavor=cilium",
     "--set", "global.observability.metrics.serviceMonitor.enabled=true",
     "--set", "agentSandbox.podSecurity.enabled=true",
+    "--set", "modelServing.policies.enabled=true",
 ]
 EXPLICIT_FLEET_COPIES = [
     "--set", "dicebear.route.enabled=true",
@@ -77,6 +84,7 @@ EXPLICIT_VANILLA_KNOBS = [
     "--set", "networkPolicy.flavor=kubernetes",
     "--set", "global.observability.metrics.serviceMonitor.enabled=false",
     "--set", "agentSandbox.podSecurity.enabled=false",
+    "--set", "modelServing.policies.enabled=false",
 ]
 OTLP_HEADER = "name: OTEL_EXPORTER_OTLP_HEADERS"
 
@@ -175,6 +183,7 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
         (["networkPolicy", "flavor"], flavor),
         (["global", "observability", "metrics", "serviceMonitor", "enabled"], yes(monitors)),
         (["agentSandbox", "podSecurity", "enabled"], yes(kyverno)),
+        (["modelServing", "policies", "enabled"], yes(kyverno)),
         (["dicebear", "route", "enabled"], yes(envoy)),
         (["muster", "networkPolicy", "flavor"], flavor),
         (["valkey", "ciliumNetworkPolicy", "enabled"], yes(cilium)),

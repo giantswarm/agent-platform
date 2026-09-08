@@ -6,11 +6,14 @@ description: |
   consumer-side wiring that turns the platform components into a working whole on
   a cluster: the public muster route and the agentgateway data-plane Gateway +
   AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
-  the kagent and klaus-gateway routes, the kagent declarative-agent wiring, and the
-  CloudNativePG Cluster. Ships NO workloads of its own — those are separate releases
-  rendered by the agent-platform meta-chart. The CRDs these CRs consume are
-  app-owned: each component (agentgateway, kagent, …) ships its own CRDs, so this
-  chart's HelmRelease dependsOn those CRD-owning component releases.
+  the kagent and klaus-gateway routes, the kagent declarative-agent wiring, the
+  CloudNativePG Cluster, and — gated on the component toggles — the Backstage
+  app-config and route, the mcp-kubernetes MCPServer registration with muster and
+  the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO
+  workloads of its own — those are separate releases rendered by the agent-platform
+  meta-chart. The CRDs these CRs consume are app-owned: each component
+  (agentgateway, kagent, muster, …) ships its own CRDs, so this chart's HelmRelease
+  dependsOn those CRD-owning component releases.
 home: https://github.com/giantswarm/agent-platform
 icon: https://s.giantswarm.io/app-icons/giantswarm/1/light.svg
 sources:

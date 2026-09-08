@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ServingPreset",
+  "description": "A curated recipe for serving one model on the platform's KServe/vLLM runtime. The chart ships a reviewed set (files/model-serving/presets/) and publishes each preset in effect as a ConfigMap in the release namespace (label agent-platform.giantswarm.io/serving-preset=true, key preset.yaml); modelServing.presets adds or replaces presets. The portal's serve flow and model-manager turn a published preset into an InferenceService; they never invent vLLM flags. Authoring form and published form share this schema: publishing fills the defaults noted below and resolves chatTemplate to the ConfigMap that holds it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "agent-platform.giantswarm.io/v1alpha1"},
+    "kind": {"const": "ServingPreset"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Lowercase DNS-1123 label, at most 30 characters. Names the preset ConfigMap (agent-platform-serving-preset-<name>), its chat-template ConfigMap (agent-platform-chat-template-<name>) and, by default, the InferenceService created from it.",
+          "pattern": "^[a-z0-9]([-a-z0-9]{0,28}[a-z0-9])?$"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayName", "model", "requirements"],
+      "properties": {
+        "displayName": {"type": "string", "minLength": 1, "description": "Human-readable name shown in the portal."},
+        "description": {"type": "string", "description": "Notes for the operator: what the model is good at, the hardware the recipe was tuned on, known limits. Markdown."},
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "storageUri"],
+          "properties": {
+            "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "Hugging Face repository (owner/name); the cache inventory and the import flow key on it."},
+            "storageUri": {"type": "string", "pattern": "^(hf|pvc|s3|gs|oci|https?)://.+", "description": "InferenceService predictor.model.storageUri. hf://<id> downloads through the KServe storage-initializer (into the cache when the Kyverno policies are on); pvc://<claim>/<dir> serves pre-warmed weights without a download."},
+            "format": {"type": "string", "default": "vLLM", "description": "predictor.model.modelFormat.name; must be a format the runtime lists in supportedModelFormats. Published presets always carry it."},
+            "contextLength": {"type": "integer", "minimum": 1, "description": "Context window in tokens the recipe serves (informational; --max-model-len in args is authoritative)."},
+            "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Informational tags, e.g. chat, tools, reasoning, vision, coding, embeddings."},
+            "license": {"type": "string", "description": "SPDX identifier or the model card's license name."}
+          }
+        },
+        "runtime": {"type": "string", "description": "ClusterServingRuntime to run on. Empty or absent: modelServing.runtime.name; published presets always carry it."},
+        "args": {"type": "array", "items": {"type": "string"}, "description": "vLLM server arguments appended to the runtime's, complete and literal. Do not pass --chat-template: publishing appends it from chatTemplate."},
+        "env": {
+          "type": "array",
+          "description": "Extra environment of the runtime container (Kubernetes EnvVar).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "value": {"type": "string"},
+              "valueFrom": {"type": "object", "additionalProperties": true}
+            }
+          }
+        },
+        "chatTemplate": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "A chat template that replaces the model's own. Authoring: exactly one of file (shipped under files/model-serving/chat-templates/), content (inline) or existingConfigMap (pre-created in the serving namespace). Published: configMap names the ConfigMap in the serving namespace to mount at mountPath, and args ends with --chat-template=<mountPath>/<key>.",
+          "properties": {
+            "file": {"type": "string", "minLength": 1},
+            "content": {"type": "string", "minLength": 1},
+            "existingConfigMap": {"type": "string", "minLength": 1},
+            "configMap": {"type": "string", "minLength": 1},
+            "key": {"type": "string", "default": "chat-template.jinja"},
+            "mountPath": {"type": "string", "default": "/mnt/chat-template"}
+          },
+          "oneOf": [
+            {"required": ["file"]},
+            {"required": ["content"]},
+            {"required": ["existingConfigMap"]},
+            {"required": ["configMap"]}
+          ]
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Predictor resources. gpus is requested and limited as modelServing.serving.gpuResourceName; requests/limits are merged over the runtime's envelope by KServe.",
+          "properties": {
+            "gpus": {"type": "integer", "minimum": 0, "default": 1},
+            "requests": {"type": "object", "additionalProperties": {"type": ["string", "number"]}},
+            "limits": {"type": "object", "additionalProperties": {"type": ["string", "number"]}}
+          }
+        },
+        "requirements": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["weightsGiB"],
+          "description": "Memory the recipe needs on the serving node: weights plus the KV cache, activations and runtime overhead. The portal's fit check compares weightsGiB + overheadGiB with the node's GPU (or unified) memory.",
+          "properties": {
+            "weightsGiB": {"type": "number", "exclusiveMinimum": 0, "description": "Size of the weights as served (after quantization)."},
+            "overheadGiB": {"type": "number", "minimum": 0, "default": 30, "description": "Headroom for KV cache, activations, CUDA graphs and the runtime."}
+          }
+        },
+        "scheduling": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Placement of the predictor on top of modelServing.serving: nodeSelector is merged over the component default.",
+          "properties": {
+            "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+            "tolerations": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+          }
+        },
+        "predictor": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Extra InferenceService predictor fields copied verbatim (e.g. minReplicas, timeout, deploymentStrategy); they win over the component defaults."
+        }
+      }
+    }
+  }
+}
