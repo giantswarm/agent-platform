@@ -1,4 +1,9 @@
-{{- if and .Values.kagent.namespaceOverride (ne .Values.kagent.namespaceOverride .Release.Namespace) }}
+{{- /* The kagent namespace exists only while the kagent component is on: an
+installation without kagent gets no empty, Helm-owned namespace, and turning
+kagent off removes it with the release (the standalone umbrella's generator
+patched this gate into its copy; it was a bug here too). */ -}}
+{{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
+{{- if and $kagentOn .Values.kagent.namespaceOverride (ne .Values.kagent.namespaceOverride .Release.Namespace) }}
 # Ensure the kagent namespace exists when it differs from the release namespace.
 # On clusters where the namespace is pre-created (e.g. graveler), Kubernetes
 # applies this as a no-op. On fresh installs the namespace is created here;

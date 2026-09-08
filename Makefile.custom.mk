@@ -679,9 +679,12 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@grep -A3 '^subjects:' /tmp/vid-rb.out | grep -q 'namespace: kagent' || { echo "FAIL: the RoleBinding subject is not in the kagent namespace"; exit 1; }
 	@if grep -q '^kind: ClusterRoleBinding$$' /tmp/vid-on.out; then echo "FAIL: the identity must be namespace-scoped, no ClusterRoleBinding"; exit 1; fi
 	@echo "ok: identity rendered"
-	@echo "--> kagent off: neither object"
+	@echo "--> kagent off: neither object, and no kagent Namespace either"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=false >/tmp/vid-off.out 2>&1 || { cat /tmp/vid-off.out; exit 1; }
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' /tmp/vid-off.out; then echo "FAIL: the identity renders with kagent off"; exit 1; else echo "ok: no identity without kagent"; fi
+	@if grep -q '^kind: Namespace$$' /tmp/vid-off.out; then echo "FAIL: the kagent Namespace renders with kagent off (an empty Helm-owned namespace)"; exit 1; else echo "ok: no kagent Namespace without kagent"; fi
+	@grep -q '^kind: Namespace$$' /tmp/vid-on.out || { echo "FAIL: the kagent Namespace is gone with kagent on"; exit 1; }
+	@echo "ok: kagent Namespace follows the component"
 	@echo "--> ONE value renames all three consumers: the ServiceAccount, the RoleBinding subject, agent-manager's flux.helmReleaseServiceAccount"
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName=tenant-x >/tmp/vid-x.out 2>&1 || { cat /tmp/vid-x.out; exit 1; }
 	@[ "$$(grep -c '^  name: tenant-x$$' /tmp/vid-x.out)" = "2" ] || { echo "FAIL: renaming kagent.fluxServiceAccountName did not rename ServiceAccount and RoleBinding"; exit 1; }
