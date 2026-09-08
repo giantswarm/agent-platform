@@ -14,23 +14,29 @@ So for each HelmRelease the meta render produces, this resolves the chart's
 pinned version from the BOM, pulls it, and renders it with exactly the values
 the release carries. `tests/verify-toolset-presets.py` does the same for
 muster's toolset presets; this is the BOM-wide form of that check.
+
+Deliberately stdlib-only, as that script is: the CI image has no PyYAML. The
+render is split on document separators and each values block is cut by
+indentation, which is all the shape of a HelmRelease needs; the BOM's pins are
+one line each.
 """
 
 from __future__ import annotations
 
-import json
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
 
-import yaml
-
 REGISTRY = "oci://gsoci.azurecr.io/charts/giantswarm"
+
+# `  <name>: { versionRange: "0.19.0" }` — the BOM's one-line component pins.
+PIN_RE = re.compile(r'^\s{2}([a-z0-9][a-z0-9-]*):\s*\{\s*versionRange:\s*"([^"]+)"')
 
 
 def fail(msg: str) -> None:
-    print(f"FAIL: {msg}")
+    print(f"FAIL: {msg}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -54,31 +60,87 @@ def first_line(err: str) -> str:
     return err.splitlines()[0] if err.splitlines() else err
 
 
-def releases(render: str) -> dict[str, dict]:
-    """The HelmReleases that carry values, by release name."""
-    out: dict[str, dict] = {}
-    for doc in yaml.safe_load_all(render):
-        if isinstance(doc, dict) and doc.get("kind") == "HelmRelease" and doc["spec"].get("values"):
-            out[doc["metadata"]["name"]] = doc["spec"]["values"]
+def documents(text: str):
+    doc: list[str] = []
+    for line in text.splitlines():
+        if line.strip() == "---":
+            if doc:
+                yield "\n".join(doc)
+            doc = []
+            continue
+        doc.append(line)
+    if doc:
+        yield "\n".join(doc)
+
+
+def release_name(lines: list[str]) -> str:
+    """The `metadata.name` of a release document (indent 2, before `spec:`)."""
+    for line in lines:
+        if line.startswith("spec:"):
+            break
+        if line.startswith("  name: "):
+            return line[len("  name: "):].strip()
+    return ""
+
+
+def values_block(lines: list[str]) -> str:
+    """The release's `values:` block (HelmRelease, indent 2) or an Argo
+    Application's `valuesObject:`, de-indented to a values file. Empty when
+    the release forwards nothing."""
+    for key in ("  values:", "      valuesObject:"):
+        indent = len(key) - len(key.lstrip())
+        for i, line in enumerate(lines):
+            if line != key:
+                continue
+            block = []
+            for inner in lines[i + 1:]:
+                if inner.strip() == "":
+                    block.append("")
+                elif len(inner) - len(inner.lstrip()) > indent:
+                    block.append(inner[indent + 2:])
+                else:
+                    break
+            return "\n".join(block).strip("\n")
+    return ""
+
+
+def releases(render: str) -> dict[str, str]:
+    """The values each release carries, by release name, for the ones that
+    carry any. A release the meta chart forwards nothing to renders `{}`,
+    which is no more input than an absent block."""
+    out: dict[str, str] = {}
+    for doc in documents(render):
+        lines = doc.splitlines()
+        if not any(l.strip() in ("kind: HelmRelease", "kind: Application") for l in lines):
+            continue
+        name = release_name(lines)
+        values = values_block(lines)
+        if name and values and values.strip() != "{}":
+            out[name] = values + "\n"
     return out
 
 
 def pins(bom: pathlib.Path) -> dict[str, str]:
-    """The BOM's component pins, only the exact ones (a range is not a version)."""
-    doc = yaml.safe_load(bom.read_text())
-    out = {}
-    for name, spec in (doc.get("components") or {}).items():
-        v = (spec or {}).get("versionRange", "")
-        # Exact pins only: "0.19.0" yes, "0.x" or ">=1 <2" no.
-        if v and all(c.isdigit() or c == "." for c in v):
-            out[name] = v
+    """The BOM's component pins, only the exact ones (a range is not a
+    version): `0.19.0` yes, `0.x` or `>=1 <2` no."""
+    out: dict[str, str] = {}
+    in_components = False
+    for line in bom.read_text(encoding="utf-8").splitlines():
+        if line.startswith("components:"):
+            in_components = True
+            continue
+        if in_components and line and not line.startswith((" ", "#")):
+            break
+        m = PIN_RE.match(line) if in_components else None
+        if m and all(c.isdigit() or c == "." for c in m.group(2)):
+            out[m.group(1)] = m.group(2)
     return out
 
 
 def main() -> None:
     if len(sys.argv) != 3:
         fail("usage: verify-bom-charts.py <meta-render> <bom.yaml>")
-    render = pathlib.Path(sys.argv[1]).read_text()
+    render = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
     bom = pathlib.Path(sys.argv[2])
 
     values_by_release = releases(render)
@@ -100,7 +162,7 @@ def main() -> None:
             if pulled.returncode != 0:
                 fail(f"{name} {version}: cannot pull the pinned chart\n{pulled.stderr.strip()}")
             vf = pathlib.Path(tmp) / f"{name}-values.yaml"
-            vf.write_text(yaml.safe_dump(values))
+            vf.write_text(values, encoding="utf-8")
             rendered = run("helm", "template", name, f"{tmp}/{name}/{name}",
                            "--namespace", "agent-platform", "-f", str(vf))
             if rendered.returncode != 0:
