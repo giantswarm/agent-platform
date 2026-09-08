@@ -299,6 +299,9 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "installDisableWait": {
+                            "type": "boolean"
+                        },
                         "omitKeys": {
                             "type": "array",
                             "items": {

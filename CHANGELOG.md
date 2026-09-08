@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A fresh install with `components.kagent.enabled` and `postgres.enabled` deadlocked: the kagent controller mounts the CNPG Secret `kagent-pg-app` that the connectivity release renders, while connectivity `dependsOn` kagent for its CRDs, so the kagent install waited for a controller that could never start (`FailedMount`), timed out, was uninstalled and retried, and connectivity never installed. The kagent child HelmRelease now carries `install.disableWait: true` (new per-component key `components.<name>.installDisableWait`): the first install is reported once the manifests (CRDs, Deployment) are applied, connectivity proceeds, the controller starts as soon as the Cluster exists; upgrades keep waiting for the rollout. `make verify-meta` asserts it. Existing installations see only the changed HelmRelease spec, no Helm action.
+
 ### Removed
 
 - The Argo CD render engine of the meta-package. `gitops.engine` accepts `flux` only (`enum: [flux]` in the schema, a template guard behind it); `templates/components.yaml` renders a Flux `OCIRepository` + `HelmRelease` per component and nothing else; `gitops.argo.project` / `gitops.argo.server` are gone from the values and the schema. The Argo `Application` branch was never verified against a running Argo CD and no installation selected it, and the platform cannot run on Argo CD in any case: agents are Flux objects on every path (the Backstage agent create flow and agent-manager write an `OCIRepository` + `HelmRelease` per agent). `gitops.engine: argo` now fails the render — the schema first, the guard with `gitops.engine=argo is not supported; flux is the only engine` — and `gitops.argo.*` fails the schema. `make verify-meta` asserts the refusal on both layers, that the Flux render carries no `argoproj.io` object and that an explicit `gitops.engine: flux` renders exactly the default; the Argo render assertions of `verify-meta` and `verify-presets` are gone with the branch. **No installation needs to act**: the Flux render is byte-identical. See UPGRADE.md.

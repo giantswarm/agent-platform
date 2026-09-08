@@ -68,6 +68,13 @@ knowledge:
       bugs without forking — e.g. kagent stamps the chart version into
       app.kubernetes.io/version, which helm-controller corrupts with the OCI
       +digest build-metadata (invalid in a label); a kustomize patch overwrites it.
+  installDisableWait — render `install.disableWait: true` on the child
+      HelmRelease: the first install is reported successful as soon as the
+      manifests are applied, without waiting for the workload to become ready.
+      Upgrades keep waiting. For a component whose workload cannot start until a
+      dependant of the component has installed — kagent's controller mounts the
+      CNPG Secret the connectivity release renders, while connectivity dependsOn
+      kagent for its CRDs — so that the pair can bootstrap instead of deadlocking.
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
       HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
@@ -197,6 +204,9 @@ spec:
     createNamespace: true
     {{- with $c.crds }}
     crds: {{ . }}
+    {{- end }}
+    {{- if $c.installDisableWait }}
+    disableWait: true
     {{- end }}
     remediation:
       retries: {{ $g.retries }}
