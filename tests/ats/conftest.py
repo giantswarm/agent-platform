@@ -761,6 +761,14 @@ def prerequisites(kube: Kube) -> None:
     live before muster resolves the issuer."""
     started = time.monotonic()
     kube.apply_file(GATEWAY_API_CRDS)
+    # The ATS image applies the CRD families a Giant Swarm cluster serves
+    # (Kyverno, Cilium, prometheus-operator, Gateway API, …) to the kind cluster
+    # before the tests, so the cluster-shape knobs resolve the FLEET shape here:
+    # the connectivity release renders Kyverno objects, among them a
+    # PolicyException in the policy-exceptions namespace — which only Giant Swarm
+    # clusters have. ATS creates it on its own deploy path; the smoke installs
+    # the chart itself, so it creates it too (the standalone smoke did the same).
+    kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "policy-exceptions"}})
     kube.apply_file(str(LAB_DEX_MANIFEST))
     kube.cmd(["-n", NAMESPACE, "wait", "--for=condition=complete", "--timeout=300s", "job/lab-dex-cert-gen"])
     kube.cmd(["-n", "kube-system", "rollout", "restart", "deployment", "coredns"])

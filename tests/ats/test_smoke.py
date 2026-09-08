@@ -502,14 +502,21 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     assert kube.get("secret", VALUES_SECRET, namespace=NAMESPACE) is None, "the values Secret survived"
     wait_for("the admission policy gone (it lingers a second in the apiserver cache)",
              lambda: kube.get("validatingadmissionpolicies.admissionregistration.k8s.io", SELF_POLICY) is None, 60, interval=2)
-    # The agents' HelmRelease objects went with the CRDs (the CRD is gone, so is
-    # every object of its kind); what is left of the agents is what the kagent
-    # release's uninstall left — the kagent namespace is the connectivity
-    # release's object and goes with it, its workloads included.
-    logger.info("agent HelmReleases before the uninstall: %s; kagent namespace after: %s; kagent pods after: %s",
-                agent_hrs_before, "present" if kube.get("namespace", KAGENT_NAMESPACE) else "gone",
-                [p["metadata"]["name"] for p in kube.items("pods", namespace=KAGENT_NAMESPACE)] if kube.get("namespace", KAGENT_NAMESPACE) else "-")
+    # The agents' HelmRelease objects went with the Flux CRDs (the CRD is gone,
+    # so is every object of its kind); their workloads stay behind, orphaned:
+    # the kagent namespace is kept (helm.sh/resource-policy: keep on the
+    # connectivity release's Namespace), the Agent CRs with it (the kagent CRDs
+    # are app-owned, Helm never deletes crds/), and the agents' Deployments run on.
+    assert MANAGED_AGENT in agent_hrs_before, f"the managed agent's HelmRelease was not there before the uninstall: {agent_hrs_before}"
+    assert kube.get("namespace", KAGENT_NAMESPACE), "the kagent namespace went with the uninstall; it must be kept (the agents live there)"
+    orphans = {d["metadata"]["name"] for d in kube.items("deployments", namespace=KAGENT_NAMESPACE)}
+    assert {DECLARATIVE_AGENT, MANAGED_AGENT} <= orphans, f"the agents' Deployments did not survive the uninstall: {sorted(orphans)}"
+    assert kube.get("agents.kagent.dev", MANAGED_AGENT, namespace=KAGENT_NAMESPACE), "the managed agent's Agent CR did not survive"
+    logger.info("orphaned in %s after the uninstall: Deployments %s (their HelmReleases %s are gone with the CRDs)", KAGENT_NAMESPACE, sorted(orphans), agent_hrs_before)
     assert elapsed < UNINSTALL_BUDGET_S, f"helm uninstall --wait took {elapsed:.0f}s (budget {UNINSTALL_BUDGET_S}s)"
     logger.info("uninstall clean in %.0f s: no Flux CRD, operator CRDs kept, no controller, no Job, no release", elapsed)
+    # Leave the next scenario a cluster without the orphans (its own kagent
+    # runs there); the namespace's termination completes in the background.
+    kube.delete("namespace", KAGENT_NAMESPACE, wait=False)
     for phase, seconds in TIMINGS.entries.items():
         logger.info("TIMING %-90s %6.0f s", phase, seconds)

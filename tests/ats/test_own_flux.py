@@ -164,10 +164,12 @@ def meta_helmrelease(version: str, engine: bool) -> List[Dict[str, Any]]:
 
 
 @pytest.fixture(scope="module")
-def own_flux(kube: Kube) -> Iterator[None]:
+def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     """Flux's source-controller + helm-controller from the upstream release
     manifest, the way `flux install --components=…` applies them (field manager
-    `flux`), on a cluster without Flux. Yields with the CRD managers recorded."""
+    `flux`), on a cluster without Flux. Yields with the CRD managers recorded.
+    ``prerequisites`` (idempotent) brings what the smoke left when this scenario
+    runs alone: the Gateway API CRDs, the lab Dex, the policy-exceptions namespace."""
     assert not kube.flux_crds(), f"the own-Flux scenario needs a cluster without Flux CRDs: {kube.flux_crds()}"
     assert not operator_deployments(kube) and not helm_controllers(kube), "an engine is still running"
     assert OPERATOR_CRDS <= set(kube.crd_names()), "the smoke's operator CRDs are expected to remain; the guard's lookup must find no FluxInstance among them"

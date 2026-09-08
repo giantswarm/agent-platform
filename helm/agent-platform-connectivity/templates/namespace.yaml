@@ -4,18 +4,22 @@ kagent off removes it with the release (the standalone umbrella's generator
 patched this gate into its copy; it was a bug here too). */ -}}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
 {{- if and $kagentOn .Values.kagent.namespaceOverride (ne .Values.kagent.namespaceOverride .Release.Namespace) }}
-# Ensure the kagent namespace exists when it differs from the release namespace.
-# On clusters where the namespace is pre-created (e.g. graveler), Kubernetes
-# applies this as a no-op. On fresh installs the namespace is created here;
-# note that Helm applies all resources in a single pass, so kagent resources
-# referencing this namespace may require a second apply if the controller
-# starts before the namespace is Ready. In practice this is not an issue
-# because Kubernetes accepts namespace-scoped resources against a namespace
-# that exists as an API object, even if it is not yet fully propagated.
+# The kagent namespace, adopted where the cluster created it (a management
+# cluster's bases, the bundled engine's kagent HelmRelease with
+# install.createNamespace) and created here otherwise. It is KEPT
+# (helm.sh/resource-policy: keep): Helm never deletes it — not on `helm
+# uninstall` of the platform, whose agents' workloads and Helm storage stay
+# behind orphaned in it (README "Uninstalling"), and not as the install
+# remediation of a failed first install of this release, which used to take the
+# namespace and every kagent object in it down with the release (measured on
+# the ATS kind smoke: a PolicyException without its namespace failed the
+# install, the remediation deleted the kagent namespace, kagent's pods with it).
 apiVersion: v1
 kind: Namespace
 metadata:
   name: {{ .Values.kagent.namespaceOverride }}
+  annotations:
+    helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
     application.giantswarm.io/team: {{ index .Chart.Annotations "io.giantswarm.application.team" | quote }}
