@@ -587,6 +587,51 @@ Helm treats a dependency whose condition path is absent). Emits "true" or "".
 {{- end -}}
 
 {{/*
+The namespace the kagent component installs its workloads into, when it is one
+the install would not otherwise create — the bundled engine's pre-install /
+pre-upgrade hook creates it (templates/hooks/kagent-namespace.yaml). Empty
+unless ALL of: the bundled engine is on (with the engine off this chart is a
+pure renderer for a cluster's own Flux, and that cluster creates the namespace
+out of band — the fleet's bases do), the kagent component is on,
+kagent.namespaceOverride is set, and it differs from the namespace the platform
+HelmReleases target (gitops.targetNamespace, else the release namespace — that
+one helm-controller creates itself, install.createNamespace).
+Why a hook, and why here: the kagent chart renders its objects into
+kagent.namespaceOverride while its HelmRelease targets the platform namespace,
+so helm-controller's createNamespace never creates `kagent`; the one chart
+object that does — the connectivity chart's Namespace — sits in a release that
+dependsOn kagent. A first install on a cluster without the namespace failed
+every kagent attempt with `namespaces "kagent" not found` until the retries
+were exhausted, and everything behind kagent waited
+(giantswarm/agent-platform#306). The Namespace is deliberately NOT an object of
+this release: the connectivity release renders and tracks it (adopting the
+existing one on its install), and two Helm releases must never track one
+object — a second tracked owner flips meta.helm.sh/release-name and the other
+release's next upgrade fails on ownership metadata. A hook resource is not a
+release object, and a Job that runs `kubectl create namespace` when it is
+missing leaves exactly what the bases and the lab leave: a bare Namespace the
+connectivity release adopts.
+Usage: include "agent-platform.kagent.hookNamespace" .
+*/}}
+{{- define "agent-platform.kagent.hookNamespace" -}}
+{{- if and (eq (include "agent-platform.engineEnabled" .) "true") (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- $ns := dig "namespaceOverride" "" (.Values.kagent | default dict) -}}
+{{- $target := .Values.gitops.targetNamespace | default .Release.Namespace -}}
+{{- if and $ns (ne $ns $target) }}{{ $ns }}{{ end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The Helm hook events the hook ServiceAccount + ClusterRoleBinding (hooks/rbac.yaml)
+are created for: pre-delete for the ordered teardown, and pre-install,pre-upgrade
+too while the kagent namespace hook renders — it runs as that account (creating
+a namespace is cluster-scoped, the namespaced <release>-self identity cannot).
+*/}}
+{{- define "agent-platform.hooks.serviceAccountEvents" -}}
+{{- if include "agent-platform.kagent.hookNamespace" . }}pre-install,pre-upgrade,pre-delete{{ else }}pre-delete{{ end -}}
+{{- end -}}
+
+{{/*
 The tenant ServiceAccount the platform HelmReleases run under: the one the
 flux-engine subchart renders (agent-platform-flux) whenever the engine is on,
 nothing otherwise. gitops.serviceAccountName overrides it either way (see

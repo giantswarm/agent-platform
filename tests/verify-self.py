@@ -178,7 +178,9 @@ def main(chart: str) -> int:
         fail("self-management renders a ClusterRole; a namespaced Role is enough")
     hooks = {(k, n): hook_meta(d) for (k, _, n), d in on.items() if "helm.sh/hook:" in d}
     expected_hooks = {
-        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-delete", -10),
+        # ci-values turn kagent on: the kagent namespace hook (verify-engine.py) and the hook identity at its events
+        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,pre-delete", -10),
+        ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
         ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-delete", -5),
         ("Job", f"{RELEASE}-self-values"): ("post-install,post-upgrade", 0),
         ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("pre-delete", 5),
@@ -231,6 +233,11 @@ def main(chart: str) -> int:
         del expected_off[("Job", f"{RELEASE}-self-values")]
         expected_off[("Job", f"{RELEASE}-self-stop-resumer")] = ("pre-upgrade,pre-delete", -6)
         expected_off[("Job", f"{RELEASE}-self-suspend")] = ("pre-upgrade,pre-delete", -5)
+        if label != "self off":
+            # the lab values leave kagent off: no kagent namespace hook, the hook identity at pre-delete only
+            del expected_off[("Job", f"{RELEASE}-kagent-namespace")]
+            expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-delete", -10)
+            expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-delete", -10)
         if hooks_off != expected_off:
             fail(f"{label}: hooks differ:\n  got      {hooks_off}\n  expected {expected_off}")
         if label == "self off":
