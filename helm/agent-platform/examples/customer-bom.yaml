@@ -17,7 +17,13 @@
 # whole model-manager block, `lmstudio` included, to every release, and that
 # key only exists from 0.19.0 — a chart before it rejects the values outright
 # (its schema is additionalProperties: false), whether or not the
-# installation uses LM Studio.
+# installation uses LM Studio. Selecting that backend needs one more thing
+# this snapshot does not have: an agent-platform-connectivity newer than
+# 3.11.0, the release carrying the lmstudio render guard and the egress arm.
+# The 3.10.0 pin below predates both, so `backend: lmstudio` would fail the
+# render with "must be one of: ollama, kserve, lemonade" — bump that pin too
+# when the release exists. An installation that does not select lmstudio is
+# unaffected either way.
 # =============================================================================
 
 gitops:

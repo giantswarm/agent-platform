@@ -1340,6 +1340,12 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
   ollama:
     endpoint: ""
     agentHost: ""
+  lemonade:
+    endpoint: ""
+    agentHost: ""
+  lmstudio:
+    endpoint: ""
+    agentHost: ""
   kagent:
     namespace: kagent
     disableWiring: false
