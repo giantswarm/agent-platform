@@ -13,7 +13,7 @@
 {{- $toolsPort := dig "service" "ports" "tools" "targetPort" "8084" $toolsValues | toString }}
 {{- $clusterName := .Values.postgres.clusterName }}
 
-{{- if eq .Values.networkPolicy.flavor "cilium" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Egress from agentgateway data-plane to the kagent controller (cross-namespace).
 apiVersion: cilium.io/v2
@@ -429,7 +429,7 @@ spec:
             - port: "8080"
               protocol: TCP
 {{- end }}
-{{- else if eq .Values.networkPolicy.flavor "kubernetes" }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

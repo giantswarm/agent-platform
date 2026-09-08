@@ -23,7 +23,7 @@ egress to their servers: every endpoint split into host, port and whether it
 is an address — one model-manager may front several. */ -}}
 {{- $servers := include "agent-platform.modelManager.hostTargets" . | fromJsonArray }}
 
-{{- if eq .Values.networkPolicy.flavor "cilium" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Ingress to model-manager: the agentgateway data plane (the portal's route)
 # and muster (the MCP endpoint), both in the release namespace, on the Service
@@ -237,7 +237,7 @@ spec:
               protocol: TCP
 {{- end }}
 
-{{- else if eq .Values.networkPolicy.flavor "kubernetes" }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
 # Ingress to model-manager: the agentgateway data plane (the portal's route)
 # and muster (the MCP endpoint), on the Service port only.

@@ -49,7 +49,17 @@ WIRING = {
     ),
 }
 
-PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
+# The fleet's API groups: the cluster-shape knobs default to `auto` and resolve
+# from .Capabilities.APIVersions, so without these a `helm template` renders the
+# vanilla shape and the Kyverno / Cilium markers below never appear.
+FLEET_APIS = [
+    "--api-versions", "kyverno.io/v1",
+    "--api-versions", "cilium.io/v2",
+    "--api-versions", "monitoring.coreos.com/v1",
+    "--api-versions", "gateway.networking.k8s.io/v1",
+    "--api-versions", "gateway.envoyproxy.io/v1alpha1",
+]
+PARENT_REF = ["--set", "ingress.parentRefs[0].name=x", *FLEET_APIS]
 
 
 def render(chart: str, flags: list[str]) -> str:

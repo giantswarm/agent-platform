@@ -456,7 +456,16 @@
                                     "additionalProperties": false,
                                     "properties": {
                                         "enabled": {
-                                            "type": "boolean"
+                                            "type": [
+                                                "boolean",
+                                                "string"
+                                            ],
+                                            "description": "`auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off.",
+                                            "enum": [
+                                                "auto",
+                                                true,
+                                                false
+                                            ]
                                         },
                                         "interval": {
                                             "type": "string"
@@ -608,7 +617,16 @@
             "additionalProperties": false,
             "properties": {
                 "enabled": {
-                    "type": "boolean"
+                    "type": [
+                        "boolean",
+                        "string"
+                    ],
+                    "description": "`auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off.",
+                    "enum": [
+                        "auto",
+                        true,
+                        false
+                    ]
                 },
                 "policyExceptionNamespace": {
                     "type": "string"
@@ -667,7 +685,13 @@
                     "type": "boolean"
                 },
                 "flavor": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "`auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor.",
+                    "enum": [
+                        "auto",
+                        "cilium",
+                        "kubernetes"
+                    ]
                 },
                 "kubernetes": {
                     "type": "object",

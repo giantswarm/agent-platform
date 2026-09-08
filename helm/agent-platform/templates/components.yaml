@@ -35,7 +35,10 @@ knowledge:
       release until the chart catches up, on every installation.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
       a single block. Used by agent-platform-connectivity, which reads many
-      blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …).
+      blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …). Like
+      every block, it is taken from the tree AFTER the cluster-shape knobs are
+      resolved (see agent-platform.shape.apply in _helpers.tpl), so the child
+      never sees `auto`.
   injectGlobal  — inject `.Values.global` into the forwarded values (default
       true). Set false for components whose strict values.schema.json
       (additionalProperties:false) rejects an unexpected `global` key
@@ -91,24 +94,33 @@ plumbing and are dropped. */ -}}
 {{- range $key, $c := .Values.components -}}
 {{- $_ := set $roster $key (dict "enabled" (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" $key)) "true")) -}}
 {{- end -}}
+{{- /* The values every release is inlined from: one deep copy of the tree with
+every cluster-shape knob (kyvernoPolicies.enabled, networkPolicy.flavor,
+global.observability.metrics.serviceMonitor.enabled, dicebear.route.enabled,
+agentSandbox.podSecurity.enabled) resolved from `auto` ONCE, and the component
+copies derived from those answers (see agent-platform.shape.apply). Detected
+here, not in the child charts: the connectivity chart receives the resolved
+values and every component the same one flavor. */ -}}
+{{- $shaped := deepCopy (omit $root.Values "gitops" "components") -}}
+{{- include "agent-platform.shape.apply" (dict "root" $root "values" $shaped) -}}
 {{- range $key, $c := .Values.components }}
 {{- if (index $roster $key).enabled }}
 {{- $name := $c.chart }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}
 {{- if $c.forwardAllValues }}
-{{- $vals = mergeOverwrite (deepCopy (omit $root.Values "gitops" "components")) (dict "components" $roster) }}
+{{- $vals = mergeOverwrite (deepCopy $shaped) (dict "components" $roster) }}
 {{- /* Hold back the top-level blocks the chart does not read yet (see omitKeys above). */ -}}
 {{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
 {{- else }}
-{{- with $c.valuesFrom }}{{- $vals = index $root.Values . | default dict }}{{- end }}
+{{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
 {{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
 {{- /* GS wrapper charts vendor the upstream chart as a subchart of the same name;
 nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- with $c.valuesKey }}{{- $vals = dict . $vals }}{{- end }}
-{{- if ne $c.injectGlobal false }}{{- $vals = merge (deepCopy $vals) (dict "global" $root.Values.global) }}{{- end }}
+{{- if ne $c.injectGlobal false }}{{- $vals = merge (deepCopy $vals) (dict "global" $shaped.global) }}{{- end }}
 {{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an
 always-on consumer (e.g. connectivity) does not block on a HelmRelease that was

@@ -324,3 +324,204 @@ Rendered as a YAML list item; the caller must provide the surrounding `egress:` 
         - port: "53"
           protocol: TCP
 {{- end -}}
+
+{{/*
+=== Cluster shape ===
+
+The knobs that describe what the cluster can admit — Kyverno policies, the
+network-policy flavor, ServiceMonitors/PodMonitors, dicebear's Envoy route
+filter, the agent-sandbox pod-security policy — accept `auto` (the default):
+the object renders when its API group is served. `.Capabilities.APIVersions` is
+the live discovery under helm-controller, the Helm CLI and `--dry-run=server`;
+under `helm template` it is Helm's built-in set unless `--api-versions` names
+more, so an offline render resolves every `auto` to the vanilla shape. An
+explicit `true|false` (or `cilium|kubernetes`) always wins over detection.
+
+The meta chart resolves each knob ONCE (agent-platform.shape.apply) before it
+inlines a component's values, and derives the component-level copies from that
+same answer, so a render can never hand one component the cilium flavor and
+another the kubernetes one. The connectivity chart carries the same helpers
+for renders without the meta chart; the meta chart forwards resolved values,
+so the two cannot disagree on one cluster.
+*/}}
+
+{{/*
+Resolve one `auto|true|false` knob to the string "true" or "false". `auto`
+follows whether .api is served; an explicit boolean (or its string form from
+--set-string) is returned as is; anything else fails the render naming .key.
+Usage: include "agent-platform.shape.resolve" (dict "root" $ "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1")
+*/}}
+{{- define "agent-platform.shape.resolve" -}}
+{{- $v := .value -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- if .root.Capabilities.APIVersions.Has .api }}true{{ else }}false{{ end -}}
+{{- else if kindIs "bool" $v -}}
+{{- if $v }}true{{ else }}false{{ end -}}
+{{- else if or (eq (toString $v) "true") (eq (toString $v) "false") -}}
+{{- toString $v -}}
+{{- else -}}
+{{- fail (printf "%s must be one of auto, true, false (got %v)" .key $v) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+kyvernoPolicies.enabled resolved: "true" when Kyverno policies render (auto:
+kyverno.io/v1 served).
+*/}}
+{{- define "agent-platform.shape.kyvernoPolicies" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1") -}}
+{{- end -}}
+
+{{/*
+networkPolicy.flavor resolved: "cilium" or "kubernetes" (auto: cilium when
+cilium.io/v2 is served, else kubernetes).
+*/}}
+{{- define "agent-platform.shape.networkPolicyFlavor" -}}
+{{- $f := .Values.networkPolicy.flavor -}}
+{{- if or (kindIs "invalid" $f) (eq (toString $f) "auto") -}}
+{{- if .Capabilities.APIVersions.Has "cilium.io/v2" }}cilium{{ else }}kubernetes{{ end -}}
+{{- else if or (eq (toString $f) "cilium") (eq (toString $f) "kubernetes") -}}
+{{- toString $f -}}
+{{- else -}}
+{{- fail (printf "networkPolicy.flavor must be one of auto, cilium, kubernetes (got %v)" $f) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+global.observability.metrics.serviceMonitor.enabled resolved: "true" when the
+monitor objects render (auto: monitoring.coreos.com/v1 served).
+*/}}
+{{- define "agent-platform.shape.serviceMonitor" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "global.observability.metrics.serviceMonitor.enabled" "value" .Values.global.observability.metrics.serviceMonitor.enabled "api" "monitoring.coreos.com/v1") -}}
+{{- end -}}
+
+{{/*
+dicebear.route.enabled resolved: "true" when the avatar HTTPRoute and its Envoy
+Gateway HTTPRouteFilters render (auto: gateway.envoyproxy.io/v1alpha1 served).
+*/}}
+{{- define "agent-platform.shape.dicebearRoute" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "dicebear.route.enabled" "value" (dig "route" "enabled" "auto" (.Values.dicebear | default dict)) "api" "gateway.envoyproxy.io/v1alpha1") -}}
+{{- end -}}
+
+{{/*
+agentSandbox.podSecurity.enabled resolved: "true" when the agent-sandbox
+pod-security ClusterPolicy renders. It is a Kyverno mutate policy, so `auto`
+follows the RESOLVED kyvernoPolicies.enabled (an explicit
+kyvernoPolicies.enabled: false switches it off with the rest; the
+"podSecurity requires kyvernoPolicies" guard then never fires on auto).
+*/}}
+{{- define "agent-platform.shape.agentSandboxPodSecurity" -}}
+{{- $v := dig "podSecurity" "enabled" "auto" (.Values.agentSandbox | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.kyvernoPolicies" . -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "agentSandbox.podSecurity.enabled" "value" $v "api" "kyverno.io/v1") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Write .value into .values at .path (a list of keys) when the leaf there is
+`auto`. A leaf that is absent or set explicitly is left alone — explicit
+overrides win, and a block an operator emptied is not re-created. Emits nothing.
+Usage: include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "networkPolicy" "flavor") "value" "cilium")
+*/}}
+{{- define "agent-platform.shape.derive" -}}
+{{- $cur := .values -}}
+{{- $ok := true -}}
+{{- range (initial .path) -}}
+{{- if and $ok (kindIs "map" $cur) (hasKey $cur .) -}}
+{{- $cur = index $cur . -}}
+{{- else -}}
+{{- $ok = false -}}
+{{- end -}}
+{{- end -}}
+{{- if and $ok (kindIs "map" $cur) -}}
+{{- $leaf := last .path -}}
+{{- if and (hasKey $cur $leaf) (eq (toString (index $cur $leaf)) "auto") -}}
+{{- $_ := set $cur $leaf .value -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Resolve every cluster-shape knob in .values (a deep copy of .Values) IN PLACE,
+once, before the component loop inlines them. Emits nothing.
+
+The five knobs are written with their resolved value. The component-level
+copies the standalone overlay used to flip by hand are derived from the same
+answers, but only where the leaf is left at `auto`:
+  networkPolicy.flavor      -> muster.networkPolicy.flavor,
+                               valkey.ciliumNetworkPolicy.enabled (cilium only)
+  serviceMonitor.enabled    -> muster.muster.observability.metrics.prometheus.serviceMonitor.enabled,
+                               .prometheus.prometheusRule.enabled,
+                               muster.muster.observability.grafanaDashboard.enabled
+                               (the dashboard ConfigMap is only picked up by the
+                               same observability platform),
+                               kagent.oauth2-proxy.metrics.serviceMonitor.enabled,
+                               kagent.otel.tracing.enabled / .logging.enabled (the
+                               OTLP gateway they export to is part of that platform)
+Two leaves have no `auto` form and are derived directly, off only:
+  valkey.valkey.metrics.podMonitor.enabled — the valkey chart's own default is
+      on; written false when monitors are off, left absent otherwise so the
+      fleet's HelmRelease values are unchanged. An explicit value is kept.
+  kagent.controller.env[name=OTEL_EXPORTER_OTLP_HEADERS] — the tenant header
+      of the OTLP gateway; dropped when both kagent OTel exporters resolve off.
+mcp-kubernetes' Cilium policy joins this list once mcp-kubernetes is a component.
+Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
+*/}}
+{{- define "agent-platform.shape.apply" -}}
+{{- $root := .root -}}
+{{- $v := .values -}}
+{{- $kyverno := eq (include "agent-platform.shape.kyvernoPolicies" $root) "true" -}}
+{{- $flavor := include "agent-platform.shape.networkPolicyFlavor" $root -}}
+{{- $monitors := eq (include "agent-platform.shape.serviceMonitor" $root) "true" -}}
+{{- $dicebearRoute := eq (include "agent-platform.shape.dicebearRoute" $root) "true" -}}
+{{- $podSecurity := eq (include "agent-platform.shape.agentSandboxPodSecurity" $root) "true" -}}
+{{- /* The knobs themselves: written resolved whatever they held. */ -}}
+{{- $_ := set $v.kyvernoPolicies "enabled" $kyverno -}}
+{{- $_ := set $v.networkPolicy "flavor" $flavor -}}
+{{- $_ := set $v.global.observability.metrics.serviceMonitor "enabled" $monitors -}}
+{{- if kindIs "map" (dig "route" nil (index $v "dicebear" | default dict)) -}}
+{{- $_ := set (index $v "dicebear" "route") "enabled" $dicebearRoute -}}
+{{- end -}}
+{{- if kindIs "map" (dig "podSecurity" nil (index $v "agentSandbox" | default dict)) -}}
+{{- $_ := set (index $v "agentSandbox" "podSecurity") "enabled" $podSecurity -}}
+{{- end -}}
+{{- /* Derived component copies: only a leaf left at auto is written. */ -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "networkPolicy" "flavor") "value" $flavor) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "valkey" "ciliumNetworkPolicy" "enabled") "value" (eq $flavor "cilium")) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "metrics" "prometheus" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "metrics" "prometheus" "prometheusRule" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "grafanaDashboard" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "oauth2-proxy" "metrics" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "tracing" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "logging" "enabled") "value" $monitors) -}}
+{{- /* valkey PodMonitor: the chart's own default is on, so only "off" is written. */ -}}
+{{- if not $monitors -}}
+{{- $metrics := dig "valkey" "metrics" nil (index $v "valkey" | default dict) -}}
+{{- if kindIs "map" $metrics -}}
+{{- $pm := index $metrics "podMonitor" -}}
+{{- if kindIs "invalid" $pm -}}
+{{- $_ := set $metrics "podMonitor" (dict "enabled" false) -}}
+{{- else if and (kindIs "map" $pm) (not (hasKey $pm "enabled")) -}}
+{{- $_ := set $pm "enabled" false -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /* kagent OTLP tenant header: gone when neither OTel exporter is on. */ -}}
+{{- $kagent := index $v "kagent" | default dict -}}
+{{- if kindIs "map" $kagent -}}
+{{- $tracing := dig "otel" "tracing" "enabled" false $kagent -}}
+{{- $logging := dig "otel" "logging" "enabled" false $kagent -}}
+{{- $ctrl := index $kagent "controller" -}}
+{{- if and (not $tracing) (not $logging) (kindIs "map" $ctrl) (kindIs "slice" (index $ctrl "env")) -}}
+{{- $env := list -}}
+{{- range (index $ctrl "env") -}}
+{{- if not (and (kindIs "map" .) (eq (toString (index . "name")) "OTEL_EXPORTER_OTLP_HEADERS")) -}}
+{{- $env = append $env . -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $ctrl "env" $env -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

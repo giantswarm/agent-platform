@@ -7,10 +7,19 @@
 CHART_DIR ?= helm/agent-platform
 CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 
+# The API groups a Giant Swarm management cluster serves and the cluster-shape
+# knobs detect (kyvernoPolicies.enabled, networkPolicy.flavor,
+# global.observability.metrics.serviceMonitor.enabled, dicebear.route.enabled,
+# agentSandbox.podSecurity.enabled default to `auto`): Kyverno, Cilium,
+# prometheus-operator, Gateway API, Envoy Gateway. `helm template` alone serves
+# Helm's built-in set, i.e. renders the vanilla shape; the assertions below that
+# expect the fleet shape pass these. verify-auto covers the resolution itself.
+FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1
 # parentRefs[0].name satisfies the all-modes ingress guard so a single guard is
-# isolated under test. Neither chart has subcharts anymore, so no `helm
-# dependency build` and no subchart-fail quieting is needed.
-VM := --set ingress.parentRefs[0].name=x
+# isolated under test, and the fleet's API groups are served so the fleet shape
+# renders. Neither chart has subcharts anymore, so no `helm dependency build`
+# and no subchart-fail quieting is needed.
+VM := --set ingress.parentRefs[0].name=x $(FLEET_APIS)
 
 # The two components that own a kyverno.io object (kagent: two ClusterPolicies + the
 # seccomp PolicyException; agentSandbox: the pod-security ClusterPolicy), so the
@@ -68,7 +77,7 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
 	@echo "--> agentSandbox.podSecurity.enabled with no kyverno policies must fail"
-	@if helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set kyvernoPolicies.enabled=false >/tmp/vm-pe-guard.out 2>&1; then \
+	@if helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set kyvernoPolicies.enabled=false --set agentSandbox.podSecurity.enabled=true >/tmp/vm-pe-guard.out 2>&1; then \
 		echo "FAIL: the sandbox lost its only securityContext source and the render succeeded"; exit 1; \
 	elif ! grep -q "agentSandbox.podSecurity.enabled requires kyvernoPolicies.enabled" /tmp/vm-pe-guard.out; then \
 		echo "FAIL: the sandbox pod-security guard failed for the wrong reason"; cat /tmp/vm-pe-guard.out; exit 1; \
@@ -140,9 +149,9 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 
 # The global.* contract inputs a standalone install sets; the fleet sets none of
 # them, which the golden check above pins to a byte-identical render.
-GLOBAL_VM := --set global.domain=ci.example.com --set 'global.gatewayApi.parentRefs[0].name=giantswarm-default' --set 'global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system'
+GLOBAL_VM := --set global.domain=ci.example.com --set 'global.gatewayApi.parentRefs[0].name=giantswarm-default' --set 'global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system' $(FLEET_APIS)
 # A valid edge-mode config: the chart-owned Gateway is the public edge.
-EDGE_VM := --set global.domain=ci.example.com --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls
+EDGE_VM := --set global.domain=ci.example.com --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls $(FLEET_APIS)
 
 .PHONY: verify-global
 verify-global: ## Assert the global.* contract behaviors (derived hostnames, gateway fallback, observability gates, edge mode) and their guards.
@@ -801,3 +810,9 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 		echo "FAIL: the built-in guard failed for the wrong reason"; cat /tmp/vp-builtin.out; exit 1; \
 	else echo "ok: built-in names refused"; fi
 	@echo "ok: presets reach muster's config"
+
+.PHONY: verify-auto
+verify-auto: ## Assert the cluster-shape knobs: `auto` resolves by served API group once, the fleet shape equals the explicit fleet values byte for byte, the vanilla shape has no Kyverno / Cilium / monitor / Envoy-only object, every component copy follows the one detection, explicit values win.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-cluster-shape.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"

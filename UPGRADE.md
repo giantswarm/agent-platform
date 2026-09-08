@@ -2,6 +2,21 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (cluster-shape knobs default to `auto`)
+
+`kyvernoPolicies.enabled`, `networkPolicy.flavor`, `global.observability.metrics.serviceMonitor.enabled`, `dicebear.route.enabled` and `agentSandbox.podSecurity.enabled` default to `auto` (they were `true` / `cilium`): the object renders when its API group is served on the cluster (`kyverno.io/v1`, `cilium.io/v2`, `monitoring.coreos.com/v1`, `gateway.envoyproxy.io/v1alpha1`; the pod-security policy follows the resolved Kyverno answer). The meta chart detects once and resolves the knobs — and the component copies left at `auto` (muster's flavor and monitors, valkey's Cilium policy and PodMonitor, kagent's OTel exporters, oauth2-proxy monitor and OTLP header) — before it inlines a component's values.
+
+### Operator action
+
+**No installation needs to act.**
+
+- A management cluster serves every one of those groups, so the render is byte-identical to the previous release: no object changes, no pod rolls.
+- A cluster without them (kind, a plain cloud cluster) now renders the vanilla shape from the same chart — Kubernetes `NetworkPolicy` instead of `CiliumNetworkPolicy`, no `kyverno.io` object, no monitor, no avatar route — without a values file that describes the cluster. Values that set those knobs to `false` / `kubernetes` by hand keep working and can be dropped.
+- An explicit value keeps winning over detection, on a knob (`networkPolicy.flavor: kubernetes` with Cilium present renders the kubernetes flavor everywhere) and on a component copy (`muster.networkPolicy.flavor: cilium` pins muster alone). `agentSandbox.podSecurity.enabled: true` together with `kyvernoPolicies.enabled: false` still fails the render, as before.
+- `helm template` without `--api-versions` renders the vanilla shape. Pass the groups (`--api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1`) to render the fleet shape offline; `helm install --dry-run=server` and helm-controller read the live cluster.
+
+## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
+
 ## \<current\> → \<next\> (the Argo CD render engine is removed; Flux is the only engine)
 
 `templates/components.yaml` renders a Flux `OCIRepository` + `HelmRelease` per component and nothing else. The `gitops.engine: argo` branch — an Argo CD `Application` per component, ordered by `argocd.argoproj.io/sync-wave`, with `gitops.argo.project` / `gitops.argo.server` as its destination — is gone, and so are the two `gitops.argo.*` keys. It was never verified against a running Argo CD, no installation selected it, and the platform cannot run on Argo CD alone: agents are Flux objects on every path (the Backstage agent create flow and agent-manager write an `OCIRepository` + `HelmRelease` per agent). `gitops.engine` stays a key and accepts `flux` only (`enum: [flux]` in the schema, a template guard behind it).
