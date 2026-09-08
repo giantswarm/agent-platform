@@ -33,12 +33,19 @@ global:
     metrics:
       # Gates the monitor objects this chart renders: the kagent controller
       # ServiceMonitor (+ its metrics Service) and the CNPG Cluster's built-in
-      # PodMonitor. enabled: false removes them all; the per-component keys
+      # PodMonitor, and — through the copies the meta chart derives from this
+      # answer — muster's ServiceMonitor, PrometheusRule and Grafana dashboard,
+      # valkey's PodMonitor, kagent's oauth2-proxy ServiceMonitor and kagent's
+      # OTel exporters with their tenant header. The per-component keys
       # (kagent.serviceMonitor.*) keep working underneath and can still
-      # disable or tune their own object. Needs the monitoring.coreos.com
-      # CRDs when on; metrics endpoints stay exposed either way.
+      # disable or tune their own object. Metrics endpoints stay exposed
+      # either way.
       serviceMonitor:
-        enabled: true
+        # -- `auto` (default) renders the monitor objects when
+        # monitoring.coreos.com/v1 is served on the cluster, detected once by the
+        # meta chart (an offline `helm template` resolves to false unless the API
+        # is passed in); `true` / `false` force them on or off.
+        enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
         # Scrape interval; empty falls back to the per-component interval.
         interval: ""
         # Labels on every monitor object (e.g. the Giant Swarm tenant label);
@@ -456,14 +463,18 @@ components:  # @schema additionalProperties: true
     dependsOn: [agentgateway, kagent, cloudnative-pg, kserve-resources]
 
 # === Agent avatars (DiceBear) ===
-# Forwarded verbatim to the dicebear component chart (see giantswarm/dicebear
-# values.yaml for the full surface). The renderer is force-enabled and its public
-# route is ON by default, so EVERY installation MUST set route.parentRefs (the
-# platform's public Gateway — typically the same one as ingress.parentRefs) and
-# route.hostnames (e.g. [avatars.<domain>]); the chart hard-fails otherwise, by design.
+# Forwarded to the dicebear component chart (see giantswarm/dicebear values.yaml
+# for the full surface) with route.enabled resolved. The renderer is
+# force-enabled. Its public route needs Envoy Gateway's HTTPRouteFilter for the
+# path-to-query rewrite, so route.enabled `auto` (the default) renders the route
+# when gateway.envoyproxy.io/v1alpha1 is served and skips it otherwise; `true` /
+# `false` force it. Wherever the route renders, the installation MUST set
+# route.parentRefs (the platform's public Gateway — typically the same one as
+# ingress.parentRefs) and route.hostnames (e.g. [avatars.<domain>]); the chart
+# hard-fails otherwise, by design.
 dicebear:  # @schema skipProperties: true; additionalProperties: true
   route:
-    enabled: true
+    enabled: auto  # auto | true | false
     parentRefs: []    # REQUIRED per cluster: public Gateway parentRef(s)
     hostnames: []      # REQUIRED per cluster: e.g. [avatars.example.com]
 
@@ -579,14 +590,19 @@ gatewayApi:
 
 networkPolicy:
   enabled: true
+  # auto       — cilium when cilium.io/v2 is served on the cluster, else
+  #              kubernetes (detected once by the meta chart; `helm template`
+  #              without `--api-versions cilium.io/v2` resolves to kubernetes)
   # cilium     — CiliumNetworkPolicy (entity selectors + FQDN egress)
   # kubernetes — vanilla networking.k8s.io/v1 NetworkPolicy
   #
-  # Governs the agentgateway policies owned by this chart, plus the supplementary
-  # muster MCP-egress policy below. Muster's own ciliumNetworkPolicy is otherwise
-  # independent — set muster.ciliumNetworkPolicy.enabled to false when running
-  # the kubernetes flavor.
-  flavor: cilium
+  # Governs every network policy the connectivity chart renders, plus the
+  # supplementary muster MCP-egress policy below. The meta chart derives
+  # muster.networkPolicy.flavor and valkey.ciliumNetworkPolicy.enabled from the
+  # same answer while those are left at `auto`.
+  # -- `auto` (default) selects `cilium` when cilium.io/v2 is served on the
+  # cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor.
+  flavor: auto  # @schema enum: [auto, cilium, kubernetes]
   # Extra CIDR egress for in-cluster Gateway VIPs the entity selectors miss.
   # Example:
   #   additionalEgressCIDRs:
@@ -620,9 +636,10 @@ networkPolicy:
 
 # The connectivity chart's kyverno.io objects: the kagent declarative-agent mutate
 # policies, the kagent seccomp PolicyException, the CNPG ImageVolume
-# PolicyException, and the agent-sandbox pod-security policy. Requires Kyverno on
-# the cluster. Set enabled: false on a cluster without it, where these objects fail
-# the install on an unknown API group.
+# PolicyException, and the agent-sandbox pod-security policy. `enabled: auto`
+# (the default) renders them when kyverno.io/v1 is served on the cluster and
+# skips them otherwise, where they would fail the install on an unknown API
+# group; `true` / `false` force them.
 #
 # A cluster that enforces restricted PSS without Kyverno (PSA labels only) must set
 # components.agent-sandbox.enabled: false as well: the upstream agent-sandbox controller chart
@@ -638,7 +655,11 @@ networkPolicy:
 # The volume-types exception is rendered only when a pgvector extension image is
 # set, the one case where a CNPG pod carries an `image` volume.
 kyvernoPolicies:
-  enabled: true
+  # -- `auto` (default) renders the Kyverno objects when kyverno.io/v1 is
+  # served on the cluster, detected once by the meta chart (an offline
+  # `helm template` resolves to false unless the API is passed in); `true` /
+  # `false` force them on or off.
+  enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
   policyExceptionNamespace: policy-exceptions
   seccompPolicyName: restrict-seccomp-strict
   seccompRuleNames:  # @schema minItems: 1; item: string; uniqueItems: true
@@ -711,12 +732,13 @@ muster:  # @schema skipProperties: true; additionalProperties: true
           kind: Group
           name: giantswarm-github:giantswarm:giantswarm-admins
   # Muster's NetworkPolicy mirrors the umbrella's flavor split (`cilium` vs
-  # `kubernetes`). Defaults stay aligned with `networkPolicy.flavor` at the
-  # umbrella top level — flip `flavor: kubernetes` here too when running on
-  # a non-Cilium cluster.
+  # `kubernetes`). `auto` (the default) is replaced by the resolved top-level
+  # `networkPolicy.flavor` before the block is forwarded, so muster and the
+  # connectivity chart always run one flavor; an explicit `cilium` /
+  # `kubernetes` here wins.
   networkPolicy:
     enabled: true
-    flavor: cilium
+    flavor: auto  # auto | cilium | kubernetes
     cilium:
       # Reaches Dex / OIDC / MCPServers fronted by in-cluster ingress.
       # Muster's sub-chart default is false.
@@ -791,12 +813,15 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     # implies the prometheus exporter, so the muster chart serves
     # /metrics, exposes the metrics port on the Service, and renders
     # the ServiceMonitor. The tenant label routes the series to the
-    # correct Mimir tenant.
+    # correct Mimir tenant. The three `auto` leaves below follow the
+    # resolved global.observability.metrics.serviceMonitor.enabled (the
+    # meta chart replaces them before it forwards the block); an explicit
+    # true / false wins.
     observability:
       metrics:
         prometheus:
           serviceMonitor:
-            enabled: true
+            enabled: auto  # auto | true | false
             interval: 60s
             labels:
               observability.giantswarm.io/tenant: giantswarm
@@ -814,7 +839,7 @@ muster:  # @schema skipProperties: true; additionalProperties: true
           # its own schema with additionalProperties: false, so this key
           # must not be set for a muster older than 4.1.0.
           prometheusRule:
-            enabled: true
+            enabled: auto  # auto | true | false
             labels:
               observability.giantswarm.io/tenant: giantswarm
       # The "Muster / MCP Gateway" Grafana dashboard (uid muster): MCP
@@ -833,7 +858,7 @@ muster:  # @schema skipProperties: true; additionalProperties: true
       # chart validates values with additionalProperties: false, so
       # this key must not be set for an older muster.
       grafanaDashboard:
-        enabled: true
+        enabled: auto  # auto | true | false
         giantswarm:
           enabled: true
 
@@ -844,8 +869,11 @@ muster:  # @schema skipProperties: true; additionalProperties: true
 #   .vpa                  — wrapper's VerticalPodAutoscaler (off by default)
 # Single-pod Deployment + PVC; writable Service at muster-valkey.<ns>.svc:6379.
 valkey:  # @schema skipProperties: true; additionalProperties: true
+  # `auto` (the default) follows the resolved top-level networkPolicy.flavor:
+  # on with cilium, off with kubernetes (the wrapper ships no kubernetes-flavor
+  # policy). An explicit true / false wins.
   ciliumNetworkPolicy:
-    enabled: true
+    enabled: auto  # auto | true | false
   vpa:
     enabled: false
   valkey:
@@ -913,6 +941,11 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     # sets a base securityContext that's missing `allowPrivilegeEscalation` and
     # `seccompProfile`, which Kyverno's restricted policies reject. Mirror the
     # main container's block for the sidecar.
+    # The wrapper also ships its PodMonitor on (metrics.podMonitor.enabled).
+    # The meta chart sets it false where the resolved
+    # global.observability.metrics.serviceMonitor.enabled is false (no
+    # monitoring.coreos.com/v1) and leaves it to the wrapper otherwise; set
+    # metrics.podMonitor.enabled here explicitly to override either way.
     metrics:
       exporter:
         securityContext:
@@ -1034,6 +1067,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # metrics-secure=false avoids needing a cert for the in-cluster scrape.
     # X-Scope-OrgID routes OTLP traces and logs to the correct Loki/Tempo
     # tenant. The configmap template has no headers field so we inject via env.
+    # The meta chart drops the OTEL_EXPORTER_OTLP_HEADERS entry when both OTel
+    # exporters below resolve off (no OTLP gateway to send the tenant to).
     env:
       - name: METRICS_BIND_ADDRESS
         value: ":8080"
@@ -1085,8 +1120,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       apiKeySecretKey: ANTHROPIC_API_KEY
       apiKey: ""  # Leave empty; pre-create the apiKeySecretRef Secret instead
 
-  # ServiceMonitor for controller-runtime Prometheus metrics.
-  # Requires the Prometheus Operator CRDs (monitoring.coreos.com/v1).
+  # ServiceMonitor for controller-runtime Prometheus metrics, rendered by the
+  # connectivity chart under the global.observability.metrics.serviceMonitor
+  # gate (which detects monitoring.coreos.com/v1); this is the object's own
+  # toggle underneath that gate.
   serviceMonitor:
     enabled: true
     interval: 60s
@@ -1096,17 +1133,21 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       observability.giantswarm.io/tenant: giantswarm
 
   # OTel — traces and logs to the GS Observability Platform OTLP gateway.
-  # X-Scope-OrgID header routes to the correct Loki/Tempo tenant.
+  # X-Scope-OrgID header routes to the correct Loki/Tempo tenant. `auto` (the
+  # default) follows the resolved global.observability.metrics.serviceMonitor
+  # .enabled — the gateway is part of the same observability platform whose
+  # monitoring.coreos.com/v1 CRDs that knob detects; the meta chart replaces
+  # it before forwarding. An explicit true / false wins.
   otel:
     tracing:
-      enabled: true
+      enabled: auto  # auto | true | false
       exporter:
         otlp:
           endpoint: http://otlp-gateway.kube-system.svc:4317
           protocol: grpc
           insecure: true
     logging:
-      enabled: true
+      enabled: auto  # auto | true | false
       exporter:
         otlp:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -1183,8 +1224,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       portNumber: 4180
     metrics:
       enabled: true
+      # `auto` follows the resolved global.observability.metrics.serviceMonitor
+      # .enabled (replaced by the meta chart before forwarding).
       serviceMonitor:
-        enabled: true
+        enabled: auto  # auto | true | false
         interval: 60s
         labels:
           observability.giantswarm.io/tenant: giantswarm
@@ -1766,7 +1809,11 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
   # admission via the Kyverno mutate policy in
   # templates/agent-sandbox/pod-security.yaml. These values feed that policy.
   podSecurity:
-    enabled: true
+    # `auto` (the default) follows the resolved kyvernoPolicies.enabled — the
+    # policy is a Kyverno mutate policy; `true` / `false` force it. An explicit
+    # true with kyvernoPolicies.enabled false fails the render (the
+    # securityContext has no other way onto the Deployment).
+    enabled: auto  # auto | true | false
     # Must match the agent-sandbox chart's namespace.name (upstream default).
     namespace: agent-sandbox-system
     podSecurityContext:
