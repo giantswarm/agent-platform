@@ -120,9 +120,9 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	elif ! grep -q "volumeTypesRuleNames must name at least one non-empty rule" /tmp/vm-pe-rule.out; then \
 		echo "FAIL: the empty-rule guard failed for the wrong reason"; cat /tmp/vm-pe-rule.out; exit 1; \
 	else echo "ok: empty-rule guard"; fi
-	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it)"
-	@if grep -q "helm.sh/resource-policy" /tmp/vm-pe-kyverno.out; then \
-		echo "FAIL: helm.sh/resource-policy is back; the policy would be orphaned on removal"; exit 1; \
+	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it; the kagent Namespace is the one kept object)"
+	@if awk 'BEGIN{RS="\n---\n"} /kind: ClusterPolicy/ && /helm.sh\/resource-policy/ {found=1} END{exit !found}' /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: helm.sh/resource-policy is back on a ClusterPolicy; the policy would be orphaned on removal"; exit 1; \
 	else echo "ok: prunable"; fi
 	@echo "--> a component toggle left in its old per-chart block must fail loudly"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set kagent.enabled=true >/tmp/vm-legacy.out 2>&1; then \
