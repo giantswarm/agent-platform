@@ -78,6 +78,7 @@ from conftest import (
     MusterSession,
     PortForward,
     condition,
+    connectivity_sets,
     dex_password_grant,
     is_ready,
     jwt_claims,
@@ -151,8 +152,9 @@ def dump_agents(kube: Kube) -> None:
 @pytest.fixture(scope="module")
 def smoke_sets(candidate_version: str) -> List[str]:
     """The --set values of the smoke install: self-management against the
-    in-cluster registry (and the muster base URL when the local port moved)."""
-    return self_management_sets(candidate_version) + MUSTER_BASE_URL_SETS
+    in-cluster registry, the connectivity chart of this checkout from the same
+    registry (and the muster base URL when the local port moved)."""
+    return self_management_sets(candidate_version) + connectivity_sets(candidate_version) + MUSTER_BASE_URL_SETS
 
 
 @pytest.fixture(scope="module")

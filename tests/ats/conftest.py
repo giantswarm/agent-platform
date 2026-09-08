@@ -142,6 +142,26 @@ def self_management_sets(version: str) -> List[str]:
         f"gitops.self.versionRange={version}",
     ]
 
+
+# The connectivity chart of this checkout, pushed to the in-cluster registry
+# next to the meta chart (both charts release off one tag and change together;
+# the published one would not carry this PR's connectivity changes). The
+# component's roster entry is pointed at the registry at the same version.
+CONNECTIVITY_CHART_DIR = REPO_ROOT / "helm" / "agent-platform-connectivity"
+CONNECTIVITY = "agent-platform-connectivity"
+
+
+def connectivity_sets(version: str) -> List[str]:
+    return [
+        f"components.{CONNECTIVITY}.repository={REGISTRY_URL}",
+        f"components.{CONNECTIVITY}.versionRange={version}",
+        f"components.{CONNECTIVITY}.insecure=true",
+    ]
+
+
+def connectivity_values(version: str) -> Dict[str, Any]:
+    return {"components": {CONNECTIVITY: {"repository": REGISTRY_URL, "versionRange": version, "insecure": True}}}
+
 # ---------------------------------------------------------------------------
 # Processes, waiting, timing
 # ---------------------------------------------------------------------------
@@ -363,6 +383,15 @@ class Helm:
         r = run(["helm", "push", str(archive), registry, "--plain-http"], timeout=300)
         assert r.returncode == 0, f"helm push failed:\n{r.stdout}\n{r.stderr}"
         logger.info("pushed %s to %s", archive.name, registry)
+
+    def package(self, chart_dir: Path, version: str, dest: Path) -> Path:
+        """`helm package` of a chart directory at the given version (the way abs
+        stamps it); returns the archive path."""
+        r = run(["helm", "package", str(chart_dir), "--version", version, "--app-version", version, "--destination", str(dest)], timeout=300)
+        assert r.returncode == 0, f"helm package {chart_dir} failed:\n{r.stdout}\n{r.stderr}"
+        m = re.search(r"saved it to: (\S+)", r.stdout)
+        assert m, r.stdout
+        return Path(m.group(1))
 
 
 def deep_merge(base: Dict[str, Any], over: Dict[str, Any]) -> Dict[str, Any]:
@@ -816,23 +845,29 @@ def muster_forward(kube: Kube) -> Iterator[PortForward]:
 
 
 @pytest.fixture(scope="module")
-def pushed_chart(kube: Kube, helm: Helm, registry: str, chart_archive: Path, candidate_version: str) -> str:
-    """The chart under test in the in-cluster registry (pushed once; a second
-    module finds the tag and skips the push). Returns the in-cluster OCI URL of
-    the repository the chart is in."""
+def pushed_chart(kube: Kube, helm: Helm, registry: str, chart_archive: Path, candidate_version: str, tmp_path_factory: pytest.TempPathFactory) -> str:
+    """The charts under test in the in-cluster registry: the meta chart archive
+    ATS hands over, and the connectivity chart packaged from this checkout at
+    the same version (pushed once; a second module finds the tags and skips the
+    push). Returns the in-cluster OCI URL of the repository the charts are in."""
     started = time.monotonic()
     wait_for_endpoints(kube, REGISTRY_NAMESPACE, "registry")
     pf = PortForward(kube.kubeconfig, REGISTRY_NAMESPACE, "registry", REGISTRY_PORT, REGISTRY_PORT).start()
+
+    def tags(name: str) -> List[str]:
+        r = requests.get(f"http://127.0.0.1:{REGISTRY_PORT}/v2/charts/{name}/tags/list", timeout=30)
+        return (r.json().get("tags") or []) if r.status_code == 200 else []
+
     try:
-        tags = requests.get(f"http://127.0.0.1:{REGISTRY_PORT}/v2/charts/{RELEASE}/tags/list", timeout=30)
-        have = tags.json().get("tags") or [] if tags.status_code == 200 else []
-        if candidate_version in have:
-            logger.info("%s %s is already in the registry", RELEASE, candidate_version)
-        else:
-            helm.push(chart_archive, f"oci://127.0.0.1:{REGISTRY_PORT}/charts")
-            tags = requests.get(f"http://127.0.0.1:{REGISTRY_PORT}/v2/charts/{RELEASE}/tags/list", timeout=30)
-            assert candidate_version in (tags.json().get("tags") or []), f"pushed tag not listed: {tags.text[:300]}"
+        for name, archive in ((RELEASE, chart_archive), (CONNECTIVITY, None)):
+            if candidate_version in tags(name):
+                logger.info("%s %s is already in the registry", name, candidate_version)
+                continue
+            if archive is None:
+                archive = helm.package(CONNECTIVITY_CHART_DIR, candidate_version, tmp_path_factory.mktemp("connectivity"))
+            helm.push(archive, f"oci://127.0.0.1:{REGISTRY_PORT}/charts")
+            assert candidate_version in tags(name), f"pushed tag of {name} not listed"
     finally:
         pf.stop()
-    TIMINGS.record("chart push (helm push --plain-http through the port-forward)", time.monotonic() - started)
+    TIMINGS.record("chart push (meta archive + the connectivity chart of the checkout, helm push --plain-http)", time.monotonic() - started)
     return registry

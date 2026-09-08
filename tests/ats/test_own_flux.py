@@ -55,6 +55,7 @@ from conftest import (
     TIMINGS,
     Kube,
     condition,
+    connectivity_values,
     is_ready,
     load_values,
     wait_for,
@@ -146,6 +147,7 @@ def platform_values() -> Dict[str, Any]:
 def meta_helmrelease(version: str, engine: bool) -> List[Dict[str, Any]]:
     values = platform_values()
     values["components"]["flux"]["enabled"] = engine
+    values["components"].update(connectivity_values(version)["components"])
     return [
         {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
          "metadata": {"name": RELEASE, "namespace": FLUX_NAMESPACE},

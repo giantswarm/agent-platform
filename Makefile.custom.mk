@@ -420,6 +420,16 @@ verify-self: ## Assert self-management's shapes: engine off renders nothing of i
 	@python3 tests/verify-self.py $(CHART_DIR)
 	@echo "self-management shapes verified."
 
+.PHONY: verify-insecure
+verify-insecure: ## Assert components.<name>.insecure renders OCIRepository.spec.insecure for that component only (a lab's plain-HTTP registry), and nothing by default.
+	@echo "====> $@ ($(CHART_DIR))"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false >/tmp/ap-insecure-off.out 2>&1 || { cat /tmp/ap-insecure-off.out; exit 1; }
+	@if grep -q '^  insecure: true' /tmp/ap-insecure-off.out; then echo "FAIL: an OCIRepository renders insecure by default"; exit 1; fi
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false --set components.muster.insecure=true --set components.muster.repository=oci://registry.registry.svc.cluster.local:5000/charts >/tmp/ap-insecure-on.out 2>&1 || { cat /tmp/ap-insecure-on.out; exit 1; }
+	@if [ "$$(grep -c '^  insecure: true' /tmp/ap-insecure-on.out)" != "1" ]; then echo "FAIL: components.muster.insecure must render exactly one insecure OCIRepository"; grep -n 'insecure' /tmp/ap-insecure-on.out; exit 1; fi
+	@if ! grep -q 'url: oci://registry.registry.svc.cluster.local:5000/charts/muster' /tmp/ap-insecure-on.out; then echo "FAIL: components.muster.repository did not steer the OCIRepository url"; exit 1; fi
+	@echo "components.<name>.insecure verified."
+
 .PHONY: verify-labels
 verify-labels: ## Assert every label value stays valid at the versions the charts are installed under: helm-controller's +digest and a branch build's long prerelease, with the 63-character cut landing on each separator. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
