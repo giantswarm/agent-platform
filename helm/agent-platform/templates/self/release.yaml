@@ -1,0 +1,83 @@
+{{- /*
+The chart's own OCIRepository + HelmRelease (self-management, README
+"Self-management"): the bundled helm-controller adopts the release the Helm CLI
+installed — same release name, same namespace, `takeOwnership` is
+helm-controller's default — and from then on rolls the chart forward inside the
+semver range and applies the values Secret. Both objects carry the release's
+name and run as the tenant identity.
+
+The install-time bracket (measured): the HelmRelease is created SUSPENDED and
+resumed by a detached Job once Helm has marked the release `deployed`.
+Otherwise helm-controller reconciles it while the CLI's revision is still
+`pending-install`, unlocks that revision (marks it failed) and upgrades the
+release with whatever the values Secret holds — nothing yet, so every user value
+reverts. The same bracket covers the upgrade INTO self-management (an engine-on
+installation of an earlier version upgrading with the Helm CLI): the HelmRelease
+does not exist yet, so it is rendered suspended. A controller-driven upgrade
+finds its own HelmRelease and renders no `suspend` at all — it never suspends
+itself. `helm template` sees no cluster and renders `suspend: true`, so a
+`helm template | kubectl apply` user gets a suspended HelmRelease.
+
+`disableWait`: helm-controller must not wait on this chart's HelmRelease
+objects — its own among them, mid-reconcile — or on a component that is
+legitimately slow; hook Jobs are waited for regardless. `optional: false`: the
+release never runs on empty values (the Secret is written by the values hook
+before the resumer resumes).
+*/ -}}
+{{- if eq (include "agent-platform.selfEnabled" .) "true" }}
+{{- include "agent-platform.validateSelf" . }}
+{{- $existing := dict }}
+{{- if .Capabilities.APIVersions.Has "helm.toolkit.fluxcd.io/v2" }}
+{{- $existing = lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" .Release.Namespace .Release.Name }}
+{{- end }}
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: self-management
+spec:
+  interval: {{ .Values.gitops.self.interval }}
+  url: {{ printf "%s/%s" (trimSuffix "/" .Values.gitops.self.repository) .Chart.Name }}
+  {{- if .Values.gitops.self.insecure }}
+  insecure: true
+  {{- end }}
+  ref:
+    semver: {{ include "agent-platform.self.versionRange" . | quote }}
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: self-management
+spec:
+  interval: {{ .Values.gitops.self.interval }}
+  {{- if or .Release.IsInstall (not $existing) }}
+  # created suspended; the resumer Job resumes it once the release is deployed
+  suspend: true
+  {{- end }}
+  releaseName: {{ .Release.Name }}
+  targetNamespace: {{ .Release.Namespace }}
+  serviceAccountName: {{ include "agent-platform.self.releaseServiceAccountName" . }}
+  chartRef:
+    kind: OCIRepository
+    name: {{ .Release.Name }}
+  install:
+    disableWait: true
+    remediation:
+      retries: {{ .Values.gitops.retries }}
+  upgrade:
+    disableWait: true
+    remediation:
+      retries: {{ .Values.gitops.retries }}
+  valuesFrom:
+    - kind: Secret
+      name: {{ include "agent-platform.self.valuesSecretName" . }}
+      valuesKey: values.yaml
+      optional: false
+{{- end }}

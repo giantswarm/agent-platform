@@ -106,14 +106,69 @@ gitops:
   # override either way.
   serviceAccountName: ""
   # The Helm hook Jobs of this chart — the ordered teardown on `helm uninstall`
-  # (rendered only when components.flux.enabled is true). They run one plain
-  # kubectl command each, without a shell, in a distroless kubectl image;
-  # Renovate tracks the tag as a docker image pin.
+  # and the self-management bracket (rendered only when components.flux.enabled
+  # is true). `image` runs the hooks that are one plain kubectl command, without
+  # a shell, in a distroless kubectl image. `helmImage` runs the hooks that need
+  # helm and a shell — the values hook (`helm get values` into the values
+  # Secret), the detached resumer and the tolerant suspend hook: alpine/k8s
+  # carries kubectl, helm, jq and /bin/sh. Renovate tracks both tags as docker
+  # image pins.
   hooks:
     image:
       registry: registry.k8s.io
       repository: kubectl
       tag: v1.36.4
+    helmImage:
+      registry: docker.io
+      repository: alpine/k8s
+      tag: 1.36.4
+  # === Self-management (the chart holds its own release) ===
+  # Where the chart brings the engine, the engine also holds the chart: the
+  # release renders its own OCIRepository + HelmRelease (both named after the
+  # release, in the release namespace, run as the tenant identity
+  # agent-platform-flux), so the bundled helm-controller adopts the release the
+  # Helm CLI installed and rolls the chart forward inside its major without a
+  # `helm upgrade`. The Helm CLI is day-0 only: after the install a
+  # ValidatingAdmissionPolicy refuses the CLI's `helm upgrade` and `helm rollback`
+  # (the CREATE of this release's Helm storage Secrets is allowed to the tenant
+  # identity only), with the reason in Helm's own error output and no revision
+  # written; `helm uninstall` passes. Day 2 goes through Secret
+  # `agent-platform-values` in the release namespace (key `values.yaml`, the
+  # user-supplied values, written by a post-install hook and watched by
+  # helm-controller): change values by rewriting it, move to the next major by
+  # setting gitops.self.versionRange in it. README "Self-management".
+  self:
+    # `auto` (default) follows components.flux.enabled: on with the bundled
+    # engine, off on a cluster that runs its own Flux (that Flux holds the
+    # chart's HelmRelease, as on every Giant Swarm management cluster). `false`
+    # keeps the Helm CLI as the day-2 tool (the lab shape: agentlab and the
+    # chart's own kind smoke install UNRELEASED charts, which the self
+    # HelmRelease would replace with the published one); it is also the escape
+    # hatch that hands a self-managed release back to the CLI — annotate the
+    # namespace agent-platform.giantswarm.io/helm-cli=allow first, then
+    # `helm upgrade --set gitops.self.enabled=false --force-conflicts`, and
+    # keep the value in the values file. `true` with the engine off fails the
+    # render. Needs Kubernetes >= 1.30 (admissionregistration.k8s.io/v1
+    # ValidatingAdmissionPolicy); an older cluster fails the render and installs
+    # with false.
+    enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+    # OCI repository the chart is pulled from (the OCIRepository url is
+    # <repository>/agent-platform). A mirror, or a lab's own registry, goes here.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # Plain-HTTP registry (OCIRepository.spec.insecure), for an in-cluster lab
+    # registry. Never for a public one.
+    insecure: false
+    # Semver range the OCIRepository follows. Empty (default) derives
+    # `>=<this chart's version> <next major>.0.0` at render time — a release
+    # follows patch and minor releases of its own major and never a downgrade;
+    # the next major is an explicit step: set the range here (in the values
+    # Secret on a self-managed installation). An offline `helm template` of a
+    # checkout derives it from Chart.yaml's placeholder version; the released
+    # chart carries its tag.
+    versionRange: ""
+    # Interval the OCIRepository polls the registry and the HelmRelease
+    # reconciles; a values Secret change is picked up at once (watch label).
+    interval: 10m
   # install/upgrade remediation retries for every child HelmRelease. Lets the
   # children self-heal transient/ordering failures (e.g. a component installs
   # before another has created its namespace) instead of stalling after one

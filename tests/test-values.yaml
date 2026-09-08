@@ -9,6 +9,17 @@
 # Gateway that does not exist on kind — an unattached HTTPRoute is fine, the
 # releases are Ready without it. Also the third fleet-render shape of the fleet
 # diff (BRIEF (c)), so keep the component set and every key here deliberate.
+#
+# Self-management is OFF here (the lab shape): the chart under test is an
+# UNRELEASED archive, and a self HelmRelease following the published range would
+# replace it with the published chart mid-test. agentlab installs the same way.
+# The smoke asserts the shape renders none of it (no self OCIRepository /
+# HelmRelease, no values Secret, no admission policy); self-management against a
+# published chart is a separate scenario.
+gitops:
+  self:
+    enabled: false
+
 ingress:
   mode: muster-direct
   parentRefs:

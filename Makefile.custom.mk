@@ -314,7 +314,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@grep -q 'crds: CreateReplace' /tmp/ap-flux.out || { echo "FAIL: app-owned CRDs (crds: CreateReplace) not rendered"; exit 1; }
 	@grep -qE '^    - name: agentgateway$$' /tmp/ap-flux.out || { echo "FAIL: a CR consumer no longer dependsOn its CRD-owning component (agentgateway)"; exit 1; }
 	@echo "--> kagent's first install does not wait for the controller (it mounts the CNPG Secret connectivity renders, and connectivity dependsOn kagent)"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.kagent.enabled=true >/tmp/ap-kag.out 2>&1 || { cat /tmp/ap-kag.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent.enabled=true >/tmp/ap-kag.out 2>&1 || { cat /tmp/ap-kag.out; exit 1; }
 	@python3 -c 'import re,sys; docs=open("/tmp/ap-kag.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: kagent HelmRelease not rendered") if not hr else None; sys.exit("FAIL: kagent install waits for the controller (install.disableWait missing)") if "disableWait: true" not in hr[0] else None; others=[d for d in docs if "kind: HelmRelease" in d and "disableWait: true" in d and not re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: disableWait leaked to "+", ".join(re.search(r"^  name: (.*)$$", d, re.M).group(1) for d in others)) if others else print("ok: kagent install.disableWait, no other component")'
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
@@ -401,6 +401,12 @@ verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure 
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-engine.py $(CHART_DIR)
 	@echo "flux engine shapes verified."
+
+.PHONY: verify-self
+verify-self: ## Assert self-management's shapes: engine off renders nothing of it; engine on renders the self OCIRepository + suspended HelmRelease, the -6/-5/0 hooks, the identity and the admission policy (CLI day-0 only); engine on with self off (lab, hand-back) renders the -6/-5 hooks at pre-upgrade too and nothing else; the guards and knobs. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-self.py $(CHART_DIR)
+	@echo "self-management shapes verified."
 
 .PHONY: verify-components
 verify-components: ## Assert the roster entries of the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts): off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema.
