@@ -77,6 +77,24 @@ components:  # @schema additionalProperties: true
     enabled: false
   agent-manager:  # @schema additionalProperties: true
     enabled: false
+  # The components the agent-platform-standalone umbrella carried on top of the
+  # fleet's roster, forwarded by the meta chart like the rest so the wiring this
+  # chart renders for them gates on the same answer: the Backstage app-config and
+  # route, the mcp-kubernetes MCPServer CR and the model serving objects.
+  backstage:  # @schema additionalProperties: true
+    enabled: false
+  mcp-kubernetes:  # @schema additionalProperties: true
+    enabled: false
+  cloudnative-pg:  # @schema additionalProperties: true
+    enabled: false
+  kserve-crd:  # @schema additionalProperties: true
+    enabled: false
+  kserve-resources:  # @schema additionalProperties: true
+    enabled: false
+  kserve-llmisvc-crd:  # @schema additionalProperties: true
+    enabled: false
+  kserve-llmisvc-resources:  # @schema additionalProperties: true
+    enabled: false
 
 # === Ingress topology ===
 # mode selects the whole request topology. What each mode renders/consumes:
@@ -1599,3 +1617,18 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
       cidrs: []
+
+# === The standalone chart's extras: component chart values ===
+# Values of the backstage, mcp-kubernetes, cloudnative-pg and kserve component
+# charts. Consumed by those charts and forwarded here via forwardAllValues (the
+# meta chart forwards its whole values tree, and this chart's schema is
+# additionalProperties: false at the root); declared so the schema accepts the
+# blocks, the way dicebear's is. The wiring this chart renders for these
+# components reads what it needs from them.
+backstage: {}  # @schema skipProperties: true; additionalProperties: true
+mcp-kubernetes: {}  # @schema skipProperties: true; additionalProperties: true
+cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
+kserve-crd: {}  # @schema skipProperties: true; additionalProperties: true
+kserve-resources: {}  # @schema skipProperties: true; additionalProperties: true
+kserve-llmisvc-crd: {}  # @schema skipProperties: true; additionalProperties: true
+kserve-llmisvc-resources: {}  # @schema skipProperties: true; additionalProperties: true

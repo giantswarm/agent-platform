@@ -23,6 +23,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "backstage": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "baseDomain": {
             "type": "string"
         },
@@ -35,6 +39,10 @@
             "additionalProperties": true
         },
         "ciliumNetworkPolicy": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "cloudnative-pg": {
             "type": "object",
             "additionalProperties": true
         },
@@ -94,6 +102,24 @@
                         }
                     }
                 },
+                "backstage": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "cloudnative-pg": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "kagent": {
                     "type": "object",
                     "additionalProperties": true,
@@ -104,6 +130,51 @@
                     }
                 },
                 "klaus-gateway": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "kserve-crd": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "kserve-llmisvc-crd": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "kserve-llmisvc-resources": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "kserve-resources": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "mcp-kubernetes": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
@@ -516,6 +587,22 @@
             "type": "object",
             "additionalProperties": true
         },
+        "kserve-crd": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kserve-llmisvc-crd": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kserve-llmisvc-resources": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kserve-resources": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "kyvernoPolicies": {
             "type": "object",
             "additionalProperties": false,
@@ -549,6 +636,10 @@
                     "uniqueItems": true
                 }
             }
+        },
+        "mcp-kubernetes": {
+            "type": "object",
+            "additionalProperties": true
         },
         "model-manager": {
             "type": "object",
