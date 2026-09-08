@@ -1,0 +1,387 @@
+# =============================================================================
+# LAB ONLY — NEVER A PRODUCTION PATH. The ATS smoke's identity provider.
+#
+# A throwaway OIDC provider for the chart's kind smoke (tests/ats): Dex with
+# STATIC PASSWORD USERS (enablePasswordDB, no upstream connector), FIXED,
+# WORLD-READABLE CLIENT SECRETS, a self-signed certificate and the OAuth
+# password grant enabled. Every credential in this file is public by design.
+# Do not point it at real users, do not reuse any value here anywhere else, and
+# do not apply it to a cluster you care about: it also REPLACES the kube-system
+# CoreDNS Corefile (kind's default plus one rewrite rule).
+#
+# Ported from the standalone chart's prerequisites/lab-dex.yaml with one change:
+# the meta chart's smoke runs no edge Gateway (ingress.mode: muster-direct), so
+# Dex terminates TLS itself on 5554 with the certificate minted below, and the
+# issuer is https://dex.127.0.0.1.nip.io:5554 — the SAME URL inside the cluster
+# (CoreDNS rewrites the name to the lab-dex Service) and from the test (nip.io
+# resolves it to 127.0.0.1, where a `kubectl port-forward svc/lab-dex 5554`
+# listens). muster and agent-manager reach Dex through that URL and trust the
+# lab CA (Secret agent-platform-idp-ca); the test trusts the same CA.
+#
+# What it provides, in the release namespace `agent-platform`:
+#   * Dex (lab-dex) with a static user      admin@example.com / password
+#   * static client `agent-platform` for muster (and agent-manager, which
+#     validates the tokens muster forwards), plus a `dex-k8s-authenticator`
+#     client whose trustedPeers allow the cross-client audience the platform's
+#     agent-manager MCPServer requires (muster.mcpServer.auth.requiredAudiences)
+#   * Secret agent-platform-idp — the platform credentials the chart reads
+#     (dex-client-secret, registration-token, oauth-encryption-key,
+#     valkey-password, backstage-session-secret)
+#   * a Job that mints a self-signed CA + a certificate for dex.127.0.0.1.nip.io
+#     into Secret agent-platform-tls (Dex's serving certificate), and the CA
+#     into Secret and ConfigMap agent-platform-idp-ca for the OIDC clients
+#     (muster --extra-ca-file, agent-manager --dex-ca-file)
+#   * a CoreDNS rewrite so dex.127.0.0.1.nip.io resolves to the lab-dex Service
+#     INSIDE pods (outside the cluster the public nip.io wildcard already
+#     resolves it to 127.0.0.1)
+#
+# muster's OAuth server runs at http://localhost:8090 in this shape (the test
+# port-forwards svc/muster 8090; muster allows a plain-HTTP base URL for
+# loopback hosts only), so the platform client's redirect URI is that callback.
+#
+# Order (tests/ats/conftest.py `prerequisites`):
+#   1. kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
+#   2. kubectl apply -f tests/ats/lab-dex.yaml
+#   3. kubectl -n agent-platform wait --for=condition=complete job/lab-dex-cert-gen
+#   4. kubectl -n kube-system rollout restart deployment coredns
+#   5. helm install with tests/test-values.yaml + tests/ats/values-kagent.yaml + tests/ats/values-round-trips.yaml
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-platform
+---
+# The platform credentials the chart reads (global.identity.existingSecret).
+# FIXED LAB VALUES — public in this repository, worthless anywhere else.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-platform-idp
+  namespace: agent-platform
+type: Opaque
+stringData:
+  # OAuth client secret of the `agent-platform` Dex client below; muster and
+  # agent-manager authenticate with it.
+  dex-client-secret: lab-only-agent-platform-client-secret
+  # Bearer for muster's RFC 7591 dynamic client registration endpoint
+  # (POST /oauth/register); the smoke's OAuth client presents it.
+  registration-token: lab-only-registration-token
+  # muster's token encryption at rest (only read when oauth.server.encryptionKey
+  # is on; harmless otherwise). `openssl rand -base64 32` of nothing secret.
+  oauth-encryption-key: bGFiLW9ubHktb2F1dGgtZW5jcnlwdGlvbi1rZXktMzJi
+  # Read by muster's Valkey session storage when it is on (the smoke uses
+  # in-memory storage; the key exists because the chart's contract names it).
+  valkey-password: lab-only-valkey-password
+  # Backstage cookie signing key (Backstage is off in the smoke).
+  backstage-session-secret: lab-only-backstage-session-secret
+---
+# --- Self-signed certificate ---------------------------------------------
+# A Job mints the CA and Dex's serving certificate in-cluster, so no private
+# key is committed to the repository and every lab gets its own. Idempotent: it
+# exits early when agent-platform-tls already exists.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lab-dex-cert-gen
+  namespace: agent-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lab-dex-cert-gen
+  namespace: agent-platform
+rules:
+  - apiGroups: [""]
+    resources: [secrets, configmaps]
+    verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lab-dex-cert-gen
+  namespace: agent-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: lab-dex-cert-gen
+subjects:
+  - kind: ServiceAccount
+    name: lab-dex-cert-gen
+    namespace: agent-platform
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lab-dex-cert-gen
+  namespace: agent-platform
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: lab-dex-cert-gen
+    spec:
+      serviceAccountName: lab-dex-cert-gen
+      restartPolicy: OnFailure
+      containers:
+        - name: cert-gen
+          # alpine + kubectl; openssl is added at run time (needs root, which
+          # is fine for a lab job). Mirrored on the public Giant Swarm
+          # registry, so no Docker Hub pull limits in CI.
+          image: gsoci.azurecr.io/giantswarm/docker-kubectl:1.36.4
+          command: [sh, -ec]
+          args:
+            - |
+              if kubectl -n agent-platform get secret agent-platform-tls >/dev/null 2>&1; then
+                echo "agent-platform-tls already exists; lab certificates are minted only once"
+                exit 0
+              fi
+              apk add --no-cache openssl >/dev/null
+              cd /tmp
+              openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+                -keyout ca.key -out ca.crt -subj "/CN=agent-platform lab CA" \
+                -addext "basicConstraints=critical,CA:TRUE" \
+                -addext "keyUsage=critical,keyCertSign,cRLSign"
+              # The one name Dex serves (the issuer), reachable under it both
+              # from pods (CoreDNS rewrite) and from the test (nip.io ->
+              # 127.0.0.1, the port-forward).
+              openssl req -newkey rsa:2048 -nodes -keyout tls.key -out tls.csr \
+                -subj "/CN=dex.127.0.0.1.nip.io" \
+                -addext "subjectAltName=DNS:dex.127.0.0.1.nip.io,DNS:*.127.0.0.1.nip.io,DNS:127.0.0.1.nip.io,DNS:lab-dex.agent-platform.svc.cluster.local,DNS:localhost,IP:127.0.0.1"
+              openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key \
+                -CAcreateserial -days 3650 -sha256 -copy_extensions copyall -out tls.crt
+              kubectl -n agent-platform create secret tls agent-platform-tls \
+                --cert=tls.crt --key=tls.key
+              kubectl -n agent-platform create secret generic agent-platform-idp-ca \
+                --from-file=ca.crt
+              kubectl -n agent-platform create configmap agent-platform-idp-ca \
+                --from-file=ca.crt
+              echo "minted agent-platform-tls, agent-platform-idp-ca (Secret + ConfigMap)"
+---
+# --- The lab Dex ---------------------------------------------------------
+# Serves HTTPS itself on 5554 with the certificate minted above (no edge
+# Gateway in this shape). The pod starts once the Job has written the Secret.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lab-dex
+  namespace: agent-platform
+---
+# Dex's Kubernetes storage: CRD-backed, so the token SIGNING KEYS survive pod
+# restarts (with `type: memory` every restart rotates them and the OIDC
+# clients reject all tokens until their JWKS caches refresh).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: lab-dex
+rules:
+  - apiGroups: [dex.coreos.com]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: lab-dex
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: lab-dex
+subjects:
+  - kind: ServiceAccount
+    name: lab-dex
+    namespace: agent-platform
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: lab-dex-config
+  namespace: agent-platform
+type: Opaque
+stringData:
+  config.yaml: |
+    # LAB ONLY. Static users, fixed public secrets, password grant enabled.
+    issuer: https://dex.127.0.0.1.nip.io:5554
+
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+
+    web:
+      https: 0.0.0.0:5554
+      tlsCert: /etc/dex/tls/tls.crt
+      tlsKey: /etc/dex/tls/tls.key
+
+    telemetry:
+      http: 0.0.0.0:5558
+
+    oauth2:
+      skipApprovalScreen: true
+      # Enables the OAuth password grant against the local connector, so the
+      # smoke logs in with a single token request. Lab only.
+      passwordConnector: local
+
+    frontend:
+      issuer: Agent Platform lab
+
+    # Users that exist only here. bcrypt hash of the literal "password".
+    enablePasswordDB: true
+    staticPasswords:
+      - email: admin@example.com
+        hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+        username: admin
+        userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
+        groups:
+          - platform-admins
+
+    staticClients:
+      # The one platform client (global.identity.clientId). Secret must equal
+      # `dex-client-secret` in the agent-platform-idp Secret above. The
+      # redirect URI is muster's OAuth callback at the base URL the smoke
+      # values give muster (http://localhost:8090, the test's port-forward).
+      - id: agent-platform
+        name: Agent Platform (lab)
+        secret: lab-only-agent-platform-client-secret
+        redirectURIs:
+          - http://localhost:8090/oauth/callback
+      # Cross-client audience target. The platform's agent-manager MCPServer
+      # requires the dex-k8s-authenticator audience on forwarded tokens
+      # (agent-manager.muster.mcpServer.auth.requiredAudiences); Dex only
+      # mints it (scope audience:server:client_id:dex-k8s-authenticator) when
+      # the TARGET client lists the requesting client in trustedPeers. This
+      # client exists for that audience only — it never runs a flow itself.
+      - id: dex-k8s-authenticator
+        name: dex-k8s-authenticator audience (lab)
+        secret: lab-only-dex-k8s-authenticator-secret
+        trustedPeers:
+          - agent-platform
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-dex
+  namespace: agent-platform
+  labels:
+    app: lab-dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab-dex
+  template:
+    metadata:
+      labels:
+        app: lab-dex
+    spec:
+      serviceAccountName: lab-dex
+      containers:
+        - name: dex
+          image: gsoci.azurecr.io/giantswarm/dex:v2.45.1
+          args: [dex, serve, /etc/dex/cfg/config.yaml]
+          ports:
+            - name: https
+              containerPort: 5554
+            - name: telemetry
+              containerPort: 5558
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex/cfg
+              readOnly: true
+            - name: tls
+              mountPath: /etc/dex/tls
+              readOnly: true
+            # Dex expands its config through a temp file, so /tmp must be
+            # writable even with a read-only root filesystem.
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: telemetry
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: config
+          secret:
+            secretName: lab-dex-config
+        - name: tls
+          secret:
+            secretName: agent-platform-tls
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-dex
+  namespace: agent-platform
+  labels:
+    app: lab-dex
+spec:
+  selector:
+    app: lab-dex
+  ports:
+    - name: https
+      port: 5554
+      targetPort: https
+---
+# kind's default Corefile plus ONE rewrite: inside pods, dex.127.0.0.1.nip.io
+# would resolve to each pod's own loopback (that is what nip.io answers), so
+# muster could never reach the Dex issuer. The rewrite points that one name at
+# the lab-dex Service; the answer is rewritten back so Go resolvers accept it.
+# REPLACES the kube-system Corefile — kind only. CoreDNS's reload plugin picks
+# the change up within ~30s; the test restarts the deployment to make it
+# immediate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health {
+           lameduck 5s
+        }
+        ready
+        rewrite stop {
+            name regex ^dex\.127\.0\.0\.1\.nip\.io\.?$ lab-dex.agent-platform.svc.cluster.local
+            answer auto
+        }
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+           pods insecure
+           fallthrough in-addr.arpa ip6.arpa
+           ttl 30
+        }
+        prometheus :9153
+        forward . /etc/resolv.conf {
+           max_concurrent 1000
+        }
+        cache 30 {
+           disable success cluster.local
+           disable denial cluster.local
+        }
+        loop
+        reload
+        loadbalance
+    }
