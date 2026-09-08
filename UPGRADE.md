@@ -2,6 +2,14 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the kagent Namespace follows the kagent component)
+
+The connectivity chart renders the `kagent` Namespace (`kagent.namespaceOverride`, when it differs from the release namespace) only while `components.kagent.enabled` is true.
+
+### Operator action
+
+- **None.** Where kagent is on, nothing changes. Where it is off, the connectivity upgrade deletes the empty, Helm-owned `kagent` namespace — on Giant Swarm management clusters it held nothing but the fleet's hand-written `kagent-flux` ServiceAccount and RoleBinding, which the fleet bases stopped applying before this release (the chart renders the identity itself where kagent runs). An installation that put its own objects into a `kagent` namespace on a cluster without kagent moves them out before upgrading, or turns kagent on.
+
 ## \<current\> → \<next\> (the chart renders the `kagent-flux` tenant identity)
 
 The connectivity chart renders ServiceAccount `kagent-flux` and its RoleBinding to `cluster-admin` (namespace-scoped) in the kagent namespace whenever kagent is on, and one value — `kagent.fluxServiceAccountName` — names it into agent-manager (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the portal (`agentPlatform.fluxServiceAccountName`). Six template fixes land with it (CHANGELOG, Fixed).
