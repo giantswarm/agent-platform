@@ -190,6 +190,42 @@ which mcp-kubernetes forwards to the kube-apiserver via downstream OAuth — so
 Kubernetes RBAC and the audit log reflect the human directly. No muster-issued
 token and no impersonation `ClusterRole` are involved.
 
+### Tool discovery by the kagent controller: no identity, opted out
+
+The kagent controller reconciles a `RemoteMCPServer` by connecting to it and
+listing its tools, to publish them in the CR status (`status.discoveredTools`)
+and the kagent UI. That request is the controller's own: there is no human
+behind it, so it carries no bearer. muster is an OAuth resource server and
+answers `401`; the controller then reports `Accepted=False (ReconcileFailed …
+Unauthorized)` on the shared `RemoteMCPServer agent-platform/muster` — a
+permanent red condition with no effect on agents, which resolve their tool list
+at run time as the human (above).
+
+The connectivity chart therefore opts the muster server out of controller-side
+discovery whenever muster runs with OAuth on (`muster.muster.oauth.server.enabled`,
+the default): the CR carries the label `kagent.dev/discovery: disabled`, and a
+kagent controller that knows the label reports `Accepted=True` with reason
+`DiscoveryDisabled` and an empty inventory (kagent-dev/kagent#2752,
+backported to the 0.10 line as kagent-dev/kagent#2753). An older controller
+ignores the label and keeps the red condition; nothing else changes. With OAuth
+off (dev installs) the controller lists tools anonymously and the label is not
+rendered.
+
+**Why the controller gets no credential of its own.** The obvious alternative —
+a projected ServiceAccount token on the controller, presented through
+`spec.headersFrom`, trusted by muster through a `trustedIssuers` entry for the
+cluster's OIDC issuer — is rejected, because `headersFrom` is not a discovery
+credential: the kagent translator resolves every `headersFrom` value into each
+agent's rendered config, and the kagent runtime applies those static headers
+**last**, after the propagated caller token (`headerRoundTripper.RoundTrip` in
+`go/adk/pkg/mcp/registry.go`: "static headers … take precedence over all dynamic
+sources"). Every agent would then call muster as
+`system:serviceaccount:kagent:kagent-controller` — the per-caller model of this
+section would be gone, the token would sit in every agent's config Secret, and
+each rotation would roll every agent (the config hash covers it). The
+controller's discovery has no identity by design; the label makes the status say
+so instead of failing.
+
 ---
 
 ## 4. Edge JWT validation and JWKS

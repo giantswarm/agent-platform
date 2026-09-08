@@ -9,7 +9,7 @@
 #
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
-#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-meta` +
+#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-kagent-discovery` + `make verify-meta` +
 #     `make verify-engine` + `make verify-self` + `make verify-postgres` +
 #     `make verify-components` + `make verify-auto` + `make verify-identity` +
 #     `make verify-wiring` checks on branches (ingress-mode guards, the global.*
@@ -55,6 +55,9 @@ jobs:
         # global.* contract behaviors and their guards), verify-managers (the
         # model-manager / agent-manager wiring and guards), verify-kagent-netpol
         # (the kagent controller/agent egress to the built-in tool server),
+        # verify-kagent-discovery (the muster RemoteMCPServer opts out of
+        # controller-side tool discovery iff muster runs with OAuth on, and
+        # never carries a static header),
         # verify-meta (root app-of-apps render: the flux-engine subchart the
         # only Chart.yaml dependency and no component pin, ranges as values,
         # Flux the only engine, pure renderer with the engine off, pinned BOM),
@@ -84,7 +87,7 @@ jobs:
         # single source of truth, also run locally. The meta chart's one
         # dependency is the flux-engine subchart, a directory in its charts/,
         # which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-managers verify-kagent-netpol verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring
 
 workflows:
   build:

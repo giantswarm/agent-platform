@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the muster `RemoteMCPServer` opts out of controller-side tool discovery)
+
+The connectivity chart labels the shared `RemoteMCPServer agent-platform/muster` with `kagent.dev/discovery: disabled` whenever muster runs with OAuth on (`muster.muster.oauth.server.enabled`, the default). The kagent controller has no credential muster accepts when it lists the server's tools for the CR status, so every installation showed `Accepted=False (ReconcileFailed … Unauthorized)` on that CR (giantswarm/agent-platform#299). A kagent controller that knows the label reports `Accepted=True` (`DiscoveryDisabled`, empty inventory) instead; agents are unaffected either way — they resolve tools at run time with the propagated caller token. See docs/authentication.md, "Tool discovery by the kagent controller".
+
+### Operator action
+
+- **None.** The label is metadata on a CR the chart already owns; no pod rolls. The condition turns green once the installation runs a kagent controller with the opt-out (kagent-dev/kagent#2752; the `0.10.x` backport is kagent-dev/kagent#2753) — on a Giant Swarm management cluster that is the `giantswarm/kagent` wrapper picking up that upstream release under the meta chart's `0.2.x` range. Until then the condition stays as it was, and is expected.
+- Do **not** add `headersFrom` with a controller credential to the muster server as a shortcut: the kagent runtime applies static headers after the propagated caller token, so every agent would act as that credential (docs/authentication.md explains).
+- Installations that run muster **without** OAuth (`muster.muster.oauth.server.enabled: false`) get no label and keep controller-side discovery, which works anonymously there.
+
 ## \<current\> → \<next\> (self-management through the bundled Flux, on by default; the Helm CLI is day-0 only)
 
 With the bundled engine on, the release now renders its own `OCIRepository` + `HelmRelease` and is adopted by its helm-controller (`gitops.self.enabled: auto` follows `components.flux.enabled`), a `ValidatingAdmissionPolicy` refuses `helm upgrade` / `helm rollback` from then on, and day-2 changes go through Secret `agent-platform-values`. See README "Self-management".
