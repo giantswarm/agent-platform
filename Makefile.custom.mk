@@ -33,8 +33,12 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # byte; GOLDEN_REF= (empty) opts out for a clone that has no such ref. The
 # kagent-flux tenant identity is the other intended change: both sides render
 # with it off (a chart that predates the key ignores it, the kagent block is
-# additionalProperties: true), and verify-identity asserts it both ways.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName=
+# additionalProperties: true), and verify-identity asserts it both ways. The
+# third intended change is the discovery opt-out label on the muster
+# RemoteMCPServer, derived from muster's OAuth toggle: both sides render with
+# that toggle off (a chart that predates the derivation reads nothing from it),
+# and verify-kagent-discovery asserts the label both ways.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -490,6 +494,32 @@ verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-
 	else echo "ok: oauth2-proxy ingress peers"; fi
 	@echo "--> oauth2-proxy off: no oauth2-proxy policy, peers ignored"
 	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.oauth2ProxyIngress.additionalPeers=[{"app":"teleport-kube-agent"}]' 2>&1 | grep -q 'teleport-kube-agent'; then echo "FAIL: oauth2-proxy peers render while oauth2-proxy is off"; exit 1; else echo "ok: inert while oauth2-proxy is off"; fi
+
+.PHONY: verify-kagent-discovery
+verify-kagent-discovery: ## Assert the shared muster RemoteMCPServer opts out of controller-side tool discovery (kagent.dev/discovery=disabled) iff muster runs with OAuth on, carries no headersFrom, and the operator-defined kagent.remoteMcpServers are untouched.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> muster OAuth on (the default): the muster RemoteMCPServer carries the opt-out label and no headersFrom"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"}]' >/tmp/vkd-on.out 2>&1 || { cat /tmp/vkd-on.out; exit 1; }
+	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-on.out | awk "/^  name: muster$$/,/^---/" >/tmp/vkd-on-muster.out
+	@grep -q 'kind: RemoteMCPServer' /tmp/vkd-on.out || { echo "FAIL: no RemoteMCPServer rendered"; exit 1; }
+	@grep -q '^  name: muster$$' /tmp/vkd-on-muster.out || { echo "FAIL: no muster RemoteMCPServer rendered"; cat /tmp/vkd-on.out | grep -n 'RemoteMCPServer' ; exit 1; }
+	@grep -q '^    kagent.dev/discovery: disabled$$' /tmp/vkd-on-muster.out || { echo "FAIL: the muster RemoteMCPServer does not opt out of controller-side discovery while muster OAuth is on"; cat /tmp/vkd-on-muster.out; exit 1; }
+	@if grep -q 'headersFrom' /tmp/vkd-on-muster.out; then echo "FAIL: the muster RemoteMCPServer carries headersFrom — a static header there overrides the propagated caller token in every agent"; cat /tmp/vkd-on-muster.out; exit 1; fi
+	@echo "ok: muster opts out, no static header"
+	@echo "--> operator-defined kagent.remoteMcpServers: no opt-out label, tokenSecret still renders headersFrom"
+	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-on.out | awk "/^  name: \"external\"$$/,/^---/" >/tmp/vkd-on-external.out
+	@grep -q '^  name: "external"$$' /tmp/vkd-on-external.out || { echo "FAIL: the operator-defined RemoteMCPServer did not render"; grep -n 'name:' /tmp/vkd-on.out | grep -i remote; exit 1; }
+	@if grep -q 'kagent.dev/discovery' /tmp/vkd-on-external.out; then echo "FAIL: the opt-out label leaked onto an operator-defined RemoteMCPServer"; cat /tmp/vkd-on-external.out; exit 1; fi
+	@grep -q 'headersFrom' /tmp/vkd-on-external.out || { echo "FAIL: tokenSecret no longer renders headersFrom on an operator-defined RemoteMCPServer"; cat /tmp/vkd-on-external.out; exit 1; }
+	@echo "ok: operator-defined servers untouched"
+	@echo "--> muster OAuth off: the controller can list tools anonymously, no opt-out label"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set muster.muster.oauth.server.enabled=false >/tmp/vkd-off.out 2>&1 || { cat /tmp/vkd-off.out; exit 1; }
+	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-off.out | awk "/^  name: muster$$/,/^---/" >/tmp/vkd-off-muster.out
+	@grep -q '^  name: muster$$' /tmp/vkd-off-muster.out || { echo "FAIL: no muster RemoteMCPServer rendered with OAuth off"; exit 1; }
+	@if grep -q 'kagent.dev/discovery' /tmp/vkd-off-muster.out; then echo "FAIL: the opt-out label renders while muster OAuth is off"; cat /tmp/vkd-off-muster.out; exit 1; fi
+	@echo "ok: no label with OAuth off"
+	@echo "--> kagent off: no RemoteMCPServer at all"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.enabled=true 2>&1 | grep -q 'kind: RemoteMCPServer'; then echo "FAIL: a RemoteMCPServer renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
 
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
