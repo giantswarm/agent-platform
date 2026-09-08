@@ -29,10 +29,13 @@ WIRING = {
         ["--set", "ingress.mode=muster-direct"],
     ),
     "kagent": ("agent-platform-connectivity-kagent-controller", [], []),
+    # The route renders agentgateway.dev objects on the agentgateway Gateway, so
+    # it needs an agentgateway-* mode with the agentgateway component on (the
+    # ingress guard refuses it in muster-direct).
     "klaus-gateway": (
         "agent-platform-connectivity-dataplane-to-klausgateway",
-        ["--set", "klausGateway.agentgatewayRoute.enabled=true"],
-        ["--set", "klausGateway.agentgatewayRoute.enabled=true"],
+        ["--set", "klausGateway.agentgatewayRoute.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "components.agentgateway.enabled=true"],
+        ["--set", "klausGateway.agentgatewayRoute.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "components.agentgateway.enabled=true"],
     ),
     "agent-sandbox": ("agent-platform-connectivity-agent-sandbox-pod-security", [], []),
     # The egress policy renders whenever the component is on (networkPolicy is

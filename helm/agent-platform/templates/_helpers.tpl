@@ -61,22 +61,56 @@ true
 {{- end -}}
 
 {{/*
+The tenant identity of the agents' Flux HelmReleases: kagent.fluxServiceAccountName
+while the kagent component is on, "" otherwise. The connectivity chart renders
+the ServiceAccount and its RoleBinding from the same value (a helper of the same
+name there) and exports it to the portal's app-config; this copy derives
+agent-manager's flux.helmReleaseServiceAccount (componentDerivedValues), so the
+three consumers cannot disagree.
+Usage: include "agent-platform.kagent.fluxServiceAccountName" .
+*/}}
+{{- define "agent-platform.kagent.fluxServiceAccountName" -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- dig "fluxServiceAccountName" "" (.Values.kagent | default dict) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Values this chart derives for a component from a block another component owns,
+merged OVER the component's forwarded values (templates/components.yaml) so one
+value drives every consumer. Emits a JSON object; {} for a component with
+nothing derived. A value the component's own block sets must agree with the
+derived one, otherwise the render fails naming the single key to set — a silent
+overwrite would hide a values file that still spells the old key.
+  agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName.
+Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson
+*/}}
+{{- define "agent-platform.componentDerivedValues" -}}
+{{- $derived := dict -}}
+{{- if eq .name "agent-manager" -}}
+{{- $sa := include "agent-platform.kagent.fluxServiceAccountName" .root -}}
+{{- $own := dig "flux" "helmReleaseServiceAccount" "" (index .root.Values "agent-manager" | default dict) -}}
+{{- if and $own (ne $own $sa) -}}
+{{- fail (printf "agent-manager.flux.helmReleaseServiceAccount (%s) differs from kagent.fluxServiceAccountName (%s): the agents' HelmReleases have one tenant identity — set kagent.fluxServiceAccountName and leave agent-manager.flux.helmReleaseServiceAccount unset" $own $sa) -}}
+{{- end -}}
+{{- $_ := set $derived "flux" (dict "helmReleaseServiceAccount" $sa) -}}
+{{- end -}}
+{{- $derived | toJson -}}
+{{- end -}}
+
+{{/*
 Fail the render when a component's on/off toggle is still set the old way, inside
 the component's own values block. Those blocks are additionalProperties: true, so
 a leftover `enabled` key validates and is then ignored — the component silently
 falls back to the `components.<name>.enabled` default, which is off for five of
 the six. This turns that into a loud failure naming the new key.
-The probe is coalescing-safe: in a layout where a block feeds a real Helm
-dependency (the standalone umbrella copies this helper), Helm coalesces that
-chart's own top-level `enabled: true` default into the block once the dependency
-is on (klaus-gateway ships one), so hasKey cannot tell an operator-set value from
-the chart default. A legacy key is therefore reported when it is provably the
-operator's: always while the component is off (a disabled dependency's block is
-never coalesced), and while it is on when the value is an explicit false (the
-only coalesced default is true) — exactly the case where the operator believes
-the component is off while it runs anyway. On + true is indistinguishable from a
-coalesced default and passes. The removed `mcps:` block needs no entry: the root
-schema rejects it already.
+Neither this chart nor the connectivity chart has a Helm dependency, so no chart
+default is ever coalesced into these blocks: a legacy key can only be the
+operator's and is reported whatever its value, whether the component is on or
+off. (An umbrella that feeds these blocks to real Helm dependencies sees
+klaus-gateway's own `enabled: true` default coalesced in while that dependency is
+on and has to special-case it; nothing here does.) The removed `mcps:` block
+needs no entry: the root schema rejects it already.
 */}}
 {{- define "agent-platform.validateLegacyToggles" -}}
 {{- $moved := list
@@ -87,12 +121,8 @@ schema rejects it already.
       (list "agentSandbox" "components.agent-sandbox.enabled") -}}
 {{- $found := list -}}
 {{- range $moved -}}
-{{- $block := index $.Values (first .) | default dict -}}
-{{- if hasKey $block "enabled" -}}
-{{- $on := include "agent-platform.componentEnabled" (dict "root" $ "name" (index (splitList "." (last .)) 1)) -}}
-{{- if or (not $on) (not (index $block "enabled")) -}}
+{{- if hasKey (index $.Values (first .) | default dict) "enabled" -}}
 {{- $found = append $found (printf "%s.enabled -> %s" (first .) (last .)) -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- with $found -}}

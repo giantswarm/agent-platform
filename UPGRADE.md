@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the chart renders the `kagent-flux` tenant identity)
+
+The connectivity chart renders ServiceAccount `kagent-flux` and its RoleBinding to `cluster-admin` (namespace-scoped) in the kagent namespace whenever kagent is on, and one value — `kagent.fluxServiceAccountName` — names it into agent-manager (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the portal (`agentPlatform.fluxServiceAccountName`). Six template fixes land with it (CHANGELOG, Fixed).
+
+### Operator action
+
+- **Giant Swarm management clusters: none.** The two objects already exist there, hand-written in the management-cluster bases with the same spec. helm-controller takes ownership of them on the upgrade (its default since 1.3) and both writers — the chart and the bases' kustomize-controller — set the same fields, so nothing changes on the cluster and no pod rolls. The hand-written copy is removed from the bases in a follow-up; until then both own the objects without conflict.
+- Installations that set `agent-manager.flux.helmReleaseServiceAccount` themselves: drop it, or keep it equal to `kagent.fluxServiceAccountName`. A different value fails the render, naming the key. To rename the identity, set `kagent.fluxServiceAccountName` only.
+- `ingress.mode: muster-direct` now fails the render when `kagent.controllerRoute.enabled`, `klausGateway.agentgatewayRoute.enabled`, or agent-platform-mcps' `agentgateway.enabled` with `mcpServers` set is on: those render agentgateway.dev objects a cluster without the agentgateway component cannot apply. Every management cluster runs `agentgateway-muster`; an installation that hits the guard turns the knob off or moves to an agentgateway-* mode.
+- A leftover legacy toggle (`kagent.enabled`, `klausGateway.enabled`, …) now fails the render whatever its value, also `true` under a component that is on. Move it to `components.<name>.enabled` (see the section on component toggles below).
+
 ## \<current\> → \<next\> (cluster-shape knobs default to `auto`)
 
 `kyvernoPolicies.enabled`, `networkPolicy.flavor`, `global.observability.metrics.serviceMonitor.enabled`, `dicebear.route.enabled` and `agentSandbox.podSecurity.enabled` default to `auto` (they were `true` / `cilium`): the object renders when its API group is served on the cluster (`kyverno.io/v1`, `cilium.io/v2`, `monitoring.coreos.com/v1`, `gateway.envoyproxy.io/v1alpha1`; the pod-security policy follows the resolved Kyverno answer). The meta chart detects once and resolves the knobs — and the component copies left at `auto` (muster's flavor and monitors, valkey's Cilium policy and PodMonitor, kagent's OTel exporters, oauth2-proxy monitor and OTLP header) — before it inlines a component's values.
@@ -33,6 +44,8 @@ Backstage, mcp-kubernetes, the CloudNativePG operator and the four KServe charts
 ### Operator action
 
 **No installation needs to act.** The default render adds nothing but seven `<name>: {enabled: false}` entries to the component roster inside the `agent-platform-connectivity` `HelmRelease`'s values, so that release gets one Helm revision with unchanged objects; no pod rolls. A management cluster keeps all seven off — it runs each of them as its own app. A BOM-pinned installation has nothing to pin unless it turns one on; `examples/customer-bom.yaml` carries the pins. An installation that turns Backstage or mcp-kubernetes on sets `global.domain` and `global.identity` first (README "Backstage, mcp-kubernetes, CloudNativePG and KServe").
+
+## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
 
 ## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
 

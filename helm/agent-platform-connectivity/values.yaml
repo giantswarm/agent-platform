@@ -850,6 +850,19 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     #       io.kubernetes.pod.namespace: kube-system
     additionalPeers: []
 
+  # --- Tenant identity (read by umbrella templates/kagent/flux-service-account.yaml, not passed to subchart) ---
+  # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in
+  # the kagent namespace whenever kagent is on, bound to `cluster-admin` by a
+  # namespace-scoped RoleBinding (full control of the kagent namespace, nothing
+  # outside it), and named from this ONE value into agent-manager
+  # (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the
+  # portal's `agentPlatform.fluxServiceAccountName` (through the
+  # `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot
+  # disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs
+  # as the rights-less default ServiceAccount and fails. Empty renders no
+  # identity and hands both callers an empty name.
+  fluxServiceAccountName: kagent-flux
+
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose kagent controller API through agentgateway (JWT-validated).
   # Creates AgentgatewayBackend + HTTPRoute in the release namespace.
@@ -1515,11 +1528,11 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
 # and MCP (tools appear as x_agent-manager_<tool> through the chart's own
 # MCPServer CR). It needs the kagent component (the agents it manages, in
 # kagent.namespace = kagent.namespaceOverride) and Flux's helm and source
-# controllers on the cluster. The HelmReleases it writes carry
-# flux.helmReleaseServiceAccount: the Flux multi-tenancy admission policy on
-# Giant Swarm clusters requires one in tenant namespaces, and the
-# management-cluster base provisions `kagent-flux` (namespace-admin of kagent)
-# for exactly this; a cluster without that policy may leave it empty.
+# controllers on the cluster. The HelmReleases it writes execute as
+# flux.helmReleaseServiceAccount, which is NOT set here: the meta chart derives
+# it from kagent.fluxServiceAccountName — the tenant identity this chart renders
+# in the kagent namespace (templates/kagent/flux-service-account.yaml) — so the
+# ServiceAccount, its RoleBinding, agent-manager and the portal share one name.
 # Identity as for model-manager above: an OAuth 2.1 resource server acting as
 # the caller, no ServiceAccount permissions (the chart renders no RBAC), the
 # platform client named here or through global.identity. The chart's own
@@ -1532,8 +1545,6 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
   agentChart:
     ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
     semver: x.x.x
-  flux:
-    helmReleaseServiceAccount: kagent-flux
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:

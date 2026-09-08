@@ -30,8 +30,11 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # render change (verify-global asserts that gate both ways). It also leaves
 # agentSandbox off (see the 1.1.x note about its dropped resource-policy).
 # GOLDEN_REF is the ref the rest of the default render must still match byte for
-# byte; GOLDEN_REF= (empty) opts out for a clone that has no such ref.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes
+# byte; GOLDEN_REF= (empty) opts out for a clone that has no such ref. The
+# kagent-flux tenant identity is the other intended change: both sides render
+# with it off (a chart that predates the key ignores it, the kagent block is
+# additionalProperties: true), and verify-identity asserts it both ways.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName=
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -119,16 +122,24 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	elif ! grep -q "components.kagent.enabled" /tmp/vm-legacy.out; then \
 		echo "FAIL: the legacy-toggle guard failed for the wrong reason"; cat /tmp/vm-legacy.out; exit 1; \
 	else echo "ok: legacy-toggle guard"; fi
-	@echo "--> a legacy false under a component that is on must fail loudly (coalescing-safe probe)"
+	@echo "--> a legacy false under a component that is on must fail loudly"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.klaus-gateway.enabled=true --set klausGateway.enabled=false >/tmp/vm-legacy-on.out 2>&1; then \
 		echo "FAIL: klausGateway.enabled=false rendered silently while components.klaus-gateway.enabled=true"; exit 1; \
 	elif ! grep -q "components.klaus-gateway.enabled" /tmp/vm-legacy-on.out; then \
 		echo "FAIL: the on+false legacy-toggle guard failed for the wrong reason"; cat /tmp/vm-legacy-on.out; exit 1; \
 	else echo "ok: on+false legacy-toggle guard"; fi
-	@echo "--> a legacy true under a component that is on passes (indistinguishable from a coalesced chart default)"
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.klaus-gateway.enabled=true --set klausGateway.enabled=true >/tmp/vm-legacy-true.out 2>&1 || { \
-		echo "FAIL: on+true must pass — a coalesced chart default would trip it on every install"; cat /tmp/vm-legacy-true.out; exit 1; }
-	@echo "ok: on+true passes"
+	@echo "--> a legacy true under a component that is on fails too: neither chart has a Helm dependency, so no chart default is ever coalesced into these blocks and the key can only be the operator's"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.klaus-gateway.enabled=true --set klausGateway.enabled=true >/tmp/vm-legacy-true.out 2>&1; then \
+		echo "FAIL: klausGateway.enabled=true rendered silently while components.klaus-gateway.enabled=true"; exit 1; \
+	elif ! grep -q "components.klaus-gateway.enabled" /tmp/vm-legacy-true.out; then \
+		echo "FAIL: the on+true legacy-toggle guard failed for the wrong reason"; cat /tmp/vm-legacy-true.out; exit 1; \
+	else echo "ok: on+true legacy-toggle guard"; fi
+	@echo "--> the meta chart's copy of the probe reports the same key"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set klausGateway.enabled=true >/tmp/vm-legacy-meta.out 2>&1; then \
+		echo "FAIL: the meta chart's legacy-toggle guard did not fire on on+true"; exit 1; \
+	elif ! grep -q "components.klaus-gateway.enabled" /tmp/vm-legacy-meta.out; then \
+		echo "FAIL: the meta chart's legacy-toggle guard failed for the wrong reason"; cat /tmp/vm-legacy-meta.out; exit 1; \
+	else echo "ok: meta legacy-toggle guard"; fi
 	@echo "--> golden: the default render is byte-identical to $(GOLDEN_REF)"
 	@if [ -z "$(GOLDEN_REF)" ]; then \
 		echo "skip: GOLDEN_REF is empty (explicit opt-out)"; \
@@ -198,7 +209,7 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	@grep -A2 '^  service:' /tmp/vg-otlp.out | grep -q '^      type: ClusterIP' || { echo "FAIL: gateway.parameters.serviceType is not rendered at spec.service.spec.type"; exit 1; }
 	@echo "ok: Service overlay nesting"
 	@echo "--> the kagent JWT policy defaults its issuer from global.identity.issuerUrl"
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set kagent.controllerRoute.hostname=agw.example.com --set kagent.controllerRoute.jwtAuthentication.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com 2>/dev/null | grep -q 'issuer: "https://dex.ci.example.com"' || { echo "FAIL: JWT issuer not defaulted from global.identity"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set kagent.controllerRoute.hostname=agw.example.com --set kagent.controllerRoute.jwtAuthentication.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com 2>/dev/null | grep -q 'issuer: "https://dex.ci.example.com"' || { echo "FAIL: JWT issuer not defaulted from global.identity"; exit 1; }
 	@echo "ok: JWT issuer default"
 	@echo "--> a muster issuer that differs from global.identity fails"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set global.identity.issuerUrl=https://dex.ci.example.com --set muster.muster.oauth.server.enabled=true --set muster.muster.oauth.server.dex.issuerUrl=https://other.example.com >/tmp/vg-idp.out 2>&1; then \
@@ -644,6 +655,94 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@if grep -qE '^    - name: kagent$$' /tmp/vmg-meta-off.out; then echo "FAIL: a dependsOn on the disabled kagent survived"; exit 1; fi
 	@echo "ok: meta render"
 	@echo "All model-manager / agent-manager wiring verified."
+
+# The kagent-flux tenant identity (PRD Q3 / D4) and the upstream fixes that
+# retired the text patches the standalone umbrella's generator applied to its
+# copy of the connectivity templates (muster-off route gate, kagent Service
+# naming, the muster-direct guards, the kserve guard's deference to the bundled
+# components, the legacy-toggle probe, doc fixes).
+IDENTITY_ON := $(VM) --set components.kagent.enabled=true
+MCPS_ONE := --set components.agent-platform-mcps.enabled=true --set agent-platform-mcps.mcpServers[0].cluster=ci --set agent-platform-mcps.mcpServers[0].group=kubernetes --set agent-platform-mcps.mcpServers[0].url=https://mcp.ci.example.com/mcp
+.PHONY: verify-identity
+verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAccount, RoleBinding, agent-manager, the portal helper) and the fixes that retired the standalone's template patches.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@echo "--> kagent on: ServiceAccount + RoleBinding kagent-flux in the kagent namespace, bound to cluster-admin"
+	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) >/tmp/vid-on.out 2>&1 || { cat /tmp/vid-on.out; exit 1; }
+	@awk '/^kind: ServiceAccount$$/,/^---/' /tmp/vid-on.out >/tmp/vid-sa.out; grep -q '^  name: kagent-flux$$' /tmp/vid-sa.out || { echo "FAIL: no ServiceAccount kagent-flux"; exit 1; }
+	@grep -q '^  namespace: kagent$$' /tmp/vid-sa.out || { echo "FAIL: the ServiceAccount is not in the kagent namespace"; exit 1; }
+	@grep -q 'application.giantswarm.io/team: "bumblebee"' /tmp/vid-sa.out || { echo "FAIL: the ServiceAccount lost the team label the fleet's hand-written copy carries"; exit 1; }
+	@awk '/^kind: RoleBinding$$/,/^---/' /tmp/vid-on.out >/tmp/vid-rb.out; grep -q '^  name: kagent-flux$$' /tmp/vid-rb.out || { echo "FAIL: no RoleBinding kagent-flux"; exit 1; }
+	@grep -q '^  namespace: kagent$$' /tmp/vid-rb.out || { echo "FAIL: the RoleBinding is not in the kagent namespace"; exit 1; }
+	@grep -A3 '^roleRef:' /tmp/vid-rb.out | grep -q 'kind: ClusterRole' || { echo "FAIL: the RoleBinding roleRef is not a ClusterRole"; exit 1; }
+	@grep -A3 '^roleRef:' /tmp/vid-rb.out | grep -q 'name: cluster-admin' || { echo "FAIL: the RoleBinding does not bind cluster-admin (namespace-scoped admin; the fleet object's immutable roleRef)"; exit 1; }
+	@grep -A3 '^subjects:' /tmp/vid-rb.out | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding subject is not kagent-flux"; exit 1; }
+	@grep -A3 '^subjects:' /tmp/vid-rb.out | grep -q 'namespace: kagent' || { echo "FAIL: the RoleBinding subject is not in the kagent namespace"; exit 1; }
+	@if grep -q '^kind: ClusterRoleBinding$$' /tmp/vid-on.out; then echo "FAIL: the identity must be namespace-scoped, no ClusterRoleBinding"; exit 1; fi
+	@echo "ok: identity rendered"
+	@echo "--> kagent off: neither object"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=false >/tmp/vid-off.out 2>&1 || { cat /tmp/vid-off.out; exit 1; }
+	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' /tmp/vid-off.out; then echo "FAIL: the identity renders with kagent off"; exit 1; else echo "ok: no identity without kagent"; fi
+	@echo "--> ONE value renames all three consumers: the ServiceAccount, the RoleBinding subject, agent-manager's flux.helmReleaseServiceAccount"
+	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName=tenant-x >/tmp/vid-x.out 2>&1 || { cat /tmp/vid-x.out; exit 1; }
+	@[ "$$(grep -c '^  name: tenant-x$$' /tmp/vid-x.out)" = "2" ] || { echo "FAIL: renaming kagent.fluxServiceAccountName did not rename ServiceAccount and RoleBinding"; exit 1; }
+	@grep -A3 '^subjects:' /tmp/vid-x.out | grep -q 'name: tenant-x' || { echo "FAIL: the RoleBinding subject did not follow the value"; exit 1; }
+	@if grep -q 'kagent-flux' /tmp/vid-x.out; then echo "FAIL: the old name survives in the connectivity render"; grep -n kagent-flux /tmp/vid-x.out; exit 1; fi
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.fluxServiceAccountName=tenant-x >/tmp/vid-meta-x.out 2>&1 || { cat /tmp/vid-meta-x.out; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' /tmp/vid-meta-x.out >/tmp/vid-meta-am.out
+	@grep -q 'helmReleaseServiceAccount: tenant-x' /tmp/vid-meta-am.out || { echo "FAIL: agent-manager's flux.helmReleaseServiceAccount is not derived from kagent.fluxServiceAccountName"; head -40 /tmp/vid-meta-am.out; exit 1; }
+	@grep -q 'fluxServiceAccountName: tenant-x' /tmp/vid-meta-x.out || { echo "FAIL: the value is not forwarded to the connectivity release"; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' /tmp/vid-meta-x.out >/tmp/vid-meta-kagent.out
+	@if grep -q 'fluxServiceAccountName' /tmp/vid-meta-kagent.out; then echo "FAIL: fluxServiceAccountName forwarded to the kagent chart, whose schema rejects it"; exit 1; fi
+	@if grep -q 'kagent-flux' /tmp/vid-meta-x.out; then echo "FAIL: the old name survives in the meta render"; grep -n kagent-flux /tmp/vid-meta-x.out; exit 1; fi
+	@echo "ok: one value, three consumers"
+	@echo "--> the portal surface reads the same helper (it renders agentPlatform.fluxServiceAccountName from it)"
+	@grep -q 'define "agent-platform.kagent.fluxServiceAccountName"' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the connectivity chart lost the agent-platform.kagent.fluxServiceAccountName helper"; exit 1; }
+	@grep -q 'define "agent-platform.kagent.fluxServiceAccountName"' $(CHART_DIR)/templates/_helpers.tpl || { echo "FAIL: the meta chart lost the agent-platform.kagent.fluxServiceAccountName helper"; exit 1; }
+	@echo "--> the default: agent-manager receives kagent-flux from the derivation, not from values.yaml"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/vid-meta.out 2>&1 || { cat /tmp/vid-meta.out; exit 1; }
+	@grep -q 'helmReleaseServiceAccount: kagent-flux' /tmp/vid-meta.out || { echo "FAIL: agent-manager lost flux.helmReleaseServiceAccount"; exit 1; }
+	@if grep -q 'helmReleaseServiceAccount:' $(CHART_DIR)/values.yaml $(CONNECTIVITY_DIR)/values.yaml; then echo "FAIL: agent-manager.flux.helmReleaseServiceAccount is set in a values.yaml again; it is derived from kagent.fluxServiceAccountName"; exit 1; fi
+	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
+	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >/tmp/vid-empty.out 2>&1 || { cat /tmp/vid-empty.out; exit 1; }
+	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' /tmp/vid-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still renders the identity"; exit 1; fi
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.fluxServiceAccountName= >/tmp/vid-meta-empty.out 2>&1 || { cat /tmp/vid-meta-empty.out; exit 1; }
+	@grep -q 'helmReleaseServiceAccount: ""' /tmp/vid-meta-empty.out || { echo "FAIL: an empty value does not reach agent-manager as an empty ServiceAccount"; exit 1; }
+	@echo "ok: empty value"
+	@echo "--> a disagreeing agent-manager.flux.helmReleaseServiceAccount fails, naming the one key; an agreeing one passes"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.flux.helmReleaseServiceAccount=other >/tmp/vid-guard.out 2>&1; then \
+		echo "FAIL: a disagreeing agent-manager.flux.helmReleaseServiceAccount was accepted"; exit 1; \
+	elif ! grep -q "set kagent.fluxServiceAccountName" /tmp/vid-guard.out; then \
+		echo "FAIL: the identity guard failed for the wrong reason"; cat /tmp/vid-guard.out; exit 1; \
+	else echo "ok: identity guard"; fi
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.flux.helmReleaseServiceAccount=kagent-flux >/dev/null 2>&1 || { echo "FAIL: an agreeing agent-manager.flux.helmReleaseServiceAccount must pass"; exit 1; }
+	@echo "--> upstream fixes that retired the standalone's template patches"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.muster.enabled=false >/tmp/vid-nomuster.out 2>&1 || { cat /tmp/vid-nomuster.out; exit 1; }
+	@if grep -A3 '^kind: HTTPRoute$$' /tmp/vid-nomuster.out | grep -q '^  name: muster$$'; then echo "FAIL: the muster / HTTPRoute renders with the muster component off (hostname-less, it would blackhole the shared Gateway)"; exit 1; else echo "ok: muster route gated on the component"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vid-muster.out 2>&1 || { cat /tmp/vid-muster.out; exit 1; }
+	@grep -A3 '^kind: HTTPRoute$$' /tmp/vid-muster.out | grep -q '^  name: muster$$' || { echo "FAIL: the muster / HTTPRoute is gone with muster on"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.uiRoute.enabled=true --set kagent.uiRoute.hostname=kagent.ci.example.com --set kagent.oauth2-proxy.enabled=false >/tmp/vid-ui.out 2>&1 || { cat /tmp/vid-ui.out; exit 1; }
+	@grep -q '^        - name: kagent-ui$$' /tmp/vid-ui.out || { echo "FAIL: the kagent UI route does not target the Service named from kagent.fullnameOverride"; grep -n -- '-ui$$' /tmp/vid-ui.out; exit 1; }
+	@echo "ok: UI route backend follows fullnameOverride"
+	@for case in "kagent.controllerRoute:--set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true" \
+	             "klausGateway.agentgatewayRoute:--set components.klaus-gateway.enabled=true --set klausGateway.agentgatewayRoute.enabled=true" \
+	             "agent-platform-mcps.agentgateway:$(MCPS_ONE)"; do \
+		knob=$${case%%:*}; flags=$${case#*:}; \
+		if helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=muster-direct --set global.domain=ci.example.com $$flags >/tmp/vid-md.out 2>&1; then \
+			echo "FAIL: $$knob renders agentgateway.dev objects in muster-direct mode without failing"; exit 1; \
+		elif ! grep -q "agentgateway.dev" /tmp/vid-md.out; then \
+			echo "FAIL: the muster-direct guard for $$knob failed for the wrong reason"; cat /tmp/vid-md.out; exit 1; \
+		else echo "ok: muster-direct guard: $$knob"; fi; \
+	done
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=muster-direct $(MCPS_ONE) --set agent-platform-mcps.agentgateway.enabled=false >/dev/null 2>&1 || { echo "FAIL: mcps through muster (agentgateway.enabled=false) must pass in muster-direct"; exit 1; }
+	@echo "ok: mcps through muster passes in muster-direct"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --set components.kserve-resources.enabled=true >/dev/null 2>&1 || { echo "FAIL: the kserve API guard must defer to the bundled kserve-resources component"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --set components.modelServing.enabled=true >/dev/null 2>&1 || { echo "FAIL: the kserve API guard must defer to the modelServing component"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --set components.kserve-resources.enabled=false >/tmp/vid-kserve.out 2>&1; then echo "FAIL: a kserve-resources component that is OFF must not satisfy the kserve API guard"; exit 1; fi
+	@grep -q 'serving.kserve.io/v1beta1 API' /tmp/vid-kserve.out || { echo "FAIL: the kserve guard failed for the wrong reason"; cat /tmp/vid-kserve.out; exit 1; }
+	@echo "ok: kserve guard defers to the bundled components only"
+	@if grep -q 'serviceMonitor.enabled, default true' $(CONNECTIVITY_DIR)/templates/_helpers.tpl; then echo "FAIL: the serviceMonitor helper prose states a default again (an umbrella may flip it)"; exit 1; fi
+	@echo "ok: upstream fixes"
+	@echo "kagent-flux identity verified."
 
 # postgres.backup: the Barman Cloud plugin wiring (ObjectStore, ScheduledBackup,
 # the Cluster's plugin entry and ServiceAccount identity, the object-store

@@ -39,7 +39,10 @@ spec:
         - name: {{ index .Values.kagent "oauth2-proxy" "fullnameOverride" | default (printf "%s-oauth2-proxy" .Release.Name) }}
           port: 4180
         {{- else }}
-        - name: {{ printf "%s-ui" .Release.Name }}
+        {{- /* The kagent chart names its Services from fullnameOverride (pinned
+        to `kagent` in values.yaml), not from this release's name — as the
+        oauth2-proxy branch above and controller-route.yaml already honor. */}}
+        - name: {{ printf "%s-ui" (.Values.kagent.fullnameOverride | default .Release.Name) }}
           port: 8080
         {{- end }}
 {{- end }}

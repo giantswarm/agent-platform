@@ -54,22 +54,51 @@ true
 {{- end -}}
 
 {{/*
+Whether an OPTIONAL component is on: "true" when `components.<name>` exists and
+is enabled, empty otherwise — unlike componentEnabled, a name absent from the
+roster is NOT force-on. For components a chart of this version may not carry
+yet (the KServe control plane, model serving), so a guard can defer to them
+without asserting they exist.
+Usage: include "agent-platform.optionalComponentEnabled" (dict "root" $ "name" "kserve-resources")
+*/}}
+{{- define "agent-platform.optionalComponentEnabled" -}}
+{{- if hasKey (.root.Values.components | default dict) .name -}}
+{{- include "agent-platform.componentEnabled" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The tenant identity of the agents' Flux HelmReleases: the ServiceAccount name
+(kagent.fluxServiceAccountName) while the kagent component is on, "" otherwise.
+ONE value, three consumers: templates/kagent/flux-service-account.yaml renders
+the ServiceAccount and its RoleBinding from it, the meta chart derives
+agent-manager's flux.helmReleaseServiceAccount from the same key, and the
+portal's app-config (agentPlatform.fluxServiceAccountName) reads this helper.
+Under a multi-tenancy lockdown (helm-controller with --no-cross-namespace-refs
+and a rights-less default ServiceAccount; the Flux multi-tenancy admission
+policy on Giant Swarm management clusters) a HelmRelease executes as the
+ServiceAccount it names and fails without one.
+Usage: include "agent-platform.kagent.fluxServiceAccountName" .
+*/}}
+{{- define "agent-platform.kagent.fluxServiceAccountName" -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- dig "fluxServiceAccountName" "" (.Values.kagent | default dict) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fail the render when a component's on/off toggle is still set the old way, inside
 the component's own values block. Those blocks are additionalProperties: true, so
 a leftover `enabled` key validates and is then ignored — the component silently
 falls back to the `components.<name>.enabled` default, which is off for five of
 the six. This turns that into a loud failure naming the new key.
-The probe is coalescing-safe: in a layout where a block feeds a real Helm
-dependency (the standalone umbrella copies this helper), Helm coalesces that
-chart's own top-level `enabled: true` default into the block once the dependency
-is on (klaus-gateway ships one), so hasKey cannot tell an operator-set value from
-the chart default. A legacy key is therefore reported when it is provably the
-operator's: always while the component is off (a disabled dependency's block is
-never coalesced), and while it is on when the value is an explicit false (the
-only coalesced default is true) — exactly the case where the operator believes
-the component is off while it runs anyway. On + true is indistinguishable from a
-coalesced default and passes. The removed `mcps:` block needs no entry: the root
-schema rejects it already.
+Neither this chart nor the meta chart has a Helm dependency, so no chart default
+is ever coalesced into these blocks: a legacy key can only be the operator's and
+is reported whatever its value, whether the component is on or off. (An umbrella
+that feeds these blocks to real Helm dependencies sees klaus-gateway's own
+`enabled: true` default coalesced in while that dependency is on and has to
+special-case it; nothing here does.) The removed `mcps:` block needs no entry:
+the root schema rejects it already.
 */}}
 {{- define "agent-platform.validateLegacyToggles" -}}
 {{- $moved := list
@@ -80,12 +109,8 @@ schema rejects it already.
       (list "agentSandbox" "components.agent-sandbox.enabled") -}}
 {{- $found := list -}}
 {{- range $moved -}}
-{{- $block := index $.Values (first .) | default dict -}}
-{{- if hasKey $block "enabled" -}}
-{{- $on := include "agent-platform.componentEnabled" (dict "root" $ "name" (index (splitList "." (last .)) 1)) -}}
-{{- if or (not $on) (not (index $block "enabled")) -}}
+{{- if hasKey (index $.Values (first .) | default dict) "enabled" -}}
 {{- $found = append $found (printf "%s.enabled -> %s" (first .) (last .)) -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- with $found -}}
@@ -198,6 +223,23 @@ agent-platform-mcps component. */ -}}
 {{- end -}}
 {{- if and (eq $mode "muster-direct") $agentgatewayEnabled -}}
 {{- fail "components.agentgateway.enabled must be false in muster-direct mode; the controller dependency condition must match ingress.mode" -}}
+{{- end -}}
+{{- /* muster-direct runs without the agentgateway component, so its CRDs are
+not on the cluster: anything that renders an agentgateway.dev object or attaches
+to the agentgateway Gateway must fail here, naming the knob, instead of shipping
+objects the API server rejects (the model-manager / agent-manager routes already
+guard themselves the same way). */ -}}
+{{- if eq $mode "muster-direct" -}}
+{{- $mcpsValues := index .Values "agent-platform-mcps" | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) (dig "agentgateway" "enabled" false $mcpsValues) (dig "mcpServers" (list) $mcpsValues) -}}
+{{- fail "muster-direct mode cannot serve the agentgateway.dev resources agent-platform-mcps renders per MCP server; set agent-platform-mcps.agentgateway.enabled=false to reach the MCP servers through muster" -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.controllerRoute.enabled -}}
+{{- fail "kagent.controllerRoute renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled -}}
+{{- fail "klausGateway.agentgatewayRoute renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

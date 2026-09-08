@@ -69,9 +69,15 @@ route the API server rejects, or an MCPServer CR without its CRD.
   {{- end }}
 
   {{- /* The kserve backend manages InferenceServices: it needs KServe on the
-         cluster. Only checkable through its CRDs at render time. */ -}}
-  {{- if and (eq $backend "kserve") $mm.kserve.requireApi (not (.Capabilities.APIVersions.Has "serving.kserve.io/v1beta1")) }}
-    {{- fail "model-manager.backend is kserve but the serving.kserve.io/v1beta1 API (InferenceService) is not on the cluster: install KServe first (the Agent Platform does not bundle it). For an offline render pass --api-versions serving.kserve.io/v1beta1, or set modelManager.kserve.requireApi=false to skip this check." }}
+         cluster. Only checkable through its CRDs at render time — unless this
+         platform installs KServe itself: with the kserve-resources component
+         (or the modelServing wiring that runs on it) on, that component's own
+         guards own the check and a missing API is the first install, where the
+         CRDs arrive in the same reconcile. Optional components: a roster that
+         does not carry them yet is not force-on. */ -}}
+  {{- $kserveBundled := or (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-resources")) (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "modelServing")) }}
+  {{- if and (eq $backend "kserve") $mm.kserve.requireApi (not $kserveBundled) (not (.Capabilities.APIVersions.Has "serving.kserve.io/v1beta1")) }}
+    {{- fail "model-manager.backend is kserve but the serving.kserve.io/v1beta1 API (InferenceService) is not on the cluster and no component of this chart installs it: turn on the KServe components (components.kserve-crd, components.kserve-resources; with components.modelServing for the platform's serving runtime) or install KServe first. For an offline render pass --api-versions serving.kserve.io/v1beta1, or set modelManager.kserve.requireApi=false to skip this check." }}
   {{- end }}
 
   {{- /* ModelConfig wiring lands in the kagent namespace: the ModelConfigs
