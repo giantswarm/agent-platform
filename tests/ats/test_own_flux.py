@@ -158,6 +158,10 @@ def own_flux(kube: Kube) -> Iterator[None]:
     STATE.crd_managers = flux_crd_managers(kube)
     # The cluster owns its namespaces: the fleet bases create kagent's on every
     # management cluster; here the test does (README "Clusters that run Flux").
+    # The smoke's teardown deleted the namespace with the connectivity release;
+    # its termination may still be running when this scenario starts.
+    wait_for(f"namespace {KAGENT_NAMESPACE} gone or Active (not Terminating)",
+             lambda: (kube.get("namespace", KAGENT_NAMESPACE) or {}).get("status", {}).get("phase", "gone") != "Terminating", 300)
     kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": KAGENT_NAMESPACE}})
     TIMINGS.record(f"flux install ({', '.join(sorted(FLUX_COMPONENTS))} {FLUX_VERSION}; {len(keep)} objects, components dropped: {dropped})", time.monotonic() - started)
     logger.info("Flux CRD managers after flux install: %s", sorted({m for ms in STATE.crd_managers.values() for m in ms}))

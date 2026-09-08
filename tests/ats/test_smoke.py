@@ -321,13 +321,15 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForw
         assert CROSS_CLIENT_AUDIENCE in aud, f"the token lacks the {CROSS_CLIENT_AUDIENCE} audience: {aud}"
         session = MusterSession(MUSTER_BASE_URL, token, "ats-password-grant").initialize()
         tools = session.list_tools()
-        assert any(t.startswith("core_") for t in tools), f"no core_ tool listed: {tools[:20]}"
+        assert {"list_tools", "call_tool"} <= set(tools), f"muster's meta-tools missing from tools/list: {tools}"
+        aggregated = session.aggregated_tools()
+        assert any(t.startswith("core_") for t in aggregated), f"no core_ tool aggregated for the user: {aggregated[:20]}"
     except AssertionError:
         dump_auth(kube)
         raise
     STATE.dex_token = token
-    TIMINGS.record("auth round trip: password grant -> /mcp initialize -> tools/list", time.monotonic() - started)
-    logger.info("Dex user %s reached /mcp: %d tools", DEX_USER, len(tools))
+    TIMINGS.record("auth round trip: password grant -> /mcp initialize -> tools/list -> list_tools", time.monotonic() - started)
+    logger.info("Dex user %s reached /mcp: %d meta-tools, %d aggregated tools", DEX_USER, len(tools), len(aggregated))
 
 
 @pytest.mark.smoke
@@ -339,7 +341,8 @@ def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: PortFo
     try:
         token = login_through_muster(MUSTER_BASE_URL, dex)
         session = MusterSession(MUSTER_BASE_URL, token, "ats-login").initialize()
-        assert any(t.startswith("core_") for t in session.list_tools())
+        assert "call_tool" in session.list_tools()
+        assert any(t.startswith("core_") for t in session.aggregated_tools())
     except AssertionError:
         dump_auth(kube)
         raise
@@ -384,10 +387,11 @@ def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, must
     try:
         # muster connects to a forwardToken server per session, after the first
         # authenticated request; the tools appear once the SSO connection is up.
-        wait_for("agent-manager's tools in muster's tool list", lambda: "x_agent-manager_create_agent" in session.list_tools(), 120, interval=3)
+        wait_for("agent-manager's tools in muster's aggregated tool list", lambda: "x_agent-manager_create_agent" in session.aggregated_tools(), 120, interval=3)
         info = session.call_server_json("x_agent-manager_get_info")
-        logger.info("agent-manager get_info: version %s, chart %s, flux %s", info.get("version"), info.get("agentChart", {}).get("ociUrl"), info.get("flux"))
-        assert info.get("flux", {}).get("helmReleaseServiceAccount") == KAGENT_FLUX_SA, info.get("flux")
+        logger.info("agent-manager get_info: version %s, chart %s, flux %s", info.get("version"), info.get("chart", {}).get("ociUrl"), info.get("flux"))
+        assert info.get("flux", {}).get("serviceAccountName") == KAGENT_FLUX_SA, info.get("flux")
+        assert info.get("chart", {}).get("ociUrl") == "oci://gsoci.azurecr.io/charts/giantswarm/agent", info.get("chart")
         # Clean up an earlier attempt (a flaky rerun) so create_agent does not refuse a duplicate.
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", MANAGED_AGENT, namespace=KAGENT_NAMESPACE, timeout="2m")
         result = session.call_server_json("x_agent-manager_create_agent", {

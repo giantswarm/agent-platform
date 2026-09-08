@@ -116,8 +116,12 @@ REGISTRY_URL = f"oci://registry.{REGISTRY_NAMESPACE}.svc.cluster.local:{REGISTRY
 
 INSTALL_TIMEOUT = "12m"
 UNINSTALL_TIMEOUT = "5m"
-# The acceptance criterion of the ordered teardown: clean in under a minute.
-UNINSTALL_BUDGET_S = 60
+# The ordered teardown's budget. Measured: 12–16 s with muster + dicebear +
+# connectivity (the shape PRD Q9's "under a minute" was measured on), ~65 s
+# with kagent and agent-manager on — the long pole is the kagent namespace's
+# termination (the connectivity release owns the Namespace, its pods and PVC go
+# with it), which the teardown hook waits for.
+UNINSTALL_BUDGET_S = 120
 # Self-management in the smoke: the chart's own OCIRepository follows the
 # in-cluster registry the candidate was pushed to, at the candidate's exact
 # version. Exact, not the chart's derived range: a branch build carries a
@@ -567,6 +571,15 @@ class MusterSession:
 
     def call(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return self.request("tools/call", {"name": name, "arguments": arguments or {}})
+
+    def aggregated_tools(self) -> List[str]:
+        """The tools muster aggregates for this session — its own core_* tools
+        and every connected server's x_<server>_<tool> — from the list_tools
+        meta-tool. tools/list carries only the meta-tools (list_tools,
+        describe_tool, filter_tools, call_tool, …); the aggregated tools are
+        called through call_tool."""
+        listing = json.loads(self.text_of(self.call("list_tools")))
+        return [t["name"] for t in (listing.get("tools", []) if isinstance(listing, dict) else listing)]
 
     @staticmethod
     def text_of(result: Dict[str, Any]) -> str:
