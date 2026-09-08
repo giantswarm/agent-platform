@@ -12,7 +12,12 @@
 # floor of components.muster.versionRange: the toolset presets in values.yaml
 # select by the tool-group label, which a muster before 5.12.0 does not know
 # (it refuses to start), and which agent-platform-mcps, agent-manager and
-# model-manager stamp on their MCPServer CRs from the versions below.
+# model-manager stamp on their MCPServer CRs from the versions below. The
+# model-manager pin is a floor for the same reason: values.yaml forwards the
+# whole model-manager block, `lmstudio` included, to every release, and that
+# key only exists from 0.19.0 — a chart before it rejects the values outright
+# (its schema is additionalProperties: false), whether or not the
+# installation uses LM Studio.
 # =============================================================================
 
 gitops:
@@ -28,6 +33,6 @@ components:
   klaus-gateway:                 { versionRange: "0.39.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
-  model-manager:                 { versionRange: "0.18.0" }
+  model-manager:                 { versionRange: "0.19.0" }
   agent-manager:                 { versionRange: "0.4.0" }
   agent-platform-connectivity: { versionRange: "3.10.0" }

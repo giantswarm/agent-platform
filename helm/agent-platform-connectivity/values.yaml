@@ -1308,7 +1308,11 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # pinned Service name is what the wiring below (route, network policies)
 # targets, like muster.fullnameOverride. `backend` selects the serving driver:
 # `ollama` proxies an Ollama reached at ollama.endpoint (REQUIRED as reached
-# from pods; the chart's own default is a Docker Desktop guess), `kserve`
+# from pods; the chart's own default is a Docker Desktop guess), `lemonade` a
+# Lemonade Server at lemonade.endpoint (FastFlowLM on AMD Ryzen AI NPUs,
+# llama.cpp on GPU/CPU; wired against <endpoint>/api/v1), `lmstudio` an LM
+# Studio at lmstudio.endpoint (0.4.0+, llama.cpp on GPU/CPU and MLX on Apple
+# silicon; wired against <endpoint>/v1, and it serves no delete), `kserve`
 # manages InferenceServices on the KServe control plane the cluster runs (a
 # prerequisite of that backend; nothing under this key installs it),
 # configured through the chart's kserve.* keys.
