@@ -1,0 +1,61 @@
+{{- /*
+The identity of the self-management hooks and the detached resumer: a
+ServiceAccount in the release namespace with a namespaced Role — the hooks read
+the release's Helm storage (`helm get values`, `helm status`: Secrets in this
+namespace), write and delete the values Secret, create and delete the resumer
+Job, and patch the self HelmRelease's suspend field. Regular chart objects, not
+hooks: the resumer runs AFTER the post-install hooks completed, when a
+hook-managed ServiceAccount (hook-succeeded) is already gone, and the -6/-5
+pre-upgrade hooks of the hand-back render need an account that exists before
+that upgrade's hooks run. Rendered whenever the engine is on — the -6/-5 hooks
+render in the self-off shape too (hooks/self.yaml).
+*/ -}}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "agent-platform.self.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: self-management
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "agent-platform.self.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: self-management
+rules:
+  # Helm storage (read) and the values Secret (write, delete on teardown).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The detached resumer Job.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete"]
+  # Suspend and resume the self HelmRelease.
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "agent-platform.self.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: self-management
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "agent-platform.self.serviceAccountName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "agent-platform.self.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -16,8 +16,11 @@
   // flux-engine subchart (charts/flux-engine/values.yaml, operator.image — bump
   // its Chart.yaml appVersion with it; the operator's embedded Flux manifests
   // decide which Flux 2.x the FluxInstance runs, so a new Flux minor arrives
-  // with a new operator tag) and the kubectl image of the meta chart's hook
-  // Jobs (values.yaml, gitops.hooks.image).
+  // with a new operator tag), the kubectl image of the meta chart's hook Jobs
+  // (values.yaml, gitops.hooks.image) and the kubectl+helm image of the hooks
+  // that need helm or a shell — the self-management values hook, its resumer
+  // and the suspend hook (values.yaml, gitops.hooks.helmImage: alpine/k8s,
+  // whose tags follow the kubectl minor).
   "customManagers": [
     {
       // Tracks registry/repository/tag image blocks in Helm values files.

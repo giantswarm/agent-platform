@@ -17,10 +17,18 @@ the chart:
      operator removes Flux including its CRDs), the four operator CRDs remain
      (Helm never deletes crds/), and a reinstall reaches `deployed` again.
 
+  5. the lab shape: tests/test-values.yaml sets `gitops.self.enabled: false`
+     (an unreleased chart must not adopt itself — the self HelmRelease would
+     replace it with the published one), so nothing of self-management is on
+     the cluster: no self OCIRepository / HelmRelease, no values Secret, no
+     admission policy, no values hook — only the hand-back hooks' identity,
+     which renders whenever the engine is on.
+
 Helm and kubectl come with the ATS image; ``kube_cluster`` (pytest-helm-charts)
 carries the kubeconfig. No agent round trips here: they need kagent and
-agentgateway, which do not fit the CI executor's budget next to this — the
-self-management slice adds them as a second scenario.
+agentgateway, which do not fit the CI executor's budget next to this. Self-
+management against a PUBLISHED chart (adoption, the refused CLI, the hand-back)
+is a separate scenario: it needs a registry the chart under test is pushed to.
 """
 
 import json
@@ -46,6 +54,10 @@ GATEWAY_API_CRDS = (
     "v1.5.0/standard-install.yaml"
 )
 TENANT_SA = "agent-platform-flux"
+# Self-management (off in the lab shape): the objects that must NOT exist.
+SELF_POLICY = f"{RELEASE}-self-managed-{NAMESPACE}"
+VALUES_SECRET = "agent-platform-values"
+SELF_SA = f"{RELEASE}-self"
 # The component HelmReleases tests/test-values.yaml leaves on.
 COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity")
 FLUX_CRD_SUFFIX = ".toolkit.fluxcd.io"
@@ -267,6 +279,26 @@ def test_engine_objects(kube_cluster: Cluster, app_deployment: float) -> None:
     # No hook object lingers after a successful install (hooks are pre-delete only).
     jobs = pykube.Job.objects(kube_cluster.kube_client).filter(namespace=NAMESPACE)
     assert not [j.name for j in jobs], [j.name for j in jobs]
+
+
+@pytest.mark.smoke
+def test_lab_shape_renders_no_self_management(kube_cluster: Cluster, app_deployment: float) -> None:
+    """`gitops.self.enabled: false` (tests/test-values.yaml): the release is the
+    Helm CLI's, not the bundled helm-controller's."""
+    ocis = {o["metadata"]["name"] for o in _kubectl_items(kube_cluster, f"-n {NAMESPACE} get ocirepositories.source.toolkit.fluxcd.io")}
+    hrs = {o["metadata"]["name"] for o in _kubectl_items(kube_cluster, f"-n {NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io")}
+    assert RELEASE not in ocis and RELEASE not in hrs, f"the self OCIRepository/HelmRelease exists in the lab shape: {sorted(ocis)}, {sorted(hrs)}"
+    policies = {p["metadata"]["name"] for p in _kubectl_items(kube_cluster, "get validatingadmissionpolicies.admissionregistration.k8s.io")}
+    assert SELF_POLICY not in policies, f"the admission policy exists in the lab shape: {sorted(policies)}"
+    secrets = {s.name for s in pykube.Secret.objects(kube_cluster.kube_client).filter(namespace=NAMESPACE)}
+    assert VALUES_SECRET not in secrets, "the values Secret exists in the lab shape"
+    jobs = {j.name for j in pykube.Job.objects(kube_cluster.kube_client).filter(namespace=NAMESPACE)}
+    assert not {f"{RELEASE}-self-values", f"{RELEASE}-self-resume"} & jobs, f"self-management Jobs exist in the lab shape: {sorted(jobs)}"
+    # The hand-back hooks' identity renders whenever the engine is on (a Role, not cluster-admin).
+    kube_cluster.kubectl(f"-n {NAMESPACE} get serviceaccount {SELF_SA}", output_format="")
+    kube_cluster.kubectl(f"-n {NAMESPACE} get role {SELF_SA}", output_format="")
+    # A CLI upgrade is still the day-2 tool here: the -6/-5 pre-upgrade hooks are no-ops and the release stays the CLI's.
+    logger.info("lab shape: no self OCIRepository/HelmRelease, policy, values Secret or self Job; %s present", SELF_SA)
 
 
 @pytest.mark.smoke

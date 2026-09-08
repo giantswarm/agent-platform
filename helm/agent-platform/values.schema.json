@@ -761,6 +761,21 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "helmImage": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "registry": {
+                                    "type": "string"
+                                },
+                                "repository": {
+                                    "type": "string"
+                                },
+                                "tag": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "image": {
                             "type": "object",
                             "additionalProperties": false,
@@ -786,6 +801,35 @@
                 },
                 "retries": {
                     "type": "integer"
+                },
+                "self": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": [
+                                "boolean",
+                                "string"
+                            ],
+                            "enum": [
+                                "auto",
+                                true,
+                                false
+                            ]
+                        },
+                        "insecure": {
+                            "type": "boolean"
+                        },
+                        "interval": {
+                            "type": "string"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
                 },
                 "serviceAccountName": {
                     "type": "string"

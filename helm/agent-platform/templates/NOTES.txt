@@ -17,6 +17,26 @@ run as the tenant ServiceAccount {{ include "agent-platform.tenantServiceAccount
 `helm uninstall --wait` tears the platform down in order (pre-delete hooks
 delete the platform HelmReleases, then the FluxInstance; the operator removes
 Flux and its CRDs); the four fluxcd.controlplane.io CRDs stay behind.
+{{- if eq (include "agent-platform.selfEnabled" .) "true" }}
+
+This release manages itself (gitops.self.enabled): helm-controller adopts it
+through HelmRelease {{ .Release.Namespace }}/{{ .Release.Name }} once the install is
+deployed (a resumer Job lifts the install-time suspend) and follows
+{{ include "agent-platform.self.versionRange" . }} from
+{{ printf "%s/%s" (trimSuffix "/" .Values.gitops.self.repository) .Chart.Name }}.
+Day 2 is the Secret, not Helm: change values by rewriting
+Secret {{ .Release.Namespace }}/{{ include "agent-platform.self.valuesSecretName" . }} (key values.yaml, your
+values file); move to the next major by setting gitops.self.versionRange in it.
+`helm upgrade` and `helm rollback` are refused (ValidatingAdmissionPolicy
+{{ include "agent-platform.self.policyName" . }}); to hand the release back to the CLI,
+annotate the namespace {{ include "agent-platform.self.handBackAnnotation" . }}=allow and run
+`helm upgrade … --set gitops.self.enabled=false --force-conflicts` (keep the value).
+{{- else }}
+
+The Helm CLI stays the day-2 tool (gitops.self.enabled: false): `helm upgrade -f
+values.yaml` applies a values change; component versions still roll forward on
+their own inside their versionRanges.
+{{- end }}
 {{- else }}
 
 This cluster's own Flux reconciles these objects (components.flux.enabled: false).

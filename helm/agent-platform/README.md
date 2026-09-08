@@ -50,6 +50,14 @@ README.
 | gitops.hooks.image.registry | string | `"registry.k8s.io"` |  |
 | gitops.hooks.image.repository | string | `"kubectl"` |  |
 | gitops.hooks.image.tag | string | `"v1.36.4"` |  |
+| gitops.hooks.helmImage.registry | string | `"docker.io"` |  |
+| gitops.hooks.helmImage.repository | string | `"alpine/k8s"` |  |
+| gitops.hooks.helmImage.tag | string | `"1.36.4"` |  |
+| gitops.self.enabled | string | `"auto"` |  |
+| gitops.self.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| gitops.self.insecure | bool | `false` |  |
+| gitops.self.versionRange | string | `""` |  |
+| gitops.self.interval | string | `"10m"` |  |
 | gitops.retries | int | `5` |  |
 | gitops.forbidInlineSecrets | bool | `false` |  |
 | components.flux.enabled | bool | `true` |  |

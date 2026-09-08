@@ -14,9 +14,12 @@ the fleet, the kind quick start or the sibling slices rely on:
   gitops.serviceAccountName is set, the roster says `flux: enabled: false`;
 - engine ON (the default): exactly the eleven CRDs, the operator objects, the
   FluxInstance (two controllers, multitenant), the identity, the hook
-  ServiceAccount at weight -10 and the two teardown Jobs at weights 0 and 5 —
-  nothing at the weights -6/-5 reserved for self-management — and every
-  platform HelmRelease naming agent-platform-flux;
+  ServiceAccount at weight -10, the two teardown Jobs at weights 0 and 5, the
+  self-management hooks at -6/-5 with their identity <release>-self (they
+  render whenever the engine is on) — and every platform HelmRelease naming
+  agent-platform-flux. The engine-on renders here set gitops.self.enabled=false
+  so the assertions stay about the engine; the self OCIRepository/HelmRelease,
+  the values hook and the admission policy are tests/verify-self.py's;
 - the engine changes nothing else: the OCIRepository/HelmRelease documents of
   both shapes are identical but for the serviceAccountName line and the roster;
 - Chart.yaml's only dependency is flux-engine, conditional on
@@ -41,6 +44,7 @@ RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
 TENANT_SA = "agent-platform-flux"
 OFF = ["--set", "components.flux.enabled=false"]
+SELF_OFF = ["--set", "gitops.self.enabled=false"]
 CRDS = {
     "fluxinstances.fluxcd.controlplane.io",
     "fluxreports.fluxcd.controlplane.io",
@@ -204,7 +208,7 @@ def main(chart: str) -> int:
     print(f"ok: engine off — {len(off)} Flux objects, no CRD/hook/operator/FluxInstance/identity, no serviceAccountName, roster flux: false, fleet shape clean")
 
     # --- engine ON: exactly the engine besides the platform objects
-    on = docs(helm(chart, [*ci, "--include-crds"]))
+    on = docs(helm(chart, [*ci, *SELF_OFF, "--include-crds"]))
     crds = {n for k, _, n, _ in on if k == "CustomResourceDefinition"}
     if crds != CRDS:
         fail(f"engine on: CRDs differ from the eleven expected: missing {sorted(CRDS - crds)}, extra {sorted(crds - CRDS)}")
@@ -215,6 +219,8 @@ def main(chart: str) -> int:
         ("ServiceAccount", NAMESPACE, TENANT_SA), ("ClusterRoleBinding", "", TENANT_SA),
         ("ServiceAccount", NAMESPACE, f"{RELEASE}-hooks"), ("ClusterRoleBinding", "", f"{RELEASE}-hooks"),
         ("Job", NAMESPACE, f"{RELEASE}-teardown-releases"), ("Job", NAMESPACE, f"{RELEASE}-teardown-engine"),
+        ("ServiceAccount", NAMESPACE, f"{RELEASE}-self"), ("Role", NAMESPACE, f"{RELEASE}-self"), ("RoleBinding", NAMESPACE, f"{RELEASE}-self"),
+        ("Job", NAMESPACE, f"{RELEASE}-self-stop-resumer"), ("Job", NAMESPACE, f"{RELEASE}-self-suspend"),
     }
     engine = {(k, ns, n) for k, ns, n, _ in on if k not in ("OCIRepository", "HelmRelease", "CustomResourceDefinition")}
     if engine != expected:
@@ -247,24 +253,26 @@ def main(chart: str) -> int:
         fail("engine on: the roster forwarded to connectivity does not say flux: enabled: true")
     if re.search(r"^flux-engine:", conn_values, re.M):
         fail("the flux-engine values block reached the connectivity release (omitKeys)")
-    on_sa = docs(helm(chart, [*ci, "--set", "gitops.serviceAccountName=custom-sa"]))
+    on_sa = docs(helm(chart, [*ci, *SELF_OFF, "--set", "gitops.serviceAccountName=custom-sa"]))
     if not all("\n  serviceAccountName: custom-sa\n" in d for k, _, _, d in on_sa if k == "HelmRelease"):
         fail("engine on: gitops.serviceAccountName does not override the tenant default")
     print(f"ok: engine on — the eleven CRDs, operator, FluxInstance (2 controllers, multitenant), identities, hooks; {len(hrs_on)} HelmReleases name {TENANT_SA}")
 
     # --- the hooks: weights, policy, one plain command each, restricted pods
     hooks = {(k, n): d for k, _, n, d in on if "helm.sh/hook:" in d}
-    weights = {}
+    events = {}
     for (k, n), d in hooks.items():
         hook, weight, policy = hook_meta(d)
-        if hook != "pre-delete" or policy != "before-hook-creation,hook-succeeded":
-            fail(f"hook {k} {n}: event {hook!r} policy {policy!r}")
-        weights[(k, n)] = int(weight)
-    if weights != {
-        ("ServiceAccount", f"{RELEASE}-hooks"): -10, ("ClusterRoleBinding", f"{RELEASE}-hooks"): -10,
-        ("Job", f"{RELEASE}-teardown-releases"): 0, ("Job", f"{RELEASE}-teardown-engine"): 5,
+        if policy != "before-hook-creation,hook-succeeded":
+            fail(f"hook {k} {n}: policy {policy!r}")
+        events[(k, n)] = (hook, int(weight))
+    if events != {
+        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-delete", -10),
+        # the self-management hooks (verify-self.py): pre-upgrade too while self-management is off (the hand-back)
+        ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-upgrade,pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-upgrade,pre-delete", -5),
+        ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("pre-delete", 5),
     }:
-        fail(f"hook weights differ (−6/−5 are reserved for self-management): {weights}")
+        fail(f"hook events/weights differ: {events}")
     hr_names = sorted(n for k, _, n, _ in on if k == "HelmRelease")
     rel = job_args(one(on, "Job", f"{RELEASE}-teardown-releases"))
     if rel[:7] != ["delete", "helmreleases.helm.toolkit.fluxcd.io", "--namespace", NAMESPACE, "--ignore-not-found", "--wait", "--timeout=5m"] or sorted(rel[7:]) != hr_names:
@@ -283,7 +291,7 @@ def main(chart: str) -> int:
                 fail(f"hook Job {job} lacks {needle!r}")
         if "command:" in d:
             fail(f"hook Job {job} overrides the image entrypoint; hooks pass kubectl arguments only")
-    print(f"ok: hooks — SA/CRB at -10, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases by name), teardown-engine at 5, restricted pods running {image}")
+    print(f"ok: hooks — SA/CRB at -10, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases by name), teardown-engine at 5, restricted pods running {image}")
 
     # --- the engine changes nothing else about the platform objects
     p_off, p_on = platform_docs(off), platform_docs(on)

@@ -671,3 +671,137 @@ Usage: include "agent-platform.platformReleaseNames" . | fromYamlArray
 {{- end -}}
 {{- toYaml $names -}}
 {{- end -}}
+
+{{/*
+Self-management resolved: "true" when this release renders its own
+OCIRepository + HelmRelease (templates/self/) and the admission policy that
+makes the Helm CLI day-0 only, empty otherwise. gitops.self.enabled is
+`auto` (follows the bundled engine: components.flux.enabled), `true` or
+`false`. `true` without the engine is refused: on a cluster that runs its own
+Flux that Flux holds the chart's HelmRelease (README, "Clusters that run
+Flux"), and a self HelmRelease under a foreign helm-controller would run as
+whatever account that controller impersonates.
+*/}}
+{{- define "agent-platform.selfEnabled" -}}
+{{- $v := (.Values.gitops.self | default dict).enabled -}}
+{{- $engine := eq (include "agent-platform.engineEnabled" .) "true" -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- if $engine }}true{{ end -}}
+{{- else if eq (toString $v) "true" -}}
+{{- if not $engine -}}
+{{- fail "gitops.self.enabled=true needs the bundled Flux engine (components.flux.enabled=true): with the engine off, the cluster's own Flux holds this chart's HelmRelease (README, Clusters that run Flux). Set gitops.self.enabled to auto (the default) or false" -}}
+{{- end -}}
+true
+{{- else if eq (toString $v) "false" -}}
+{{- else -}}
+{{- fail (printf "gitops.self.enabled=%v is not one of auto, true, false" $v) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The identity the self-management hooks run as: a ServiceAccount in the release
+namespace with a namespaced Role (templates/self/rbac.yaml) — a regular chart
+object, not a hook: the detached resumer Job runs AFTER the post-install hooks
+completed, when a hook-managed ServiceAccount (hook-succeeded) is already gone.
+*/}}
+{{- define "agent-platform.self.serviceAccountName" -}}
+{{- printf "%s-self" .Release.Name -}}
+{{- end -}}
+
+{{/*
+The Secret the self HelmRelease reads its values from (valuesFrom, optional:
+false) and the values hook writes (the USER-SUPPLIED values of the release —
+`helm get values` — never the merged tree, which would pin every component
+versionRange at first-install time). Fixed name: the admission policy's message
+and the README name it.
+*/}}
+{{- define "agent-platform.self.valuesSecretName" -}}
+agent-platform-values
+{{- end -}}
+
+{{/*
+The ValidatingAdmissionPolicy (cluster-scoped) and its binding that make the
+Helm CLI day-0 only, one pair per release: <release>-self-managed-<namespace>.
+*/}}
+{{- define "agent-platform.self.policyName" -}}
+{{- printf "%s-self-managed-%s" .Release.Name .Release.Namespace -}}
+{{- end -}}
+
+{{/*
+The hand-back annotation on the release namespace: with it present the
+admission policy admits the Helm CLI's storage write again, so
+`helm upgrade --set gitops.self.enabled=false --force-conflicts` can hand the
+release back to the CLI.
+*/}}
+{{- define "agent-platform.self.handBackAnnotation" -}}
+agent-platform.giantswarm.io/helm-cli
+{{- end -}}
+
+{{/*
+The ServiceAccount the self HelmRelease runs as and the only identity the
+admission policy admits to write this release's Helm storage: the bundled
+engine's tenant identity, or gitops.serviceAccountName when set (the same
+resolution the platform HelmReleases use in components.yaml).
+*/}}
+{{- define "agent-platform.self.releaseServiceAccountName" -}}
+{{- .Values.gitops.serviceAccountName | default (include "agent-platform.tenantServiceAccountName" .) -}}
+{{- end -}}
+
+{{/*
+Semver range the self OCIRepository follows. gitops.self.versionRange when set;
+otherwise derived from the running chart's version: `>=<version> <next
+major>.0.0` — a release follows patch and minor releases of its own major, never
+a downgrade (a fixed floor would let source-controller pick a LOWER tag than the
+one the CLI just installed), and the range moves forward with every version
+the controller applies. Build metadata (helm-controller renders the chart as
+<version>+<oci digest>) is dropped; a pre-release floor is kept.
+*/}}
+{{- define "agent-platform.self.versionRange" -}}
+{{- with .Values.gitops.self.versionRange -}}
+{{- . -}}
+{{- else -}}
+{{- $v := semver .Chart.Version -}}
+{{- $floor := printf "%d.%d.%d" $v.Major $v.Minor $v.Patch -}}
+{{- with $v.Prerelease }}{{ $floor = printf "%s-%s" $floor . }}{{ end -}}
+{{- printf ">=%s <%d.0.0" $floor (add1 $v.Major) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Render guards of self-management, evaluated only when it is on:
+
+1. Kubernetes >= 1.30: the admission policy is admissionregistration.k8s.io/v1
+   ValidatingAdmissionPolicy (GA in 1.30). An older apiserver would fail the
+   install at apply time with `no matches for kind`; the render says why and
+   names the way out (gitops.self.enabled=false keeps the Helm CLI as the
+   day-2 tool). `helm template --kube-version` exercises it offline.
+2. The hand-back annotation together with self-management on: the policy would
+   admit the Helm CLI while the bundled helm-controller holds the release — two
+   writers on one release, which is what the whole shape forbids (a CLI
+   revision pending while the controller reconciles is unlocked and upgraded
+   with whatever the values Secret holds). The hand-back upgrade carries
+   gitops.self.enabled=false; a stale annotation is removed. `lookup` is live
+   under the Helm CLI, --dry-run=server and helm-controller (where the guard
+   surfaces on the self HelmRelease for the duration of a hand-back), empty
+   under `helm template`.
+*/}}
+{{- define "agent-platform.validateSelf" -}}
+{{- if eq (include "agent-platform.selfEnabled" .) "true" -}}
+{{- if semverCompare "<1.30.0-0" .Capabilities.KubeVersion.Version -}}
+{{- fail (printf "self-management (gitops.self.enabled) needs Kubernetes >= 1.30 for its ValidatingAdmissionPolicy (admissionregistration.k8s.io/v1); this cluster reports %s. Set gitops.self.enabled=false to install without it — the Helm CLI then stays the day-2 tool" .Capabilities.KubeVersion.Version) -}}
+{{- end -}}
+{{- $ns := lookup "v1" "Namespace" "" .Release.Namespace -}}
+{{- $ann := include "agent-platform.self.handBackAnnotation" . -}}
+{{- if and $ns (eq (dig "metadata" "annotations" $ann "" $ns) "allow") -}}
+{{- fail (printf "namespace %s carries the hand-back annotation %s=allow while gitops.self.enabled resolves to true: the Helm CLI and the bundled helm-controller would both write release %s. Finish the hand-back — helm upgrade … --set gitops.self.enabled=false --force-conflicts — or remove the annotation to keep the release self-managed" .Release.Namespace $ann .Release.Name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The helm-and-shell image the hooks that need helm run (gitops.hooks.helmImage).
+*/}}
+{{- define "agent-platform.hooks.helmImage" -}}
+{{- $i := .Values.gitops.hooks.helmImage -}}
+{{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
+{{- end -}}
