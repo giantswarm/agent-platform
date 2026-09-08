@@ -222,25 +222,29 @@ components:  # @schema additionalProperties: true
     dependsOn: [muster, agentgateway]
   kagent:  # @schema additionalProperties: true
     chart: kagent
-    # GS-vendored wrapper chart (giantswarm/kagent): upstream kagent controller
-    # vendored as a subchart, shipping the kagent.dev + kmcp CRDs in its own crds/
-    # dir (app-owned CRDs). Wrapping the upstream chart as a subchart keeps the
-    # subchart's `.Chart.Version` a clean pinned version even when helm-controller
-    # appends the OCI +digest to THIS umbrella's version, so the
-    # app.kubernetes.io/version label is no longer corrupted — the postRenderer
-    # kustomize hack and the version pin the meta-package needed for the upstream
-    # chart are both gone.
+    # GS-vendored chart (giantswarm/kagent): upstream kagent controller flattened
+    # onto the chart root, shipping the kagent.dev + kmcp CRDs in its own crds/
+    # dir (app-owned CRDs). The chart sanitises its own version labels, so the
+    # OCI +digest helm-controller appends needs no postRenderer here.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # Held on the 0.1 line: kagent 0.2.0 flattens the upstream keys onto the
-    # chart root and forwards no nested `kagent:` block, so this wiring (valuesKey
-    # below) cannot follow it. The 0.2 line lands together with the wiring change.
-    versionRange: "0.1.x"
+    # 0.2.0 flattened the chart: upstream keys moved from `kagent.*` to the chart
+    # root, so the forwarded block is no longer nested (no valuesKey) and the
+    # 0.1.x range cannot be used with this wiring.
+    versionRange: "0.2.x"
     valuesFrom: kagent
-    # The wrapper vendors the upstream chart under a subchart named `kagent`, so the
-    # forwarded block (controller/providers/oauth2-proxy/otel/… overrides, plus the
-    # per-cluster SOPS overrides that target the same flat paths) must be nested
-    # under that key.
-    valuesKey: kagent
+    # The flattened chart validates values against its own schema with
+    # additionalProperties: false, and these keys are not upstream's: they are
+    # this umbrella's (enabled is the toggle; the rest are read by the
+    # connectivity chart), so they stay in the top-level block and are dropped
+    # on the way out. fullnameOverride and namespaceOverride are upstream keys
+    # the connectivity chart also reads, so they are forwarded.
+    omitKeys:
+      - controllerRoute
+      - enabled
+      - modelConfigs
+      - remoteMcpServers
+      - serviceMonitor
+      - uiRoute
     enabled: false
     # App-owned CRDs: the wrapper chart ships the kagent.dev + kmcp CRDs (with
     # helm.sh/resource-policy: keep) in its own crds/ dir; CreateReplace upgrades
@@ -870,12 +874,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Pull kagent images from the GS-retagged registry (retagger uses override_repo_name
   # so the repository paths are flat, not the upstream kagent-dev/kagent/* hierarchy).
   registry: gsoci.azurecr.io/giantswarm
-  # No image tag pin. The upstream chart coalesces its image tag to
-  # `.Chart.Version`, and since the kagent chart vendors it as a subchart that is the
-  # clean pinned upstream version — helm-controller appends the OCI +digest to the
-  # kagent chart umbrella version, not to the subchart, so the tag no longer ends up
-  # with an illegal `+` in it. Pinning here would silently hold the images at an
-  # older release than the wrapper chart ships.
+  # No image tag pin. The kagent chart pins `tag` to the upstream release it
+  # vendors; pinning here would silently hold the images at an older release
+  # than the chart ships.
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
   # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
   # must stay allowed.
@@ -1078,13 +1079,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Argo Rollouts tools. Only useful when the declarative agents below are enabled.
   # Disabled: muster-registered MCP servers cover these surfaces.
   kagent-tools:
-    enabled: false
-
-  # Semantic document search MCP server (doc2vec embeddings, vector similarity).
-  # Ships empty — no documents loaded by default. Enable and populate with GS
-  # or upstream docs if you want AI-assisted documentation search.
-  # To enable: set querydoc to enabled: true and configure document ingestion.
-  querydoc:
     enabled: false
 
   # --- Bundled declarative agents (all disabled) ---

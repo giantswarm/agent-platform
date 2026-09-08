@@ -288,6 +288,10 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
 	@grep -q 'semver: "2.x"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not 2.x (the flattened chart line)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
+	@echo "--> kagent 0.2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
+	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out
+	@grep -q 'semver: "0.2.x"' /tmp/ap-flux.out || { echo "FAIL: kagent range is not 0.2.x (the flattened chart line)"; exit 1; }
+	@echo "ok: kagent 0.2.x wiring"
 	@echo "--> PURE app-of-apps: root emits ONLY OCIRepository + HelmRelease (no raw CRs)"
 	@if grep -E '^kind:' /tmp/ap-flux.out | grep -vqE '^kind: (OCIRepository|HelmRelease)$$'; then \
 		echo "FAIL: root rendered a non-app-of-apps kind:"; grep -E '^kind:' /tmp/ap-flux.out | grep -vE '^kind: (OCIRepository|HelmRelease)$$'; exit 1; \
