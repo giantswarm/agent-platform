@@ -3,7 +3,9 @@
 # `mcpServers` list. The umbrella must still ship zero CRDs.
 #
 # Mode is muster-direct, so viaMuster stays at its default (false) — setting it
-# true here would trip the ingress.mode consistency guard.
+# true here would trip the ingress.mode consistency guard — and the sub-chart's
+# agentgateway.dev rendering is off: without the agentgateway component there
+# is no CRD for it (the ingress guard refuses the combination).
 components:
   agent-platform-mcps:
     enabled: true
@@ -27,6 +29,8 @@ muster:
           type: memory
 
 agent-platform-mcps:
+  agentgateway:
+    enabled: false
   mcpServers:
     - cluster: ci
       group: kubernetes
