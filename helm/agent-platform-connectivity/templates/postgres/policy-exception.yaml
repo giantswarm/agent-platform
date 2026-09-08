@@ -1,4 +1,4 @@
-{{- if and .Values.postgres.enabled .Values.kyvernoPolicies.enabled }}
+{{- if and .Values.postgres.enabled (include "agent-platform.kyvernoPolicies" .) }}
 {{- if and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference }}
 {{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
 {{- $clusterName := .Values.postgres.clusterName }}

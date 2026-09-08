@@ -27,7 +27,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | global.identity.clientId | string | `""` |  |
 | global.identity.existingSecret | string | `""` |  |
 | global.gatewayApi.parentRefs | list | `[]` |  |
-| global.observability.metrics.serviceMonitor.enabled | bool | `true` |  |
+| global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
 | global.observability.metrics.serviceMonitor.labels | object | `{}` |  |
 | global.observability.traces.otlp.endpoint | string | `""` |  |
@@ -93,7 +93,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
 | networkPolicy.enabled | bool | `true` |  |
-| networkPolicy.flavor | string | `"cilium"` |  |
+| networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
@@ -103,7 +103,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | networkPolicy.kubernetes.worldExcludedCIDRs[1] | string | `"172.16.0.0/12"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[2] | string | `"192.168.0.0/16"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
-| kyvernoPolicies.enabled | bool | `true` |  |
+| kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
 | kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
 | kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
@@ -118,7 +118,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | muster.fullnameOverride | string | `"muster"` |  |
 | muster.crds.install | bool | `false` |  |
 | muster.networkPolicy.enabled | bool | `true` |  |
-| muster.networkPolicy.flavor | string | `"cilium"` |  |
+| muster.networkPolicy.flavor | string | `"auto"` |  |
 | muster.networkPolicy.cilium.allowClusterIngress | bool | `true` |  |
 | muster.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | muster.gatewayAPI.enabled | bool | `false` |  |
@@ -130,10 +130,10 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | muster.muster.oauth.server.storage.type | string | `"valkey"` |  |
 | muster.muster.oauth.server.storage.valkey.url | string | `"muster-valkey:6379"` |  |
 | muster.muster.oauth.server.storage.valkey.secretKeyPassword | string | `"valkey-password"` |  |
-| muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | bool | `true` |  |
+| muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | string | `"auto"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.interval | string | `"60s"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
-| valkey.ciliumNetworkPolicy.enabled | bool | `true` |  |
+| valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
@@ -196,11 +196,11 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | kagent.serviceMonitor.enabled | bool | `true` |  |
 | kagent.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
-| kagent.otel.tracing.enabled | bool | `true` |  |
+| kagent.otel.tracing.enabled | string | `"auto"` |  |
 | kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |
 | kagent.otel.tracing.exporter.otlp.insecure | bool | `true` |  |
-| kagent.otel.logging.enabled | bool | `true` |  |
+| kagent.otel.logging.enabled | string | `"auto"` |  |
 | kagent.otel.logging.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | kagent.otel.logging.exporter.otlp.insecure | bool | `true` |  |
 | kagent.oauth2-proxy.enabled | bool | `false` |  |
@@ -243,7 +243,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | kagent.oauth2-proxy.service.type | string | `"ClusterIP"` |  |
 | kagent.oauth2-proxy.service.portNumber | int | `4180` |  |
 | kagent.oauth2-proxy.metrics.enabled | bool | `true` |  |
-| kagent.oauth2-proxy.metrics.serviceMonitor.enabled | bool | `true` |  |
+| kagent.oauth2-proxy.metrics.serviceMonitor.enabled | string | `"auto"` |  |
 | kagent.oauth2-proxy.metrics.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.oauth2-proxy.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.grafana-mcp.enabled | bool | `false` |  |
@@ -410,7 +410,7 @@ chart's HelmRelease dependsOn those CRD-owning component releases.
 | agentgateway.resources.requests.memory | string | `"128Mi"` |  |
 | agentgateway.resources.limits.cpu | string | `"500m"` |  |
 | agentgateway.resources.limits.memory | string | `"512Mi"` |  |
-| agentSandbox.podSecurity.enabled | bool | `true` |  |
+| agentSandbox.podSecurity.enabled | string | `"auto"` |  |
 | agentSandbox.podSecurity.namespace | string | `"agent-sandbox-system"` |  |
 | agentSandbox.podSecurity.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentSandbox.podSecurity.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |

@@ -270,12 +270,124 @@ timeouts:
 {{- end -}}
 
 {{/*
+=== Cluster shape ===
+
+The knobs that describe what the cluster can admit — Kyverno policies, the
+network-policy flavor, ServiceMonitors/PodMonitors, the agent-sandbox
+pod-security policy — accept `auto` (the default): the object renders when its
+API group is served. `.Capabilities.APIVersions` is the live discovery under
+helm-controller, the Helm CLI and `--dry-run=server`; under `helm template` it
+is Helm's built-in set unless `--api-versions` names more, so an offline render
+resolves every `auto` to the vanilla shape. An explicit `true|false` (or
+`cilium|kubernetes`) always wins over detection.
+
+Under the meta chart (agent-platform) these knobs arrive resolved: it detects
+once with the same helpers and forwards concrete values, so the wiring rendered
+here and every component's own copy come from one answer. The helpers below
+are what a render of this chart on its own uses; on the same cluster they give
+the same answer. Templates read the truthy wrappers underneath
+(agent-platform.kyvernoPolicies, .networkPolicyFlavor, .serviceMonitor,
+.agentSandboxPodSecurity), never the raw values.
+*/}}
+
+{{/*
+Resolve one `auto|true|false` knob to the string "true" or "false". `auto`
+follows whether .api is served; an explicit boolean (or its string form from
+--set-string) is returned as is; anything else fails the render naming .key.
+Usage: include "agent-platform.shape.resolve" (dict "root" $ "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1")
+*/}}
+{{- define "agent-platform.shape.resolve" -}}
+{{- $v := .value -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- if .root.Capabilities.APIVersions.Has .api }}true{{ else }}false{{ end -}}
+{{- else if kindIs "bool" $v -}}
+{{- if $v }}true{{ else }}false{{ end -}}
+{{- else if or (eq (toString $v) "true") (eq (toString $v) "false") -}}
+{{- toString $v -}}
+{{- else -}}
+{{- fail (printf "%s must be one of auto, true, false (got %v)" .key $v) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+kyvernoPolicies.enabled resolved: "true" when Kyverno policies render (auto:
+kyverno.io/v1 served).
+*/}}
+{{- define "agent-platform.shape.kyvernoPolicies" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1") -}}
+{{- end -}}
+
+{{/*
+networkPolicy.flavor resolved: "cilium" or "kubernetes" (auto: cilium when
+cilium.io/v2 is served, else kubernetes).
+*/}}
+{{- define "agent-platform.shape.networkPolicyFlavor" -}}
+{{- $f := .Values.networkPolicy.flavor -}}
+{{- if or (kindIs "invalid" $f) (eq (toString $f) "auto") -}}
+{{- if .Capabilities.APIVersions.Has "cilium.io/v2" }}cilium{{ else }}kubernetes{{ end -}}
+{{- else if or (eq (toString $f) "cilium") (eq (toString $f) "kubernetes") -}}
+{{- toString $f -}}
+{{- else -}}
+{{- fail (printf "networkPolicy.flavor must be one of auto, cilium, kubernetes (got %v)" $f) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+global.observability.metrics.serviceMonitor.enabled resolved: "true" when the
+monitor objects render (auto: monitoring.coreos.com/v1 served).
+*/}}
+{{- define "agent-platform.shape.serviceMonitor" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "global.observability.metrics.serviceMonitor.enabled" "value" .Values.global.observability.metrics.serviceMonitor.enabled "api" "monitoring.coreos.com/v1") -}}
+{{- end -}}
+
+{{/*
+agentSandbox.podSecurity.enabled resolved: "true" when the agent-sandbox
+pod-security ClusterPolicy renders. It is a Kyverno mutate policy, so `auto`
+follows the RESOLVED kyvernoPolicies.enabled (an explicit
+kyvernoPolicies.enabled: false switches it off with the rest; the
+"podSecurity requires kyvernoPolicies" guard then never fires on auto).
+*/}}
+{{- define "agent-platform.shape.agentSandboxPodSecurity" -}}
+{{- $v := dig "podSecurity" "enabled" "auto" (.Values.agentSandbox | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.kyvernoPolicies" . -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "agentSandbox.podSecurity.enabled" "value" $v "api" "kyverno.io/v1") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy (emits "true") when the kyverno.io objects render. Gated templates use:
+  {{- if (include "agent-platform.kyvernoPolicies" .) }}
+*/}}
+{{- define "agent-platform.kyvernoPolicies" -}}
+{{- if eq (include "agent-platform.shape.kyvernoPolicies" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The network-policy flavor every policy template branches on: "cilium" or
+"kubernetes". Gated templates use:
+  {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+*/}}
+{{- define "agent-platform.networkPolicyFlavor" -}}
+{{- include "agent-platform.shape.networkPolicyFlavor" . -}}
+{{- end -}}
+
+{{/*
 Truthy when the umbrella renders its ServiceMonitor / PodMonitor objects
-(global.observability.metrics.serviceMonitor.enabled, default true). The
+(global.observability.metrics.serviceMonitor.enabled, default auto). The
 per-component keys underneath (kagent.serviceMonitor.*) keep working.
 */}}
 {{- define "agent-platform.serviceMonitor" -}}
-{{- if .Values.global.observability.metrics.serviceMonitor.enabled -}}true{{- end -}}
+{{- if eq (include "agent-platform.shape.serviceMonitor" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the agent-sandbox pod-security ClusterPolicy renders
+(agentSandbox.podSecurity.enabled, default auto).
+*/}}
+{{- define "agent-platform.agentSandboxPodSecurity" -}}
+{{- if eq (include "agent-platform.shape.agentSandboxPodSecurity" .) "true" -}}true{{- end -}}
 {{- end -}}
 
 {{/*

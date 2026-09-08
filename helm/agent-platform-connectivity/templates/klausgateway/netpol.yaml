@@ -1,6 +1,6 @@
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.a2a.enabled .Values.networkPolicy.enabled }}
 {{- $agentgatewayPort := "8080" }}
-{{- if eq .Values.networkPolicy.flavor "cilium" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Allow klausgateway to reach the agentgateway data-plane for A2A egress.
 # Traffic flows: klausgateway → agentgateway:8080 → kagent-controller:8083.
@@ -24,7 +24,7 @@ spec:
         - ports:
             - port: {{ $agentgatewayPort | quote }}
               protocol: TCP
-{{- else if eq .Values.networkPolicy.flavor "kubernetes" }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -49,7 +49,7 @@ spec:
 {{- end }}
 {{- end }}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.obo.enabled .Values.networkPolicy.enabled }}
-{{- if eq .Values.networkPolicy.flavor "cilium" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Allow klausgateway Slack-OBO egress: DNS + the muster authorization server on
 # :443. The gateway is a muster OAuth client; it runs RFC 8414 discovery and the
@@ -81,7 +81,7 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
-{{- else if eq .Values.networkPolicy.flavor "kubernetes" }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -113,7 +113,7 @@ spec:
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled .Values.networkPolicy.enabled }}
 {{- $klausgatewayPort := "8080" }}
 {{- $fullname := .Values.klausGateway.fullnameOverride | default "klaus-gateway" }}
-{{- if eq .Values.networkPolicy.flavor "cilium" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Egress from the agentgateway data-plane to klaus-gateway. The channel paths
 # (/v1, /web, /cli/v1, and /channels/slack when slack.enabled) are served on the
@@ -144,7 +144,7 @@ spec:
         - ports:
             - port: {{ $klausgatewayPort | quote }}
               protocol: TCP
-{{- else if eq .Values.networkPolicy.flavor "kubernetes" }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

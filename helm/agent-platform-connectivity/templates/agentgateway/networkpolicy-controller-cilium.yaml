@@ -1,4 +1,4 @@
-{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq .Values.networkPolicy.flavor "cilium") }}
+{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
