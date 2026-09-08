@@ -10,13 +10,14 @@
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
 #     `make verify-managers` + `make verify-kagent-netpol` + `make verify-meta` +
-#     `make verify-postgres` + `make verify-components` + `make verify-auto` +
-#     `make verify-identity` checks on branches (ingress-mode guards, the global.* contract, the
-#     model-manager / agent-manager wiring, the kagent tool-server egress,
-#     app-of-apps meta-package render, the postgres.backup wiring and guards,
-#     the roster entries of the standalone chart's extras and the component
-#     charts' acceptance of the forwarded values, the cluster-shape `auto`
-#     knobs, the kagent-flux tenant identity)
+#     `make verify-engine` + `make verify-postgres` + `make verify-components` +
+#     `make verify-auto` + `make verify-identity` checks on branches
+#     (ingress-mode guards, the global.* contract, the model-manager /
+#     agent-manager wiring, the kagent tool-server egress, app-of-apps
+#     meta-package render, the bundled Flux engine's two shapes, the
+#     postgres.backup wiring and guards, the roster entries of the standalone
+#     chart's extras and the component charts' acceptance of the forwarded
+#     values, the cluster-shape `auto` knobs, the kagent-flux tenant identity)
 #   - the standalone agent-platform-connectivity chart (build, tag push), the
 #     consumer-side wiring rendered by the meta-package as a HelmRelease
 #   versioned in lockstep with agent-platform off the same git tag. This
@@ -53,8 +54,13 @@ jobs:
         # global.* contract behaviors and their guards), verify-managers (the
         # model-manager / agent-manager wiring and guards), verify-kagent-netpol
         # (the kagent controller/agent egress to the built-in tool server),
-        # verify-meta (root app-of-apps render: no Chart.yaml pins, ranges as
-        # values, Flux the only engine, pure renderer, pinned BOM), verify-postgres
+        # verify-meta (root app-of-apps render: the flux-engine subchart the
+        # only Chart.yaml dependency and no component pin, ranges as values,
+        # Flux the only engine, pure renderer with the engine off, pinned BOM),
+        # verify-engine (the bundled Flux engine's two shapes: engine off renders
+        # no CRD/hook/operator/identity, engine on exactly the eleven CRDs, the
+        # operator, the FluxInstance, agent-platform-flux on every HelmRelease
+        # and the teardown hooks — with the Helm 3 installed here), verify-postgres
         # (the postgres.backup wiring and guards) and verify-secrets
         # (gitops.forbidInlineSecrets: off by default, names only the inline
         # credential paths, passes on referenced Secrets), verify-components
@@ -62,14 +68,15 @@ jobs:
         # and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree
         # against the connectivity schema), verify-components-charts (pulls
         # the seven component charts and renders each with the forwarded
-        # values) and verify-auto (the cluster-shape knobs: `auto` resolves by
+        # values), verify-auto (the cluster-shape knobs: `auto` resolves by
         # served API group, the fleet shape is unchanged, the vanilla shape
         # carries no Kyverno / Cilium / monitor / Envoy-only object) and
         # verify-identity (the kagent-flux tenant identity from one value, and
         # the fixes that retired the standalone's template patches) are the
-        # single source of truth, also run locally. Neither chart has
-        # subcharts, so no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-managers verify-kagent-netpol verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity
+        # single source of truth, also run locally. The meta chart's one
+        # dependency is the flux-engine subchart, a directory in its charts/,
+        # which needs no `helm dependency build`.
+        command: make verify-modes verify-global verify-meta verify-engine verify-managers verify-kagent-netpol verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity
 
 workflows:
   build:

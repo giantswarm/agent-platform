@@ -2,19 +2,28 @@
 
 Giant Swarm Agent Platform — MCP gateway deploy unit, packaged as an
 app-of-apps meta-package. Renders each component (muster, agentgateway, kagent,
-klaus-gateway, valkey, agent-platform-mcps, agent-sandbox) and the consumer-side
+klaus-gateway, valkey, agent-platform-mcps, agent-sandbox, …) and the consumer-side
 connectivity layer as a Flux OCIRepository + HelmRelease (Flux is the only
 render engine), with each component's version expressed as a value RANGE rather
 than a Chart.yaml pin — so a component release rolls forward with no PR to this
-chart. Each component ships its own CRDs (app-owned CRDs, upgraded via Flux
-CreateReplace); the Gateway API CRDs and GatewayClass remain cluster-level
-prerequisites — see README.
+chart. Brings its own Flux engine (the flux-engine subchart: Flux Operator +
+FluxInstance) where a cluster has none, so `helm install` yields a running
+platform; a cluster that runs Flux sets components.flux.enabled=false. Each
+component ships its own CRDs (app-owned CRDs, upgraded via Flux CreateReplace);
+the Gateway API CRDs and GatewayClass remain cluster-level prerequisites — see
+README.
 
 **Homepage:** <https://github.com/giantswarm/agent-platform>
 
 ## Source Code
 
 * <https://github.com/giantswarm/agent-platform>
+
+## Requirements
+
+| Repository | Name | Version |
+|------------|------|---------|
+|  | flux-engine | 0.1.0 |
 
 ## Values
 
@@ -38,8 +47,12 @@ prerequisites — see README.
 | gitops.namespace | string | `""` |  |
 | gitops.targetNamespace | string | `""` |  |
 | gitops.serviceAccountName | string | `""` |  |
+| gitops.hooks.image.registry | string | `"registry.k8s.io"` |  |
+| gitops.hooks.image.repository | string | `"kubectl"` |  |
+| gitops.hooks.image.tag | string | `"v1.36.4"` |  |
 | gitops.retries | int | `5` |  |
 | gitops.forbidInlineSecrets | bool | `false` |  |
+| components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.muster.versionRange | string | `">=5.12.0 <6.0.0"` |  |
@@ -160,10 +173,12 @@ prerequisites — see README.
 | components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-resources"` |  |
 | components.agent-platform-connectivity.omitKeys[5] | string | `"kserve-llmisvc-crd"` |  |
 | components.agent-platform-connectivity.omitKeys[6] | string | `"kserve-llmisvc-resources"` |  |
+| components.agent-platform-connectivity.omitKeys[7] | string | `"flux-engine"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"kagent"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"cloudnative-pg"` |  |
 | components.agent-platform-connectivity.dependsOn[3] | string | `"kserve-resources"` |  |
+| flux-engine | object | `{}` |  |
 | dicebear.route.enabled | string | `"auto"` |  |
 | dicebear.route.parentRefs | list | `[]` |  |
 | dicebear.route.hostnames | list | `[]` |  |

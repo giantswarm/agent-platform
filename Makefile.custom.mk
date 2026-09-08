@@ -287,14 +287,24 @@ verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the 
 	@if grep -q 'forbidInlineSecrets' /tmp/vs-ref.out; then echo "FAIL: gitops.forbidInlineSecrets leaked into a child HelmRelease's values"; exit 1; else echo "ok: flag not forwarded"; fi
 
 .PHONY: verify-meta
-verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, ranges as values, Flux the only engine, pinned BOM).
+# The meta chart's render assertions run with the bundled Flux engine OFF (the
+# fleet's value): the pure-renderer rule holds for the platform objects, and
+# the engine's own objects (operator, FluxInstance, identities, hooks, CRDs)
+# are asserted by verify-engine in both shapes.
+ENGINE_OFF := --set components.flux.enabled=false
+.PHONY: verify-meta
+verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with the engine off, ranges as values, Flux the only engine, pinned BOM).
 	@echo "====> $@ ($(CHART_DIR))"
-	@echo "--> meta-package has NO Chart.yaml dependencies (no package-time pins)"
-	@if grep -q '^dependencies:' $(CHART_DIR)/Chart.yaml; then \
-		echo "FAIL: Chart.yaml still pins component versions as dependencies"; exit 1; \
-	else echo "ok: zero pinned dependencies"; fi
+	@echo "--> Chart.yaml's only dependency is the flux-engine subchart, conditional on components.flux.enabled; no component pin"
+	@if ! grep -q '^dependencies:' $(CHART_DIR)/Chart.yaml; then \
+		echo "FAIL: Chart.yaml declares no dependencies; the flux-engine subchart must be one"; exit 1; \
+	elif [ "$$(sed -n '/^dependencies:/,$$p' $(CHART_DIR)/Chart.yaml | grep -c '^  - name: ')" != "1" ] || ! sed -n '/^dependencies:/,$$p' $(CHART_DIR)/Chart.yaml | grep -q '^  - name: flux-engine$$'; then \
+		echo "FAIL: Chart.yaml dependencies must be exactly flux-engine — components are values (versionRange), never package-time pins"; sed -n '/^dependencies:/,$$p' $(CHART_DIR)/Chart.yaml; exit 1; \
+	elif ! sed -n '/^dependencies:/,$$p' $(CHART_DIR)/Chart.yaml | grep -q 'condition: components.flux.enabled'; then \
+		echo "FAIL: the flux-engine dependency is not conditional on components.flux.enabled"; exit 1; \
+	else echo "ok: one dependency, flux-engine, conditional, not a component"; fi
 	@echo "--> flux engine renders OCIRepository + HelmRelease with version RANGES + app-owned CRDs"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/ap-flux.out 2>&1 || { cat /tmp/ap-flux.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) >/tmp/ap-flux.out 2>&1 || { cat /tmp/ap-flux.out; exit 1; }
 	@grep -q 'kind: OCIRepository' /tmp/ap-flux.out || { echo "FAIL: no OCIRepository"; exit 1; }
 	@grep -q 'kind: HelmRelease'   /tmp/ap-flux.out || { echo "FAIL: no HelmRelease"; exit 1; }
 	@grep -q 'semver: "0.x"'       /tmp/ap-flux.out || { echo "FAIL: muster range not rendered as a value"; exit 1; }
@@ -312,7 +322,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out
 	@grep -q 'semver: "0.2.x"' /tmp/ap-flux.out || { echo "FAIL: kagent range is not 0.2.x (the flattened chart line)"; exit 1; }
 	@echo "ok: kagent 0.2.x wiring"
-	@echo "--> PURE app-of-apps: root emits ONLY OCIRepository + HelmRelease (no raw CRs)"
+	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease (no raw CRs)"
 	@if grep -E '^kind:' /tmp/ap-flux.out | grep -vqE '^kind: (OCIRepository|HelmRelease)$$'; then \
 		echo "FAIL: root rendered a non-app-of-apps kind:"; grep -E '^kind:' /tmp/ap-flux.out | grep -vE '^kind: (OCIRepository|HelmRelease)$$'; exit 1; \
 	else echo "ok: pure renderer (only OCIRepository/HelmRelease)"; fi
@@ -321,52 +331,52 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 		echo "FAIL: an argoproj.io object rendered; the Argo render engine was removed"; grep -n 'argoproj.io' /tmp/ap-flux.out; exit 1; \
 	else echo "ok: no argoproj.io object"; fi
 	@echo "--> gitops.engine=argo is refused by the schema (enum: flux)"
-	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=argo >/tmp/ap-argo.out 2>&1; then \
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.engine=argo >/tmp/ap-argo.out 2>&1; then \
 		echo "FAIL: gitops.engine=argo rendered; the Argo render engine was removed"; exit 1; \
 	elif ! grep -q "gitops" /tmp/ap-argo.out || ! grep -q "flux" /tmp/ap-argo.out; then \
 		echo "FAIL: gitops.engine=argo failed for the wrong reason (expected the schema enum naming flux)"; cat /tmp/ap-argo.out; exit 1; \
 	else echo "ok: argo refused by the schema"; fi
 	@echo "--> gitops.engine=argo is refused by the template guard too, naming flux as the only engine"
-	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=argo --skip-schema-validation >/tmp/ap-argo-guard.out 2>&1; then \
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.engine=argo --skip-schema-validation >/tmp/ap-argo-guard.out 2>&1; then \
 		echo "FAIL: gitops.engine=argo rendered past the schema; the template guard is gone"; exit 1; \
 	elif ! grep -q "gitops.engine=argo is not supported; flux is the only engine" /tmp/ap-argo-guard.out; then \
 		echo "FAIL: gitops.engine=argo failed for the wrong reason (expected the guard message)"; cat /tmp/ap-argo-guard.out; exit 1; \
 	else echo "ok: argo refused by the guard"; fi
 	@echo "--> gitops.argo.* is gone: the schema rejects the key"
-	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.argo.project=x >/tmp/ap-argo-vals.out 2>&1; then \
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.argo.project=x >/tmp/ap-argo-vals.out 2>&1; then \
 		echo "FAIL: gitops.argo.project passed the schema"; exit 1; \
 	elif ! grep -q "argo" /tmp/ap-argo-vals.out; then \
 		echo "FAIL: gitops.argo.project failed for the wrong reason"; cat /tmp/ap-argo-vals.out; exit 1; \
 	else echo "ok: gitops.argo.* refused by the schema"; fi
 	@echo "--> gitops.engine: flux set explicitly renders exactly the default"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.engine=flux >/tmp/ap-flux-explicit.out 2>&1 || { cat /tmp/ap-flux-explicit.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.engine=flux >/tmp/ap-flux-explicit.out 2>&1 || { cat /tmp/ap-flux-explicit.out; exit 1; }
 	@cmp -s /tmp/ap-flux.out /tmp/ap-flux-explicit.out || { echo "FAIL: an explicit gitops.engine=flux renders differently from the default"; exit 1; }
 	@echo "ok: explicit flux"
 	@echo "--> bogus engine must fail (schema, then the guard behind it)"
-	@if helm template t $(CHART_DIR) --set gitops.engine=bogus >/tmp/ap-eng.out 2>&1; then \
+	@if helm template t $(CHART_DIR) $(ENGINE_OFF) --set gitops.engine=bogus >/tmp/ap-eng.out 2>&1; then \
 		echo "FAIL: engine guard did not fire"; exit 1; \
 	elif ! grep -q "flux" /tmp/ap-eng.out; then \
 		echo "FAIL: engine schema check failed for the wrong reason"; cat /tmp/ap-eng.out; exit 1; \
 	else echo "ok: engine schema"; fi
-	@if helm template t $(CHART_DIR) --set gitops.engine=bogus --skip-schema-validation >/tmp/ap-eng-guard.out 2>&1; then \
+	@if helm template t $(CHART_DIR) $(ENGINE_OFF) --set gitops.engine=bogus --skip-schema-validation >/tmp/ap-eng-guard.out 2>&1; then \
 		echo "FAIL: engine guard did not fire past the schema"; exit 1; \
 	elif ! grep -q "flux is the only engine" /tmp/ap-eng-guard.out; then \
 		echo "FAIL: engine guard failed for the wrong reason"; cat /tmp/ap-eng-guard.out; exit 1; \
 	else echo "ok: engine guard"; fi
 	@echo "--> customer BOM pins every range to an exact version"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml >/tmp/ap-bom.out 2>&1 || { cat /tmp/ap-bom.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml $(ENGINE_OFF) >/tmp/ap-bom.out 2>&1 || { cat /tmp/ap-bom.out; exit 1; }
 	@grep -q 'semver: "5.12.0"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to 5.12.0"; exit 1; }
 	@if grep -qE 'semver: "[0-9]+\.x"' /tmp/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agent-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agent-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
 	@if grep -E '^  namespace:' /tmp/ap-ns.out | grep -vq 'flux-giantswarm'; then \
 		echo "FAIL: a rendered CR is not in the gitops.namespace"; grep -E '^  namespace:' /tmp/ap-ns.out | grep -v 'flux-giantswarm'; exit 1; \
 	else echo "ok: all CRs in flux-giantswarm"; fi
 	@grep -q 'targetNamespace: agent-platform' /tmp/ap-ns.out || { echo "FAIL: HelmRelease targetNamespace not routed"; exit 1; }
 	@echo "ok: gitops namespace routing"
 	@echo "--> components.<name>.enabled=false skips that component's release"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.kagent.enabled=false >/tmp/ap-noc.out 2>&1 || { cat /tmp/ap-noc.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent.enabled=false >/tmp/ap-noc.out 2>&1 || { cat /tmp/ap-noc.out; exit 1; }
 	@if grep -qE '^  name: kagent$$' /tmp/ap-noc.out; then echo "FAIL: kagent still rendered when disabled"; exit 1; else echo "ok: kagent component skipped"; fi
 	@grep -q 'name: muster' /tmp/ap-noc.out || { echo "FAIL: disabling kagent dropped other components"; exit 1; }
 	@echo "--> a dependsOn ref to a disabled component is dropped (no dangling dependency)"
@@ -382,6 +392,12 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer, range
 	@grep -q 'kind: HTTPRoute' /tmp/ap-conn.out || { echo "FAIL: connectivity did not render the muster HTTPRoute"; exit 1; }
 	@echo "ok: connectivity wiring"
 	@echo "meta-package render verified."
+
+.PHONY: verify-engine
+verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks). HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-engine.py $(CHART_DIR)
+	@echo "flux engine shapes verified."
 
 .PHONY: verify-components
 verify-components: ## Assert the roster entries of the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts): off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema.

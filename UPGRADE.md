@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the chart brings its own Flux engine; `components.flux.enabled` defaults to `true`)
+
+The meta-package gains the `flux-engine` subchart — the Flux Operator, one `FluxInstance` (source-controller + helm-controller under the multi-tenancy lockdown), the tenant identity `agent-platform-flux`, eleven CRDs in its `crds/` — switched by `components.flux.enabled`, **default `true`**, plus a render guard against a cluster that already runs Flux and pre-delete hooks for an ordered `helm uninstall`. With the engine on, every platform `HelmRelease` names `agent-platform-flux` (`gitops.serviceAccountName` default). See README "Installing".
+
+### Operator action
+
+- **Giant Swarm management clusters: none.** The fleet's `HelmRelease` carries `components.flux.enabled: false` since management-cluster-bases#721 (reconciled on every management cluster before this release shipped), and the render with that value is byte-identical to the previous release: no CRD, no operator, no hook, no `serviceAccountName`, the roster already said `flux: {enabled: false}`. The Flux CRDs' field managers on those clusters stay untouched (a disabled dependency's `crds/` are never collected).
+- **Any other installation that runs its own Flux — through a `HelmRelease` or with the Helm CLI — MUST set `components.flux.enabled: false` before upgrading to this version.** Without it the render fails with `this cluster runs Flux; set components.flux.enabled=false or install the chart through it` (helm-controller marks the `HelmRelease` not Ready and retries; the Helm CLI refuses the upgrade before touching anything). The failure is the intended outcome: an engine next to a cluster's Flux would put a second, locked-down helm-controller on every `HelmRelease` in the cluster. Set the value and upgrade.
+- **A Helm CLI installation on a cluster without Flux did not exist before this version** (the chart rendered Flux objects a Flux-less cluster could not accept), so there is no existing installation that gains the engine on `helm upgrade`. Should one ever turn the engine on for an existing release, `helm upgrade` would not install the subchart's `crds/` (Helm installs `crds/` on install only): apply them first — `helm show crds oci://gsoci.azurecr.io/charts/giantswarm/agent-platform --version <next> | kubectl apply --server-side -f -` — or install fresh. The common path is a fresh `helm install`.
+- **Turning the engine off on an installation that runs it is refused** (`components.flux.enabled=false … the upgrade would delete the operator together with the FluxInstance it finalizes and hang`): uninstall the release instead — `helm uninstall --wait` tears it down in order — or delete the `FluxInstance` first.
+- `gitops.namespace` cannot be combined with the engine (the tenant identity lives in the release namespace): the fleet's exempt-namespace layout goes with `components.flux.enabled: false`, a CLI installation leaves `gitops.namespace` empty.
+
 ## \<current\> → \<next\> (the kagent Namespace follows the kagent component)
 
 The connectivity chart renders the `kagent` Namespace (`kagent.namespaceOverride`, when it differs from the release namespace) only while `components.kagent.enabled` is true.

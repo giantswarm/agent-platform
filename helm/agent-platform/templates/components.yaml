@@ -9,7 +9,10 @@ resolved at reconcile time) — never from a Chart.yaml pin.
 Each entry is fully self-describing; this template has no per-component
 knowledge:
   chart/repository/versionRange — where to pull and which versions (filterTags
-      optional, for dev-tag streams).
+      optional, for dev-tag streams). An entry WITHOUT a chart key is a feature
+      switch (components.flux, the condition of the flux-engine subchart): it is
+      part of the roster forwarded to connectivity and of the enabled/disabled
+      logic like every other entry, but this loop renders no release for it.
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
@@ -84,6 +87,9 @@ and this guard refuses anything else that gets past it. */ -}}
 {{- if ne $g.engine "flux" -}}
 {{- fail (printf "gitops.engine=%s is not supported; flux is the only engine" $g.engine) -}}
 {{- end -}}
+{{- /* The bundled engine (components.flux.enabled): refuse a cluster that already
+runs Flux, and a gitops.namespace the tenant identity cannot reach. */ -}}
+{{- include "agent-platform.validateEngine" . -}}
 {{- /* Namespace the rendered Flux CRs live in. Defaults to the release
 namespace; set gitops.namespace to a tenancy-exempt namespace (e.g.
 flux-giantswarm on Giant Swarm clusters) so the child HelmReleases are not
@@ -91,6 +97,11 @@ rejected by the flux-multi-tenancy admission policy. gitops.targetNamespace
 then routes the actual workloads to a separate namespace. */ -}}
 {{- $ns := $g.namespace | default $root.Release.Namespace -}}
 {{- $targetNs := $g.targetNamespace | default $root.Release.Namespace -}}
+{{- /* The tenant identity every platform HelmRelease runs under. With the bundled
+engine on, the multi-tenancy lockdown makes a HelmRelease without one run as the
+rights-less default account, so the engine's agent-platform-flux is the default;
+the fleet (engine off, exempt namespace) keeps the key empty and renders none. */ -}}
+{{- $sa := $g.serviceAccountName | default (include "agent-platform.tenantServiceAccountName" $root) -}}
 {{- /* The component roster, stripped to enablement, for a chart that renders
 another component's wiring. It carries the same key path this chart reads
 (components.<name>.enabled), so the two can never spell the answer differently.
@@ -110,7 +121,8 @@ values and every component the same one flavor. */ -}}
 {{- $shaped := deepCopy (omit $root.Values "gitops" "components") -}}
 {{- include "agent-platform.shape.apply" (dict "root" $root "values" $shaped) -}}
 {{- range $key, $c := .Values.components }}
-{{- if (index $roster $key).enabled }}
+{{- /* An entry without a chart is a feature switch (components.flux): in the roster, no release. */ -}}
+{{- if and (index $roster $key).enabled (hasKey $c "chart") }}
 {{- $name := $c.chart }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}
@@ -174,7 +186,7 @@ spec:
   interval: {{ $g.interval }}
   releaseName: {{ $name }}
   targetNamespace: {{ $targetNs }}
-  {{- with $g.serviceAccountName }}
+  {{- with $sa }}
   serviceAccountName: {{ . }}
   {{- end }}
   chartRef:

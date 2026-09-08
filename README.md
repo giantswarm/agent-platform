@@ -20,7 +20,7 @@ This repo publishes **two** charts:
 
 > Implements [giantswarm/giantswarm#36875](https://github.com/giantswarm/giantswarm/issues/36875). Concept write-up: klaus-lab `architecture/agent-platform-meta-package.md`.
 
-The `agent-platform` chart no longer bundles its components as pinned Helm subcharts. It is an **app-of-apps meta-package**: `templates/components.yaml` renders, per entry in `.Values.components`, a Flux `OCIRepository` + `HelmRelease`. Flux is the only render engine (`gitops.engine` accepts `flux` only). It emits **only** those objects (a *pure* renderer — no raw CRs of its own).
+The `agent-platform` chart no longer bundles its components as pinned Helm subcharts. It is an **app-of-apps meta-package**: `templates/components.yaml` renders, per entry in `.Values.components`, a Flux `OCIRepository` + `HelmRelease`. Flux is the only render engine (`gitops.engine` accepts `flux` only). It emits **only** those objects (a *pure* renderer — no raw CRs of its own) — plus, where a cluster has no Flux, the engine that reconciles them: the `flux-engine` subchart, on by default, off on a cluster that runs its own Flux (see [Installing](#installing)).
 
 The decisive change: each component's version is a **constraint expressed as a value** (`components.<name>.versionRange`), not a `Chart.yaml` pin. Flux re-resolves the range on every reconcile, so a new component release rolls forward **with no PR to this chart and no umbrella re-package**.
 
@@ -50,8 +50,9 @@ The decisive change: each component's version is a **constraint expressed as a v
 | KServe controller | `components.kserve-resources.enabled` | `false` |
 | LLMInferenceService CRDs | `components.kserve-llmisvc-crd.enabled` | `false` |
 | LLMInferenceService controller | `components.kserve-llmisvc-resources.enabled` | `false` |
+| the bundled Flux engine (`flux-engine` subchart) | `components.flux.enabled` | `true` |
 
-A component with no `enabled` key is always installed (`muster`, `dicebear`, `agent-platform-connectivity`). The `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:`, `model-manager:`, `agent-manager:`, `backstage:`, `mcp-kubernetes:`, `cloudnative-pg:` and `kserve-*:` blocks hold that component's values and no longer hold an `enabled` key; `make verify-meta` fails if the two ever diverge again. The last seven are the components the standalone umbrella carried on top of this roster — see [Backstage, mcp-kubernetes, CloudNativePG and KServe](#backstage-mcp-kubernetes-cloudnativepg-and-kserve).
+A component with no `enabled` key is always installed (`muster`, `dicebear`, `agent-platform-connectivity`). `components.flux` is a feature switch, not a component: it has no `chart`, so the render loop emits no release for it — it is the condition of the `flux-engine` subchart (Chart.yaml `dependencies`), and it travels in the roster forwarded to connectivity like every other entry. The `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:`, `model-manager:`, `agent-manager:`, `backstage:`, `mcp-kubernetes:`, `cloudnative-pg:` and `kserve-*:` blocks hold that component's values and no longer hold an `enabled` key; `make verify-meta` fails if the two ever diverge again. The last seven are the components the standalone umbrella carried on top of this roster — see [Backstage, mcp-kubernetes, CloudNativePG and KServe](#backstage-mcp-kubernetes-cloudnativepg-and-kserve).
 
 ```bash
 helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml                          # flux objects, wide ranges
@@ -62,6 +63,7 @@ make verify-meta verify-modes verify-postgres
 ## Prerequisites
 
 - Kubernetes ≥ 1.33 on the install target.
+- Flux — **optional**. The chart brings its own engine (the Flux Operator and one `FluxInstance` running source-controller + helm-controller) where a cluster has none; a cluster that already runs Flux installs the chart through it with `components.flux.enabled: false`. See [Installing](#installing).
 - Gateway API v1 CRDs (`gateways.gateway.networking.k8s.io`, `httproutes.gateway.networking.k8s.io`, `gatewayclasses.gateway.networking.k8s.io`) installed cluster-wide. The Agent Platform does **not** install them.
 - No separate CRD chart to install first — every component ships its own CRDs (`AgentgatewayParameters` / `AgentgatewayPolicy` / `AgentgatewayBackend` with the agentgateway component, `MCPServer` / `Workflow` with muster, the kagent + agent-sandbox CRDs with their components). The meta-package orders each CR consumer after the CRD-owning component for you; see [CRD lifecycle](#crd-lifecycle).
 - A `GatewayClass` CR named `agentgateway` (`status.conditions[type=Accepted]=True`). The bundled `agentgateway` sub-chart creates it on install; operators managing the controller out-of-band must ensure the `GatewayClass` exists.
@@ -71,16 +73,54 @@ make verify-meta verify-modes verify-postgres
 
 ## Installing
 
-**One gitops entry.** Install the `agent-platform` meta-package; it renders the per-component and `agent-platform-connectivity` releases for you (each component ships its own CRDs, and a CR consumer `dependsOn` the CRD-owning component so CRDs Establish before any CR applies). Flux is required on the install target — the meta-package's output is Flux objects; `gitops.engine` accepts `flux` only.
+**One install.** The `agent-platform` meta-package renders the per-component and `agent-platform-connectivity` releases as Flux `OCIRepository` + `HelmRelease` objects (each component ships its own CRDs, and a CR consumer `dependsOn` the CRD-owning component so CRDs Establish before any CR applies) — and brings the Flux engine that reconciles them where the cluster has none. `helm install` on a cluster without Flux yields a running platform.
 
-### Flux
+### Quick start
+
+Three inputs: the domain, the identity provider, the components. Nothing about Flux.
+
+```yaml
+# values.yaml
+global:
+  domain: platform.example.com               # muster., avatars., kagent.<domain> derive from it
+  identity:                                  # the platform's one OIDC provider
+    issuerUrl: https://dex.platform.example.com
+    clientId: agent-platform
+    existingSecret: agent-platform-idp       # dex-client-secret, registration-token, oauth-encryption-key, valkey-password
+  gatewayApi:
+    parentRefs:                              # the public Gateway every route attaches to
+      - name: public
+        namespace: gateway-system
+components:
+  kagent: { enabled: true }                  # pick the components you want; muster, dicebear and connectivity are always on
+  agent-manager: { enabled: true }
+```
+
+```bash
+# the one cluster prerequisite the chart does not bring: the Gateway API CRDs
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
+helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platform \
+  --namespace agent-platform --create-namespace -f values.yaml --wait --timeout 10m
+```
+
+`--wait` returns when the platform runs: Helm waits for the component `HelmRelease`s to be Ready (Helm 4 waits on custom resources' `Ready` condition), which on a fresh kind cluster takes about two minutes with the default components. The cluster-shape knobs (Kyverno, network-policy flavor, monitors, the Envoy-only avatar route) default to `auto` and follow what the cluster serves — see [Cluster shape](#cluster-shape-auto). `helm upgrade -f values.yaml` applies a values change; component versions roll forward on their own inside their `versionRange`s.
+
+### The engine
+
+`components.flux.enabled: true` (the default) makes the `flux-engine` subchart (`helm/agent-platform/charts/flux-engine`, released with this chart) part of the release. It carries the seven Flux CRDs of source-controller and helm-controller and the four Flux Operator CRDs in its `crds/`, and renders the [Flux Operator](https://fluxoperator.dev) (web UI off, no network policy; `ghcr.io/controlplaneio-fluxcd/flux-operator`, a Renovate-managed pin) plus one `FluxInstance` named `flux` in the release namespace: `distribution.version: "2.x"`, `components: [source-controller, helm-controller]`, `cluster.multitenant: true` — the multi-tenancy lockdown, under which helm-controller impersonates the ServiceAccount a `HelmRelease` names and refuses cross-namespace references. The platform's own releases therefore run as the tenant identity `agent-platform-flux` (a ServiceAccount in the release namespace bound to `cluster-admin`, rendered by the subchart; `gitops.serviceAccountName` defaults to it whenever the engine is on). The operator keeps Flux current inside the `2.x` range — controllers, CRDs and stored objects — on its own; Helm never upgrades `crds/`, and with the operator it does not have to. The Flux manifests come embedded in the operator image, so a new Flux minor arrives with a new operator tag. The subchart's values sit under `flux-engine:` (the operator image, the distribution registry for a mirror of `ghcr.io/fluxcd`, kustomize patches for the controllers); nothing needs setting for a default installation.
+
+The engine is a value, not detection: Helm and helm-controller evaluate a dependency's `condition` before they collect `crds/`, so `false` drops CRDs and engine together — a chart that always carried Flux CRDs would be force-applied over a cluster's own by helm-controller's default CRD policy, and `crds/` are processed before any template could look at the cluster.
+
+### Clusters that run Flux
+
+A cluster that runs its own Flux — every Giant Swarm management cluster — sets `components.flux.enabled: false` and installs the chart through that Flux. Nothing of the engine reaches the cluster: no CRD, no operator, no `FluxInstance`, no hook, no tenant identity, and the platform `HelmRelease`s carry no `serviceAccountName` unless `gitops.serviceAccountName` says so. The render is the pure app-of-apps render, byte for byte what it was before the engine existed.
 
 ```yaml
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
   name: agent-platform
-  namespace: muster
+  namespace: flux-giantswarm
 spec:
   interval: 1h
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform
@@ -91,22 +131,41 @@ apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: agent-platform
-  namespace: muster
+  namespace: flux-giantswarm
 spec:
   interval: 10m
   chartRef: { kind: OCIRepository, name: agent-platform }
   install:
     createNamespace: true
+  values:
+    components:
+      flux:
+        enabled: false        # this cluster runs Flux
+    gitops:
+      namespace: flux-giantswarm       # a namespace exempt from the tenancy policy holds the Flux CRs
+      targetNamespace: agent-platform  # the workloads land here
   valuesFrom:
     - kind: Secret
       name: agent-platform-values
 ```
 
-The meta-package then renders, in the same namespace: an `OCIRepository` + `HelmRelease` for each enabled component and for `agent-platform-connectivity`. Each component ships its own CRDs. Component `versionRange`s default to **wide** (continuous auto-update); pin them in your values for a reproducible release.
+With the value left at `true` on such a cluster the render fails — under the Helm CLI, `helm upgrade --dry-run=server` and helm-controller alike — with `this cluster runs Flux; set components.flux.enabled=false or install the chart through it`: the guard looks the cluster up for a helm-controller `Deployment` (`app.kubernetes.io/component=helm-controller`) or a `FluxInstance` outside the release namespace. It stops a second, locked-down helm-controller from reconciling every `HelmRelease` in the cluster as the default account, which is what an engine next to a cluster's Flux does (measured). `helm template` sees no cluster and renders the engine; the guard needs a live API. Two more guards: `gitops.namespace` cannot be combined with the bundled engine (the tenant identity lives in the release namespace), and `components.flux.enabled=false` is refused on an installation that runs the engine (an upgrade would delete the operator together with the `FluxInstance` it finalizes and hang — uninstall instead).
 
-### Raw Helm (no GitOps controller)
+### Uninstalling
 
-The meta-package renders Flux objects, so a raw `helm install` of it needs Flux present. For a controller-free install, drive the components directly from a pinned bill-of-materials — install each component chart (which ships its own CRDs) then `agent-platform-connectivity`, at the exact versions in [`examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml):
+```bash
+helm uninstall agent-platform --namespace agent-platform --wait --timeout 5m
+```
+
+Uninstalling the platform uninstalls its engine and everything the engine held, in order. Helm deletes a release's objects in one pass, so on its own `helm uninstall --wait` would remove the operator together with the `FluxInstance` whose finalizer it processes and hang for its timeout (measured). The chart therefore ships pre-delete hook Jobs — restricted pods running one plain `kubectl` command each in `registry.k8s.io/kubectl` (`gitops.hooks.image`), as a hook ServiceAccount bound to `cluster-admin` at weight -10 — that delete the platform `HelmRelease`s by name and wait (weight 0), then delete the `FluxInstance` and wait (weight 5). The operator then uninstalls Flux **including the Flux CRDs**, and every `HelmRelease` object in the cluster goes with them: the agents' too, while their workloads and Helm storage stay behind, orphaned. The uninstall returns in well under a minute on kind; the four `fluxcd.controlplane.io` CRDs remain (Helm never deletes `crds/`), and a reinstall is clean. "Keep my agents running" is not something an uninstall can offer — the way to keep agents is not to uninstall. A failed hook aborts the uninstall before anything is deleted (the release is left `uninstalling`, the platform untouched); `helm uninstall --no-hooks` skips the ordering and is only safe once the `FluxInstance` is already gone. With the engine off (a cluster's own Flux) none of this applies: that Flux finalizes the platform `HelmRelease`s, the chart renders no hook and never touches it.
+
+### Helm versions
+
+Measured for this release on kind (kindest/node v1.36): **Helm 4.2** installs the chart with `--wait` honoured on the Flux custom resources (the command returns when the component `HelmRelease`s are Ready), upgrades it, and uninstalls it through the ordered teardown. **Helm 3.17** renders the templates identically — CI renders every assertion with 3.17.3 — but a Helm 3 install of this release is not measured: Helm 3's `--wait` does not wait on custom resources, so `helm install` would return before the components are Ready. Installing through a cluster's own Flux (helm-controller ≥ 1.5 runs the Helm 4 SDK) is the fleet's path and is verified on every release.
+
+### Raw Helm without the engine
+
+For a controller-free install with no Flux at all, drive the components directly from a pinned bill-of-materials — install each component chart (which ships its own CRDs) then `agent-platform-connectivity`, at the exact versions in [`examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml):
 
 ```bash
 # Each component chart ships its own CRDs in crds/ (app-owned CRDs). Helm applies
@@ -120,7 +179,7 @@ helm install agent-platform-connectivity \
   --version <connectivity-version> --namespace muster -f values.yaml
 ```
 
-> Helm's `crds/` directory is install-only: `helm upgrade` never re-applies or upgrades CRDs from `crds/`. The meta-package solves this for GitOps installs by setting `crds: CreateReplace` on each app-owned component's `HelmRelease`. For a raw-Helm install you must apply CRD schema changes out of band (`kubectl apply`/`replace`) on a component upgrade.
+> Helm's `crds/` directory is install-only: `helm upgrade` never re-applies or upgrades CRDs from `crds/`. The meta-package solves this for the component CRDs by setting `crds: CreateReplace` on each app-owned component's `HelmRelease`, and for the Flux CRDs by letting the operator own them. For a raw-Helm install of the components you must apply CRD schema changes out of band (`kubectl apply`/`replace`) on a component upgrade.
 
 ## Configuration
 

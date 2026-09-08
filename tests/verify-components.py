@@ -62,6 +62,10 @@ HELD_BACK = sorted(NEW)
 
 ON = [f"--set=components.{n}.enabled=true" for n in NEW]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
+# The bundled Flux engine (components.flux.enabled, default true) adds its own
+# objects to the render; its two shapes are tests/verify-engine.py's. The roster
+# assertions here look at the platform objects, so they render with it off.
+ENGINE_OFF = ["--set", "components.flux.enabled=false"]
 
 
 def render(chart: str, flags: list[str]) -> str:
@@ -103,7 +107,7 @@ def fail(msg: str) -> None:
 
 
 def main(meta: str, connectivity: str) -> int:
-    ci = ["-f", f"{meta}/ci/ci-values.yaml"]
+    ci = ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]
 
     # --- off by default -------------------------------------------------------
     off = docs(render(meta, ci))
@@ -186,7 +190,11 @@ def main(meta: str, connectivity: str) -> int:
     print("ok: the forwarded values tree (roster included) validates against the connectivity chart, seven off and on")
 
     # --- schema symmetry ------------------------------------------------------------
-    meta_keys = set(json.load(open(f"{meta}/values.schema.json"))["properties"]) - {"gitops"}
+    # gitops is never forwarded; a block named in the connectivity entry's omitKeys
+    # is held back (the flux-engine subchart's values, the seven until their wiring).
+    omit = re.search(r"^    omitKeys:\n((?:      .*\n)+)", open(f"{meta}/values.yaml").read()[open(f"{meta}/values.yaml").read().index("  agent-platform-connectivity:"):], re.M)
+    held = set(re.findall(r"^      - (\S+)$", omit.group(1), re.M)) if omit else set()
+    meta_keys = set(json.load(open(f"{meta}/values.schema.json"))["properties"]) - {"gitops"} - held
     conn_keys = set(json.load(open(f"{connectivity}/values.schema.json"))["properties"])
     extra = sorted(meta_keys - conn_keys)
     if extra:

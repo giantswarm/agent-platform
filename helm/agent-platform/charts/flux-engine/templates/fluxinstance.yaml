@@ -1,0 +1,40 @@
+{{- /*
+The one FluxInstance. The operator reconciles exactly the instance named `flux`
+in its own namespace (a CEL rule on the CRD rejects any other name; other
+namespaces are ignored), so name and namespace are not values. Deleting it
+makes the operator uninstall Flux — controllers and CRDs — which is how the meta
+chart's ordered teardown removes the engine (its pre-delete hook deletes this
+object while the operator still runs).
+*/ -}}
+apiVersion: fluxcd.controlplane.io/v1
+kind: FluxInstance
+metadata:
+  name: flux
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "flux-engine.labels" . | nindent 4 }}
+  annotations:
+    fluxcd.controlplane.io/reconcileEvery: {{ .Values.instance.reconcileEvery | quote }}
+    fluxcd.controlplane.io/reconcileTimeout: {{ .Values.instance.reconcileTimeout | quote }}
+spec:
+  distribution:
+    version: {{ .Values.instance.distribution.version | quote }}
+    registry: {{ .Values.instance.distribution.registry | quote }}
+    {{- with .Values.instance.distribution.imagePullSecret }}
+    imagePullSecret: {{ . | quote }}
+    {{- end }}
+  components:
+    {{- range (required "flux-engine.instance.components must name at least source-controller and helm-controller" .Values.instance.components) }}
+    - {{ . }}
+    {{- end }}
+  cluster:
+    type: {{ .Values.instance.cluster.type }}
+    multitenant: {{ .Values.instance.cluster.multitenant }}
+    tenantDefaultServiceAccount: {{ .Values.instance.cluster.tenantDefaultServiceAccount }}
+    networkPolicy: {{ .Values.instance.cluster.networkPolicy }}
+    domain: {{ .Values.instance.cluster.domain }}
+  {{- with .Values.instance.kustomizePatches }}
+  kustomize:
+    patches:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}

@@ -1,0 +1,31 @@
+apiVersion: v2
+name: flux-engine
+type: application
+description: |
+  The Flux engine of the agent-platform meta chart: the Flux Operator
+  (ghcr.io/controlplaneio-fluxcd/flux-operator) and one FluxInstance named
+  `flux` in the release namespace running source-controller and helm-controller
+  under the multi-tenancy lockdown, plus the platform's tenant identity — the
+  ServiceAccount `agent-platform-flux` bound to cluster-admin, which every
+  platform HelmRelease names. Its crds/ carry the seven Flux CRDs of the two
+  controllers and the four Flux Operator CRDs. A conditional dependency of the
+  meta chart (`components.flux.enabled`, default true): a cluster that runs its
+  own Flux sets the value to false and gets neither the CRDs nor the engine.
+  Not published on its own.
+home: https://github.com/giantswarm/agent-platform
+icon: https://s.giantswarm.io/app-icons/giantswarm/1/light.svg
+sources:
+  - https://github.com/giantswarm/agent-platform
+  - https://github.com/controlplaneio-fluxcd/flux-operator
+  - https://github.com/fluxcd/flux2
+# appVersion is the Flux Operator this subchart runs; keep it equal to
+# operator.image.tag in values.yaml (Renovate moves the tag; move this with it).
+appVersion: "v0.59.0"
+# The meta chart's Chart.yaml names this version in its dependencies entry, and
+# Helm refuses a mismatch. A change to this subchart is released with the meta
+# chart (one tag, one OCI artifact); bump this only together with that entry.
+version: 0.1.0
+annotations:
+  io.giantswarm.application.audience: all
+  io.giantswarm.application.managed: "true"
+  io.giantswarm.application.team: bumblebee
