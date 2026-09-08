@@ -1,0 +1,34 @@
+# Qwen3-Coder-Next, FP8. Coding-specialised MoE (80B total, 3B active).
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-coder-next
+spec:
+  displayName: Qwen3 Coder Next (FP8)
+  description: |
+    Coding MoE model served from the FP8 checkpoint (~80 GiB of weights, 3B
+    active per token) with a 16k context. Tuned on a single-GPU 128 GB
+    unified-memory node (--gpu-memory-utilization=0.72).
+  model:
+    id: Qwen/Qwen3-Coder-Next-FP8
+    storageUri: hf://Qwen/Qwen3-Coder-Next-FP8
+    format: vLLM
+    contextLength: 16384
+    capabilities: [chat, tools, coding]
+    license: apache-2.0
+  args:
+    - --gpu-memory-utilization=0.72
+    - --max-model-len=16384
+    - --enforce-eager
+    - --no-enable-log-requests
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 48Gi
+    limits:
+      cpu: "8"
+      memory: 64Gi
+  requirements:
+    weightsGiB: 80
+    overheadGiB: 30

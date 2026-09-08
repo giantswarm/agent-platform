@@ -1,0 +1,29 @@
+{{- if (include "agent-platform.backstage.enabled" .) }}
+{{- $backstage := .Values.backstage | default dict }}
+# Public route to the Backstage Service (the backstage chart's own Ingress and
+# route stay off in the forwarded values). The Service name and port are the
+# backstage chart's `name` and `port`.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: backstage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.backstage.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $backstage.parentRefs "key" "backstage.parentRefs") | nindent 4 }}
+  hostnames:
+    - {{ include "agent-platform.backstage.hostname" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      {{- with (include "agent-platform.routeTimeouts" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      backendRefs:
+        - name: {{ include "agent-platform.backstage.name" . }}
+          port: {{ dig "port" 7007 $backstage }}
+{{- end }}

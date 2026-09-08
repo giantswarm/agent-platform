@@ -1,0 +1,43 @@
+{{- if (include "agent-platform.modelServing.enabled" .) }}
+{{- $ns := include "agent-platform.modelServing.namespace" . }}
+{{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}
+{{- range $name, $entry := $presets }}
+{{- $resolved := include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name" $name "entry" $entry) | fromJson }}
+---
+# Serving preset {{ $name }} ({{ $entry.source }}): the published ServingPreset
+# the portal's serve flow turns into an InferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n {{ $.Release.Namespace }} get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" $ | nindent 4 }}
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: {{ $name | quote }}
+    agent-platform.giantswarm.io/preset-source: {{ $entry.source | quote }}
+data:
+  preset.yaml: |
+    {{- toYaml $resolved.preset | nindent 4 }}
+{{- if $resolved.chatTemplate.render }}
+---
+# The chat template preset {{ $name }} mounts into its predictor at
+# spec.chatTemplate.mountPath; lives in the serving namespace because the
+# pod mounts it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $resolved.chatTemplate.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" $ | nindent 4 }}
+    agent-platform.giantswarm.io/serving-asset: chat-template
+    agent-platform.giantswarm.io/preset: {{ $name | quote }}
+data:
+  {{ $resolved.chatTemplate.key }}: |
+    {{- $resolved.chatTemplate.content | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,40 @@
+# Qwen3.5 27B, BF16. Dense 27B (all parameters active), Gated DeltaNet hybrid
+# architecture, multimodal. Strong coding performance.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-5-27b
+spec:
+  displayName: Qwen3.5 27B
+  description: |
+    Dense 27B general and coding model served at BF16 (~54 GiB of weights),
+    language-only (--language-model-only skips the vision encoder), thinking
+    enabled. Tuned on a single-GPU 128 GB unified-memory node:
+    --gpu-memory-utilization=0.50 is that node's half; scale it to the
+    target GPU.
+  model:
+    id: Qwen/Qwen3.5-27B
+    storageUri: hf://Qwen/Qwen3.5-27B
+    format: vLLM
+    contextLength: 8192
+    capabilities: [chat, tools, reasoning, coding]
+    license: apache-2.0
+  args:
+    - --gpu-memory-utilization=0.50
+    - --max-model-len=8192
+    - --enforce-eager
+    - --no-enable-log-requests
+    - --language-model-only
+    - --default-chat-template-kwargs
+    - '{"enable_thinking": true}'
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 48Gi
+    limits:
+      cpu: "8"
+      memory: 64Gi
+  requirements:
+    weightsGiB: 54
+    overheadGiB: 30

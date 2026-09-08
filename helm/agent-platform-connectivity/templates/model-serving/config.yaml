@@ -1,0 +1,62 @@
+{{- if (include "agent-platform.modelServing.enabled" .) }}
+{{- $ms := .Values.modelServing }}
+{{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}
+# Discovery ConfigMap of the model-serving layer, read by the portal's serve
+# flow and by model-manager: where InferenceServices go, which runtime and
+# defaults they get, which cache claim to mount and where the presets are.
+# Fixed name and label, in the release namespace:
+#   kubectl -n {{ .Release.Namespace }} get configmap -l agent-platform.giantswarm.io/model-serving-config=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-model-serving
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+    agent-platform.giantswarm.io/model-serving-config: "true"
+data:
+  config.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ModelServingConfig
+    spec:
+      # The namespace InferenceServices are created in.
+      namespace: {{ include "agent-platform.modelServing.namespace" . }}
+      # The ClusterServingRuntime a preset without a runtime of its own uses.
+      runtime: {{ $ms.runtime.name }}
+      # Defaults of every InferenceService created from a preset.
+      gpuResourceName: {{ $ms.serving.gpuResourceName }}
+      runtimeClassName: {{ $ms.serving.runtimeClassName | quote }}
+      nodeSelector:
+        {{- if $ms.serving.nodeSelector }}
+        {{- toYaml $ms.serving.nodeSelector | nindent 8 }}
+        {{- else }} {}
+        {{- end }}
+      deploymentStrategyType: {{ $ms.serving.deploymentStrategyType }}
+      timeoutSeconds: {{ $ms.serving.timeoutSeconds }}
+      # Whether this chart renders network policies for the serving namespace
+      # (networkPolicy.enabled), and in which flavor (kubernetes | cilium).
+      networkPolicy:
+        enabled: {{ .Values.networkPolicy.enabled }}
+        flavor: {{ include "agent-platform.networkPolicyFlavor" . }}
+      cache:
+        enabled: {{ $ms.cache.enabled }}
+        {{- if $ms.cache.enabled }}
+        # The claim in the serving namespace that holds one subdirectory per
+        # InferenceService (its name), mounted at mountPath in the predictor.
+        claimName: {{ include "agent-platform.modelServing.claimName" . }}
+        mountPath: /mnt/models
+        # Whether the Kyverno policies redirect the KServe storage-initializer
+        # into that claim at admission (no InferenceService change needed).
+        redirectPolicy: {{ if (include "agent-platform.modelServingPolicies" .) }}true{{ else }}false{{ end }}
+        {{- end }}
+      presets:
+        namespace: {{ .Release.Namespace }}
+        labelSelector: agent-platform.giantswarm.io/serving-preset=true
+        names:
+          {{- if $presets }}
+          {{- range $name, $_ := $presets }}
+          - {{ $name }}
+          {{- end }}
+          {{- else }} []
+          {{- end }}
+{{- end }}

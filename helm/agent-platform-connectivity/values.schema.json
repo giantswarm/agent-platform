@@ -191,6 +191,15 @@
                             "type": "boolean"
                         }
                     }
+                },
+                "modelServing": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
                 }
             }
         },
@@ -429,6 +438,18 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "ca": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "key": {
+                                    "type": "string"
+                                },
+                                "secretName": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "clientId": {
                             "type": "string"
                         },
@@ -664,6 +685,10 @@
             "additionalProperties": true
         },
         "modelManager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "modelServing": {
             "type": "object",
             "additionalProperties": true
         },

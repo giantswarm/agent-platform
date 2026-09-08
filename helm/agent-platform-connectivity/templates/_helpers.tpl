@@ -329,7 +329,7 @@ here and every component's own copy come from one answer. The helpers below
 are what a render of this chart on its own uses; on the same cluster they give
 the same answer. Templates read the truthy wrappers underneath
 (agent-platform.kyvernoPolicies, .networkPolicyFlavor, .serviceMonitor,
-.agentSandboxPodSecurity), never the raw values.
+.agentSandboxPodSecurity, .modelServingPolicies), never the raw values.
 */}}
 
 {{/*
@@ -399,6 +399,22 @@ kyvernoPolicies.enabled: false switches it off with the rest; the
 {{- end -}}
 
 {{/*
+modelServing.policies.enabled resolved: "true" when the model-serving Kyverno
+cache policies render. They are Kyverno mutate policies, so `auto` follows the
+RESOLVED kyvernoPolicies.enabled, like the agent-sandbox pod-security policy;
+an explicit true with kyvernoPolicies.enabled false fails the render
+(templates/model-serving/validate.yaml).
+*/}}
+{{- define "agent-platform.shape.modelServingPolicies" -}}
+{{- $v := dig "policies" "enabled" "auto" (.Values.modelServing | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.kyvernoPolicies" . -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "modelServing.policies.enabled" "value" $v "api" "kyverno.io/v1") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Truthy (emits "true") when the kyverno.io objects render. Gated templates use:
   {{- if (include "agent-platform.kyvernoPolicies" .) }}
 */}}
@@ -430,6 +446,14 @@ Truthy when the agent-sandbox pod-security ClusterPolicy renders
 */}}
 {{- define "agent-platform.agentSandboxPodSecurity" -}}
 {{- if eq (include "agent-platform.shape.agentSandboxPodSecurity" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the model-serving Kyverno cache policies render
+(modelServing.policies.enabled, default auto).
+*/}}
+{{- define "agent-platform.modelServingPolicies" -}}
+{{- if eq (include "agent-platform.shape.modelServingPolicies" .) "true" -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -560,6 +584,32 @@ item; the caller must provide the surrounding `egress:` key.
       rules:
         dns:
           - matchPattern: "*"
+{{- end -}}
+
+{{/*
+Kubernetes NetworkPolicy DNS egress rule (kube-dns / coredns / node-local cache
+in kube-system on 53 and 1053), the kubernetes flavor of dnsEgress. Rendered as
+a YAML list item; the caller must provide the surrounding `egress:` key.
+*/}}
+{{- define "agent-platform.dnsEgress.kubernetes" -}}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchExpressions:
+          - key: k8s-app
+            operator: In
+            values: [kube-dns, coredns, k8s-dns-node-cache]
+  ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+    - port: 1053
+      protocol: UDP
+    - port: 1053
+      protocol: TCP
 {{- end -}}
 
 {{/*

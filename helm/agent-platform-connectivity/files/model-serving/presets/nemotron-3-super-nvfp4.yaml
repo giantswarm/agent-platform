@@ -1,0 +1,38 @@
+# NVIDIA Nemotron 3 Super 120B-A12B, NVFP4. Hybrid SSM + transformer MoE.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: nemotron-3-super-nvfp4
+spec:
+  displayName: Nemotron 3 Super 120B-A12B (NVFP4)
+  description: |
+    Large MoE reasoning model (120B total, 12B active) served from the NVFP4
+    checkpoint (~75 GiB of weights); thinking disabled by default (the chat
+    template enables it otherwise). Needs a Blackwell-class GPU for NVFP4.
+    Tuned on a single-GPU 128 GB unified-memory node
+    (--gpu-memory-utilization=0.72).
+  model:
+    id: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+    storageUri: hf://nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+    format: vLLM
+    contextLength: 8192
+    capabilities: [chat, tools, reasoning]
+    license: nvidia-open-model-license
+  args:
+    - --gpu-memory-utilization=0.72
+    - --max-model-len=8192
+    - --enforce-eager
+    - --no-enable-log-requests
+    - --default-chat-template-kwargs
+    - '{"enable_thinking": false}'
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 48Gi
+    limits:
+      cpu: "8"
+      memory: 64Gi
+  requirements:
+    weightsGiB: 75
+    overheadGiB: 30

@@ -22,6 +22,19 @@ The connectivity chart renders the `kagent` Namespace (`kagent.namespaceOverride
 
 - **None.** Where kagent is on, nothing changes. Where it is off, the connectivity upgrade deletes the empty, Helm-owned `kagent` namespace — on Giant Swarm management clusters it held nothing but the fleet's hand-written `kagent-flux` ServiceAccount and RoleBinding, which the fleet bases stopped applying before this release (the chart renders the identity itself where kagent runs). An installation that put its own objects into a `kagent` namespace on a cluster without kagent moves them out before upgrading, or turns kagent on.
 
+## \<current\> → \<next\> (the standalone's wiring in the connectivity chart, behind the component toggles)
+
+The connectivity chart renders, gated on `components.backstage`, `components.mcp-kubernetes`, `components.modelServing` (a new feature switch) and the kserve component toggles, what the agent-platform-standalone umbrella wired by hand: the Backstage app-config ConfigMap, route and config-reload hook; the mcp-kubernetes `MCPServer`; the KServe/vLLM model serving layer; the KServe controllers' network policies and guards. The seven values blocks of the extras now reach the connectivity release, the connectivity release `dependsOn` `muster`, and `backstage` `dependsOn` `agent-platform-connectivity`.
+
+### Operator action
+
+**No installation needs to act.**
+
+- Giant Swarm management clusters: every toggle is off. The connectivity `HelmRelease` gets one Helm revision (its values gain the `backstage:`, `mcp-kubernetes:`, `cloudnative-pg:` and `kserve-*:` blocks and the `modelServing: {enabled: false}` roster line — the `modelServing:` block itself travels only while the switch is on — and `muster` in `dependsOn`); the objects it renders are byte-identical, so nothing changes on the cluster and no pod rolls.
+- An installation moving from the standalone chart: the standalone's `components.backstage.*` and `components.mcp-kubernetes.*` wiring keys become `backstage.*` / `mcp-kubernetes.*`, `components.modelServing.*` becomes `components.modelServing.enabled` + `modelServing.*`, and `components.kserve.enabled` becomes `components.kserve-crd.enabled` + `components.kserve-resources.enabled` (`.llmisvc.enabled` → `kserve-llmisvc-crd` + `kserve-llmisvc-resources`). The full table is in the README, "Turning on the standalone's extras". The portal's installation name defaults to `agent-platform` (`backstage.installationName`), the standalone's release name; set it to your release name if it differed.
+- `components.modelServing.enabled: true` without `components.kserve-crd` and `components.kserve-resources` on fails the render on a cluster that does not serve the `serving.kserve.io` APIs; turn the two on (they order themselves before the connectivity release) or set `modelServing.kserve.requireApi: false` for a KServe installed some other way. `modelServing.policies.enabled: true` with `kyvernoPolicies.enabled` resolving to `false` fails the render; the default `auto` follows Kyverno.
+- `kagent.uiRoute.hostname` set while `kagent.oauth2-proxy.extraArgs.redirect-url` still derives from `global.domain` fails the render (the callback would land on the wrong host); set the redirect-url to the route's hostname.
+
 ## \<current\> → \<next\> (the chart renders the `kagent-flux` tenant identity)
 
 The connectivity chart renders ServiceAccount `kagent-flux` and its RoleBinding to `cluster-admin` (namespace-scoped) in the kagent namespace whenever kagent is on, and one value — `kagent.fluxServiceAccountName` — names it into agent-manager (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the portal (`agentPlatform.fluxServiceAccountName`). Six template fixes land with it (CHANGELOG, Fixed).

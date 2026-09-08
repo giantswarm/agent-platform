@@ -360,7 +360,8 @@ Rendered as a YAML list item; the caller must provide the surrounding `egress:` 
 
 The knobs that describe what the cluster can admit — Kyverno policies, the
 network-policy flavor, ServiceMonitors/PodMonitors, dicebear's Envoy route
-filter, the agent-sandbox pod-security policy — accept `auto` (the default):
+filter, the agent-sandbox pod-security policy, the model-serving cache
+policies — accept `auto` (the default):
 the object renders when its API group is served. `.Capabilities.APIVersions` is
 the live discovery under helm-controller, the Helm CLI and `--dry-run=server`;
 under `helm template` it is Helm's built-in set unless `--api-versions` names
@@ -450,6 +451,20 @@ kyvernoPolicies.enabled: false switches it off with the rest; the
 {{- end -}}
 
 {{/*
+modelServing.policies.enabled resolved: "true" when the model-serving Kyverno
+cache policies render (a Kyverno mutate policy, so `auto` follows the RESOLVED
+kyvernoPolicies.enabled like the agent-sandbox pod-security policy).
+*/}}
+{{- define "agent-platform.shape.modelServingPolicies" -}}
+{{- $v := dig "policies" "enabled" "auto" (.Values.modelServing | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.kyvernoPolicies" . -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "modelServing.policies.enabled" "value" $v "api" "kyverno.io/v1") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Write .value into .values at .path (a list of keys) when the leaf there is
 `auto`. A leaf that is absent or set explicitly is left alone — explicit
 overrides win, and a block an operator emptied is not re-created. Emits nothing.
@@ -477,7 +492,9 @@ Usage: include "agent-platform.shape.derive" (dict "values" $v "path" (list "mus
 Resolve every cluster-shape knob in .values (a deep copy of .Values) IN PLACE,
 once, before the component loop inlines them. Emits nothing.
 
-The five knobs are written with their resolved value. The component-level
+The six knobs (the five above and modelServing.policies.enabled, a Kyverno
+mutate policy that follows the resolved kyvernoPolicies.enabled) are written
+with their resolved value. The component-level
 copies the standalone overlay used to flip by hand are derived from the same
 answers, but only where the leaf is left at `auto`:
   networkPolicy.flavor      -> muster.networkPolicy.flavor,
@@ -507,6 +524,7 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- $monitors := eq (include "agent-platform.shape.serviceMonitor" $root) "true" -}}
 {{- $dicebearRoute := eq (include "agent-platform.shape.dicebearRoute" $root) "true" -}}
 {{- $podSecurity := eq (include "agent-platform.shape.agentSandboxPodSecurity" $root) "true" -}}
+{{- $servingPolicies := eq (include "agent-platform.shape.modelServingPolicies" $root) "true" -}}
 {{- /* The knobs themselves: written resolved whatever they held. */ -}}
 {{- $_ := set $v.kyvernoPolicies "enabled" $kyverno -}}
 {{- $_ := set $v.networkPolicy "flavor" $flavor -}}
@@ -516,6 +534,9 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- end -}}
 {{- if kindIs "map" (dig "podSecurity" nil (index $v "agentSandbox" | default dict)) -}}
 {{- $_ := set (index $v "agentSandbox" "podSecurity") "enabled" $podSecurity -}}
+{{- end -}}
+{{- if kindIs "map" (dig "policies" nil (index $v "modelServing" | default dict)) -}}
+{{- $_ := set (index $v "modelServing" "policies") "enabled" $servingPolicies -}}
 {{- end -}}
 {{- /* Derived component copies: only a leaf left at auto is written. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "networkPolicy" "flavor") "value" $flavor) -}}

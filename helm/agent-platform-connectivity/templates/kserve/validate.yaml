@@ -1,0 +1,30 @@
+{{- /*
+Render-time guards of the KServe components' wiring. They fail `helm template`
+(and therefore CI lint + install) with an actionable message instead of
+shipping a control plane that cannot start. The standalone umbrella's other
+kserve guards are the meta chart's ordering now: kserve-crd before the
+controllers and before every CR consumer (dependsOn), so the two-phase first
+install and the "CRDs on the cluster yet?" checks have no counterpart here;
+cert-manager stays a documented prerequisite of kserve-resources (its release
+reports the missing Issuer API).
+*/ -}}
+{{- if (include "agent-platform.kserve.enabled" .) }}
+  {{- $resources := include "agent-platform.kserve.resourcesValues" . | fromJson }}
+  {{- /* Deployment mode: only the raw mode works without Knative/ModelMesh.
+         Checked when set — the meta chart forwards Standard by default; a
+         connectivity render on its own without the block relies on the
+         chart's default and its own release. */ -}}
+  {{- $mode := dig "kserve" "controller" "deploymentMode" "" $resources }}
+  {{- if and $mode (not (or (eq $mode "Standard") (eq $mode "RawDeployment"))) }}
+    {{- fail (printf "kserve-resources.kserve.controller.deploymentMode (%q) must be Standard (plain Deployments and Services per InferenceService; RawDeployment is its former name): the Knative and ModelMesh modes need controllers the platform does not ship" $mode) }}
+  {{- end }}
+{{- end }}
+{{- if (include "agent-platform.kserve.llmisvcEnabled" .) }}
+  {{- if not (include "agent-platform.kserve.enabled" .) }}
+    {{- fail "components.kserve-llmisvc-resources.enabled is true but components.kserve-resources.enabled is false: the llmisvc controller reads the KServe control plane's inferenceservice-config and shares its webhook certificate Issuer. Turn on components.kserve-resources (and components.kserve-crd)." }}
+  {{- end }}
+  {{- $llmisvc := include "agent-platform.kserve.llmisvcValues" . | fromJson }}
+  {{- if dig "kserve" "createSharedResources" false $llmisvc }}
+    {{- fail "kserve-llmisvc-resources.kserve.createSharedResources must stay false: kserve-resources renders the shared inferenceservice-config ConfigMap, the self-signed Issuer and the default ClusterStorageContainer, and a second copy in the same namespace conflicts" }}
+  {{- end }}
+{{- end }}

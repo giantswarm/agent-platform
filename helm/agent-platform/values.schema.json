@@ -224,6 +224,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -446,6 +452,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -481,6 +493,15 @@
                         },
                         "versionRange": {
                             "type": "string"
+                        }
+                    }
+                },
+                "modelServing": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
                         }
                     }
                 },
@@ -792,7 +813,7 @@
                 },
                 "identity": {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "properties": {
                         "clientId": {
                             "type": "string"
@@ -1029,6 +1050,10 @@
             "additionalProperties": true
         },
         "modelManager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "modelServing": {
             "type": "object",
             "additionalProperties": true
         },

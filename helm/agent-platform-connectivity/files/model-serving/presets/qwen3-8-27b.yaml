@@ -1,0 +1,69 @@
+# Qwen3.8 27B, NVFP4 repack with DFlash2 speculative decoding — the reference
+# install's daily-driver coding/agent model. Dense 27B (Qwen3.5 lineage, Gated
+# DeltaNet hybrid), natively multimodal, Apache 2.0. Fifteen tuned flags, a
+# patched chat template and a draft model: this is why presets are curated in
+# git and not typed into a form.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-8-27b
+spec:
+  displayName: Qwen3.8 27B (NVFP4, speculative decoding)
+  description: |
+    Dense 27B coding and agent model with 256k native context, tool calling
+    (Claude Code compatible) and vision. Served as the Inferact NVFP4 repack
+    (BF16 lm_head, required by the DFlash2 draft model), which cuts the
+    weights from ~52 GiB to ~15 GiB and, with the 1.9B DFlash2 draft
+    proposing 7 tokens per target pass, lifts single-request decode from
+    ~4 to ~29 tok/s on a bandwidth-bound node. Tuned on a single-GPU
+    128 GB unified-memory Blackwell node (the CUTE_DSL_ARCH pin and
+    --gpu-memory-utilization=0.60 belong to that hardware; adjust both
+    elsewhere). The chat template maps the Anthropic reasoning effort
+    "high" to the model's "xhigh", which the stock template rejects.
+    Known ceiling: the DFlash kernel can wedge at >100k-token prefill with
+    concurrency >= 2, hence --max-num-seqs=4.
+  model:
+    id: Inferact/Qwen3.8-27B-NVFP4
+    storageUri: hf://Inferact/Qwen3.8-27B-NVFP4
+    format: vLLM
+    contextLength: 262144
+    capabilities: [chat, tools, reasoning, vision, coding]
+    license: apache-2.0
+  env:
+    # cute-dsl CUDA-graph kernels need the arch pinned on Blackwell sm_121.
+    - name: CUTE_DSL_ARCH
+      value: sm_121a
+  args:
+    - --gpu-memory-utilization=0.60
+    - --max-model-len=262144
+    - --max-num-seqs=4
+    - --max-num-batched-tokens=16384
+    - --enable-chunked-prefill
+    - --enable-prefix-caching
+    - --limit-mm-per-prompt
+    - '{"image": 1, "video": 0}'
+    - --speculative-config
+    - '{"method":"dflash","model":"z-lab/Qwen3.8-27B-DFlash2","num_speculative_tokens":7}'
+    - --no-enable-log-requests
+    - --reasoning-parser=qwen3
+    - --enable-auto-tool-choice
+    - --tool-call-parser=qwen3_coder
+    - --default-chat-template-kwargs
+    - '{"enable_thinking": true}'
+  chatTemplate:
+    file: qwen3-8-27b.jinja
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 48Gi
+    limits:
+      cpu: "8"
+      memory: 64Gi
+  requirements:
+    weightsGiB: 15
+    overheadGiB: 30
+  predictor:
+    # KServe writes this into the predictor route as the request timeout; the
+    # default 60s cuts long reasoning streams mid-response.
+    timeout: 1800

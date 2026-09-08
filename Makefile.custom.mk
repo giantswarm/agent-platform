@@ -758,7 +758,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=muster-direct $(MCPS_ONE) --set agent-platform-mcps.agentgateway.enabled=false >/dev/null 2>&1 || { echo "FAIL: mcps through muster (agentgateway.enabled=false) must pass in muster-direct"; exit 1; }
 	@echo "ok: mcps through muster passes in muster-direct"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --set components.kserve-resources.enabled=true >/dev/null 2>&1 || { echo "FAIL: the kserve API guard must defer to the bundled kserve-resources component"; exit 1; }
-	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --set components.modelServing.enabled=true >/dev/null 2>&1 || { echo "FAIL: the kserve API guard must defer to the modelServing component"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --set components.modelServing.enabled=true --set modelServing.kserve.requireApi=false >/dev/null 2>&1 || { echo "FAIL: the kserve API guard must defer to the modelServing component (its own prerequisite check skipped here to isolate the deferral)"; exit 1; }
 	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --set components.kserve-resources.enabled=false >/tmp/vid-kserve.out 2>&1; then echo "FAIL: a kserve-resources component that is OFF must not satisfy the kserve API guard"; exit 1; fi
 	@grep -q 'serving.kserve.io/v1beta1 API' /tmp/vid-kserve.out || { echo "FAIL: the kserve guard failed for the wrong reason"; cat /tmp/vid-kserve.out; exit 1; }
 	@echo "ok: kserve guard defers to the bundled components only"
@@ -937,3 +937,158 @@ verify-auto: ## Assert the cluster-shape knobs: `auto` resolves by served API gr
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-cluster-shape.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
+
+# The standalone umbrella's wiring, ported into the connectivity chart behind the
+# component toggles the meta chart forwards: the Backstage app-config surface
+# (components.backstage), the mcp-kubernetes MCPServer registration
+# (components.mcp-kubernetes), the KServe/vLLM model serving layer
+# (components.modelServing, a feature switch with no chart, on the kserve-crd +
+# kserve-resources components) and the KServe controllers' guards and network
+# policies. The quick-start inputs Backstage takes by design: global.domain,
+# global.identity and a public Gateway for its route.
+WIRING_QUICKSTART := --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=agent-platform --set global.identity.existingSecret=agent-platform-idp --set 'global.gatewayApi.parentRefs[0].name=giantswarm-default' --set 'global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system'
+WIRING_BACKSTAGE := $(VM) --namespace agent-platform $(WIRING_QUICKSTART) --set components.backstage.enabled=true
+WIRING_SERVING := $(VM) --namespace agent-platform --set components.modelServing.enabled=true --set components.kserve-crd.enabled=true --set components.kserve-resources.enabled=true
+# The fleet-shape render with every toggle of this slice off: byte-identical to origin/main's.
+WIRING_OFF := $(VM) --namespace agent-platform --set components.kagent.enabled=true
+
+.PHONY: verify-wiring
+verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object; on = the Backstage app-config (one-value identity), route and config-reload hook, the mcp-kubernetes MCPServer (OAuth, forwarded token, kube audience), the model serving objects on the kserve components and the guard without them, the KServe controller policies; the meta chart forwards the blocks, omits the wiring keys and renders no release for the switch.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@echo "--> toggles off: none of the ported objects renders"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_OFF) >/tmp/vw-off.out 2>&1 || { cat /tmp/vw-off.out; exit 1; }
+	@for pattern in 'agent-platform-backstage-app-config' 'kind: MCPServer' 'serving.kserve.io' 'agent-platform-model-serving' 'name: hf-cache' 'kserve-controller' 'backstage-config-reload' 'kind: Job'; do \
+		if grep -q -- "$$pattern" /tmp/vw-off.out; then echo "FAIL: toggles off but the render contains $$pattern"; exit 1; fi; \
+	done
+	@echo "ok: inert while off"
+	@echo "--> Backstage on: the app-config ConfigMap the backstage: block mounts, derived from the platform's values"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
+	@awk '/^kind: ConfigMap$$/,/^---/' /tmp/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >/tmp/vw-bs-cm.out
+	@[ -s /tmp/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com/kagent/api' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
+		grep -q -- "$$pattern" /tmp/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
+	done
+	@if grep -q 'client: pg' /tmp/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
+	@grep -q 'configMapRef: agent-platform-backstage-app-config' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta chart's backstage: block no longer mounts the ConfigMap this chart renders"; exit 1; }
+	@echo "ok: app-config"
+	@echo "--> the one-value identity: renaming kagent.fluxServiceAccountName renames the portal's agentPlatform.fluxServiceAccountName; kagent off drops it"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.fluxServiceAccountName=tenant-x 2>/dev/null | grep -q 'fluxServiceAccountName: tenant-x' || { echo "FAIL: the app-config does not follow kagent.fluxServiceAccountName"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) >/tmp/vw-bs-nokagent.out 2>&1 || { cat /tmp/vw-bs-nokagent.out; exit 1; }
+	@if grep -q 'fluxServiceAccountName' /tmp/vw-bs-nokagent.out; then echo "FAIL: agentPlatform.fluxServiceAccountName rendered with kagent off"; exit 1; fi
+	@echo "ok: one-value identity"
+	@echo "--> Backstage on: the route, the pg block, the installation name, the config-reload hook and its network policy in both flavors"
+	@awk '/^kind: HTTPRoute$$/,/^---/' /tmp/vw-bs.out | awk '/^  name: backstage$$/,/^---/' >/tmp/vw-bs-route.out
+	@grep -q '"backstage.ci.example.com"' /tmp/vw-bs-route.out || { echo "FAIL: the Backstage HTTPRoute lacks the derived hostname"; exit 1; }
+	@grep -q 'name: giantswarm-default' /tmp/vw-bs-route.out || { echo "FAIL: the Backstage HTTPRoute does not attach to global.gatewayApi.parentRefs"; exit 1; }
+	@grep -A1 'backendRefs:' /tmp/vw-bs-route.out | grep -q 'name: backstage' || { echo "FAIL: the Backstage HTTPRoute does not target the backstage Service"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set backstage.database.engine=postgresql --set backstage.installationName=lab --set backstage.hostname=portal.example.org 2>/dev/null >/tmp/vw-bs-pg.out
+	@grep -q 'client: pg' /tmp/vw-bs-pg.out || { echo "FAIL: backstage.database.engine=postgresql did not render the pg block"; exit 1; }
+	@grep -q '^        lab:$$' /tmp/vw-bs-pg.out || { echo "FAIL: backstage.installationName does not key gs.installations"; exit 1; }
+	@grep -q 'url: https://muster.ci.example.com/mcp' /tmp/vw-bs-pg.out && grep -q '"portal.example.org"' /tmp/vw-bs-pg.out || { echo "FAIL: backstage.hostname override lost"; exit 1; }
+	@awk '/^kind: Job$$/,/^---/' /tmp/vw-bs.out >/tmp/vw-bs-job.out
+	@grep -q 'helm.sh/hook: post-install,post-upgrade' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job is not a post-install/post-upgrade hook"; exit 1; }
+	@grep -q -- '--selector=app=backstage' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job does not select the Backstage Deployment by label (a missing Deployment must be a no-op)"; exit 1; }
+	@grep -qE 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]{64}' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job carries no app-config checksum"; exit 1; }
+	@grep -q 'kind: CiliumNetworkPolicy' /tmp/vw-bs.out && grep -q 'agent-platform-connectivity-backstage-config-reload' /tmp/vw-bs.out || { echo "FAIL: no cilium policy for the config-reload Job"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^kind: NetworkPolicy$$/,/^---/' | grep -q 'agent-platform-connectivity-backstage-config-reload' || { echo "FAIL: no kubernetes policy for the config-reload Job"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set backstage.configReload.enabled=false >/tmp/vw-bs-noreload.out 2>&1 || { cat /tmp/vw-bs-noreload.out; exit 1; }
+	@if grep -q 'backstage-config-reload' /tmp/vw-bs-noreload.out; then echo "FAIL: configReload.enabled=false still renders the hook"; exit 1; fi
+	@echo "ok: route, pg block, installation name, config-reload hook"
+	@echo "--> Backstage on without global.domain fails, naming it"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.backstage.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com --set 'global.gatewayApi.parentRefs[0].name=gw' --set 'global.gatewayApi.parentRefs[0].namespace=gw-system' >/tmp/vw-bs-nodomain.out 2>&1; then \
+		echo "FAIL: Backstage on with no global.domain rendered"; exit 1; \
+	elif ! grep -q "global.domain is empty" /tmp/vw-bs-nodomain.out; then \
+		echo "FAIL: the Backstage domain guard failed for the wrong reason"; cat /tmp/vw-bs-nodomain.out; exit 1; \
+	else echo "ok: Backstage domain guard"; fi
+	@echo "--> mcp-kubernetes on: the MCPServer with OAuth, the forwarded token and the kube audience; OAuth off drops the auth block; an empty audience drops requiredAudiences; muster off drops the CR"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --namespace agent-platform --set components.mcp-kubernetes.enabled=true >/tmp/vw-mcpk.out 2>&1 || { cat /tmp/vw-mcpk.out; exit 1; }
+	@awk '/^kind: MCPServer$$/,/^---/' /tmp/vw-mcpk.out >/tmp/vw-mcpk-cr.out
+	@for pattern in '^  name: mcp-kubernetes$$' 'muster.giantswarm.io/type: mcp-kubernetes' 'agent-platform.giantswarm.io/tool-group: infrastructure' 'url: http://mcp-kubernetes.agent-platform.svc.cluster.local:8080/mcp' 'type: oauth' 'forwardToken: true' '- dex-k8s-authenticator'; do \
+		grep -q -- "$$pattern" /tmp/vw-mcpk-cr.out || { echo "FAIL: the mcp-kubernetes MCPServer lacks $$pattern"; exit 1; }; \
+	done
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set mcp-kubernetes.mcpKubernetes.oauth.enabled=false 2>/dev/null | awk '/^kind: MCPServer$$/,/^---/' >/tmp/vw-mcpk-noauth.out
+	@if grep -q 'forwardToken' /tmp/vw-mcpk-noauth.out; then echo "FAIL: the MCPServer carries an auth block with the server's OAuth off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set mcp-kubernetes.kubernetesAudience= 2>/dev/null | awk '/^kind: MCPServer$$/,/^---/' >/tmp/vw-mcpk-noaud.out
+	@if grep -q 'requiredAudiences' /tmp/vw-mcpk-noaud.out; then echo "FAIL: an empty kubernetesAudience still renders requiredAudiences"; exit 1; fi
+	@grep -q 'forwardToken: true' /tmp/vw-mcpk-noaud.out || { echo "FAIL: the auth block went with the audience"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set components.muster.enabled=false >/tmp/vw-mcpk-nomuster.out 2>&1 || { cat /tmp/vw-mcpk-nomuster.out; exit 1; }
+	@if grep -q 'kind: MCPServer' /tmp/vw-mcpk-nomuster.out; then echo "FAIL: the MCPServer renders with muster off (no CRD to map to)"; exit 1; fi
+	@echo "ok: mcp-kubernetes MCPServer"
+	@echo "--> modelServing on without the kserve components (and no serving API) fails, naming the toggles; requireApi=false and a served API pass"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.modelServing.enabled=true >/tmp/vw-ms-guard.out 2>&1; then \
+		echo "FAIL: modelServing rendered without the KServe control plane"; exit 1; \
+	elif ! grep -q "turn on components.kserve-crd and components.kserve-resources" /tmp/vw-ms-guard.out; then \
+		echo "FAIL: the modelServing guard failed for the wrong reason"; cat /tmp/vw-ms-guard.out; exit 1; \
+	else echo "ok: modelServing needs the kserve components"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.modelServing.enabled=true --set modelServing.kserve.requireApi=false >/dev/null 2>&1 || { echo "FAIL: modelServing.kserve.requireApi=false must skip the check"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.modelServing.enabled=true --api-versions serving.kserve.io/v1alpha1 --api-versions serving.kserve.io/v1beta1 >/dev/null 2>&1 || { echo "FAIL: a cluster that serves the KServe APIs must satisfy the guard without the components"; exit 1; }
+	@echo "ok: modelServing prerequisite guard"
+	@echo "--> modelServing + kserve components on (fleet shape, kagent on): runtime, namespace, discovery ConfigMap, presets, chat template, cache PVC, the two Kyverno policies, the cilium policies incl. the agent egress, the kserve controller policy"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_SERVING) --set components.kagent.enabled=true --set components.kserve-llmisvc-resources.enabled=true >/tmp/vw-ms.out 2>&1 || { cat /tmp/vw-ms.out; exit 1; }
+	@for pattern in 'kind: ClusterServingRuntime' '^  name: kserve-vllm$$' 'image: "docker.io/vllm/vllm-openai:' '^  name: agent-platform-model-serving$$' 'kind: PersistentVolumeClaim' '^  name: hf-cache$$' 'agent-platform-serving-preset-qwen3-8-27b' 'agent-platform-serving-preset-qwen3-14b' 'name: agent-platform-chat-template-qwen3-8-27b' '^  name: model-serving$$' 'kind: Namespace' 'name: agent-platform-connectivity-model-serving-pods' 'name: agent-platform-connectivity-model-serving-deployments' 'redirectPolicy: true' 'name: agent-platform-connectivity-model-serving-predictor$$' 'name: agent-platform-connectivity-model-serving-download$$' 'name: agent-platform-connectivity-kagent-agents-to-model-serving' 'matchName: huggingface.co' 'matchPattern: "\*"' '- remote-node' 'name: agent-platform-connectivity-kserve-controller' 'name: agent-platform-connectivity-llmisvc-controller' 'control-plane: kserve-controller-manager' 'flavor: cilium' 'preset-source: "shipped"'; do \
+		grep -q -e "$$pattern" /tmp/vw-ms.out || { echo "FAIL: the model serving render lacks $$pattern"; exit 1; }; \
+	done
+	@[ "$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)" = "7" ] || { echo "FAIL: expected the 7 shipped presets, got $$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)"; exit 1; }
+	@if grep -q 'kind: NetworkPolicy' /tmp/vw-ms.out; then echo "FAIL: a kubernetes NetworkPolicy rendered under the cilium flavor"; exit 1; fi
+	@echo "ok: model serving fleet shape"
+	@echo "--> the vanilla shape (no served API groups): kubernetes policies, no Kyverno object, no Cilium object; policies.enabled=true without Kyverno fails"
+	@helm template t $(CONNECTIVITY_DIR) --set 'ingress.parentRefs[0].name=x' --namespace agent-platform --set components.modelServing.enabled=true --set components.kserve-crd.enabled=true --set components.kserve-resources.enabled=true --set components.kagent.enabled=true >/tmp/vw-ms-vanilla.out 2>&1 || { cat /tmp/vw-ms-vanilla.out; exit 1; }
+	@if grep -qE 'kyverno.io|cilium.io' /tmp/vw-ms-vanilla.out; then echo "FAIL: the vanilla render carries a Kyverno or Cilium object"; exit 1; fi
+	@for pattern in 'name: agent-platform-connectivity-model-serving-predictor-ingress' 'name: agent-platform-connectivity-model-serving-predictor-egress' 'name: agent-platform-connectivity-model-serving-download-egress' 'name: agent-platform-connectivity-kserve-controller' 'redirectPolicy: false' 'flavor: kubernetes' 'Hugging Face: vanilla NetworkPolicy has no FQDN selector'; do \
+		grep -q -e "$$pattern" /tmp/vw-ms-vanilla.out || { echo "FAIL: the vanilla model serving render lacks $$pattern"; exit 1; }; \
+	done
+	@if helm template t $(CONNECTIVITY_DIR) --set 'ingress.parentRefs[0].name=x' --set components.modelServing.enabled=true --set components.kserve-crd.enabled=true --set components.kserve-resources.enabled=true --set modelServing.policies.enabled=true >/tmp/vw-ms-pol.out 2>&1; then \
+		echo "FAIL: modelServing.policies.enabled=true without Kyverno rendered"; exit 1; \
+	elif ! grep -q "modelServing.policies.enabled is true but kyvernoPolicies.enabled resolves to false" /tmp/vw-ms-pol.out; then \
+		echo "FAIL: the policies guard failed for the wrong reason"; cat /tmp/vw-ms-pol.out; exit 1; \
+	else echo "ok: vanilla shape + policies guard"; fi
+	@echo "--> presets: a values preset replaces a shipped one, an existing claim drops the PVC, shippedPresets.enabled=false drops the set, a bad preset fails"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_SERVING) --set-json 'modelServing.presets=[{"apiVersion":"agent-platform.giantswarm.io/v1alpha1","kind":"ServingPreset","metadata":{"name":"qwen3-14b"},"spec":{"displayName":"Overridden","model":{"id":"Qwen/Qwen3-14B","storageUri":"hf://Qwen/Qwen3-14B"},"chatTemplate":{"content":"{{ messages }}"},"requirements":{"weightsGiB":28}}}]' --set modelServing.cache.pvc.existingClaim=models >/tmp/vw-ms-presets.out 2>&1 || { cat /tmp/vw-ms-presets.out; exit 1; }
+	@grep -q 'displayName: Overridden' /tmp/vw-ms-presets.out || { echo "FAIL: a values preset did not replace the shipped one"; exit 1; }
+	@grep -q 'preset-source: "values"' /tmp/vw-ms-presets.out || { echo "FAIL: the values preset is not labelled as such"; exit 1; }
+	@grep -q 'name: agent-platform-chat-template-qwen3-14b' /tmp/vw-ms-presets.out || { echo "FAIL: the inline chat template ConfigMap is missing"; exit 1; }
+	@grep -q -- '--chat-template=/mnt/chat-template/chat-template.jinja' /tmp/vw-ms-presets.out || { echo "FAIL: the --chat-template flag was not appended"; exit 1; }
+	@if grep -q 'kind: PersistentVolumeClaim' /tmp/vw-ms-presets.out; then echo "FAIL: a PVC rendered next to an existing claim"; exit 1; fi
+	@grep -q 'claimName: models' /tmp/vw-ms-presets.out || { echo "FAIL: the existing claim is not published"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_SERVING) --set modelServing.shippedPresets.enabled=false 2>/dev/null >/tmp/vw-ms-noship.out; if grep -q 'serving-preset: "true"' /tmp/vw-ms-noship.out; then echo "FAIL: shipped presets rendered while disabled"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(WIRING_SERVING) --set 'modelServing.presets[0].metadata.name=bad' >/dev/null 2>&1; then echo "FAIL: a preset without spec was accepted"; exit 1; fi
+	@echo "ok: presets"
+	@echo "--> the model-manager kserve backend must agree with the modelServing layer"
+	@if helm template t $(CONNECTIVITY_DIR) $(WIRING_SERVING) --set components.kagent.enabled=true --set components.model-manager.enabled=true --set model-manager.backend=kserve --set model-manager.oauth.enabled=false --set model-manager.kserve.namespace=other >/tmp/vw-mm.out 2>&1; then \
+		echo "FAIL: a model-manager kserve namespace that differs from modelServing.namespace.name rendered"; exit 1; \
+	elif ! grep -q "must equal modelServing.namespace.name" /tmp/vw-mm.out; then \
+		echo "FAIL: the model-manager/modelServing guard failed for the wrong reason"; cat /tmp/vw-mm.out; exit 1; \
+	else echo "ok: model-manager agrees with modelServing"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_SERVING) --set components.kagent.enabled=true --set components.model-manager.enabled=true --set model-manager.backend=kserve --set model-manager.oauth.enabled=false --set model-manager.kserve.namespace=model-serving --set model-manager.kserve.discovery.configMap=agent-platform-model-serving >/dev/null 2>&1 || { echo "FAIL: an agreeing model-manager kserve backend must pass"; exit 1; }
+	@echo "--> the KServe component guards: llmisvc without the controller, a non-Standard deployment mode, shared resources twice"
+	$(call managers_must_fail,llmisvc needs kserve-resources,$(VM) --set components.kserve-llmisvc-resources.enabled=true,components.kserve-resources.enabled is false)
+	$(call managers_must_fail,deployment mode must be Standard,$(VM) --set components.kserve-resources.enabled=true --set kserve-resources.kserve.controller.deploymentMode=Knative,must be Standard)
+	$(call managers_must_fail,shared resources rendered once,$(VM) --set components.kserve-resources.enabled=true --set components.kserve-llmisvc-resources.enabled=true --set kserve-llmisvc-resources.kserve.createSharedResources=true,createSharedResources must stay false)
+	@echo "--> the meta chart: the switch renders no release, the roster and the blocks reach connectivity, the wiring keys never reach the component charts, the policies knob arrives resolved, backstage dependsOn connectivity, connectivity dependsOn muster"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(FLEET_APIS) --set components.modelServing.enabled=true --set components.backstage.enabled=true --set components.mcp-kubernetes.enabled=true --set components.kserve-crd.enabled=true --set components.kserve-resources.enabled=true >/tmp/vw-meta.out 2>&1 || { cat /tmp/vw-meta.out; exit 1; }
+	@if grep -qE '^  name: modelServing$$' /tmp/vw-meta.out; then echo "FAIL: components.modelServing rendered a release; it is a feature switch"; exit 1; fi
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vw-meta.out >/tmp/vw-meta-conn.out
+	@grep -A1 '^      modelServing:$$' /tmp/vw-meta-conn.out | grep -q 'enabled: true' || { echo "FAIL: the roster forwarded to connectivity does not carry modelServing: enabled: true"; exit 1; }
+	@for block in backstage mcp-kubernetes modelServing kserve-resources kserve-llmisvc-resources; do \
+		grep -qE "^    $$block:" /tmp/vw-meta-conn.out || { echo "FAIL: the $$block block is held back from the connectivity release"; exit 1; }; \
+	done
+	@grep -q 'kubernetesAudience: dex-k8s-authenticator' /tmp/vw-meta-conn.out || { echo "FAIL: mcp-kubernetes.kubernetesAudience did not reach the connectivity release"; exit 1; }
+	@grep -q 'installationName: agent-platform' /tmp/vw-meta-conn.out || { echo "FAIL: backstage.installationName did not reach the connectivity release"; exit 1; }
+	@awk '/^      policies:$$/{f=1;next} f&&/^      [a-z]/{f=0} f' /tmp/vw-meta-conn.out | grep -q '^        enabled: true' || { echo "FAIL: modelServing.policies.enabled did not arrive resolved (true with kyverno.io served)"; exit 1; }
+	@if grep -q 'enabled: auto' /tmp/vw-meta-conn.out; then echo "FAIL: an unresolved auto reached the connectivity release"; exit 1; fi
+	@grep -A6 '^  dependsOn:' /tmp/vw-meta-conn.out | grep -q 'name: muster' || { echo "FAIL: connectivity does not dependsOn muster (its MCPServer needs the CRD)"; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: backstage$$/{f=1} f&&/^---/{exit} f' /tmp/vw-meta.out >/tmp/vw-meta-bs.out
+	@for key in hostname parentRefs installationName extraScopes startUrlSearchParams enabledExtensions disabledExtensions skillsRepositories catalogs configReload; do \
+		if grep -qE "^    $$key:" /tmp/vw-meta-bs.out; then echo "FAIL: the wiring key $$key reached the backstage chart, whose schema rejects it"; exit 1; fi; \
+	done
+	@grep -A3 '^  dependsOn:' /tmp/vw-meta-bs.out | grep -q 'name: agent-platform-connectivity' || { echo "FAIL: backstage does not dependsOn connectivity (its pod mounts the app-config rendered there)"; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: mcp-kubernetes$$/{f=1} f&&/^---/{exit} f' /tmp/vw-meta.out >/tmp/vw-meta-mcpk.out
+	@if grep -q 'kubernetesAudience' /tmp/vw-meta-mcpk.out; then echo "FAIL: kubernetesAudience reached the mcp-kubernetes chart, whose schema rejects it"; exit 1; fi
+	@echo "ok: meta forwards"
+	@echo "--> the switch off (the fleet): the modelServing block is NOT forwarded (a live connectivity chart that predates it would reject it); on, it arrives with the policies knob resolved to false on the vanilla render"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(FLEET_APIS) 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' >/tmp/vw-meta-off.out
+	@if grep -qE '^    modelServing:' /tmp/vw-meta-off.out; then echo "FAIL: the modelServing block is forwarded while the switch is off"; exit 1; fi
+	@grep -A1 '^      modelServing:$$' /tmp/vw-meta-off.out | grep -q 'enabled: false' || { echo "FAIL: the roster forwarded to connectivity lacks modelServing: enabled: false"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.modelServing.enabled=true 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' | awk '/^      policies:$$/{f=1;next} f&&/^      [a-z]/{f=0} f' | grep -q '^        enabled: false' || { echo "FAIL: policies knob not false on the vanilla render with the switch on"; exit 1; }
+	@echo "ok: switch block forwarded only while on, policies knob resolved"
+	@echo "the standalone's ported wiring verified."
