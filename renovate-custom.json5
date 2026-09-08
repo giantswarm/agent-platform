@@ -6,7 +6,7 @@
   //
   // No chart in this repo has a Chart.yaml `dependencies:` block anymore: the
   // agent-platform meta-package and agent-platform-connectivity render their
-  // children as Flux/Argo objects (component versions are `components.*.versionRange`
+  // children as Flux objects (component versions are `components.*.versionRange`
   // VALUES re-resolved by Flux on every reconcile, not Renovate-managed pins), and
   // the agent-platform-crds CRD-bundle chart has been retired in favour of
   // app-owned CRDs. So the helmv3 manager has nothing to manage here — the only

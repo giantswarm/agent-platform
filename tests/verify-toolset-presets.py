@@ -2,7 +2,7 @@
 """Assert the platform toolset presets reach muster, at two points of the path.
 
 `release-values <render>` reads the meta chart's render, finds the muster
-HelmRelease (or Argo Application), checks its values carry the `infrastructure`
+HelmRelease, checks its values carry the `infrastructure`
 and `agent-platform` presets selecting by the tool-group label, and prints the
 values block as a plain values file so the muster chart itself can be rendered
 with exactly what the meta chart forwards.
@@ -46,28 +46,28 @@ def documents(text: str):
 def muster_release(text: str) -> str:
     for doc in documents(text):
         lines = doc.splitlines()
-        is_release = any(l.strip() in ("kind: HelmRelease", "kind: Application") for l in lines)
+        is_release = any(l.strip() == "kind: HelmRelease" for l in lines)
         if is_release and "  name: muster" in lines:
             return doc
-    fail("no HelmRelease/Application named muster in the render")
+    fail("no HelmRelease named muster in the render")
     return ""  # unreachable
 
 
 def values_block(doc: str) -> str:
-    """The `values:` block of a HelmRelease (indent 2) or of an Argo
-    Application's helm source (`valuesObject:`), de-indented to a values file."""
+    """The `values:` block of a HelmRelease (indent 2), de-indented to a values
+    file."""
     lines = doc.splitlines()
-    for key in ("  values:", "      valuesObject:"):
-        indent = len(key) - len(key.lstrip())
-        for i, line in enumerate(lines):
-            if line == key:
-                block = []
-                for inner in lines[i + 1:]:
-                    if inner.strip() == "" or len(inner) - len(inner.lstrip()) > indent:
-                        block.append(inner[indent + 2:] if inner.strip() else "")
-                    else:
-                        break
-                return "\n".join(block) + "\n"
+    key = "  values:"
+    indent = len(key) - len(key.lstrip())
+    for i, line in enumerate(lines):
+        if line == key:
+            block = []
+            for inner in lines[i + 1:]:
+                if inner.strip() == "" or len(inner) - len(inner.lstrip()) > indent:
+                    block.append(inner[indent + 2:] if inner.strip() else "")
+                else:
+                    break
+            return "\n".join(block) + "\n"
     fail("the muster release carries no values block")
     return ""  # unreachable
 

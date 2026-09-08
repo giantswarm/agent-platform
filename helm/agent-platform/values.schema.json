@@ -531,20 +531,11 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "argo": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "project": {
-                            "type": "string"
-                        },
-                        "server": {
-                            "type": "string"
-                        }
-                    }
-                },
                 "engine": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                        "flux"
+                    ]
                 },
                 "forbidInlineSecrets": {
                     "type": "boolean"

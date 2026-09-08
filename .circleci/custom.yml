@@ -51,7 +51,7 @@ jobs:
         # model-manager / agent-manager wiring and guards), verify-kagent-netpol
         # (the kagent controller/agent egress to the built-in tool server),
         # verify-meta (root app-of-apps render: no Chart.yaml pins, ranges as
-        # values, both engines, pure renderer, pinned BOM), verify-postgres
+        # values, Flux the only engine, pure renderer, pinned BOM), verify-postgres
         # (the postgres.backup wiring and guards) and verify-secrets
         # (gitops.forbidInlineSecrets: off by default, names only the inline
         # credential paths, passes on referenced Secrets) are the single source

@@ -111,8 +111,8 @@ config.existingSecret, muster oauth.server.existingSecret /
 storage.valkey.existingSecret, valkey auth.usersExistingSecret, klaus-gateway
 slack.secretName / obo.existingSecret, model-manager and agent-manager
 oauth.existingSecret). Set inline, they are forwarded verbatim into that
-component's HelmRelease spec.values (Argo: valuesObject) and into Helm's
-release storage, readable by anyone allowed to get HelmReleases there.
+component's HelmRelease spec.values and into Helm's release storage, readable
+by anyone allowed to get HelmReleases there.
 */}}
 {{- define "agent-platform.inlineSecretPaths" -}}
 {{- $v := .Values -}}
