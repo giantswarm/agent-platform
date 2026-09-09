@@ -166,6 +166,13 @@ gitops:
     # checkout derives it from Chart.yaml's placeholder version; the released
     # chart carries its tag.
     versionRange: ""
+    # Go regexp the OCI tags must match before versionRange is evaluated
+    # (OCIRepository.spec.ref.semverFilter) — the components' semverFilter for
+    # the chart itself. A self-managed installation of a dev channel keeps
+    # following that channel; without it the derived range would also admit
+    # the next stable release and every other branch's dev builds. Empty
+    # (default) filters nothing.
+    semverFilter: ""
     # Interval the OCIRepository polls the registry and the HelmRelease
     # reconciles; a values Secret change is picked up at once (watch label).
     interval: 10m
@@ -206,9 +213,9 @@ gitops:
 
 # Component source coordinates + version policy. Each entry is self-describing;
 # templates/components.yaml is a generic loop with no per-component knowledge.
-#   versionRange — semver constraint rendered into OCIRepository.spec.ref.semver
-#       (or .filterTags for dev-tag streams). WIDE here = the GS dogfooding track
-#       (continuous auto-update, zero PRs). Pin exactly for a customer BOM.
+#   versionRange — semver constraint rendered into OCIRepository.spec.ref.semver.
+#       WIDE here = the GS dogfooding track (continuous auto-update, zero PRs).
+#       Pin exactly for a customer BOM.
 #   valuesFrom   — top-level values block forwarded to this release's values.
 #   forwardAllValues — forward the whole values tree (connectivity reads many
 #       blocks). injectGlobal — inject .Values.global (default true; false for
@@ -222,6 +229,14 @@ gitops:
 #   insecure     — plain-HTTP registry (OCIRepository.spec.insecure), for a lab's
 #       in-cluster registry (the ATS pushes the charts under test to one). Never
 #       for a public registry.
+#   semverFilter — Go regexp the OCI tags must match BEFORE versionRange is
+#       evaluated (OCIRepository.spec.ref.semverFilter); unset = every tag.
+#       Selects a dev channel: the dev builds of one branch (see "Dev channel"
+#       in the README), e.g. ".*-dev\\.<sanitized-branch>\\..*" together with
+#       a prerelease-admitting range such as ">=3.0.0-0 <4.0.0-0" — a range
+#       without the `-0` bounds never matches a prerelease, and Masterminds
+#       semver (Flux's) rejects the RFC's "*-*". The stable tags never act as
+#       fallback while a filter is set.
 #   crds         — Helm CRD lifecycle (CreateReplace) for a component that ships its
 #       own CRDs in its chart's crds/ dir (app-owned CRDs). Such a component owns its
 #       CRD version; its CR consumers dependsOn it instead.

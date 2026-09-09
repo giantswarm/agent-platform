@@ -27,7 +27,8 @@ rely on:
   refused; a Kubernetes below 1.30 is refused while self-management is on and
   accepted with it off; a value outside auto/true/false fails the schema;
 - the knobs: repository (with or without a trailing slash), insecure,
-  versionRange, interval, gitops.serviceAccountName (the policy admits the
+  versionRange, semverFilter (the dev-channel tag filter, rendered iff set),
+  interval, gitops.serviceAccountName (the policy admits the
   overriding identity); `lookup` is empty offline, so the HelmRelease stays
   suspended even when the HelmRelease API is passed in;
 - the Renovate-tracked image block of the helm hooks and the schema comment of
@@ -39,6 +40,7 @@ README). Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the
 binary (the CI job runs Helm 3.17.3 as `helm`).
 """
 
+import json
 import os
 import re
 import subprocess
@@ -137,7 +139,12 @@ def main(chart: str) -> int:
     helm_ref = "/".join(helm_image.group(1, 2)) + ":" + helm_image.group(3)
     if "  self:\n" not in values or "    enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]\n" not in values[values.index("  self:\n"):]:
         fail("gitops.self.enabled is not the tri-state knob `auto  # @schema type: [boolean, string]; enum: [auto, true, false]`")
-    print(f"ok: values — gitops.self tri-state knob, hook images {kubectl_ref} and {helm_ref} as Renovate blocks; derived range {derived}")
+    self_block = values[values.index("  self:\n"):]
+    m = re.search(r'^    semverFilter: (".*")$', self_block, re.M)
+    if not m:
+        fail("gitops.self.semverFilter is not a double-quoted string in values.yaml")
+    self_filter = json.loads(m.group(1))  # YAML double-quoted == JSON for these strings
+    print(f"ok: values — gitops.self tri-state knob, hook images {kubectl_ref} and {helm_ref} as Renovate blocks; derived range {derived}; self semverFilter {self_filter!r}")
 
     # --- engine OFF: nothing of self-management, the fleet shape unchanged
     for flags in ([*ci, *ENGINE_OFF, "--include-crds"],
@@ -163,6 +170,10 @@ def main(chart: str) -> int:
     needles(oci, "self OCIRepository", "\n  interval: 10m\n", f"\n  url: oci://gsoci.azurecr.io/charts/giantswarm/{RELEASE}\n", f'semver: "{derived}"', "app.kubernetes.io/component: self-management")
     if "insecure" in oci:
         fail("self OCIRepository sets insecure by default")
+    if self_filter:
+        needles(oci, "self OCIRepository", f"\n    semverFilter: {json.dumps(self_filter)}")
+    elif "semverFilter" in oci:
+        fail("self OCIRepository renders a semverFilter although gitops.self.semverFilter is empty")
     needles(hr, "self HelmRelease", "\n  suspend: true\n", f"\n  releaseName: {RELEASE}\n", f"\n  targetNamespace: {NAMESPACE}\n",
             f"\n  serviceAccountName: {TENANT_SA}\n", f"\n  chartRef:\n    kind: OCIRepository\n    name: {RELEASE}\n",
             "\n  install:\n    disableWait: true\n", "\n  upgrade:\n    disableWait: true\n",
@@ -267,13 +278,15 @@ def main(chart: str) -> int:
 
     # --- knobs
     knobs = docs(helm(chart, [*ci, "--set", "gitops.self.repository=oci://localhost:5000/charts/", "--set", "gitops.self.insecure=true",
-                              "--set", "gitops.self.versionRange=>=3.0.0 <4.0.0", "--set", "gitops.self.interval=1m", "--api-versions", "helm.toolkit.fluxcd.io/v2"]))
-    needles(knobs[("OCIRepository", NAMESPACE, RELEASE)], "self OCIRepository with knobs", f"\n  url: oci://localhost:5000/charts/{RELEASE}\n", "\n  insecure: true\n", 'semver: ">=3.0.0 <4.0.0"', "\n  interval: 1m\n")
+                              "--set", "gitops.self.versionRange=>=3.0.0 <4.0.0", "--set-json", 'gitops.self.semverFilter=".*-dev\\\\.x\\\\..*"',
+                              "--set", "gitops.self.interval=1m", "--api-versions", "helm.toolkit.fluxcd.io/v2"]))
+    needles(knobs[("OCIRepository", NAMESPACE, RELEASE)], "self OCIRepository with knobs", f"\n  url: oci://localhost:5000/charts/{RELEASE}\n", "\n  insecure: true\n", 'semver: ">=3.0.0 <4.0.0"',
+            '\n    semverFilter: ".*-dev\\\\.x\\\\..*"', "\n  interval: 1m\n")
     needles(knobs[("HelmRelease", NAMESPACE, RELEASE)], "self HelmRelease with the HelmRelease API served offline", "\n  suspend: true\n", "\n  interval: 1m\n")
     custom = docs(helm(chart, [*ci, "--set", "gitops.serviceAccountName=custom-sa"]))
     needles(custom[("HelmRelease", NAMESPACE, RELEASE)], "self HelmRelease with gitops.serviceAccountName", "\n  serviceAccountName: custom-sa\n")
     needles(custom[("ValidatingAdmissionPolicy", "", POLICY)], "the policy with gitops.serviceAccountName", f'"system:serviceaccount:{NAMESPACE}:custom-sa"')
-    print("ok: knobs — repository, insecure, versionRange, interval; suspended with the HelmRelease API offline; gitops.serviceAccountName carried into the HelmRelease and the policy")
+    print("ok: knobs — repository, insecure, versionRange, semverFilter, interval; suspended with the HelmRelease API offline; gitops.serviceAccountName carried into the HelmRelease and the policy")
     return 0
 
 
