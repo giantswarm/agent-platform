@@ -88,7 +88,7 @@ README.
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.kagent.versionRange | string | `"0.2.x"` |  |
+| components.kagent.versionRange | string | `">=0.2.0 <1.0.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
