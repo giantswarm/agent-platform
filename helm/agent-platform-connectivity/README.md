@@ -671,6 +671,7 @@ On the installation, after the cutover:
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
 | cloudnative-pg | object | `{}` |  |
+| kagent-crds | object | `{}` |  |
 | kserve-crd | object | `{}` |  |
 | kserve-resources | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |
