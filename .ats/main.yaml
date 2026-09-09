@@ -22,7 +22,10 @@
 #               self-management fixpoint and the values Secret, the refused
 #               `helm upgrade`, then the ordered teardown (`helm uninstall
 #               --wait` clean in under a minute, no Flux CRD left, the operator
-#               CRDs still there).
+#               CRDs still there). DEV LINE (poc/kagent-main): kagent and
+#               agent-manager are off in those values (kagent main cannot run
+#               on this cluster — tests/ats/values-kagent.yaml), so the agent
+#               round trips are skipped with that reason.
 #   functional  tests/ats/test_own_flux.py — a cluster that runs its own Flux:
 #               source-controller + helm-controller from the upstream manifest,
 #               the chart THROUGH a HelmRelease with components.flux.enabled

@@ -24,8 +24,12 @@ global:
       secretName: agent-platform-idp-ca
 
 components:
+  # DEV LINE (poc/kagent-main): agent-manager is OFF here — it writes kagent
+  # main's v1alpha3 AgentTemplates and needs the kagent CRDs, and kagent is off
+  # in values-kagent.yaml (why: there). The auth round trips below do not need
+  # it; the agent-manager round trip is skipped (conftest.py AGENT_MANAGER_ON).
   agent-manager:
-    enabled: true
+    enabled: false
 
 muster:
   # CI sizing (two cores), see values-kagent.yaml.

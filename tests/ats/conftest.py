@@ -434,6 +434,23 @@ def load_values(files: List[Path], sets: Optional[List[str]] = None) -> Dict[str
     return merged
 
 
+# What the smoke values turn on, read from the files so the tests and the values
+# cannot disagree. On the dev line (poc/kagent-main) values-kagent.yaml leaves
+# kagent off — kagent main (kagent.dev/v1alpha3) runs its agents as Agent
+# Substrate actors and needs Substrate plus apiserver feature gates the ATS kind
+# cluster does not have — and values-round-trips.yaml agent-manager (it writes
+# v1alpha3 AgentTemplates). The agent round trips skip with NO_KAGENT_REASON;
+# agentlab proves them on a cluster that has both.
+def _component_on(files: List[Path], name: str) -> bool:
+    return bool(load_values(files).get("components", {}).get(name, {}).get("enabled"))
+
+
+KAGENT_ON = _component_on([BASE_VALUES, KAGENT_VALUES], "kagent")
+AGENT_MANAGER_ON = _component_on(SMOKE_VALUES, "agent-manager")
+NO_KAGENT_REASON = ("kagent is off in tests/ats/values-kagent.yaml: this line's kagent main needs Agent Substrate and the "
+                    "ClusterTrustBundle / PodCertificateRequest feature gates the ATS kind cluster does not have; agentlab proves the agent round trips")
+
+
 # ---------------------------------------------------------------------------
 # Reaching Services from the test: kubectl port-forward
 # ---------------------------------------------------------------------------

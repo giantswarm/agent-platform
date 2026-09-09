@@ -33,6 +33,10 @@ management cluster) on the ATS kind cluster, after the smoke's uninstall.
 Runs as the `functional` scenario (one pytest process after the smoke's); the
 smoke leaves the lab Dex, the registry with the chart and the four operator
 CRDs behind, and nothing else the guard could mistake for an engine.
+
+On the dev line (poc/kagent-main) values-kagent.yaml leaves kagent off (kagent
+main cannot run on the ATS kind cluster — the file says why), so step 4 is
+skipped with that reason and the kagent assertions are gated on KAGENT_ON.
 """
 
 import logging
@@ -47,8 +51,10 @@ from conftest import (
     BASE_VALUES,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
+    KAGENT_ON,
     KAGENT_VALUES,
     NAMESPACE,
+    NO_KAGENT_REASON,
     OPERATOR_CRDS,
     REGISTRY_URL,
     RELEASE,
@@ -69,7 +75,7 @@ FLUX_NAMESPACE = "flux-system"
 FLUX_COMPONENTS = {"source-controller", "helm-controller"}
 FLUX_FIELD_MANAGER = "flux"
 GUARD_MESSAGE = "this cluster runs Flux; set components.flux.enabled=false or install the chart through it"
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent")
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", *(("kagent",) if KAGENT_ON else ()))
 AGENT = "ats-flux-agent"
 AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
 MODEL_CONFIG = "default-model-config"
@@ -249,7 +255,8 @@ def test_platform_installs_through_the_clusters_flux(kube: Kube, platform_throug
     for name, hr in hrs.items():
         assert is_ready(hr), f"{name}: {condition(hr)}"
         assert "serviceAccountName" not in hr["spec"], f"{name} names a serviceAccountName with the engine off: {hr['spec'].get('serviceAccountName')}"
-    assert hrs["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "engine off: the kagent HelmRelease must keep gitops.targetNamespace (the fleet render)"
+    if KAGENT_ON:
+        assert hrs["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "engine off: the kagent HelmRelease must keep gitops.targetNamespace (the fleet render)"
     assert_no_engine(kube)
     hook_jobs = [j["metadata"]["name"] for j in kube.items("jobs", "-l", f"app.kubernetes.io/instance={RELEASE}", namespace=NAMESPACE)]
     assert not hook_jobs, f"the chart rendered hooks with the engine off: {hook_jobs}"
@@ -260,6 +267,7 @@ def test_platform_installs_through_the_clusters_flux(kube: Kube, platform_throug
 
 
 @pytest.mark.functional
+@pytest.mark.skipif(not KAGENT_ON, reason=NO_KAGENT_REASON)
 def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_flux: None) -> None:
     started = time.monotonic()
     try:
@@ -303,7 +311,8 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
         assert set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values()), {n: condition(h) for n, h in hrs.items()}
         assert all("serviceAccountName" not in hr["spec"] for hr in hrs.values()), "the failed upgrade changed the platform HelmReleases"
-        assert is_ready(kube.get("agents.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent is no longer Ready"
+        if KAGENT_ON:
+            assert is_ready(kube.get("agents.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent is no longer Ready"
         logger.info("guard fired: %s", messages[:300])
         # the way out the message names: the value back to false recovers
         kube.apply(meta_helmrelease(candidate_version, engine=False))

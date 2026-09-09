@@ -7,9 +7,21 @@
 # platform pods; the kagent UI stays off (nothing in the smoke reaches it, and
 # its image is the largest pull of the install — the chart has no ui.enabled
 # switch, zero replicas keeps the Deployment without a pod).
+#
+# DEV LINE (poc/kagent-main): kagent is OFF here. This line's kagent is kagent
+# main (kagent.dev/v1alpha3) from the kagent fork's dev channel, and it cannot
+# run on the ATS kind cluster: agents are Agent Substrate actors, so the
+# controller needs Substrate in ate-system and the apiserver feature gates
+# ClusterTrustBundle, ClusterTrustBundleProjection, PodCertificateRequest (+
+# certificates.k8s.io/v1beta1), none of which the ATS cluster has; and the
+# published 0.2.x wrapper the smoke used to install serves v1alpha2, which the
+# connectivity chart of this line no longer renders. The agent round trips are
+# skipped with that reason (tests/ats/conftest.py KAGENT_ON); agentlab, with
+# the gates and Substrate, proves them. The sizing below is inert while off
+# and is what the smoke gets back when kagent returns.
 components:
   kagent:
-    enabled: true
+    enabled: false
 
 kagent:
   controller:

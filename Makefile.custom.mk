@@ -50,7 +50,15 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
-GOLDEN_REF ?= origin/main
+# DEV LINE (poc/kagent-main): the baseline is this line's own published head,
+# not origin/main — the default render of the connectivity chart drifted from
+# main by design (kagent.dev/v1alpha3, the muster RemoteMCPServer in the kagent
+# namespace without allowedNamespaces, the kagent Kyverno mutations gone), so a
+# diff against main would only restate the branch. Against its own head the
+# guard means on this line what it means on main: a PR into it must not drift
+# the default render unnoticed. The release of this line sets it back to
+# origin/main.
+GOLDEN_REF ?= origin/poc/kagent-main
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
