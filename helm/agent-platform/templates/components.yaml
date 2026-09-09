@@ -49,10 +49,13 @@ knowledge:
       never sees `auto`.
   derived values — a value another block owns, merged over the forwarded block
       by the agent-platform.componentDerivedValues helper (the per-component
-      knowledge lives there, not in this loop): agent-manager's
-      flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName, the
-      tenant identity the connectivity chart renders. Never written back into
-      .Values, so the whole-tree forward stays what the operator wrote.
+      knowledge lives there, not in this loop). On the release line that is
+      agent-manager's flux.helmReleaseServiceAccount from
+      kagent.fluxServiceAccountName, the tenant identity the connectivity
+      chart renders; on this line (kagent API v2) nothing is derived and the
+      helper refuses agent-manager.flux / .agentChart instead — the chart's
+      closed schema has neither. Never written back into .Values, so the
+      whole-tree forward stays what the operator wrote.
   injectGlobal  — inject `.Values.global` into the forwarded values (default
       true). Set false for components whose strict values.schema.json
       (additionalProperties:false) rejects an unexpected `global` key
@@ -171,7 +174,7 @@ nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- with $c.valuesKey }}{{- $vals = dict . $vals }}{{- end }}
 {{- if ne $c.injectGlobal false }}{{- $vals = merge (deepCopy $vals) (dict "global" $shaped.global) }}{{- end }}
 {{- /* Derived values win over the block's own copy (the helper fails the
-render when the two disagree). */ -}}
+render on a key the component's chart would refuse). */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
 {{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an

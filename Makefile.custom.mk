@@ -590,10 +590,20 @@ verify-components: ## Assert the roster entries of the standalone chart's extras
 	@echo "component roster verified."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Pull the seven component charts (at the range's resolution and at the BOM pin) and render each with the values the meta chart forwards to it. Network: gsoci.azurecr.io, ghcr.io.
+verify-components-charts: ## Pull the component charts the meta chart composes values for — the seven extras and the two managers, whose closed schemas reject any forwarded key they do not declare — at the range's resolution and at the BOM pin, and render each with the values the meta chart forwards to it. Network: gsoci.azurecr.io, ghcr.io.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
+
+# The HelmRelease document of component $(1) in the meta render $(2): kind
+# first, then the name under metadata, one document (a reset on ---, so the
+# OCIRepository of the same name is never taken for it). For asserting on the
+# values the meta chart forwards to that component.
+hr_doc = awk -v n='$(1)' '/^---/{if(f)exit; h=0} /^kind: HelmRelease$$/{h=1} h&&$$0=="  name: "n{f=1} f' $(2)
+# The keys the kagent API v2 agent-manager chart's closed schema rejects and
+# the meta chart must therefore never forward (D-V1: "additional properties
+# 'agentChart', 'flux' not allowed").
+AM_REJECTED := ^    (flux|agentChart):
 
 # The two platform services the connectivity chart wires — model-manager and
 # agent-manager (route + JWT policy + network policies + render-time guards). A
@@ -938,7 +948,10 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 		grep -A3 '^kind: OCIRepository$$' /tmp/vmg-meta.out | grep -q "^  name: $$n$$" || { echo "FAIL: no $$n OCIRepository in the meta render"; exit 1; }; \
 	done
 	@awk '/^  name: agent-manager$$/{f=1} f&&/^  dependsOn:/{d=1} d&&/- name: muster/{m=1} d&&/- name: kagent/{k=1} /^---/{if(f&&d&&m&&k){ok=1}; f=0;d=0;m=0;k=0} END{if(ok)exit 0; else exit 1}' /tmp/vmg-meta.out || { echo "FAIL: the agent-manager release does not dependsOn muster and kagent"; exit 1; }
-	@grep -q 'helmReleaseServiceAccount: kagent-flux' /tmp/vmg-meta.out || { echo "FAIL: agent-manager values lost flux.helmReleaseServiceAccount"; exit 1; }
+	@$(call hr_doc,agent-manager,/tmp/vmg-meta.out) >/tmp/vmg-meta-am.out
+	@grep -q '^    fullnameOverride: agent-manager$$' /tmp/vmg-meta-am.out || { echo "FAIL: no agent-manager HelmRelease values in the meta render"; exit 1; }
+	@if grep -qE '$(AM_REJECTED)' /tmp/vmg-meta-am.out; then echo "FAIL: agent-manager's values carry flux / agentChart, which the kagent API v2 agent-manager chart's closed schema rejects"; grep -nE '$(AM_REJECTED)' /tmp/vmg-meta-am.out; exit 1; fi
+	@echo "ok: agent-manager receives neither flux nor agentChart (verify-components-charts renders the block against the chart)"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.kagent.enabled=false --set components.agent-manager.enabled=false >/tmp/vmg-meta-off.out 2>&1 || { cat /tmp/vmg-meta-off.out; exit 1; }
 	@if grep -qE '^  name: agent-manager$$' /tmp/vmg-meta-off.out; then echo "FAIL: agent-manager release rendered while disabled"; exit 1; fi
 	@if grep -qE '^    - name: kagent$$' /tmp/vmg-meta-off.out; then echo "FAIL: a dependsOn on the disabled kagent survived"; exit 1; fi
@@ -953,7 +966,7 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 IDENTITY_ON := $(VM) --set components.kagent.enabled=true
 MCPS_ONE := --set components.agent-platform-mcps.enabled=true --set agent-platform-mcps.mcpServers[0].cluster=ci --set agent-platform-mcps.mcpServers[0].group=kubernetes --set agent-platform-mcps.mcpServers[0].url=https://mcp.ci.example.com/mcp
 .PHONY: verify-identity
-verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAccount, RoleBinding, agent-manager, the portal helper) and the fixes that retired the standalone's template patches.
+verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAccount, RoleBinding, the portal helper; on this line agent-manager receives no flux / agentChart key and the render refuses them) and the fixes that retired the standalone's template patches.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@echo "--> kagent on: ServiceAccount + RoleBinding kagent-flux in the kagent namespace, bound to cluster-admin"
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) >/tmp/vid-on.out 2>&1 || { cat /tmp/vid-on.out; exit 1; }
@@ -974,39 +987,45 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@if grep -q '^kind: Namespace$$' /tmp/vid-off.out; then echo "FAIL: the kagent Namespace renders with kagent off (an empty Helm-owned namespace)"; exit 1; else echo "ok: no kagent Namespace without kagent"; fi
 	@grep -q '^kind: Namespace$$' /tmp/vid-on.out || { echo "FAIL: the kagent Namespace is gone with kagent on"; exit 1; }
 	@echo "ok: kagent Namespace follows the component"
-	@echo "--> ONE value renames all three consumers: the ServiceAccount, the RoleBinding subject, agent-manager's flux.helmReleaseServiceAccount"
+	@echo "--> ONE value renames the ServiceAccount and the RoleBinding subject; agent-manager receives nothing from it on this line (kagent API v2: no agent HelmReleases, its chart's schema has no flux key)"
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName=tenant-x >/tmp/vid-x.out 2>&1 || { cat /tmp/vid-x.out; exit 1; }
 	@[ "$$(grep -c '^  name: tenant-x$$' /tmp/vid-x.out)" = "2" ] || { echo "FAIL: renaming kagent.fluxServiceAccountName did not rename ServiceAccount and RoleBinding"; exit 1; }
 	@grep -A3 '^subjects:' /tmp/vid-x.out | grep -q 'name: tenant-x' || { echo "FAIL: the RoleBinding subject did not follow the value"; exit 1; }
 	@if grep -q 'kagent-flux' /tmp/vid-x.out; then echo "FAIL: the old name survives in the connectivity render"; grep -n kagent-flux /tmp/vid-x.out; exit 1; fi
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.fluxServiceAccountName=tenant-x >/tmp/vid-meta-x.out 2>&1 || { cat /tmp/vid-meta-x.out; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' /tmp/vid-meta-x.out >/tmp/vid-meta-am.out
-	@grep -q 'helmReleaseServiceAccount: tenant-x' /tmp/vid-meta-am.out || { echo "FAIL: agent-manager's flux.helmReleaseServiceAccount is not derived from kagent.fluxServiceAccountName"; head -40 /tmp/vid-meta-am.out; exit 1; }
+	@$(call hr_doc,agent-manager,/tmp/vid-meta-x.out) >/tmp/vid-meta-am.out
+	@grep -q '^    fullnameOverride: agent-manager$$' /tmp/vid-meta-am.out || { echo "FAIL: no agent-manager HelmRelease values in the meta render"; exit 1; }
+	@if grep -qE '$(AM_REJECTED)' /tmp/vid-meta-am.out; then echo "FAIL: agent-manager's values carry flux / agentChart, which its chart's closed schema rejects"; grep -nE '$(AM_REJECTED)' /tmp/vid-meta-am.out; exit 1; fi
 	@grep -q 'fluxServiceAccountName: tenant-x' /tmp/vid-meta-x.out || { echo "FAIL: the value is not forwarded to the connectivity release"; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' /tmp/vid-meta-x.out >/tmp/vid-meta-kagent.out
+	@$(call hr_doc,kagent,/tmp/vid-meta-x.out) >/tmp/vid-meta-kagent.out
 	@if grep -q 'fluxServiceAccountName' /tmp/vid-meta-kagent.out; then echo "FAIL: fluxServiceAccountName forwarded to the kagent chart, whose schema rejects it"; exit 1; fi
 	@if grep -q 'kagent-flux' /tmp/vid-meta-x.out; then echo "FAIL: the old name survives in the meta render"; grep -n kagent-flux /tmp/vid-meta-x.out; exit 1; fi
-	@echo "ok: one value, three consumers"
+	@echo "ok: one value, two consumers; nothing of it reaches agent-manager"
 	@echo "--> the portal surface reads the same helper (it renders agentPlatform.fluxServiceAccountName from it)"
 	@grep -q 'define "agent-platform.kagent.fluxServiceAccountName"' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the connectivity chart lost the agent-platform.kagent.fluxServiceAccountName helper"; exit 1; }
 	@grep -q 'define "agent-platform.kagent.fluxServiceAccountName"' $(CHART_DIR)/templates/_helpers.tpl || { echo "FAIL: the meta chart lost the agent-platform.kagent.fluxServiceAccountName helper"; exit 1; }
-	@echo "--> the default: agent-manager receives kagent-flux from the derivation, not from values.yaml"
+	@echo "--> the default: agent-manager receives neither flux nor agentChart, and the meta values.yaml sets neither"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/vid-meta.out 2>&1 || { cat /tmp/vid-meta.out; exit 1; }
-	@grep -q 'helmReleaseServiceAccount: kagent-flux' /tmp/vid-meta.out || { echo "FAIL: agent-manager lost flux.helmReleaseServiceAccount"; exit 1; }
-	@if grep -q 'helmReleaseServiceAccount:' $(CHART_DIR)/values.yaml $(CONNECTIVITY_DIR)/values.yaml; then echo "FAIL: agent-manager.flux.helmReleaseServiceAccount is set in a values.yaml again; it is derived from kagent.fluxServiceAccountName"; exit 1; fi
-	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
+	@$(call hr_doc,agent-manager,/tmp/vid-meta.out) >/tmp/vid-meta-am-default.out
+	@grep -q '^    fullnameOverride: agent-manager$$' /tmp/vid-meta-am-default.out || { echo "FAIL: no agent-manager HelmRelease values in the default meta render"; exit 1; }
+	@if grep -qE '$(AM_REJECTED)' /tmp/vid-meta-am-default.out; then echo "FAIL: the default render forwards flux / agentChart to agent-manager (D-V1)"; grep -nE '$(AM_REJECTED)' /tmp/vid-meta-am-default.out; exit 1; fi
+	@if grep -q 'helmReleaseServiceAccount:' $(CHART_DIR)/values.yaml $(CONNECTIVITY_DIR)/values.yaml; then echo "FAIL: agent-manager.flux.helmReleaseServiceAccount is set in a values.yaml again; the kagent API v2 agent-manager chart rejects the key"; exit 1; fi
+	@if awk '/^agent-manager:/{f=1;next} f&&/^[^ #]/{exit} f' $(CHART_DIR)/values.yaml | grep -qE '^  (flux|agentChart):'; then echo "FAIL: the meta values.yaml sets agent-manager.flux / .agentChart again; there is no agent chart on this line and the agent-manager chart rejects both"; exit 1; fi
+	@echo "--> empty value: no identity; the meta render passes and agent-manager still receives no flux key"
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >/tmp/vid-empty.out 2>&1 || { cat /tmp/vid-empty.out; exit 1; }
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' /tmp/vid-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still renders the identity"; exit 1; fi
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.fluxServiceAccountName= >/tmp/vid-meta-empty.out 2>&1 || { cat /tmp/vid-meta-empty.out; exit 1; }
-	@grep -q 'helmReleaseServiceAccount: ""' /tmp/vid-meta-empty.out || { echo "FAIL: an empty value does not reach agent-manager as an empty ServiceAccount"; exit 1; }
+	@if grep -q 'helmReleaseServiceAccount' /tmp/vid-meta-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still reaches agent-manager as a flux key"; exit 1; fi
 	@echo "ok: empty value"
-	@echo "--> a disagreeing agent-manager.flux.helmReleaseServiceAccount fails, naming the one key; an agreeing one passes"
-	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.flux.helmReleaseServiceAccount=other >/tmp/vid-guard.out 2>&1; then \
-		echo "FAIL: a disagreeing agent-manager.flux.helmReleaseServiceAccount was accepted"; exit 1; \
-	elif ! grep -q "set kagent.fluxServiceAccountName" /tmp/vid-guard.out; then \
-		echo "FAIL: the identity guard failed for the wrong reason"; cat /tmp/vid-guard.out; exit 1; \
-	else echo "ok: identity guard"; fi
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.flux.helmReleaseServiceAccount=kagent-flux >/dev/null 2>&1 || { echo "FAIL: an agreeing agent-manager.flux.helmReleaseServiceAccount must pass"; exit 1; }
+	@echo "--> any agent-manager.flux.* or agent-manager.agentChart.* fails the render, naming the key (the release line's values, which the kagent API v2 chart rejects)"
+	@for key in flux.helmReleaseServiceAccount=kagent-flux agentChart.ociUrl=oci://gsoci.azurecr.io/charts/giantswarm/agent; do \
+		top=$${key%%.*}; \
+		if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.$$key >/tmp/vid-guard.out 2>&1; then \
+			echo "FAIL: agent-manager.$$key was accepted; the kagent API v2 agent-manager chart rejects it"; exit 1; \
+		elif ! grep -q "agent-manager.$$top is set" /tmp/vid-guard.out || ! grep -q "remove the key" /tmp/vid-guard.out; then \
+			echo "FAIL: the agent-manager key guard for $$key failed for the wrong reason"; cat /tmp/vid-guard.out; exit 1; \
+		else echo "ok: agent-manager.$$top refused, naming the key"; fi; \
+	done
 	@echo "--> upstream fixes that retired the standalone's template patches"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.muster.enabled=false >/tmp/vid-nomuster.out 2>&1 || { cat /tmp/vid-nomuster.out; exit 1; }
 	@if grep -A3 '^kind: HTTPRoute$$' /tmp/vid-nomuster.out | grep -q '^  name: muster$$'; then echo "FAIL: the muster / HTTPRoute renders with the muster component off (hostname-less, it would blackhole the shared Gateway)"; exit 1; else echo "ok: muster route gated on the component"; fi

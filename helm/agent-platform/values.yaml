@@ -1761,18 +1761,20 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     namespaceOverride: kagent
 
   # --- Tenant identity (read by the connectivity chart, not passed to the kagent chart) ---
-  # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. The
-  # connectivity chart renders it in the kagent namespace whenever kagent is
-  # on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control
-  # of the kagent namespace, nothing outside it); this chart derives
-  # agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's
-  # `agentPlatform.fluxServiceAccountName` is rendered from the same value —
-  # ONE value, three consumers, so they cannot disagree. Under a Flux
-  # multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less
-  # default ServiceAccount and fails. Empty renders no identity and hands both
-  # callers an empty name. On kagent main agent-manager and the portal write
-  # AgentTemplates as the caller instead of HelmReleases; the identity stays
-  # rendered and named to both until that path is retired.
+  # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as on the
+  # release line. The connectivity chart renders it in the kagent namespace
+  # whenever kagent is on, bound to `cluster-admin` by a namespace-scoped
+  # RoleBinding (full control of the kagent namespace, nothing outside it), and
+  # the portal's `agentPlatform.fluxServiceAccountName` is rendered from the
+  # same value. On this line (kagent API v2) agent-manager and the portal write
+  # AgentTemplates as the caller — there are no agent HelmReleases — so this
+  # chart no longer derives agent-manager's `flux.helmReleaseServiceAccount`
+  # from it: the agent-manager POC chart's closed schema has no `flux` key and
+  # would refuse the release (see the `agent-manager:` block). The identity
+  # itself stays rendered — a namespace-scoped ServiceAccount + RoleBinding is
+  # harmless, the portal's app-config still names it — until the portal's
+  # HelmRelease path is retired too. Empty renders no identity and hands the
+  # portal an empty name.
   fluxServiceAccountName: kagent-flux
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
@@ -2521,18 +2523,23 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
 # === Agent manager (agent-manager) ===
 # Values forwarded verbatim to the agent-manager component release
 # (giantswarm/agent-manager, the agent write surface of the Agent Control
-# Plane): creates, updates, deletes and inspects kagent agents as Flux
-# HelmReleases of the agent chart — byte-for-byte what the portal's create
-# flow composes — validated against the chart's values.schema.json, as REST
-# and MCP (tools appear as x_agent-manager_<tool> through the chart's own
-# MCPServer CR). It needs the kagent component (the agents it manages, in
-# kagent.namespace = kagent.namespaceOverride) and Flux's helm and source
-# controllers on the cluster. The HelmReleases it writes execute as
-# flux.helmReleaseServiceAccount, which is NOT set here: templates/components.yaml
-# derives it from kagent.fluxServiceAccountName — the tenant identity the
-# connectivity chart renders in the kagent namespace — so the ServiceAccount, its
-# RoleBinding, agent-manager and the portal share one name (a value set here
-# must agree with it or the render fails).
+# Plane). On this line — kagent API v2, the agent-manager poc/kagent-main
+# build — it creates, updates, deletes and inspects agents as kagent.dev/v1alpha3
+# AgentTemplate CRs plus their carrier RemoteMCPServer, written directly as the
+# caller — byte-for-byte what the portal's create flow composes — as REST and
+# MCP (tools appear as x_agent-manager_<tool> through the chart's own MCPServer
+# CR). It needs the kagent component (the agents it manages, in
+# kagent.namespace = kagent.namespaceOverride). There is NO agent chart and NO
+# agent HelmRelease on this line, and the chart's values.schema.json is closed
+# (additionalProperties: false) without `agentChart` and without `flux`, so the
+# release line's `agentChart` (ociUrl, semver) is not set here and the
+# derivation of `flux.helmReleaseServiceAccount` from kagent.fluxServiceAccountName
+# is off (templates/_helpers.tpl, agent-platform.componentDerivedValues): either
+# key in this block fails the release on the cluster ("additional properties
+# 'agentChart', 'flux' not allowed"), so the render refuses both, naming the
+# key. The release of this line restores them with the agent chart.
+# make verify-components-charts renders this block against the agent-manager
+# chart the dev channel resolves to.
 # Identity as for model-manager above: an OAuth 2.1 resource server acting as
 # the caller, no ServiceAccount permissions (the chart renders no RBAC), the
 # platform client named here or through global.identity. The chart's own
@@ -2542,9 +2549,6 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: agent-manager
   kagent:
     namespace: kagent
-  agentChart:
-    ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-    semver: x.x.x
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:

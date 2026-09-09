@@ -515,7 +515,7 @@ This chart version is a build of the `poc/kagent-main` branch — the kagent API
 | kagent.cilium-debug-agent.namespaceOverride | string | `"kagent"` |  |
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
-| kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. On kagent main agent-manager and the portal write AgentTemplates as the caller instead of HelmReleases; the identity stays rendered and named to both until that path is retired. |
+| kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as on the release line. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it), and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value. On this line (kagent API v2) agent-manager and the portal write AgentTemplates as the caller — there are no agent HelmReleases — so this chart no longer derives agent-manager's `flux.helmReleaseServiceAccount` from it: the agent-manager POC chart's closed schema has no `flux` key and would refuse the release (see the `agent-manager:` block). The identity itself stays rendered — a namespace-scoped ServiceAccount + RoleBinding is harmless, the portal's app-config still names it — until the portal's HelmRelease path is retired too. Empty renders no identity and hands the portal an empty name. |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.pathPrefix | string | `"/kagent"` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
@@ -724,8 +724,6 @@ This chart version is a build of the `poc/kagent-main` branch — the kagent API
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
-| agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
-| agent-manager.agentChart.semver | string | `"x.x.x"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |

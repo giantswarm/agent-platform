@@ -971,15 +971,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in
   # the kagent namespace whenever kagent is on, bound to `cluster-admin` by a
   # namespace-scoped RoleBinding (full control of the kagent namespace, nothing
-  # outside it), and named from this ONE value into agent-manager
-  # (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the
-  # portal's `agentPlatform.fluxServiceAccountName` (through the
-  # `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot
-  # disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs
-  # as the rights-less default ServiceAccount and fails. Empty renders no
-  # identity and hands both callers an empty name. On kagent main agent-manager
-  # and the portal write AgentTemplates as the caller instead of HelmReleases;
-  # the identity stays rendered and named to both until that path is retired.
+  # outside it), and named from this ONE value into the portal's
+  # `agentPlatform.fluxServiceAccountName` (through the
+  # `agent-platform.kagent.fluxServiceAccountName` helper) and, on the release
+  # line, into agent-manager (`flux.helmReleaseServiceAccount`, derived by the
+  # meta chart). Under a Flux multi-tenancy lockdown a `HelmRelease` without it
+  # runs as the rights-less default ServiceAccount and fails. Empty renders no
+  # identity and hands the portal an empty name. On this line (kagent API v2)
+  # agent-manager and the portal write AgentTemplates as the caller instead of
+  # HelmReleases and the meta chart forwards no `flux` key to agent-manager
+  # (its chart's closed schema has none); the identity stays rendered — harmless,
+  # namespace-scoped — and named to the portal until that path is retired.
   fluxServiceAccountName: kagent-flux
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
@@ -1695,10 +1697,14 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
 # MCPServer CR). It needs the kagent component (the agents it manages, in
 # kagent.namespace = kagent.namespaceOverride) and Flux's helm and source
 # controllers on the cluster. The HelmReleases it writes execute as
-# flux.helmReleaseServiceAccount, which is NOT set here: the meta chart derives
-# it from kagent.fluxServiceAccountName — the tenant identity this chart renders
-# in the kagent namespace (templates/kagent/flux-service-account.yaml) — so the
-# ServiceAccount, its RoleBinding, agent-manager and the portal share one name.
+# flux.helmReleaseServiceAccount, which is NOT set here: the release line's meta
+# chart derives it from kagent.fluxServiceAccountName — the tenant identity this
+# chart renders in the kagent namespace (templates/kagent/flux-service-account.yaml).
+# On this line (kagent API v2) agent-manager writes AgentTemplate CRs directly,
+# and the meta chart forwards neither `flux` nor `agentChart` to it (its chart's
+# closed schema has neither); the `agentChart` below is read by THIS chart only,
+# for the registry host of the agent-manager egress policy
+# (templates/agent-manager/_helpers.tpl), and is not what the meta chart forwards.
 # Identity as for model-manager above: an OAuth 2.1 resource server acting as
 # the caller, no ServiceAccount permissions (the chart renders no RBAC), the
 # platform client named here or through global.identity. The chart's own

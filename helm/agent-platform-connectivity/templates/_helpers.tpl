@@ -79,10 +79,12 @@ Usage: include "agent-platform.optionalComponentEnabled" (dict "root" $ "name" "
 {{/*
 The tenant identity of the agents' Flux HelmReleases: the ServiceAccount name
 (kagent.fluxServiceAccountName) while the kagent component is on, "" otherwise.
-ONE value, three consumers: templates/kagent/flux-service-account.yaml renders
-the ServiceAccount and its RoleBinding from it, the meta chart derives
-agent-manager's flux.helmReleaseServiceAccount from the same key, and the
-portal's app-config (agentPlatform.fluxServiceAccountName) reads this helper.
+ONE value, two consumers on this line: templates/kagent/flux-service-account.yaml
+renders the ServiceAccount and its RoleBinding from it and the portal's
+app-config (agentPlatform.fluxServiceAccountName) reads this helper. The release
+line's meta chart also derives agent-manager's flux.helmReleaseServiceAccount
+from it; on kagent API v2 agent-manager writes AgentTemplates directly and its
+chart's closed schema has no flux key, so the meta chart forwards none.
 Under a multi-tenancy lockdown (helm-controller with --no-cross-namespace-refs
 and a rights-less default ServiceAccount; the Flux multi-tenancy admission
 policy on Giant Swarm management clusters) a HelmRelease executes as the

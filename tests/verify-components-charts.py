@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Pull the seven component charts of the standalone chart's extras and render each
-with the values the meta chart forwards to it.
+"""Pull the component charts whose values the meta chart composes — the seven
+extras of the standalone chart and the two managers — and render each with the
+values the meta chart forwards to it.
 
 The meta chart cannot know whether a component chart accepts the block it
 forwards: the block is inlined into a HelmRelease and validated by helm-controller
@@ -10,6 +11,14 @@ resolves to today (what a dogfooding installation gets) and at the exact pin in
 examples/customer-bom.yaml (what a BOM installation gets). The render uses the
 quick-start inputs Backstage and mcp-kubernetes require (global.domain and
 global.identity) and the API groups the charts' optional objects need.
+
+The two managers matter most: their charts validate values with a CLOSED schema
+(additionalProperties: false at the root), so one key the meta chart forwards —
+from the `agent-manager:` / `model-manager:` block or derived by
+agent-platform.componentDerivedValues — that the chart the channel resolves to
+does not declare fails the HelmRelease on every installation that turns the
+component on. Nothing else in CI turns them on against their real charts.
+agent-manager needs the kagent component on, so the render turns kagent on too.
 
 A component on a dev channel (components.<name>.semverFilter) is resolved the
 way Flux resolves it — the registry's tag list filtered by the regexp, then the
@@ -30,15 +39,23 @@ import time
 import urllib.error
 import urllib.request
 
-NEW = [
+EXTRAS = [
     "backstage", "mcp-kubernetes", "cloudnative-pg",
     "kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources",
 ]
+MANAGERS = ["model-manager", "agent-manager"]
+COMPONENTS = [*EXTRAS, *MANAGERS]
+# Turned on for the render but not pulled: agent-manager's prerequisite. The
+# kagent fork chart has no schema, so there is nothing to validate against.
+PREREQUISITES = ["kagent"]
 QUICKSTART = [
     "--set", "global.domain=example.com",
     "--set", "global.identity.issuerUrl=https://dex.example.com",
     "--set", "global.identity.clientId=agent-platform",
     "--set", "global.identity.existingSecret=agent-platform-idp",
+    # model-manager's chart requires the endpoint of its default backend (an
+    # installation input, empty in the meta chart's values).
+    "--set", "model-manager.ollama.endpoint=http://ollama.example.com:11434",
 ]
 API_VERSIONS = [
     "--api-versions", "cilium.io/v2",
@@ -144,10 +161,10 @@ def pull(url: str, constraint: str, dest: str) -> str:
 
 
 def main(meta: str) -> int:
-    on = [f"--set=components.{n}.enabled=true" for n in NEW]
+    on = [f"--set=components.{n}.enabled=true" for n in (*COMPONENTS, *PREREQUISITES)]
     wide = docs(render_meta(meta, [*QUICKSTART, *on]))
     pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *on]))
-    for name in NEW:
+    for name in COMPONENTS:
         url, rng, semver_filter = source(wide[("OCIRepository", name)])
         _, pin, pin_filter = source(pinned[("OCIRepository", name)])
         if pin_filter:

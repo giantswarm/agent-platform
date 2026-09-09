@@ -79,9 +79,11 @@ true
 The tenant identity of the agents' Flux HelmReleases: kagent.fluxServiceAccountName
 while the kagent component is on, "" otherwise. The connectivity chart renders
 the ServiceAccount and its RoleBinding from the same value (a helper of the same
-name there) and exports it to the portal's app-config; this copy derives
-agent-manager's flux.helmReleaseServiceAccount (componentDerivedValues), so the
-three consumers cannot disagree.
+name there) and exports it to the portal's app-config. On this line (kagent API
+v2) agent-manager writes AgentTemplates directly and its chart's closed schema
+has no `flux` key, so this copy derives nothing from the value any more
+(componentDerivedValues refuses the key instead); the helper stays for the
+release line, which derives agent-manager's flux.helmReleaseServiceAccount here.
 Usage: include "agent-platform.kagent.fluxServiceAccountName" .
 */}}
 {{- define "agent-platform.kagent.fluxServiceAccountName" -}}
@@ -97,18 +99,27 @@ value drives every consumer. Emits a JSON object; {} for a component with
 nothing derived. A value the component's own block sets must agree with the
 derived one, otherwise the render fails naming the single key to set — a silent
 overwrite would hide a values file that still spells the old key.
-  agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName.
+Nothing is derived on this line. The release line derives agent-manager's
+flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName (the tenant
+identity of the agents' HelmReleases); on kagent API v2 agent-manager writes
+AgentTemplate + RemoteMCPServer CRs directly — no agent HelmRelease, no agent
+chart — and its chart's values.schema.json is closed without `flux` and without
+`agentChart`, so a forwarded key of either name fails the release on the
+cluster (helm-controller: "additional properties 'agentChart', 'flux' not
+allowed"). Instead of deriving, this helper refuses both keys in the
+agent-manager block, naming the one to remove; verify-components-charts renders
+the forwarded block against the chart the channel resolves to.
 Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
 {{- $derived := dict -}}
 {{- if eq .name "agent-manager" -}}
-{{- $sa := include "agent-platform.kagent.fluxServiceAccountName" .root -}}
-{{- $own := dig "flux" "helmReleaseServiceAccount" "" (index .root.Values "agent-manager" | default dict) -}}
-{{- if and $own (ne $own $sa) -}}
-{{- fail (printf "agent-manager.flux.helmReleaseServiceAccount (%s) differs from kagent.fluxServiceAccountName (%s): the agents' HelmReleases have one tenant identity — set kagent.fluxServiceAccountName and leave agent-manager.flux.helmReleaseServiceAccount unset" $own $sa) -}}
+{{- $block := index .root.Values "agent-manager" | default dict -}}
+{{- range $key := list "flux" "agentChart" -}}
+{{- if hasKey $block $key -}}
+{{- fail (printf "agent-manager.%s is set: kagent API v2 agent-manager has no agent HelmReleases and no agent chart (it writes AgentTemplate CRs directly) and its chart's schema rejects the key; remove the key" $key) -}}
 {{- end -}}
-{{- $_ := set $derived "flux" (dict "helmReleaseServiceAccount" $sa) -}}
+{{- end -}}
 {{- end -}}
 {{- $derived | toJson -}}
 {{- end -}}
