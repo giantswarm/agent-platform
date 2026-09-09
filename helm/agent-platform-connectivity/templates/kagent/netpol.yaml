@@ -1,6 +1,16 @@
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.networkPolicy.enabled }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $controllerPort := "8083" }}
+{{- /* The agent-pod selectors below (app: kagent, the label the v1alpha2
+     controller set on every per-agent Deployment) are v1alpha2-shaped: on kagent
+     main there is no per-agent pod — agents run as Substrate actors in the
+     gVisor worker pods of the WorkerPool, and their traffic (muster, the LLM
+     provider, the controller) leaves through Substrate's atenet-egress in
+     ate-system. The rules that select app: kagent match nothing on main;
+     whether the worker pods and atenet-egress need policies of their own is
+     unverified in this POC (the lab renders no network policies). Deliberately
+     not restructured: the controller, UI, oauth2-proxy and CNPG rules are what
+     they were. */}}
 {{- /* kagent's built-in tool server (the kagent-tools subchart of the kagent chart).
      The kagent chart renders a RemoteMCPServer for it at
      http://kagent-tools.<tools namespace>:<port>/mcp; the controller discovers its

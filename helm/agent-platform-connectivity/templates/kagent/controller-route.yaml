@@ -16,19 +16,28 @@ spec:
   policies:
     auth:
       # Gateway strips the JWT after validation; passthrough re-injects it so
-      # trusted-proxy mode can extract the sub claim.
+      # the controller forwards the caller's bearer to the actor unchanged (with
+      # KAGENT_PROPAGATE_TOKEN it reaches muster as the person). The controller
+      # itself reads the caller from x-user-id, not from the token (trusted-proxy
+      # decoding of the sub claim is the v1alpha2 controller; AUTH_MODE is inert
+      # on main).
       passthrough: {}
   static:
     host: {{ printf "%s-controller.%s.svc.cluster.local" $kagentFullname $ns }}
     port: 8083
 ---
 # HTTPRoute — exposes the kagent API at <pathPrefix> on the agentgateway Gateway.
-# Path prefix is stripped (URLRewrite) before forwarding so the controller
-# receives requests at /api/... as it expects.
+# The route carries gRPC-Web (application/grpc-web+proto over HTTP/1.1 POST — what
+# crosses the edge; native gRPC over h2 is not promised) and the controller's MCP
+# endpoint (/mcp). The prefix is stripped (URLRewrite) so the controller sees the
+# bare service path: <pathPrefix>/kagent.api.v1alpha1.AgentInstanceService/ListAgentInstances
+# becomes /kagent.api.v1alpha1.AgentInstanceService/ListAgentInstances. There is
+# no REST /api on kagent main.
 #
 # This is the internal data-plane hop. It is deliberately NOT hostname-scoped:
 # in-cluster A2A callers (e.g. klaus-gateway's --a2a-url, which points at the
-# agentgateway Service's cluster-DNS name) send Host=<svc>.<ns>.svc.cluster.local,
+# agentgateway Service's cluster-DNS name; JSON-RPC A2A is v1alpha2, on main the
+# same callers speak gRPC-Web to this route) send Host=<svc>.<ns>.svc.cluster.local,
 # which would not match the public hostname. A host-scoped inner route lets those
 # requests fall through to the catch-all MCP route ("/"), where they are handled
 # as MCP Streamable-HTTP and rejected with 406 ("client must accept both
