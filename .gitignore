@@ -8,3 +8,6 @@ helm/*/charts/*
 # is a function of the Chart.yaml entry alone, so nothing is pinned by it.
 helm/*/Chart.lock
 __pycache__/
+
+# graphify knowledge graph (regenerable, rebuilt by the post-commit hook)
+graphify-out/
