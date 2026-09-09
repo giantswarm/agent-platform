@@ -300,6 +300,27 @@ verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the 
 	@echo "--> the flag itself is meta-package plumbing and is not forwarded to any child release"
 	@if grep -q 'forbidInlineSecrets' /tmp/vs-ref.out; then echo "FAIL: gitops.forbidInlineSecrets leaked into a child HelmRelease's values"; exit 1; else echo "ok: flag not forwarded"; fi
 
+.PHONY: verify-login-connector
+verify-login-connector: ## Assert gitops.forbidPinnedLoginConnector: off by default a pinned connectorId renders and reaches the muster release, on it fails the render naming the key, on with an empty or absent connectorId renders, and the knob reaches no child release.
+	@echo "====> $@ ($(CHART_DIR))"
+	@echo "--> default (forbidPinnedLoginConnector: false): a pinned connectorId renders and reaches the muster release (the pre-existing behavior)"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set muster.muster.oauth.server.dex.connectorId=pinned-connector >/tmp/vlc-default.out 2>&1 || { cat /tmp/vlc-default.out; exit 1; }
+	@grep -q 'connectorId: pinned-connector' /tmp/vlc-default.out || { echo "FAIL: the pinned connectorId did not reach the muster HelmRelease (test setup)"; exit 1; }
+	@echo "ok: default render unchanged"
+	@echo "--> forbidPinnedLoginConnector: true with a pinned connectorId fails, naming the key"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidPinnedLoginConnector=true --set muster.muster.oauth.server.dex.connectorId=pinned-connector >/tmp/vlc-forbid.out 2>&1; then \
+		echo "FAIL: the pinned-connector guard did not fire"; exit 1; fi
+	@grep -q "gitops.forbidPinnedLoginConnector is true" /tmp/vlc-forbid.out || { echo "FAIL: the render failed for the wrong reason"; cat /tmp/vlc-forbid.out; exit 1; }
+	@grep -q "muster.muster.oauth.server.dex.connectorId" /tmp/vlc-forbid.out || { echo "FAIL: the guard did not name the key"; cat /tmp/vlc-forbid.out; exit 1; }
+	@if grep -q 'pinned-connector' /tmp/vlc-forbid.out; then echo "FAIL: the guard's message repeated the pinned value"; exit 1; fi
+	@echo "ok: guard fires naming the key"
+	@echo "--> forbidPinnedLoginConnector: true with no pin renders (connectorId absent, and set to the empty string)"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidPinnedLoginConnector=true >/tmp/vlc-none.out 2>&1 || { cat /tmp/vlc-none.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidPinnedLoginConnector=true --set muster.muster.oauth.server.dex.connectorId="" >/tmp/vlc-empty.out 2>&1 || { cat /tmp/vlc-empty.out; exit 1; }
+	@echo "ok: no pin renders"
+	@echo "--> the knob itself is meta-package plumbing and is not forwarded to any child release"
+	@if grep -q 'forbidPinnedLoginConnector' /tmp/vlc-none.out; then echo "FAIL: gitops.forbidPinnedLoginConnector leaked into a child HelmRelease's values"; exit 1; else echo "ok: knob not forwarded"; fi
+
 .PHONY: verify-meta
 # The meta chart's render assertions run with the bundled Flux engine OFF (the
 # fleet's value): the pure-renderer rule holds for the platform objects, and

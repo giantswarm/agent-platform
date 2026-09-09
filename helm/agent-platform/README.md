@@ -60,6 +60,7 @@ README.
 | gitops.self.interval | string | `"10m"` |  |
 | gitops.retries | int | `5` |  |
 | gitops.forbidInlineSecrets | bool | `false` |  |
+| gitops.forbidPinnedLoginConnector | bool | `false` |  |
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |

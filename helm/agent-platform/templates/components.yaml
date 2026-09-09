@@ -97,6 +97,7 @@ knowledge:
 */ -}}
 {{- include "agent-platform.validateLegacyToggles" . -}}
 {{- include "agent-platform.validateInlineSecrets" . -}}
+{{- include "agent-platform.validatePinnedLoginConnector" . -}}
 {{- include "agent-platform.validateToolsetPresets" . -}}
 {{- $root := . -}}
 {{- $g := .Values.gitops -}}

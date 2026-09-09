@@ -781,6 +781,9 @@
                 "forbidInlineSecrets": {
                     "type": "boolean"
                 },
+                "forbidPinnedLoginConnector": {
+                    "type": "boolean"
+                },
                 "hooks": {
                     "type": "object",
                     "additionalProperties": false,
