@@ -87,7 +87,7 @@ export ANTHROPIC_API_KEY=…
 agentlab up && agentlab platform-test && agentlab backstage-test && agentlab agents-test && agentlab toolsets-test
 ```
 
-`--chart-branch` resolves the newest `agent-platform` dev tag of the branch at `configure`, `up` and `platform` and writes it to `platform.chartVersion`, so `render`, the preload and re-runs stay deterministic; it also turns `platform.substrate.enabled` on (kagent `main` cannot run without it) — the lab installs the feature gates at `kind create`, the Substrate charts and the CA/JWT bootstrap. Until an agentlab release carries `--chart-branch`, the fallback works today with no code: `agentlab configure --chart-version <full dev tag>` (`crane ls gsoci.azurecr.io/charts/giantswarm/agent-platform | grep -- '-dev.poc-kagent-main.'` lists them) on a lab that has the gates and Substrate.
+`--chart-branch` resolves the newest `agent-platform` dev tag of the branch at `configure`, `up` and `platform` and writes it to `platform.chartVersion`, so `render`, the preload and re-runs stay deterministic; it also turns `platform.substrate.enabled` on (kagent `main` cannot run without it) — the lab installs the feature gates at `kind create`, the Substrate charts and the CA/JWT bootstrap. `--chart-branch` ships with agentlab v0.27.0 (`agentlab self-update`); the fallback needs no resolver: `agentlab configure --chart-version <full dev tag> --substrate` (`crane ls gsoci.azurecr.io/charts/giantswarm/agent-platform | grep -- '-dev.poc-kagent-main.'` lists the tags; the first is `3.22.1-dev.poc-kagent-main.2026-09-09.21-30-24.hb693e7a`).
 
 **Consuming it with Flux (a cluster like spidertron).** Point the meta chart's `OCIRepository` at the dev channel; the components follow through the chart's defaults:
 

@@ -1417,10 +1417,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # under helm-controller that is `<version>+<oci digest>` — an invalid image
   # tag, a silent ImagePullBackOff. A new kagent build re-pins this tag AND
   # the two Harness digests below in one commit (the chart follows the branch
-  # through components.kagent; the images are pinned here).
-  # TODO(R2): the first published build of ghcr.io/giantswarm/kagent — set once
-  # the fork's tag workflow has run (`crane ls ghcr.io/giantswarm/kagent/controller`).
-  tag: "0.11.0-dev.poc-agent-platform.TODO-R2"
+  # through components.kagent; the images are pinned here). This is the fork's
+  # build of 2026-09-09 (commit 7ae93c5; `crane ls
+  # ghcr.io/giantswarm/kagent/controller` lists the builds).
+  tag: "0.11.0-dev.poc-agent-platform.2026-09-09.21-33-35.h7ae93c5"
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
   # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
   # must stay allowed.
@@ -1875,16 +1875,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # kagent build `tag` above names (a new build re-pins tag and both digests in
   # one commit): the Go ADK runtime and the Claude Code harness, both on the
   # WorkerPool substrateWorkerPool creates, snapshots in the Substrate
-  # release's bundled object store (bucket ate-snapshots).
-  # TODO(R2): the digests of the first published build —
-  #   crane digest ghcr.io/giantswarm/kagent/golang-adk:<tag>
-  #   crane digest ghcr.io/giantswarm/kagent/claude-harness:<tag>
-  # (index digests; atelet resolves the architecture). All-zero until then:
-  # syntactically a digest, so the render passes; the pull would not.
+  # release's bundled object store (bucket ate-snapshots). The digests are the
+  # image index digests of the build `tag` names (`crane digest
+  # ghcr.io/giantswarm/kagent/golang-adk:<tag>`, `…/claude-harness:<tag>`;
+  # amd64 + arm64, atelet resolves the architecture).
   harnesses:
     - name: kagent
       type: kagent
-      image: ghcr.io/giantswarm/kagent/golang-adk@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      image: ghcr.io/giantswarm/kagent/golang-adk@sha256:749e34bfb8314604f27946b85328e0cf7509a36d2a76a90ba279d3fab0d0a49a
       env:
         # The Go ADK re-emits the caller's bearer on its MCP calls, so muster
         # sees the person, not the agent.
@@ -1894,7 +1892,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       snapshotLocation: s3://ate-snapshots/kagent
     - name: claude
       type: claude
-      image: ghcr.io/giantswarm/kagent/claude-harness@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      image: ghcr.io/giantswarm/kagent/claude-harness@sha256:f5dd111a06743b9cd9aabac0cb5e6fc7ccbae6168eaccd24d577999eea953589
       workerPool: kagent-default
       snapshotLocation: s3://ate-snapshots/claude
 

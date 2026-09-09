@@ -13,9 +13,9 @@
 # matches NOTHING (the filter admits only the branch's dev tags, the pin names
 # one of them or a stable one) — so every dev-channel entry below clears the
 # filter (`semverFilter: ""`) and pins the full dev tag of the build it was
-# snapshotted from. kagent and kagent-crds pin the fork build named by
-# kagent.tag in values.yaml (TODO(R2): the first published build). The
-# release of this line puts the stable pins back.
+# snapshotted from — kagent and kagent-crds the fork build kagent.tag in
+# values.yaml names, agent-platform-connectivity this branch's first published
+# build (2026-09-09). The release of this line puts the stable pins back.
 #
 # Snapshot of the internal dogfooding track on 2026-09-07. The muster pin is the
 # floor of components.muster.versionRange: the toolset presets in values.yaml
@@ -44,16 +44,14 @@ components:
   agentgateway:                  { versionRange: "2.0.7" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "0.11.0-dev.poc-agent-platform.TODO-R2", semverFilter: "" }
-  kagent-crds:                   { versionRange: "0.11.0-dev.poc-agent-platform.TODO-R2", semverFilter: "" }
+  kagent:                        { versionRange: "0.11.0-dev.poc-agent-platform.2026-09-09.21-33-35.h7ae93c5", semverFilter: "" }
+  kagent-crds:                   { versionRange: "0.11.0-dev.poc-agent-platform.2026-09-09.21-33-35.h7ae93c5", semverFilter: "" }
   klaus-gateway:                 { versionRange: "0.39.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.19.4-dev.poc-kagent-main.2026-09-09.20-20-39.h8fb4caa", semverFilter: "" }
   agent-manager:                 { versionRange: "0.4.1-dev.poc-kagent-main.2026-09-09.20-20-34.hc2aecf4", semverFilter: "" }
-  # TODO(first dev build): the first agent-platform-connectivity dev tag this
-  # branch's CI pushes (push-connectivity-chart), identical to the meta chart's.
-  agent-platform-connectivity: { versionRange: "3.22.1-dev.poc-kagent-main.TODO-FIRST-BUILD", semverFilter: "" }
+  agent-platform-connectivity: { versionRange: "3.22.1-dev.poc-kagent-main.2026-09-09.21-30-24.hb693e7a", semverFilter: "" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the three kserve charts and the two
