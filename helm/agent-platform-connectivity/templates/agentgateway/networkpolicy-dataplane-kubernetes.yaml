@@ -23,6 +23,19 @@ spec:
         - port: {{ .Values.llmRouting.listener.port }}
           protocol: TCP
         {{- end }}
+    {{- /* Prometheus scrape of the data plane's stats endpoint: pod port 15020,
+    path /metrics, the target of the PodMonitor this chart renders. The port is
+    fixed by the agentgateway controller, which names it `metrics` on the
+    container and sets the prometheus.io/* annotations; it is not an operator
+    choice, so it is written here as the controller's sibling policy writes the
+    controller's own 9092/9093. Unconditional, like that rule: a cluster may
+    scrape by pod annotation with no PodMonitor at all. Without it the scrape is
+    dropped, the target reports up=0, and every GenAI and HTTP metric is lost. */}}
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 15020
+          protocol: TCP
     {{- if (include "agent-platform.edgeIsDataPlane" .) }}
     # The data plane is the public edge: the HTTPS listener takes traffic from
     # outside the cluster. World traffic is admitted on 443 only — the

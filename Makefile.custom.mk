@@ -441,7 +441,8 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@echo "--> off, agentgateway on: the data-plane PodMonitor still renders (the MCP path is scraped too)"
 	@grep -q 'kind: PodMonitor' /tmp/vl-off.out || { echo "FAIL: the data-plane PodMonitor is gated on llmRouting; the MCP path would never be scraped"; exit 1; }
 	@grep -A12 'agentgateway-dataplane' /tmp/vl-off.out | grep -q 'observability.giantswarm.io/tenant: giantswarm' || { echo "FAIL: the PodMonitor lost the tenant label; alloy-metrics would ignore it"; exit 1; }
-	@echo "ok: PodMonitor + tenant label"
+	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-off.out | grep -q '"15020"' || { echo "FAIL: the data-plane policy does not admit the scrape port; the PodMonitor target reports up=0 and every metric is lost"; exit 1; }
+	@echo "ok: PodMonitor + tenant label + scrape port"
 	@echo "--> on: the llm listener, the pinned route, the AI backend, the Gateway policy and the price catalog"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true >/tmp/vl-on.out 2>&1 || { cat /tmp/vl-on.out; exit 1; }
 	@grep -q 'name: llm' /tmp/vl-on.out || { echo "FAIL: no llm listener on the Gateway"; exit 1; }
@@ -485,9 +486,11 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@echo "ok: price catalog wired"
 	@echo "--> the network policies admit the LLM port in both flavors"
 	@grep -A24 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-on.out | grep -q '"8081"' || { echo "FAIL: the cilium data-plane policy does not admit the LLM port"; exit 1; }
+	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-on.out | grep -q '"15020"' || { echo "FAIL: the cilium data-plane policy does not admit the scrape port"; exit 1; }
 	@grep -A40 'kagent-agent-muster-egress' /tmp/vl-on.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' || { echo "FAIL: agent pods have no egress to the data plane's LLM port"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes >/tmp/vl-k8s.out 2>&1 || { cat /tmp/vl-k8s.out; exit 1; }
 	@grep -A24 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-k8s.out | grep -q 'port: 8081' || { echo "FAIL: the kubernetes data-plane policy does not admit the LLM port"; exit 1; }
+	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-k8s.out | grep -q 'port: 15020' || { echo "FAIL: the kubernetes data-plane policy does not admit the scrape port"; exit 1; }
 	@echo "ok: network policies"
 	@echo "--> guard: llmRouting on with no agentgateway data plane must fail"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set llmRouting.enabled=true >/tmp/vl-guard.out 2>&1; then \
