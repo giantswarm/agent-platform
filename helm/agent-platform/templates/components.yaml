@@ -8,11 +8,16 @@ resolved at reconcile time) — never from a Chart.yaml pin.
 
 Each entry is fully self-describing; this template has no per-component
 knowledge:
-  chart/repository/versionRange — where to pull and which versions (filterTags
-      optional, for dev-tag streams). An entry WITHOUT a chart key is a feature
-      switch (components.flux, the condition of the flux-engine subchart): it is
-      part of the roster forwarded to connectivity and of the enabled/disabled
-      logic like every other entry, but this loop renders no release for it.
+  chart/repository/versionRange — where to pull and which versions. An entry
+      WITHOUT a chart key is a feature switch (components.flux, the condition of
+      the flux-engine subchart): it is part of the roster forwarded to
+      connectivity and of the enabled/disabled logic like every other entry, but
+      this loop renders no release for it.
+  semverFilter  — optional Go regexp the OCI tags must match BEFORE versionRange
+      is evaluated (OCIRepository.spec.ref.semverFilter). Selects a dev channel:
+      the branch builds of one branch (`.*-dev\.<sanitized-branch>\..*` today)
+      together with a prerelease-admitting range; the stable tags never act as
+      fallback while a filter is set. Unset = every tag of the range.
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
@@ -195,12 +200,8 @@ spec:
   {{- end }}
   ref:
     semver: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
-    {{- with $c.filterTags }}
-    filterTags:
-      pattern: {{ .pattern | quote }}
-      {{- with .extract }}
-      extract: {{ . | quote }}
-      {{- end }}
+    {{- with $c.semverFilter }}
+    semverFilter: {{ . | quote }}
     {{- end }}
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
