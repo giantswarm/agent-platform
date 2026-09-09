@@ -652,9 +652,15 @@ verify-kagent-discovery: ## Assert the shared muster RemoteMCPServer opts out of
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> muster OAuth on (the default): the muster RemoteMCPServer carries the opt-out label and no headersFrom"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"}]' >/tmp/vkd-on.out 2>&1 || { cat /tmp/vkd-on.out; exit 1; }
-	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-on.out | awk "/^  name: muster$$/,/^---/" >/tmp/vkd-on-muster.out
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/ && /\n  name: muster\n/' /tmp/vkd-on.out >/tmp/vkd-on-muster.out
 	@grep -q 'kind: RemoteMCPServer' /tmp/vkd-on.out || { echo "FAIL: no RemoteMCPServer rendered"; exit 1; }
 	@grep -q '^  name: muster$$' /tmp/vkd-on-muster.out || { echo "FAIL: no muster RemoteMCPServer rendered"; cat /tmp/vkd-on.out | grep -n 'RemoteMCPServer' ; exit 1; }
+	@echo "--> kagent main: v1alpha3, in the kagent namespace with the AgentTemplates that bind it, no allowedNamespaces"
+	@grep -q '^apiVersion: kagent.dev/v1alpha3$$' /tmp/vkd-on-muster.out || { echo "FAIL: the muster RemoteMCPServer is not kagent.dev/v1alpha3"; cat /tmp/vkd-on-muster.out; exit 1; }
+	@grep -q '^  namespace: kagent$$' /tmp/vkd-on-muster.out || { echo "FAIL: the muster RemoteMCPServer is not in the kagent namespace — an AgentTemplate binds a same-namespace server only"; cat /tmp/vkd-on-muster.out; exit 1; }
+	@if grep -q 'allowedNamespaces' /tmp/vkd-on-muster.out; then echo "FAIL: allowedNamespaces is back on the muster RemoteMCPServer (a v1alpha2 cross-namespace grant, inert on main)"; cat /tmp/vkd-on-muster.out; exit 1; fi
+	@if grep -q '^apiVersion: kagent.dev/v1alpha2$$' /tmp/vkd-on.out; then echo "FAIL: a kagent.dev/v1alpha2 object renders"; grep -n 'v1alpha2' /tmp/vkd-on.out; exit 1; fi
+	@echo "ok: v1alpha3 in the kagent namespace"
 	@grep -q '^    kagent.dev/discovery: disabled$$' /tmp/vkd-on-muster.out || { echo "FAIL: the muster RemoteMCPServer does not opt out of controller-side discovery while muster OAuth is on"; cat /tmp/vkd-on-muster.out; exit 1; }
 	@if grep -q 'headersFrom' /tmp/vkd-on-muster.out; then echo "FAIL: the muster RemoteMCPServer carries headersFrom — a static header there overrides the propagated caller token in every agent"; cat /tmp/vkd-on-muster.out; exit 1; fi
 	@echo "ok: muster opts out, no static header"

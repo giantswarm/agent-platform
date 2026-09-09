@@ -2,33 +2,39 @@
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $musterUrl := printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) }}
 {{- if .Values.muster.enabled }}
-{{/* Shared platform gateway: created in the release namespace (not $ns) and
-referenced cross-namespace by tenant agents — the generic `agent` chart defaults
-its serverRef to muster/agent-platform; that name/namespace pair is the
-platform contract, so it is fixed here. Rendered whenever kagent + muster are
-enabled: the CR is inert until an agent references it. allowedNamespaces
-from: All admits every namespace; muster still authenticates each call.
+{{/* Shared platform gateway, in the kagent namespace ($ns) with the
+AgentTemplates that bind it: on kagent main a template's tools[].mcp.server
+({kind: RemoteMCPServer, name}) has no namespace field and resolves in the
+template's own namespace, and allowedNamespaces opens nothing (a v1alpha2
+cross-namespace grant, inert on main), so the server has to live where the
+templates do. Its name is the platform contract: agent-manager and the portal
+write AgentTemplates in the kagent namespace that bind
+{kind: RemoteMCPServer, name: muster} — the whole server, since a per-tool
+selection needs controller-side discovery, which is off here — or the per-agent
+toolset copy (muster-<agent>, headersFrom X-Muster-Toolset) agent-manager
+derives from it. Rendered whenever kagent + muster are enabled: the CR is inert
+until a template binds it.
 No headersFrom, so the caller token forwarded by kagent (KAGENT_PROPAGATE_TOKEN)
-is the only Authorization reaching muster — a static header here would be
-copied into every agent's config and applied LAST by the kagent runtime,
-overriding the propagated caller token, so every agent would act as that
-static identity (docs/authentication.md, "Tool discovery by the kagent
-controller"). For the same reason the kagent controller has no credential
-muster accepts when it lists the server's tools for its status (muster is an
-OAuth resource server, the request carries no bearer, muster answers 401):
-while muster runs with OAuth on, the server opts out of controller-side tool
-discovery with kagent.dev/discovery=disabled — the controller Accepts it
-without a tool listing (kagent controller with kagent-dev/kagent#2752; an
-older controller ignores the label and keeps reporting Accepted=False,
-ReconcileFailed … Unauthorized). Agents resolve the tool list at run time as
-the caller. With muster's OAuth off (dev installs) the controller can list
-tools anonymously, so the label is not rendered. */}}
+is the only Authorization reaching muster — a static header here is applied
+LAST by the runtime on every agent's MCP calls, overriding the propagated
+caller token, so every agent would act as that static identity
+(docs/authentication.md, "Tool discovery by the kagent controller"). For the
+same reason the kagent controller has no credential muster accepts when it
+lists the server's tools for its status (muster is an OAuth resource server,
+the request carries no bearer, muster answers 401): while muster runs with
+OAuth on, the server opts out of controller-side tool discovery with
+kagent.dev/discovery=disabled — the controller Accepts it without a tool
+listing (kagent controller with kagent-dev/kagent#2752; an older controller
+ignores the label and keeps reporting Accepted=False, ReconcileFailed …
+Unauthorized). Agents resolve the tool list at run time as the caller. With
+muster's OAuth off (dev installs) the controller can list tools anonymously,
+so the label is not rendered. */}}
 ---
-apiVersion: kagent.dev/v1alpha2
+apiVersion: kagent.dev/v1alpha3
 kind: RemoteMCPServer
 metadata:
   name: muster
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $ns }}
   {{- if dig "muster" "oauth" "server" "enabled" true .Values.muster }}
   labels:
     kagent.dev/discovery: disabled
@@ -37,12 +43,10 @@ spec:
   description: "Shared muster MCP gateway for platform agents"
   url: {{ $musterUrl | quote }}
   protocol: STREAMABLE_HTTP
-  allowedNamespaces:
-    from: All
 {{- end }}
 {{- range .Values.kagent.remoteMcpServers }}
 ---
-apiVersion: kagent.dev/v1alpha2
+apiVersion: kagent.dev/v1alpha3
 kind: RemoteMCPServer
 metadata:
   name: {{ required "kagent.remoteMcpServers[].name is required" .name | quote }}
