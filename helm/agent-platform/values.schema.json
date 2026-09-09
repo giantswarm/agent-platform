@@ -347,9 +347,6 @@
                         "chart": {
                             "type": "string"
                         },
-                        "enabled": {
-                            "type": "boolean"
-                        },
                         "injectGlobal": {
                             "type": "boolean"
                         },

@@ -62,7 +62,13 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- $c := index $root.Values.components .name -}}
 {{- if $c -}}
 {{- $on := true -}}
-{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}{{- end }}
+{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}
+{{- else if eq .name "kagent-crds" }}
+{{- /* kagent main's CRDs are their own chart; without an explicit switch the
+       component follows components.kagent, so a consumer turns on kagent and
+       gets its CRDs (an explicit false is refused by validateKagentCrds). */ -}}
+{{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true" }}
+{{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
 true

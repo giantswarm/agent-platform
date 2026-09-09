@@ -112,7 +112,6 @@ This chart version is a build of the `poc/kagent-main` branch — the kagent API
 | components.kagent-crds.versionRange | string | `">=0.11.0-0 <0.12.0-0"` |  |
 | components.kagent-crds.semverFilter | string | `".*-dev\\.poc-agent-platform\\..*"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
-| components.kagent-crds.enabled | bool | `false` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |

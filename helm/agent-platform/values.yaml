@@ -442,14 +442,16 @@ components:  # @schema additionalProperties: true
     # chart, from the same source and build as the kagent chart above — the
     # kserve-crd shape: the CRDs are templates (upgraded with the release, no
     # `crds:` policy), and the CR consumers dependsOn this component (the kagent
-    # release, the connectivity release's kagent CRs). Turn it on together with
-    # components.kagent: the render fails with kagent on and this off. Its
-    # kmcp-crds and substrate-crds subcharts stay off (kagent-crds: below).
+    # release, the connectivity release's kagent CRs). It follows
+    # components.kagent: no `enabled` here means "on whenever kagent is on", so
+    # a consumer switches kagent on and gets its CRDs; an explicit `enabled:
+    # false` with kagent on fails the render (a controller without its CRDs
+    # fails every kagent CR at apply time). Its kmcp-crds and substrate-crds
+    # subcharts stay off (kagent-crds: below).
     repository: oci://ghcr.io/giantswarm/kagent/helm
     versionRange: ">=0.11.0-0 <0.12.0-0"
     semverFilter: ".*-dev\\.poc-agent-platform\\..*"
     valuesFrom: kagent-crds
-    enabled: false
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
   klaus-gateway:  # @schema additionalProperties: true
