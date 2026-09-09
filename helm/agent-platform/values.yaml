@@ -2674,6 +2674,15 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
 # PodMonitor (monitoring.podMonitorEnabled), the shape the standalone shipped.
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 
+# === kagent-crds (kagent main) ===
+# Values forwarded verbatim to a kagent-crds component release: upstream kagent
+# main ships its CRDs as their own chart, which the kagent release dependsOn
+# (the 0.2.x wrapper folds them into crds/). The roster entry is the
+# installation's (components.kagent-crds, chart kagent-crds, valuesFrom
+# kagent-crds); this block only exists so the schema accepts the values, e.g.
+# kmcp.enabled / substrate.enabled: false where those CRDs come from elsewhere.
+kagent-crds: {}  # @schema skipProperties: true; additionalProperties: true
+
 # === KServe (kserve-crd, kserve-resources, kserve-llmisvc-crd, kserve-llmisvc-resources) ===
 # Values forwarded verbatim to the four KServe component releases
 # (giantswarm/kserve, the vendored upstream charts). The two CRD charts take

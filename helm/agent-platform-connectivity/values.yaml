@@ -1962,6 +1962,9 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   kubernetesAudience: dex-k8s-authenticator
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
+# The kagent-crds component's values (kagent main ships its CRDs as their own
+# chart); forwarded by the meta chart, read by nothing here.
+kagent-crds: {}  # @schema skipProperties: true; additionalProperties: true
 kserve-crd: {}  # @schema skipProperties: true; additionalProperties: true
 # The KServe controller chart's values; this chart reads
 # kserve.controller.deploymentMode for its guard (templates/kserve/) and renders
