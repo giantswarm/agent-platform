@@ -665,9 +665,9 @@ To override, set the value instead of `auto`: `true` / `false` (`cilium` / `kube
 
 ### Kyverno
 
-The connectivity chart renders four `kyverno.io` objects: two ClusterPolicies that give the bundled declarative agents their securityContext, a PolicyException that lifts the seccomp restriction those agents need, and the agent-sandbox pod-security ClusterPolicy. On a cluster with no Kyverno they would fail the install on an unknown API group, so `kyvernoPolicies.enabled: auto` (the default) renders none of the four where `kyverno.io/v1` is not served; `false` forces that, `true` forces them on.
+The connectivity chart renders two `kyverno.io` objects: the agent-sandbox pod-security ClusterPolicy and, only with `postgres.vector.extensionImage.reference` set, the PolicyException that admits the CNPG instance pods' `image` volume. (The kagent declarative-agent mutations — two ClusterPolicies and a seccomp PolicyException — went with kagent `main`: agents run as Substrate actors in gVisor worker pods, so there is no `Agent` CR, per-agent Deployment or config Secret left to mutate.) On a cluster with no Kyverno they would fail the install on an unknown API group, so `kyvernoPolicies.enabled: auto` (the default) renders neither where `kyverno.io/v1` is not served; `false` forces that, `true` forces them on.
 
-The PolicyException targets a policy this chart does not own, so its names must match the target cluster. They default to the Giant Swarm names (`policyExceptionNamespace: policy-exceptions`, `seccompPolicyName: restrict-seccomp-strict`, `seccompRuleNames`); a cluster that names its policies differently must override them, or the exception matches nothing.
+The PolicyException targets a policy this chart does not own, so its names must match the target cluster. They default to the Giant Swarm names (`policyExceptionNamespace: policy-exceptions`, `volumeTypesPolicyName: restrict-volume-types`, `volumeTypesRuleNames`); a cluster that names its policies differently must override them, or the exception matches nothing.
 
 A cluster that enforces restricted PSS through PSA labels instead of Kyverno must also set `components.agent-sandbox.enabled: false` (see [agent-sandbox](#agent-sandbox)).
 

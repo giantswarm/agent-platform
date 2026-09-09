@@ -1,10 +1,10 @@
 # The vanilla-cluster shape: a cluster with no Kyverno at all.
 #
-# kagent and agentSandbox are both on, so every `kyverno.io` template in the
-# chart is reachable (the two kagent declarative-agent ClusterPolicies, the
-# kagent seccomp PolicyException, the agent-sandbox pod-security ClusterPolicy).
-# kyvernoPolicies.enabled: false must then drop all four, or the install fails
-# on an unknown API group.
+# kagent and agentSandbox are both on, so every `kyverno.io` template this
+# shape reaches is rendered (the agent-sandbox pod-security ClusterPolicy; the
+# CNPG ImageVolume PolicyException needs postgres with a pgvector extension
+# image on top). kyvernoPolicies.enabled: false must then drop them, or the
+# install fails on an unknown API group.
 #
 # agentSandbox.podSecurity.enabled must go off with it: the controller's
 # securityContext reaches the Deployment through the mutate policy and through

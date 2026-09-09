@@ -54,6 +54,11 @@ ON = [
     "--set", "components.kagent.enabled=true",
     "--set", "components.agent-sandbox.enabled=true",
     "--set", "postgres.enabled=true",
+    # A pgvector extension image: the one case the CNPG ImageVolume
+    # PolicyException renders — the chart's only PolicyException since the
+    # kagent seccomp exception went with kagent main.
+    "--set", "postgres.vector.enabled=true",
+    "--set", "postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm",
     # The modelServing switch with its KServe prerequisites: its values block
     # (and the policies knob) travels to connectivity only while it is on.
     "--set", "components.modelServing.enabled=true",

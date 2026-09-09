@@ -21,9 +21,12 @@ FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-ver
 # and no subchart-fail quieting is needed.
 VM := --set ingress.parentRefs[0].name=x $(FLEET_APIS)
 
-# The two components that own a kyverno.io object (kagent: two ClusterPolicies + the
-# seccomp PolicyException; agentSandbox: the pod-security ClusterPolicy), so the
-# kyvernoPolicies assertions below see all four objects.
+# The components whose toggles gate a kyverno.io object: agentSandbox owns the
+# pod-security ClusterPolicy; kagent owns none since kagent main (agents run as
+# Substrate actors in gVisor worker pods — no Agent CR, per-agent Deployment or
+# config Secret is left to mutate) and stays on so the render is the fleet's.
+# The CNPG ImageVolume PolicyException needs postgres + a pgvector extension
+# image and is asserted on its own below.
 KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent-sandbox.enabled=true
 # The golden render deliberately uses the kubernetes networkPolicy flavor: the
 # cilium flavor's CNPG section is now gated on postgres.enabled, the one intended
@@ -100,11 +103,13 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if grep -q "kyverno.io" /tmp/vm-pe-none.out; then \
 		echo "FAIL: kyverno.io objects still render under kyvernoPolicies.enabled=false"; grep -n "kyverno.io" /tmp/vm-pe-none.out; exit 1; \
 	else echo "ok: no kyverno.io kinds"; fi
-	@echo "--> the default (kyverno) render still carries all four kyverno.io objects"
+	@echo "--> the default (kyverno) render carries this shape's one kyverno.io object, the agent-sandbox ClusterPolicy, and no kagent Agent mutation"
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) >/tmp/vm-pe-kyverno.out 2>&1 || { cat /tmp/vm-pe-kyverno.out; exit 1; }
-	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "4" ]; then \
-		echo "FAIL: expected 4 kyverno.io objects, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; exit 1; \
-	else echo "ok: 4 kyverno.io objects"; fi
+	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "1" ]; then \
+		echo "FAIL: expected 1 kyverno.io object, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; exit 1; \
+	elif grep -qE 'kagent-declarative|kagent-srt-settings|kagent.dev/v1alpha2' /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: a kagent v1alpha2 Agent mutation is back (no Agent CR, per-agent Deployment or config Secret exists on kagent main)"; exit 1; \
+	else echo "ok: 1 kyverno.io object"; fi
 	@echo "--> the CNPG ImageVolume exception renders only with an extension image"
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true >/tmp/vm-pe-noimg.out 2>&1 || { cat /tmp/vm-pe-noimg.out; exit 1; }
 	@if grep -q "image-volume" /tmp/vm-pe-noimg.out; then \

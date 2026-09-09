@@ -652,17 +652,6 @@
                 "policyExceptionNamespace": {
                     "type": "string"
                 },
-                "seccompPolicyName": {
-                    "type": "string"
-                },
-                "seccompRuleNames": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "minItems": 1,
-                    "uniqueItems": true
-                },
                 "volumeTypesPolicyName": {
                     "type": "string"
                 },

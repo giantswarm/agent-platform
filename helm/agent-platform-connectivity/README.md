@@ -253,9 +253,6 @@ On the installation, after the cutover:
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
-| kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
-| kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
-| kyvernoPolicies.seccompRuleNames[1] | string | `"autogen-check-seccomp-strict"` |  |
 | kyvernoPolicies.volumeTypesPolicyName | string | `"restrict-volume-types"` |  |
 | kyvernoPolicies.volumeTypesRuleNames[0] | string | `"restricted-volumes"` |  |
 | kyvernoPolicies.volumeTypesRuleNames[1] | string | `"autogen-restricted-volumes"` |  |
