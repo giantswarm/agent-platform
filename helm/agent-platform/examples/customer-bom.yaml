@@ -17,11 +17,16 @@
 # whole model-manager block, `lmstudio` included, to every release, and that
 # key only exists from 0.19.0 — a chart before it rejects the values outright
 # (its schema is additionalProperties: false), whether or not the
-# installation uses LM Studio. The agent-platform-connectivity pin is the
-# other half of that backend: 3.12.0 is the release carrying the lmstudio
-# render guard and its egress arm, so `backend: lmstudio` renders with this
-# snapshot. An installation that does not select lmstudio is unaffected
-# either way.
+# installation uses LM Studio. The agent-platform-connectivity pin has to
+# move for the same reason and further: values.yaml forwards `llmRouting` and
+# the seven ported extras (backstage, mcp-kubernetes, cloudnative-pg, the four
+# kserve charts) to the connectivity release, and no chart before 3.21.0 has
+# those keys — every pin from 3.10.0 to 3.20.2 is rejected outright by its
+# schema, whatever the installation enables. 3.21.0 also carries the lmstudio
+# render guard and its egress arm (3.12.0), so `backend: lmstudio` renders
+# with this snapshot. tests/verify-bom-charts.py is what now holds this true:
+# it renders every chart this file pins with the values the meta chart
+# forwards to it.
 # =============================================================================
 
 gitops:
@@ -39,7 +44,7 @@ components:
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.19.0" }
   agent-manager:                 { versionRange: "0.4.0" }
-  agent-platform-connectivity: { versionRange: "3.12.0" }
+  agent-platform-connectivity: { versionRange: "3.21.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the three kserve charts and the two
