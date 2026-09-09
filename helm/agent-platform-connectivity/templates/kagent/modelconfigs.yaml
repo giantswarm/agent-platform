@@ -16,5 +16,14 @@ spec:
   model: {{ required "kagent.modelConfigs[].model is required" .model | quote }}
   apiKeySecret: {{ required "kagent.modelConfigs[].apiKeySecret is required" .apiKeySecret | quote }}
   apiKeySecretKey: {{ .apiKeySecretKey | default "ANTHROPIC_API_KEY" | quote }}
+  {{- /* Route this ModelConfig's traffic through the LLM listener too. Without
+  it an extra ModelConfig calls the provider directly and its usage never
+  reaches the gateway's metrics — the default ModelConfig is redirected through
+  the forwarded kagent.providers.<default>.config.baseUrl instead, which this
+  chart does not render. The key is the lower-cased provider name. */}}
+  {{- with .baseUrl }}
+  {{ $.Values.kagent.providers.default | lower }}:
+    baseUrl: {{ . | quote }}
+  {{- end }}
 {{- end }}
 {{- end }}

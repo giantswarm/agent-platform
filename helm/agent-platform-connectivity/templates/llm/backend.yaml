@@ -1,0 +1,19 @@
+{{- /* The provider the LLM listener forwards to. No host, port or model
+override: the Anthropic provider defaults resolve to api.anthropic.com:443 with
+system-trust TLS and the /v1/messages path suffix. No `policies.auth` either —
+the gateway holds no credential, and a client `x-api-key` header without an
+Authorization header passes through untouched, so reach to the listener grants
+no spend. */ -}}
+{{- if (include "agent-platform.llmRouting" .) }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: {{ .Values.llmRouting.backend.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  ai:
+    provider:
+      {{ .Values.llmRouting.backend.provider }}: {}
+{{- end }}

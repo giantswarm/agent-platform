@@ -10,6 +10,18 @@ spec:
   gatewayClassName: {{ .Values.gateway.gatewayClassName }}
   listeners:
     {{- toYaml .Values.gateway.listeners | nindent 4 }}
+    {{- if (include "agent-platform.llmRouting" .) }}
+    # LLM listener: agent inference traffic to the provider. Cluster-internal —
+    # the data-plane NetworkPolicy admits world traffic on 443 only, and the LLM
+    # HTTPRoute pins itself here by sectionName so it never attaches to the
+    # public HTTPS listener below.
+    - name: {{ .Values.llmRouting.listener.name }}
+      port: {{ .Values.llmRouting.listener.port }}
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+    {{- end }}
     {{- if (include "agent-platform.edgeIsDataPlane" .) }}
     # Public edge listener: terminates TLS for *.<global.domain>. Routes from
     # every namespace attach here (the kagent UI route lives in the kagent

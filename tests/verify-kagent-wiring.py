@@ -15,7 +15,10 @@ the chart validates values with additionalProperties: false:
     derived from the connectivity templates, so a new wiring key must be added
     to `components.kagent.omitKeys` before this passes;
   * dropping `fullnameOverride` or `namespaceOverride`, which the chart AND the
-    connectivity chart read, so the two would name different objects.
+    connectivity chart read, so the two would name different objects; or
+    `providers`, which the chart reads for the default ModelConfig (the LLM
+    cutover, `providers.<default>.config.baseUrl`) and the connectivity chart
+    reads for the provider key of its own ModelConfigs.
 
 Reads a rendered meta-package manifest. Deliberately stdlib-only: the CI image
 has no PyYAML.
@@ -31,7 +34,7 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 # Keys the connectivity chart reads under .Values.kagent that ARE upstream kagent
 # keys, so they must keep being forwarded. Everything else it reads there is
 # umbrella-only and must be in omitKeys.
-UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride"}
+UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
 

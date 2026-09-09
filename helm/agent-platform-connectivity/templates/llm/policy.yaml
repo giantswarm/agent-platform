@@ -1,0 +1,41 @@
+{{- /* One Gateway-scoped policy carries both sections.
+
+`backend.ai.routes` maps the client path to the body format the gateway parses.
+It is mandatory: without it an `ai` backend parses every body as OpenAI
+Completions and mis-parses Anthropic bodies. Selection matches the client path
+against the keys by suffix, so the "*" entry forwards any other path unchanged
+instead of falling back to Completions. A Gateway-scoped backend.ai section
+applies to AI backends only, and the LLM route is the only AI route here.
+
+`frontend.metrics` may target only a Gateway, which is why the policy is
+Gateway-scoped rather than route-scoped. Only ONE metrics policy per Gateway:
+custom labels replace rather than merge, and when two policies target the same
+Gateway the lexicographically lowest policy key wins while the other is
+silently dropped. */ -}}
+{{- if (include "agent-platform.llmRouting" .) }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" . }}-llm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}
+  backend:
+    ai:
+      routes:
+        {{- range $path, $type := .Values.llmRouting.routes }}
+        {{ $path | quote }}: {{ $type }}
+        {{- end }}
+  {{- with .Values.llmRouting.metricLabels }}
+  frontend:
+    metrics:
+      attributes:
+        add:
+          {{- toYaml . | nindent 10 }}
+  {{- end }}
+{{- end }}

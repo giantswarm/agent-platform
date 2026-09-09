@@ -12,13 +12,14 @@
 #     `make verify-managers` + `make verify-kagent-netpol` + `make verify-kagent-discovery` + `make verify-meta` +
 #     `make verify-engine` + `make verify-self` + `make verify-labels` + `make verify-postgres` +
 #     `make verify-components` + `make verify-auto` + `make verify-identity` +
-#     `make verify-wiring` checks on branches (ingress-mode guards, the global.*
+#     `make verify-wiring` + `make verify-llm-routing` checks on branches (ingress-mode guards, the global.*
 #     contract, the model-manager / agent-manager wiring, the kagent tool-server
 #     egress, app-of-apps meta-package render, the bundled Flux engine's two
 #     shapes, the self-management shapes, the postgres.backup wiring and guards,
 #     the roster entries of the standalone chart's extras and the component
 #     charts' acceptance of the forwarded values, the cluster-shape `auto` knobs,
-#     the kagent-flux tenant identity, the standalone's ported wiring)
+#     the kagent-flux tenant identity, the standalone's ported wiring, the
+#     LLM routing toggle)
 #   - the standalone agent-platform-connectivity chart (build, tag push), the
 #     consumer-side wiring rendered by the meta-package as a HelmRelease
 #   versioned in lockstep with agent-platform off the same git tag. This
@@ -50,7 +51,7 @@ jobs:
           sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
           helm version
     - run:
-        name: verify ingress-mode guards + global contract + meta-package render
+        name: verify ingress-mode guards + global contract + meta-package render + LLM routing
         # verify-modes (connectivity chart ingress guards), verify-global (the
         # global.* contract behaviors and their guards), verify-managers (the
         # model-manager / agent-manager wiring and guards), verify-kagent-netpol
@@ -85,11 +86,12 @@ jobs:
         # the fixes that retired the standalone's template patches) and
         # verify-wiring (the standalone's ported wiring: the Backstage
         # app-config surface, the mcp-kubernetes MCPServer, model serving on
-        # the kserve components and its guards, toggles off = no object) are the
-        # single source of truth, also run locally. The meta chart's one
+        # the kserve components and its guards, toggles off = no object) and
+        # verify-llm-routing (the llmRouting toggle, both states, and its
+        # guards) are the single source of truth, also run locally. The meta chart's one
         # dependency is the flux-engine subchart, a directory in its charts/,
         # which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing
 
 workflows:
   build:

@@ -1,0 +1,58 @@
+# LLM routing on: the `llm` listener, the Anthropic AgentgatewayBackend, the
+# pinned HTTPRoute, the Gateway-scoped AgentgatewayPolicy (route-type map +
+# metric labels), the model-price ConfigMap and its AgentgatewayParameters
+# reference, and the data-plane PodMonitor.
+#
+# Both cutover values are set, so this scenario renders the whole path: the
+# listener AND kagent's default ModelConfig pointing at it. A real rollout sets
+# them in two steps (listener first) — see the chart README.
+components:
+  agentgateway:
+    enabled: true
+  kagent:
+    enabled: true
+
+# The LLM listener is reconciled by the agentgateway controller, so the mode
+# must route through it (validate.yaml guard).
+ingress:
+  mode: agentgateway-muster
+  parentRefs:
+    - name: giantswarm-default
+      namespace: envoy-gateway-system
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - muster.ci.example.com
+  httpRoute:
+    # Streamed completions must stay open.
+    timeouts:
+      request: 0s
+
+llmRouting:
+  enabled: true
+
+kagent:
+  namespaceOverride: kagent
+  providers:
+    anthropic:
+      # The cutover value, forwarded to the kagent release by the meta chart
+      # (this chart does not render the default ModelConfig). Host and port must
+      # match gateway.name, the release namespace and llmRouting.listener.port.
+      config:
+        baseUrl: http://agentgateway.default.svc:8081
+  # An extra, chart-owned ModelConfig sent through the same listener.
+  modelConfigs:
+    - name: anthropic-sonnet
+      displayName: Anthropic Sonnet 4.6
+      provider: Anthropic
+      model: claude-sonnet-4-6
+      apiKeySecret: kagent-anthropic
+      baseUrl: http://agentgateway.default.svc:8081
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory

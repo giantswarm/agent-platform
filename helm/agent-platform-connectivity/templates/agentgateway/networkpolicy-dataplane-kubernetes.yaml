@@ -17,6 +17,12 @@ spec:
       ports:
         - port: {{ (index .Values.gateway.listeners 0).port }}
           protocol: TCP
+        {{- if (include "agent-platform.llmRouting" .) }}
+        # The LLM listener. Cluster-internal only: the world rule below admits
+        # 443 alone, so no external client reaches it.
+        - port: {{ .Values.llmRouting.listener.port }}
+          protocol: TCP
+        {{- end }}
     {{- if (include "agent-platform.edgeIsDataPlane" .) }}
     # The data plane is the public edge: the HTTPS listener takes traffic from
     # outside the cluster. World traffic is admitted on 443 only — the
