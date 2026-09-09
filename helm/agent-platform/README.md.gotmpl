@@ -11,4 +11,8 @@
 
 {{ template "chart.requirementsSection" . }}
 
+## Dev channel
+
+This chart version is a build of the `poc/kagent-main` branch — the kagent API v2 line. Its `components.*` defaults follow the dev builds of the sibling POC branches (`components.<name>.semverFilter`, and `gitops.self.semverFilter` for the chart itself under self-management), and `components.kagent` / `components.kagent-crds` deliver kagent `main` from the kagent fork's dev channel; kagent `main` needs Agent Substrate on the cluster. The release of this line resets every `semverFilter` and returns the ranges to the stable lines. How to consume it — agentlab, a Flux `OCIRepository`, the Substrate prerequisite — is in the repository README, section "Dev channel (kagent API v2 line)".
+
 {{ template "chart.valuesSection" . }}

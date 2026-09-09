@@ -25,6 +25,10 @@ README.
 |------------|------|---------|
 |  | flux-engine | 0.1.0 |
 
+## Dev channel
+
+This chart version is a build of the `poc/kagent-main` branch — the kagent API v2 line. Its `components.*` defaults follow the dev builds of the sibling POC branches (`components.<name>.semverFilter`, and `gitops.self.semverFilter` for the chart itself under self-management), and `components.kagent` / `components.kagent-crds` deliver kagent `main` from the kagent fork's dev channel; kagent `main` needs Agent Substrate on the cluster. The release of this line resets every `semverFilter` and returns the ranges to the stable lines. How to consume it — agentlab, a Flux `OCIRepository`, the Substrate prerequisite — is in the repository README, section "Dev channel (kagent API v2 line)".
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -57,7 +61,7 @@ README.
 | gitops.self.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | gitops.self.insecure | bool | `false` |  |
 | gitops.self.versionRange | string | `""` |  |
-| gitops.self.semverFilter | string | `""` |  |
+| gitops.self.semverFilter | string | `".*-dev\\.poc-kagent-main\\..*"` |  |
 | gitops.self.interval | string | `"10m"` |  |
 | gitops.retries | int | `5` |  |
 | gitops.forbidInlineSecrets | bool | `false` |  |
@@ -88,9 +92,11 @@ README.
 | components.agent-platform-mcps.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
-| components.kagent.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.kagent.versionRange | string | `"0.2.x"` |  |
+| components.kagent.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
+| components.kagent.versionRange | string | `">=0.11.0-0 <0.12.0-0"` |  |
+| components.kagent.semverFilter | string | `".*-dev\\.poc-agent-platform\\..*"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
+| components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
 | components.kagent.omitKeys[2] | string | `"harnesses"` |  |
@@ -100,8 +106,14 @@ README.
 | components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
 | components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
 | components.kagent.enabled | bool | `false` |  |
-| components.kagent.crds | string | `"CreateReplace"` |  |
 | components.kagent.installDisableWait | bool | `true` |  |
+| components.kagent-crds.chart | string | `"kagent-crds"` |  |
+| components.kagent-crds.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
+| components.kagent-crds.versionRange | string | `">=0.11.0-0 <0.12.0-0"` |  |
+| components.kagent-crds.semverFilter | string | `".*-dev\\.poc-agent-platform\\..*"` |  |
+| components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
+| components.kagent-crds.enabled | bool | `false` |  |
+| components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.klaus-gateway.versionRange | string | `"0.x"` |  |
@@ -116,7 +128,8 @@ README.
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `"0.x"` |  |
+| components.model-manager.versionRange | string | `">=0.0.0-0 <1.0.0-0"` |  |
+| components.model-manager.semverFilter | string | `".*-dev\\.poc-kagent-main\\..*"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
 | components.model-manager.enabled | bool | `false` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
@@ -124,14 +137,16 @@ README.
 | components.model-manager.dependsOn[2] | string | `"kserve-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `"0.x"` |  |
+| components.agent-manager.versionRange | string | `">=0.0.0-0 <1.0.0-0"` |  |
+| components.agent-manager.semverFilter | string | `".*-dev\\.poc-kagent-main\\..*"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.backstage.versionRange | string | `"0.x"` |  |
+| components.backstage.versionRange | string | `">=0.0.0-0 <1.0.0-0"` |  |
+| components.backstage.semverFilter | string | `".*-dev\\.poc-kagent-main\\..*"` |  |
 | components.backstage.valuesFrom | string | `"backstage"` |  |
 | components.backstage.omitKeys[0] | string | `"hostname"` |  |
 | components.backstage.omitKeys[1] | string | `"parentRefs"` |  |
@@ -189,14 +204,16 @@ README.
 | components.dicebear.injectGlobal | bool | `false` |  |
 | components.agent-platform-connectivity.chart | string | `"agent-platform-connectivity"` |  |
 | components.agent-platform-connectivity.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-connectivity.versionRange | string | `">=1.0.0"` |  |
+| components.agent-platform-connectivity.versionRange | string | `">=3.0.0-0 <4.0.0-0"` |  |
+| components.agent-platform-connectivity.semverFilter | string | `".*-dev\\.poc-kagent-main\\..*"` |  |
 | components.agent-platform-connectivity.forwardAllValues | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
-| components.agent-platform-connectivity.dependsOn[2] | string | `"kagent"` |  |
-| components.agent-platform-connectivity.dependsOn[3] | string | `"cloudnative-pg"` |  |
-| components.agent-platform-connectivity.dependsOn[4] | string | `"kserve-resources"` |  |
+| components.agent-platform-connectivity.dependsOn[2] | string | `"kagent-crds"` |  |
+| components.agent-platform-connectivity.dependsOn[3] | string | `"kagent"` |  |
+| components.agent-platform-connectivity.dependsOn[4] | string | `"cloudnative-pg"` |  |
+| components.agent-platform-connectivity.dependsOn[5] | string | `"kserve-resources"` |  |
 | flux-engine | object | `{}` |  |
 | dicebear.route.enabled | string | `"auto"` |  |
 | dicebear.route.parentRefs | list | `[]` |  |
@@ -384,10 +401,14 @@ README.
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
-| kagent.registry | string | `"gsoci.azurecr.io/giantswarm"` |  |
-| kagent.controller.image.repository | string | `"kagent-controller"` |  |
-| kagent.controller.agentImage.repository | string | `"kagent-app"` |  |
-| kagent.controller.skillsInitImage.repository | string | `"kagent-skills-init"` |  |
+| kagent.registry | string | `"ghcr.io"` |  |
+| kagent.tag | string | `"0.11.0-dev.poc-agent-platform.TODO-R2"` |  |
+| kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
+| kagent.controller.agentImage.repository | string | `"giantswarm/kagent/golang-adk"` |  |
+| kagent.controller.substrate.enabled | bool | `true` |  |
+| kagent.controller.substrate.ateApiEndpoint | string | `"dns:///api.ate-system.svc:443"` |  |
+| kagent.controller.substrate.atenetRouterURL | string | `"http://atenet-router.ate-system.svc:80"` |  |
+| kagent.controller.substrate.defaultWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
 | kagent.controller.env[0].name | string | `"METRICS_BIND_ADDRESS"` |  |
@@ -396,7 +417,16 @@ README.
 | kagent.controller.env[1].value | string | `"false"` |  |
 | kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
-| kagent.ui.image.repository | string | `"kagent-ui"` |  |
+| kagent.substrateWorkerPool.create | bool | `true` |  |
+| kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
+| kagent.substrateWorkerPool.replicas | int | `4` |  |
+| kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.26"` |  |
+| kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
+| kagent.ui.image.repository | string | `"giantswarm/kagent/ui"` |  |
+| kagent.database.postgres.vectorEnabled | bool | `true` |  |
+| kagent.database.postgres.bundled.image.repository | string | `"pgvector"` |  |
+| kagent.database.postgres.bundled.image.name | string | `"pgvector"` |  |
+| kagent.database.postgres.bundled.image.tag | string | `"pg18-trixie"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |
 | kagent.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | kagent.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -409,7 +439,7 @@ README.
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.serviceMonitor.enabled | bool | `true` |  |
+| kagent.serviceMonitor.enabled | bool | `false` |  |
 | kagent.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.otel.tracing.enabled | string | `"auto"` |  |
@@ -506,7 +536,18 @@ README.
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
-| kagent.harnesses | list | `[]` |  |
+| kagent.harnesses[0].name | string | `"kagent"` |  |
+| kagent.harnesses[0].type | string | `"kagent"` |  |
+| kagent.harnesses[0].image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:0000000000000000000000000000000000000000000000000000000000000000"` |  |
+| kagent.harnesses[0].env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
+| kagent.harnesses[0].env[0].value | string | `"true"` |  |
+| kagent.harnesses[0].workerPool | string | `"kagent-default"` |  |
+| kagent.harnesses[0].snapshotLocation | string | `"s3://ate-snapshots/kagent"` |  |
+| kagent.harnesses[1].name | string | `"claude"` |  |
+| kagent.harnesses[1].type | string | `"claude"` |  |
+| kagent.harnesses[1].image | string | `"ghcr.io/giantswarm/kagent/claude-harness@sha256:0000000000000000000000000000000000000000000000000000000000000000"` |  |
+| kagent.harnesses[1].workerPool | string | `"kagent-default"` |  |
+| kagent.harnesses[1].snapshotLocation | string | `"s3://ate-snapshots/claude"` |  |
 | kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | postgres.enabled | bool | `false` |  |
@@ -770,7 +811,8 @@ README.
 | mcp-kubernetes.mcpKubernetes.oauth.enableDownstreamOAuth | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
 | cloudnative-pg | object | `{}` |  |
-| kagent-crds | object | `{}` |  |
+| kagent-crds.kmcp.enabled | bool | `false` |  |
+| kagent-crds.substrate.enabled | bool | `false` |  |
 | kserve-crd | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |
 | kserve-resources.kserve.controller.deploymentMode | string | `"Standard"` |  |

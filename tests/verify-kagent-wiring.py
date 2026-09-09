@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Assert the kagent component's forwarded values match the 0.2.x chart.
+"""Assert the kagent component's forwarded values match the kagent chart.
 
-kagent 0.2.0 flattened the upstream chart onto its chart root, so the
-meta-package forwards the block un-nested and drops its own keys from it. The
-mistakes below fail only at reconcile time, in the child HelmRelease, because
-the chart validates values with additionalProperties: false:
+The chart takes its keys at the chart root (kagent 0.2.0 flattened the GS
+wrapper the way upstream's chart is; kagent main, the dev line, is upstream's
+chart), so the meta-package forwards the block un-nested and drops its own keys
+from it. The mistakes below fail only at reconcile time, in the child
+HelmRelease — the wrapper validates values with additionalProperties: false,
+and kagent main's chart, without a schema, would carry them on silently:
 
   * putting `valuesKey: kagent` back, which hands the chart a block it rejects
     as an unknown property;
@@ -110,8 +112,10 @@ def main(path: str) -> int:
             sys.exit(f"FAIL: `{key}` forwarded to the kagent chart, whose schema is additionalProperties:false")
     if "fullnameOverride" not in values or "namespaceOverride" not in values:
         sys.exit("FAIL: kagent values lost fullnameOverride or namespaceOverride, which the connectivity chart also reads")
-    if "repository: kagent-controller" not in values.get("controller", []):
-        sys.exit("FAIL: kagent values lost controller.image.repository")
+    if "repository: giantswarm/kagent/controller" not in values.get("controller", []):
+        sys.exit("FAIL: kagent values lost controller.image.repository (the dev line's ghcr.io/giantswarm/kagent/controller)")
+    if "tag" not in values:
+        sys.exit("FAIL: kagent values carry no explicit image tag; upstream's chart falls back to .Chart.Version, which is <version>+<digest> under helm-controller")
     return 0
 
 

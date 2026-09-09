@@ -11,15 +11,24 @@ examples/customer-bom.yaml (what a BOM installation gets). The render uses the
 quick-start inputs Backstage and mcp-kubernetes require (global.domain and
 global.identity) and the API groups the charts' optional objects need.
 
-Network: pulls from gsoci.azurecr.io and ghcr.io (three attempts each).
+A component on a dev channel (components.<name>.semverFilter) is resolved the
+way Flux resolves it — the registry's tag list filtered by the regexp, then the
+highest semver of what is left — because `helm pull --version <range>` knows no
+filter and would pick any branch's dev build (or a stable tag) instead.
+
+Network: pulls from gsoci.azurecr.io and ghcr.io (three attempts each); the tag
+list comes from the registry's anonymous `/v2/<repo>/tags/list`.
 Deliberately stdlib-only: the CI image has no PyYAML.
 """
 
+import json
 import re
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 
 NEW = [
     "backstage", "mcp-kubernetes", "cloudnative-pg",
@@ -65,10 +74,60 @@ def hr_values(doc: str) -> str:
     return "\n".join(line[4:] if line.startswith("    ") else line for line in body.splitlines())
 
 
-def source(doc: str) -> tuple[str, str]:
+def source(doc: str) -> tuple[str, str, str]:
+    """An OCIRepository's url, semver range and semverFilter ("" when none)."""
     url = re.search(r"^  url: (\S+)", doc, re.M).group(1)
     semver = re.search(r'semver: "([^"]+)"', doc).group(1)
-    return url, semver
+    m = re.search(r'^    semverFilter: (".*")$', doc, re.M)
+    return url, semver, json.loads(m.group(1)) if m else ""
+
+
+def registry_tags(url: str) -> list[str]:
+    """Every tag of an OCI repository (`oci://host/path`), anonymously, following
+    the distribution API's token challenge and Link pagination."""
+    host, _, path = url.removeprefix("oci://").partition("/")
+    next_url, token, tags = f"https://{host}/v2/{path}/tags/list?n=1000", None, []
+    for _ in range(100):
+        req = urllib.request.Request(next_url, headers={"Authorization": f"Bearer {token}"} if token else {})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                tags += json.load(r).get("tags") or []
+                link = r.headers.get("Link", "")
+        except urllib.error.HTTPError as e:
+            if e.code != 401 or token:
+                raise
+            challenge = dict(re.findall(r'(\w+)="([^"]*)"', e.headers.get("Www-Authenticate", "")))
+            with urllib.request.urlopen(f"{challenge['realm']}?service={challenge['service']}&scope={challenge['scope']}", timeout=60) as t:
+                body = json.load(t)
+            token = body.get("access_token") or body.get("token")
+            continue
+        m = re.search(r"<([^>]+)>", link)
+        if not m:
+            return tags
+        next_url = m.group(1) if m.group(1).startswith("http") else f"https://{host}{m.group(1)}"
+    sys.exit(f"FAIL: the tag list of {url} did not end after 100 pages")
+
+
+def semver_key(tag: str):
+    """SemVer 2.0 precedence: numeric core, then a release above every
+    prerelease, then the prerelease identifiers left to right (numeric < alnum,
+    numeric by value, alnum lexically, a shorter prefix first)."""
+    core, _, rest = tag.partition("-")
+    pre = rest.split("+")[0]
+    ids = [(0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre.split(".")] if pre else []
+    return (tuple(int(x) for x in core.split(".")), 0 if pre else 1, ids)
+
+
+def resolve_filtered(url: str, constraint: str, semver_filter: str) -> str:
+    """The tag Flux picks for a dev channel: the highest semver among the tags
+    the filter admits. The constraint of a dev channel is a whole-line range
+    (`>=X.0.0-0 <Y.0.0-0`), so the filter alone decides; the bounds are checked."""
+    lo, hi = re.fullmatch(r">=(\d+)\.0\.0-0 <(\d+)\.0\.0-0", constraint).groups()
+    matching = [t for t in registry_tags(url) if re.search(semver_filter, t) and re.match(r"\d+\.\d+\.\d+(-|$)", t)
+                and int(lo) <= int(t.split(".")[0]) < int(hi)]
+    if not matching:
+        sys.exit(f"FAIL: no tag of {url} matches the dev-channel filter {semver_filter!r} within {constraint!r}")
+    return max(matching, key=semver_key)
 
 
 def pull(url: str, constraint: str, dest: str) -> str:
@@ -89,10 +148,15 @@ def main(meta: str) -> int:
     wide = docs(render_meta(meta, [*QUICKSTART, *on]))
     pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *on]))
     for name in NEW:
-        url, rng = source(wide[("OCIRepository", name)])
-        _, pin = source(pinned[("OCIRepository", name)])
+        url, rng, semver_filter = source(wide[("OCIRepository", name)])
+        _, pin, pin_filter = source(pinned[("OCIRepository", name)])
+        if pin_filter:
+            sys.exit(f"FAIL: the BOM leaves the semverFilter {pin_filter!r} on {name}; an exact pin with a filter matches no tag")
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write(hr_values(wide[("HelmRelease", name)]))
+        if semver_filter:
+            rng = resolve_filtered(url, rng, semver_filter)
+            print(f"ok: {name} dev channel {semver_filter!r} resolves to {rng} today")
         for label, constraint in (("range", rng), ("BOM pin", pin)):
             with tempfile.TemporaryDirectory() as d:
                 resolved = pull(url, constraint, d)

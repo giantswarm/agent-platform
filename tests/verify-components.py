@@ -52,7 +52,7 @@ GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 # component -> (repository, versionRange, dependsOn, a line only the standalone's
 # defaults put into the forwarded values, or None when the block is empty)
 NEW = {
-    "backstage": (GSOCI, "0.x", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
+    "backstage": (GSOCI, ">=0.0.0-0 <1.0.0-0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
     "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://ghcr.io/cloudnative-pg/charts", "0.29.x", [], None),
     "kserve-crd": (GSOCI, "0.2.x", [], None),
@@ -84,8 +84,19 @@ WIRING_KEYS = {
 SWITCHES = ["modelServing"]
 
 # component -> the semverFilter its default source carries (a dev channel). Every
-# other component's OCIRepository renders none. Empty on the stable line.
-DEV_CHANNEL: dict[str, str] = {}
+# other component's OCIRepository renders none. Empty on the stable line; on the
+# poc/kagent-main line the meta chart's siblings carry that branch's constant and
+# the kagent charts the kagent fork's (values.yaml `components:` preamble).
+META_FILTER = ".*-dev\\.poc-kagent-main\\..*"
+KAGENT_FILTER = ".*-dev\\.poc-agent-platform\\..*"
+DEV_CHANNEL: dict[str, str] = {
+    "agent-platform-connectivity": META_FILTER,
+    "backstage": META_FILTER,
+    "model-manager": META_FILTER,
+    "agent-manager": META_FILTER,
+    "kagent": KAGENT_FILTER,
+    "kagent-crds": KAGENT_FILTER,
+}
 # A filter handed to a component that has none by default; the value carries
 # the backslashes a real filter has (`\.`), so the quoting is exercised.
 PROBE_FILTER = ".*-dev\\.x\\..*"
@@ -245,15 +256,21 @@ def main(meta: str, connectivity: str) -> int:
     bom_file = open(f"{meta}/examples/customer-bom.yaml").read()
     bom = docs(render(meta, [*ci, "-f", f"{meta}/examples/customer-bom.yaml", *ON]))
     for name in NEW:
-        m = re.search(rf"^\s*{re.escape(name)}:\s*\{{\s*versionRange:\s*\"([^\"]+)\"\s*\}}", bom_file, re.M)
+        # `{ versionRange: "<pin>" }`, with `semverFilter: ""` next to it on a dev-channel entry.
+        m = re.search(rf"^\s*{re.escape(name)}:\s*\{{\s*versionRange:\s*\"([^\"]+)\"(?:\s*,\s*semverFilter:\s*\"\")?\s*\}}", bom_file, re.M)
         if not m:
             fail(f"examples/customer-bom.yaml does not pin components.{name}.versionRange")
         pin = m.group(1)
-        if not re.fullmatch(r"\d+\.\d+\.\d+", pin):
+        if not re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?", pin):
             fail(f"the BOM pin for {name} is not an exact version: {pin!r}")
         if f'semver: "{pin}"' not in bom[("OCIRepository", name)]:
             fail(f"the BOM pin {pin} for {name} did not reach its OCIRepository")
-    print("ok: the customer BOM pins all seven exactly")
+    # An exact pin together with a semverFilter matches nothing, so the BOM
+    # clears every dev-channel filter (`semverFilter: ""`).
+    left = semver_filters(render(meta, [*ci, "-f", f"{meta}/examples/customer-bom.yaml", *ON]))
+    if left:
+        fail(f"the BOM leaves a semverFilter on {sorted(left)}; an exact pin with a filter matches no tag — set semverFilter: \"\" there")
+    print("ok: the customer BOM pins all seven exactly and clears every dev-channel filter")
 
     # --- the forwarded tree validates against the connectivity chart --------------
     # The meta chart's defaults plus the one input every render needs; the CI

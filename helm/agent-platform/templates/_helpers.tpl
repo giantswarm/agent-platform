@@ -140,6 +140,21 @@ needs no entry: the root schema rejects it already.
 {{- end -}}
 
 {{/*
+kagent main ships its CRDs as the kagent-crds chart (a roster entry the kagent
+release dependsOn, the kserve-crd shape). kagent on with kagent-crds off would
+install a controller without its CRDs and fail every kagent CR the connectivity
+release renders at apply time ("no matches for kind"); refuse it at render time
+instead. Only while the roster carries a kagent-crds entry (the dev line).
+*/}}
+{{- define "agent-platform.validateKagentCrds" -}}
+{{- if and (hasKey .Values.components "kagent-crds")
+           (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true")
+           (ne (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) "true") -}}
+{{- fail "components.kagent.enabled is true but components.kagent-crds.enabled is not: kagent main ships its CRDs as the kagent-crds chart, which the kagent release and the connectivity release's kagent CRs depend on; turn both on" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Key paths (dot-joined, "block.path") of credentials set INLINE in the values,
 joined by ", ". Empty when none is set. Only the paths are emitted, never the
 values, so the string is safe to print in a fail message.

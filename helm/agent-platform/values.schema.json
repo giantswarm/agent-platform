@@ -85,6 +85,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "semverFilter": {
+                            "type": "string"
+                        },
                         "valuesFrom": {
                             "type": "string"
                         },
@@ -116,6 +119,9 @@
                             }
                         },
                         "repository": {
+                            "type": "string"
+                        },
+                        "semverFilter": {
                             "type": "string"
                         },
                         "versionRange": {
@@ -233,6 +239,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "semverFilter": {
+                            "type": "string"
+                        },
                         "valuesFrom": {
                             "type": "string"
                         },
@@ -299,8 +308,11 @@
                         "chart": {
                             "type": "string"
                         },
-                        "crds": {
-                            "type": "string"
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "enabled": {
                             "type": "boolean"
@@ -315,6 +327,36 @@
                             }
                         },
                         "repository": {
+                            "type": "string"
+                        },
+                        "semverFilter": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "kagent-crds": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "semverFilter": {
                             "type": "string"
                         },
                         "valuesFrom": {
@@ -486,6 +528,9 @@
                             "type": "boolean"
                         },
                         "repository": {
+                            "type": "string"
+                        },
+                        "semverFilter": {
                             "type": "string"
                         },
                         "valuesFrom": {

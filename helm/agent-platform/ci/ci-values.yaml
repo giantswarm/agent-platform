@@ -11,6 +11,8 @@ components:
     enabled: true
   kagent:
     enabled: true
+  kagent-crds:  # on together with kagent (kagent main's CRDs are their own chart)
+    enabled: true
   klaus-gateway:
     enabled: true
   agent-sandbox:

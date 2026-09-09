@@ -361,10 +361,16 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
 	@grep -q 'semver: "2.x"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not 2.x (the flattened chart line)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
-	@echo "--> kagent 0.2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
+	@echo "--> kagent main wiring (the dev line): forwarded values are FLAT, carry no umbrella-only key and an explicit image tag; the kagent charts follow the fork's dev channel"
 	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out
-	@grep -q 'semver: "0.2.x"' /tmp/ap-flux.out || { echo "FAIL: kagent range is not 0.2.x (the flattened chart line)"; exit 1; }
-	@echo "ok: kagent 0.2.x wiring"
+	@grep -q 'semver: ">=0.11.0-0 <0.12.0-0"' /tmp/ap-flux.out || { echo "FAIL: kagent range is not the kagent main dev line (>=0.11.0-0 <0.12.0-0)"; exit 1; }
+	@python3 -c 'import re,sys; docs=open("/tmp/ap-flux.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: kagent HelmRelease not rendered") if not hr else None; sys.exit("FAIL: kagent does not dependsOn kagent-crds (kagent main ships its CRDs as their own chart)") if not re.search(r"^    - name: kagent-crds$$", hr[0], re.M) else None; crds=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent-crds$$", d, re.M)]; sys.exit("FAIL: kagent-crds HelmRelease not rendered with kagent on") if not crds else None; sys.exit("FAIL: kagent-crds carries a crds: policy, but its CRDs are templates (the kserve-crd shape)") if "crds: " in crds[0] else print("ok: kagent dependsOn kagent-crds; kagent-crds renders, CRDs as templates")'
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent-crds.enabled=false >/tmp/ap-kag-crds.out 2>&1; then \
+		echo "FAIL: kagent on with kagent-crds off rendered; the controller would run without its CRDs"; exit 1; \
+	elif ! grep -q "components.kagent-crds.enabled is not" /tmp/ap-kag-crds.out; then \
+		echo "FAIL: the kagent-crds guard failed for the wrong reason"; cat /tmp/ap-kag-crds.out; exit 1; \
+	else echo "ok: kagent on without kagent-crds is refused"; fi
+	@echo "ok: kagent main wiring"
 	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease (no raw CRs)"
 	@if grep -E '^kind:' /tmp/ap-flux.out | grep -vqE '^kind: (OCIRepository|HelmRelease)$$'; then \
 		echo "FAIL: root rendered a non-app-of-apps kind:"; grep -E '^kind:' /tmp/ap-flux.out | grep -vE '^kind: (OCIRepository|HelmRelease)$$'; exit 1; \
