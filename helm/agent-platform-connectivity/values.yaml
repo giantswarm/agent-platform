@@ -1985,7 +1985,7 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       registry: docker.io
       name: vllm/vllm-openai
       # registry: docker.io/vllm/vllm-openai
-      version: "v0.28.0"
+      version: "v0.29.0"
     # Server arguments common to every model. KServe expands {{.Name}} to
     # the InferenceService name; a preset's args are appended by KServe.
     # The port must stay 8080 (the probe, the metrics annotations and
