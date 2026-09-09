@@ -356,10 +356,10 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
 	@grep -q 'semver: "2.x"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not 2.x (the flattened chart line)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
-	@echo "--> kagent 0.2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
+	@echo "--> kagent flattened-chart wiring (0.2.0+): forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out
-	@grep -q 'semver: "0.2.x"' /tmp/ap-flux.out || { echo "FAIL: kagent range is not 0.2.x (the flattened chart line)"; exit 1; }
-	@echo "ok: kagent 0.2.x wiring"
+	@grep -q 'semver: ">=0.2.0 <1.0.0"' /tmp/ap-flux.out || { echo "FAIL: kagent range is not >=0.2.0 <1.0.0 (floor: the flattened chart; ceiling: the next major, so wrapper minors roll)"; exit 1; }
+	@echo "ok: kagent flattened-chart wiring"
 	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease (no raw CRs)"
 	@if grep -E '^kind:' /tmp/ap-flux.out | grep -vqE '^kind: (OCIRepository|HelmRelease)$$'; then \
 		echo "FAIL: root rendered a non-app-of-apps kind:"; grep -E '^kind:' /tmp/ap-flux.out | grep -vE '^kind: (OCIRepository|HelmRelease)$$'; exit 1; \
@@ -532,7 +532,7 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@echo "--> the meta chart forwards the cutover value to the kagent release"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.providers.anthropic.config.baseUrl=http://agentgateway.default.svc:8081 >/tmp/vl-meta.out 2>&1 || { cat /tmp/vl-meta.out; exit 1; }
 	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' /tmp/vl-meta.out >/tmp/vl-meta-kagent.out
-	@grep -A8 '^    providers:$$' /tmp/vl-meta-kagent.out | grep -q 'baseUrl: http://agentgateway.default.svc:8081' || { echo "FAIL: the cutover value never reaches the kagent HelmRelease (flat, kagent 0.2.x: providers.anthropic.config.baseUrl at the values root); the default ModelConfig would stay direct"; exit 1; }
+	@grep -A8 '^    providers:$$' /tmp/vl-meta-kagent.out | grep -q 'baseUrl: http://agentgateway.default.svc:8081' || { echo "FAIL: the cutover value never reaches the kagent HelmRelease (flat, kagent 0.2.0+: providers.anthropic.config.baseUrl at the values root); the default ModelConfig would stay direct"; exit 1; }
 	@echo "ok: cutover forwarded"
 	@echo "All llmRouting behaviors verified."
 

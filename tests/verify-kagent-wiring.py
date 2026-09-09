@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assert the kagent component's forwarded values match the 0.2.x chart.
+"""Assert the kagent component's forwarded values match the flattened chart (0.2.0+).
 
 kagent 0.2.0 flattened the upstream chart onto its chart root, so the
 meta-package forwards the block un-nested and drops its own keys from it. The
@@ -104,7 +104,7 @@ def main(path: str) -> int:
             "does not drop them; the flattened kagent chart rejects them"
         )
     if "kagent" in values:
-        sys.exit("FAIL: kagent values still nested under a kagent key; the 0.2.x chart is flat")
+        sys.exit("FAIL: kagent values still nested under a kagent key; the chart is flat from 0.2.0")
     for key in sorted(omitted | {"enabled"}):
         if key in values:
             sys.exit(f"FAIL: `{key}` forwarded to the kagent chart, whose schema is additionalProperties:false")

@@ -345,9 +345,13 @@ components:  # @schema additionalProperties: true
     # OCI +digest helm-controller appends needs no postRenderer here.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # 0.2.0 flattened the chart: upstream keys moved from `kagent.*` to the chart
-    # root, so the forwarded block is no longer nested (no valuesKey) and the
-    # 0.1.x range cannot be used with this wiring.
-    versionRange: "0.2.x"
+    # root, so the forwarded block is no longer nested (no valuesKey) and a chart
+    # before 0.2.0 cannot be used with this wiring — the floor. The ceiling is
+    # the next major, like the other 0.x components, so minor releases roll
+    # forward on their own: the wrapper's version moves with its CI as much as
+    # with its content (a `feat(ci)` title released 0.3.0 with a chart identical
+    # to 0.2.2), and a range that held the minor stranded every installation.
+    versionRange: ">=0.2.0 <1.0.0"
     valuesFrom: kagent
     # The flattened chart validates values against its own schema with
     # additionalProperties: false, and these keys are not upstream's: the
@@ -525,7 +529,7 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The four kserve charts come from one repository and move together; the
     # forwarded blocks below assume the 0.2.x key shape (createSharedResources,
-    # controller.deploymentMode), so the range holds the line like kagent's.
+    # controller.deploymentMode), so the range holds the line.
     versionRange: "0.2.x"
     valuesFrom: kserve-crd
     enabled: false

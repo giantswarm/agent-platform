@@ -2,6 +2,15 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (kagent follows the wrapper's 0.x line)
+
+`components.kagent.versionRange` is `>=0.2.0 <1.0.0` (was `0.2.x`): the floor stays at the flattened chart the wiring needs, the ceiling moves to the next major, as for the other 0.x components. The `giantswarm/kagent` wrapper released 0.3.0 and 0.3.1 on 2026-09-09 from CI-only changes — a `feat(ci)` title is a minor bump to git-cliff — with a chart identical to 0.2.2 in templates, values and dependencies; the minor-holding range excluded them, and would have excluded every following wrapper release, the next fix included.
+
+### Operator action
+
+- **None.** On every installation with kagent on, the kagent `OCIRepository` resolves 0.3.1 on its next poll and helm-controller upgrades the release. The rendered difference is two labels on every object — `helm.sh/chart: kagent-0.3.1` and `app.kubernetes.io/version: "0.3.1"` (the wrapper stamps its chart version as the app version) — and the pod annotations that hash the labelled ConfigMaps and Secret, so the kagent controller and UI pods roll once; no CRD, value or object changes otherwise. The meta chart's fleet render differs by the kagent `OCIRepository`'s `semver` line and nothing else.
+- A BOM that pins `components.kagent.versionRange` to an exact version is unaffected; the example BOM keeps its `0.2.0` pin.
+
 ## \<current\> → \<next\> (`gateway.parameters.dataPlaneResources` is settable through the meta chart)
 
 The meta chart's schema accepts `gateway.parameters.dataPlaneResources` (giantswarm/agent-platform#303): the agentgateway data-plane container's resources, which the connectivity chart reads and applied with its own defaults all along. The meta chart declares the key with those same defaults (`requests.ephemeral-storage: 50Mi`, `limits.ephemeral-storage: 512Mi`).
@@ -27,7 +36,7 @@ The connectivity chart labels the shared `RemoteMCPServer agent-platform/muster`
 
 ### Operator action
 
-- **None.** The label is metadata on a CR the chart already owns; no pod rolls. The condition turns green once the installation runs a kagent controller with the opt-out (kagent-dev/kagent#2752; the `0.10.x` backport is kagent-dev/kagent#2753) — on a Giant Swarm management cluster that is the `giantswarm/kagent` wrapper picking up that upstream release under the meta chart's `0.2.x` range. Until then the condition stays as it was, and is expected.
+- **None.** The label is metadata on a CR the chart already owns; no pod rolls. The condition turns green once the installation runs a kagent controller with the opt-out (kagent-dev/kagent#2752; the `0.10.x` backport is kagent-dev/kagent#2753) — on a Giant Swarm management cluster that is the `giantswarm/kagent` wrapper picking up that upstream release under the meta chart's kagent range. Until then the condition stays as it was, and is expected.
 - Do **not** add `headersFrom` with a controller credential to the muster server as a shortcut: the kagent runtime applies static headers after the propagated caller token, so every agent would act as that credential (docs/authentication.md explains).
 - Installations that run muster **without** OAuth (`muster.muster.oauth.server.enabled: false`) get no label and keep controller-side discovery, which works anonymously there.
 
@@ -102,8 +111,6 @@ The connectivity chart renders ServiceAccount `kagent-flux` and its RoleBinding 
 - An explicit value keeps winning over detection, on a knob (`networkPolicy.flavor: kubernetes` with Cilium present renders the kubernetes flavor everywhere) and on a component copy (`muster.networkPolicy.flavor: cilium` pins muster alone). `agentSandbox.podSecurity.enabled: true` together with `kyvernoPolicies.enabled: false` still fails the render, as before.
 - `helm template` without `--api-versions` renders the vanilla shape. Pass the groups (`--api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1`) to render the fleet shape offline; `helm install --dry-run=server` and helm-controller read the live cluster.
 
-## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
-
 ## \<current\> → \<next\> (the Argo CD render engine is removed; Flux is the only engine)
 
 `templates/components.yaml` renders a Flux `OCIRepository` + `HelmRelease` per component and nothing else. The `gitops.engine: argo` branch — an Argo CD `Application` per component, ordered by `argocd.argoproj.io/sync-wave`, with `gitops.argo.project` / `gitops.argo.server` as its destination — is gone, and so are the two `gitops.argo.*` keys. It was never verified against a running Argo CD, no installation selected it, and the platform cannot run on Argo CD alone: agents are Flux objects on every path (the Backstage agent create flow and agent-manager write an `OCIRepository` + `HelmRelease` per agent). `gitops.engine` stays a key and accepts `flux` only (`enum: [flux]` in the schema, a template guard behind it).
@@ -120,8 +127,6 @@ Backstage, mcp-kubernetes, the CloudNativePG operator and the four KServe charts
 ### Operator action
 
 **No installation needs to act.** The default render adds nothing but seven `<name>: {enabled: false}` entries to the component roster inside the `agent-platform-connectivity` `HelmRelease`'s values, so that release gets one Helm revision with unchanged objects; no pod rolls. A management cluster keeps all seven off — it runs each of them as its own app. A BOM-pinned installation has nothing to pin unless it turns one on; `examples/customer-bom.yaml` carries the pins. An installation that turns Backstage or mcp-kubernetes on sets `global.domain` and `global.identity` first (README "Backstage, mcp-kubernetes, CloudNativePG and KServe").
-
-## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
 
 ## \<current\> → \<next\> (kagent moves to the flattened 0.2.x chart)
 
