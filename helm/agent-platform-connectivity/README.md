@@ -4,7 +4,7 @@ Giant Swarm Agent Platform — connectivity / integration layer. Renders the
 consumer-side wiring that turns the platform components into a working whole on
 a cluster: the public muster route and the agentgateway data-plane Gateway +
 AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
-the kagent and klaus-gateway routes, the kagent declarative-agent wiring, the
+the kagent and klaus-gateway routes, the kagent wiring (Harnesses, RemoteMCPServers, ModelConfigs), the
 CloudNativePG Cluster, and — gated on the component toggles — the Backstage
 app-config and route, the mcp-kubernetes MCPServer registration with muster and
 the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO
@@ -417,7 +417,7 @@ On the installation, after the cutover:
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
 | kagent.oauth2ProxyIngress.additionalPeers | list | `[]` |  |
-| kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it), and named from this ONE value into agent-manager (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the portal's `agentPlatform.fluxServiceAccountName` (through the `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
+| kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it), and named from this ONE value into agent-manager (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the portal's `agentPlatform.fluxServiceAccountName` (through the `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. On kagent main agent-manager and the portal write AgentTemplates as the caller instead of HelmReleases; the identity stays rendered and named to both until that path is retired. |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.pathPrefix | string | `"/kagent"` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
@@ -437,6 +437,7 @@ On the installation, after the cutover:
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
+| kagent.harnesses | list | `[]` |  |
 | kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | postgres.enabled | bool | `false` |  |

@@ -686,7 +686,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # validates the JWT) for the controllerRoute path, and the netpols restrict
       # controller ingress to agentgateway + the release/kagent namespaces, so the
       # controller is never directly reachable. Use "unsecure" only for local dev
-      # without any front proxy.
+      # without any front proxy. On kagent main the mode is inert: the controller
+      # takes the caller from the x-user-id header (else admin@kagent.dev) and
+      # forwards the bearer to the actor unchanged; kept for the 0.2.x wrapper.
       mode: trusted-proxy
       # email, not sub: dex subs are opaque connector-prefixed identifiers
       # (connector-coupled and unreadable in session listings); email is the
@@ -975,7 +977,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot
   # disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs
   # as the rights-less default ServiceAccount and fails. Empty renders no
-  # identity and hands both callers an empty name.
+  # identity and hands both callers an empty name. On kagent main agent-manager
+  # and the portal write AgentTemplates as the caller instead of HelmReleases;
+  # the identity stays rendered and named to both until that path is retired.
   fluxServiceAccountName: kagent-flux
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
@@ -1044,16 +1048,57 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       labels: {}
 
   # --- Admin-owned kagent CRs (read by connectivity templates, not the subchart) ---
-  # Tenant agents — created with the generic agent chart
-  # (https://github.com/giantswarm/agent), one release per agent, per the
-  # creating-agents PRD — reference these by name. The shared muster
-  # RemoteMCPServer is template-owned: rendered when the kagent component is on
-  # and muster.enabled, in the release namespace, its name/namespace fixed as the
-  # platform contract the agent chart's default serverRef depends on.
+  # Agents are kagent.dev/v1alpha3 AgentTemplates, written into the kagent
+  # namespace by agent-manager and the portal as the person creating them. A
+  # template names its runtime with the kagent.dev/harness label, its model
+  # with spec.modelConfig.name and its tools with tools[].mcp.server
+  # {kind: RemoteMCPServer, name}; every one of those references resolves in
+  # the template's own namespace, so everything below renders in the kagent
+  # namespace. The shared muster RemoteMCPServer is template-owned: rendered
+  # when the kagent component is on and muster.enabled, its name the platform
+  # contract the AgentTemplates bind.
+
+  # Harnesses — the runtimes agents run under: a digest-pinned image plus the
+  # Substrate policy (worker pool, snapshot location). Each admits the
+  # AgentTemplates its selector matches; the default selector admits the
+  # templates labelled kagent.dev/harness: <name>. Rendered as
+  # kagent.dev/v1alpha3 Harness objects in the kagent namespace. Empty renders
+  # none; an AgentTemplate needs a Harness that admits it to become Ready.
+  #   name              required; the object name and the default selector value
+  #   type              required; kagent | claude | codex | byo (the runtime adapter)
+  #   image             required; <repository>@sha256:<digest> — the CRD accepts
+  #                     no tag, and the render fails on one
+  #   command, args     optional; override the image entrypoint / arguments
+  #                     (byo requires command)
+  #   env               optional; Harness environment, passed through verbatim:
+  #                     {name, value} or {name, credentialRef: {name, key}} (a
+  #                     same-namespace Secret). Not ANTHROPIC_API_KEY on a claude
+  #                     Harness: the Claude adapter injects it from the template's
+  #                     ModelConfig and rejects an env of that name.
+  #   workerPool        required; the Substrate WorkerPool in the kagent namespace
+  #   snapshotLocation  required; the Substrate snapshot store, e.g. s3://<bucket>/<name>
+  #   selector          optional; matchLabels the Harness admits (default
+  #                     {kagent.dev/harness: <name>})
+  harnesses: []
+  # - name: kagent
+  #   type: kagent
+  #   image: gsoci.azurecr.io/giantswarm/kagent-golang-adk@sha256:<digest>
+  #   env:
+  #     # The Go ADK re-emits the caller's bearer on its MCP calls, so muster
+  #     # sees the person, not the agent.
+  #     - name: KAGENT_PROPAGATE_TOKEN
+  #       value: "true"
+  #   workerPool: kagent-default
+  #   snapshotLocation: s3://ate-snapshots/kagent
+  # - name: claude
+  #   type: claude
+  #   image: gsoci.azurecr.io/giantswarm/kagent-claude-harness@sha256:<digest>
+  #   workerPool: kagent-default
+  #   snapshotLocation: s3://ate-snapshots/claude
 
   # Additional ModelConfig CRs — the model catalog beyond the
   # default-model-config the kagent subchart creates from providers.anthropic.
-  # Agents reference a ModelConfig by name via spec.declarative.modelConfig.
+  # An AgentTemplate names its ModelConfig via spec.modelConfig.name.
   # The apiKeySecret must be pre-created in the kagent namespace.
   modelConfigs: []
   # - name: anthropic-sonnet
@@ -1069,10 +1114,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   baseUrl: http://agentgateway.<release namespace>.svc:8081
 
   # Additional RemoteMCPServer CRs beyond the shared muster server. Each entry
-  # creates one CR in the kagent namespace; agents reference it by name. Set
-  # tokenSecret to a pre-existing Secret holding key "token" with value
-  # "Bearer <token>" for servers that need a static credential; omit it for
-  # servers reached with the propagated token.
+  # creates one CR in the kagent namespace; an AgentTemplate binds it by name
+  # (tools[].mcp.server). Set tokenSecret to a pre-existing Secret holding key
+  # "token" with value "Bearer <token>" for servers that need a static
+  # credential; omit it for servers the agent should reach as the caller (a
+  # static Authorization is applied last and overrides the propagated token).
   remoteMcpServers: []
   # - name: external-mcp
   #   url: "https://external-mcp.example.com/mcp"

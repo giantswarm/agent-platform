@@ -684,6 +684,63 @@ verify-kagent-discovery: ## Assert the shared muster RemoteMCPServer opts out of
 	@echo "--> kagent off: no RemoteMCPServer at all"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.enabled=true 2>&1 | grep -q 'kind: RemoteMCPServer'; then echo "FAIL: a RemoteMCPServer renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
 
+# Two Harnesses in the lab's shape: the Go ADK runtime with the token-propagation
+# env, and the Claude adapter with an explicit selector. The digest is a
+# placeholder; the assertions read the shape, not the image.
+HARNESS_DIGEST := sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+KAGENT_HARNESSES := $(KAGENT_NETPOL) --set-json 'kagent.harnesses=[{"name":"kagent","type":"kagent","image":"registry.example/kagent/golang-adk@$(HARNESS_DIGEST)","env":[{"name":"KAGENT_PROPAGATE_TOKEN","value":"true"}],"workerPool":"kagent-default","snapshotLocation":"s3://ate-snapshots/kagent"},{"name":"claude","type":"claude","image":"registry.example/kagent/claude-harness@$(HARNESS_DIGEST)","workerPool":"kagent-default","snapshotLocation":"s3://ate-snapshots/claude","selector":{"team":"x"}}]'
+.PHONY: verify-kagent-harnesses
+verify-kagent-harnesses: ## Assert kagent.harnesses[] renders kagent.dev/v1alpha3 Harness objects in the kagent namespace (runtime type, digest-pinned image, env, Substrate worker pool and snapshot location, the kagent.dev/harness selector by default) and that a tag, an unknown type, a byo without command or a missing worker pool fails the render.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> no harnesses (the default): no Harness object"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkh-off.out 2>&1 || { cat /tmp/vkh-off.out; exit 1; }
+	@if grep -q '^kind: Harness$$' /tmp/vkh-off.out; then echo "FAIL: a Harness renders with kagent.harnesses empty"; exit 1; else echo "ok: inert while empty"; fi
+	@echo "--> two entries: two v1alpha3 Harnesses in the kagent namespace, on the kagent-default WorkerPool"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_HARNESSES) >/tmp/vkh-on.out 2>&1 || { cat /tmp/vkh-on.out; exit 1; }
+	@[ "$$(grep -c '^kind: Harness$$' /tmp/vkh-on.out)" = "2" ] || { echo "FAIL: expected 2 Harness objects, got $$(grep -c '^kind: Harness$$' /tmp/vkh-on.out)"; exit 1; }
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: Harness\n/ && /\n  name: "kagent"\n/' /tmp/vkh-on.out >/tmp/vkh-kagent.out
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: Harness\n/ && /\n  name: "claude"\n/' /tmp/vkh-on.out >/tmp/vkh-claude.out
+	@[ -s /tmp/vkh-kagent.out ] && [ -s /tmp/vkh-claude.out ] || { echo "FAIL: the Harnesses are not named after their entries"; grep -n 'name:' /tmp/vkh-on.out; exit 1; }
+	@for f in /tmp/vkh-kagent.out /tmp/vkh-claude.out; do \
+		grep -q '^apiVersion: kagent.dev/v1alpha3$$' $$f || { echo "FAIL: $$f is not kagent.dev/v1alpha3"; cat $$f; exit 1; }; \
+		grep -q '^  namespace: kagent$$' $$f || { echo "FAIL: $$f is not in the kagent namespace (its WorkerPool and AgentTemplates resolve there only)"; cat $$f; exit 1; }; \
+		grep -A1 '^    workerPoolRef:$$' $$f | grep -q 'name: "kagent-default"' || { echo "FAIL: $$f lacks substrate.workerPoolRef.name"; cat $$f; exit 1; }; \
+	done
+	@echo "--> the kagent entry: the kagent runtime, the digest-pinned image, the env verbatim, the snapshot location, the default kagent.dev/harness selector, no command/args"
+	@grep -q '^  kagent: {}$$' /tmp/vkh-kagent.out || { echo "FAIL: type kagent did not render spec.kagent: {}"; cat /tmp/vkh-kagent.out; exit 1; }
+	@grep -q '^    image: "registry.example/kagent/golang-adk@$(HARNESS_DIGEST)"$$' /tmp/vkh-kagent.out || { echo "FAIL: workload.image is not the digest-pinned reference"; cat /tmp/vkh-kagent.out; exit 1; }
+	@grep -A1 'name: KAGENT_PROPAGATE_TOKEN' /tmp/vkh-kagent.out | grep -q 'value: "true"' || { echo "FAIL: env is not passed through verbatim"; cat /tmp/vkh-kagent.out; exit 1; }
+	@grep -A1 '^    snapshotPolicy:$$' /tmp/vkh-kagent.out | grep -q 'location: "s3://ate-snapshots/kagent"' || { echo "FAIL: substrate.snapshotPolicy.location lost"; cat /tmp/vkh-kagent.out; exit 1; }
+	@grep -A1 '^      matchLabels:$$' /tmp/vkh-kagent.out | grep -q '^        kagent.dev/harness: kagent$$' || { echo "FAIL: the default selector is not kagent.dev/harness: <name>"; cat /tmp/vkh-kagent.out; exit 1; }
+	@if grep -qE '^    (command|args):' /tmp/vkh-kagent.out; then echo "FAIL: command/args render without being set"; cat /tmp/vkh-kagent.out; exit 1; fi
+	@echo "ok: kagent Harness"
+	@echo "--> the claude entry: the claude runtime, no env, the explicit selector replaces the default"
+	@grep -q '^  claude: {}$$' /tmp/vkh-claude.out || { echo "FAIL: type claude did not render spec.claude: {}"; cat /tmp/vkh-claude.out; exit 1; }
+	@if grep -q '^  env:' /tmp/vkh-claude.out; then echo "FAIL: env renders without being set"; cat /tmp/vkh-claude.out; exit 1; fi
+	@grep -A1 '^      matchLabels:$$' /tmp/vkh-claude.out | grep -q '^        team: x$$' || { echo "FAIL: an explicit selector is not rendered"; cat /tmp/vkh-claude.out; exit 1; }
+	@if grep -q 'kagent.dev/harness' /tmp/vkh-claude.out; then echo "FAIL: the default selector leaks onto an entry with its own"; cat /tmp/vkh-claude.out; exit 1; fi
+	@echo "ok: claude Harness"
+	@echo "--> a byo entry renders spec.byo and its command"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.harnesses=[{"name":"x","type":"byo","image":"registry.example/x@$(HARNESS_DIGEST)","command":["/run"],"args":["--a2a"],"workerPool":"p","snapshotLocation":"s3://b/x"}]' >/tmp/vkh-byo-ok.out 2>&1 || { cat /tmp/vkh-byo-ok.out; exit 1; }
+	@grep -q '^  byo: {}$$' /tmp/vkh-byo-ok.out && grep -A1 '^    command:$$' /tmp/vkh-byo-ok.out | grep -q -- '- /run' && grep -A1 '^    args:$$' /tmp/vkh-byo-ok.out | grep -q -- '- --a2a' || { echo "FAIL: the byo Harness lost its type, command or args"; cat /tmp/vkh-byo-ok.out; exit 1; }
+	@echo "ok: byo Harness"
+	@echo "--> guards: a tag instead of a digest, an unknown type, byo without command, a missing worker pool"
+	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.harnesses=[{"name":"x","type":"kagent","image":"registry.example/x:v1","workerPool":"p","snapshotLocation":"s3://b/x"}]' >/tmp/vkh-tag.out 2>&1; then \
+		echo "FAIL: a tagged Harness image was accepted (the CRD would reject it at admission)"; exit 1; \
+	elif ! grep -q 'Harness images are digest-pinned' /tmp/vkh-tag.out; then echo "FAIL: the digest guard failed for the wrong reason"; cat /tmp/vkh-tag.out; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.harnesses=[{"name":"x","type":"python","image":"registry.example/x@$(HARNESS_DIGEST)","workerPool":"p","snapshotLocation":"s3://b/x"}]' >/tmp/vkh-type.out 2>&1; then \
+		echo "FAIL: an unknown Harness type was accepted"; exit 1; \
+	elif ! grep -q 'is not one of kagent, claude, codex, byo' /tmp/vkh-type.out; then echo "FAIL: the type guard failed for the wrong reason"; cat /tmp/vkh-type.out; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.harnesses=[{"name":"x","type":"byo","image":"registry.example/x@$(HARNESS_DIGEST)","workerPool":"p","snapshotLocation":"s3://b/x"}]' >/tmp/vkh-byo.out 2>&1; then \
+		echo "FAIL: a byo Harness without command was accepted"; exit 1; \
+	elif ! grep -q 'byo Harness must set command' /tmp/vkh-byo.out; then echo "FAIL: the byo guard failed for the wrong reason"; cat /tmp/vkh-byo.out; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.harnesses=[{"name":"x","type":"kagent","image":"registry.example/x@$(HARNESS_DIGEST)","snapshotLocation":"s3://b/x"}]' >/tmp/vkh-pool.out 2>&1; then \
+		echo "FAIL: a Harness without workerPool was accepted"; exit 1; \
+	elif ! grep -q 'kagent.harnesses\[x\].workerPool is required' /tmp/vkh-pool.out; then echo "FAIL: the workerPool guard failed for the wrong reason"; cat /tmp/vkh-pool.out; exit 1; fi
+	@echo "ok: guards"
+	@echo "--> kagent off: no Harness at all"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.enabled=true --set-json 'kagent.harnesses=[{"name":"x","type":"kagent","image":"registry.example/x@$(HARNESS_DIGEST)","workerPool":"p","snapshotLocation":"s3://b/x"}]' 2>&1 | grep -q '^kind: Harness$$'; then echo "FAIL: a Harness renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
+
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"

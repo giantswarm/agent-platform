@@ -6,7 +6,7 @@ description: |
   consumer-side wiring that turns the platform components into a working whole on
   a cluster: the public muster route and the agentgateway data-plane Gateway +
   AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
-  the kagent and klaus-gateway routes, the kagent declarative-agent wiring, the
+  the kagent and klaus-gateway routes, the kagent wiring (Harnesses, RemoteMCPServers, ModelConfigs), the
   CloudNativePG Cluster, and — gated on the component toggles — the Backstage
   app-config and route, the mcp-kubernetes MCPServer registration with muster and
   the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO
@@ -28,7 +28,7 @@ annotations:
 #
 # This chart renders only the consumer-side integration CRs (Gateway,
 # AgentgatewayParameters, HTTPRoutes, BackendTrafficPolicies, NetworkPolicies,
-# kagent/klaus-gateway routes, kagent declarative-agent wiring, CNPG Cluster).
+# kagent/klaus-gateway routes, kagent Harness/RemoteMCPServer/ModelConfig wiring, CNPG Cluster).
 # The components it wires (muster, agentgateway, kagent, …) are installed as
 # separate releases by the agent-platform meta-chart, which renders THIS chart
 # as a HelmRelease that `dependsOn` the agentgateway + kagent component releases

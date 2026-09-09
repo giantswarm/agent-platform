@@ -1,0 +1,59 @@
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.harnesses }}
+{{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $types := list "kagent" "claude" "codex" "byo" }}
+{{/* Platform-owned Harnesses (kagent main): the runtime image plus the Substrate
+policy an AgentTemplate runs under. A Harness admits the templates its
+allowedAgentTemplates selector matches, so agent-manager and the portal place a
+template on a runtime with one label (kagent.dev/harness: <name>, the default
+selector) and never touch images, worker pools or snapshot locations. Rendered
+in the kagent namespace: a Harness resolves its WorkerPool, its templates and
+their ModelConfigs in its own namespace only. The image is digest-pinned because
+the CRD demands it (a Harness is an immutable runtime; a moving tag would change
+every agent under it silently), so a tag fails the render here instead of at
+admission. Nothing beyond these knobs (kagent memory, …) is wired. */}}
+{{- range .Values.kagent.harnesses }}
+{{- $name := required "kagent.harnesses[].name is required" .name }}
+{{- $type := required (printf "kagent.harnesses[%s].type is required (one of %s)" $name (join ", " $types)) .type }}
+{{- if not (has $type $types) }}
+{{- fail (printf "kagent.harnesses[%s].type %q is not one of %s" $name $type (join ", " $types)) }}
+{{- end }}
+{{- $image := required (printf "kagent.harnesses[%s].image is required" $name) .image }}
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" $image) }}
+{{- fail (printf "kagent.harnesses[%s].image %q: Harness images are digest-pinned (<repository>@sha256:<64 hex digits>); the kagent.dev Harness CRD rejects a tag" $name $image) }}
+{{- end }}
+{{- if and (eq $type "byo") (not .command) }}
+{{- fail (printf "kagent.harnesses[%s]: a byo Harness must set command (kagent's private A2A contract, not the image's entrypoint)" $name) }}
+{{- end }}
+---
+apiVersion: kagent.dev/v1alpha3
+kind: Harness
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns }}
+spec:
+  {{ $type }}: {}
+  workload:
+    image: {{ $image | quote }}
+    {{- with .command }}
+    command:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .args }}
+    args:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- with .env }}
+  env:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  substrate:
+    workerPoolRef:
+      name: {{ required (printf "kagent.harnesses[%s].workerPool is required (a Substrate WorkerPool in the kagent namespace)" $name) .workerPool | quote }}
+    snapshotPolicy:
+      location: {{ required (printf "kagent.harnesses[%s].snapshotLocation is required (the Substrate snapshot store, e.g. s3://<bucket>/%s)" $name $name) .snapshotLocation | quote }}
+  allowedAgentTemplates:
+    selector:
+      matchLabels:
+        {{- toYaml (.selector | default (dict "kagent.dev/harness" $name)) | nindent 8 }}
+{{- end }}
+{{- end }}

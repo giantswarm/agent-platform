@@ -92,11 +92,12 @@ README.
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
-| components.kagent.omitKeys[2] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[3] | string | `"oauth2ProxyIngress"` |  |
-| components.kagent.omitKeys[4] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[5] | string | `"serviceMonitor"` |  |
-| components.kagent.omitKeys[6] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[2] | string | `"harnesses"` |  |
+| components.kagent.omitKeys[3] | string | `"modelConfigs"` |  |
+| components.kagent.omitKeys[4] | string | `"oauth2ProxyIngress"` |  |
+| components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
+| components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent.crds | string | `"CreateReplace"` |  |
 | components.kagent.installDisableWait | bool | `true` |  |
@@ -484,7 +485,7 @@ README.
 | kagent.cilium-debug-agent.namespaceOverride | string | `"kagent"` |  |
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
-| kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
+| kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. On kagent main agent-manager and the portal write AgentTemplates as the caller instead of HelmReleases; the identity stays rendered and named to both until that path is retired. |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.pathPrefix | string | `"/kagent"` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
@@ -504,6 +505,7 @@ README.
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
+| kagent.harnesses | list | `[]` |  |
 | kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | postgres.enabled | bool | `false` |  |
