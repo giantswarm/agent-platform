@@ -1,0 +1,100 @@
+{{- if and (include "agent-platform.agentManager.enabled" .) .Values.agentManager.route.enabled }}
+{{- $route := .Values.agentManager.route }}
+{{- $fullname := include "agent-platform.agentManager.fullname" . }}
+# AgentgatewayBackend — registers the agent-manager Service as a backend that
+# agentgateway can proxy to after JWT validation.
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: agent-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.agentManager.labels" . | nindent 4 }}
+spec:
+  policies:
+    auth:
+      # Gateway strips the JWT after validation; passthrough re-injects it so
+      # the backend sees the caller's token — agent-manager validates it
+      # itself (agent-manager.oauth) and writes every agent as that caller.
+      passthrough: {}
+  static:
+    host: {{ printf "%s.%s.svc.cluster.local" $fullname .Release.Namespace }}
+    port: {{ include "agent-platform.agentManager.servicePort" . }}
+---
+# HTTPRoute — exposes the agent-manager API at <pathPrefix> on the agentgateway
+# Gateway. The path prefix is stripped (URLRewrite) before forwarding so the
+# service receives requests at /api/v1/... as it expects.
+#
+# This is the internal data-plane hop. Like the kagent controller route it is
+# deliberately NOT hostname-scoped: an in-cluster caller dialing the
+# agentgateway Service by its cluster-DNS name sends that as Host, which would
+# not match the public hostname and fall through to the catch-all MCP route
+# ("/"). The path prefix is more specific than "/", so a hostname-less route
+# wins for every Host.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: agent-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.agentManager.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ .Release.Namespace }}
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ $route.pathPrefix }}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: agent-manager
+          kind: AgentgatewayBackend
+          group: agentgateway.dev
+{{- if not (include "agent-platform.edgeIsDataPlane" .) }}
+---
+# HTTPRoute — exposes the agent-manager API on the outer public Gateway
+# (TLS-terminating). Forwards <pathPrefix>/* on the public hostname to the
+# agentgateway Service, which then applies JWT validation and the inner
+# URLRewrite before forwarding to agent-manager. No URLRewrite here: the prefix
+# strip happens at the inner hop only. Not rendered when the data plane is the
+# edge itself: the inner route above then serves <pathPrefix> on the HTTPS
+# listener directly.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: agent-manager-public
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.agentManager.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- $override := list }}
+    {{- if $route.parentRef.name }}
+    {{- $override = list (dict "name" $route.parentRef.name "namespace" $route.parentRef.namespace "group" "gateway.networking.k8s.io" "kind" "Gateway") }}
+    {{- end }}
+    {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $override "key" "agentManager.route.parentRef") | nindent 4 }}
+  hostnames:
+    - {{ include "agent-platform.agentManager.hostname" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ $route.pathPrefix }}
+      {{- with (include "agent-platform.routeTimeouts" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      backendRefs:
+        - name: {{ .Values.gateway.name }}
+          port: 8080
+{{- end }}
+{{- end }}

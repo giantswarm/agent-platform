@@ -29,15 +29,40 @@ WIRING = {
         ["--set", "ingress.mode=muster-direct"],
     ),
     "kagent": ("agent-platform-connectivity-kagent-controller", [], []),
+    # The route renders agentgateway.dev objects on the agentgateway Gateway, so
+    # it needs an agentgateway-* mode with the agentgateway component on (the
+    # ingress guard refuses it in muster-direct).
     "klaus-gateway": (
         "agent-platform-connectivity-dataplane-to-klausgateway",
-        ["--set", "klausGateway.agentgatewayRoute.enabled=true"],
-        ["--set", "klausGateway.agentgatewayRoute.enabled=true"],
+        ["--set", "klausGateway.agentgatewayRoute.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "components.agentgateway.enabled=true"],
+        ["--set", "klausGateway.agentgatewayRoute.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "components.agentgateway.enabled=true"],
     ),
     "agent-sandbox": ("agent-platform-connectivity-agent-sandbox-pod-security", [], []),
+    # The egress policy renders whenever the component is on (networkPolicy is
+    # on by default); the guards need a backend endpoint / the kagent runtime.
+    "model-manager": (
+        "agent-platform-connectivity-model-manager-egress",
+        ["--set", "model-manager.ollama.endpoint=http://10.0.0.1:11434", "--set", "components.kagent.enabled=true", "--set", "model-manager.oauth.enabled=false"],
+        [],
+    ),
+    "agent-manager": (
+        "agent-platform-connectivity-agent-manager-egress",
+        ["--set", "components.kagent.enabled=true", "--set", "agent-manager.oauth.enabled=false"],
+        [],
+    ),
 }
 
-PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
+# The fleet's API groups: the cluster-shape knobs default to `auto` and resolve
+# from .Capabilities.APIVersions, so without these a `helm template` renders the
+# vanilla shape and the Kyverno / Cilium markers below never appear.
+FLEET_APIS = [
+    "--api-versions", "kyverno.io/v1",
+    "--api-versions", "cilium.io/v2",
+    "--api-versions", "monitoring.coreos.com/v1",
+    "--api-versions", "gateway.networking.k8s.io/v1",
+    "--api-versions", "gateway.envoyproxy.io/v1alpha1",
+]
+PARENT_REF = ["--set", "ingress.parentRefs[0].name=x", *FLEET_APIS]
 
 
 def render(chart: str, flags: list[str]) -> str:

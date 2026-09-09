@@ -40,6 +40,18 @@ producing a silently-broken release.
     {{- fail "kagent.controllerRoute.jwtAuthentication.enabled is true but gateway.jwksEgress.enabled is false. The agentgateway data plane cannot reach dex on 5556 to fetch the JWKS, so signature validation fails closed. Set gateway.jwksEgress.enabled: true." }}
   {{- end }}
 
+  {{- /* The oauth2-proxy callback must land on the UI hostname the route
+         serves. An installation that derives redirect-url from global.domain
+         (the standalone umbrella's contract did, through the oauth2-proxy
+         chart's tpl of extraArgs) and overrides kagent.uiRoute.hostname renders
+         green and breaks login at runtime: the oauth2-proxy chart cannot see
+         the route's hostname. Fail the render instead. */ -}}
+  {{- $proxy := index .Values.kagent "oauth2-proxy" | default dict }}
+  {{- $redirect := dig "extraArgs" "redirect-url" "" $proxy | toString }}
+  {{- if and .Values.kagent.uiRoute.hostname (dig "enabled" false $proxy) (contains ".Values.global.domain" $redirect) }}
+    {{- fail (printf "kagent.uiRoute.hostname is %q but kagent.oauth2-proxy.extraArgs.redirect-url still derives from global.domain; set redirect-url: https://%s/oauth2/callback" .Values.kagent.uiRoute.hostname .Values.kagent.uiRoute.hostname) }}
+  {{- end }}
+
   {{- /* The CNPG-generated DSN Secret lands in the Cluster's namespace; kagent
          mounts it by name, so the two namespaces must match. */ -}}
   {{- if .Values.postgres.enabled }}

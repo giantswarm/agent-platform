@@ -1,26 +1,40 @@
-# app-test-suite config. Consumed by the generated `run-tests-with-ats`
-# CircleCI job (execute-chart-tests for the agent-platform meta-package chart).
-# The agent-platform-crds bundle chart has been retired (app-owned CRDs).
+# app-test-suite (ATS >= 1.0) config, consumed by the generated
+# `run-tests-with-ats` CircleCI job (execute-chart-tests). The job creates the
+# kind cluster and hands ATS its kubeconfig; helm and kubectl come with the ATS
+# image; the chart archive under test is copied to the working directory.
 #
-# The cluster test steps are skipped on purpose. agent-platform is an
-# app-of-apps platform meta-package: it always installs the muster subchart and
-# renders CRs for ~9 external CRD families (Cilium, Kyverno, CAPI, CNPG,
-# Gateway API, kagent, agentgateway, muster, Prometheus-operator). A standalone
-# app-test-suite smoke on a bare kind cluster fails at install (no matching
-# CRDs), so it is not the right validation model for this chart -- the same call
-# the muster repo makes for its own platform chart.
+# Two scenarios on the one cluster, in order (tests/ats/README.md):
 #
-# What still runs and gates the PR: the build-chart job (app-build-suite lint +
-# package + values.schema.json validation) for both charts. Full deployment is
-# validated against a real management cluster, not an ATS kind smoke.
+#   smoke       tests/ats/test_smoke.py — the quick start on a bare cluster. The
+#               chart needs the Gateway API CRDs and an identity provider first,
+#               so ATS's own pre-test deploy is skipped and the test installs the
+#               candidate itself: prerequisites (Gateway API CRDs, the lab Dex,
+#               an in-cluster registry the archive is pushed to), then
+#               `helm install --wait` with tests/test-values.yaml +
+#               tests/ats/values-kagent.yaml + tests/ats/values-round-trips.yaml
+#               and self-management ON against that registry. It asserts what the
+#               install promises (deployed, FluxInstance Ready, component
+#               HelmReleases Ready as agent-platform-flux), the adoption, the
+#               auth round trip (401 chain, a Dex user through the password grant
+#               and through muster's login flow), the agent round trips (a
+#               declarative Agent Ready; agent-manager's create_agent through
+#               muster -> a HelmRelease as kagent-flux -> Agent Ready), the
+#               self-management fixpoint and the values Secret, the refused
+#               `helm upgrade`, then the ordered teardown (`helm uninstall
+#               --wait` clean in under a minute, no Flux CRD left, the operator
+#               CRDs still there).
+#   functional  tests/ats/test_own_flux.py — a cluster that runs its own Flux:
+#               source-controller + helm-controller from the upstream manifest,
+#               the chart THROUGH a HelmRelease with components.flux.enabled
+#               false (no operator, no second helm-controller, the Flux CRDs'
+#               field managers untouched, an agent through that Flux), the render
+#               guard when the value is flipped on, and the way back.
 #
-# To turn on a real smoke later: drop `smoke` from skip-steps and add
-# `app-tests-skip-app-deploy: true` + a tests/ats conftest that installs the
-# Gateway API CRD and deploys the chart with tests/test-values.yaml (which
-# already trims the render to core resources + a single HTTPRoute).
+# upgrade stays skipped: the upgrade from the last published chart is not a
+# kind smoke's job here (self-management rolls a running installation forward
+# through its own HelmRelease; the smoke asserts that mechanism's fixpoint).
 app-tests-app-config-file: tests/test-values.yaml
 app-tests-deploy-namespace: agent-platform
+app-tests-skip-app-deploy: true
 
-smoke-tests-cluster-type: kind
-
-skip-steps: [smoke,functional,upgrade]
+skip-steps: [upgrade]

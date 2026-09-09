@@ -1,0 +1,34 @@
+{{- if (include "agent-platform.modelServing.enabled" .) }}
+{{- $pvc := .Values.modelServing.cache.pvc }}
+{{- if and .Values.modelServing.cache.enabled (not $pvc.existingClaim) }}
+# The Hugging Face model cache: one claim in the serving namespace, one
+# subdirectory per InferenceService (its name). The Kyverno policies
+# (policies.yaml) mount it into the KServe storage-initializer and the
+# runtime; model-manager's pre-warm downloads land in the same layout.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $pvc.name }}
+  namespace: {{ include "agent-platform.modelServing.namespace" . }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+  annotations:
+    # Hundreds of gigabytes of downloads outlive the release: an uninstall or a
+    # cache.enabled flip must not delete them.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml $pvc.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ $pvc.size | quote }}
+  {{- if eq $pvc.storageClassName "-" }}
+  storageClassName: ""
+  {{- else if $pvc.storageClassName }}
+  storageClassName: {{ $pvc.storageClassName | quote }}
+  {{- end }}
+  {{- with $pvc.volumeName }}
+  volumeName: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

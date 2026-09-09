@@ -1,9 +1,19 @@
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.networkPolicy.enabled }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $controllerPort := "8083" }}
+{{- /* kagent's built-in tool server (the kagent-tools subchart of the kagent chart).
+     The kagent chart renders a RemoteMCPServer for it at
+     http://kagent-tools.<tools namespace>:<port>/mcp; the controller discovers its
+     tools there and every agent that references it calls it there. The kagent
+     wrapper chart pins the subchart to the kagent namespace; an explicit
+     kagent.kagent-tools.namespaceOverride wins. */}}
+{{- $toolsValues := index .Values.kagent "kagent-tools" | default dict }}
+{{- $toolsEnabled := $toolsValues.enabled }}
+{{- $toolsNs := $toolsValues.namespaceOverride | default $kagentNs }}
+{{- $toolsPort := dig "service" "ports" "tools" "targetPort" "8084" $toolsValues | toString }}
 {{- $clusterName := .Values.postgres.clusterName }}
 
-{{- if eq .Values.networkPolicy.flavor "cilium" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Egress from agentgateway data-plane to the kagent controller (cross-namespace).
 apiVersion: cilium.io/v2
@@ -67,7 +77,8 @@ spec:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
 ---
-# Egress from the kagent controller: DNS, Postgres, Kubernetes API, OTLP.
+# Egress from the kagent controller: DNS, Postgres, Kubernetes API, OTLP, muster,
+# the agent pods, and the built-in tool server when it is enabled.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -120,10 +131,28 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    {{- if $toolsEnabled }}
+    # Tool discovery (MCP initialize + tools/list) against the built-in tool
+    # server's RemoteMCPServer URL; without it the RemoteMCPServer never becomes
+    # Accepted and the agents that reference it run without tools.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: kagent-tools
+            io.kubernetes.pod.namespace: {{ $toolsNs }}
+      toPorts:
+        - ports:
+            - port: {{ $toolsPort | quote }}
+              protocol: TCP
+    {{- end }}
 {{- if .Values.postgres.enabled }}
 ---
 # CNPG cluster policies: inter-instance egress for streaming replication,
-# and ingress from the kagent controller.
+# and ingress from the kagent controller. The selector also covers a Cluster
+# named <clusterName>-restore: the scratch Cluster a restore test bootstraps
+# from the backup store (its full-recovery Job needs the Kubernetes API and the
+# store, and the operator's cluster-wide CNPG policies cover instance, initdb
+# and join pods but not recovery Jobs). It never selects the live Cluster's
+# pods for anything the restore Cluster could not do on its own.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -133,12 +162,20 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   endpointSelector:
-    matchLabels:
-      cnpg.io/cluster: {{ $clusterName }}
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: In
+        values:
+          - {{ $clusterName }}
+          - {{ $clusterName }}-restore
   egress:
     - toEndpoints:
-        - matchLabels:
-            cnpg.io/cluster: {{ $clusterName }}
+        - matchExpressions:
+            - key: cnpg.io/cluster
+              operator: In
+              values:
+                - {{ $clusterName }}
+                - {{ $clusterName }}-restore
       toPorts:
         - ports:
             - port: "5432"
@@ -147,10 +184,56 @@ spec:
               protocol: TCP
     - toEntities:
         - kube-apiserver
+    {{- if and (include "agent-platform.postgres.backupEnabled" .) (eq .Values.postgres.backup.method "plugin") }}
+    {{- $np := .Values.postgres.backup.networkPolicy }}
+    # The Barman Cloud plugin sidecar reaches the object store: DNS, the world on
+    # the store's ports, the cluster entity when endpointURL names an in-cluster
+    # store, and any names or blocks the installation pins.
+    {{- if $np.fqdns }}
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- else }}
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- end }}
+    - toEntities:
+        - world
+        {{- if .Values.postgres.backup.objectStore.endpointURL }}
+        - cluster
+        {{- end }}
+      toPorts:
+        - ports:
+            {{- range $np.ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- with $np.fqdns }}
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $np.ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    {{- with $np.cidrs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $np.ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    {{- end }}
   ingress:
     - fromEndpoints:
-        - matchLabels:
-            cnpg.io/cluster: {{ $clusterName }}
+        - matchExpressions:
+            - key: cnpg.io/cluster
+              operator: In
+              values:
+                - {{ $clusterName }}
+                - {{ $clusterName }}-restore
       toPorts:
         - ports:
             - port: "5432"
@@ -169,8 +252,9 @@ spec:
 
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.muster.enabled }}
 ---
-# Egress from all kagent-managed agent pods to muster (MCP tool calls)
-# and to the Anthropic API (model inference). DNS included.
+# Egress from all kagent-managed agent pods to muster (MCP tool calls), to the
+# built-in tool server when it is enabled (MCP tool calls), and to the Anthropic
+# API (model inference). DNS included.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -231,11 +315,34 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
+    {{- if $toolsEnabled }}
+    # The agents call the built-in tool server's MCP endpoint directly, the same
+    # way they call muster.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: kagent-tools
+            io.kubernetes.pod.namespace: {{ $toolsNs }}
+      toPorts:
+        - ports:
+            - port: {{ $toolsPort | quote }}
+              protocol: TCP
+    {{- end }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
 {{- end }}
 {{- if index .Values.kagent "oauth2-proxy" "enabled" }}
+{{- /* Extra callers admitted on oauth2-proxy's proxy port next to the public
+Gateway's Envoy pods (kagent.oauth2ProxyIngress.additionalPeers): pod label maps,
+each rendered as one more fromEndpoints entry. A peer outside the kagent
+namespace carries its own io.kubernetes.pod.namespace label. */ -}}
+{{- $o2pPeers := dig "oauth2ProxyIngress" "additionalPeers" (list) .Values.kagent }}
+{{- range $o2pPeers }}
+{{- if or (not (kindIs "map" .)) (not .) }}
+{{- fail (printf "kagent.oauth2ProxyIngress.additionalPeers: every item is a non-empty pod label map (matchLabels), e.g. {app: teleport-kube-agent, io.kubernetes.pod.namespace: kube-system}; got %v" .) }}
+{{- end }}
+{{- end }}
 ---
-# Ingress to oauth2-proxy: envoy (proxy port) + Prometheus (metrics port).
+# Ingress to oauth2-proxy: envoy (proxy port), the installation's extra callers
+# (kagent.oauth2ProxyIngress.additionalPeers, proxy port) + Prometheus (metrics port).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -256,6 +363,15 @@ spec:
         - ports:
             - port: "4180"
               protocol: TCP
+    {{- range $o2pPeers }}
+    - fromEndpoints:
+        - matchLabels:
+            {{- toYaml . | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: "4180"
+              protocol: TCP
+    {{- end }}
     - fromEntities:
         - cluster
       toPorts:
@@ -326,7 +442,7 @@ spec:
             - port: "8080"
               protocol: TCP
 {{- end }}
-{{- else if eq .Values.networkPolicy.flavor "kubernetes" }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

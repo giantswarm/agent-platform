@@ -4,13 +4,23 @@
   // `extends` entry of the generated renovate.json5. Class-wide rules belong in
   // giantswarm/renovate-presets instead.
   //
-  // No chart in this repo has a Chart.yaml `dependencies:` block anymore: the
+  // No Chart.yaml in this repo pins anything Renovate could bump: the
   // agent-platform meta-package and agent-platform-connectivity render their
-  // children as Flux/Argo objects (component versions are `components.*.versionRange`
-  // VALUES re-resolved by Flux on every reconcile, not Renovate-managed pins), and
-  // the agent-platform-crds CRD-bundle chart has been retired in favour of
-  // app-owned CRDs. So the helmv3 manager has nothing to manage here — the only
-  // custom rule left tracks the component image tags pinned in values.yaml.
+  // children as Flux objects (component versions are `components.*.versionRange`
+  // VALUES re-resolved by Flux on every reconcile, not Renovate-managed pins), the
+  // agent-platform-crds CRD-bundle chart has been retired in favour of app-owned
+  // CRDs, and the meta-package's one `dependencies:` entry is its own flux-engine
+  // subchart (helm/agent-platform/charts/flux-engine, no repository — the helmv3
+  // manager skips a local chart). What Renovate tracks here are image tags in
+  // values files, through the rule below: the Flux Operator image of the
+  // flux-engine subchart (charts/flux-engine/values.yaml, operator.image — bump
+  // its Chart.yaml appVersion with it; the operator's embedded Flux manifests
+  // decide which Flux 2.x the FluxInstance runs, so a new Flux minor arrives
+  // with a new operator tag), the kubectl image of the meta chart's hook Jobs
+  // (values.yaml, gitops.hooks.image) and the kubectl+helm image of the hooks
+  // that need helm or a shell — the self-management values hook, its resumer
+  // and the suspend hook (values.yaml, gitops.hooks.helmImage: alpine/k8s,
+  // whose tags follow the kubectl minor).
   "customManagers": [
     {
       // Tracks registry/repository/tag image blocks in Helm values files.

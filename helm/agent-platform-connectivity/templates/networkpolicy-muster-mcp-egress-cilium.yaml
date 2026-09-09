@@ -1,4 +1,4 @@
-{{- if and .Values.networkPolicy.enabled (eq .Values.networkPolicy.flavor "cilium") .Values.networkPolicy.musterInClusterMcpPorts }}
+{{- if and .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") .Values.networkPolicy.musterInClusterMcpPorts }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

@@ -1,0 +1,50 @@
+{{- /*
+Registers the mcp-kubernetes component with muster. The standalone umbrella
+rendered this CR next to its mcp-kubernetes dependency; here it gates on the
+component toggle the meta chart forwards (components.mcp-kubernetes.enabled)
+and on muster being on (the MCPServer CRD ships with the muster component, and
+the connectivity release dependsOn it). The Service name is pinned by
+mcp-kubernetes.fullnameOverride (values.yaml) so the URL survives any release
+name; the port follows the mcp-kubernetes chart's service.port.
+
+With the server's OAuth on (mcp-kubernetes.mcpKubernetes.oauth.enabled, the
+default) the CR carries the auth block: muster forwards the session's IdP
+id_token byte-identical (forwardToken — the server validates it against the
+IdP's JWKS, trusting the platform client's audience) and requests
+mcp-kubernetes.kubernetesAudience at login so the token is also valid at the
+kube-apiserver (enableDownstreamOAuth). With OAuth off muster connects
+anonymously and the server acts as its ServiceAccount.
+
+agent-platform.giantswarm.io/tool-group: infrastructure is the Agent Platform's
+MCP server tier -- the servers for the infrastructure the platform runs on,
+next to the platform's own management surface (agent-manager, model-manager:
+agent-platform, stamped by their charts) and the servers an installation
+registers (no label). The portal's MCP servers page, the toolset presets and
+the docs group servers by it.
+*/ -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "mcp-kubernetes")) (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
+{{- $mcpk := index .Values "mcp-kubernetes" | default dict }}
+{{- $oauthOn := dig "mcpKubernetes" "oauth" "enabled" false $mcpk }}
+apiVersion: muster.giantswarm.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: mcp-kubernetes
+  namespace: {{ .Release.Namespace }}
+  labels:
+    muster.giantswarm.io/type: mcp-kubernetes
+    agent-platform.giantswarm.io/tool-group: infrastructure
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  autoStart: true
+  type: streamable-http
+  url: http://{{ dig "fullnameOverride" "mcp-kubernetes" $mcpk }}.{{ .Release.Namespace }}.svc.cluster.local:{{ dig "service" "port" 8080 $mcpk }}/mcp
+  {{- if $oauthOn }}
+  auth:
+    type: oauth
+    forwardToken: true
+    {{- with (dig "kubernetesAudience" "" $mcpk) }}
+    requiredAudiences:
+      - {{ . }}
+    {{- end }}
+  {{- end }}
+{{- end }}

@@ -1,5 +1,5 @@
 # Meta-package render smoke values. The root chart emits only Flux
-# OCIRepository + HelmRelease (or Argo Application) objects; it has no workloads
+# OCIRepository + HelmRelease objects; it has no workloads
 # and needs no ingress wiring (that lives in the connectivity chart). Enabling
 # every component here exercises the full render path in chart-testing.
 gitops:
@@ -16,4 +16,8 @@ components:
   agent-sandbox:
     enabled: true
   agent-platform-mcps:
+    enabled: true
+  model-manager:
+    enabled: true
+  agent-manager:
     enabled: true

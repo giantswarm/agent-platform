@@ -1,0 +1,150 @@
+{{- /*
+The Flux Operator: the upstream chart controlplaneio-fluxcd/flux-operator 0.59.0
+reduced to what the engine needs — Deployment, ServiceAccount, the cluster-admin
+ClusterRoleBinding the operator requires to install Flux, and the metrics
+Service. The web UI (web.enabled) is off, which drops the chart's ports 9080,
+its Secret, HTTPRoute/Ingress, RBAC roles and its only NetworkPolicy; the
+ServiceMonitor, FlowSchema and marketplace settings are not carried. The
+Deployment's labels carry no app.kubernetes.io/component=helm-controller, so
+the meta chart's render guard never mistakes this operator for a foreign Flux.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "flux-engine.labels" . | nindent 4 }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-platform-flux-operator
+  labels:
+    {{- include "flux-engine.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: flux-operator
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flux-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "flux-engine.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: 8080
+      targetPort: http-metrics
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "flux-engine.operator.selectorLabels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flux-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "flux-engine.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "flux-engine.operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+      labels:
+        {{- include "flux-engine.operator.selectorLabels" . | nindent 8 }}
+        {{- include "flux-engine.labels.common" . | nindent 8 }}
+    spec:
+      {{- with .Values.operator.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- $pullSecrets := concat (.Values.operator.imagePullSecrets | default list) ((.Values.global | default dict).imagePullSecrets | default list) }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "map" . }}{{ .name }}{{ else }}{{ . }}{{ end }}
+        {{- end }}
+      {{- end }}
+      serviceAccountName: flux-operator
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: {{ include "flux-engine.operator.image" . | quote }}
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          args:
+            - --log-level={{ .Values.operator.logLevel }}
+          env:
+            - name: RUNTIME_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REPORTING_INTERVAL
+              value: {{ .Values.operator.reportingInterval | quote }}
+            # 0 disables the Flux Status web server (the upstream chart's web.enabled=false).
+            - name: WEB_SERVER_PORT
+              value: "0"
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http-metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+          volumeMounts:
+            - name: temp
+              mountPath: /tmp
+      volumes:
+        - name: temp
+          emptyDir: {}
+      {{- with .Values.operator.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.operator.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.operator.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

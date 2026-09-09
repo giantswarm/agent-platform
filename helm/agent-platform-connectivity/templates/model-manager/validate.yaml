@@ -1,0 +1,159 @@
+{{- /*
+Render-time guards of the model-manager component. They fail `helm template`
+(and therefore CI lint + install) with an actionable message instead of
+shipping a service that cannot reach its backend or its identity provider, a
+route the API server rejects, or an MCPServer CR without its CRD.
+*/ -}}
+{{- if (include "agent-platform.modelManager.enabled" .) }}
+  {{- $mm := .Values.modelManager }}
+  {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson }}
+  {{- $backends := include "agent-platform.modelManager.backends" . | fromJsonArray }}
+  {{- /* One model-manager runs one or several backends (model-manager.backends,
+         else [model-manager.backend]); every guard below applies to every
+         listed driver. $backend keeps the kserve API guard — which the
+         standalone umbrella patches by text — keyed on one name: kserve when
+         it is listed, else the default (first) backend. */ -}}
+  {{- $backend := index $backends 0 }}
+  {{- if has "kserve" $backends }}{{- $backend = "kserve" }}{{- end }}
+  {{- $_ := include "agent-platform.modelManager.fullname" . }}
+
+  {{- /* The chart's schema types `backend` as a free string and `backends` as
+         strings; a typo would start the service with a driver it does not
+         have, a repeated name a process that refuses to start. */ -}}
+  {{- range $name := $backends }}
+    {{- if not (or (eq $name "ollama") (eq $name "kserve") (eq $name "lemonade") (eq $name "lmstudio")) }}
+      {{- fail (printf "model-manager backend %q (model-manager.backends / model-manager.backend) is invalid; must be one of: ollama, kserve, lemonade, lmstudio" $name) }}
+    {{- end }}
+  {{- end }}
+  {{- if ne (len $backends) (len (uniq $backends)) }}
+    {{- fail (printf "model-manager.backends (%s) lists a driver twice: one model-manager runs each driver at most once" (join ", " $backends)) }}
+  {{- end }}
+
+  {{- /* The ollama backend proxies a host Ollama: the endpoint is the one
+         input an install must provide (the chart's own default,
+         host.docker.internal, is a Docker Desktop guess). */ -}}
+  {{- if include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "ollama") }}
+    {{- $endpoint := include "agent-platform.modelManager.ollamaEndpoint" . }}
+    {{- if not $endpoint }}
+      {{- fail "ollama is among the model-manager backends but model-manager.ollama.endpoint is empty: set the Ollama API base URL as reached from pods (e.g. http://ollama.models.svc.cluster.local:11434)" }}
+    {{- end }}
+    {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
+      {{- fail (printf "model-manager.ollama.endpoint (%q) must be an http(s) URL with a host, e.g. http://ollama.models.svc.cluster.local:11434" $endpoint) }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* The lemonade backend proxies a host Lemonade Server (FastFlowLM on
+         AMD Ryzen AI NPUs, llama.cpp): the endpoint is the one input an
+         install must provide, as for ollama. */ -}}
+  {{- if include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "lemonade") }}
+    {{- $endpoint := include "agent-platform.modelManager.lemonadeEndpoint" . }}
+    {{- if not $endpoint }}
+      {{- fail "lemonade is among the model-manager backends but model-manager.lemonade.endpoint is empty: set the Lemonade Server base URL as reached from pods (e.g. http://172.21.0.1:13305 — Lemonade listens on 13305 by default)" }}
+    {{- end }}
+    {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
+      {{- fail (printf "model-manager.lemonade.endpoint (%q) must be an http(s) URL with a host, e.g. http://172.21.0.1:13305" $endpoint) }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* The lmstudio backend proxies a host LM Studio (llama.cpp, MLX on
+         Apple silicon): the endpoint is the one input an install must
+         provide, as for ollama. */ -}}
+  {{- if include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "lmstudio") }}
+    {{- $endpoint := include "agent-platform.modelManager.lmstudioEndpoint" . }}
+    {{- if not $endpoint }}
+      {{- fail "lmstudio is among the model-manager backends but model-manager.lmstudio.endpoint is empty: set the LM Studio base URL as reached from pods (e.g. http://172.21.0.1:1234 — LM Studio listens on 1234 by default)" }}
+    {{- end }}
+    {{- if not (regexMatch "^https?://[^/]+" $endpoint) }}
+      {{- fail (printf "model-manager.lmstudio.endpoint (%q) must be an http(s) URL with a host, e.g. http://172.21.0.1:1234" $endpoint) }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* The kserve backend manages InferenceServices: it needs KServe on the
+         cluster. Only checkable through its CRDs at render time — unless this
+         platform installs KServe itself: with the kserve-resources component
+         (or the modelServing wiring that runs on it) on, that component's own
+         guards own the check and a missing API is the first install, where the
+         CRDs arrive in the same reconcile. Optional components: a roster that
+         does not carry them yet is not force-on. */ -}}
+  {{- $kserveBundled := or (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-resources")) (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "modelServing")) }}
+  {{- if and (eq $backend "kserve") $mm.kserve.requireApi (not $kserveBundled) (not (.Capabilities.APIVersions.Has "serving.kserve.io/v1beta1")) }}
+    {{- fail "model-manager.backend is kserve but the serving.kserve.io/v1beta1 API (InferenceService) is not on the cluster and no component of this chart installs it: turn on the KServe components (components.kserve-crd, components.kserve-resources; with components.modelServing for the platform's serving runtime) or install KServe first. For an offline render pass --api-versions serving.kserve.io/v1beta1, or set modelManager.kserve.requireApi=false to skip this check." }}
+  {{- end }}
+
+  {{- /* ModelConfig wiring lands in the kagent namespace: the ModelConfigs
+         model-manager creates must land where the kagent controller reads them. */ -}}
+  {{- if not (dig "kagent" "disableWiring" false $chart) }}
+    {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) }}
+      {{- fail "model-manager wires kagent ModelConfigs but components.kagent.enabled is false: turn on kagent, or set model-manager.kagent.disableWiring: true (inventory, pull, load/unload and delete keep working; the wire capability reports false)" }}
+    {{- end }}
+    {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+    {{- $mmKagentNs := include "agent-platform.modelManager.kagentNamespace" . }}
+    {{- if ne $kagentNs $mmKagentNs }}
+      {{- fail (printf "model-manager.kagent.namespace (%s) must equal the kagent component's namespace (%s, kagent.namespaceOverride): the ModelConfigs model-manager creates must land where the kagent controller reads them" $mmKagentNs $kagentNs) }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* The MCPServer CRD ships with the muster component. */ -}}
+  {{- if and (dig "muster" "mcpServer" "enabled" false $chart) (not (include "agent-platform.componentEnabled" (dict "root" . "name" "muster"))) }}
+    {{- fail "model-manager.muster.mcpServer.enabled is true but components.muster.enabled is false: the MCPServer CRD ships with muster, so the CR has no API to map to. Turn on muster or set model-manager.muster.mcpServer.enabled: false" }}
+  {{- end }}
+
+  {{- /* The component release resolves its OAuth inputs through the chart's
+         global.identity / global.domain fallbacks; a missing one fails inside
+         the child release, out of sight. Fail here, naming both keys. */ -}}
+  {{- if (include "agent-platform.modelManager.oauthEnabled" .) }}
+    {{- $oauth := dig "oauth" dict $chart }}
+    {{- if and (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
+      {{- fail "model-manager.oauth.enabled is true but model-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL (the gateway route, e.g. https://agentgateway.<domain>/model-manager)" }}
+    {{- end }}
+    {{- if eq (dig "provider" "dex" $oauth) "dex" }}
+      {{- if not (include "agent-platform.modelManager.issuerUrl" .) }}
+        {{- fail "model-manager.oauth.enabled is true but model-manager.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set: the resource server needs the login issuer" }}
+      {{- end }}
+      {{- if and (not (dig "dex" "clientID" "" $oauth)) (not .Values.global.identity.clientId) }}
+        {{- fail "model-manager.oauth.enabled is true but model-manager.oauth.dex.clientID is empty and global.identity.clientId is not set: the resource server needs the platform OAuth client" }}
+      {{- end }}
+      {{- if and (not (dig "existingSecret" "" $oauth)) (not (dig "dex" "clientSecret" "" $oauth)) (not .Values.global.identity.existingSecret) }}
+        {{- fail "model-manager.oauth.enabled is true but none of model-manager.oauth.existingSecret, model-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: the resource server needs the platform client's secret (key dex-client-secret)" }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+
+  {{- if $mm.route.enabled }}
+    {{- /* The route renders agentgateway.dev resources on the agentgateway
+           Gateway. */ -}}
+    {{- if not (include "agent-platform.ingress.agentgateway" .) }}
+      {{- fail "modelManager.route renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" }}
+    {{- end }}
+    {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) }}
+      {{- fail "modelManager.route.enabled is true but components.agentgateway.enabled is false: the route attaches to the agentgateway data plane" }}
+    {{- end }}
+    {{- if not (hasPrefix "/" $mm.route.pathPrefix) }}
+      {{- fail (printf "modelManager.route.pathPrefix (%q) must start with /" $mm.route.pathPrefix) }}
+    {{- end }}
+    {{- /* An HTTPRoute with no hostname on the shared public Gateway matches
+           ALL traffic to that Gateway. The hostname helper derives
+           agentgateway.<global.domain> when the override is empty, and fails
+           the render when neither is set. */ -}}
+    {{- $_ := include "agent-platform.modelManager.hostname" . }}
+    {{- /* A parentRef override needs both halves: a route with namespace ""
+           is rejected by the Gateway API CRD, silently breaking the install. */ -}}
+    {{- if and $mm.route.parentRef.name (not $mm.route.parentRef.namespace) }}
+      {{- fail "modelManager.route.parentRef.name is set but .namespace is empty. Set both (the Gateway API CRD rejects an empty namespace), or clear .name to fall back to the chart-owned edge / global.gatewayApi.parentRefs." }}
+    {{- end }}
+    {{- if ($mm.route.jwtAuthentication).enabled }}
+      {{- /* A JWT policy without an issuer validates nothing dex-shaped. The
+             issuer defaults from global.identity.issuerUrl; the helper fails
+             the render when both are empty. */ -}}
+      {{- if not $mm.route.jwtAuthentication.issuer }}
+        {{- $_ := include "agent-platform.issuerUrl" (dict "ctx" . "for" "modelManager.route.jwtAuthentication (or set its .issuer)") }}
+      {{- end }}
+      {{- /* The data plane can only fetch the JWKS from the issuer when
+             jwksEgress is on; without it Strict/Optional validation fails
+             closed on every token. */ -}}
+      {{- if not .Values.gateway.jwksEgress.enabled }}
+        {{- fail "modelManager.route.jwtAuthentication.enabled is true but gateway.jwksEgress.enabled is false. The agentgateway data plane cannot reach the issuer's JWKS endpoint, so signature validation fails closed. Set gateway.jwksEgress.enabled: true (and its namespace/port to the issuer's)." }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}

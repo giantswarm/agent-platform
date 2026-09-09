@@ -1,0 +1,200 @@
+{{- $ms := .Values.modelServing }}
+{{- if and (include "agent-platform.modelServing.enabled" .) .Values.networkPolicy.enabled }}
+{{- $np := $ms.networkPolicy }}
+{{- $ns := include "agent-platform.modelServing.namespace" . }}
+{{- $name := include "name" . }}
+{{- $port := int $np.predictor.port }}
+{{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- /* Network policies of the serving namespace, in the flavor networkPolicy
+       selects (auto: cilium where cilium.io/v2 is served). The predictor pods
+       are every pod KServe runs for an InferenceService (label
+       serving.kserve.io/inferenceservice, whatever the runtime); the
+       storage-initializer is an init container of that pod, so one egress
+       rule covers the download and the runtime. model-manager's pre-warm
+       download Jobs (kserve backend) run in the same namespace under their
+       own labels. */ -}}
+
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# Predictor pods: ingress on the runtime port from the callers of the
+# OpenAI-compatible API, egress to DNS and the model download endpoints.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-predictor
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: serving.kserve.io/inferenceservice
+        operator: Exists
+  ingress:
+    - fromEndpoints:
+        {{- if $kagentOn }}
+        # kagent agent pods: the auto-created ModelConfig dials the predictor
+        # Service (:80, translated to the pod port before policy evaluation).
+        - matchLabels:
+            app: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+        {{- end }}
+        # The release namespace: Backstage, model-manager, the agentgateway
+        # data plane.
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+        {{- range $np.predictor.additionalIngressNamespaces }}
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ . }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    # The kubelet's startup and readiness probes arrive from the host entity.
+    # Under policyEnforcementMode always, a policy without this rule
+    # default-denies them and the predictor is killed before it turns Ready.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- include "agent-platform.modelServing.huggingFaceEgress.cilium" . | trim | nindent 4 }}
+---
+# model-manager's pre-warm download Jobs (kserve backend): DNS and the model
+# download endpoints; they serve nothing and mount no ServiceAccount token.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-download
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: model-manager
+      model-manager.giantswarm.io/component: download
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- include "agent-platform.modelServing.huggingFaceEgress.cilium" . | trim | nindent 4 }}
+{{- if $kagentOn }}
+---
+# Egress from kagent agent pods to the predictor pods. The chart's agent
+# egress (templates/kagent/netpol.yaml) admits world and cluster on 443 only;
+# Cilium evaluates after service translation, so the predictor pod port is
+# what must be allowed (Cilium policies are additive to the agents' own).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}-kagent-agents-to-model-serving
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: kagent
+  egress:
+    - toEndpoints:
+        - matchExpressions:
+            - key: serving.kserve.io/inferenceservice
+              operator: Exists
+          matchLabels:
+            io.kubernetes.pod.namespace: {{ $ns }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+{{- end }}
+
+{{- else }}
+---
+# Predictor pods: ingress on the runtime port from the callers of the
+# OpenAI-compatible API. The kubelet's probes are not subject to
+# NetworkPolicy; the kagent agents' own egress is unrestricted in this flavor
+# (the chart renders no egress policy for agent pods), so no agent-side rule
+# is needed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-predictor-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: serving.kserve.io/inferenceservice
+        operator: Exists
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- if $kagentOn }}
+        # kagent agent pods: the auto-created ModelConfig dials the predictor
+        # Service (:80, translated to the pod port before policy evaluation).
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchLabels:
+              app: kagent
+        {{- end }}
+        # The release namespace: Backstage, model-manager, the agentgateway
+        # data plane.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+        {{- range $np.predictor.additionalIngressNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - port: {{ $port }}
+          protocol: TCP
+---
+# Predictor pods: egress to DNS and the model download endpoints (the
+# storage-initializer's download and the runtime's own Hub lookups).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-predictor-egress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: serving.kserve.io/inferenceservice
+        operator: Exists
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    {{- include "agent-platform.modelServing.huggingFaceEgress.kubernetes" . | trim | nindent 4 }}
+---
+# model-manager's pre-warm download Jobs (kserve backend): DNS and the model
+# download endpoints.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-download-egress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: model-manager
+      model-manager.giantswarm.io/component: download
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    {{- include "agent-platform.modelServing.huggingFaceEgress.kubernetes" . | trim | nindent 4 }}
+{{- end }}
+{{- end }}

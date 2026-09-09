@@ -1,0 +1,88 @@
+# Values of the flux-engine subchart. Set them from the meta chart under the
+# `flux-engine:` key (Helm hands a subchart the block named after it). The
+# meta chart's `components.flux.enabled` decides whether this subchart — CRDs
+# included — is part of the release at all; nothing here can turn it off.
+
+operator:
+  # -- The Flux Operator image. The tag is the operator release
+  # (appVersion in Chart.yaml); Renovate tracks it as a docker image pin.
+  image:
+    registry: ghcr.io
+    repository: controlplaneio-fluxcd/flux-operator
+    tag: v0.59.0
+    pullPolicy: IfNotPresent
+  # -- Pull secrets for the operator image, in the release namespace
+  # (`global.imagePullSecrets` of the meta chart apply as well).
+  imagePullSecrets: []
+  # -- Operator log level: debug, info or error.
+  logLevel: info
+  # -- How often the operator refreshes the FluxReport.
+  reportingInterval: 5m
+  # -- Container resources (the upstream chart's defaults).
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+  # -- Pod priority class; the upstream chart recommends system-cluster-critical.
+  priorityClassName: ""
+  # -- Scheduling constraints of the operator pod.
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                  - linux
+
+# The one FluxInstance the operator reconciles: it must be named `flux` and
+# live in the operator's namespace (the release namespace), so neither is a
+# value.
+instance:
+  distribution:
+    # -- Flux version range the operator installs and keeps current — the
+    # operator upgrades the controllers, the CRDs and the stored objects inside
+    # the range on its own (Helm never upgrades crds/). No `artifact` is set,
+    # so the manifests come embedded in the operator image (air-gap default):
+    # a new Flux minor arrives with a new operator tag.
+    version: "2.x"
+    # -- Registry the Flux controller images are pulled from. A mirror of
+    # ghcr.io/fluxcd goes here.
+    registry: ghcr.io/fluxcd
+    # -- Pull secret for the controller images, in the release namespace.
+    imagePullSecret: ""
+  # -- The controllers the instance runs. Explicit on purpose: the operator's
+  # default list is four controllers (notification-controller included), the
+  # platform needs the two that fetch charts and install releases. A future
+  # component that needs Kustomizations adds kustomize-controller here.
+  components:
+    - source-controller
+    - helm-controller
+  cluster:
+    # -- kubernetes, openshift, aws, azure or gcp — the operator adapts the
+    # controller manifests to the platform.
+    type: kubernetes
+    # -- The multi-tenancy lockdown: helm-controller runs with
+    # --no-cross-namespace-refs=true and impersonates the tenant
+    # ServiceAccount of every HelmRelease; one without serviceAccountName runs
+    # as `tenantDefaultServiceAccount`, which has no rights. The platform's own
+    # HelmReleases name `agent-platform-flux` (rendered below).
+    multitenant: true
+    tenantDefaultServiceAccount: default
+    # -- No Flux-managed NetworkPolicy in the release namespace: the meta
+    # chart's network policies are the connectivity component's.
+    networkPolicy: false
+    # -- Cluster DNS domain.
+    domain: cluster.local
+  # -- Kustomize patches applied to the Flux manifests, verbatim
+  # (FluxInstance.spec.kustomize.patches): controller resources, extra flags.
+  kustomizePatches: []
+  # -- Reconcile interval and timeout of the FluxInstance (operator annotations).
+  reconcileEvery: 1h
+  reconcileTimeout: 5m

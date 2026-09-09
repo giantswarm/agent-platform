@@ -1,36 +1,53 @@
 {{- /*
 META-PACKAGE render loop (app-of-apps).
 
-For each enabled entry in `.Values.components`, emit either a Flux
-OCIRepository + HelmRelease (gitops.engine=flux) or an Argo Application
-(gitops.engine=argo). The version constraint comes from
-`components.<name>.versionRange` (a VALUE, resolved at reconcile time) — never
-from a Chart.yaml pin.
+For each enabled entry in `.Values.components`, emit a Flux OCIRepository +
+HelmRelease. Flux is the only render engine (`gitops.engine: flux`). The
+version constraint comes from `components.<name>.versionRange` (a VALUE,
+resolved at reconcile time) — never from a Chart.yaml pin.
 
 Each entry is fully self-describing; this template has no per-component
 knowledge:
   chart/repository/versionRange — where to pull and which versions (filterTags
-      optional, for dev-tag streams).
+      optional, for dev-tag streams). An entry WITHOUT a chart key is a feature
+      switch (components.flux, the condition of the flux-engine subchart): it is
+      part of the roster forwarded to connectivity and of the enabled/disabled
+      logic like every other entry, but this loop renders no release for it.
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
-      being forwarded (e.g. valuesKey: kagent → {kagent: {…block…}}). Needed for
-      GS wrapper charts that vendor an upstream chart as a SUBCHART of the same
-      name: Helm only passes parent values to a subchart when they sit under the
-      subchart's key. The top-level block (and every per-cluster override path and
-      the connectivity chart's reads of it) stays flat — only the copy handed to
-      this release is wrapped. global is injected at the wrapped top level so the
-      subchart still inherits it. Omit for charts whose values are already at top
-      level (muster, agentgateway, the GS-owned connectivity/crds charts).
+      being forwarded (valuesKey: foo → {foo: {…block…}}). For a chart that
+      vendors an upstream chart as a SUBCHART of the same name: Helm only passes
+      parent values to a subchart when they sit under the subchart's key. The
+      top-level block (and every per-cluster override path and the connectivity
+      chart's reads of it) stays flat — only the copy handed to this release is
+      wrapped. global is injected at the wrapped top level so the subchart still
+      inherits it. No component uses it today: muster, agentgateway, kagent and
+      the GS-owned connectivity/crds charts all take their values at top level.
   omitKeys      — keys dropped from the forwarded block. For a component whose
       top-level block holds a key that belongs to THIS umbrella rather than to
       the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs, which only
       the connectivity chart reads), and whose chart validates values with
       additionalProperties: false and would reject it. Applied after valuesKey,
-      so it always addresses the block's own keys.
+      so it always addresses the block's own keys. With forwardAllValues it
+      drops top-level blocks from the forwarded tree instead: a block the
+      connectivity chart does not read yet is held back until it does, because
+      that chart's root schema is additionalProperties: false and the fleet's
+      connectivity release re-resolves its chart on its own OCIRepository
+      interval — a block the live chart does not declare would fail that
+      release until the chart catches up, on every installation.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
       a single block. Used by agent-platform-connectivity, which reads many
-      blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …).
+      blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …). Like
+      every block, it is taken from the tree AFTER the cluster-shape knobs are
+      resolved (see agent-platform.shape.apply in _helpers.tpl), so the child
+      never sees `auto`.
+  derived values — a value another block owns, merged over the forwarded block
+      by the agent-platform.componentDerivedValues helper (the per-component
+      knowledge lives there, not in this loop): agent-manager's
+      flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName, the
+      tenant identity the connectivity chart renders. Never written back into
+      .Values, so the whole-tree forward stays what the operator wrote.
   injectGlobal  — inject `.Values.global` into the forwarded values (default
       true). Set false for components whose strict values.schema.json
       (additionalProperties:false) rejects an unexpected `global` key
@@ -42,36 +59,69 @@ knowledge:
       renders a component's wiring (agent-platform-connectivity) gates on the
       same answer that decided whether the release exists. The forwarded copy
       holds only `enabled`.
-  dependsOn     — Flux dependsOn / Argo sync-wave ordering (CRD-owning component
-      before its CR consumers). References that name a component which is toggled
+  feature switch — an entry WITHOUT `chart:` is a switch, not a component: the
+      loop renders no OCIRepository / HelmRelease for it and forwards its
+      `enabled` in the roster like every other entry, so a subchart condition
+      (components.flux, the flux-engine subchart) or the connectivity chart
+      (components.modelServing: the model serving objects are connectivity
+      templates with no chart of their own) gates on it. A top-level values
+      block named after a switch (modelServing:) travels with forwardAllValues
+      only while the switch is ON: while it is off nothing reads it, and a
+      live connectivity chart that predates the block would reject it
+      (additionalProperties: false) — the same window omitKeys closes for a
+      new key, closed here without a follow-up release. A dependsOn reference
+      to a switch is filtered like any other (it names no release, so keep
+      switches out of dependsOn lists).
+  dependsOn     — Flux dependsOn ordering (CRD-owning component before its CR
+      consumers). References that name a component which is toggled
       off are dropped at render time (see the componentEnabled helper) so an
       always-on consumer never blocks on a HelmRelease that was never rendered.
   postRenderers — optional Flux helm-controller postRenderers passed straight to
-      the child HelmRelease (flux engine only). Used to work around upstream chart
+      the child HelmRelease. Used to work around upstream chart
       bugs without forking — e.g. kagent stamps the chart version into
       app.kubernetes.io/version, which helm-controller corrupts with the OCI
       +digest build-metadata (invalid in a label); a kustomize patch overwrites it.
+  installDisableWait — render `install.disableWait: true` on the child
+      HelmRelease: the first install is reported successful as soon as the
+      manifests are applied, without waiting for the workload to become ready.
+      Upgrades keep waiting. For a component whose workload cannot start until a
+      dependant of the component has installed — kagent's controller mounts the
+      CNPG Secret the connectivity release renders, while connectivity dependsOn
+      kagent for its CRDs — so that the pair can bootstrap instead of deadlocking.
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
-      HelmRelease's spec.install.crds and spec.upgrade.crds (flux engine only).
-      Set to CreateReplace so the app's CRDs upgrade atomically with the app at the
-      same version (Helm otherwise never upgrades crds/-dir CRDs). Such a component
-      owns its CRD version itself; its CR consumers dependsOn it instead. Argo
-      applies crds/ unconditionally, so this field is flux-only.
+      HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
+      so the app's CRDs upgrade atomically with the app at the same version (Helm
+      otherwise never upgrades crds/-dir CRDs). Such a component owns its CRD
+      version itself; its CR consumers dependsOn it instead.
 */ -}}
 {{- include "agent-platform.validateLegacyToggles" . -}}
+{{- include "agent-platform.validateInlineSecrets" . -}}
+{{- include "agent-platform.validateToolsetPresets" . -}}
 {{- $root := . -}}
 {{- $g := .Values.gitops -}}
-{{- if not (or (eq $g.engine "flux") (eq $g.engine "argo")) -}}
-{{- fail (printf "gitops.engine=%s is invalid; must be one of: flux, argo" $g.engine) -}}
+{{- /* Flux is the only render engine. Agents are Flux objects on every path
+(the portal and agent-manager write an OCIRepository + HelmRelease per agent),
+so no other engine could run the platform; the schema pins the key to `flux`
+and this guard refuses anything else that gets past it. */ -}}
+{{- if ne $g.engine "flux" -}}
+{{- fail (printf "gitops.engine=%s is not supported; flux is the only engine" $g.engine) -}}
 {{- end -}}
-{{- /* Namespace the rendered Flux/Argo CRs live in. Defaults to the release
+{{- /* The bundled engine (components.flux.enabled): refuse a cluster that already
+runs Flux, and a gitops.namespace the tenant identity cannot reach. */ -}}
+{{- include "agent-platform.validateEngine" . -}}
+{{- /* Namespace the rendered Flux CRs live in. Defaults to the release
 namespace; set gitops.namespace to a tenancy-exempt namespace (e.g.
 flux-giantswarm on Giant Swarm clusters) so the child HelmReleases are not
 rejected by the flux-multi-tenancy admission policy. gitops.targetNamespace
 then routes the actual workloads to a separate namespace. */ -}}
 {{- $ns := $g.namespace | default $root.Release.Namespace -}}
 {{- $targetNs := $g.targetNamespace | default $root.Release.Namespace -}}
+{{- /* The tenant identity every platform HelmRelease runs under. With the bundled
+engine on, the multi-tenancy lockdown makes a HelmRelease without one run as the
+rights-less default account, so the engine's agent-platform-flux is the default;
+the fleet (engine off, exempt namespace) keeps the key empty and renders none. */ -}}
+{{- $sa := $g.serviceAccountName | default (include "agent-platform.tenantServiceAccountName" $root) -}}
 {{- /* The component roster, stripped to enablement, for a chart that renders
 another component's wiring. It carries the same key path this chart reads
 (components.<name>.enabled), so the two can never spell the answer differently.
@@ -81,22 +131,41 @@ plumbing and are dropped. */ -}}
 {{- range $key, $c := .Values.components -}}
 {{- $_ := set $roster $key (dict "enabled" (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" $key)) "true")) -}}
 {{- end -}}
+{{- /* The values every release is inlined from: one deep copy of the tree with
+every cluster-shape knob (kyvernoPolicies.enabled, networkPolicy.flavor,
+global.observability.metrics.serviceMonitor.enabled, dicebear.route.enabled,
+agentSandbox.podSecurity.enabled) resolved from `auto` ONCE, and the component
+copies derived from those answers (see agent-platform.shape.apply). Detected
+here, not in the child charts: the connectivity chart receives the resolved
+values and every component the same one flavor. */ -}}
+{{- $shaped := deepCopy (omit $root.Values "gitops" "components") -}}
+{{- include "agent-platform.shape.apply" (dict "root" $root "values" $shaped) -}}
 {{- range $key, $c := .Values.components }}
-{{- if (index $roster $key).enabled }}
+{{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
+{{- if and (index $roster $key).enabled (hasKey $c "chart") }}
 {{- $name := $c.chart }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}
 {{- if $c.forwardAllValues }}
-{{- $vals = mergeOverwrite (deepCopy (omit $root.Values "gitops" "components")) (dict "components" $roster) }}
+{{- $vals = mergeOverwrite (deepCopy $shaped) (dict "components" $roster) }}
+{{- /* Hold back the top-level blocks the chart does not read yet (see omitKeys above). */ -}}
+{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- /* A switch's values block travels only while the switch is on (see feature switch above). */ -}}
+{{- range $switch, $sw := $root.Values.components }}
+{{- if and (not (hasKey $sw "chart")) (not (index $roster $switch).enabled) (hasKey $vals $switch) }}{{- $vals = omit $vals $switch }}{{- end }}
+{{- end }}
 {{- else }}
-{{- with $c.valuesFrom }}{{- $vals = index $root.Values . | default dict }}{{- end }}
+{{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
 {{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
 {{- /* GS wrapper charts vendor the upstream chart as a subchart of the same name;
 nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- with $c.valuesKey }}{{- $vals = dict . $vals }}{{- end }}
-{{- if ne $c.injectGlobal false }}{{- $vals = merge (deepCopy $vals) (dict "global" $root.Values.global) }}{{- end }}
+{{- if ne $c.injectGlobal false }}{{- $vals = merge (deepCopy $vals) (dict "global" $shaped.global) }}{{- end }}
+{{- /* Derived values win over the block's own copy (the helper fails the
+render when the two disagree). */ -}}
+{{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
 {{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an
 always-on consumer (e.g. connectivity) does not block on a HelmRelease that was
@@ -109,7 +178,6 @@ that CRD either, so the dependency is moot. */ -}}
 {{- $deps = append $deps . }}
 {{- end }}
 {{- end }}
-{{- if eq $g.engine "flux" }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
@@ -121,6 +189,9 @@ metadata:
 spec:
   interval: {{ $g.interval }}
   url: {{ printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart }}
+  {{- if $c.insecure }}
+  insecure: true
+  {{- end }}
   ref:
     semver: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
     {{- with $c.filterTags }}
@@ -142,7 +213,7 @@ spec:
   interval: {{ $g.interval }}
   releaseName: {{ $name }}
   targetNamespace: {{ $targetNs }}
-  {{- with $g.serviceAccountName }}
+  {{- with $sa }}
   serviceAccountName: {{ . }}
   {{- end }}
   chartRef:
@@ -153,6 +224,9 @@ spec:
     createNamespace: true
     {{- with $c.crds }}
     crds: {{ . }}
+    {{- end }}
+    {{- if $c.installDisableWait }}
+    disableWait: true
     {{- end }}
     remediation:
       retries: {{ $g.retries }}
@@ -174,37 +248,5 @@ spec:
   {{- end }}
   values:
     {{- toYaml $vals | nindent 4 }}
-{{- else }}
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: {{ $name }}
-  namespace: {{ $ns }}
-  labels:
-    {{- include "labels.common" $root | nindent 4 }}
-  annotations:
-    # dependsOn has no Argo equivalent; CRDs (wave 0) apply and Establish before
-    # their consumers (wave 1).
-    argocd.argoproj.io/sync-wave: {{ if $deps }}"1"{{ else }}"0"{{ end }}
-spec:
-  project: {{ $g.argo.project }}
-  destination:
-    server: {{ $g.argo.server }}
-    namespace: {{ $targetNs }}
-  source:
-    repoURL: {{ trimPrefix "oci://" $c.repository | quote }}
-    chart: {{ $c.chart }}
-    targetRevision: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
-    helm:
-      valuesObject:
-        {{- toYaml $vals | nindent 8 }}
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-{{- end }}
 {{- end }}
 {{- end }}

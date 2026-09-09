@@ -1,7 +1,7 @@
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.controllerRoute.enabled }}
 {{- $route := .Values.kagent.controllerRoute }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
-{{- $kagentFullname := .Values.kagent.fullnameOverride | default .Release.Name }}
+{{- $kagentFullname := include "agent-platform.kagent.fullname" . }}
 # AgentgatewayBackend — registers the kagent controller as a backend that
 # agentgateway can proxy to after JWT validation.
 ---

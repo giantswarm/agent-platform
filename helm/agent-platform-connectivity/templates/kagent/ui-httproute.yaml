@@ -36,10 +36,17 @@ spec:
       {{- end }}
       backendRefs:
         {{- if $oauth2proxyEnabled }}
-        - name: {{ index .Values.kagent "oauth2-proxy" "fullnameOverride" | default (printf "%s-oauth2-proxy" .Release.Name) }}
+        {{- /* The oauth2-proxy subchart of the kagent chart names its Service
+        from its fullnameOverride (pinned to `kagent-oauth2-proxy` in
+        values.yaml), else `<kagent release>-oauth2-proxy` — kagent's release
+        name, never this release's (agent-platform.kagent.releaseName). */}}
+        - name: {{ index .Values.kagent "oauth2-proxy" "fullnameOverride" | default (printf "%s-oauth2-proxy" (include "agent-platform.kagent.releaseName" .)) }}
           port: 4180
         {{- else }}
-        - name: {{ printf "%s-ui" .Release.Name }}
+        {{- /* The kagent chart names its Services from its fullname (pinned to
+        `kagent` in values.yaml), not from this release's name — as the
+        oauth2-proxy branch above and controller-route.yaml already honor. */}}
+        - name: {{ printf "%s-ui" (include "agent-platform.kagent.fullname" .) }}
           port: 8080
         {{- end }}
 {{- end }}

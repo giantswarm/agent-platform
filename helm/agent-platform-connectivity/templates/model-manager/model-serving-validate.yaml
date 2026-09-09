@@ -1,0 +1,54 @@
+{{- /*
+Render-time guards between a model-manager with the kserve backend among its
+backends (model-manager.backends, else model-manager.backend) and the
+modelServing wiring (components.modelServing.enabled). The two describe one
+serving layer: model-manager reads the runtime, GPU resource name, cache claim
+and preset selector from the modelServing discovery ConfigMap at run time, so
+only what must be static (the serving namespace, the discovery ConfigMap's name
+and namespace) and explicit overrides are checked here. They fail `helm
+template` (and therefore CI lint + install) with an actionable message instead
+of shipping a model-manager that manages InferenceServices in a namespace the
+runtime, presets and cache do not target. An unset model-manager.kserve key
+means the model-manager chart's own default, which is the modelServing layer's
+(kserve.namespace model-serving, kserve.discovery.configMap
+agent-platform-model-serving): the two agree out of the box.
+*/ -}}
+{{- if and (include "agent-platform.modelManager.enabled" .) (include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "kserve")) (include "agent-platform.modelServing.enabled" .) }}
+  {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson }}
+  {{- $ms := .Values.modelServing }}
+  {{- $servingNs := include "agent-platform.modelServing.namespace" . }}
+  {{- $kserve := dig "kserve" dict $chart }}
+  {{- $mmNs := dig "namespace" "" $kserve | default "model-serving" }}
+  {{- if ne $servingNs $mmNs }}
+    {{- fail (printf "model-manager.kserve.namespace (%s) must equal modelServing.namespace.name (%s): model-manager manages the InferenceServices the modelServing runtime, presets and cache target" $mmNs $servingNs) }}
+  {{- end }}
+  {{- $discovery := dig "discovery" dict $kserve }}
+  {{- $discoveryName := dig "configMap" "" $discovery | default "agent-platform-model-serving" }}
+  {{- if ne $discoveryName "agent-platform-model-serving" }}
+    {{- fail (printf "model-manager.kserve.discovery.configMap (%q) must name the modelServing discovery ConfigMap, agent-platform-model-serving" $discoveryName) }}
+  {{- end }}
+  {{- $discoveryNs := dig "namespace" "" $discovery }}
+  {{- if and $discoveryNs (ne $discoveryNs .Release.Namespace) }}
+    {{- fail (printf "model-manager.kserve.discovery.namespace (%s) must be empty or the release namespace (%s), where the modelServing wiring publishes its discovery ConfigMap" $discoveryNs .Release.Namespace) }}
+  {{- end }}
+  {{- $runtime := dig "runtime" "" $kserve }}
+  {{- if and $runtime (ne $runtime $ms.runtime.name) }}
+    {{- fail (printf "model-manager.kserve.runtime (%s) differs from modelServing.runtime.name (%s); leave it empty to follow the discovery ConfigMap" $runtime $ms.runtime.name) }}
+  {{- end }}
+  {{- $gpu := dig "gpuResourceName" "" $kserve }}
+  {{- if and $gpu (ne $gpu $ms.serving.gpuResourceName) }}
+    {{- fail (printf "model-manager.kserve.gpuResourceName (%s) differs from modelServing.serving.gpuResourceName (%s); leave it empty to follow the discovery ConfigMap" $gpu $ms.serving.gpuResourceName) }}
+  {{- end }}
+  {{- $claim := dig "cache" "claimName" "" $kserve }}
+  {{- if and $claim $ms.cache.enabled (ne $claim (include "agent-platform.modelServing.claimName" .)) }}
+    {{- fail (printf "model-manager.kserve.cache.claimName (%s) differs from the modelServing cache claim (%s); leave it empty to follow the discovery ConfigMap" $claim (include "agent-platform.modelServing.claimName" .)) }}
+  {{- end }}
+  {{- $presetsNs := dig "presets" "namespace" "" $kserve }}
+  {{- if and $presetsNs (ne $presetsNs .Release.Namespace) }}
+    {{- fail (printf "model-manager.kserve.presets.namespace (%s) must be empty or the release namespace (%s), where the modelServing wiring publishes its presets" $presetsNs .Release.Namespace) }}
+  {{- end }}
+  {{- $selector := dig "presets" "labelSelector" "" $kserve }}
+  {{- if and $selector (ne $selector "agent-platform.giantswarm.io/serving-preset=true") }}
+    {{- fail (printf "model-manager.kserve.presets.labelSelector (%q) differs from the modelServing preset label agent-platform.giantswarm.io/serving-preset=true; leave it empty to follow the discovery ConfigMap" $selector) }}
+  {{- end }}
+{{- end }}

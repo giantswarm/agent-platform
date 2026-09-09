@@ -1,0 +1,179 @@
+{{- /*
+The self-management hooks (README "Self-management"). Only with the bundled
+engine. Two run ahead of the ordered teardown, and — when self-management is
+OFF while the engine is on, i.e. the hand-back and the lab shape — ahead of
+every `helm upgrade` too:
+  weight -6  stop a resumer Job still running from the last operation;
+  weight -5  suspend the chart's own HelmRelease (a suspended HelmRelease is
+             deleted without uninstalling its release and cannot re-create the
+             platform HelmReleases mid-teardown) and drop the hook-written
+             values Secret (not a chart object). Tolerates a missing HelmRelease
+             — the lab shape never had one, the hand-back deleted it — and a
+             missing HelmRelease API.
+With self-management ON a `helm upgrade` from the CLI is refused by the
+admission policy before any hook runs, and a controller-driven upgrade must not
+suspend the HelmRelease it is reconciling, so the two are pre-delete only.
+The third runs after every install and upgrade while self-management is on:
+  weight 0   write the USER-SUPPLIED values of the release (`helm get values`
+             — Helm writes the pending revision before it runs post hooks, so
+             this is the revision in flight) into Secret agent-platform-values,
+             labelled reconcile.fluxcd.io/watch=Enabled so a day-2 edit
+             reconciles at once, and — when the self HelmRelease is suspended
+             (the install, the upgrade into self-management) — start the
+             detached resumer Job, which polls `helm status` and resumes the
+             HelmRelease once the release is `deployed`. Detached on purpose:
+             Helm waits for its hooks, and the release is marked deployed only
+             after the post hooks; a hook that waited for `deployed` would wait
+             for itself. Not a chart object either: Helm 4's --wait is kstatus
+             over the chart's objects and would wait on a Job.
+*/ -}}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+{{- $self := eq (include "agent-platform.selfEnabled" .) "true" }}
+{{- $events := ternary "pre-delete" "pre-upgrade,pre-delete" $self }}
+{{- $sa := include "agent-platform.self.serviceAccountName" . }}
+{{ include "agent-platform.hooks.job" (dict "root" . "name" "self-stop-resumer" "hook" $events "weight" -6 "serviceAccountName" $sa
+      "about" "stop a resumer Job still running from the last operation"
+      "args" (list "delete" "jobs.batch" "--namespace" .Release.Namespace (printf "%s-self-resume" .Release.Name) "--ignore-not-found")) }}
+---
+{{ include "agent-platform.hooks.job" (dict "root" . "name" "self-suspend" "hook" $events "weight" -5 "serviceAccountName" $sa
+      "image" (include "agent-platform.hooks.helmImage" .)
+      "about" "suspend the chart's own HelmRelease (deleted without an uninstall, cannot re-create the platform HelmReleases) and drop the hook-written values Secret"
+      "script" (include "agent-platform.self.suspendScript" .)) }}
+{{- if $self }}
+---
+{{ include "agent-platform.hooks.job" (dict "root" . "name" "self-values" "hook" "post-install,post-upgrade" "weight" 0 "serviceAccountName" $sa
+      "image" (include "agent-platform.hooks.helmImage" .)
+      "about" "write the user-supplied values of this release into the values Secret the self HelmRelease reads, and resume the self HelmRelease once the release is deployed"
+      "script" (include "agent-platform.self.valuesScript" .)) }}
+{{- end }}
+{{- end }}
+
+{{- define "agent-platform.self.suspendScript" -}}
+ns={{ .Release.Namespace | quote }}
+rel={{ .Release.Name | quote }}
+if kubectl get helmreleases.helm.toolkit.fluxcd.io "$rel" -n "$ns" >/dev/null 2>&1; then
+  kubectl patch helmreleases.helm.toolkit.fluxcd.io "$rel" -n "$ns" --type merge -p '{"spec":{"suspend":true}}'
+  echo "self HelmRelease $ns/$rel suspended"
+else
+  echo "no self HelmRelease $ns/$rel (or no HelmRelease API): nothing to suspend"
+fi
+# the hook-written values Secret (by its labels, never by name alone)
+kubectl delete secrets -n "$ns" -l "app.kubernetes.io/component=self-management,app.kubernetes.io/instance=$rel" --ignore-not-found
+{{- end -}}
+
+{{- define "agent-platform.self.valuesScript" -}}
+ns={{ .Release.Namespace | quote }}
+rel={{ .Release.Name | quote }}
+secret={{ include "agent-platform.self.valuesSecretName" . | quote }}
+# the USER-SUPPLIED values of the revision in flight — never the merged tree
+helm get values "$rel" -n "$ns" -o yaml > /tmp/values.yaml
+if [ "$(tr -d '[:space:]' < /tmp/values.yaml)" = "null" ]; then printf '{}\n' > /tmp/values.yaml; fi
+rev=$(helm history "$rel" -n "$ns" -o json | jq -r 'map(.revision) | max')
+echo "release $ns/$rel revision $rev: writing its user-supplied values ($(wc -c < /tmp/values.yaml | tr -d ' ') bytes) into Secret $ns/$secret"
+kubectl create secret generic "$secret" -n "$ns" --from-file=values.yaml=/tmp/values.yaml --dry-run=client -o json \
+  | jq --arg rel "$rel" '.metadata.labels = {"reconcile.fluxcd.io/watch": "Enabled", "app.kubernetes.io/instance": $rel, "app.kubernetes.io/component": "self-management", "app.kubernetes.io/managed-by": "agent-platform-hooks"}' \
+  | kubectl apply --server-side --field-manager agent-platform-self-values --force-conflicts -f -
+# the resumer: only while the self HelmRelease is suspended (the install, the
+# upgrade into self-management); a controller-driven upgrade needs none
+suspended=$(kubectl get helmreleases.helm.toolkit.fluxcd.io "$rel" -n "$ns" -o jsonpath='{.spec.suspend}' 2>/dev/null || echo "absent")
+if [ "$suspended" = "true" ]; then
+  kubectl delete jobs.batch "$rel-self-resume" -n "$ns" --ignore-not-found
+  kubectl create -f - <<'EOF'
+{{ include "agent-platform.self.resumerJob" . }}
+EOF
+  echo "self HelmRelease $ns/$rel is suspended: resumer Job $ns/$rel-self-resume started"
+else
+  echo "self HelmRelease $ns/$rel: suspend=$suspended, no resumer needed"
+fi
+{{- end -}}
+
+{{- /*
+The detached resumer Job, created by the values hook (not a chart object, not a
+hook). Polls `helm status` every 2 s: `deployed` (or `failed` — the CLI has
+stopped writing either way) resumes the self HelmRelease and exits 0; still
+pending after 300 s exits 1 WITHOUT resuming (a resume against a pending
+revision is the empty-values upgrade the bracket exists to prevent) — the
+HelmRelease stays suspended, the Job stays for an hour to be read, and the
+README says how to finish by hand.
+*/ -}}
+{{- define "agent-platform.self.resumerJob" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-self-resume" .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: self-management
+  annotations:
+    agent-platform.giantswarm.io/about: "resume the chart's own HelmRelease once the Helm release is deployed (started by the values hook)"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 420
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "labels.common" . | nindent 8 }}
+        app.kubernetes.io/component: self-management
+    spec:
+      serviceAccountName: {{ include "agent-platform.self.serviceAccountName" . }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "map" . }}{{ .name }}{{ else }}{{ . }}{{ end }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: sh
+          image: {{ include "agent-platform.hooks.helmImage" . | quote }}
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              ns={{ .Release.Namespace | quote }}
+              rel={{ .Release.Name | quote }}
+              deadline=$(( $(date +%s) + 300 ))
+              while :; do
+                status=$(helm status "$rel" -n "$ns" -o json 2>/dev/null | jq -r '.info.status // "unknown"')
+                echo "$(date -u +%FT%TZ) release $ns/$rel: $status"
+                case "$status" in
+                  deployed|failed)
+                    kubectl patch helmreleases.helm.toolkit.fluxcd.io "$rel" -n "$ns" --type merge -p '{"spec":{"suspend":false}}'
+                    echo "self HelmRelease $ns/$rel resumed (release $status): helm-controller adopts the release"
+                    exit 0;;
+                esac
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "release $ns/$rel is still $status after 300 s: NOT resuming the self HelmRelease. Once the release is deployed, resume it by hand: kubectl -n $ns patch helmrelease $rel --type merge -p '{\"spec\":{\"suspend\":false}}'" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+          env:
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end -}}

@@ -1,4 +1,4 @@
-{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq .Values.networkPolicy.flavor "kubernetes") }}
+{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

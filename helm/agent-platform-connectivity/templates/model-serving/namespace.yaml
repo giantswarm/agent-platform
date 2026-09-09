@@ -1,0 +1,20 @@
+{{- if (include "agent-platform.modelServing.enabled" .) }}
+{{- $ms := .Values.modelServing }}
+{{- $ns := include "agent-platform.modelServing.namespace" . }}
+{{- if and $ms.namespace.create (ne $ns .Release.Namespace) }}
+# The serving namespace: InferenceServices, the cache PVC and the chat-template
+# ConfigMaps live here; the Kyverno policies match pods in it. Helm-owned, so
+# an uninstall removes it together with every InferenceService in it (the
+# cache PVC is kept, see cache-pvc.yaml). Set namespace.create: false for a
+# namespace that already exists (a GitOps-managed one, for example).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+    {{- with $ms.namespace.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}

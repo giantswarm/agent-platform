@@ -9,13 +9,30 @@ platform contract, so it is fixed here. Rendered whenever kagent + muster are
 enabled: the CR is inert until an agent references it. allowedNamespaces
 from: All admits every namespace; muster still authenticates each call.
 No headersFrom, so the caller token forwarded by kagent (KAGENT_PROPAGATE_TOKEN)
-is the only Authorization reaching muster. */}}
+is the only Authorization reaching muster — a static header here would be
+copied into every agent's config and applied LAST by the kagent runtime,
+overriding the propagated caller token, so every agent would act as that
+static identity (docs/authentication.md, "Tool discovery by the kagent
+controller"). For the same reason the kagent controller has no credential
+muster accepts when it lists the server's tools for its status (muster is an
+OAuth resource server, the request carries no bearer, muster answers 401):
+while muster runs with OAuth on, the server opts out of controller-side tool
+discovery with kagent.dev/discovery=disabled — the controller Accepts it
+without a tool listing (kagent controller with kagent-dev/kagent#2752; an
+older controller ignores the label and keeps reporting Accepted=False,
+ReconcileFailed … Unauthorized). Agents resolve the tool list at run time as
+the caller. With muster's OAuth off (dev installs) the controller can list
+tools anonymously, so the label is not rendered. */}}
 ---
 apiVersion: kagent.dev/v1alpha2
 kind: RemoteMCPServer
 metadata:
   name: muster
   namespace: {{ .Release.Namespace }}
+  {{- if dig "muster" "oauth" "server" "enabled" true .Values.muster }}
+  labels:
+    kagent.dev/discovery: disabled
+  {{- end }}
 spec:
   description: "Shared muster MCP gateway for platform agents"
   url: {{ $musterUrl | quote }}

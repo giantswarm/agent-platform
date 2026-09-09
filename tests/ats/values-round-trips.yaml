@@ -1,0 +1,69 @@
+# The auth and agent round trips of the ATS kind smoke, layered over
+# tests/test-values.yaml + tests/ats/values-kagent.yaml (tests/ats/conftest.py
+# `SMOKE_VALUES`): the lab Dex of tests/ats/lab-dex.yaml as the platform's
+# identity provider, muster's OAuth server ON against it, and agent-manager —
+# the write path an agent takes into the cluster's Flux. LAB ONLY: every
+# credential here is the public lab fixture's.
+#
+# The two URLs are the same inside and outside the cluster (the reason the lab
+# Dex serves TLS itself): dex.127.0.0.1.nip.io resolves to the lab-dex Service
+# in pods (CoreDNS rewrite) and to 127.0.0.1 from the test (nip.io), where
+# `kubectl port-forward svc/lab-dex 5554` listens; muster's base URL is a
+# loopback address (muster allows plain HTTP for loopback only), reached
+# through `kubectl port-forward svc/muster 8090`. In-cluster callers reach
+# muster by its Service (kagent's RemoteMCPServer, agent-manager's registration).
+global:
+  domain: 127.0.0.1.nip.io
+  identity:
+    issuerUrl: https://dex.127.0.0.1.nip.io:5554
+    clientId: agent-platform
+    existingSecret: agent-platform-idp
+    # The lab CA: agent-manager validates the forwarded tokens against Dex's
+    # JWKS over TLS (--dex-ca-file), muster through extraCaFile below.
+    ca:
+      secretName: agent-platform-idp-ca
+
+components:
+  agent-manager:
+    enabled: true
+
+muster:
+  # CI sizing (two cores), see values-kagent.yaml.
+  resources:
+    requests:
+      cpu: 50m
+  muster:
+    oauth:
+      server:
+        enabled: true
+        baseUrl: http://localhost:8090
+        dex:
+          issuerUrl: https://dex.127.0.0.1.nip.io:5554
+          clientId: agent-platform
+          # The issuer resolves to a ClusterIP inside the cluster.
+          allowPrivateIPOIDC: true
+        existingSecret: agent-platform-idp
+        # No bundled Valkey in the smoke: sessions in memory.
+        storage:
+          type: memory
+        # Accept the lab Dex's ID tokens as bearer tokens (the password grant
+        # the smoke uses, and the token muster forwards to agent-manager with
+        # the cross-client audience its MCPServer requires).
+        trustedAudiences:
+          - agent-platform
+          - dex-k8s-authenticator
+    extraCaFile:
+      secret:
+        name: agent-platform-idp-ca
+        key: ca.crt
+
+agent-manager:
+  oauth:
+    # The kind API server of the ATS knows no OIDC issuer, so agent-manager
+    # cannot act as the caller against it (the lab, agentlab, wires the kind
+    # apiserver to its Dex and proves that hop). Here agent-manager validates
+    # the forwarded token — the caller is the Dex user — and writes the agent's
+    # HelmRelease with its ServiceAccount; helm-controller then executes the
+    # HelmRelease as the tenant identity kagent-flux either way.
+    downstream:
+      enabled: false

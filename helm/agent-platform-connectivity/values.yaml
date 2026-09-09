@@ -20,8 +20,17 @@ global:
     clientId: ""
     # Secret in the release namespace with the platform credentials
     # (dex-client-secret, registration-token, oauth-encryption-key,
-    # valkey-password).
+    # valkey-password; backstage-session-secret for the portal).
     existingSecret: ""
+    # CA of an identity provider with a private certificate (a lab Dex). Read
+    # by the component charts through their own global.identity fallbacks
+    # (mcp-kubernetes; Backstage mounts it as NODE_EXTRA_CA_CERTS through the
+    # backstage: block) and by the managers' JWT policies (the JWKS TLS CA
+    # falls back to it). Empty: system trust only. Declared here so the schema
+    # accepts what the meta chart forwards.
+    ca:
+      secretName: ""
+      key: ca.crt
   gatewayApi:
     # The public Gateway every route attaches to when neither the route's own
     # parentRefs/parentRef override nor the chart-owned edge
@@ -33,12 +42,16 @@ global:
     metrics:
       # Gates the monitor objects this chart renders: the kagent controller
       # ServiceMonitor (+ its metrics Service) and the CNPG Cluster's built-in
-      # PodMonitor. enabled: false removes them all; the per-component keys
-      # (kagent.serviceMonitor.*) keep working underneath and can still
-      # disable or tune their own object. Needs the monitoring.coreos.com
-      # CRDs when on; metrics endpoints stay exposed either way.
+      # PodMonitor. The per-component keys (kagent.serviceMonitor.*) keep
+      # working underneath and can still disable or tune their own object.
+      # Metrics endpoints stay exposed either way. Under the meta chart this
+      # arrives resolved (it detects once for every component).
       serviceMonitor:
-        enabled: true
+        # -- `auto` (default) renders the monitor objects when
+        # monitoring.coreos.com/v1 is served on the cluster (an offline
+        # `helm template` resolves to false unless the API is passed in);
+        # `true` / `false` force them on or off.
+        enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
         # Scrape interval; empty falls back to the per-component interval.
         interval: ""
         # Labels on every monitor object (e.g. the Giant Swarm tenant label);
@@ -72,6 +85,37 @@ components:  # @schema additionalProperties: true
   klaus-gateway:  # @schema additionalProperties: true
     enabled: false
   agent-sandbox:  # @schema additionalProperties: true
+    enabled: false
+  model-manager:  # @schema additionalProperties: true
+    enabled: false
+  agent-manager:  # @schema additionalProperties: true
+    enabled: false
+  # The components the agent-platform-standalone umbrella carried on top of the
+  # fleet's roster, forwarded by the meta chart like the rest so the wiring this
+  # chart renders for them gates on the same answer: the Backstage app-config and
+  # route, the mcp-kubernetes MCPServer CR and the model serving objects.
+  backstage:  # @schema additionalProperties: true
+    enabled: false
+  mcp-kubernetes:  # @schema additionalProperties: true
+    enabled: false
+  cloudnative-pg:  # @schema additionalProperties: true
+    enabled: false
+  kserve-crd:  # @schema additionalProperties: true
+    enabled: false
+  kserve-resources:  # @schema additionalProperties: true
+    enabled: false
+  kserve-llmisvc-crd:  # @schema additionalProperties: true
+    enabled: false
+  kserve-llmisvc-resources:  # @schema additionalProperties: true
+    enabled: false
+  # Model serving on KServe with vLLM (the standalone umbrella's modelServing
+  # component): a feature switch of the roster with no chart behind it — the
+  # meta chart renders no release for it and forwards the flag like every
+  # other — that gates the objects this chart renders from the modelServing:
+  # block below (templates/model-serving/). Needs the KServe control plane:
+  # components.kserve-crd and components.kserve-resources, or a KServe the
+  # cluster already serves (see modelServing.kserve.requireApi).
+  modelServing:  # @schema additionalProperties: true
     enabled: false
 
 # === Ingress topology ===
@@ -303,14 +347,18 @@ llmRouting:
 
 networkPolicy:
   enabled: true
+  # auto       — cilium when cilium.io/v2 is served on the cluster, else
+  #              kubernetes (`helm template` without `--api-versions cilium.io/v2`
+  #              resolves to kubernetes)
   # cilium     — CiliumNetworkPolicy (entity selectors + FQDN egress)
   # kubernetes — vanilla networking.k8s.io/v1 NetworkPolicy
   #
-  # Governs the agentgateway policies owned by this chart, plus the supplementary
-  # muster MCP-egress policy below. Muster's own ciliumNetworkPolicy is otherwise
-  # independent — set muster.ciliumNetworkPolicy.enabled to false when running
-  # the kubernetes flavor.
-  flavor: cilium
+  # Governs every network policy this chart renders, plus the supplementary
+  # muster MCP-egress policy below. Under the meta chart this arrives resolved,
+  # and muster / valkey receive the same flavor.
+  # -- `auto` (default) selects `cilium` when cilium.io/v2 is served on the
+  # cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor.
+  flavor: auto  # @schema enum: [auto, cilium, kubernetes]
   # Extra CIDR egress for in-cluster Gateway VIPs the entity selectors miss.
   # Example:
   #   additionalEgressCIDRs:
@@ -344,9 +392,10 @@ networkPolicy:
 
 # The chart's kyverno.io objects: the kagent declarative-agent mutate policies, the
 # kagent seccomp PolicyException, the CNPG ImageVolume PolicyException, and the
-# agent-sandbox pod-security policy. Requires Kyverno on the cluster. Set
-# enabled: false on a cluster without it, where these objects fail the install on an
-# unknown API group.
+# agent-sandbox pod-security policy. `enabled: auto` (the default) renders them
+# when kyverno.io/v1 is served on the cluster and skips them otherwise, where
+# they would fail the install on an unknown API group; `true` / `false` force
+# them.
 #
 # A cluster that enforces restricted PSS without Kyverno (PSA labels only) must set
 # components.agent-sandbox.enabled: false as well: the upstream agent-sandbox controller chart
@@ -362,7 +411,10 @@ networkPolicy:
 # The volume-types exception is rendered only when a pgvector extension image is
 # set, the one case where a CNPG pod carries an `image` volume.
 kyvernoPolicies:
-  enabled: true
+  # -- `auto` (default) renders the Kyverno objects when kyverno.io/v1 is
+  # served on the cluster (an offline `helm template` resolves to false unless
+  # the API is passed in); `true` / `false` force them on or off.
+  enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
   policyExceptionNamespace: policy-exceptions
   seccompPolicyName: restrict-seccomp-strict
   seccompRuleNames:  # @schema minItems: 1; item: string; uniqueItems: true
@@ -418,7 +470,7 @@ muster:  # @schema skipProperties: true; additionalProperties: true
   # a non-Cilium cluster.
   networkPolicy:
     enabled: true
-    flavor: cilium
+    flavor: auto  # auto | cilium | kubernetes (resolved by the meta chart)
     cilium:
       # Reaches Dex / OIDC / MCPServers fronted by in-cluster ingress.
       # Muster's sub-chart default is false.
@@ -468,7 +520,7 @@ muster:  # @schema skipProperties: true; additionalProperties: true
       metrics:
         prometheus:
           serviceMonitor:
-            enabled: true
+            enabled: auto  # auto | true | false (resolved by the meta chart)
             interval: 60s
             labels:
               observability.giantswarm.io/tenant: giantswarm
@@ -481,7 +533,7 @@ muster:  # @schema skipProperties: true; additionalProperties: true
 # Single-pod Deployment + PVC; writable Service at muster-valkey.<ns>.svc:6379.
 valkey:  # @schema skipProperties: true; additionalProperties: true
   ciliumNetworkPolicy:
-    enabled: true
+    enabled: auto  # auto | true | false (resolved by the meta chart from networkPolicy.flavor)
   vpa:
     enabled: false
   valkey:
@@ -712,14 +764,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # X-Scope-OrgID header routes to the correct Loki/Tempo tenant.
   otel:
     tracing:
-      enabled: true
+      enabled: auto  # auto | true | false (resolved by the meta chart)
       exporter:
         otlp:
           endpoint: http://otlp-gateway.kube-system.svc:4317
           protocol: grpc
           insecure: true
     logging:
-      enabled: true
+      enabled: auto  # auto | true | false (resolved by the meta chart)
       exporter:
         otlp:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -794,7 +846,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     metrics:
       enabled: true
       serviceMonitor:
-        enabled: true
+        enabled: auto  # auto | true | false (resolved by the meta chart)
         interval: 60s
         labels:
           observability.giantswarm.io/tenant: giantswarm
@@ -897,6 +949,37 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   kmcp:
     enabled: false
     namespaceOverride: kagent
+
+  # --- Network policy peers (read by umbrella templates/kagent/netpol.yaml, not passed to subchart) ---
+  oauth2ProxyIngress:
+    # Callers admitted on oauth2-proxy's proxy port (4180) next to the public
+    # Gateway's Envoy pods, cilium flavor only (the kubernetes flavor renders no
+    # oauth2-proxy policy): a list of pod label maps (matchLabels), each rendered
+    # as one more fromEndpoints entry on that port. A peer in another namespace
+    # must carry io.kubernetes.pod.namespace; without it Cilium matches pods of
+    # the kagent namespace only. Empty, the default, admits no one else.
+    #
+    # For an installation whose kagent hostname sits on a private edge LB and is
+    # reached from elsewhere through a Teleport tunnel instead: the local
+    # teleport-kube-agent proxies the tunnel's requests to oauth2-proxy, so it
+    # is the caller the policy has to admit.
+    #   additionalPeers:
+    #     - app: teleport-kube-agent
+    #       io.kubernetes.pod.namespace: kube-system
+    additionalPeers: []
+
+  # --- Tenant identity (read by umbrella templates/kagent/flux-service-account.yaml, not passed to subchart) ---
+  # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in
+  # the kagent namespace whenever kagent is on, bound to `cluster-admin` by a
+  # namespace-scoped RoleBinding (full control of the kagent namespace, nothing
+  # outside it), and named from this ONE value into agent-manager
+  # (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the
+  # portal's `agentPlatform.fluxServiceAccountName` (through the
+  # `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot
+  # disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs
+  # as the rights-less default ServiceAccount and fails. Empty renders no
+  # identity and hands both callers an empty name.
+  fluxServiceAccountName: kagent-flux
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose kagent controller API through agentgateway (JWT-validated).
@@ -1054,6 +1137,147 @@ postgres:
     enabled: false
     name: sessions
     owner: sessions
+  # Backups. Off by default: a Cluster rendered without them is protected by
+  # its PVCs alone, carries the annotation
+  # agent-platform.giantswarm.io/backup: none and NOTES warns about it. Turn
+  # this on before the installation holds data it cannot lose.
+  backup:
+    enabled: false
+    # plugin         — Barman Cloud plugin (CNPG-I): continuous WAL archiving plus
+    #                  scheduled base backups to an object store, point-in-time
+    #                  recovery. Needs the plugin (barman-cloud.cloudnative-pg.io)
+    #                  installed next to the CNPG operator.
+    # volumeSnapshot — CSI VolumeSnapshots of the data volume: no WAL archive,
+    #                  restore to a snapshot only. Needs a VolumeSnapshotClass.
+    method: plugin
+    # ScheduledBackup schedule, CNPG cron with seconds first (six fields). Daily
+    # at 02:00 UTC; WAL archiving covers the time in between.
+    schedule: "0 0 2 * * *"
+    # Take the first backup as soon as the ScheduledBackup exists.
+    immediate: true
+    suspend: false
+    # The Barman server name, the folder under destinationPath. Defaults to
+    # postgres.clusterName. Give a cluster restored from this store a new name
+    # when it archives back into the same store, so the two histories stay apart.
+    serverName: ""
+    # The object store the plugin writes to (method: plugin), rendered as an
+    # ObjectStore (barmancloud.cnpg.io/v1) named <clusterName>-backup.
+    objectStore:
+      # Use an ObjectStore that already exists in postgres.namespace instead of
+      # rendering one. The other objectStore keys are ignored then.
+      existingName: ""
+      # s3://<bucket>/<prefix>/ or https://<account>.blob.core.windows.net/<container>/.
+      # Derived from crossplane.* when that block renders the bucket.
+      destinationPath: ""
+      # S3-compatible endpoint (MinIO, Ceph RGW). Empty for AWS and Azure.
+      endpointURL: ""
+      # Recovery window. Base backups older than the first one that still covers
+      # the window are deleted after the next backup. <n>d, <n>w or <n>m.
+      retentionPolicy: 30d
+      wal:
+        compression: gzip
+        # Parallel WAL uploads per archive_command invocation.
+        maxParallel: 1
+      data:
+        compression: gzip
+      # Exactly one credential source, matching destinationPath.
+      s3:
+        # IRSA: the plugin sidecar assumes the role annotated on the Cluster's
+        # ServiceAccount (serviceAccount.annotations below).
+        inheritFromIAMRole: false
+        # Static keys, each a key of a Secret in postgres.namespace.
+        accessKeyId:
+          name: ""
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: ""
+          key: ACCESS_SECRET_KEY
+      azure:
+        # Azure AD workload identity on the Cluster's ServiceAccount.
+        inheritFromAzureAD: false
+        # A blob connection string held in a Secret. Derived from the Crossplane
+        # Account's connection Secret when crossplane.* renders the storage.
+        connectionString:
+          name: ""
+          key: ""
+        # Or storage account name and key, each a key of a Secret.
+        storageAccount:
+          name: ""
+          key: ""
+        storageKey:
+          name: ""
+          key: ""
+      # The plugin sidecar that runs in every instance pod.
+      sidecar:
+        resources: {}  # @schema skipProperties: true; additionalProperties: true
+    # method: volumeSnapshot
+    volumeSnapshot:
+      className: ""
+      # Class for the WAL volume when walStorage is used; empty = className.
+      walClassName: ""
+      online: true
+    # Annotations for the Cluster's ServiceAccount: the IRSA role
+    # (eks.amazonaws.com/role-arn) or the Azure workload identity client id.
+    # The IRSA role is derived when crossplane.aws renders it.
+    serviceAccount:
+      annotations: {}  # @schema additionalProperties: true
+    # Egress the instance pods get for the object store, cilium flavor (the
+    # kubernetes flavor renders no policy for the CNPG pods): DNS, world on the
+    # ports below, the cluster entity when endpointURL names an in-cluster store,
+    # and optional names and blocks for a store behind a fixed address.
+    networkPolicy:
+      ports:  # @schema minItems: 1; item: string
+        - "443"
+      fqdns: []
+      cidrs: []
+    # Render the bucket and its access as Crossplane managed resources, the way
+    # the fleet provisions object storage for its own components. Off by default;
+    # needs the upbound AWS or Azure provider and a ProviderConfig on the cluster.
+    # Bucket and storage objects are created but never deleted by Crossplane
+    # (no Delete management policy) and carry helm.sh/resource-policy: keep.
+    crossplane:
+      enabled: false
+      # aws   — S3 Bucket with a lifecycle rule, a public-access block and a
+      #         TLS-only bucket policy, plus an IAM Role with an inline S3 policy
+      #         trusted by the Cluster's ServiceAccount (and <clusterName>-restore*
+      #         for scratch restore clusters) through the cluster's IRSA OIDC
+      #         provider. Sets s3.inheritFromIAMRole and the role annotation.
+      # azure — Storage Account, Container and a lifecycle ManagementPolicy, plus a
+      #         PrivateEndpoint on private installations. The Account's connection
+      #         Secret (<clusterName>-backup-store) feeds azure.connectionString.
+      provider: aws
+      providerConfigRef: ""
+      region: ""
+      # Adopt existing cloud resources without changing them.
+      observeOnly: false
+      tags: {}  # @schema additionalProperties: true
+      aws:
+        bucketName: ""
+        # The AWS account that holds the OIDC provider and the role.
+        accountId: ""
+        # IRSA OIDC provider host, e.g. irsa.<cluster>.<base-domain>.
+        oidcProvider: ""
+        # IAM role name. Defaults to bucketName.
+        roleName: ""
+        # Objects expire after this many days, a safety net above retentionPolicy.
+        lifecycleDays: 45
+      azure:
+        # 3 to 24 lowercase letters and digits, globally unique.
+        storageAccountName: ""
+        containerName: ""
+        resourceGroup: ""
+        replicationType: LRS
+        # Blobs are deleted this many days after their last modification.
+        lifecycleDays: 45
+        # Private installation: no public network access on the Account and a
+        # PrivateEndpoint in the cluster's node subnet. Needs subscriptionId.
+        private: false
+        subscriptionId: ""
+        # PrivateEndpoint wiring. Empty values derive from resourceGroup:
+        # <resourceGroup>-vnet and <resourceGroup>-privatelink.blob.core.windows.net.
+        vnetName: ""
+        subnetName: node-subnet
+        privateDnsZoneRef: ""
 
 # Klaus Gateway — channel front door (Slack, CLI, web) for Klaus instances.
 # Disabled by default; set components.klaus-gateway.enabled: true to deploy.
@@ -1221,7 +1445,11 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
   # admission via the Kyverno mutate policy in
   # templates/agent-sandbox/pod-security.yaml. These values feed that policy.
   podSecurity:
-    enabled: true
+    # `auto` (the default) follows the resolved kyvernoPolicies.enabled — the
+    # policy is a Kyverno mutate policy; `true` / `false` force it. An explicit
+    # true with kyvernoPolicies.enabled false fails the render (the
+    # securityContext has no other way onto the Deployment).
+    enabled: auto  # auto | true | false
     # Must match the agent-sandbox chart's namespace.name (upstream default).
     namespace: agent-sandbox-system
     podSecurityContext:
@@ -1242,3 +1470,733 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # under its own `agent-sandbox:` key, so a controller override is
 # `agent-sandbox.agent-sandbox.<key>`.
 # agent-sandbox: {}
+
+# === Model manager (model-manager) ===
+# Values forwarded verbatim to the model-manager component release
+# (giantswarm/model-manager: backend-abstracted model inventory, pull,
+# load/unload, delete and kagent ModelConfig wiring, as REST and MCP). The
+# pinned Service name is what the wiring below (route, network policies)
+# targets, like muster.fullnameOverride. `backend` selects the serving driver:
+# `ollama` proxies an Ollama reached at ollama.endpoint (REQUIRED as reached
+# from pods; the chart's own default is a Docker Desktop guess), `lemonade` a
+# Lemonade Server at lemonade.endpoint (FastFlowLM on AMD Ryzen AI NPUs,
+# llama.cpp on GPU/CPU; wired against <endpoint>/api/v1), `lmstudio` an LM
+# Studio at lmstudio.endpoint (0.4.0+, llama.cpp on GPU/CPU and MLX on Apple
+# silicon; wired against <endpoint>/v1, and it serves no delete), `kserve`
+# manages InferenceServices on the KServe control plane the cluster runs (a
+# prerequisite of that backend; nothing under this key installs it),
+# configured through the chart's kserve.* keys.
+# ModelConfigs are wired into kagent.namespace, which must be the kagent
+# component's namespace (kagent.namespaceOverride); an install without kagent
+# sets kagent.disableWiring: true. The MCP endpoint is registered with muster
+# through the chart's own MCPServer CR (tools appear as x_model-manager_<tool>).
+#
+# The user's identity, not a ServiceAccount: oauth.enabled makes model-manager
+# an OAuth 2.1 resource server in front of its MCP endpoint and REST API. The
+# issuer, client and secret fall back to global.identity inside the chart and
+# the OAuth base URL to global.domain — an installation that sets no global.*
+# names them here (oauth.baseURL, oauth.dex.issuerURL, oauth.dex.clientID,
+# oauth.existingSecret with key dex-client-secret — the platform client's, the
+# same Dex client muster logs users in with) and lists that client in
+# oauth.trustedAudiences. muster forwards the session's id_token (the MCPServer
+# CR's auth block) and requests requiredAudiences at login — the cross-client
+# audience the kube-apiserver trusts, so oauth.downstream can present the same
+# token to the API: the user's RBAC governs and the ServiceAccount holds no
+# permissions (the chart renders no RBAC). The chart's own NetworkPolicy stays
+# off; the connectivity chart renders the policies (modelManager below).
+model-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: model-manager
+  backend: ollama
+  ollama:
+    endpoint: ""
+    agentHost: ""
+  lemonade:
+    endpoint: ""
+    agentHost: ""
+  lmstudio:
+    endpoint: ""
+    agentHost: ""
+  kagent:
+    namespace: kagent
+    disableWiring: false
+  mcp:
+    enabled: true
+  oauth:
+    enabled: true
+    provider: dex
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+    downstream:
+      enabled: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+        requiredAudiences:
+          - dex-k8s-authenticator
+  networkPolicy:
+    enabled: false
+
+# The wiring the connectivity chart renders for the model-manager component
+# (it reads this block, not the chart's). Inert while
+# components.model-manager.enabled is false.
+modelManager:  # @schema skipProperties: true; additionalProperties: true
+  # Expose the model-manager API on the agentgateway data plane at
+  # https://agentgateway.<domain><pathPrefix>: an AgentgatewayBackend for the
+  # Service, an HTTPRoute that strips the prefix (model-manager then sees
+  # /api/v1/...), and — when the chart-owned edge is not the data plane — the
+  # public HTTPRoute on the outer Gateway (the same shape as
+  # kagent.controllerRoute). The portal's Models pages call this route.
+  # Requires an agentgateway-* ingress.mode.
+  route:
+    enabled: false
+    pathPrefix: /model-manager
+    # Public hostname; empty derives agentgateway.<global.domain>.
+    hostname: ""
+    # Outer (public) Gateway that terminates TLS, the Giant Swarm public
+    # Gateway by default (as kagent.controllerRoute). Both halves or neither:
+    # empty follows the chart-owned edge, else global.gatewayApi.parentRefs.
+    parentRef:
+      name: giantswarm-default
+      namespace: envoy-gateway-system
+    # Validate the bearer JWT (signature, issuer, expiry) at the gateway
+    # before forwarding: no token, no API. The issuer defaults to
+    # global.identity.issuerUrl; the JWKS is fetched from the issuer's
+    # in-cluster endpoint through a static AgentgatewayBackend (needs
+    # gateway.jwksEgress when network policies are on).
+    jwtAuthentication:
+      enabled: false
+      mode: Strict
+      issuer: ""
+      jwks:
+        host: dex.giantswarm.svc.cluster.local
+        port: 5556
+        path: /keys
+        # The issuer serves its JWKS over TLS: originate TLS to it, verifying
+        # against the CA Secret (key ca.crt); empty caSecretName uses
+        # global.identity.ca.secretName, and with both empty the data plane's
+        # system trust. Off: plain HTTP, the in-cluster Dex default.
+        tls:
+          enabled: false
+          caSecretName: ""
+  kserve:
+    # Fail the render when model-manager.backend is kserve and the
+    # serving.kserve.io/v1beta1 API (InferenceService) is not on the cluster;
+    # an offline `helm template` passes with --api-versions
+    # serving.kserve.io/v1beta1, or false skips the check.
+    requireApi: true
+  # Network policy inputs. The policies render under networkPolicy (enabled +
+  # flavor) like every other component's wiring. Ingress: the agentgateway
+  # data plane (route on), muster (MCPServer on) and the kubelet's probes.
+  # Egress: DNS, the Kubernetes API, the identity provider (oauth on: the Dex
+  # issuer by name, or for model-manager.oauth.provider google its discovery,
+  # JWKS/userinfo and token hosts), the Ollama endpoint (ollama backend) or the
+  # Hugging Face Hub (kserve backend), plus the names and blocks of egress.
+  networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to the platform's own (the
+      # agentgateway data plane with route on, muster with the MCPServer on):
+      # a list of pod label maps (matchLabels), every one a workload in the
+      # release namespace. cilium flavor: one fromEndpoints entry per item with
+      # io.kubernetes.pod.namespace pinned to the release namespace; kubernetes
+      # flavor: one podSelector per item. A non-empty list also counts as a
+      # platform caller (no placeholder peer renders). Empty, the default,
+      # admits no one else. For an umbrella that runs a portal next to the
+      # managers:
+      #   additionalPeers:
+      #     - app.kubernetes.io/name: backstage
+      additionalPeers: []
+    huggingFace:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) for the
+      # kserve backend's Hub calls (search, fit checks, revision lookups),
+      # resolved through the DNS proxy rule the policy renders; the defaults
+      # cover huggingface.co, its API redirects and the LFS / Xet download
+      # fronts under hf.co. A mirror (HF_ENDPOINT) replaces the list. Ignored
+      # by the kubernetes flavor (see cidrs).
+      fqdns:
+        - matchName: huggingface.co
+        - matchPattern: "*.huggingface.co"
+        - matchPattern: "*.hf.co"
+        - matchPattern: "*.*.hf.co"
+      # IP blocks of the Hub. kubernetes flavor: vanilla NetworkPolicy selects
+      # addresses, never names, so an empty list (the default) opens 443 to
+      # every public destination — 0.0.0.0/0 minus
+      # networkPolicy.kubernetes.worldExcludedCIDRs. A list here narrows the
+      # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
+      # adds them next to the names.
+      cidrs: []
+    # Further destinations of the service on 443, whatever the backend — the
+    # same knob as agentManager.networkPolicy.egress: a private identity
+    # provider, a model mirror.
+    egress:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders. Ignored by the
+      # kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks, opened on 443 in both flavors. In the kubernetes flavor the
+      # policy already opens every public destination while oauth is on, so
+      # this is where a private address (one of
+      # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
+      cidrs: []
+
+# === Agent manager (agent-manager) ===
+# Values forwarded verbatim to the agent-manager component release
+# (giantswarm/agent-manager, the agent write surface of the Agent Control
+# Plane): creates, updates, deletes and inspects kagent agents as Flux
+# HelmReleases of the agent chart — byte-for-byte what the portal's create
+# flow composes — validated against the chart's values.schema.json, as REST
+# and MCP (tools appear as x_agent-manager_<tool> through the chart's own
+# MCPServer CR). It needs the kagent component (the agents it manages, in
+# kagent.namespace = kagent.namespaceOverride) and Flux's helm and source
+# controllers on the cluster. The HelmReleases it writes execute as
+# flux.helmReleaseServiceAccount, which is NOT set here: the meta chart derives
+# it from kagent.fluxServiceAccountName — the tenant identity this chart renders
+# in the kagent namespace (templates/kagent/flux-service-account.yaml) — so the
+# ServiceAccount, its RoleBinding, agent-manager and the portal share one name.
+# Identity as for model-manager above: an OAuth 2.1 resource server acting as
+# the caller, no ServiceAccount permissions (the chart renders no RBAC), the
+# platform client named here or through global.identity. The chart's own
+# NetworkPolicy stays off; the connectivity chart renders the policies
+# (agentManager below).
+agent-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: agent-manager
+  kagent:
+    namespace: kagent
+  agentChart:
+    ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
+    semver: x.x.x
+  # The skill repositories list_skills offers — the same list the portal's
+  # create flow reads.
+  skills:
+    repositories:
+      - https://github.com/giantswarm/agent-skills
+  mcp:
+    enabled: true
+  oauth:
+    enabled: true
+    provider: dex
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+    downstream:
+      enabled: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+        requiredAudiences:
+          - dex-k8s-authenticator
+  networkPolicy:
+    enabled: false
+
+# The wiring the connectivity chart renders for the agent-manager component
+# (it reads this block, not the chart's). Inert while
+# components.agent-manager.enabled is false.
+agentManager:  # @schema skipProperties: true; additionalProperties: true
+  # Expose the agent-manager API on the agentgateway data plane at
+  # https://agentgateway.<domain><pathPrefix> (the same shape as
+  # modelManager.route). Off by default: the MCP tools reach muster in-cluster
+  # without it; turn it on for a portal or CLI that calls the REST API.
+  # Requires an agentgateway-* ingress.mode.
+  route:
+    enabled: false
+    pathPrefix: /agent-manager
+    hostname: ""
+    parentRef:
+      name: giantswarm-default
+      namespace: envoy-gateway-system
+    jwtAuthentication:
+      enabled: false
+      mode: Strict
+      issuer: ""
+      jwks:
+        host: dex.giantswarm.svc.cluster.local
+        port: 5556
+        path: /keys
+        tls:
+          enabled: false
+          caSecretName: ""
+  flux:
+    # Fail the render when the Flux APIs agent-manager writes
+    # (helm.toolkit.fluxcd.io/v2 HelmRelease, source.toolkit.fluxcd.io/v1
+    # OCIRepository) are not on the cluster. Off by default: an offline
+    # `helm template` (lint, the catalog build) never sees cluster APIs; turn
+    # it on for installs that want a missing Flux to fail the upgrade instead
+    # of leaving agents "progressing".
+    requireApi: false
+  # Network policy inputs; the policies render under networkPolicy (enabled +
+  # flavor). Ingress: the agentgateway data plane (route on), muster (MCPServer
+  # on) and the kubelet's probes. Egress: DNS, the Kubernetes API, the identity
+  # provider (oauth on: the Dex issuer by name, or for
+  # agent-manager.oauth.provider google its discovery, JWKS/userinfo and token
+  # hosts), and 443 to the agent chart's registry (derived from
+  # agent-manager.agentChart.ociUrl) plus the names below.
+  networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to the platform's own (the
+      # agentgateway data plane with route on, muster with the MCPServer on):
+      # a list of pod label maps (matchLabels), every one a workload in the
+      # release namespace. cilium flavor: one fromEndpoints entry per item with
+      # io.kubernetes.pod.namespace pinned to the release namespace; kubernetes
+      # flavor: one podSelector per item. A non-empty list also counts as a
+      # platform caller (no placeholder peer renders). Empty, the default,
+      # admits no one else. For an umbrella that runs a portal next to the
+      # managers:
+      #   additionalPeers:
+      #     - app.kubernetes.io/name: backstage
+      additionalPeers: []
+    egress:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) next to
+      # the registry host, resolved through the DNS proxy rule the policy
+      # renders. The defaults cover the registry's blob storage front
+      # (gsoci.azurecr.io redirects downloads to *.blob.core.windows.net) and
+      # the GitHub API skill discovery reads SKILL.md files from. Ignored by
+      # the kubernetes flavor (see cidrs).
+      fqdns:
+        - matchPattern: "*.blob.core.windows.net"
+        - matchName: api.github.com
+      # IP blocks of the registry and GitHub. kubernetes flavor: vanilla
+      # NetworkPolicy selects addresses, never names, so an empty list (the
+      # default) opens 443 to every public destination — 0.0.0.0/0 minus
+      # networkPolicy.kubernetes.worldExcludedCIDRs. A list here narrows the
+      # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
+      # adds them next to the names.
+      cidrs: []
+
+# === The standalone chart's extras: component chart values and their wiring ===
+# Values of the backstage, mcp-kubernetes, cloudnative-pg and kserve component
+# charts. Consumed by those charts and forwarded here via forwardAllValues (the
+# meta chart forwards its whole values tree, and this chart's schema is
+# additionalProperties: false at the root); declared so the schema accepts the
+# blocks, the way dicebear's is. The wiring this chart renders for these
+# components reads what it needs from them, and two of the blocks also carry
+# the wiring's own inputs — the keys the standalone umbrella kept under
+# components.backstage / components.mcp-kubernetes — which the meta chart
+# drops from the values it forwards to the component chart
+# (components.<name>.omitKeys; both charts validate their values strictly),
+# the kagent shape.
+
+# === Backstage (the portal) ===
+# The backstage chart's own values are forwarded verbatim by the meta chart
+# (Ingress and VPA off, the base config restated, the Agent Platform
+# app-config mounted from the ConfigMap this chart renders, the credentials
+# Secret and the identity-provider CA from global.identity); this chart reads
+# `name`, `port` and `database.engine` from them. Everything else below is
+# the wiring's own (templates/backstage/): the app-config ConfigMap
+# agent-platform-backstage-app-config, the public HTTPRoute and the
+# config-reload hook. Inert while components.backstage.enabled is false.
+# Backstage on needs global.domain, global.identity (issuerUrl, clientId,
+# existingSecret with the keys dex-client-secret and backstage-session-secret)
+# and a public Gateway (parentRefs, gatewayApi.gateway.create or
+# global.gatewayApi.parentRefs).
+backstage:  # @schema skipProperties: true; additionalProperties: true
+  # Public hostname; empty derives backstage.<global.domain>.
+  hostname: ""
+  # Gateway of the Backstage route; empty follows the platform default (the
+  # chart-owned edge, else global.gatewayApi.parentRefs).
+  parentRefs: []
+  # The installation the portal shows for this platform: the key of
+  # gs.installations, the in-cluster Kubernetes cluster entry, the muster
+  # installation and the kagent / model-manager installations in the
+  # app-config. Empty falls back to this release's name
+  # (agent-platform-connectivity under the meta chart). The standalone
+  # umbrella used its own release name, agent-platform.
+  installationName: agent-platform
+  # Extra OIDC scopes the Backstage login requests. The two defaults are Dex
+  # cross-client scopes: muster trusts the dex-k8s-authenticator audience on
+  # forwarded tokens. Set [] for a provider that rejects unknown scopes
+  # (Keycloak, Entra ID).
+  extraScopes:
+    - federated:id
+    - audience:server:client_id:dex-k8s-authenticator
+  # Extra query parameters on the login provider's authorize request (the
+  # oidc authenticator's startUrlSearchParams). Dex needs none. Google models
+  # offline access as authorize parameters, not as the offline_access scope
+  # (which it rejects), so a Google IdP needs
+  #   access_type: offline   # a refresh token is issued at all
+  #   prompt: consent        # ... on every login, not only the first grant;
+  #                          # without it a browser logging in after the first
+  #                          # grant gets no refresh token and every page
+  #                          # reload forces a fresh login
+  # A `prompt` set here wins over the provider's default `prompt: auto`.
+  # Spec-conforming providers ignore parameters they don't know.
+  startUrlSearchParams: {}
+  # Portal extensions to enable on top of the Agent Platform pages. Some
+  # portal pages are off by default in the Backstage app itself (Deployments,
+  # Clusters, Installations), so dropping them from disabledExtensions is not
+  # enough to show them -- list them here instead. Example, HelmRelease
+  # visibility for the agent create flow's "Go to the deployment" link
+  # (Deployments links to cluster details, so enable both):
+  #   - page:gs/deployments
+  #   - nav-item:gs/deployments
+  #   - page:gs/clusters
+  #   - nav-item:gs/clusters
+  # An extension listed here and in disabledExtensions ends up enabled.
+  enabledExtensions: []
+  # Sidebar pages of the Giant Swarm portal hidden on the vanilla UI.
+  disabledExtensions:
+    - page:gs/clusters
+    - nav-item:gs/clusters
+    - page:gs/deployments
+    - nav-item:gs/deployments
+    - page:gs/installations
+    - nav-item:gs/installations
+    - page:flux
+    - nav-item:flux
+    - page:ai-chat
+    - api:ai-chat/service
+    - api:ai-chat/drawer
+    - app-root-element:ai-chat/drawer
+  # Skill repositories offered when an agent is created.
+  skillsRepositories:
+    - https://github.com/giantswarm/agent-skills
+  # Release of giantswarm/backstage-catalogs whose hidden agent-deployment
+  # scaffolder template the app-config registers as a catalog location. The
+  # agent create flow's deploy step runs that template; without the location
+  # the step fails with "Template template:default/agent-deployment not
+  # found". Backstage fetches it from github.com at catalog processing time,
+  # so the backend needs egress there; set version "" to skip the location
+  # (agent creation then stops at the deploy step).
+  catalogs:
+    # repo: giantswarm/backstage-catalogs
+    version: v0.6.0
+  # Roll the Backstage pod when this chart's app-config ConfigMap changes.
+  # The backstage chart's own checksum annotations cover only its own
+  # templates, so an app-config change (templates/backstage/app-config.yaml)
+  # otherwise takes effect only on the next manual pod restart. A
+  # post-install/post-upgrade hook Job of THIS release stamps the rendered
+  # app-config's checksum into the Backstage Deployment's pod template
+  # (kubectl set env, selected by label: a no-op while the checksum is
+  # unchanged, a rolling update when it differs, nothing when the Deployment
+  # does not exist yet — the backstage release dependsOn this one). Disable
+  # for clusters where Helm hooks are unwelcome; config changes then need a
+  # manual `kubectl rollout restart deployment/backstage`.
+  configReload:
+    enabled: true
+    # kubectl runs the patch; override for mirrored registries.
+    image:
+      registry: gsoci.azurecr.io
+      name: giantswarm/kubectl
+      # The registry tags this image `v1.33.5`, `v1.37.0`, ...: the `v` is part
+      # of the tag, Renovate bumps the digits after it.
+      # registry: gsoci.azurecr.io/giantswarm/kubectl
+      version: "v1.37.0"
+
+# === Kubernetes MCP server (mcp-kubernetes) ===
+# The mcp-kubernetes chart's own values are forwarded verbatim by the meta
+# chart (the pinned Service name, OAuth as the user with downstream OAuth);
+# this chart reads `fullnameOverride`, `service.port` and
+# `mcpKubernetes.oauth.enabled` from them for the MCPServer CR that registers
+# the server with muster (templates/mcp-kubernetes/mcpserver.yaml). Inert
+# while components.mcp-kubernetes.enabled is false.
+mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
+  # The chart's keys this wiring reads, mirrored from the meta chart's defaults
+  # (the meta chart forwards its block; a render of this chart on its own falls
+  # back to these): the Service name and whether the server validates the
+  # caller's identity itself (the auth block of the MCPServer CR).
+  fullnameOverride: mcp-kubernetes
+  mcpKubernetes:
+    oauth:
+      enabled: true
+  # Audience the forwarded IdP id_token must carry on top of the platform
+  # client's so the kube-apiserver accepts it: with the server's OAuth on,
+  # muster forwards the session's id_token byte-identical (auth.forwardToken)
+  # and requests this cross-client audience at login (auth.requiredAudiences),
+  # and mcp-kubernetes presents that token to the apiserver
+  # (enableDownstreamOAuth) — the user's RBAC governs, not a ServiceAccount's.
+  # dex-k8s-authenticator is the Dex client Giant Swarm apiservers trust (a
+  # lab Dex ships it, with the platform client in its trustedPeers); an
+  # apiserver that trusts another client id names it here. Empty: no extra
+  # audience — a Google IdP has no cross-client scopes (they fail the login
+  # with invalid_scope) and its client id IS the apiserver's --oidc-client-id.
+  # The wiring's own key: the meta chart drops it from the values forwarded to
+  # the mcp-kubernetes chart (components.mcp-kubernetes.omitKeys).
+  kubernetesAudience: dex-k8s-authenticator
+
+cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
+kserve-crd: {}  # @schema skipProperties: true; additionalProperties: true
+# The KServe controller chart's values; this chart reads
+# kserve.controller.deploymentMode for its guard (templates/kserve/) and renders
+# the controller's network policies while components.kserve-resources is on.
+kserve-resources: {}  # @schema skipProperties: true; additionalProperties: true
+kserve-llmisvc-crd: {}  # @schema skipProperties: true; additionalProperties: true
+# The llm-d controller chart's values; this chart reads
+# kserve.createSharedResources for its guard and renders the controller's
+# network policies while components.kserve-llmisvc-resources is on.
+kserve-llmisvc-resources: {}  # @schema skipProperties: true; additionalProperties: true
+
+# === Model serving (modelServing) ===
+# Model serving on KServe with vLLM, for installs that run local models —
+# the standalone umbrella's modelServing component, rendered by this chart
+# from templates/model-serving/ and the chart files under files/model-serving/,
+# gated on components.modelServing.enabled (a feature switch of the roster, no
+# chart behind it). Off by default and inert while off: nothing below renders.
+# The KServe control plane is a prerequisite: the platform's own
+# (components.kserve-crd + components.kserve-resources; this release dependsOn
+# kserve-resources, so the CRDs and the webhook are Established before these
+# objects apply) or a KServe the cluster already runs (kserve.requireApi). On,
+# the chart renders: the vLLM ClusterServingRuntime every preset runs on; the
+# curated serving presets the portal's serve flow offers (one ConfigMap per
+# preset in the release namespace, label
+# agent-platform.giantswarm.io/serving-preset=true, schema in
+# files/model-serving/serving-preset.schema.json); the discovery ConfigMap
+# agent-platform-model-serving (label
+# agent-platform.giantswarm.io/model-serving-config=true) that tells the portal
+# and model-manager where InferenceServices go and how; the Hugging Face cache
+# PVC; and, where Kyverno runs, the admission policies that wire every
+# InferenceService pod in the serving namespace to that cache. The
+# standalone's components.modelServing.* keys map one-to-one onto this block
+# (components.modelServing.enabled stays where it was).
+modelServing:  # @schema skipProperties: true; additionalProperties: true
+  kserve:
+    # Fail the render when neither the KServe components (kserve-crd +
+    # kserve-resources) are on nor the KServe CRDs (serving.kserve.io/v1alpha1
+    # ClusterServingRuntime, v1beta1 InferenceService) are served on the
+    # cluster, instead of shipping objects the API server rejects. An offline
+    # `helm template` passes the check with the components on, or with
+    # --api-versions serving.kserve.io/v1alpha1 --api-versions serving.kserve.io/v1beta1;
+    # false skips it.
+    requireApi: true
+  # The namespace InferenceServices run in. The runtime is cluster-scoped;
+  # the cache PVC, the chat-template ConfigMaps and the Kyverno policies
+  # target this namespace, and the portal creates InferenceServices here.
+  # Created by the chart (Helm-owned) when create is true and the name
+  # differs from the release namespace. labels: e.g. a Pod Security
+  # admission level — the upstream vLLM image runs as root, and the cache
+  # init container needs root to create the per-model directory.
+  namespace:
+    name: model-serving
+    create: true
+    labels: {}
+  # The vLLM ClusterServingRuntime (serving.kserve.io/v1alpha1,
+  # cluster-scoped). Every shipped preset runs on it; a preset may name
+  # another runtime.
+  runtime:
+    name: kserve-vllm
+    # The upstream x86-64 CUDA image. An install with special hardware
+    # (ARM64, Blackwell sm_121) points registry/name/version at its own
+    # build; the presets do not change.
+    image:
+      registry: docker.io
+      name: vllm/vllm-openai
+      # registry: docker.io/vllm/vllm-openai
+      version: "v0.28.0"
+    # Server arguments common to every model. KServe expands {{.Name}} to
+    # the InferenceService name; a preset's args are appended by KServe.
+    # The port must stay 8080 (the probe, the metrics annotations and
+    # KServe's predictor Service assume it).
+    args:
+      - --model
+      - /mnt/models
+      - --port
+      - "8080"
+      - --served-model-name
+      - "{{.Name}}"
+    # Environment of the runtime container; a preset's env is merged on
+    # top by KServe. VLLM_CONFIG_ROOT keeps vLLM's config writable when
+    # /mnt/models is a read-only mount.
+    env:
+      - name: HF_HUB_ENABLE_HF_TRANSFER
+        value: "1"
+      - name: VLLM_CONFIG_ROOT
+        value: /tmp
+    # Resource envelope of the runtime container. A preset's resources win
+    # field by field (KServe merges the InferenceService over the runtime);
+    # the GPU count always comes from the preset.
+    resources:
+      requests:
+        cpu: "2"
+        memory: 16Gi
+      limits:
+        cpu: "8"
+        memory: 64Gi
+    # /dev/shm (memory-backed emptyDir) for vLLM's worker IPC.
+    shmSize: 16Gi
+    # Startup budget of the runtime container: loading a large model after
+    # the download takes many minutes; 360 x 30s = 3 hours before KServe
+    # gives up on the pod.
+    startupProbe:
+      initialDelaySeconds: 300
+      periodSeconds: 30
+      failureThreshold: 360
+    # Pod annotations KServe copies onto every predictor pod of this
+    # runtime; the defaults let KServe's Prometheus scraping find vLLM's
+    # /metrics.
+    annotations:
+      prometheus.kserve.io/path: /metrics
+      prometheus.kserve.io/port: "8080"
+    # Model formats this runtime serves. KServe matches an InferenceService
+    # whose modelFormat.name is listed here (autoSelect) or that names the
+    # runtime explicitly.
+    supportedModelFormats:
+      - name: vLLM
+        version: "1"
+        autoSelect: true
+        priority: 1
+    # Scheduling of every predictor pod of this runtime (the GPU nodes).
+    nodeSelector: {}
+    tolerations: []
+  # Defaults for every InferenceService the portal or model-manager creates
+  # from a preset. Published in the discovery ConfigMap; the chart itself
+  # creates no InferenceService.
+  serving:
+    # The extended resource a GPU is requested as (NVIDIA device plugin).
+    gpuResourceName: nvidia.com/gpu
+    # RuntimeClass of the predictor pods, e.g. nvidia for the NVIDIA
+    # container toolkit; empty leaves the cluster default.
+    runtimeClassName: ""
+    # Node selector of every predictor pod, e.g. the GPU node pool; a
+    # preset's scheduling.nodeSelector is merged on top.
+    nodeSelector: {}
+    # Deployment strategy of the predictor: Recreate frees the GPU memory
+    # of the old pod before the new one loads the model, which a node
+    # whose memory is shared between GPU and CPU (unified memory) needs.
+    deploymentStrategyType: Recreate
+    # Request timeout KServe writes into the predictor's route. Long
+    # reasoning turns stream for minutes; the KServe default of 60s cuts
+    # them mid-response.
+    timeoutSeconds: 1800
+  # Serving presets an install adds (ServingPreset documents, see
+  # files/model-serving/serving-preset.schema.json and the README). A
+  # preset with the name of a shipped one replaces it. Example:
+  #   presets:
+  #     - apiVersion: agent-platform.giantswarm.io/v1alpha1
+  #       kind: ServingPreset
+  #       metadata:
+  #         name: my-model
+  #       spec:
+  #         displayName: My model
+  #         model:
+  #           id: org/My-Model
+  #           storageUri: hf://org/My-Model
+  #         args: [--max-model-len=8192]
+  #         resources:
+  #           gpus: 1
+  #         requirements:
+  #           weightsGiB: 16
+  presets: []
+  # The presets shipped with the chart (files/model-serving/presets/).
+  # enabled: false drops the whole set; exclude drops single ones by name.
+  shippedPresets:
+    enabled: true
+    exclude: []
+  # Hugging Face model cache: one PVC in the serving namespace with one
+  # subdirectory per InferenceService, so a model downloads once and every
+  # restart finds it (hours to seconds). The PVC is kept on uninstall
+  # (helm.sh/resource-policy: keep). Without the Kyverno policies below the
+  # PVC is still created and published for model-manager's pre-warm
+  # downloads, but the KServe storage-initializer downloads into its
+  # ephemeral volume on every start.
+  cache:
+    enabled: true
+    pvc:
+      # Claim name, also the name published to the portal and
+      # model-manager.
+      name: hf-cache
+      # A pre-existing claim in the serving namespace to use instead;
+      # set, no PVC is rendered.
+      existingClaim: ""
+      size: 500Gi
+      # Empty uses the cluster's default StorageClass; "-" sets an empty
+      # class (static binding to a pre-provisioned PersistentVolume, e.g.
+      # local NVMe on the GPU node).
+      storageClassName: ""
+      # Bind this claim to a specific pre-provisioned PersistentVolume.
+      volumeName: ""
+      accessModes:
+        - ReadWriteOnce
+  # Kyverno ClusterPolicies for the InferenceService pods and Deployments
+  # in the serving namespace. `auto` (the default) follows the resolved
+  # kyvernoPolicies.enabled — they render where kyverno.io/v1 is served and
+  # nowhere else; `true` / `false` force them (an explicit true with Kyverno
+  # off fails the render). On, every predictor pod gets: an init container
+  # that creates the pod's cache subdirectory (<claim>/<inferenceservice>)
+  # world-writable before the KServe storage-initializer runs (the kubelet
+  # creates a missing subPath directory root-owned 0750, which the
+  # storage-initializer's uid cannot write), the storage-initializer's and
+  # the runtime's /mnt/models redirected into that subdirectory, and a
+  # storage-initializer memory limit that survives multi-GB downloads; the
+  # Deployment gets a progressDeadlineSeconds long enough for a first
+  # download. Nothing to do on the node by hand.
+  policies:
+    enabled: auto  # auto | true | false
+    # The init container that prepares the cache subdirectory (runs as
+    # root: the PVC root is root-owned).
+    cacheInit:
+      image:
+        registry: gsoci.azurecr.io
+        name: giantswarm/alpine
+        # registry: gsoci.azurecr.io/giantswarm/alpine
+        version: "3.24.1"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+    # Memory limit of the KServe storage-initializer init container. The
+    # KServe default (1Gi) is OOM-killed by the Hugging Face download of a
+    # large model. Empty leaves KServe's default.
+    storageInitializerMemoryLimit: 4Gi
+    # progressDeadlineSeconds of every InferenceService Deployment. The
+    # Kubernetes default (600) is shorter than a first model download and
+    # fires rollout-stuck alerts; 0 leaves the default.
+    progressDeadlineSeconds: 3600
+  # Network policies of the serving namespace, rendered under networkPolicy
+  # (enabled + the resolved flavor) like every other component's wiring:
+  # nothing renders while networkPolicy.enabled is false. On, both flavors
+  # get: ingress to the predictor pods (every pod KServe runs for an
+  # InferenceService, label serving.kserve.io/inferenceservice) on the
+  # runtime port from the kagent agent pods, the release namespace and
+  # predictor.additionalIngressNamespaces; egress from the predictor pods
+  # (the storage-initializer download, the runtime) and from model-manager's
+  # pre-warm download Jobs to DNS and the Hugging Face endpoints below. The
+  # cilium flavor also admits the kubelet's probes (host entity) — under
+  # policyEnforcementMode always a policy without that rule kills the
+  # predictor before it turns Ready — and adds the agent-side egress to the
+  # predictor pods (the chart's agent egress covers 443 only).
+  networkPolicy:
+    predictor:
+      # The port the runtime container listens on (the ClusterServingRuntime
+      # above: 8080); a preset that names another runtime with another port
+      # changes it here.
+      port: 8080
+      # Namespaces whose pods may reach the predictor pods on that port,
+      # besides the kagent agent pods and the release namespace: e.g. the
+      # namespace of the KServe ingress Gateway (envoy-gateway-system) or of
+      # Prometheus (KServe's scrape annotations point at the same port).
+      additionalIngressNamespaces: []
+    # Where the weights come from, TCP 443: the KServe storage-initializer
+    # (hf:// presets), the runtime's own Hub lookups, model-manager's
+    # pre-warm download Jobs and — on the kserve backend — model-manager
+    # itself (Hub search, fit checks; modelManager.networkPolicy.huggingFace).
+    huggingFace:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # enforced through the DNS proxy rule the policies render on their DNS
+      # egress; the defaults cover huggingface.co, its API redirects and the
+      # LFS / Xet download fronts under hf.co (Cilium's * matches one label,
+      # hence the two-level pattern for cas-bridge.xethub.hf.co). A mirror
+      # (HF_ENDPOINT) or an internal proxy replaces the list. Ignored by the
+      # kubernetes flavor, which cannot select names (see cidrs).
+      fqdns:
+        - matchName: huggingface.co
+        - matchPattern: "*.huggingface.co"
+        - matchPattern: "*.hf.co"
+        - matchPattern: "*.*.hf.co"
+      # IP blocks of the download endpoints. kubernetes flavor: vanilla
+      # NetworkPolicy selects addresses, never names, so an empty list (the
+      # default) opens 443 to every public destination — 0.0.0.0/0 minus
+      # networkPolicy.kubernetes.worldExcludedCIDRs, the data plane's own
+      # rule — because Hugging Face's download fronts are CDNs whose
+      # addresses change and a static list would break downloads silently. A
+      # list here narrows the egress to exactly these blocks (a mirror, a
+      # proxy, an S3 endpoint). The cilium flavor adds them next to the FQDNs.
+      # networkPolicy.additionalEgressCIDRs and additionalEgressFQDNs apply to
+      # both flavors as well.
+      cidrs: []

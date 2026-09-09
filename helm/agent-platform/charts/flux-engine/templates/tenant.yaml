@@ -1,0 +1,32 @@
+{{- /*
+The platform's tenant identity under the multi-tenancy lockdown. helm-controller
+impersonates the ServiceAccount a HelmRelease names; one that names none runs as
+the rights-less default account and fails on its first Secret. The meta chart
+names this account on every platform HelmRelease whenever the engine is on
+(gitops.serviceAccountName defaults to it). Components install CRDs and
+ClusterRoles, so nothing narrower than cluster-admin works. The account needs
+no token: helm-controller impersonates it, nothing runs as it.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "flux-engine.tenantServiceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "flux-engine.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "flux-engine.tenantServiceAccountName" . }}
+  labels:
+    {{- include "flux-engine.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "flux-engine.tenantServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

@@ -1,0 +1,42 @@
+# Qwen3 14B, BF16. The small dense generalist; fits next to another model on a
+# large node.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-14b
+spec:
+  displayName: Qwen3 14B
+  description: |
+    Dense 14B general model at BF16 (~28 GiB of weights), thinking disabled
+    by default, tool calling on (hermes parser — agents always send tools,
+    and vLLM answers 400 without --enable-auto-tool-choice). Tuned on a
+    single-GPU 128 GB unified-memory node (--gpu-memory-utilization=0.50).
+  model:
+    id: Qwen/Qwen3-14B
+    storageUri: hf://Qwen/Qwen3-14B
+    format: vLLM
+    contextLength: 8192
+    capabilities: [chat, tools]
+    license: apache-2.0
+  args:
+    - --gpu-memory-utilization=0.50
+    - --max-model-len=8192
+    - --enforce-eager
+    - --no-enable-log-requests
+    - --default-chat-template-kwargs
+    - '{"enable_thinking": false}'
+    # kagent agents call /v1/chat/completions with tools and tool_choice auto;
+    # without a parser vLLM rejects every agent request (400).
+    - --enable-auto-tool-choice
+    - --tool-call-parser=hermes
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 48Gi
+    limits:
+      cpu: "8"
+      memory: 64Gi
+  requirements:
+    weightsGiB: 28
+    overheadGiB: 30

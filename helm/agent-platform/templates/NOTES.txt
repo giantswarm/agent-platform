@@ -1,12 +1,45 @@
 agent-platform meta-package installed (release {{ .Release.Name }}, namespace {{ .Release.Namespace }}).
 
-This chart ships no workloads itself. It rendered, via gitops.engine={{ .Values.gitops.engine }},
-one release per enabled component plus the connectivity layer:
+This chart ships no workloads itself. It rendered, as Flux OCIRepository + HelmRelease
+objects, one release per enabled component plus the connectivity layer:
 
 {{- range $key, $c := .Values.components }}
-{{- if include "agent-platform.componentEnabled" (dict "root" $ "name" $key) }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $key)) (hasKey $c "chart") }}
   - {{ $c.chart }} (versionRange {{ $c.versionRange }}{{ with $c.dependsOn }}, dependsOn {{ join "," . }}{{ end }})
 {{- end }}
+{{- end }}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+
+The Flux engine came with this release (components.flux.enabled: true): the Flux
+Operator and the FluxInstance `flux` in {{ .Release.Namespace }} run source-controller
+and helm-controller under the multi-tenancy lockdown; the platform HelmReleases
+run as the tenant ServiceAccount {{ include "agent-platform.tenantServiceAccountName" . }}.
+`helm uninstall --wait` tears the platform down in order (pre-delete hooks
+delete the platform HelmReleases, then the FluxInstance; the operator removes
+Flux and its CRDs); the four fluxcd.controlplane.io CRDs stay behind.
+{{- if eq (include "agent-platform.selfEnabled" .) "true" }}
+
+This release manages itself (gitops.self.enabled): helm-controller adopts it
+through HelmRelease {{ .Release.Namespace }}/{{ .Release.Name }} once the install is
+deployed (a resumer Job lifts the install-time suspend) and follows
+{{ include "agent-platform.self.versionRange" . }} from
+{{ printf "%s/%s" (trimSuffix "/" .Values.gitops.self.repository) .Chart.Name }}.
+Day 2 is the Secret, not Helm: change values by rewriting
+Secret {{ .Release.Namespace }}/{{ include "agent-platform.self.valuesSecretName" . }} (key values.yaml, your
+values file); move to the next major by setting gitops.self.versionRange in it.
+`helm upgrade` and `helm rollback` are refused (ValidatingAdmissionPolicy
+{{ include "agent-platform.self.policyName" . }}); to hand the release back to the CLI,
+annotate the namespace {{ include "agent-platform.self.handBackAnnotation" . }}=allow and run
+`helm upgrade … --set gitops.self.enabled=false --force-conflicts` (keep the value).
+{{- else }}
+
+The Helm CLI stays the day-2 tool (gitops.self.enabled: false): `helm upgrade -f
+values.yaml` applies a values change; component versions still roll forward on
+their own inside their versionRanges.
+{{- end }}
+{{- else }}
+
+This cluster's own Flux reconciles these objects (components.flux.enabled: false).
 {{- end }}
 
 Flux re-resolves each versionRange on every reconcile, so component releases roll
@@ -15,5 +48,5 @@ examples/customer-bom.yaml) for a reproducible customer bill-of-materials.
 
 CRD-before-CR ordering: each component ships its own CRDs (app-owned CRDs,
 upgraded via CreateReplace); a CR consumer dependsOn the component that owns the
-CRD it needs (Flux) or orders after it via sync-wave (Argo). The Gateway API CRDs
-and GatewayClass remain cluster-level prerequisites.
+CRD it needs. The Gateway API CRDs and GatewayClass remain cluster-level
+prerequisites.

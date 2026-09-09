@@ -1,0 +1,77 @@
+{{- /*
+The Helm CLI is day-0 only. Helm writes a release revision as a Secret of type
+helm.sh/release.v1 (label name=<release>) BEFORE it renders, runs hooks or
+applies anything (Helm 4 upgrade.go: Releases.Create precedes the pre-upgrade
+hooks; rollback likewise). This ValidatingAdmissionPolicy refuses that CREATE in
+the release namespace unless the writer is the tenant ServiceAccount the bundled
+helm-controller impersonates — so `helm upgrade` and `helm rollback` fail in
+about a second with the message below in Helm's own error output, no revision
+is written, and helm-controller's revisions pass. UPDATE and DELETE are not
+matched: `helm uninstall` (status label updates, then deletes) and the install's
+own status updates go through. Kubernetes >= 1.30 (validateSelf).
+
+The hand-back: the namespace annotation agent-platform.giantswarm.io/helm-cli=allow
+admits the CLI again for `helm upgrade --set gitops.self.enabled=false
+--force-conflicts`, whose render drops this policy and suspends the self
+HelmRelease first (hooks/self.yaml, weight -5) so Helm's deletion of it drops
+the finalizer without an uninstall. Day 0 is unaffected: the policy does not
+exist when the first revision is written. It lingers about a second in the
+apiserver's cache after `helm uninstall` deleted it (a reinstall in the same
+second is refused once). Cluster-scoped, like the chart's ClusterRoleBindings;
+one pair per release.
+*/ -}}
+{{- if eq (include "agent-platform.selfEnabled" .) "true" }}
+{{- $name := include "agent-platform.self.policyName" . }}
+{{- $ann := include "agent-platform.self.handBackAnnotation" . }}
+{{- $writer := printf "system:serviceaccount:%s:%s" .Release.Namespace (include "agent-platform.self.releaseServiceAccountName" .) }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: self-management
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: helm-storage-of-this-release
+      expression: >-
+        object.type == 'helm.sh/release.v1' && has(object.metadata.labels) &&
+        'name' in object.metadata.labels && object.metadata.labels['name'] == {{ .Release.Name | quote }}
+  variables:
+    - name: handBack
+      expression: >-
+        has(namespaceObject.metadata.annotations) &&
+        {{ $ann | quote }} in namespaceObject.metadata.annotations &&
+        namespaceObject.metadata.annotations[{{ $ann | quote }}] == 'allow'
+  validations:
+    - expression: >-
+        request.userInfo.username == {{ $writer | quote }} || variables.handBack
+      reason: Forbidden
+      message: >-
+        release {{ .Release.Name }} manages itself through its bundled Flux: change values by rewriting
+        Secret {{ include "agent-platform.self.valuesSecretName" . }} in namespace {{ .Release.Namespace }} (key values.yaml),
+        or hand the release back to the Helm CLI — annotate the namespace {{ $ann }}=allow, then
+        helm upgrade --set gitops.self.enabled=false --force-conflicts
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: self-management
+spec:
+  policyName: {{ $name }}
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Release.Namespace }}
+{{- end }}

@@ -1,11 +1,25 @@
-# Values for an app-test-suite smoke (currently skipped via .ats/main.yaml --
-# see the note there). They trim the umbrella meta-package down to core
-# resources plus a single Gateway API HTTPRoute, which is the minimal
-# installable shape on a kind cluster: muster's OAuth server and the bundled
-# valkey are off, and the Cilium NetworkPolicies (parent and muster) are
-# disabled (Cilium is environment infra, not in a kind cluster). The only
-# remaining external CRD is Gateway API (HTTPRoute) -- a real smoke would
-# pre-install it (see .ats/main.yaml).
+# Values of the ATS kind smoke (tests/ats/test_smoke.py; .ats/main.yaml) — the
+# shape the chart installs on a bare kind cluster with `helm install --wait`:
+# the bundled Flux engine on (the default) and the minimal component set that
+# needs nothing but the Gateway API CRDs the smoke pre-applies — muster, dicebear
+# and the connectivity wiring, the bundled valkey off, muster without its own
+# OAuth server, no network policies (Cilium is environment infra). The
+# cluster-shape knobs left at `auto` resolve the rest on kind: no Kyverno
+# objects, no monitor objects, no Envoy-only avatar route. The routes name a
+# Gateway that does not exist on kind — an unattached HTTPRoute is fine, the
+# releases are Ready without it. Also the third fleet-render shape of the fleet
+# diff (BRIEF (c)), so keep the component set and every key here deliberate.
+#
+# Self-management is OFF here (the lab shape): the chart under test is an
+# UNRELEASED archive, and a self HelmRelease following the published range would
+# replace it with the published chart mid-test. agentlab installs the same way.
+# The smoke asserts the shape renders none of it (no self OCIRepository /
+# HelmRelease, no values Secret, no admission policy); self-management against a
+# published chart is a separate scenario.
+gitops:
+  self:
+    enabled: false
+
 ingress:
   mode: muster-direct
   parentRefs:

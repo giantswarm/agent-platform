@@ -1,0 +1,64 @@
+{{- if (include "agent-platform.modelServing.enabled" .) }}
+{{- $rt := .Values.modelServing.runtime }}
+# The vLLM serving runtime every preset runs on (cluster-scoped). KServe
+# merges an InferenceService's predictor.model spec over this container:
+# the preset's args are appended, its env and resources win field by field,
+# and {{ "{{.Name}}" }} in args expands to the InferenceService name. The image
+# is the upstream x86-64 CUDA build by default; an install with other
+# hardware points modelServing.runtime.image at its own build.
+apiVersion: serving.kserve.io/v1alpha1
+kind: ClusterServingRuntime
+metadata:
+  name: {{ $rt.name }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  {{- with $rt.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $rt.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $rt.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: kserve-container
+      image: {{ printf "%s/%s:%s" $rt.image.registry $rt.image.name $rt.image.version | quote }}
+      {{- with $rt.args }}
+      args:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $rt.env }}
+      env:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      resources:
+        {{- toYaml $rt.resources | nindent 8 }}
+      volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+      startupProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: {{ $rt.startupProbe.initialDelaySeconds }}
+        periodSeconds: {{ $rt.startupProbe.periodSeconds }}
+        failureThreshold: {{ $rt.startupProbe.failureThreshold }}
+  volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: {{ $rt.shmSize | quote }}
+  protocolVersions:
+    - v1
+    - v2
+  supportedModelFormats:
+    {{- toYaml $rt.supportedModelFormats | nindent 4 }}
+{{- end }}

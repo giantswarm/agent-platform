@@ -1,0 +1,42 @@
+{{- /*
+The kagent namespace, created ahead of the platform HelmReleases — only with the
+bundled engine, only while the kagent component installs into a namespace this
+install would not otherwise create (agent-platform.kagent.hookNamespace explains
+the deadlock this breaks, giantswarm/agent-platform#306). One pre-install /
+pre-upgrade hook Job at weight -8 (after the hook identity at -10, ahead of the
+self hooks at -6/-5), a shell script in alpine/k8s (gitops.hooks.helmImage): look
+the namespace up, create it when it is missing, nothing else. An existing
+namespace is left exactly as it is. What the hook creates is a bare Namespace
+with no Helm ownership metadata — the same object the fleet's bases and the lab
+pre-create — which the connectivity release adopts on its install and owns
+from then on (its labels; it is kept on uninstall, helm.sh/resource-policy: keep). pre-upgrade too: an
+installation that turns kagent on later gets the namespace before the kagent
+HelmRelease appears. Without the engine nothing renders here.
+*/ -}}
+{{- with include "agent-platform.kagent.hookNamespace" . }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "kagent-namespace" "hook" "pre-install,pre-upgrade" "weight" -8
+      "image" (include "agent-platform.hooks.helmImage" $)
+      "about" (printf "create the %s namespace the kagent component installs into when it does not exist yet, ahead of the kagent HelmRelease" .)
+      "script" (include "agent-platform.kagent.namespaceScript" .)) }}
+{{- end }}
+
+{{- /* A namespace still Terminating is a reinstall right after somebody deleted
+it (the connectivity release keeps it on uninstall, but an operator may remove
+it by hand), which takes as long as the kagent workloads in it take to go.
+Creating into a terminating namespace is refused and "exists" would be a lie
+that deadlocks the kagent install once more — so the hook waits for it to be
+gone, then creates it. */ -}}
+{{- define "agent-platform.kagent.namespaceScript" -}}
+ns={{ . | quote }}
+phase="$(kubectl get namespace "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+case "$phase" in
+  "")
+    kubectl create namespace "$ns" ;;
+  Terminating)
+    echo "namespace $ns is terminating (the previous release's uninstall); waiting for it to be gone"
+    kubectl wait --for=delete "namespace/$ns" --timeout=5m
+    kubectl create namespace "$ns" ;;
+  *)
+    echo "namespace $ns exists ($phase); left as it is" ;;
+esac
+{{- end -}}

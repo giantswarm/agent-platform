@@ -9,8 +9,17 @@ Expand the name of the chart.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
+{{- /*
+The helm.sh/chart label: <name>-<version> as a valid label value. A label is at
+most 63 characters and must end on an alphanumeric: Helm's `+` build metadata
+(helm-controller appends the OCI digest to every chart version it installs,
+`3.20.0+8c89e1be4cbf`) becomes `_`, and after the cut every trailing `-`, `.`
+and `_` goes — a branch build's long prerelease version (abs:
+`3.19.1-dev.<branch>.<date>.h<sha>`) made the cut land on the `_` once, and the
+apiserver rejected every object of the release. tests/verify-labels.py.
+*/ -}}
 {{- define "chart" -}}
-{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-." -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-._" -}}
 {{- end -}}
 
 {{/*
@@ -54,22 +63,83 @@ true
 {{- end -}}
 
 {{/*
+Whether an OPTIONAL component is on: "true" when `components.<name>` exists and
+is enabled, empty otherwise — unlike componentEnabled, a name absent from the
+roster is NOT force-on. For components a chart of this version may not carry
+yet (the KServe control plane, model serving), so a guard can defer to them
+without asserting they exist.
+Usage: include "agent-platform.optionalComponentEnabled" (dict "root" $ "name" "kserve-resources")
+*/}}
+{{- define "agent-platform.optionalComponentEnabled" -}}
+{{- if hasKey (.root.Values.components | default dict) .name -}}
+{{- include "agent-platform.componentEnabled" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The tenant identity of the agents' Flux HelmReleases: the ServiceAccount name
+(kagent.fluxServiceAccountName) while the kagent component is on, "" otherwise.
+ONE value, three consumers: templates/kagent/flux-service-account.yaml renders
+the ServiceAccount and its RoleBinding from it, the meta chart derives
+agent-manager's flux.helmReleaseServiceAccount from the same key, and the
+portal's app-config (agentPlatform.fluxServiceAccountName) reads this helper.
+Under a multi-tenancy lockdown (helm-controller with --no-cross-namespace-refs
+and a rights-less default ServiceAccount; the Flux multi-tenancy admission
+policy on Giant Swarm management clusters) a HelmRelease executes as the
+ServiceAccount it names and fails without one.
+Usage: include "agent-platform.kagent.fluxServiceAccountName" .
+*/}}
+{{- define "agent-platform.kagent.fluxServiceAccountName" -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- dig "fluxServiceAccountName" "" (.Values.kagent | default dict) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The kagent component's Helm release name — the value of the pods'
+app.kubernetes.io/instance label the kagent chart stamps, and the name its
+fullname helper falls back to when kagent.fullnameOverride is empty. The meta
+chart names every component's release after its roster key (components.yaml:
+`releaseName: <key>`; the kagent entry's key, chart and values block are all
+`kagent`), and this chart is only ever installed by that meta chart. It is NOT
+this chart's .Release.Name: under the retired standalone umbrella every subchart
+shared one release name, so a selector on .Release.Name happened to match
+kagent's pods; under the meta chart each component is its own release and such
+a selector matches nothing (the kagent controller metrics Service had no
+endpoints, giantswarm/agent-platform#305). Every selector, Service name or
+hostname this chart derives for kagent's OWN objects goes through this helper
+or agent-platform.kagent.fullname, never through .Release.Name.
+Usage: include "agent-platform.kagent.releaseName" .
+*/}}
+{{- define "agent-platform.kagent.releaseName" -}}
+kagent
+{{- end -}}
+
+{{/*
+The kagent chart's fullname — what it prefixes its Services with
+(`<fullname>-controller`, `<fullname>-ui`): kagent.fullnameOverride (pinned to
+`kagent` in values.yaml), or, empty, the release name (the chart's fullname
+helper collapses `<release>-<chart>` to the release name when the two match, as
+they do under the meta chart).
+Usage: include "agent-platform.kagent.fullname" .
+*/}}
+{{- define "agent-platform.kagent.fullname" -}}
+{{- .Values.kagent.fullnameOverride | default (include "agent-platform.kagent.releaseName" .) -}}
+{{- end -}}
+
+{{/*
 Fail the render when a component's on/off toggle is still set the old way, inside
 the component's own values block. Those blocks are additionalProperties: true, so
 a leftover `enabled` key validates and is then ignored — the component silently
 falls back to the `components.<name>.enabled` default, which is off for five of
 the six. This turns that into a loud failure naming the new key.
-The probe is coalescing-safe: in a layout where a block feeds a real Helm
-dependency (the standalone umbrella copies this helper), Helm coalesces that
-chart's own top-level `enabled: true` default into the block once the dependency
-is on (klaus-gateway ships one), so hasKey cannot tell an operator-set value from
-the chart default. A legacy key is therefore reported when it is provably the
-operator's: always while the component is off (a disabled dependency's block is
-never coalesced), and while it is on when the value is an explicit false (the
-only coalesced default is true) — exactly the case where the operator believes
-the component is off while it runs anyway. On + true is indistinguishable from a
-coalesced default and passes. The removed `mcps:` block needs no entry: the root
-schema rejects it already.
+Neither this chart nor the meta chart has a Helm dependency, so no chart default
+is ever coalesced into these blocks: a legacy key can only be the operator's and
+is reported whatever its value, whether the component is on or off. (An umbrella
+that feeds these blocks to real Helm dependencies sees klaus-gateway's own
+`enabled: true` default coalesced in while that dependency is on and has to
+special-case it; nothing here does.) The removed `mcps:` block needs no entry:
+the root schema rejects it already.
 */}}
 {{- define "agent-platform.validateLegacyToggles" -}}
 {{- $moved := list
@@ -80,12 +150,8 @@ schema rejects it already.
       (list "agentSandbox" "components.agent-sandbox.enabled") -}}
 {{- $found := list -}}
 {{- range $moved -}}
-{{- $block := index $.Values (first .) | default dict -}}
-{{- if hasKey $block "enabled" -}}
-{{- $on := include "agent-platform.componentEnabled" (dict "root" $ "name" (index (splitList "." (last .)) 1)) -}}
-{{- if or (not $on) (not (index $block "enabled")) -}}
+{{- if hasKey (index $.Values (first .) | default dict) "enabled" -}}
 {{- $found = append $found (printf "%s.enabled -> %s" (first .) (last .)) -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- with $found -}}
@@ -199,6 +265,23 @@ agent-platform-mcps component. */ -}}
 {{- if and (eq $mode "muster-direct") $agentgatewayEnabled -}}
 {{- fail "components.agentgateway.enabled must be false in muster-direct mode; the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
+{{- /* muster-direct runs without the agentgateway component, so its CRDs are
+not on the cluster: anything that renders an agentgateway.dev object or attaches
+to the agentgateway Gateway must fail here, naming the knob, instead of shipping
+objects the API server rejects (the model-manager / agent-manager routes already
+guard themselves the same way). */ -}}
+{{- if eq $mode "muster-direct" -}}
+{{- $mcpsValues := index .Values "agent-platform-mcps" | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) (dig "agentgateway" "enabled" false $mcpsValues) (dig "mcpServers" (list) $mcpsValues) -}}
+{{- fail "muster-direct mode cannot serve the agentgateway.dev resources agent-platform-mcps renders per MCP server; set agent-platform-mcps.agentgateway.enabled=false to reach the MCP servers through muster" -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.controllerRoute.enabled -}}
+{{- fail "kagent.controllerRoute renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled -}}
+{{- fail "klausGateway.agentgatewayRoute renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -270,12 +353,148 @@ timeouts:
 {{- end -}}
 
 {{/*
+=== Cluster shape ===
+
+The knobs that describe what the cluster can admit — Kyverno policies, the
+network-policy flavor, ServiceMonitors/PodMonitors, the agent-sandbox
+pod-security policy — accept `auto` (the default): the object renders when its
+API group is served. `.Capabilities.APIVersions` is the live discovery under
+helm-controller, the Helm CLI and `--dry-run=server`; under `helm template` it
+is Helm's built-in set unless `--api-versions` names more, so an offline render
+resolves every `auto` to the vanilla shape. An explicit `true|false` (or
+`cilium|kubernetes`) always wins over detection.
+
+Under the meta chart (agent-platform) these knobs arrive resolved: it detects
+once with the same helpers and forwards concrete values, so the wiring rendered
+here and every component's own copy come from one answer. The helpers below
+are what a render of this chart on its own uses; on the same cluster they give
+the same answer. Templates read the truthy wrappers underneath
+(agent-platform.kyvernoPolicies, .networkPolicyFlavor, .serviceMonitor,
+.agentSandboxPodSecurity, .modelServingPolicies), never the raw values.
+*/}}
+
+{{/*
+Resolve one `auto|true|false` knob to the string "true" or "false". `auto`
+follows whether .api is served; an explicit boolean (or its string form from
+--set-string) is returned as is; anything else fails the render naming .key.
+Usage: include "agent-platform.shape.resolve" (dict "root" $ "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1")
+*/}}
+{{- define "agent-platform.shape.resolve" -}}
+{{- $v := .value -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- if .root.Capabilities.APIVersions.Has .api }}true{{ else }}false{{ end -}}
+{{- else if kindIs "bool" $v -}}
+{{- if $v }}true{{ else }}false{{ end -}}
+{{- else if or (eq (toString $v) "true") (eq (toString $v) "false") -}}
+{{- toString $v -}}
+{{- else -}}
+{{- fail (printf "%s must be one of auto, true, false (got %v)" .key $v) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+kyvernoPolicies.enabled resolved: "true" when Kyverno policies render (auto:
+kyverno.io/v1 served).
+*/}}
+{{- define "agent-platform.shape.kyvernoPolicies" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1") -}}
+{{- end -}}
+
+{{/*
+networkPolicy.flavor resolved: "cilium" or "kubernetes" (auto: cilium when
+cilium.io/v2 is served, else kubernetes).
+*/}}
+{{- define "agent-platform.shape.networkPolicyFlavor" -}}
+{{- $f := .Values.networkPolicy.flavor -}}
+{{- if or (kindIs "invalid" $f) (eq (toString $f) "auto") -}}
+{{- if .Capabilities.APIVersions.Has "cilium.io/v2" }}cilium{{ else }}kubernetes{{ end -}}
+{{- else if or (eq (toString $f) "cilium") (eq (toString $f) "kubernetes") -}}
+{{- toString $f -}}
+{{- else -}}
+{{- fail (printf "networkPolicy.flavor must be one of auto, cilium, kubernetes (got %v)" $f) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+global.observability.metrics.serviceMonitor.enabled resolved: "true" when the
+monitor objects render (auto: monitoring.coreos.com/v1 served).
+*/}}
+{{- define "agent-platform.shape.serviceMonitor" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "global.observability.metrics.serviceMonitor.enabled" "value" .Values.global.observability.metrics.serviceMonitor.enabled "api" "monitoring.coreos.com/v1") -}}
+{{- end -}}
+
+{{/*
+agentSandbox.podSecurity.enabled resolved: "true" when the agent-sandbox
+pod-security ClusterPolicy renders. It is a Kyverno mutate policy, so `auto`
+follows the RESOLVED kyvernoPolicies.enabled (an explicit
+kyvernoPolicies.enabled: false switches it off with the rest; the
+"podSecurity requires kyvernoPolicies" guard then never fires on auto).
+*/}}
+{{- define "agent-platform.shape.agentSandboxPodSecurity" -}}
+{{- $v := dig "podSecurity" "enabled" "auto" (.Values.agentSandbox | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.kyvernoPolicies" . -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "agentSandbox.podSecurity.enabled" "value" $v "api" "kyverno.io/v1") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+modelServing.policies.enabled resolved: "true" when the model-serving Kyverno
+cache policies render. They are Kyverno mutate policies, so `auto` follows the
+RESOLVED kyvernoPolicies.enabled, like the agent-sandbox pod-security policy;
+an explicit true with kyvernoPolicies.enabled false fails the render
+(templates/model-serving/validate.yaml).
+*/}}
+{{- define "agent-platform.shape.modelServingPolicies" -}}
+{{- $v := dig "policies" "enabled" "auto" (.Values.modelServing | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.kyvernoPolicies" . -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "modelServing.policies.enabled" "value" $v "api" "kyverno.io/v1") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy (emits "true") when the kyverno.io objects render. Gated templates use:
+  {{- if (include "agent-platform.kyvernoPolicies" .) }}
+*/}}
+{{- define "agent-platform.kyvernoPolicies" -}}
+{{- if eq (include "agent-platform.shape.kyvernoPolicies" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The network-policy flavor every policy template branches on: "cilium" or
+"kubernetes". Gated templates use:
+  {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+*/}}
+{{- define "agent-platform.networkPolicyFlavor" -}}
+{{- include "agent-platform.shape.networkPolicyFlavor" . -}}
+{{- end -}}
+
+{{/*
 Truthy when the umbrella renders its ServiceMonitor / PodMonitor objects
-(global.observability.metrics.serviceMonitor.enabled, default true). The
+(global.observability.metrics.serviceMonitor.enabled, default auto). The
 per-component keys underneath (kagent.serviceMonitor.*) keep working.
 */}}
 {{- define "agent-platform.serviceMonitor" -}}
-{{- if .Values.global.observability.metrics.serviceMonitor.enabled -}}true{{- end -}}
+{{- if eq (include "agent-platform.shape.serviceMonitor" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the agent-sandbox pod-security ClusterPolicy renders
+(agentSandbox.podSecurity.enabled, default auto).
+*/}}
+{{- define "agent-platform.agentSandboxPodSecurity" -}}
+{{- if eq (include "agent-platform.shape.agentSandboxPodSecurity" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the model-serving Kyverno cache policies render
+(modelServing.policies.enabled, default auto).
+*/}}
+{{- define "agent-platform.modelServingPolicies" -}}
+{{- if eq (include "agent-platform.shape.modelServingPolicies" .) "true" -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -440,4 +659,236 @@ tiebreak, so every inference call would reach the MCP backend instead. */ -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Cilium DNS egress rule with the DNS proxy clause. Same selectors as dnsEgress,
+plus `rules.dns` so Cilium learns the name -> address mappings the policy's
+toFQDNs selectors need; without the clause a toFQDNs rule matches nothing on a
+cluster that has no cluster-wide DNS visibility policy. Rendered as a YAML list
+item; the caller must provide the surrounding `egress:` key.
+*/}}
+{{- define "agent-platform.dnsEgressWithProxy" -}}
+- toEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.namespace: kube-system
+        k8s-app: kube-dns
+    - matchLabels:
+        io.kubernetes.pod.namespace: kube-system
+        k8s-app: coredns
+    - matchLabels:
+        io.kubernetes.pod.namespace: kube-system
+        k8s-app: k8s-dns-node-cache
+  toPorts:
+    - ports:
+        - port: "1053"
+          protocol: UDP
+        - port: "1053"
+          protocol: TCP
+        - port: "53"
+          protocol: UDP
+        - port: "53"
+          protocol: TCP
+      rules:
+        dns:
+          - matchPattern: "*"
+{{- end -}}
+
+{{/*
+Kubernetes NetworkPolicy DNS egress rule (kube-dns / coredns / node-local cache
+in kube-system on 53 and 1053), the kubernetes flavor of dnsEgress. Rendered as
+a YAML list item; the caller must provide the surrounding `egress:` key.
+*/}}
+{{- define "agent-platform.dnsEgress.kubernetes" -}}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchExpressions:
+          - key: k8s-app
+            operator: In
+            values: [kube-dns, coredns, k8s-dns-node-cache]
+  ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+    - port: 1053
+      protocol: UDP
+    - port: 1053
+      protocol: TCP
+{{- end -}}
+
+{{/*
+The host of an issuer URL (scheme and port stripped); empty when the URL is
+empty or has no host. Usage: include "agent-platform.urlHost" $url
+*/}}
+{{- define "agent-platform.urlHost" -}}
+{{- if . -}}
+{{- $u := urlParse . -}}
+{{- regexReplaceAll ":[0-9]+$" ($u.host | default "") "" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The hosts a platform service that validates tokens itself (mcp-oauth) reaches
+at its login identity provider, as a JSON list: the discovery document, the
+JWKS (validating the id_tokens muster and the portal forward), userinfo and
+the token endpoint. The dex provider serves all of them from the issuer host.
+Google spreads them over three hosts, none of which its issuer URL
+(https://accounts.google.com) names: accounts.google.com (discovery,
+authorization), www.googleapis.com (JWKS /oauth2/v3/certs, userinfo) and
+oauth2.googleapis.com (token, revocation) — the endpoints mcp-oauth's google
+provider dials. Empty for the dex provider without an issuer.
+Usage: include "agent-platform.idpHosts" (dict "provider" "dex" "issuerUrl" $url)
+*/}}
+{{- define "agent-platform.idpHosts" -}}
+{{- if eq (.provider | default "dex") "google" -}}
+{{- list "accounts.google.com" "www.googleapis.com" "oauth2.googleapis.com" | toJson -}}
+{{- else -}}
+{{- $hosts := list -}}
+{{- with (include "agent-platform.urlHost" .issuerUrl) }}{{- $hosts = list . -}}{{- end -}}
+{{- $hosts | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Cilium egress rules from a platform service to the login identity provider:
+the hosts of agent-platform.idpHosts (discovery, JWKS, userinfo, token) by
+name on 443 (through the DNS proxy rule the caller renders), plus the cluster
+entity on 443 and 10443 — an issuer served through an in-cluster Gateway whose
+LoadBalancer address Cilium translates to the data-plane pods (the Envoy edge
+listens on 10443), or an in-cluster issuer Service, is `cluster` at policy
+time, not the name. Mirrors the klaus-gateway OBO and oauth2-proxy egress.
+Rendered as YAML list items; the caller provides `egress:` and the indentation.
+Usage: include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerUrl" $url)
+*/}}
+{{- define "agent-platform.idpEgress.cilium" -}}
+{{- with (include "agent-platform.idpHosts" . | fromJsonArray) }}
+- toFQDNs:
+    {{- range . }}
+    - matchName: {{ . }}
+    {{- end }}
+  toPorts:
+    - ports:
+        - port: "443"
+          protocol: TCP
+{{- end }}
+- toEntities:
+    - cluster
+  toPorts:
+    - ports:
+        - port: "443"
+          protocol: TCP
+        - port: "10443"
+          protocol: TCP
+{{- end -}}
+
+{{/*
+Postgres backup helpers (templates/postgres/*). backupEnabled is non-empty when
+the Cluster renders AND postgres.backup.enabled is set.
+*/}}
+{{- define "agent-platform.postgres.backupEnabled" -}}
+{{- if and .Values.postgres.enabled .Values.postgres.backup.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/* "aws" or "azure" while postgres.backup.crossplane renders the store, else "". */}}
+{{- define "agent-platform.postgres.crossplane" -}}
+{{- $b := .Values.postgres.backup -}}
+{{- if and (include "agent-platform.postgres.backupEnabled" .) (eq $b.method "plugin") $b.crossplane.enabled -}}
+{{- $b.crossplane.provider -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The ObjectStore the Cluster's plugin entry names. */}}
+{{- define "agent-platform.postgres.objectStoreName" -}}
+{{- .Values.postgres.backup.objectStore.existingName | default (printf "%s-backup" .Values.postgres.clusterName) -}}
+{{- end -}}
+
+{{/* The Secret the Crossplane Azure Account writes its connection strings to. */}}
+{{- define "agent-platform.postgres.azureAccountSecret" -}}
+{{- printf "%s-backup-store" .Values.postgres.clusterName -}}
+{{- end -}}
+
+{{/* arn:aws, or arn:aws-cn in the China partition. */}}
+{{- define "agent-platform.postgres.awsPartition" -}}
+{{- if hasPrefix "cn-" .Values.postgres.backup.crossplane.region -}}arn:aws-cn{{- else -}}arn:aws{{- end -}}
+{{- end -}}
+
+{{/* The IAM role the Crossplane AWS block renders. */}}
+{{- define "agent-platform.postgres.awsRoleName" -}}
+{{- $aws := .Values.postgres.backup.crossplane.aws -}}
+{{- $aws.roleName | default $aws.bucketName -}}
+{{- end -}}
+
+{{- define "agent-platform.postgres.awsRoleArn" -}}
+{{- printf "%s:iam::%s:role/%s" (include "agent-platform.postgres.awsPartition" .) .Values.postgres.backup.crossplane.aws.accountId (include "agent-platform.postgres.awsRoleName" .) -}}
+{{- end -}}
+
+{{/*
+destinationPath: the explicit value, else derived from the Crossplane store
+(s3://<bucket>/ or https://<account>.blob.core.windows.net/<container>/).
+*/}}
+{{- define "agent-platform.postgres.destinationPath" -}}
+{{- $b := .Values.postgres.backup -}}
+{{- $xp := include "agent-platform.postgres.crossplane" . -}}
+{{- if $b.objectStore.destinationPath -}}
+{{- $b.objectStore.destinationPath -}}
+{{- else if eq $xp "aws" -}}
+{{- printf "s3://%s/" $b.crossplane.aws.bucketName -}}
+{{- else if eq $xp "azure" -}}
+{{- printf "https://%s.blob.core.windows.net/%s/" $b.crossplane.azure.storageAccountName $b.crossplane.azure.containerName -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Annotations for the Cluster's ServiceAccount: the values, plus the IRSA role
+annotation when the Crossplane AWS block renders the role. YAML map or "".
+*/}}
+{{- define "agent-platform.postgres.serviceAccountAnnotations" -}}
+{{- $ann := deepCopy (.Values.postgres.backup.serviceAccount.annotations | default dict) -}}
+{{- if eq (include "agent-platform.postgres.crossplane" .) "aws" -}}
+{{- $_ := set $ann "eks.amazonaws.com/role-arn" (include "agent-platform.postgres.awsRoleArn" .) -}}
+{{- end -}}
+{{- if $ann -}}{{- toYaml $ann -}}{{- end -}}
+{{- end -}}
+
+{{/* Crossplane managementPolicies: everything, or Observe only. */}}
+{{- define "agent-platform.postgres.crossplaneManagementPolicies" -}}
+{{- if .Values.postgres.backup.crossplane.observeOnly -}}
+- Observe
+{{- else -}}
+- "*"
+{{- end -}}
+{{- end -}}
+
+{{/* Same, for data-bearing objects: never Delete, so an uninstall keeps the data. */}}
+{{- define "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" -}}
+{{- if .Values.postgres.backup.crossplane.observeOnly -}}
+- Observe
+{{- else -}}
+- Create
+- Update
+- LateInitialize
+- Observe
+{{- end -}}
+{{- end -}}
+
+{{/* Tags on the cloud resources: chart defaults under the installation's own. */}}
+{{- define "agent-platform.postgres.crossplaneTags" -}}
+{{- $tags := dict "app" "agent-platform-postgres" "managed-by" "crossplane" "name" (include "agent-platform.postgres.crossplaneStoreName" .) -}}
+{{- $tags = merge (deepCopy (.Values.postgres.backup.crossplane.tags | default dict)) $tags -}}
+{{- if eq .Values.postgres.backup.crossplane.provider "azure" -}}
+{{- $clean := dict -}}
+{{- range $k, $v := $tags -}}{{- $_ := set $clean ($k | replace "-" "_") $v -}}{{- end -}}
+{{- $tags = $clean -}}
+{{- end -}}
+{{- toYaml $tags -}}
+{{- end -}}
+
+{{/* The bucket (aws) or container (azure) name. */}}
+{{- define "agent-platform.postgres.crossplaneStoreName" -}}
+{{- $xp := .Values.postgres.backup.crossplane -}}
+{{- if eq $xp.provider "azure" -}}{{- $xp.azure.containerName -}}{{- else -}}{{- $xp.aws.bucketName -}}{{- end -}}
 {{- end -}}
