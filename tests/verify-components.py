@@ -31,7 +31,12 @@ roster that the fleet, the quick-start values or the connectivity wiring rely on
   but its answer is in the roster forwarded to connectivity, and its values
   block (modelServing:) travels only while the switch is on;
 - every top-level key of the meta chart's schema except gitops is a key of the
-  connectivity chart's schema, for the same reason.
+  connectivity chart's schema, for the same reason;
+- components.<name>.semverFilter reaches OCIRepository.spec.ref.semverFilter
+  (a dev channel: the tags a branch's dev builds carry, matched before the range
+  is evaluated), for exactly the components the defaults put on a dev channel
+  (DEV_CHANNEL) and for a component given one, and for no other; the dead
+  ImagePolicy-shaped `filterTags` block never renders.
 
 Deliberately stdlib-only: the CI image has no PyYAML.
 """
@@ -78,6 +83,13 @@ WIRING_KEYS = {
 # like every other flag.
 SWITCHES = ["modelServing"]
 
+# component -> the semverFilter its default source carries (a dev channel). Every
+# other component's OCIRepository renders none. Empty on the stable line.
+DEV_CHANNEL: dict[str, str] = {}
+# A filter handed to a component that has none by default; the value carries
+# the backslashes a real filter has (`\.`), so the quoting is exercised.
+PROBE_FILTER = ".*-dev\\.x\\..*"
+
 ON = [f"--set=components.{n}.enabled=true" for n in NEW]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
 # The bundled Flux engine (components.flux.enabled, default true) adds its own
@@ -122,6 +134,33 @@ def roster(conn_values: str) -> dict[str, bool]:
 
 def fail(msg: str) -> None:
     sys.exit(f"FAIL: {msg}")
+
+
+def semver_filters(manifest: str) -> dict[str, str]:
+    """OCIRepository name -> its spec.ref.semverFilter, for the ones that carry one."""
+    out = {}
+    for (kind, name), d in docs(manifest).items():
+        if kind != "OCIRepository":
+            continue
+        if "filterTags" in d:
+            fail(f"{name} OCIRepository renders filterTags — an ImagePolicy field, not an OCIRepository one; the key is semverFilter")
+        m = re.search(r'^    semverFilter: (".*")$', d, re.M)
+        if m:
+            out[name] = json.loads(m.group(1))  # Go %q quoting == JSON for these strings
+    return out
+
+
+def check_semver_filters(meta: str, ci: list[str]) -> None:
+    every = [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]]
+    got = semver_filters(render(meta, every))
+    if got != DEV_CHANNEL:
+        fail(f"OCIRepository semverFilters differ from the dev-channel defaults: rendered {got}, expected {DEV_CHANNEL}")
+    probe = render(meta, [*every, "--set-json", f"components.muster.semverFilter={json.dumps(PROBE_FILTER)}"])
+    if semver_filters(probe) != {**DEV_CHANNEL, "muster": PROBE_FILTER}:
+        fail(f"components.muster.semverFilter did not reach the muster OCIRepository alone: {semver_filters(probe)}")
+    if f"semverFilter: {json.dumps(PROBE_FILTER)}" not in probe:
+        fail("the semverFilter is not rendered as a double-quoted string with its backslashes escaped (Flux reads it as a Go regexp)")
+    print(f"ok: semverFilter — the dev-channel defaults {sorted(DEV_CHANNEL) or 'none'} and no other component; a component given one renders it verbatim; no filterTags")
 
 
 def main(meta: str, connectivity: str) -> int:
@@ -198,6 +237,9 @@ def main(meta: str, connectivity: str) -> int:
         if missing:
             fail(f"{consumer} does not dependsOn {missing} with those components on (got {have})")
     print("ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release")
+
+    # --- the dev channel: semverFilter ----------------------------------------------
+    check_semver_filters(meta, ci)
 
     # --- the BOM pins every one exactly ------------------------------------------
     bom_file = open(f"{meta}/examples/customer-bom.yaml").read()

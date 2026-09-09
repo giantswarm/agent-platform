@@ -46,6 +46,9 @@ spec:
   {{- end }}
   ref:
     semver: {{ include "agent-platform.self.versionRange" . | quote }}
+    {{- with .Values.gitops.self.semverFilter }}
+    semverFilter: {{ . | quote }}
+    {{- end }}
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease

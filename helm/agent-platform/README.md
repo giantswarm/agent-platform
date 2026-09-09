@@ -57,6 +57,7 @@ README.
 | gitops.self.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | gitops.self.insecure | bool | `false` |  |
 | gitops.self.versionRange | string | `""` |  |
+| gitops.self.semverFilter | string | `""` |  |
 | gitops.self.interval | string | `"10m"` |  |
 | gitops.retries | int | `5` |  |
 | gitops.forbidInlineSecrets | bool | `false` |  |
