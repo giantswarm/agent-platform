@@ -4,8 +4,8 @@
 # append). devctl never touches this file.
 #
 # Generated job names available to reference in `requires`: build-chart,
-# execute-chart-tests, execute-chart-tests-release, push-chart-release (all for
-# the primary `agent-platform` chart).
+# execute-chart-tests, push-chart (branches), execute-chart-tests-release,
+# push-chart-release (all for the primary `agent-platform` chart).
 #
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
@@ -21,10 +21,10 @@
 #     charts' acceptance of the forwarded values, the cluster-shape `auto` knobs,
 #     the kagent-flux tenant identity, the standalone's ported wiring, the
 #     LLM routing toggle)
-#   - the standalone agent-platform-connectivity chart (build, tag push), the
-#     consumer-side wiring rendered by the meta-package as a HelmRelease
-#   versioned in lockstep with agent-platform off the same git tag. This
-#   repo has no Dockerfile, so no chart depends on an image build.
+#   - the standalone agent-platform-connectivity chart (build, branch dev push,
+#     tag push), the consumer-side wiring rendered by the meta-package as a
+#     HelmRelease versioned in lockstep with agent-platform off the same git
+#     commit. This repo has no Dockerfile, so no chart depends on an image build.
 #
 # The agent-platform-crds chart has been RETIRED — every component now ships
 # its own CRDs (app-owned CRDs), so there is no longer a CRD-bundle chart to
@@ -124,6 +124,25 @@ workflows:
         filters:
           tags:
             only: /^v.*/
+          branches:
+            ignore:
+            - main
+
+    # Branch (branchPublish): publish the connectivity dev chart in lockstep with
+    # the generated push-chart -- same commit, same gitsemver version, same
+    # gsoci repo + giantswarm-test-catalog. Gated on the meta chart's tests too.
+    - architect/push-to-app-catalog:
+        executor: app-build-suite
+        context: architect
+        name: push-connectivity-chart
+        app_catalog: giantswarm-catalog
+        app_catalog_test: giantswarm-test-catalog
+        chart: agent-platform-connectivity
+        explicit_allow_chart_name_mismatch: true
+        requires:
+        - build-connectivity-chart
+        - execute-chart-tests
+        filters:
           branches:
             ignore:
             - main
