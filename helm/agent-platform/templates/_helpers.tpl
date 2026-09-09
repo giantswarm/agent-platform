@@ -214,6 +214,22 @@ The message names the key paths only.
 {{- end -}}
 
 {{/*
+gitops.forbidPinnedLoginConnector: fail the render when muster's Dex login is
+pinned to one connector. Without a connectorId mcp-oauth sends no connector_id
+and Dex shows its connector chooser; a pin hides every other connector of a Dex
+that serves several identity providers and hands people from the others a token
+without the groups their allowlists are written for. The message names the key.
+*/}}
+{{- define "agent-platform.validatePinnedLoginConnector" -}}
+{{- if .Values.gitops.forbidPinnedLoginConnector -}}
+{{- $pin := dig "muster" "oauth" "server" "dex" "connectorId" "" (.Values.muster | default dict) -}}
+{{- if $pin -}}
+{{- fail "gitops.forbidPinnedLoginConnector is true but muster.muster.oauth.server.dex.connectorId is set: muster would append connector_id to every Dex authorization request and the Dex connector chooser would never appear, so people from the installation's other identity providers could not sign in or would receive a token without the groups their allowlists use. Remove the key (the muster chart omits it when empty and Dex then offers every connector), or set gitops.forbidPinnedLoginConnector: false" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 muster.muster.toolsetPresets: a preset named like one of muster's built-ins
 (read-only, none, full) makes the muster pod refuse to start, out of sight in
 Flux. Fail the render here instead, naming the preset.

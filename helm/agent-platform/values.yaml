@@ -193,6 +193,16 @@ gitops:
   # klausGateway.obo.stateKey and .storeKey, model-manager.oauth.dex.clientSecret,
   # agent-manager.oauth.dex.clientSecret.
   forbidInlineSecrets: false
+  # Refuse a pinned muster login connector (muster.muster.oauth.server.dex.connectorId).
+  # Without a connectorId mcp-oauth sends no connector_id and Dex shows its connector
+  # chooser, so every identity provider the installation's Dex serves stays reachable
+  # and each person's token carries the groups of the provider they belong to. A pin
+  # hides the other connectors and, when the pinned one is not the provider the
+  # MCP-server allowlists (allowedGroups, RBAC) are written for, hands out a token
+  # without those groups. With true the render fails naming the key (the muster chart
+  # omits the key when empty); false keeps the pre-existing behavior. Meant for fleet
+  # templates that manage installations whose Dex serves several identity providers.
+  forbidPinnedLoginConnector: false
 
 # Component source coordinates + version policy. Each entry is self-describing;
 # templates/components.yaml is a generic loop with no per-component knowledge.
