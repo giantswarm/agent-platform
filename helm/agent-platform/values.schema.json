@@ -1049,6 +1049,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "kagent-crds": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "klausGateway": {
             "type": "object",
             "additionalProperties": true
