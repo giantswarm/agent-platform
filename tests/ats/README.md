@@ -93,7 +93,20 @@ The knobs of the target:
 | `CLUSTER_TYPE` | `kind` | The scenario defaults, `kind` or `eks` (`ATS_CLUSTER_TYPE`). |
 | `VALUES` | — | The values files of the run, colon-separated, in Helm's order. **Replaces** the smoke's list, so it must be complete. Empty keeps the scenario's own list, which is what a kind run wants. `SCENARIO=functional` installs the first of these plus `values-kagent.yaml`. |
 | `E2E_VERSION` | `3.99.0-dev.local` | The version the chart is packaged and installed under. A prerelease keeps a published self `HelmRelease` from matching it. |
-| `E2E_DOMAIN`, `E2E_ISSUER_URL`, `E2E_CLIENT_ID`, `E2E_IDP_SECRET_NAME`, `E2E_IDP_CA_SECRET` | — | When any is set, the target writes a values overlay from them into a temporary file, layers it last and removes it on exit. It prints the line count, never a value. `E2E_IDP_CA_SECRET` also reaches the suite as `ATS_IDP_CA_SECRET`. |
+| `E2E_DOMAIN`, `E2E_ISSUER_URL`, `E2E_CLIENT_ID`, `E2E_IDP_SECRET_NAME`, `E2E_IDP_CA_SECRET` | — | When any is set, [e2e_overlay.py](../e2e_overlay.py) turns them into a values overlay, which the target writes to a temporary file, layers last and removes on exit. It prints the line count, never a value. |
+
+Each of those names one fact that both the chart and the tests need, so the run
+names it once: the target derives `ATS_ISSUER_URL` from `E2E_ISSUER_URL`,
+`ATS_CLIENT_ID` from `E2E_CLIENT_ID`, `ATS_IDP_CA_SECRET` from
+`E2E_IDP_CA_SECRET`, and — on a cluster type other than `kind`, whose muster
+answers on a hostname — `ATS_MUSTER_BASE_URL` from `https://muster.<E2E_DOMAIN>`,
+the hostname the chart itself derives. An `ATS_` variable already in the
+caller's environment wins, so a run with an `ingress.hostnames` override names
+`ATS_MUSTER_BASE_URL` itself.
+
+`make verify-scenarios` asserts the scenario loader and the overlay offline:
+the kind and eks defaults, every refusal, the derived base URL and the
+overlay's shapes. It runs in CI with the other `verify-*` targets.
 
 **Secrets and the domain stay out of the repository.** The example files carry
 placeholders. `E2E_IDP_SECRET_NAME` and `E2E_IDP_CA_SECRET` are the NAMES of

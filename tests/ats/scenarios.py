@@ -71,7 +71,13 @@ def _env(name: str, default: str) -> str:
 
 
 def _env_int(name: str, default: int) -> int:
-    return int(_env(name, str(default)))
+    """An integer override, or the scenario default. A value that is not an
+    integer is an error naming the variable, as every other input's is."""
+    raw = _env(name, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        raise AssertionError(f"{name}={raw!r} is not an integer") from None
 
 
 _TRUE = ("1", "true", "yes", "on")
@@ -159,6 +165,11 @@ class Scenario:
     muster_reach: str = VIA_PORT_FORWARD
     # The local port of that port-forward, which the base URL carries.
     muster_port: int = LAB_MUSTER_PORT
+    # The base URL the scenario's own values files already carry. The install
+    # pins muster's base URL with `--set` when the run's differs from it, so
+    # muster's OAuth metadata and the tests agree. Empty means the values files
+    # carry none, and the install always pins it.
+    values_base_url: str = f"http://localhost:{LAB_MUSTER_PORT}"
 
     # --- the OAuth redirect --------------------------------------------------
     # Never served; the flow stops at the redirect and reads the code from
@@ -204,27 +215,30 @@ def _kind() -> Scenario:
 def _eks() -> Scenario:
     """A managed cloud cluster. It brings its own identity provider behind a
     real certificate, and muster answers on a real hostname through the
-    Gateway, so nothing is port-forwarded and no lab Dex is installed. Every
-    field that names the installation comes from the environment, the values
-    file included; the run fails with a clear message when one is missing."""
+    Gateway, so nothing is port-forwarded and no lab Dex is installed.
+
+    These are defaults only: `load` reads every field's own environment
+    variable over them. The fields that name the installation default to empty
+    here, and `_validate` then fails the run naming the variable."""
     return Scenario(
         name="eks",
         values=[],
-        issuer_url=_env("ATS_ISSUER_URL", ""),
-        issuer_port=_env_int("ATS_ISSUER_PORT", 443),
-        client_id=_env("ATS_CLIENT_ID", ""),
-        client_secret=_env("ATS_CLIENT_SECRET", ""),
-        registration_token=_env("ATS_REGISTRATION_TOKEN", ""),
-        user=_env("ATS_IDP_USER", ""),
-        password=_env("ATS_IDP_PASSWORD", ""),
-        ca_secret=_env("ATS_IDP_CA_SECRET", ""),
+        issuer_url="",
+        issuer_port=443,
+        client_id="",
+        client_secret="",
+        registration_token="",
+        user="",
+        password="",
+        ca_secret="",
         install_lab_dex=False,
-        muster_base_url=_env("ATS_MUSTER_BASE_URL", ""),
-        muster_reach=_env("ATS_MUSTER_REACH", VIA_HOSTNAME),
-        install_timeout=_env("ATS_INSTALL_TIMEOUT", "20m"),
-        uninstall_timeout=_env("ATS_UNINSTALL_TIMEOUT", "10m"),
-        uninstall_budget_s=_env_int("ATS_UNINSTALL_BUDGET_S", 300),
-        ready_timeout_s=_env_int("ATS_READY_TIMEOUT_S", 900),
+        muster_base_url="",
+        muster_reach=VIA_HOSTNAME,
+        values_base_url="",
+        install_timeout="20m",
+        uninstall_timeout="10m",
+        uninstall_budget_s=300,
+        ready_timeout_s=900,
     )
 
 
@@ -245,8 +259,9 @@ def load() -> Scenario:
     muster_base_url = _env("ATS_MUSTER_BASE_URL", base.muster_base_url)
     muster_reach = _env("ATS_MUSTER_REACH", base.muster_reach)
     # A moved port-forward port moves the base URL with it: the port is part of
-    # the URL muster is configured with.
-    if muster_reach == VIA_PORT_FORWARD and muster_port != base.muster_port and "ATS_MUSTER_BASE_URL" not in os.environ:
+    # the URL muster is configured with. An empty ATS_MUSTER_BASE_URL counts as
+    # unset here too, as `_env` reads it.
+    if muster_reach == VIA_PORT_FORWARD and muster_port != base.muster_port and not os.environ.get("ATS_MUSTER_BASE_URL"):
         muster_base_url = f"http://localhost:{muster_port}"
 
     scenario = Scenario(
@@ -265,6 +280,9 @@ def load() -> Scenario:
         muster_base_url=muster_base_url,
         muster_reach=muster_reach,
         muster_port=muster_port,
+        # A run that names its own values files carries no promise about
+        # muster's base URL in them, so the install pins it.
+        values_base_url="" if os.environ.get("ATS_VALUES") else base.values_base_url,
         callback=_env("ATS_OAUTH_CALLBACK", base.callback),
         install_timeout=_env("ATS_INSTALL_TIMEOUT", base.install_timeout),
         uninstall_timeout=_env("ATS_UNINSTALL_TIMEOUT", base.uninstall_timeout),
@@ -302,9 +320,9 @@ def _validate(scenario: Scenario) -> None:
 
 def base_url_sets(scenario: Scenario) -> List[str]:
     """`--set` arguments that pin muster's own base URL to the one the tests
-    call, when the values files do not already carry it. muster's OAuth
-    metadata echoes its base URL, so the two must agree."""
-    if scenario.muster_base_url == f"http://localhost:{LAB_MUSTER_PORT}":
+    call, when the scenario's values files do not already carry that URL.
+    muster's OAuth metadata echoes its base URL, so the two must agree."""
+    if scenario.muster_base_url == scenario.values_base_url:
         return []
     return [f"muster.muster.oauth.server.baseUrl={scenario.muster_base_url}"]
 

@@ -321,7 +321,7 @@ def test_self_management_adopts_the_release(kube: Kube, helm: Helm, candidate_ve
 
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
-def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: PortForward) -> None:
+def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: Optional[PortForward]) -> None:
     try:
         meta = unauthenticated_mcp_challenge(MUSTER_BASE_URL)
     except AssertionError:
@@ -333,7 +333,7 @@ def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: P
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
 @REQUIRES_STATIC_USER
-def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForward, dex: str) -> None:
+def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
     """The lab Dex's OAuth password grant issues an ID token for the platform
     client (a trusted audience of muster) carrying the cross-client audience
     agent-manager requires; muster accepts it as a bearer and lists its tools."""
@@ -360,7 +360,7 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForw
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
 @REQUIRES_STATIC_USER
-def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: PortForward, dex: str) -> None:
+def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
     """The full muster login — dynamic client registration, authorization code
     with PKCE, the Dex login form — headless; the access token reaches /mcp."""
     started = time.monotonic()
@@ -400,7 +400,7 @@ def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None) ->
 
 @pytest.mark.smoke
 @REQUIRES_STATIC_USER
-def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: PortForward, dex: str, kagent_controller: None) -> None:
+def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: Optional[PortForward], dex: Optional[str], kagent_controller: None) -> None:
     """agent-manager's create_agent through muster, as the Dex user: muster
     forwards the bearer to agent-manager (MCPServer auth.forwardToken; the
     token carries the required cross-client audience), agent-manager validates
