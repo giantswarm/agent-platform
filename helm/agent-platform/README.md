@@ -49,10 +49,10 @@ README.
 | gitops.serviceAccountName | string | `""` |  |
 | gitops.hooks.image.registry | string | `"registry.k8s.io"` |  |
 | gitops.hooks.image.repository | string | `"kubectl"` |  |
-| gitops.hooks.image.tag | string | `"v1.36.4"` |  |
+| gitops.hooks.image.tag | string | `"v1.37.0"` |  |
 | gitops.hooks.helmImage.registry | string | `"docker.io"` |  |
 | gitops.hooks.helmImage.repository | string | `"alpine/k8s"` |  |
-| gitops.hooks.helmImage.tag | string | `"1.36.4"` |  |
+| gitops.hooks.helmImage.tag | string | `"1.37.0"` |  |
 | gitops.self.enabled | string | `"auto"` |  |
 | gitops.self.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | gitops.self.insecure | bool | `false` |  |
