@@ -8,7 +8,7 @@ module top to bottom; each one builds on the state the previous left):
      platform's identity Secret, a self-signed CA, the CoreDNS rewrite) and an
      in-cluster registry the candidate archive is pushed to;
   2. `helm install --wait` of the candidate with the quick start's shape —
-     tests/test-values.yaml (muster, dicebear, connectivity; the bundled Flux
+     helm/agent-platform/examples/kind-lab-dex.yaml (muster, dicebear, connectivity; the bundled Flux
      engine on) + values-kagent.yaml (the kagent runtime) + values-round-trips.yaml
      (the lab Dex as global.identity, muster's OAuth server on, agent-manager) —
      and self-management ON against the in-cluster registry: the chart's own
@@ -50,14 +50,17 @@ import base64
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 import pytest
 import yaml
 
+from scenarios import EXAMPLES_DIR, KIND_LAB_VALUES
+
 from conftest import (
     CROSS_CLIENT_AUDIENCE,
     DEX_USER,
+    SCENARIO,
     FLUX_CRD_SUFFIX,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
@@ -157,6 +160,20 @@ def smoke_sets(candidate_version: str) -> List[str]:
     return self_management_sets(candidate_version) + connectivity_sets(candidate_version) + MUSTER_BASE_URL_SETS
 
 
+@pytest.mark.smoke
+def test_the_scenario_installs_the_example_file() -> None:
+    """The values file the smoke installs IS an example file the repository
+    ships, so the documented install and the tested install cannot drift. The
+    kind scenario's is helm/agent-platform/examples/kind-lab-dex.yaml."""
+    base = SCENARIO.base_values
+    assert base.is_file(), f"the scenario's base values file does not exist: {base}"
+    assert base.parent == EXAMPLES_DIR, (
+        f"the scenario installs {base}, which is not in {EXAMPLES_DIR}: the file the test installs "
+        "must be an example the repository ships, or the two drift")
+    if SCENARIO.name == "kind":
+        assert base == KIND_LAB_VALUES, f"the kind scenario installs {base}, not {KIND_LAB_VALUES}"
+
+
 @pytest.fixture(scope="module")
 def app_deployment(kube: Kube, helm: Helm, prerequisites: None, chart_archive: Path, pushed_chart: str, smoke_sets: List[str]) -> float:
     """`helm install --wait` of the candidate, the quick start's way. Returns the seconds it took."""
@@ -171,8 +188,8 @@ def app_deployment(kube: Kube, helm: Helm, prerequisites: None, chart_archive: P
 
 
 @pytest.fixture(scope="module")
-def muster(muster_forward: PortForward, app_deployment: float) -> PortForward:
-    """muster reachable and healthy (its OAuth server discovers the lab Dex)."""
+def muster(muster_forward: Optional[PortForward], app_deployment: float) -> Optional[PortForward]:
+    """muster reachable and healthy (its OAuth server discovers the issuer)."""
     started = time.monotonic()
     wait_for_muster_healthy(MUSTER_BASE_URL)
     TIMINGS.record("muster /health ok after the install", time.monotonic() - started)
@@ -180,8 +197,9 @@ def muster(muster_forward: PortForward, app_deployment: float) -> PortForward:
 
 
 @pytest.fixture(scope="module")
-def dex(dex_forward: PortForward, dex_ca: str, app_deployment: float) -> str:
-    """The lab Dex reachable from the test; returns the CA path."""
+def dex(dex_forward: Optional[PortForward], dex_ca: Optional[str], app_deployment: float) -> Optional[str]:
+    """The issuer reachable from the test; returns its CA path, or None when the
+    issuer is served by a publicly trusted certificate."""
     return dex_ca
 
 

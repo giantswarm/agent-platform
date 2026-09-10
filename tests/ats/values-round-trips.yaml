@@ -1,5 +1,5 @@
 # The auth and agent round trips of the ATS kind smoke, layered over
-# tests/test-values.yaml + tests/ats/values-kagent.yaml (tests/ats/conftest.py
+# helm/agent-platform/examples/kind-lab-dex.yaml + tests/ats/values-kagent.yaml (tests/ats/conftest.py
 # `SMOKE_VALUES`): the lab Dex of tests/ats/lab-dex.yaml as the platform's
 # identity provider, muster's OAuth server ON against it, and agent-manager —
 # the write path an agent takes into the cluster's Flux. LAB ONLY: every

@@ -1,5 +1,5 @@
 # The kagent runtime for the ATS agent round trips, layered over
-# tests/test-values.yaml (tests/ats/conftest.py): the kind smoke's declarative
+# helm/agent-platform/examples/kind-lab-dex.yaml (tests/ats/conftest.py): the kind smoke's declarative
 # Agent and agent-manager's create_agent need the controller; the own-Flux
 # scenario deploys a declarative agent through the cluster's own Flux with the
 # same file. Sized for the CI executor (two cores): modest CPU requests so the

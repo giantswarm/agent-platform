@@ -23,7 +23,7 @@ functional scenario expects to find.
 
 | Scenario | Module | What it proves |
 |---|---|---|
-| `smoke` | `test_smoke.py` | The quick start on a bare cluster. Prerequisites: the Gateway API CRDs, the lab Dex (`lab-dex.yaml`), an in-cluster registry (`registry.yaml`) the candidate archive is pushed to, together with the connectivity chart packaged from this checkout at the same version (`helm push --plain-http` through a port-forward; the two charts release off one tag and change together, and the published connectivity chart would not carry a PR's connectivity changes — `components.agent-platform-connectivity.{repository,versionRange,insecure}` point the roster at the registry). `helm install --wait` with `tests/test-values.yaml` + `values-kagent.yaml` + `values-round-trips.yaml` and **self-management on against that registry** at the candidate's exact version. Then: deployed, FluxInstance Ready at a Flux 2.x, every component HelmRelease Ready as `agent-platform-flux`, the operator managing the Flux CRDs, the kagent namespace created by the engine; the **adoption** (self HelmRelease Ready, `helm history` = install + one adoption revision); the **auth round trip** (401 with the RFC 9728 chain; a Dex user through the OAuth password grant, trusted audience; the full muster login: RFC 7591 registration, code + PKCE, the Dex form); the **agent round trips** (a declarative Agent Ready against the default ModelConfig with a placeholder key; agent-manager's `create_agent` through muster as the Dex user → OCIRepository + HelmRelease of the agent chart in `kagent`, executed as `kagent-flux`, Ready; the Agent Ready; `get_agent_status`, `list_agents`); the **fixpoint** two intervals after the adoption (history unchanged, the values Secret equals the values used, `helm get values` too); the **refused CLI** (`helm upgrade` fails with the admission policy's message, no revision); the **ordered teardown** (`helm uninstall --wait` rc 0 within budget, no Flux CRD left, the four operator CRDs remaining, no controller, no Job of the release, no release in any state, the policy gone; the agents' HelmRelease objects gone with the CRDs, their Deployments and `Agent` objects orphaned in the kept kagent namespace). |
+| `smoke` | `test_smoke.py` | The quick start on a bare cluster. Prerequisites: the Gateway API CRDs, the lab Dex (`lab-dex.yaml`), an in-cluster registry (`registry.yaml`) the candidate archive is pushed to, together with the connectivity chart packaged from this checkout at the same version (`helm push --plain-http` through a port-forward; the two charts release off one tag and change together, and the published connectivity chart would not carry a PR's connectivity changes — `components.agent-platform-connectivity.{repository,versionRange,insecure}` point the roster at the registry). `helm install --wait` with `helm/agent-platform/examples/kind-lab-dex.yaml` + `values-kagent.yaml` + `values-round-trips.yaml` and **self-management on against that registry** at the candidate's exact version. Then: deployed, FluxInstance Ready at a Flux 2.x, every component HelmRelease Ready as `agent-platform-flux`, the operator managing the Flux CRDs, the kagent namespace created by the engine; the **adoption** (self HelmRelease Ready, `helm history` = install + one adoption revision); the **auth round trip** (401 with the RFC 9728 chain; a Dex user through the OAuth password grant, trusted audience; the full muster login: RFC 7591 registration, code + PKCE, the Dex form); the **agent round trips** (a declarative Agent Ready against the default ModelConfig with a placeholder key; agent-manager's `create_agent` through muster as the Dex user → OCIRepository + HelmRelease of the agent chart in `kagent`, executed as `kagent-flux`, Ready; the Agent Ready; `get_agent_status`, `list_agents`); the **fixpoint** two intervals after the adoption (history unchanged, the values Secret equals the values used, `helm get values` too); the **refused CLI** (`helm upgrade` fails with the admission policy's message, no revision); the **ordered teardown** (`helm uninstall --wait` rc 0 within budget, no Flux CRD left, the four operator CRDs remaining, no controller, no Job of the release, no release in any state, the policy gone; the agents' HelmRelease objects gone with the CRDs, their Deployments and `Agent` objects orphaned in the kept kagent namespace). |
 | `functional` | `test_own_flux.py` | A cluster that runs its own Flux. source-controller + helm-controller from the pinned upstream manifest (field manager `flux`), the `kagent` namespace created up front (the cluster owns its namespaces, as the fleet bases do). The chart **through a HelmRelease** in `flux-system` from the in-cluster registry with `components.flux.enabled: false`: Ready, the platform HelmReleases Ready under that Flux without a `serviceAccountName`; **no engine** (no operator, no FluxInstance, one helm-controller, the Flux CRDs' field managers exactly what `flux install` left); **an agent through that Flux** (OCIRepository + HelmRelease of the agent chart as `kagent-flux`, the Agent Ready); the **render guard** — the value flipped to `true` fails the HelmRelease with `this cluster runs Flux; set components.flux.enabled=false or install the chart through it`: no operator, no FluxInstance, the platform and the agent still Ready, the Flux CRDs' content unchanged (helm-controller applies a chart's `crds/` before it renders, so it joins the CRDs' field managers — the same Flux version, identical content; asserted and logged as a finding); flipped back it recovers; the way back (HelmRelease deleted, that Flux uninstalls the platform, Flux removed). |
 
 The lab shape (`gitops.self.enabled: false`, what agentlab installs — the chart
@@ -73,6 +73,70 @@ kube-system CoreDNS Corefile).
 Each test logs `TIMING <phase>: <seconds>`; the last test of each module prints
 the table. The README's [Development](../../README.md#development) section
 carries the measured numbers and the long pole.
+
+## Running against any cluster: `make e2e`
+
+The suite is kubeconfig-driven, so it runs on any cluster. `make e2e` packages
+the chart and runs one scenario against it:
+
+```bash
+make e2e KUBECONFIG=~/.kube/lab.yaml                      # the kind smoke
+make e2e KUBECONFIG=~/.kube/lab.yaml SCENARIO=functional  # the own-Flux scenario
+```
+
+The knobs of the target:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `KUBECONFIG` | — | Required. The cluster to run against. |
+| `SCENARIO` | `smoke` | The pytest marker: `smoke` or `functional`. |
+| `CLUSTER_TYPE` | `kind` | The scenario defaults, `kind` or `eks` (`ATS_CLUSTER_TYPE`). |
+| `VALUES` | — | The values files of the run, colon-separated, in Helm's order. **Replaces** the scenario's list, so it must be complete. Empty keeps the scenario's own list, which is what a kind run wants. |
+| `E2E_VERSION` | `3.99.0-dev.local` | The version the chart is packaged and installed under. A prerelease keeps a published self `HelmRelease` from matching it. |
+| `E2E_DOMAIN`, `E2E_ISSUER_URL`, `E2E_CLIENT_ID`, `E2E_IDP_SECRET_NAME` | — | When any is set, the target writes a values overlay from them into a temporary file, layers it last and removes it on exit. It prints the line count, never a value. |
+
+**Secrets and the domain stay out of the repository.** The example files carry
+placeholders. `E2E_IDP_SECRET_NAME` is the NAME of a Secret already on the
+cluster, not a credential, so no secret passes through a command line or a
+committed file.
+
+## Scenario inputs
+
+A run's cluster-specific inputs are one `scenarios.Scenario`
+([scenarios.py](scenarios.py)). The assertions never change; only these do.
+Every field defaults to the kind lab value, so a run that sets nothing behaves
+exactly as the CI job does. `ATS_CLUSTER_TYPE` picks the defaults and each
+field has its own environment variable on top.
+
+| Input | Environment variable | kind default |
+|---|---|---|
+| Values files | `ATS_VALUES` (colon- or comma-separated) | `helm/agent-platform/examples/kind-lab-dex.yaml`, `values-kagent.yaml`, `values-round-trips.yaml` |
+| Values layered last | `ATS_OVERLAY_VALUES` | none (`make e2e` writes one from the environment) |
+| The issuer | `ATS_ISSUER_URL`, `ATS_ISSUER_PORT` | the lab Dex on its loopback `nip.io` name |
+| The OAuth client | `ATS_CLIENT_ID`, `ATS_CLIENT_SECRET` | the lab client and its public fixture secret |
+| muster's registration token | `ATS_REGISTRATION_TOKEN` | the lab fixture token |
+| A static user | `ATS_IDP_USER`, `ATS_IDP_PASSWORD` | the lab Dex static user |
+| The issuer's CA Secret | `ATS_IDP_CA_SECRET` | `agent-platform-idp-ca`; empty means the system trust store |
+| Install the lab Dex | `ATS_LAB_DEX` | true; false on a cluster with its own identity provider |
+| muster's base URL | `ATS_MUSTER_BASE_URL`, `ATS_MUSTER_PORT` | `http://localhost:<the lab port>` |
+| How muster is reached | `ATS_MUSTER_REACH` | `port-forward`; `hostname` for a real hostname behind the Gateway |
+| The OAuth redirect | `ATS_OAUTH_CALLBACK` | the lab loopback callback, never served |
+| Budgets | `ATS_INSTALL_TIMEOUT`, `ATS_UNINSTALL_TIMEOUT`, `ATS_UNINSTALL_BUDGET_S`, `ATS_READY_TIMEOUT_S` | measured on kind |
+
+Two rules the suite enforces itself:
+
+- The values file the smoke installs must be an example file the repository
+  ships (`test_the_scenario_installs_the_example_file`), so the documented
+  install and the tested install cannot drift.
+- An unknown `ATS_CLUSTER_TYPE`, an unknown `ATS_MUSTER_REACH`, a missing
+  issuer or muster base URL, and a values file that does not exist each fail
+  the run with a message naming the variable, rather than falling back to the
+  kind lab silently.
+
+The `eks` scenario carries no defaults of its own for the issuer, the client or
+muster's base URL: a managed cloud cluster brings its own, so the run must name
+them. The EKS scenarios themselves land with giantswarm/agent-platform#336 and
+#337.
 
 ## Parity with the standalone chart's smoke
 
