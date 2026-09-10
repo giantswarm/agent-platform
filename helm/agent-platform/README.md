@@ -393,7 +393,7 @@ README.
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"ghcr.io"` |  |
-| kagent.tag | string | `"0.11.0-dev.giantswarm.2026-09-10.22-06-46.h0ac5240"` |  |
+| kagent.tag | string | `"0.11.0-gs.1"` |  |
 | kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
 | kagent.controller.agentImage.repository | string | `"giantswarm/kagent/golang-adk"` |  |
 | kagent.controller.substrate.enabled | bool | `true` |  |
@@ -485,7 +485,7 @@ README.
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
-| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:1f016b6530fc92445ac56f03f848060ad85ae805ba7356ffc30f075fa1f15bcd"` |  |
+| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:969af5f733c8e2bd7756f40766352f5af744964e969a031ba146198d8becd546"` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.pathPrefix | string | `"/kagent"` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |

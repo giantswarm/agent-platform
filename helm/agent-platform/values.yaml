@@ -1410,7 +1410,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # together, from the line's ledger: builds.md on the fork's `ledger` branch
   # has one row per published build with every image's index digest (README
   # "Re-pinning the kagent line").
-  tag: "0.11.0-dev.giantswarm.2026-09-10.22-06-46.h0ac5240"
+  tag: "0.11.0-gs.1"
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
   # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
   # must stay allowed.
@@ -1707,7 +1707,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # names (builds.md on the fork's `ledger` branch, column golang-adk; `crane
     # digest ghcr.io/giantswarm/kagent/golang-adk:<tag>` says the same); a
     # re-pin moves it with `tag`.
-    image: ghcr.io/giantswarm/kagent/golang-adk@sha256:1f016b6530fc92445ac56f03f848060ad85ae805ba7356ffc30f075fa1f15bcd
+    image: ghcr.io/giantswarm/kagent/golang-adk@sha256:969af5f733c8e2bd7756f40766352f5af744964e969a031ba146198d8becd546
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose kagent controller API through agentgateway (JWT-validated).
