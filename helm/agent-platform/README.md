@@ -419,7 +419,7 @@ This chart version is a build of the `poc/kagent-main` branch — the kagent API
 | kagent.substrateWorkerPool.create | bool | `true` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.substrateWorkerPool.replicas | int | `4` |  |
-| kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.26"` |  |
+| kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-dev.giantswarm.2026-09-10.19-33-37.h734ec53"` |  |
 | kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
 | kagent.ui.image.repository | string | `"giantswarm/kagent/ui"` |  |
 | kagent.database.postgres.vectorEnabled | bool | `true` |  |
