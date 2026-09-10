@@ -101,6 +101,7 @@ knowledge:
       version itself; its CR consumers dependsOn it instead.
 */ -}}
 {{- include "agent-platform.validateLegacyToggles" . -}}
+{{- include "agent-platform.validateKagentCrds" . -}}
 {{- include "agent-platform.validateInlineSecrets" . -}}
 {{- include "agent-platform.validatePinnedLoginConnector" . -}}
 {{- include "agent-platform.validateToolsetPresets" . -}}

@@ -46,7 +46,8 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 Whether a component is enabled — reads `components.<name>.enabled`, the single
 on/off switch. `name` is the components.<key> name, which equals the component's
 chart name and is therefore what a dependsOn entry references. A component with
-no `enabled` key is force-enabled. Emits "true" when on, empty string otherwise.
+no `enabled` key is force-enabled — except kagent-crds, which then follows
+components.kagent. Emits "true" when on, empty string otherwise.
 
 Used to drop a dependsOn reference to a component that is toggled off, so a
 consumer does not wait forever on a HelmRelease that was never rendered. With
@@ -62,7 +63,14 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- $c := index $root.Values.components .name -}}
 {{- if $c -}}
 {{- $on := true -}}
-{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}{{- end }}
+{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}
+{{- else if eq .name "kagent-crds" }}
+{{- /* The kagent line ships its CRDs as their own chart; without an explicit
+       switch the component follows components.kagent, so a consumer turns on
+       kagent and gets its CRDs (an explicit false is refused by
+       agent-platform.validateKagentCrds). */ -}}
+{{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true" }}
+{{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
 true
@@ -136,6 +144,20 @@ needs no entry: the root schema rejects it already.
 {{- end -}}
 {{- with $found -}}
 {{- fail (printf "component toggles moved into components.<name>.enabled and the old keys are ignored; move %s (see UPGRADE.md)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The kagent line ships its CRDs as the kagent-crds chart (a roster entry the
+kagent release dependsOn, the kserve-crd shape). kagent on with kagent-crds off
+would install a controller without its CRDs and fail every kagent CR the
+connectivity release renders at apply time ("no matches for kind"); refuse it
+at render time instead.
+*/}}
+{{- define "agent-platform.validateKagentCrds" -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true")
+           (ne (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) "true") -}}
+{{- fail "components.kagent.enabled is true but components.kagent-crds.enabled is not: the kagent line ships its CRDs as the kagent-crds chart, which the kagent release and the connectivity release's kagent CRs depend on; turn both on" -}}
 {{- end -}}
 {{- end -}}
 
