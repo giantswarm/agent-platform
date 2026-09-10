@@ -12,26 +12,22 @@
   // CRDs, and the meta-package's one `dependencies:` entry is its own flux-engine
   // subchart (helm/agent-platform/charts/flux-engine, no repository — the helmv3
   // manager skips a local chart). What Renovate tracks here are image tags in
-  // values files, through the rule below: the Flux Operator image of the
-  // flux-engine subchart (charts/flux-engine/values.yaml, operator.image — bump
-  // its Chart.yaml appVersion with it; the operator's embedded Flux manifests
-  // decide which Flux 2.x the FluxInstance runs, so a new Flux minor arrives
-  // with a new operator tag), the kubectl image of the meta chart's hook Jobs
-  // (values.yaml, gitops.hooks.image) and the kubectl+helm image of the hooks
-  // that need helm or a shell — the self-management values hook, its resumer
-  // and the suspend hook (values.yaml, gitops.hooks.helmImage: alpine/k8s,
-  // whose tags follow the kubectl minor).
-  "customManagers": [
-    {
-      // Tracks registry/repository/tag image blocks in Helm values files.
-      // The base preset only handles registry: <depName>\n<key>: <value> (two lines).
-      // This handles the three-line split: registry + repository + tag.
-      "customType": "regex",
-      "managerFilePatterns": ["/helm/.+/values\\.yaml$/"],
-      "matchStrings": [
-        "registry: (?<registryUrl>[^\\n]+)\\n\\s+repository: (?<depName>[^\\n]+)\\n\\s+tag: \"?v?(?<currentValue>[^\"\\n]+)\"?"
-      ],
-      "datasourceTemplate": "docker",
-    },
-  ],
+  // values files, and the built-in managers cover all of them:
+  //
+  // - The helm-values manager reads every registry/repository/tag block: the
+  //   Flux Operator image of the flux-engine subchart (charts/flux-engine/
+  //   values.yaml, operator.image — bump its Chart.yaml appVersion with it; the
+  //   operator's embedded Flux manifests decide which Flux 2.x the FluxInstance
+  //   runs, so a new Flux minor arrives with a new operator tag), the kubectl
+  //   image of the meta chart's hook Jobs (values.yaml, gitops.hooks.image) and
+  //   the kubectl+helm image of the hooks that need helm or a shell — the
+  //   self-management values hook, its resumer and the suspend hook (values.yaml,
+  //   gitops.hooks.helmImage: alpine/k8s, whose tags follow the kubectl minor).
+  // - The `# registry:` hint regexes of the giantswarm preset read the plain
+  //   `version:` keys (vllm-openai, backstage-catalogs, agentgateway).
+  //
+  // Do not add a regex manager for the three-line image block: helm-values
+  // already produces those updates, so a second manager opens a duplicate PR
+  // per bump under a different dependency name (alpine/k8s next to
+  // docker.io/alpine/k8s) and cannot resolve registry.k8s.io/kubectl at all.
 }
