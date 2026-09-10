@@ -1,0 +1,177 @@
+# DO NOT EDIT. Generated with:
+#
+#    devctl
+#
+#    https://github.com/giantswarm/devctl/blob/dbac0c3a3941b5fc5734313b93764632ac19e700/pkg/gen/input/workflows/internal/file/helm-docs-regen.yaml.template
+#
+# Regenerates the files the generated pre-commit hooks derive from a chart's
+# values.yaml -- the helm-docs README and values.schema.json -- on Renovate and
+# Dependabot PR branches, and pushes the result back onto the branch.
+#
+# Why: a dependency bump that changes an image tag (or a values key) in
+# helm/<chart>/values.yaml leaves the README values table and the schema stale.
+# The pre-commit check then rewrites them in CI and fails with "files were
+# modified by this hook", and the PR stalls until a human runs the hooks and
+# pushes. The Mend-hosted Renovate app cannot run postUpgradeTasks, so the
+# regeneration happens here instead.
+#
+# How it stays safe:
+#   * The hooks run through pre-commit with the tool versions the repo's own
+#     .pre-commit-config.yaml pins (the helm-docs release, the schema generator
+#     in the hook's additional_dependencies), so the output is byte-identical
+#     to what the pre-commit check regenerates.
+#   * Every hook runs twice and the second pass has to be clean. A hook that
+#     still rewrites on the second pass, or errors out, fails this job and
+#     nothing is pushed -- instead of pushing a commit the pre-commit check
+#     would reject anyway.
+#   * A clean tree is a no-op. The push re-triggers this workflow on the new
+#     head; that run finds nothing to change and exits, so it never loops.
+#   * The push uses the taylorbot PAT, not GITHUB_TOKEN: a GITHUB_TOKEN push
+#     does not re-trigger the required checks on the new commit and the PR
+#     would sit on "Expected" statuses.
+#   * The generated renovate.json5 lists the commit author in
+#     gitIgnoredAuthors, so Renovate keeps rebasing and autoclosing the PR as
+#     if the commit were its own.
+name: helm-docs-regen
+
+on:
+  pull_request:
+    paths:
+      # Everything the helm-docs and helm-schema-<chart> hooks read, plus the
+      # config that pins their tool versions (a helm-docs rev bump changes the
+      # README output as much as a values change does).
+      - 'helm/**'
+      - '.pre-commit-config.yaml'
+
+permissions: {}
+
+concurrency:
+  group: helm-docs-regen-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Find the generated hooks
+    # Only dependency-bot branches: on a human's PR the author owns the README.
+    if: startsWith(github.head_ref, 'renovate/') || startsWith(github.head_ref, 'dependabot/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      token-available: ${{ steps.token.outputs.available }}
+      helm-docs-version: ${{ steps.hooks.outputs.helm-docs-version }}
+      hooks: ${{ steps.hooks.outputs.hooks }}
+    steps:
+      - name: Check the bot token is available
+        id: token
+        env:
+          TAYLORBOT_GITHUB_ACTION: ${{ secrets.TAYLORBOT_GITHUB_ACTION }}
+        run: |
+          if [ -z "$TAYLORBOT_GITHUB_ACTION" ]; then
+            # Fork PRs never see secrets, and Dependabot-triggered runs only see
+            # Dependabot secrets, so the regen job is skipped rather than failed:
+            # the PR then behaves as it did before this workflow existed.
+            echo "::warning::TAYLORBOT_GITHUB_ACTION is not available to this run, nothing is regenerated. For dependabot/ branches add the PAT as a Dependabot secret as well."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: false
+      - name: Read the generated hooks from .pre-commit-config.yaml
+        id: hooks
+        # The hooks are named by the repo's own config so this workflow needs no
+        # regeneration when a chart is added: every helm-schema-<chart> hook plus
+        # the hook(s) of the norwoodj/helm-docs repo entry, whose `rev` is the
+        # helm-docs release installed below. No hooks means nothing to do.
+        run: |
+          set -euo pipefail
+          config=.pre-commit-config.yaml
+          hooks=""
+          helm_docs_version=""
+          if [ -f "$config" ]; then
+            hooks="$(yq -r '.repos[].hooks[].id' "$config" | grep '^helm-schema-' | tr '\n' ' ' || true)"
+            helm_docs_hooks="$(yq -r '.repos[] | select(.repo == "https://github.com/norwoodj/helm-docs") | .hooks[].id' "$config" | tr '\n' ' ' || true)"
+            if [ -n "$helm_docs_hooks" ]; then
+              rev="$(yq -r '.repos[] | select(.repo == "https://github.com/norwoodj/helm-docs") | .rev' "$config" | tr -d '"' | head -n 1)"
+              helm_docs_version="${rev#v}"
+              hooks="${hooks}${helm_docs_hooks}"
+            fi
+          fi
+          hooks="$(echo "$hooks" | xargs || true)"
+          if [ -z "$hooks" ]; then
+            echo "::notice::no helm-docs or helm-schema-<chart> hook in $config, nothing to regenerate"
+          else
+            echo "hooks to run: $hooks"
+          fi
+          echo "helm-docs-version=$helm_docs_version" >> "$GITHUB_OUTPUT"
+          echo "hooks=$hooks" >> "$GITHUB_OUTPUT"
+
+  regen:
+    name: Regenerate and push
+    needs: preflight
+    if: needs.preflight.outputs.token-available == 'true' && needs.preflight.outputs.hooks != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          # The PAT is kept in the checkout so `git push` below uses it.
+          token: ${{ secrets.TAYLORBOT_GITHUB_ACTION }}
+      - name: Install helm-docs
+        if: needs.preflight.outputs.helm-docs-version != ''
+        uses: giantswarm/install-binary-action@5bef88f65012037dd836117c8d344b21bb559854 # v4.1.0
+        with:
+          binary: helm-docs
+          version: ${{ needs.preflight.outputs.helm-docs-version }}
+          download_url: "https://github.com/norwoodj/helm-docs/releases/download/v${version}/helm-docs_${version}_Linux_x86_64.tar.gz"
+          tarball_binary_path: "helm-docs"
+          smoke_test: "${binary} --version"
+      - name: Set up Python environment
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install pre-commit
+        run: python -m pip install pre-commit
+      - name: Cache the pre-commit hook environments
+        # The helm-schema-<chart> hook builds its generator and schemalint with
+        # `go install` on first use.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Run the generated hooks until they are clean
+        env:
+          HOOKS: ${{ needs.preflight.outputs.hooks }}
+          GOGC: "20"
+        run: |
+          set -euo pipefail
+          # pre-commit fails a hook that rewrites a file, which is the expected
+          # outcome of the first pass. The generated files are fixed points of
+          # their hooks, so the second pass has to be clean: a hook that still
+          # fails there is broken (missing tool, generator error, a pipeline
+          # that never converges) and must not be papered over with a push.
+          for hook in $HOOKS; do
+            pre-commit run "$hook" --all-files || true
+          done
+          for hook in $HOOKS; do
+            pre-commit run "$hook" --all-files
+          done
+      - name: Set up git identity
+        run: |
+          git config --local user.email "dev@giantswarm.io"
+          git config --local user.name "taylorbot"
+      - name: Commit and push the regenerated files
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "generated files already in sync, nothing to push"
+            exit 0
+          fi
+          git add -A
+          git commit -m "chore(helm): regenerate README and values.schema.json for the dependency bump"
+          git push
