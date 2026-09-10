@@ -847,6 +847,13 @@ llmRouting:
       expression: source.unverifiedWorkload.serviceAccount
     - name: agent_namespace
       expression: source.unverifiedWorkload.namespace
+  # A MutatingAdmissionPolicy that sends a ModelConfig the connectivity chart
+  # does NOT render through the LLM listener — one created by Backstage,
+  # agent-manager or kubectl. Rendered only on Kubernetes 1.36 and later, where
+  # the API server serves admissionregistration.k8s.io/v1. Consumed by the
+  # connectivity chart; see its values.yaml for the rendered behavior.
+  modelConfigPolicy:
+    enabled: true
   # USD per one million tokens, by provider and model. The deployed gateway
   # ships no built-in price catalog: with no source configured every lookup
   # reports NoCatalog and no cost sample is emitted at all. This block renders a

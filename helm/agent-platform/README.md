@@ -257,6 +257,7 @@ README.
 | llmRouting.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
 | llmRouting.metricLabels[1].name | string | `"agent_namespace"` |  |
 | llmRouting.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
 | llmRouting.modelCatalog.key | string | `"catalog.json"` |  |
