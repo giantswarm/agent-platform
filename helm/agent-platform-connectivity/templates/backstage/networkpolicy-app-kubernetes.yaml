@@ -6,7 +6,7 @@
 the prefix is the literal chart name, not backstage.name. */}}
 {{- $cnpg := printf "backstage-%s" (dig "database" "postgresql" "clusterNameSuffix" "cnpg" $backstage) }}
 ---
-# Ingress to the portal: the Gateway data plane that serves its public route.
+# Ingress to the portal: the Gateway that serves its public route.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -58,8 +58,8 @@ spec:
           protocol: TCP
 ---
 # Egress from the portal: DNS, the Kubernetes API, muster in this namespace, the
-# front Gateway (the public addresses the app-config holds resolve to it), the
-# portal's own database, and — vanilla NetworkPolicy selects addresses, never
+# edge (the public addresses the app-config holds resolve to it), the portal's
+# own database, and — vanilla NetworkPolicy selects addresses, never
 # names — every public destination on 443 for the identity provider's discovery,
 # JWKS, userinfo and token endpoints, and for the scaffolder catalog location.
 # networkPolicy.kubernetes.worldExcludedCIDRs is subtracted; a private identity

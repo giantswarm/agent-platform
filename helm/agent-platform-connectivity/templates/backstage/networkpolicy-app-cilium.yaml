@@ -95,8 +95,8 @@ spec:
               protocol: TCP
     {{- end }}
     # muster's MCP endpoint. The app-config addresses muster by its public
-    # hostname, which resolves to the front Gateway and is `cluster` at policy
-    # time (the entity leg above); this leg covers a direct in-cluster address.
+    # hostname, which resolves to the edge and is `cluster` at policy time (the
+    # entity leg above); this leg covers a direct in-cluster address.
     {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
     - toEndpoints:
         - matchLabels:
