@@ -117,7 +117,7 @@ gitops:
     image:
       registry: registry.k8s.io
       repository: kubectl
-      tag: v1.37.0
+      tag: v1.37.1
     helmImage:
       registry: docker.io
       repository: alpine/k8s
