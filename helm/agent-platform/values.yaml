@@ -121,7 +121,7 @@ gitops:
     helmImage:
       registry: docker.io
       repository: alpine/k8s
-      tag: 1.36.4
+      tag: 1.37.0
   # === Self-management (the chart holds its own release) ===
   # Where the chart brings the engine, the engine also holds the chart: the
   # release renders its own OCIRepository + HelmRelease (both named after the
