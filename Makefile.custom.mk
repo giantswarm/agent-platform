@@ -1342,7 +1342,12 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@for pattern in 'k8s-app' 'app.kubernetes.io/name: muster' '10.0.0.0/8' 'kubernetes.io/metadata.name: envoy-gateway-system'; do \
 		grep -q -- "$$pattern" /tmp/vw-bsnp-k8s-eg.out || { echo "FAIL: the kubernetes Backstage egress policy lacks $$pattern"; cat /tmp/vw-bsnp-k8s-eg.out; exit 1; }; \
 	done
-	@grep -q 'kubernetes.io/metadata.name: envoy-gateway-system' /tmp/vw-bsnp-k8s-in.out || { echo "FAIL: the kubernetes Backstage ingress policy does not admit the front Gateway that serves its route"; cat /tmp/vw-bsnp-k8s-in.out; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: envoy-gateway-system' /tmp/vw-bsnp-k8s-in.out || { echo "FAIL: the kubernetes Backstage ingress policy does not name the front Gateway that serves its route"; cat /tmp/vw-bsnp-k8s-in.out; exit 1; }
+	@echo "--> the kubernetes egress follows the same edge split as the ingress"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_EDGE) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage-egress$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-k8s-edge-eg.out
+	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vw-bsnp-k8s-edge-eg.out || { echo "FAIL: with the chart owning the edge the kubernetes egress policy reaches no edge, so the public hostnames in the app-config are denied"; cat /tmp/vw-bsnp-k8s-edge-eg.out; exit 1; }
+	@if grep -q 'envoy-gateway-system' /tmp/vw-bsnp-k8s-edge-eg.out; then echo "FAIL: with the chart owning the edge the kubernetes egress policy still names the front Gateway"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_EDGE) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' || { echo "FAIL: with the chart owning the edge the kubernetes ingress policy does not name the data plane"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_FULL) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage-egress$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-k8s-full.out
 	@for pattern in 'backstage-cnpg' 'port: 5432'; do \
 		grep -q -- "$$pattern" /tmp/vw-bsnp-k8s-full.out || { echo "FAIL: the kubernetes Backstage egress policy lacks $$pattern"; cat /tmp/vw-bsnp-k8s-full.out; exit 1; }; \
@@ -1360,9 +1365,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=$$flavor --set networkPolicy.enabled=false 2>/dev/null | grep -qE '^  name: agent-platform-connectivity-backstage(-egress)?$$' && { echo "FAIL: a Backstage app policy rendered with networkPolicy.enabled=false ($$flavor)"; exit 1; }; \
 		true; \
 	done
-	@echo "--> a core Affinity key and a nameless pull secret fail the render"
+	@echo "--> a core Affinity key, an unknown Affinity key and a nameless pull secret fail the render"
 	@if helm template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set 'postgres.affinity.podAntiAffinity.foo=bar' >/tmp/vw-pg-guard.out 2>&1; then echo "FAIL: postgres.affinity.podAntiAffinity rendered; the Cluster CRD rejects it"; exit 1; fi
 	@grep -q 'postgres.affinity.podAntiAffinity is a core Kubernetes Affinity key' /tmp/vw-pg-guard.out || { echo "FAIL: the affinity guard does not name the key"; cat /tmp/vw-pg-guard.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set 'postgres.affinity.nodeSelektor.foo=bar' >/tmp/vw-pg-guard3.out 2>&1; then echo "FAIL: an unknown postgres.affinity key rendered; the Cluster CRD drops it"; exit 1; fi
+	@grep -q 'postgres.affinity.nodeSelektor is not a key' /tmp/vw-pg-guard3.out || { echo "FAIL: the affinity guard does not reject an unknown key"; cat /tmp/vw-pg-guard3.out; exit 1; }
 	@printf 'postgres:\n  imagePullSecrets:\n    - {}\n' >/tmp/vw-pg-noname.yaml
 	@if helm template t $(CONNECTIVITY_DIR) $(WIRING_PG) -f /tmp/vw-pg-noname.yaml >/tmp/vw-pg-guard2.out 2>&1; then echo "FAIL: a nameless postgres.imagePullSecrets entry rendered"; exit 1; fi
 	@grep -q 'postgres.imagePullSecrets\[0\] has no name' /tmp/vw-pg-guard2.out || { echo "FAIL: the pull-secret guard does not name the entry"; cat /tmp/vw-pg-guard2.out; exit 1; }

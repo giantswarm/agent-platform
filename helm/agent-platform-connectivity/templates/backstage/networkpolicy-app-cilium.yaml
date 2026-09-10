@@ -65,6 +65,8 @@ spec:
     # The portal's own CNPG cluster (backstage.database.engine=postgresql). The
     # backend holds the catalog and every session there; without this leg it
     # falls back to an in-memory store and loses both on each restart.
+    # <cluster>-restore is this platform's name for a scratch Cluster restored
+    # from a backup; the backstage chart renders no such Cluster itself.
     - toEndpoints:
         - matchExpressions:
             - key: cnpg.io/cluster

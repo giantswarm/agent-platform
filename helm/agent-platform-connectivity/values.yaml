@@ -1118,11 +1118,12 @@ postgres:
   # AffinityConfiguration, NOT a core Kubernetes Affinity: the accepted keys are
   # enablePodAntiAffinity, topologyKey, podAntiAffinityType, nodeSelector,
   # nodeAffinity, tolerations, additionalPodAffinity and
-  # additionalPodAntiAffinity. A core `podAffinity` / `podAntiAffinity` key here
-  # fails the render, and reaches a Cluster CRD that rejects it if it does not
-  # (pass a core term through additionalPodAffinity /
-  # additionalPodAntiAffinity). Empty renders no field, so the operator's
-  # own defaults apply. On a cluster with mixed architectures, pin the operand:
+  # additionalPodAntiAffinity. Any other key fails the render, so a typo never
+  # reaches the Cluster silently; a core `podAffinity` / `podAntiAffinity` key
+  # fails with a message of its own (pass a core term through
+  # additionalPodAffinity / additionalPodAntiAffinity). Empty renders no field,
+  # so the operator's own defaults apply. On a cluster with mixed
+  # architectures, pin the operand:
   #   affinity:
   #     nodeSelector:
   #       kubernetes.io/arch: amd64

@@ -672,9 +672,12 @@ the CRD's own message; these fail the render instead, naming the key.
 {{- fail (printf "postgres.imagePullSecrets[%d] has no name: every entry is {name: <Secret in the Cluster's namespace>}" $i) -}}
 {{- end -}}
 {{- end -}}
-{{- range $key := list "podAffinity" "podAntiAffinity" -}}
-{{- if hasKey $.Values.postgres.affinity $key -}}
+{{- $affinityKeys := list "additionalPodAffinity" "additionalPodAntiAffinity" "enablePodAntiAffinity" "nodeAffinity" "nodeSelector" "podAntiAffinityType" "tolerations" "topologyKey" -}}
+{{- range $key, $_ := .Values.postgres.affinity -}}
+{{- if has $key (list "podAffinity" "podAntiAffinity") -}}
 {{- fail (printf "postgres.affinity.%s is a core Kubernetes Affinity key, which Cluster.spec.affinity rejects: it is CNPG's AffinityConfiguration. Use enablePodAntiAffinity, topologyKey and podAntiAffinityType for the operator's own anti-affinity, or additionalPodAffinity / additionalPodAntiAffinity to pass a core term through" $key) -}}
+{{- else if not (has $key $affinityKeys) -}}
+{{- fail (printf "postgres.affinity.%s is not a key of CNPG's AffinityConfiguration, which accepts %s" $key (join ", " $affinityKeys)) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

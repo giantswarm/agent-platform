@@ -9,9 +9,9 @@ Two gaps found on a vanilla cluster with Cilium `policyEnforcementMode: always`,
 ### Operator action
 
 - **None on the fleet.** `components.backstage` is off there, so no Backstage policy renders; with `postgres.imagePullSecrets` and `postgres.affinity` unset the `Cluster` renders no new field and the whole render is byte-identical in either flavour.
-- **An installation pulling the CNPG images through a private mirror should set `postgres.imagePullSecrets`.** The bootstrap init container runs the operator image, so the secret is needed even when `postgres.image.name` is left at the operator's default.
-- **An installation with mixed node architectures should set `postgres.affinity.nodeSelector`.** Use CNPG's `AffinityConfiguration` keys, not a core Kubernetes `Affinity`; a `podAffinity` or `podAntiAffinity` key there now fails the render, naming the key.
-- **An installation running Backstage on a default-deny cluster can drop its hand-written portal policies.** Remove them after this release lands and confirm the portal still serves: the pod passes its probes, sign-in completes, the Agent Platform pages load, and the agent create flow reaches its deploy step.
+- **Set `postgres.imagePullSecrets` when the CNPG images come through a private mirror.** The bootstrap init container runs the operator image, so the secret is needed even when `postgres.image.name` is left at the operator's default.
+- **Set `postgres.affinity.nodeSelector` when the nodes have mixed architectures.** Use CNPG's `AffinityConfiguration` keys, not a core Kubernetes `Affinity`: any other key now fails the render, naming the key.
+- **Drop the hand-written portal policies when Backstage runs on a default-deny cluster.** Remove them after this release lands and confirm the portal still serves: the pod passes its probes, sign-in completes, the Agent Platform pages load, and the agent create flow reaches its deploy step.
 - **An installation that pins the portal's route to a Gateway of its own (`backstage.parentRefs`) keeps a policy for it.** The rendered policy admits the platform's front Gateway, or the agentgateway data plane while `gatewayApi.gateway.create` makes this chart the edge; a third Gateway is neither.
 - A private identity provider inside one of `networkPolicy.kubernetes.worldExcludedCIDRs` needs its address in `networkPolicy.additionalEgressCIDRs`; the kubernetes-flavour egress subtracts those blocks from its world rule.
 

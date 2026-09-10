@@ -138,7 +138,7 @@ its container and its probes.
 | DNS | CoreDNS in `kube-system`, with the proxy clause the FQDN selectors need | CoreDNS in `kube-system` |
 | The identity provider | the issuer host by name on 443, plus the `cluster` entity for an issuer behind an in-cluster Gateway | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs` on 443 |
 | The kube-apiserver | the `kube-apiserver` entity | `networkPolicy.kubernetes.apiServerCIDR` |
-| The front Gateway | the `cluster` entity leg above | its Envoy pods on 443 |
+| The edge | the `cluster` entity leg above | the front Gateway's Envoy pods on 443, or the agentgateway data plane on 443 while `gatewayApi.gateway.create` makes this chart the edge |
 | muster | its pods in this namespace, on the muster Service port | the same, as a `podSelector` |
 | The portal's database | its CNPG pods by `cnpg.io/cluster`, on 5432, while `backstage.database.engine` is `postgresql` | the same, as a `podSelector` |
 | The scaffolder catalog | `github.com`, `api.github.com` and `raw.githubusercontent.com` on 443, while `backstage.catalogs.version` is set | the world rule above |
@@ -167,10 +167,10 @@ operator's default.
 CNPG's own `AffinityConfiguration`, not a core Kubernetes `Affinity`: the
 accepted keys are `enablePodAntiAffinity`, `topologyKey`,
 `podAntiAffinityType`, `nodeSelector`, `nodeAffinity`, `tolerations`,
-`additionalPodAffinity` and `additionalPodAntiAffinity`. A core `podAffinity`
-or `podAntiAffinity` key fails the render, and the `Cluster` CRD rejects it in
-any case; pass a core term through `additionalPodAffinity` or
-`additionalPodAntiAffinity`.
+`additionalPodAffinity` and `additionalPodAntiAffinity`. Any other key fails
+the render, so a typo never reaches the `Cluster` silently. A core
+`podAffinity` or `podAntiAffinity` key fails with a message of its own: pass a
+core term through `additionalPodAffinity` or `additionalPodAntiAffinity`.
 
 Both render no field while unset, so the operator's own defaults apply.
 
