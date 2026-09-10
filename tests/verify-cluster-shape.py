@@ -225,7 +225,10 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     expect(got == yes(envoy), f"{where} dicebear route.enabled = {got!r}, want {yes(envoy)!r}")
 
     # The connectivity chart on its own, same served groups: the matching objects.
-    objects = kinds(render(connectivity, [*PARENT_REF, *ON, *apis(served)]))
+    # kagent.serviceMonitor is off by default (the kagent line serves no
+    # /metrics), so the one ServiceMonitor the gate can produce is switched on
+    # here to see the gate resolve; the default is verify-global's.
+    objects = kinds(render(connectivity, [*PARENT_REF, *ON, *apis(served), "--set", "kagent.serviceMonitor.enabled=true"]))
     cnp, netpol = objects.get("CiliumNetworkPolicy", 0), objects.get("NetworkPolicy", 0)
     expect(not (cnp and netpol), f"{where} connectivity renders both network-policy flavors")
     expect((cnp > 0) == cilium and (netpol > 0) == (not cilium),
