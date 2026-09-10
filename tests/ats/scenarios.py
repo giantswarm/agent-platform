@@ -74,11 +74,23 @@ def _env_int(name: str, default: int) -> int:
     return int(_env(name, str(default)))
 
 
+_TRUE = ("1", "true", "yes", "on")
+_FALSE = ("0", "false", "no", "off")
+
+
 def _env_bool(name: str, default: bool) -> bool:
+    """A boolean override, or the scenario default. An unknown value is an
+    error: a typo must not silently mean False."""
     raw = os.environ.get(name)
     if not raw:
         return default
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    value = raw.strip().lower()
+    if value in _TRUE:
+        return True
+    if value in _FALSE:
+        return False
+    raise AssertionError(
+        f"{name}={raw!r} is not a boolean; use one of {', '.join((*_TRUE, *_FALSE))}")
 
 
 def _env_paths(name: str, default: List[Path]) -> List[Path]:
@@ -123,8 +135,9 @@ class Scenario:
     client_secret: str = LAB_CLIENT_SECRET
     # muster's RFC 7591 registration token.
     registration_token: str = LAB_REGISTRATION_TOKEN
-    # A static user the OAuth password grant can use, for the headless login.
-    # Empty means the scenario has none and the password-grant test is skipped.
+    # A static user the headless logins present: the OAuth password grant and
+    # the login form muster redirects to. Empty means the scenario has none,
+    # and conftest's REQUIRES_STATIC_USER skips the tests that log in.
     user: str = LAB_DEX_USER
     password: str = LAB_DEX_PASSWORD
     # The Secret holding the issuer's CA (key ca.crt), in the release namespace.
@@ -150,7 +163,7 @@ class Scenario:
     # --- the OAuth redirect --------------------------------------------------
     # Never served; the flow stops at the redirect and reads the code from
     # Location. The identity provider must still list it for the client.
-    callback: str = f"http://127.0.0.1:{LAB_CALLBACK_PORT}/callback"
+    callback: str = f"http://{LOOPBACK}:{LAB_CALLBACK_PORT}/callback"
 
     # --- budgets -------------------------------------------------------------
     install_timeout: str = "12m"
@@ -175,6 +188,14 @@ class Scenario:
         """The example file the scenario installs first."""
         return self.values[0]
 
+    @property
+    def own_flux_values(self) -> List[Path]:
+        """The functional scenario's list: the example file and the kagent
+        runtime, not the round trips, with the overlays layered last. A run
+        that names ATS_VALUES replaces the example file only; the entries after
+        it belong to the smoke."""
+        return [self.base_values, KAGENT_VALUES, *self.overlays]
+
 
 def _kind() -> Scenario:
     return Scenario(name="kind", values=[KIND_LAB_VALUES, KAGENT_VALUES, ROUND_TRIP_VALUES])
@@ -184,11 +205,11 @@ def _eks() -> Scenario:
     """A managed cloud cluster. It brings its own identity provider behind a
     real certificate, and muster answers on a real hostname through the
     Gateway, so nothing is port-forwarded and no lab Dex is installed. Every
-    field that names the installation comes from the environment; the run fails
-    with a clear message when one is missing."""
+    field that names the installation comes from the environment, the values
+    file included; the run fails with a clear message when one is missing."""
     return Scenario(
         name="eks",
-        values=[KIND_LAB_VALUES],
+        values=[],
         issuer_url=_env("ATS_ISSUER_URL", ""),
         issuer_port=_env_int("ATS_ISSUER_PORT", 443),
         client_id=_env("ATS_CLIENT_ID", ""),
@@ -269,6 +290,11 @@ def _validate(scenario: Scenario) -> None:
         raise AssertionError(
             f"scenario {scenario.name!r} needs {', '.join(missing)}: this cluster brings its own "
             "identity provider and hostname, so the run must name them (see tests/ats/README.md)")
+    if not scenario.values:
+        raise AssertionError(
+            f"scenario {scenario.name!r} names no values file: set ATS_VALUES (colon- or "
+            "comma-separated, in Helm's order), whose first entry is an example file under "
+            f"{EXAMPLES_DIR.relative_to(REPO_ROOT)} (see tests/ats/README.md)")
     for path in scenario.values_files:
         if not path.is_file():
             raise AssertionError(f"values file not found: {path}")
@@ -283,9 +309,18 @@ def base_url_sets(scenario: Scenario) -> List[str]:
     return [f"muster.muster.oauth.server.baseUrl={scenario.muster_base_url}"]
 
 
+def _display(path: Path) -> str:
+    """A values path as the reader knows it: relative to the repository root
+    when it lives there, absolute otherwise. `make e2e` writes its overlay to a
+    temporary directory, which is outside the root."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def summary(scenario: Scenario) -> str:
-    values = ", ".join(str(p.relative_to(REPO_ROOT)) for p in scenario.values_files)
+    values = ", ".join(_display(p) for p in scenario.values_files)
     return (f"scenario {scenario.name}: values [{values}], issuer {scenario.issuer_url}, "
             f"muster {scenario.muster_base_url} ({scenario.muster_reach}), "
             f"lab Dex {'installed' if scenario.install_lab_dex else 'not installed'}")
-

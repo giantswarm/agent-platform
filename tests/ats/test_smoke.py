@@ -55,12 +55,8 @@ from typing import Any, Dict, Iterator, List, Optional
 import pytest
 import yaml
 
-from scenarios import EXAMPLES_DIR, KIND_LAB_VALUES
-
 from conftest import (
     CROSS_CLIENT_AUDIENCE,
-    DEX_USER,
-    SCENARIO,
     FLUX_CRD_SUFFIX,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
@@ -69,6 +65,8 @@ from conftest import (
     NAMESPACE,
     OPERATOR_CRDS,
     RELEASE,
+    REQUIRES_STATIC_USER,
+    SCENARIO,
     SELF_INTERVAL_S,
     SELF_POLICY,
     SMOKE_VALUES,
@@ -92,6 +90,7 @@ from conftest import (
     wait_for,
     wait_for_muster_healthy,
 )
+from scenarios import EXAMPLES_DIR, KIND_LAB_VALUES
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +332,7 @@ def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: P
 
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
+@REQUIRES_STATIC_USER
 def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForward, dex: str) -> None:
     """The lab Dex's OAuth password grant issues an ID token for the platform
     client (a trusted audience of muster) carrying the cross-client audience
@@ -341,7 +341,7 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForw
     try:
         token = dex_password_grant(dex)
         claims = jwt_claims(token)
-        assert claims.get("email") == DEX_USER, claims
+        assert claims.get("email") == SCENARIO.user, claims
         aud = claims.get("aud") if isinstance(claims.get("aud"), list) else [claims.get("aud")]
         assert CROSS_CLIENT_AUDIENCE in aud, f"the token lacks the {CROSS_CLIENT_AUDIENCE} audience: {aud}"
         session = MusterSession(MUSTER_BASE_URL, token, "ats-password-grant").initialize()
@@ -354,11 +354,12 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForw
         raise
     STATE.dex_token = token
     TIMINGS.record("auth round trip: password grant -> /mcp initialize -> tools/list -> list_tools", time.monotonic() - started)
-    logger.info("Dex user %s reached /mcp: %d meta-tools, %d aggregated tools", DEX_USER, len(tools), len(aggregated))
+    logger.info("Dex user %s reached /mcp: %d meta-tools, %d aggregated tools", SCENARIO.user, len(tools), len(aggregated))
 
 
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
+@REQUIRES_STATIC_USER
 def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: PortForward, dex: str) -> None:
     """The full muster login — dynamic client registration, authorization code
     with PKCE, the Dex login form — headless; the access token reaches /mcp."""
@@ -398,6 +399,7 @@ def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None) ->
 
 
 @pytest.mark.smoke
+@REQUIRES_STATIC_USER
 def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: PortForward, dex: str, kagent_controller: None) -> None:
     """agent-manager's create_agent through muster, as the Dex user: muster
     forwards the bearer to agent-manager (MCPServer auth.forwardToken; the

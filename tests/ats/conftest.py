@@ -91,14 +91,15 @@ GATEWAY_API_CRDS = (
 SCENARIO: Scenario = scenarios.load()
 logger.info("%s", scenarios.summary(SCENARIO))
 
+# The smoke's values files. The own-Flux scenario builds its own shorter list
+# from the same scenario (SCENARIO.own_flux_values).
 SMOKE_VALUES = SCENARIO.values_files
-# The example file the scenario installs first, and the kagent overlay: the
-# own-Flux scenario inlines the same shape with the engine off.
-BASE_VALUES = SCENARIO.base_values
-KAGENT_VALUES = scenarios.KAGENT_VALUES
 LAB_DEX_MANIFEST = scenarios.LAB_DEX_MANIFEST
-# The static user the headless logins present.
-DEX_USER = SCENARIO.user
+# The tests that log in need a static user (the password grant and the login
+# form). A scenario whose identity provider has none skips them.
+REQUIRES_STATIC_USER = pytest.mark.skipif(
+    not SCENARIO.user,
+    reason="the scenario names no static user: set ATS_IDP_USER and ATS_IDP_PASSWORD to run the logins")
 
 # The cross-client audience the platform's agent-manager MCPServer requires on
 # the token muster forwards (agent-manager.muster.mcpServer.auth.requiredAudiences).
@@ -509,15 +510,19 @@ def wait_for_endpoints(kube: Kube, namespace: str, service: str, timeout: float 
 # ---------------------------------------------------------------------------
 
 
-def dex_password_grant(ca_path: Optional[str], scope: str = LOGIN_SCOPES, user: str = "", password: str = "") -> str:
+def dex_password_grant(ca_path: Optional[str], scope: str = LOGIN_SCOPES,
+                       user: Optional[str] = None, password: Optional[str] = None) -> str:
     """The OAuth password grant against the scenario's issuer (the lab Dex runs
     with oauth2.passwordConnector: local); returns the raw id_token — a headless
-    login in one request. ca_path None means the system trust store."""
+    login in one request. ca_path None means the system trust store, and a user
+    or a password of None means the scenario's own."""
     r = requests.post(
         f"{SCENARIO.issuer_url}/token",
         auth=(SCENARIO.client_id, SCENARIO.client_secret),
-        data={"grant_type": "password", "username": user or SCENARIO.user,
-              "password": password or SCENARIO.password, "scope": scope},
+        data={"grant_type": "password",
+              "username": SCENARIO.user if user is None else user,
+              "password": SCENARIO.password if password is None else password,
+              "scope": scope},
         verify=ca_path or True, timeout=30,
     )
     assert r.status_code == 200, f"Dex password grant failed: {r.status_code} {r.text[:300]}"

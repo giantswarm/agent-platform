@@ -91,14 +91,15 @@ The knobs of the target:
 | `KUBECONFIG` | — | Required. The cluster to run against. |
 | `SCENARIO` | `smoke` | The pytest marker: `smoke` or `functional`. |
 | `CLUSTER_TYPE` | `kind` | The scenario defaults, `kind` or `eks` (`ATS_CLUSTER_TYPE`). |
-| `VALUES` | — | The values files of the run, colon-separated, in Helm's order. **Replaces** the scenario's list, so it must be complete. Empty keeps the scenario's own list, which is what a kind run wants. |
+| `VALUES` | — | The values files of the run, colon-separated, in Helm's order. **Replaces** the smoke's list, so it must be complete. Empty keeps the scenario's own list, which is what a kind run wants. `SCENARIO=functional` installs the first of these plus `values-kagent.yaml`. |
 | `E2E_VERSION` | `3.99.0-dev.local` | The version the chart is packaged and installed under. A prerelease keeps a published self `HelmRelease` from matching it. |
-| `E2E_DOMAIN`, `E2E_ISSUER_URL`, `E2E_CLIENT_ID`, `E2E_IDP_SECRET_NAME` | — | When any is set, the target writes a values overlay from them into a temporary file, layers it last and removes it on exit. It prints the line count, never a value. |
+| `E2E_DOMAIN`, `E2E_ISSUER_URL`, `E2E_CLIENT_ID`, `E2E_IDP_SECRET_NAME`, `E2E_IDP_CA_SECRET` | — | When any is set, the target writes a values overlay from them into a temporary file, layers it last and removes it on exit. It prints the line count, never a value. `E2E_IDP_CA_SECRET` also reaches the suite as `ATS_IDP_CA_SECRET`. |
 
 **Secrets and the domain stay out of the repository.** The example files carry
-placeholders. `E2E_IDP_SECRET_NAME` is the NAME of a Secret already on the
-cluster, not a credential, so no secret passes through a command line or a
-committed file.
+placeholders. `E2E_IDP_SECRET_NAME` and `E2E_IDP_CA_SECRET` are the NAMES of
+Secrets already on the cluster, not credentials, so no secret passes through a
+command line or a committed file. The client secret the tests log in with comes
+from `ATS_CLIENT_SECRET` in the caller's environment.
 
 ## Scenario inputs
 
@@ -110,12 +111,12 @@ field has its own environment variable on top.
 
 | Input | Environment variable | kind default |
 |---|---|---|
-| Values files | `ATS_VALUES` (colon- or comma-separated) | `helm/agent-platform/examples/kind-lab-dex.yaml`, `values-kagent.yaml`, `values-round-trips.yaml` |
+| Values files | `ATS_VALUES` (colon- or comma-separated) | `helm/agent-platform/examples/kind-lab-dex.yaml`, `values-kagent.yaml`, `values-round-trips.yaml`. The `eks` scenario has none: a run must name them. |
 | Values layered last | `ATS_OVERLAY_VALUES` | none (`make e2e` writes one from the environment) |
 | The issuer | `ATS_ISSUER_URL`, `ATS_ISSUER_PORT` | the lab Dex on its loopback `nip.io` name |
 | The OAuth client | `ATS_CLIENT_ID`, `ATS_CLIENT_SECRET` | the lab client and its public fixture secret |
 | muster's registration token | `ATS_REGISTRATION_TOKEN` | the lab fixture token |
-| A static user | `ATS_IDP_USER`, `ATS_IDP_PASSWORD` | the lab Dex static user |
+| A static user | `ATS_IDP_USER`, `ATS_IDP_PASSWORD` | the lab Dex static user; empty skips the three tests that log in |
 | The issuer's CA Secret | `ATS_IDP_CA_SECRET` | `agent-platform-idp-ca`; empty means the system trust store |
 | Install the lab Dex | `ATS_LAB_DEX` | true; false on a cluster with its own identity provider |
 | muster's base URL | `ATS_MUSTER_BASE_URL`, `ATS_MUSTER_PORT` | `http://localhost:<the lab port>` |
@@ -128,14 +129,15 @@ Two rules the suite enforces itself:
 - The values file the smoke installs must be an example file the repository
   ships (`test_the_scenario_installs_the_example_file`), so the documented
   install and the tested install cannot drift.
-- An unknown `ATS_CLUSTER_TYPE`, an unknown `ATS_MUSTER_REACH`, a missing
-  issuer or muster base URL, and a values file that does not exist each fail
-  the run with a message naming the variable, rather than falling back to the
-  kind lab silently.
+- An unknown `ATS_CLUSTER_TYPE`, an unknown `ATS_MUSTER_REACH`, an
+  `ATS_LAB_DEX` that is not a boolean, a missing issuer, client or muster base
+  URL, a scenario that names no values file, and a values file that does not
+  exist each fail the run with a message naming the variable, rather than
+  falling back to the kind lab silently.
 
-The `eks` scenario carries no defaults of its own for the issuer, the client or
-muster's base URL: a managed cloud cluster brings its own, so the run must name
-them. The EKS scenarios themselves land with giantswarm/agent-platform#336 and
+The `eks` scenario carries no defaults of its own for the issuer, the client,
+muster's base URL or the values files: a managed cloud cluster brings its own,
+so the run must name them. The EKS scenarios themselves land with giantswarm/agent-platform#336 and
 #337.
 
 ## Parity with the standalone chart's smoke
