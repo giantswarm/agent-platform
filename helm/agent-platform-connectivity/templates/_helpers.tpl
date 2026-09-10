@@ -662,6 +662,24 @@ tiebreak, so every inference call would reach the MCP backend instead. */ -}}
 {{- end -}}
 
 {{/*
+Guards on the platform Postgres Cluster's operator-supplied blocks. Both keys
+reach the CNPG Cluster verbatim, where a wrong shape is a rejected apply with
+the CRD's own message; these fail the render instead, naming the key.
+*/}}
+{{- define "agent-platform.validatePostgres" -}}
+{{- range $i, $secret := .Values.postgres.imagePullSecrets -}}
+{{- if not (dig "name" "" $secret) -}}
+{{- fail (printf "postgres.imagePullSecrets[%d] has no name: every entry is {name: <Secret in the Cluster's namespace>}" $i) -}}
+{{- end -}}
+{{- end -}}
+{{- range $key := list "podAffinity" "podAntiAffinity" -}}
+{{- if hasKey $.Values.postgres.affinity $key -}}
+{{- fail (printf "postgres.affinity.%s is a core Kubernetes Affinity key, which Cluster.spec.affinity rejects: it is CNPG's AffinityConfiguration. Use enablePodAntiAffinity, topologyKey and podAntiAffinityType for the operator's own anti-affinity, or additionalPodAffinity / additionalPodAntiAffinity to pass a core term through" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Cilium DNS egress rule with the DNS proxy clause. Same selectors as dnsEgress,
 plus `rules.dns` so Cilium learns the name -> address mappings the policy's
 toFQDNs selectors need; without the clause a toFQDNs rule matches nothing on a

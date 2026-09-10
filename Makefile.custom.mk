@@ -1139,10 +1139,16 @@ WIRING_BACKSTAGE := $(VM) --namespace agent-platform $(WIRING_QUICKSTART) --set 
 WIRING_SERVING := $(VM) --namespace agent-platform --set components.modelServing.enabled=true --set components.kserve-crd.enabled=true --set components.kserve-resources.enabled=true
 # The fleet-shape render with every toggle of this slice off: byte-identical to origin/main's.
 WIRING_OFF := $(VM) --namespace agent-platform --set components.kagent.enabled=true
-# The Backstage app pods' own policy needs the portal's quick-start inputs (the
-# route's Gateway and the identity provider the egress names) and an
-# agentgateway-* mode, so a data-plane peer exists to admit.
-WIRING_BACKSTAGE_NETPOL := $(WIRING_BACKSTAGE) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set 'global.gatewayApi.parentRefs[0].name=giantswarm-default' --set 'global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system'
+# The Backstage app pods' own policy. WIRING_BACKSTAGE already carries the
+# portal's quick-start inputs, the front Gateway its route attaches to among
+# them; the agentgateway-* mode gives muster's leg a data plane to name.
+WIRING_BACKSTAGE_NETPOL := $(WIRING_BACKSTAGE) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true
+# The same, with the portal on its own database: an egress leg the default
+# sqlite engine does not render.
+WIRING_BACKSTAGE_NETPOL_FULL := $(WIRING_BACKSTAGE_NETPOL) --set backstage.database.engine=postgresql
+# The same, with the chart owning the edge: the portal's route then attaches to
+# the agentgateway data plane, not to the front Gateway.
+WIRING_BACKSTAGE_NETPOL_EDGE := $(WIRING_BACKSTAGE_NETPOL) --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls
 # The platform Postgres Cluster's placement and pull secrets.
 WIRING_PG := $(VM) --namespace agent-platform --set postgres.enabled=true
 WIRING_PG_SET := $(WIRING_PG) --set 'postgres.imagePullSecrets[0].name=mirror-pull-secret' --set postgres.affinity.enablePodAntiAffinity=true --set postgres.affinity.topologyKey=topology.kubernetes.io/zone
@@ -1311,14 +1317,41 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@for pattern in 'app: backstage' 'component: backstage' 'port: "7007"' '- host' '- remote-node' 'k8s-app: kube-dns' 'kube-apiserver' 'matchName: dex.ci.example.com' 'app.kubernetes.io/name: muster'; do \
 		grep -q -- "$$pattern" /tmp/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks $$pattern"; cat /tmp/vw-bsnp-cilium.out; exit 1; }; \
 	done
+	@echo "--> the ingress peer follows the Gateway the portal's route attaches to"
+	@grep -q 'io.kubernetes.pod.namespace: envoy-gateway-system' /tmp/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy does not admit the front Gateway that serves its route"; cat /tmp/vw-bsnp-cilium.out; exit 1; }
+	@if grep -q 'gateway.networking.k8s.io/gateway-name' /tmp/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy admits the agentgateway data plane, which is not in the route's path"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_EDGE) --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-edge.out
+	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vw-bsnp-edge.out || { echo "FAIL: with the chart owning the edge the policy does not admit the data plane"; cat /tmp/vw-bsnp-edge.out; exit 1; }
+	@if grep -q 'envoy-gateway-system' /tmp/vw-bsnp-edge.out; then echo "FAIL: with the chart owning the edge the policy still admits the front Gateway"; exit 1; fi
+	@echo "--> the scaffolder catalog's egress follows backstage.catalogs.version; the portal's database gets a leg on the postgresql engine"
+	@for pattern in 'matchName: github.com' 'matchName: raw.githubusercontent.com'; do \
+		grep -q -- "$$pattern" /tmp/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks $$pattern, so the catalog location it fetches is denied"; cat /tmp/vw-bsnp-cilium.out; exit 1; }; \
+	done
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.catalogs.version= --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-nocat.out
+	@if grep -q 'github' /tmp/vw-bsnp-nocat.out; then echo "FAIL: the cilium Backstage policy renders the catalog egress with backstage.catalogs.version empty"; exit 1; fi
+	@if grep -q '5432' /tmp/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy renders 5432 on the sqlite engine"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_FULL) --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-full.out
+	@for pattern in 'backstage-cnpg' 'backstage-cnpg-restore' 'port: "5432"'; do \
+		grep -q -- "$$pattern" /tmp/vw-bsnp-full.out || { echo "FAIL: the cilium Backstage policy lacks $$pattern"; cat /tmp/vw-bsnp-full.out; exit 1; }; \
+	done
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=kubernetes 2>/dev/null >/tmp/vw-bsnp-k8s-all.out
 	@awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' /tmp/vw-bsnp-k8s-all.out >/tmp/vw-bsnp-k8s-in.out
 	@awk '/^  name: agent-platform-connectivity-backstage-egress$$/{f=1} f&&/^---$$/{exit} f' /tmp/vw-bsnp-k8s-all.out >/tmp/vw-bsnp-k8s-eg.out
 	@[ -s /tmp/vw-bsnp-k8s-in.out ] && [ -s /tmp/vw-bsnp-k8s-eg.out ] || { echo "FAIL: the kubernetes flavor renders no Backstage ingress/egress policy pair"; exit 1; }
 	@grep -q 'port: 7007' /tmp/vw-bsnp-k8s-in.out || { echo "FAIL: the kubernetes Backstage ingress policy is not on the app port"; exit 1; }
-	@for pattern in 'k8s-app' 'app.kubernetes.io/name: muster' '10.0.0.0/8'; do \
+	@for pattern in 'k8s-app' 'app.kubernetes.io/name: muster' '10.0.0.0/8' 'kubernetes.io/metadata.name: envoy-gateway-system'; do \
 		grep -q -- "$$pattern" /tmp/vw-bsnp-k8s-eg.out || { echo "FAIL: the kubernetes Backstage egress policy lacks $$pattern"; cat /tmp/vw-bsnp-k8s-eg.out; exit 1; }; \
 	done
+	@grep -q 'kubernetes.io/metadata.name: envoy-gateway-system' /tmp/vw-bsnp-k8s-in.out || { echo "FAIL: the kubernetes Backstage ingress policy does not admit the front Gateway that serves its route"; cat /tmp/vw-bsnp-k8s-in.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_FULL) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage-egress$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-k8s-full.out
+	@for pattern in 'backstage-cnpg' 'port: 5432'; do \
+		grep -q -- "$$pattern" /tmp/vw-bsnp-k8s-full.out || { echo "FAIL: the kubernetes Backstage egress policy lacks $$pattern"; cat /tmp/vw-bsnp-k8s-full.out; exit 1; }; \
+	done
+	@if grep -q '5432' /tmp/vw-bsnp-k8s-eg.out; then echo "FAIL: the kubernetes Backstage egress policy renders 5432 with the engine unset"; exit 1; fi
+	@echo "--> an empty worldExcludedCIDRs renders no except key"
+	@printf 'networkPolicy:\n  kubernetes:\n    worldExcludedCIDRs: []\n' >/tmp/vw-bsnp-noexcept.yaml
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) -f /tmp/vw-bsnp-noexcept.yaml --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage-egress$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-k8s-noexcept.out
+	@if grep -q 'except' /tmp/vw-bsnp-k8s-noexcept.out; then echo "FAIL: the kubernetes Backstage egress policy renders an empty except list"; cat /tmp/vw-bsnp-k8s-noexcept.out; exit 1; fi
 	@echo "--> the app port follows backstage.port"
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=cilium --set backstage.port=9999 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' | grep -q 'port: "9999"' || { echo "FAIL: the Backstage policy pins 7007 instead of backstage.port"; exit 1; }
 	@echo "--> Backstage off, or the policies off: no Backstage app policy in either flavor"
@@ -1327,7 +1360,13 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=$$flavor --set networkPolicy.enabled=false 2>/dev/null | grep -qE '^  name: agent-platform-connectivity-backstage(-egress)?$$' && { echo "FAIL: a Backstage app policy rendered with networkPolicy.enabled=false ($$flavor)"; exit 1; }; \
 		true; \
 	done
+	@echo "--> a core Affinity key and a nameless pull secret fail the render"
+	@if helm template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set 'postgres.affinity.podAntiAffinity.foo=bar' >/tmp/vw-pg-guard.out 2>&1; then echo "FAIL: postgres.affinity.podAntiAffinity rendered; the Cluster CRD rejects it"; exit 1; fi
+	@grep -q 'postgres.affinity.podAntiAffinity is a core Kubernetes Affinity key' /tmp/vw-pg-guard.out || { echo "FAIL: the affinity guard does not name the key"; cat /tmp/vw-pg-guard.out; exit 1; }
+	@printf 'postgres:\n  imagePullSecrets:\n    - {}\n' >/tmp/vw-pg-noname.yaml
+	@if helm template t $(CONNECTIVITY_DIR) $(WIRING_PG) -f /tmp/vw-pg-noname.yaml >/tmp/vw-pg-guard2.out 2>&1; then echo "FAIL: a nameless postgres.imagePullSecrets entry rendered"; exit 1; fi
+	@grep -q 'postgres.imagePullSecrets\[0\] has no name' /tmp/vw-pg-guard2.out || { echo "FAIL: the pull-secret guard does not name the entry"; cat /tmp/vw-pg-guard2.out; exit 1; }
 	@echo "--> the meta chart declares postgres.imagePullSecrets and postgres.affinity (schema symmetry)"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(FLEET_APIS) --set 'postgres.imagePullSecrets[0].name=mirror-pull-secret' --set postgres.affinity.enablePodAntiAffinity=true >/dev/null 2>&1 || { echo "FAIL: the meta chart rejects postgres.imagePullSecrets / postgres.affinity"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(FLEET_APIS) --set 'postgres.imagePullSecrets[0].name=mirror-pull-secret' --set postgres.affinity.enablePodAntiAffinity=true >/tmp/vw-pg-meta.out 2>&1 || { echo "FAIL: the meta chart rejects postgres.imagePullSecrets / postgres.affinity"; cat /tmp/vw-pg-meta.out; exit 1; }
 	@echo "ok: the Postgres Cluster knobs and the Backstage app policy verified"
 	@echo "the standalone's ported wiring verified."

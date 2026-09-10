@@ -1119,7 +1119,9 @@ postgres:
   # enablePodAntiAffinity, topologyKey, podAntiAffinityType, nodeSelector,
   # nodeAffinity, tolerations, additionalPodAffinity and
   # additionalPodAntiAffinity. A core `podAffinity` / `podAntiAffinity` key here
-  # is rejected by the Cluster CRD. Empty renders no field, so the operator's
+  # fails the render, and reaches a Cluster CRD that rejects it if it does not
+  # (pass a core term through additionalPodAffinity /
+  # additionalPodAntiAffinity). Empty renders no field, so the operator's
   # own defaults apply. On a cluster with mixed architectures, pin the operand:
   #   affinity:
   #     nodeSelector:

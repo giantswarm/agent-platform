@@ -2,10 +2,11 @@
 {{- $backstage := include "agent-platform.backstage.values" . | fromJson }}
 {{- $port := dig "port" 7007 $backstage | int }}
 {{- $selector := dict "app" (include "agent-platform.backstage.name" .) "component" "backstage" }}
+{{- /* The backstage chart names its CNPG cluster <its chart name>-<suffix>, so
+the prefix is the literal chart name, not backstage.name. */}}
+{{- $cnpg := printf "backstage-%s" (dig "database" "postgresql" "clusterNameSuffix" "cnpg" $backstage) }}
 ---
-# Ingress to the portal: the agentgateway data plane (its public route). Vanilla
-# NetworkPolicy has no host entity, so the kubelet's probes are admitted by the
-# namespaceSelector below, which every node-local prober satisfies.
+# Ingress to the portal: the Gateway data plane that serves its public route.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -19,6 +20,9 @@ spec:
       {{- toYaml $selector | nindent 6 }}
   policyTypes: [Ingress]
   ingress:
+    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
+    # The chart owns the edge: the portal's route attaches to the agentgateway
+    # data plane's HTTPS listener, so the data-plane pods are the peer.
     - from:
         - podSelector:
             matchLabels:
@@ -26,18 +30,39 @@ spec:
       ports:
         - port: {{ $port }}
           protocol: TCP
+    {{- else }}
+    # The route attaches to the platform's front Gateway (the Envoy edge), which
+    # proxies straight to the portal's Service: agentgateway is not in this path.
+    # A route pinned elsewhere with backstage.parentRefs needs that Gateway's
+    # pods admitted by a policy of its own.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+      ports:
+        - port: {{ $port }}
+          protocol: TCP
+    {{- end }}
+    # Vanilla NetworkPolicy selects pods, never the node: it cannot name the
+    # kubelet, and node-sourced traffic is left to the CNI, which commonly
+    # admits a probe to a local pod. This rule admits any pod in the cluster on
+    # the app port; the cilium flavour is the narrow one.
     - from:
         - namespaceSelector: {}
       ports:
         - port: {{ $port }}
           protocol: TCP
 ---
-# Egress from the portal: DNS, the Kubernetes API, muster in this namespace,
-# and — vanilla NetworkPolicy selects addresses, never names — every public
-# destination on 443 for the identity provider's discovery, JWKS, userinfo and
-# token endpoints. networkPolicy.kubernetes.worldExcludedCIDRs is subtracted; a
-# private identity provider needs its address in
-# networkPolicy.additionalEgressCIDRs.
+# Egress from the portal: DNS, the Kubernetes API, muster in this namespace, the
+# front Gateway (the public addresses the app-config holds resolve to it), the
+# portal's own database, and — vanilla NetworkPolicy selects addresses, never
+# names — every public destination on 443 for the identity provider's discovery,
+# JWKS, userinfo and token endpoints, and for the scaffolder catalog location.
+# networkPolicy.kubernetes.worldExcludedCIDRs is subtracted; a private identity
+# provider needs its address in networkPolicy.additionalEgressCIDRs.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -69,10 +94,45 @@ spec:
         - port: {{ include "agent-platform.musterServicePort" . | int }}
           protocol: TCP
     {{- end }}
+    {{- if not (include "agent-platform.edgeIsDataPlane" .) }}
+    # The front Gateway. The app-config addresses muster, the kagent controller
+    # and the model manager by their public hostnames, which resolve to the
+    # edge's LoadBalancer address; that address sits inside the private blocks
+    # the world rule below subtracts, so the edge needs a leg of its own.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+    {{- if eq (dig "database" "engine" "" $backstage) "postgresql" }}
+    # The portal's own CNPG cluster (backstage.database.engine=postgresql). The
+    # backend holds the catalog and every session there; without this leg it
+    # falls back to an in-memory store and loses both on each restart.
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: cnpg.io/cluster
+                operator: In
+                values:
+                  - {{ $cnpg }}
+                  - {{ $cnpg }}-restore
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
-            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+            {{- with .Values.networkPolicy.kubernetes.worldExcludedCIDRs }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
       ports:
         - port: 443
           protocol: TCP

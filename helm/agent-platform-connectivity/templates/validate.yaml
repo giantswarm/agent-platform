@@ -2,3 +2,4 @@
 {{- include "agent-platform.validateIngress" . -}}
 {{- include "agent-platform.validateGlobal" . -}}
 {{- include "agent-platform.validateLlmRouting" . -}}
+{{- include "agent-platform.validatePostgres" . -}}

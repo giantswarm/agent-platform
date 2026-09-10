@@ -1,6 +1,9 @@
 {{- if and (include "agent-platform.backstage.enabled" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
 {{- $backstage := include "agent-platform.backstage.values" . | fromJson }}
 {{- $port := dig "port" 7007 $backstage | int }}
+{{- /* The backstage chart names its CNPG cluster <its chart name>-<suffix>, so
+the prefix is the literal chart name, not backstage.name. */}}
+{{- $cnpg := printf "backstage-%s" (dig "database" "postgresql" "clusterNameSuffix" "cnpg" $backstage) }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -16,7 +19,9 @@ spec:
       app: {{ include "agent-platform.backstage.name" . }}
       component: backstage
   ingress:
-    # The agentgateway data plane serves the portal's public route.
+    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
+    # The chart owns the edge: the portal's route attaches to the agentgateway
+    # data plane's HTTPS listener, so the data-plane pods are the peer.
     - fromEndpoints:
         - matchLabels:
             gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
@@ -25,6 +30,20 @@ spec:
         - ports:
             - port: {{ $port | toString | quote }}
               protocol: TCP
+    {{- else }}
+    # The route attaches to the platform's front Gateway (the Envoy edge), which
+    # proxies straight to the portal's Service: agentgateway is not in this path.
+    # A route pinned elsewhere with backstage.parentRefs needs that Gateway's
+    # pods admitted by a policy of its own.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: envoy
+            io.kubernetes.pod.namespace: envoy-gateway-system
+      toPorts:
+        - ports:
+            - port: {{ $port | toString | quote }}
+              protocol: TCP
+    {{- end }}
     # The kubelet's liveness and readiness probes arrive from the host entity.
     - fromEntities:
         - host
@@ -42,7 +61,40 @@ spec:
     # The login identity provider: OIDC discovery, JWKS, userinfo and token.
     # The backend exits when discovery times out.
     {{- include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerUrl" (include "agent-platform.issuerUrl" (dict "ctx" . "for" "the Backstage network policy"))) | trim | nindent 4 }}
-    # muster's MCP endpoint, in this namespace.
+    {{- if eq (dig "database" "engine" "" $backstage) "postgresql" }}
+    # The portal's own CNPG cluster (backstage.database.engine=postgresql). The
+    # backend holds the catalog and every session there; without this leg it
+    # falls back to an in-memory store and loses both on each restart.
+    - toEndpoints:
+        - matchExpressions:
+            - key: cnpg.io/cluster
+              operator: In
+              values:
+                - {{ $cnpg }}
+                - {{ $cnpg }}-restore
+          matchLabels:
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    {{- end }}
+    {{- with (dig "catalogs" "version" "" $backstage) }}
+    # The scaffolder catalog location (backstage.catalogs.version): the URL is on
+    # github.com and the reader dials the API or the raw host, by integration.
+    # Without this leg the agent create flow answers 404.
+    - toFQDNs:
+        - matchName: github.com
+        - matchName: api.github.com
+        - matchName: raw.githubusercontent.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    # muster's MCP endpoint. The app-config addresses muster by its public
+    # hostname, which resolves to the front Gateway and is `cluster` at policy
+    # time (the entity leg above); this leg covers a direct in-cluster address.
     {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
     - toEndpoints:
         - matchLabels:

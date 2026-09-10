@@ -1758,7 +1758,8 @@ postgres:
   # AffinityConfiguration (enablePodAntiAffinity, topologyKey,
   # podAntiAffinityType, nodeSelector, nodeAffinity, tolerations,
   # additionalPodAffinity, additionalPodAntiAffinity), NOT a core Kubernetes
-  # Affinity. Empty renders no field.
+  # Affinity: a core `podAffinity` / `podAntiAffinity` key fails the
+  # connectivity render. Empty renders no field.
   affinity: {}  # @schema type: object; additionalProperties: true
   # pgvector — required for kagent Memory API (RAG / semantic retrieval).
   # pgvector is NOT a trusted extension (C functions), so CREATE EXTENSION runs
