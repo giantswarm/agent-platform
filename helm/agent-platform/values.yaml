@@ -1497,7 +1497,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     create: true
     name: kagent-default
     replicas: 4
-    workerImage: ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-dev.giantswarm.2026-09-10.19-33-37.h734ec53
+    workerImage: ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627
     sandboxClass: gvisor
 
   ui:
