@@ -20,6 +20,15 @@ The meta chart's schema accepts `gateway.parameters.dataPlaneResources` (giantsw
 - **None.** The rendered platform objects are unchanged: the connectivity `HelmRelease`'s values now carry the key at the defaults the connectivity chart applied anyway, so helm-controller runs one upgrade of that release whose manifest is identical — the `AgentgatewayParameters` and the data-plane pods do not change.
 - An installation that carried `gateway.parameters.dataPlaneResources` in its values for the standalone chart and dropped it to pass the meta chart's schema can set it again; an override reaches the data-plane container through the connectivity release as before.
 
+## \<current\> → \<next\> (the 3.x meta chart selects its wiring chart below 4.0.0)
+
+`components.agent-platform-connectivity.versionRange` is bounded to `>=1.0.0 <4.0.0` (giantswarm/agent-platform#348). The 4.x line of this repository is the kagent API v2 migration (giantswarm/giantswarm#37705); its connectivity chart renders `kagent.dev/v1alpha3` objects and must not reach a 3.x installation ahead of that installation's cut-over. Both charts release off one tag, and every installation's Flux re-resolves the connectivity range on each reconcile, so the bound has to be on the fleet before the first `v4.0.0` exists.
+
+### Operator action
+
+- **None.** The connectivity `OCIRepository` gets a new `spec.ref.semver` and keeps resolving the current 3.x release; nothing else renders differently.
+- An installation moves to 4.x through the meta chart's own range (the fleet's `OCIRepository` bound, lifted per installation); the 4.0 chart resets this range to its own line.
+
 ## \<current\> → \<next\> (the kagent controller metrics Service selects kagent's own instance label; a first install with kagent on creates the kagent namespace)
 
 Two fixes from the first lab run of the meta chart (giantswarm/agent-platform#305, #306). The connectivity chart's kagent controller metrics `Service` selects the kagent pods by kagent's own release name (`app.kubernetes.io/instance: kagent`) instead of the connectivity release's, so its `ServiceMonitor` gets endpoints. With the bundled engine (`components.flux.enabled: true`) and kagent on, the meta chart runs a `pre-install,pre-upgrade` hook Job `<release>-kagent-namespace` that creates the `kagent` namespace when it does not exist, so a first install on a bare cluster converges.

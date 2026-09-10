@@ -565,7 +565,7 @@ verify-labels: ## Assert every label value stays valid at the versions the chart
 	@echo "label values verified."
 
 .PHONY: verify-components
-verify-components: ## Assert the roster entries of the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts): off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema.
+verify-components: ## Assert the roster entries of the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts): off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema; the connectivity range is bounded below the next major.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-components.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "component roster verified."

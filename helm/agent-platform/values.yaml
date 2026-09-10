@@ -594,7 +594,16 @@ components:  # @schema additionalProperties: true
   agent-platform-connectivity:  # @schema additionalProperties: true
     chart: agent-platform-connectivity
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: ">=1.0.0"          # this repo's own wiring chart
+    # This repo's own wiring chart, released off the same tag as this chart and
+    # re-resolved by every installation's Flux on each reconcile of the
+    # connectivity OCIRepository. Bounded below the next major on purpose: 4.x is
+    # the kagent API v2 line (kagent.dev/v1alpha3 ModelConfigs and
+    # RemoteMCPServers, the platform Harness; the shared muster server and the
+    # Kyverno Agent mutations gone) -- without the bound the first v4.0.0 tag
+    # would upgrade every 3.x installation's wiring ahead of its cut-over. 4.0
+    # resets the range to its own line; an installation is admitted to 4.x
+    # through the meta chart's own range (giantswarm/agent-platform#348).
+    versionRange: ">=1.0.0 <4.0.0"
     forwardAllValues: true
     # The seven values blocks of the standalone chart's extras are no longer
     # held back from this release: every top-level block the connectivity chart
