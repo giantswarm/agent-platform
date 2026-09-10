@@ -516,6 +516,8 @@ README.
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |
+| postgres.imagePullSecrets | list | `[]` |  |
+| postgres.affinity | object | `{}` |  |
 | postgres.vector.enabled | bool | `false` |  |
 | postgres.vector.extensionImage.reference | string | `""` |  |
 | postgres.applicationDatabase.name | string | `"kagent"` |  |

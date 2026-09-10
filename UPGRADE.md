@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the Postgres `Cluster` knobs, the Backstage app policy)
+
+Two gaps found on a vanilla cluster with Cilium `policyEnforcementMode: always`, mixed architectures and a private image mirror (giantswarm/agent-platform#311). The platform Postgres `Cluster` takes `postgres.imagePullSecrets` and `postgres.affinity`, and the chart renders a network policy for the Backstage app pods in both flavours.
+
+### Operator action
+
+- **None on the fleet.** `components.backstage` is off there, so no Backstage policy renders; with `postgres.imagePullSecrets` and `postgres.affinity` unset the `Cluster` renders no new field and the whole render is byte-identical in either flavour.
+- **An installation pulling the CNPG images through a private mirror should set `postgres.imagePullSecrets`.** The bootstrap init container runs the operator image, so the secret is needed even when `postgres.image.name` is left at the operator's default.
+- **An installation with mixed node architectures should set `postgres.affinity.nodeSelector`.** Use CNPG's `AffinityConfiguration` keys, not a core Kubernetes `Affinity`; a `podAffinity` or `podAntiAffinity` key there is rejected by the `Cluster` CRD.
+- **An installation running Backstage on a default-deny cluster can drop its hand-written portal policies.** Remove them after this release lands and confirm the portal still serves: the pod passes its probes, sign-in completes, and the Agent Platform pages load.
+- A private identity provider inside one of `networkPolicy.kubernetes.worldExcludedCIDRs` needs its address in `networkPolicy.additionalEgressCIDRs`; the kubernetes-flavour egress subtracts those blocks from its world rule.
+
 ## \<current\> → \<next\> (kagent follows the wrapper's 0.x line)
 
 `components.kagent.versionRange` is `>=0.2.0 <1.0.0` (was `0.2.x`): the floor stays at the flattened chart the wiring needs, the ceiling moves to the next major, as for the other 0.x components. The `giantswarm/kagent` wrapper released 0.3.0 and 0.3.1 on 2026-09-09 from CI-only changes — a `feat(ci)` title is a minor bump to git-cliff — with a chart identical to 0.2.2 in templates, values and dependencies; the minor-holding range excluded them, and would have excluded every following wrapper release, the next fix included.

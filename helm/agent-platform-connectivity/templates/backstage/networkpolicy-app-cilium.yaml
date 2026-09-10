@@ -1,0 +1,72 @@
+{{- if and (include "agent-platform.backstage.enabled" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
+{{- $backstage := include "agent-platform.backstage.values" . | fromJson }}
+{{- $port := dig "port" 7007 $backstage | int }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-backstage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.backstage.labels" . | nindent 4 }}
+spec:
+  # The backstage chart labels its pods `app: <backstage.name>` and
+  # `component: backstage`; `app` alone is not unique in the namespace.
+  endpointSelector:
+    matchLabels:
+      app: {{ include "agent-platform.backstage.name" . }}
+      component: backstage
+  ingress:
+    # The agentgateway data plane serves the portal's public route.
+    - fromEndpoints:
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $port | toString | quote }}
+              protocol: TCP
+    # The kubelet's liveness and readiness probes arrive from the host entity.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: {{ $port | toString | quote }}
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    # The Kubernetes API: the portal's Clusters and Kubernetes pages, and the
+    # Agent Platform pages' Flux writes, act as the caller.
+    - toEntities:
+        - kube-apiserver
+    # The login identity provider: OIDC discovery, JWKS, userinfo and token.
+    # The backend exits when discovery times out.
+    {{- include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerUrl" (include "agent-platform.issuerUrl" (dict "ctx" . "for" "the Backstage network policy"))) | trim | nindent 4 }}
+    # muster's MCP endpoint, in this namespace.
+    {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: {{ include "agent-platform.musterFullname" . }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ include "agent-platform.musterServicePort" . | toString | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressFQDNs }}
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+{{- end }}

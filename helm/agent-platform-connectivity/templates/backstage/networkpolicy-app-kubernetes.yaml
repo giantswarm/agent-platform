@@ -1,0 +1,89 @@
+{{- if and (include "agent-platform.backstage.enabled" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
+{{- $backstage := include "agent-platform.backstage.values" . | fromJson }}
+{{- $port := dig "port" 7007 $backstage | int }}
+{{- $selector := dict "app" (include "agent-platform.backstage.name" .) "component" "backstage" }}
+---
+# Ingress to the portal: the agentgateway data plane (its public route). Vanilla
+# NetworkPolicy has no host entity, so the kubelet's probes are admitted by the
+# namespaceSelector below, which every node-local prober satisfies.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-backstage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.backstage.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+      ports:
+        - port: {{ $port }}
+          protocol: TCP
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: {{ $port }}
+          protocol: TCP
+---
+# Egress from the portal: DNS, the Kubernetes API, muster in this namespace,
+# and — vanilla NetworkPolicy selects addresses, never names — every public
+# destination on 443 for the identity provider's discovery, JWKS, userinfo and
+# token endpoints. networkPolicy.kubernetes.worldExcludedCIDRs is subtracted; a
+# private identity provider needs its address in
+# networkPolicy.additionalEgressCIDRs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-backstage-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.backstage.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "agent-platform.musterFullname" . }}
+      ports:
+        - port: {{ include "agent-platform.musterServicePort" . | int }}
+          protocol: TCP
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+{{- end }}

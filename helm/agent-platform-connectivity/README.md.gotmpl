@@ -109,4 +109,50 @@ On the installation, after the cutover:
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
 
+## The Backstage component on a default-deny cluster
+
+With `components.backstage.enabled` and `networkPolicy.enabled`, the chart
+renders a policy for the portal's own pods next to the config-reload hook's
+policy. Without it the app boots into nothing on a default-deny cluster: DNS to
+CoreDNS is denied, OIDC discovery to the identity provider times out and the
+backend exits, and the kubelet's probes are dropped.
+
+The policy selects the backstage chart's pod labels — `app: <backstage.name>`
+and `component: backstage`; `app` alone is not unique in the namespace — and
+uses `backstage.port` (default 7007) as the app port, the port that chart gives
+its container and its probes.
+
+| | cilium flavour | kubernetes flavour |
+|---|---|---|
+| Objects | one `CiliumNetworkPolicy` | one ingress and one egress `NetworkPolicy` |
+| The portal's route | the data-plane pods by `gateway.networking.k8s.io/gateway-name` | the same, as a `podSelector` |
+| Kubelet probes | `fromEntities: [host, remote-node]`, the pattern the manager, kserve and model-serving policies use | a bare `namespaceSelector`, since vanilla `NetworkPolicy` has no host entity |
+| DNS | CoreDNS in `kube-system`, with the proxy clause the FQDN selectors need | CoreDNS in `kube-system` |
+| The identity provider | the issuer host by name on 443, plus the `cluster` entity for an issuer behind an in-cluster Gateway | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs` on 443 |
+| The kube-apiserver | the `kube-apiserver` entity | `networkPolicy.kubernetes.apiServerCIDR` |
+| muster | its pods in this namespace, on the muster Service port | the same, as a `podSelector` |
+
+A private identity provider inside one of `worldExcludedCIDRs` needs its
+address in `networkPolicy.additionalEgressCIDRs`.
+
+The backstage chart's own CNPG policy is not this chart's: its missing DNS and
+operator legs, and the missing arm64 images, are filed against
+giantswarm/backstage.
+
+## The platform Postgres `Cluster`
+
+`postgres.imagePullSecrets` renders `Cluster.spec.imagePullSecrets`. The
+bootstrap init container runs the **operator** image, not the operand image, so
+a private mirror needs the secret even with `postgres.image.name` left at the
+operator's default.
+
+`postgres.affinity` is forwarded verbatim as `Cluster.spec.affinity`. That is
+CNPG's own `AffinityConfiguration`, not a core Kubernetes `Affinity`: the
+accepted keys are `enablePodAntiAffinity`, `topologyKey`,
+`podAntiAffinityType`, `nodeSelector`, `nodeAffinity`, `tolerations`,
+`additionalPodAffinity` and `additionalPodAntiAffinity`. A core `podAffinity`
+or `podAntiAffinity` key is rejected by the `Cluster` CRD.
+
+Both render no field while unset, so the operator's own defaults apply.
+
 {{ template "chart.valuesSection" . }}

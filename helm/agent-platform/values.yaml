@@ -1749,6 +1749,17 @@ postgres:
   # ghcr.io/cloudnative-pg/postgresql with pgvector compiled in).
   image:
     name: ""
+  # Pull secrets for every image of the Cluster's pods
+  # (Cluster.spec.imagePullSecrets). The bootstrap init container runs the
+  # OPERATOR image, so a private mirror needs the secret here even with
+  # image.name left at the operator's default. Empty renders no field.
+  imagePullSecrets: []  # @schema item: object; itemProperties: {name: {type: string}}
+  # Placement, forwarded verbatim as Cluster.spec.affinity — CNPG's own
+  # AffinityConfiguration (enablePodAntiAffinity, topologyKey,
+  # podAntiAffinityType, nodeSelector, nodeAffinity, tolerations,
+  # additionalPodAffinity, additionalPodAntiAffinity), NOT a core Kubernetes
+  # Affinity. Empty renders no field.
+  affinity: {}  # @schema type: object; additionalProperties: true
   # pgvector — required for kagent Memory API (RAG / semantic retrieval).
   # pgvector is NOT a trusted extension (C functions), so CREATE EXTENSION runs
   # as superuser. Two modes:
