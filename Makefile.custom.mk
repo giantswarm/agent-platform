@@ -406,6 +406,8 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@grep -q 'semver: "5.12.0"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to 5.12.0"; exit 1; }
 	@if grep -qE 'semver: "[0-9]+\.x"' /tmp/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
+	@echo "--> every chart the BOM pins accepts the values the meta chart forwards to it"
+	@python3 tests/verify-bom-charts.py /tmp/ap-bom.out $(CHART_DIR)/examples/customer-bom.yaml
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agent-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
 	@if grep -E '^  namespace:' /tmp/ap-ns.out | grep -vq 'flux-giantswarm'; then \
@@ -606,8 +608,12 @@ endef
 # denied") and the agents that reference it run without tools. Off by default
 # and off in the golden render, so the default render is unchanged.
 KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent
+# An agent whose ModelConfig points at a host model server dials it directly,
+# on a port the default-deny agent egress list does not open: the same on-state
+# plus a model-manager in front of one.
+KAGENT_MM := $(KAGENT_NETPOL) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth
 .PHONY: verify-kagent-netpol
-verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-in tool server renders iff kagent.kagent-tools.enabled, in the tools namespace and port; and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
+verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-in tool server renders iff kagent.kagent-tools.enabled, in the tools namespace and port; that the agent egress opens every host model server model-manager fronts, at its agentHost; and that the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> kagent-tools off (the default): no tool-server egress"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-off.out 2>&1 || { cat /tmp/vkn-off.out; exit 1; }
@@ -629,6 +635,32 @@ verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-
 	@echo "--> kubernetes flavor: renders, and has no kagent egress policy to extend"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes --set kagent.kagent-tools.enabled=true >/tmp/vkn-k8s.out 2>&1 || { cat /tmp/vkn-k8s.out; exit 1; }
 	@if grep -q 'kagent-tools' /tmp/vkn-k8s.out; then echo "FAIL: kubernetes flavor renders a tool-server rule it has no egress policy for"; exit 1; else echo "ok: kubernetes flavor untouched"; fi
+	@echo "--> a host model server among model-manager's backends: the agent policy opens the address the ModelConfigs carry"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-mm-off.out 2>&1 || { cat /tmp/vkn-mm-off.out; exit 1; }
+	@if grep -q 'host model server agents dial' /tmp/vkn-mm-off.out; then echo "FAIL: host model server egress renders while model-manager is off"; exit 1; else echo "ok: inert while model-manager is off"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=lmstudio' --set model-manager.lmstudio.endpoint=http://10.0.0.3:1234 >/tmp/vkn-mm-two.out 2>&1 || { cat /tmp/vkn-mm-two.out; exit 1; }
+	@awk "/^  name: agent-platform-connectivity-kagent-agent-muster-egress$$/,/^---/" /tmp/vkn-mm-two.out >/tmp/vkn-mm-two-pol.out
+	@for pair in 10.0.0.1/32:11434 10.0.0.3/32:1234; do \
+		addr=$${pair%%:*}; port=$${pair##*:}; \
+		grep -A3 -e "- $$addr$$" /tmp/vkn-mm-two-pol.out | grep -q "port: \"$$port\"" || { echo "FAIL: the agent policy does not open $$addr on $$port"; cat /tmp/vkn-mm-two-pol.out; exit 1; }; \
+	done
+	@echo "ok: every host backend opened for the agents"
+	@echo "--> the agent path follows agentHost, not the endpoint model-manager itself dials"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set model-manager.ollama.agentHost=http://172.21.0.1:11434 >/tmp/vkn-mm-agenthost.out 2>&1 || { cat /tmp/vkn-mm-agenthost.out; exit 1; }
+	@awk "/^  name: agent-platform-connectivity-kagent-agent-muster-egress$$/,/^---/" /tmp/vkn-mm-agenthost.out >/tmp/vkn-mm-agenthost-pol.out
+	@grep -q -- '- 172.21.0.1/32' /tmp/vkn-mm-agenthost-pol.out || { echo "FAIL: the agent policy ignores model-manager.ollama.agentHost"; cat /tmp/vkn-mm-agenthost-pol.out; exit 1; }
+	@if grep -q -- '- 10.0.0.1/32' /tmp/vkn-mm-agenthost-pol.out; then echo "FAIL: the agent policy opens the management endpoint next to agentHost"; cat /tmp/vkn-mm-agenthost-pol.out; exit 1; fi
+	@grep -q -- '- 10.0.0.1/32' /tmp/vkn-mm-agenthost.out || { echo "FAIL: model-manager's own policy lost the management endpoint"; exit 1; }
+	@echo "ok: agentHost wins for the agents, the endpoint stays model-manager's"
+	@echo "--> a host model server named by hostname takes the FQDN arm, not a CIDR"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set model-manager.ollama.endpoint=http://ollama.lan:11434 >/tmp/vkn-mm-fqdn.out 2>&1 || { cat /tmp/vkn-mm-fqdn.out; exit 1; }
+	@awk "/^  name: agent-platform-connectivity-kagent-agent-muster-egress$$/,/^---/" /tmp/vkn-mm-fqdn.out >/tmp/vkn-mm-fqdn-pol.out
+	@grep -q 'matchName: ollama.lan$$' /tmp/vkn-mm-fqdn-pol.out || { echo "FAIL: the agent policy has no FQDN rule for a hostname endpoint"; cat /tmp/vkn-mm-fqdn-pol.out; exit 1; }
+	@grep -A4 'matchName: ollama.lan$$' /tmp/vkn-mm-fqdn-pol.out | grep -q 'port: "11434"' || { echo "FAIL: the FQDN rule does not open the server's port"; cat /tmp/vkn-mm-fqdn-pol.out; exit 1; }
+	@echo "ok: hostname endpoints"
+	@echo "--> kubernetes flavor: no agent egress policy to extend, so no host-model rule either"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set networkPolicy.flavor=kubernetes >/tmp/vkn-mm-k8s.out 2>&1 || { cat /tmp/vkn-mm-k8s.out; exit 1; }
+	@if grep -q 'host model server agents dial' /tmp/vkn-mm-k8s.out; then echo "FAIL: the kubernetes flavor renders a host-model rule it has no agent egress policy for"; exit 1; else echo "ok: kubernetes flavor has no agent host-model rule"; fi
 	@echo "--> oauth2-proxy ingress: only the Gateway's Envoy pods by default; kagent.oauth2ProxyIngress.additionalPeers adds callers on the proxy port"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set 'kagent.oauth2-proxy.enabled=true' >/tmp/vkn-o2p-off.out 2>&1 || { cat /tmp/vkn-o2p-off.out; exit 1; }
 	@awk "/^  name: agent-platform-connectivity-oauth2-proxy-ingress$$/,/^---/" /tmp/vkn-o2p-off.out >/tmp/vkn-o2p-off-pol.out

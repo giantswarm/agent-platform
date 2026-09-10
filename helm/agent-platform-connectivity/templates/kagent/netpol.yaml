@@ -303,6 +303,41 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    {{- /* A host model server is neither on 443 nor HTTPS, so the world rule
+           above does not reach it: an agent whose ModelConfig points at an
+           Ollama, a Lemonade Server or an LM Studio on the host needs its
+           address and port opened explicitly. model-manager's own policy
+           opens the endpoint it manages models through; this is the agent
+           path, at the address the ModelConfigs carry (agentHost, falling
+           back to the endpoint). Renders only for the host backends a
+           configured model-manager actually lists. */ -}}
+    {{- if include "agent-platform.modelManager.enabled" . }}
+    {{- range $server := include "agent-platform.modelManager.agentHostTargets" . | fromJsonArray }}
+    {{- if $server.isIP }}
+    # The {{ $server.backend }} host model server agents dial, an IP endpoint.
+    - toCIDR:
+        - {{ $server.host }}/32
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    {{- else }}
+    # The {{ $server.backend }} host model server agents dial, named by hostname.
+    - toFQDNs:
+        - matchName: {{ $server.host }}
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- end }}
+    {{- end }}
     # muster's OAuth/STS endpoints (well-known + /oauth/token) are served only on
     # the public ingress hostname, which resolves to the internal Envoy LB VIP (a
     # private IP, classified as cluster). The agent's STS token exchange for OBO
