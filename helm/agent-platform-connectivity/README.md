@@ -682,7 +682,7 @@ On the installation, after the cutover:
 | modelServing.runtime.name | string | `"kserve-vllm"` |  |
 | modelServing.runtime.image.registry | string | `"docker.io"` |  |
 | modelServing.runtime.image.name | string | `"vllm/vllm-openai"` |  |
-| modelServing.runtime.image.version | string | `"v0.28.0"` |  |
+| modelServing.runtime.image.version | string | `"v0.29.0"` |  |
 | modelServing.runtime.args[0] | string | `"--model"` |  |
 | modelServing.runtime.args[1] | string | `"/mnt/models"` |  |
 | modelServing.runtime.args[2] | string | `"--port"` |  |
