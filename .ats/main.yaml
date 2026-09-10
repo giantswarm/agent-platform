@@ -10,7 +10,7 @@
 #               so ATS's own pre-test deploy is skipped and the test installs the
 #               candidate itself: prerequisites (Gateway API CRDs, the lab Dex,
 #               an in-cluster registry the archive is pushed to), then
-#               `helm install --wait` with tests/test-values.yaml +
+#               `helm install --wait` with helm/agent-platform/examples/kind-lab-dex.yaml +
 #               tests/ats/values-kagent.yaml + tests/ats/values-round-trips.yaml
 #               and self-management ON against that registry. It asserts what the
 #               install promises (deployed, FluxInstance Ready, component
@@ -33,7 +33,7 @@
 # upgrade stays skipped: the upgrade from the last published chart is not a
 # kind smoke's job here (self-management rolls a running installation forward
 # through its own HelmRelease; the smoke asserts that mechanism's fixpoint).
-app-tests-app-config-file: tests/test-values.yaml
+app-tests-app-config-file: helm/agent-platform/examples/kind-lab-dex.yaml
 app-tests-deploy-namespace: agent-platform
 app-tests-skip-app-deploy: true
 

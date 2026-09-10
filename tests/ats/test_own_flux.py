@@ -44,14 +44,13 @@ import requests
 import yaml
 
 from conftest import (
-    BASE_VALUES,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
-    KAGENT_VALUES,
     NAMESPACE,
     OPERATOR_CRDS,
     REGISTRY_URL,
     RELEASE,
+    SCENARIO,
     TIMINGS,
     Kube,
     condition,
@@ -141,7 +140,7 @@ def assert_no_engine(kube: Kube, crds_untouched: bool = True) -> None:
 def platform_values() -> Dict[str, Any]:
     """The smoke's base values (engine on there) with the engine off: what the
     README's own-Flux HelmRelease inlines."""
-    return load_values([BASE_VALUES, KAGENT_VALUES], ["components.flux.enabled=false"])
+    return load_values(SCENARIO.own_flux_values, ["components.flux.enabled=false"])
 
 
 def meta_helmrelease(version: str, engine: bool) -> List[Dict[str, Any]]:

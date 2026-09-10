@@ -1280,3 +1280,102 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.modelServing.enabled=true 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' | awk '/^      policies:$$/{f=1;next} f&&/^      [a-z]/{f=0} f' | grep -q '^        enabled: false' || { echo "FAIL: policies knob not false on the vanilla render with the switch on"; exit 1; }
 	@echo "ok: switch block forwarded only while on, policies knob resolved"
 	@echo "the standalone's ported wiring verified."
+
+# --- e2e ---------------------------------------------------------------------
+# One ATS scenario against any cluster its kubeconfig points at. The suite is
+# already kubeconfig-driven; this target only packages the chart and hands the
+# scenario its inputs (tests/ats/scenarios.py).
+#
+#   make e2e KUBECONFIG=~/.kube/lab.yaml
+#   make e2e KUBECONFIG=… SCENARIO=functional
+#   make e2e KUBECONFIG=… CLUSTER_TYPE=eks VALUES=helm/agent-platform/examples/managed-cloud-gs.yaml
+#
+# SECRETS AND THE DOMAIN STAY OUT OF THE REPOSITORY. The example files carry
+# placeholders; tests/e2e_overlay.py turns the environment into an overlay,
+# which this target writes to a temporary file that is removed on exit, and it
+# never prints a value.
+SCENARIO ?= smoke
+CLUSTER_TYPE ?= kind
+# The kubeconfig with a leading `~` expanded. zsh leaves the tilde of an
+# argument of the form KUBECONFIG=~/.kube/lab.yaml alone, and the recipe quotes
+# the value, so the shell never expands it either.
+E2E_KUBECONFIG := $(abspath $(subst ~,$(HOME),$(KUBECONFIG)))
+# The version the chart is packaged and installed under. A prerelease keeps a
+# published self HelmRelease from ever matching it.
+E2E_VERSION ?= 3.99.0-dev.local
+E2E_DIST ?= dist
+# The values files of the run, colon-separated, in Helm's order. This REPLACES
+# the smoke's own list, so it must be complete: the kind smoke needs
+# helm/agent-platform/examples/kind-lab-dex.yaml plus tests/ats/values-kagent.yaml
+# and tests/ats/values-round-trips.yaml. Empty (the default) keeps the
+# scenario's list, which is what a kind run wants. The overlay this target
+# writes from the environment is layered after these, whatever they are.
+# SCENARIO=functional installs the first of these files plus
+# tests/ats/values-kagent.yaml, with the overlay last: that scenario's shape is
+# the example with the engine off, not the smoke's round trips.
+VALUES ?=
+# The overlay this target writes from the environment, when any of these is set.
+# None of them is a credential: E2E_IDP_SECRET_NAME and E2E_IDP_CA_SECRET are
+# the NAMES of Secrets already on the cluster. The client secret itself never
+# passes through a command line; it lives in the Secret the chart reads
+# (global.identity.existingSecret) and, for the tests' own logins, in
+# ATS_CLIENT_SECRET in the caller's environment.
+#
+# Each of these names one fact, which the chart and the suite both need: the
+# target derives the suite's ATS_ISSUER_URL, ATS_CLIENT_ID, ATS_IDP_CA_SECRET
+# and — on a cluster type whose muster answers on a hostname — ATS_MUSTER_BASE_URL
+# from them, so the run names the fact once. An ATS_ variable already in the
+# caller's environment wins.
+E2E_DOMAIN ?=
+E2E_ISSUER_URL ?=
+E2E_CLIENT_ID ?=
+E2E_IDP_SECRET_NAME ?=
+E2E_IDP_CA_SECRET ?=
+
+.PHONY: e2e
+e2e: ## Run one ATS scenario against any cluster (KUBECONFIG=… [SCENARIO=smoke|functional] [CLUSTER_TYPE=kind|eks] [VALUES=a.yaml:b.yaml]). Packages the chart first; builds a values overlay from the environment so no secret or domain is committed.
+	@echo "====> $@ (scenario $(SCENARIO), cluster type $(CLUSTER_TYPE))"
+	@test -n "$(KUBECONFIG)" || { echo "FAIL: KUBECONFIG is required, e.g. make e2e KUBECONFIG=~/.kube/lab.yaml"; exit 1; }
+	@test -r "$(E2E_KUBECONFIG)" || { echo "FAIL: cannot read KUBECONFIG=$(KUBECONFIG)"; exit 1; }
+	@mkdir -p $(E2E_DIST)
+	@helm package $(CHART_DIR) --version $(E2E_VERSION) -d $(E2E_DIST) >/dev/null
+	@archive=$(abspath $(E2E_DIST))/agent-platform-$(E2E_VERSION).tgz; \
+	test -f "$$archive" || { echo "FAIL: helm package produced no $$archive"; exit 1; }; \
+	overlay=""; \
+	identity="$(E2E_ISSUER_URL)$(E2E_CLIENT_ID)$(E2E_IDP_SECRET_NAME)$(E2E_IDP_CA_SECRET)"; \
+	if [ -n "$(E2E_DOMAIN)$$identity" ]; then \
+		overlay=$$(mktemp "$${TMPDIR:-/tmp}/agent-platform-e2e-XXXXXX.yaml"); \
+		trap 'rm -f "$$overlay"' EXIT INT TERM; \
+		E2E_DOMAIN="$(E2E_DOMAIN)" \
+		E2E_ISSUER_URL="$(E2E_ISSUER_URL)" \
+		E2E_CLIENT_ID="$(E2E_CLIENT_ID)" \
+		E2E_IDP_SECRET_NAME="$(E2E_IDP_SECRET_NAME)" \
+		E2E_IDP_CA_SECRET="$(E2E_IDP_CA_SECRET)" \
+		python3 $(CURDIR)/tests/e2e_overlay.py > "$$overlay"; \
+		echo "--> values overlay written from the environment ($$(grep -c . "$$overlay") lines; values not printed)"; \
+	fi; \
+	ats_issuer="$${ATS_ISSUER_URL:-$(E2E_ISSUER_URL)}"; \
+	ats_client="$${ATS_CLIENT_ID:-$(E2E_CLIENT_ID)}"; \
+	ats_ca="$${ATS_IDP_CA_SECRET:-$(E2E_IDP_CA_SECRET)}"; \
+	ats_muster="$${ATS_MUSTER_BASE_URL:-}"; \
+	if [ -z "$$ats_muster" ] && [ -n "$(E2E_DOMAIN)" ] && [ "$(CLUSTER_TYPE)" != "kind" ]; then \
+		ats_muster="https://muster.$(E2E_DOMAIN)"; \
+	fi; \
+	cd tests/ats && uv sync --quiet && \
+	KUBECONFIG="$(E2E_KUBECONFIG)" \
+	ATS_CHART_PATH="$$archive" \
+	ATS_CHART_VERSION=$(E2E_VERSION) \
+	ATS_CLUSTER_TYPE=$(CLUSTER_TYPE) \
+	ATS_OVERLAY_VALUES="$$overlay" \
+	ATS_VALUES="$(VALUES)" \
+	ATS_ISSUER_URL="$$ats_issuer" \
+	ATS_CLIENT_ID="$$ats_client" \
+	ATS_IDP_CA_SECRET="$$ats_ca" \
+	ATS_MUSTER_BASE_URL="$$ats_muster" \
+	uv run pytest -m $(SCENARIO) --log-cli-level info -o log_cli=true
+
+.PHONY: verify-scenarios
+verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and the `make e2e` values overlay (tests/e2e_overlay.py) offline: the kind and eks defaults, every refusal naming its variable, the derived muster base URL, the base-URL --set, and the overlay's shapes.
+	@echo "====> $@"
+	@python3 tests/verify-scenarios.py
+	@echo "the ATS scenario inputs verified."

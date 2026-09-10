@@ -217,7 +217,7 @@ def main(chart: str) -> int:
     print(f"ok: engine on, self on — OCIRepository ({derived}), suspended HelmRelease as {TENANT_SA}, {SELF_SA} with a Role, hooks at -6/-5 (pre-delete) and 0 (post-install/-upgrade), policy + binding {POLICY}")
 
     # --- engine ON, self OFF: the hand-back / lab render
-    for label, flags in (("self off", [*ci, *SELF_OFF, "--include-crds"]), ("tests/test-values.yaml", ["-f", f"{chart}/../../tests/test-values.yaml", "--include-crds"])):
+    for label, flags in (("self off", [*ci, *SELF_OFF, "--include-crds"]), ("examples/kind-lab-dex.yaml", ["-f", f"{chart}/examples/kind-lab-dex.yaml", "--include-crds"])):
         off_manifest = helm(chart, flags)
         soff = docs(off_manifest)
         if self_objects(soff):

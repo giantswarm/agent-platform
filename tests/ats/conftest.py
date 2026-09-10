@@ -22,12 +22,22 @@ kubeconfig. Helm 4 and kubectl come with the ATS image. What the smoke leaves on
 the cluster is what the functional scenario expects to find (the lab Dex, the
 registry with the chart, the four operator CRDs).
 
-Local run (a throwaway kind cluster; the lab URLs carry fixed ports, so 5554 and
-8090 must be free — ATS_MUSTER_PORT picks another muster port, see lab-dex.yaml):
+The suite runs against whatever cluster its kubeconfig points at. What differs
+per cluster — the values files, the identity provider, how muster is reached,
+the budgets — is a ``scenarios.Scenario``, and every field defaults to the kind
+lab value, so a run that sets nothing behaves as the CI job does. See
+scenarios.py and README.md.
+
+Local run (a throwaway kind cluster; the lab URLs carry their ports, so the lab
+Dex port and the muster port must be free — ATS_ISSUER_PORT and ATS_MUSTER_PORT
+move them, see scenarios.py and lab-dex.yaml):
 
   helm package helm/agent-platform --version 3.99.0-dev.local -d dist
   cd tests/ats && KUBECONFIG=… ATS_CHART_PATH=$PWD/../../dist/agent-platform-3.99.0-dev.local.tgz \
     ATS_CHART_VERSION=3.99.0-dev.local ATS_CLUSTER_TYPE=kind uv run pytest -m smoke --log-cli-level info
+
+`make e2e KUBECONFIG=… VALUES=… SCENARIO=…` packages the chart and runs one
+scenario against any cluster; see README.md.
 """
 
 import base64
@@ -51,10 +61,10 @@ import requests
 import yaml
 from pytest_helm_charts.clusters import Cluster
 
-logger = logging.getLogger(__name__)
+import scenarios
+from scenarios import ATS_DIR, LOOPBACK, MUSTER_SERVICE_PORT, REPO_ROOT, Scenario
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-ATS_DIR = Path(__file__).resolve().parent
+logger = logging.getLogger(__name__)
 
 RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
@@ -76,37 +86,29 @@ GATEWAY_API_CRDS = (
     "v1.5.0/standard-install.yaml"
 )
 
-# Values: the lab shape (tests/test-values.yaml, also the third fleet-render
-# shape), the kagent runtime and the round trips layered over it.
-BASE_VALUES = REPO_ROOT / "tests" / "test-values.yaml"
-KAGENT_VALUES = ATS_DIR / "values-kagent.yaml"
-ROUND_TRIP_VALUES = ATS_DIR / "values-round-trips.yaml"
-SMOKE_VALUES = [BASE_VALUES, KAGENT_VALUES, ROUND_TRIP_VALUES]
+# The scenario of this run: the values files, the identity provider, how muster
+# is reached and the budgets, defaulting to the kind lab (scenarios.py).
+SCENARIO: Scenario = scenarios.load()
+logger.info("%s", scenarios.summary(SCENARIO))
 
-# The lab Dex (tests/ats/lab-dex.yaml). Public lab credentials by design.
-LAB_DEX_MANIFEST = ATS_DIR / "lab-dex.yaml"
-DEX_ISSUER = "https://dex.127.0.0.1.nip.io:5554"
-DEX_PORT = 5554
-DEX_USER = "admin@example.com"
-DEX_PASSWORD = "password"
-CLIENT_ID = "agent-platform"
-CLIENT_SECRET = "lab-only-agent-platform-client-secret"
-REGISTRATION_TOKEN = "lab-only-registration-token"
+# The smoke's values files. The own-Flux scenario builds its own shorter list
+# from the same scenario (SCENARIO.own_flux_values).
+SMOKE_VALUES = SCENARIO.values_files
+LAB_DEX_MANIFEST = scenarios.LAB_DEX_MANIFEST
+# The tests that log in need a static user (the password grant and the login
+# form). A scenario whose identity provider has none skips them.
+REQUIRES_STATIC_USER = pytest.mark.skipif(
+    not SCENARIO.user,
+    reason="the scenario names no static user: set ATS_IDP_USER and ATS_IDP_PASSWORD to run the logins")
+
 # The cross-client audience the platform's agent-manager MCPServer requires on
 # the token muster forwards (agent-manager.muster.mcpServer.auth.requiredAudiences).
 CROSS_CLIENT_AUDIENCE = "dex-k8s-authenticator"
 LOGIN_SCOPES = f"openid profile email groups audience:server:client_id:{CROSS_CLIENT_AUDIENCE}"
-# muster's OAuth base URL in the smoke values: a loopback address, reached
-# through the port-forward to svc/muster. The port is part of the URL, so it is
-# the same inside the values and outside: 8090 in CI (tests/ats/values-round-trips.yaml);
-# ATS_MUSTER_PORT=18090 on a developer machine where 8090 is taken (the lab Dex
-# client lists both callbacks, and the install then overrides the base URL).
-MUSTER_PORT = int(os.environ.get("ATS_MUSTER_PORT", "8090"))
-MUSTER_BASE_URL = f"http://localhost:{MUSTER_PORT}"
-MUSTER_BASE_URL_SETS = [] if MUSTER_PORT == 8090 else [f"muster.muster.oauth.server.baseUrl={MUSTER_BASE_URL}"]
-# Loopback redirect target of the smoke's OAuth client. Never served: the flow
-# stops at the redirect and parses the code from Location.
-CALLBACK = "http://127.0.0.1:18763/callback"
+# muster's own base URL must equal the one the tests call: its OAuth metadata
+# echoes it. Empty when the values files already carry that URL.
+MUSTER_BASE_URL = SCENARIO.muster_base_url
+MUSTER_BASE_URL_SETS = scenarios.base_url_sets(SCENARIO)
 
 # The in-cluster registry (tests/ats/registry.yaml).
 REGISTRY_MANIFEST = ATS_DIR / "registry.yaml"
@@ -114,14 +116,10 @@ REGISTRY_NAMESPACE = "registry"
 REGISTRY_PORT = 5000
 REGISTRY_URL = f"oci://registry.{REGISTRY_NAMESPACE}.svc.cluster.local:{REGISTRY_PORT}/charts"
 
-INSTALL_TIMEOUT = "12m"
-UNINSTALL_TIMEOUT = "5m"
-# The ordered teardown's budget. Measured: 12–16 s with muster + dicebear +
-# connectivity (the shape PRD Q9's "under a minute" was measured on), ~65 s
-# with kagent and agent-manager on — the long pole is the kagent namespace's
-# termination (the connectivity release owns the Namespace, its pods and PVC go
-# with it), which the teardown hook waits for.
-UNINSTALL_BUDGET_S = 120
+INSTALL_TIMEOUT = SCENARIO.install_timeout
+UNINSTALL_TIMEOUT = SCENARIO.uninstall_timeout
+UNINSTALL_BUDGET_S = SCENARIO.uninstall_budget_s
+READY_TIMEOUT_S = SCENARIO.ready_timeout_s
 # Self-management in the smoke: the chart's own OCIRepository follows the
 # in-cluster registry the candidate was pushed to, at the candidate's exact
 # version. Exact, not the chart's derived range: a branch build carries a
@@ -282,7 +280,8 @@ class Kube:
         st = d.get("status", {})
         return st.get("observedGeneration", 0) >= d["metadata"]["generation"] and st.get("readyReplicas", 0) >= max(d["spec"].get("replicas", 1), 1)
 
-    def wait_deployment(self, namespace: str, name: str, timeout: float = 600) -> None:
+    def wait_deployment(self, namespace: str, name: str, timeout: Optional[float] = None) -> None:
+        timeout = READY_TIMEOUT_S if timeout is None else timeout
         wait_for(f"Deployment {namespace}/{name} Ready", lambda: self.deployment_ready(namespace, name), timeout)
 
     def logs(self, namespace: str, target: str, tail: int = 80) -> str:
@@ -459,7 +458,7 @@ class PortForward:
         while time.monotonic() < deadline:
             self._raise_if_exited()
             try:
-                with socket.create_connection(("127.0.0.1", self.local_port), timeout=2):
+                with socket.create_connection((LOOPBACK, self.local_port), timeout=2):
                     pass
             except OSError:
                 time.sleep(1)
@@ -478,7 +477,7 @@ class PortForward:
             err = (self._proc.stderr.read() if self._proc.stderr else "")[:500]
             raise AssertionError(
                 f"port-forward to {self.namespace}/{self.service} on local port {self.local_port} exited with {self._proc.returncode}: {err}\n"
-                f"(a process already listening on {self.local_port}? the lab URLs carry the port — free it, or set ATS_MUSTER_PORT / ATS_DEX_PORT to a free one)")
+                f"(a process already listening on {self.local_port}? the scenario's URLs carry the port — free it, or move it with ATS_MUSTER_PORT / ATS_ISSUER_PORT)")
 
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -511,14 +510,20 @@ def wait_for_endpoints(kube: Kube, namespace: str, service: str, timeout: float 
 # ---------------------------------------------------------------------------
 
 
-def dex_password_grant(ca_path: str, scope: str = LOGIN_SCOPES, user: str = DEX_USER, password: str = DEX_PASSWORD) -> str:
-    """The OAuth password grant against the lab Dex (oauth2.passwordConnector:
-    local); returns the raw id_token — headless CI login in one request."""
+def dex_password_grant(ca_path: Optional[str], scope: str = LOGIN_SCOPES,
+                       user: Optional[str] = None, password: Optional[str] = None) -> str:
+    """The OAuth password grant against the scenario's issuer (the lab Dex runs
+    with oauth2.passwordConnector: local); returns the raw id_token — a headless
+    login in one request. ca_path None means the system trust store, and a user
+    or a password of None means the scenario's own."""
     r = requests.post(
-        f"{DEX_ISSUER}/token",
-        auth=(CLIENT_ID, CLIENT_SECRET),
-        data={"grant_type": "password", "username": user, "password": password, "scope": scope},
-        verify=ca_path, timeout=30,
+        f"{SCENARIO.issuer_url}/token",
+        auth=(SCENARIO.client_id, SCENARIO.client_secret),
+        data={"grant_type": "password",
+              "username": SCENARIO.user if user is None else user,
+              "password": SCENARIO.password if password is None else password,
+              "scope": scope},
+        verify=ca_path or True, timeout=30,
     )
     assert r.status_code == 200, f"Dex password grant failed: {r.status_code} {r.text[:300]}"
     token = r.json().get("id_token")
@@ -670,15 +675,17 @@ def unauthenticated_mcp_challenge(base_url: str) -> Dict[str, Any]:
     return meta
 
 
-def login_through_muster(base_url: str, ca_path: str) -> str:
-    """The full muster OAuth flow with a lab Dex static user, headless: RFC 7591
-    dynamic client registration (with the lab registration token), the
-    authorization code + PKCE dance, the Dex login form — the same path a
-    browser login takes, minus the browser. Returns muster's access token."""
+def login_through_muster(base_url: str, ca_path: Optional[str]) -> str:
+    """The full muster OAuth flow with a static user, headless: RFC 7591
+    dynamic client registration (with the scenario's registration token), the
+    authorization code + PKCE dance, the identity provider's login form — the
+    same path a browser login takes, minus the browser. Returns muster's access
+    token."""
+    callback = SCENARIO.callback
     r = requests.post(
         f"{base_url}/oauth/register",
-        headers={"Authorization": f"Bearer {REGISTRATION_TOKEN}"},
-        json={"client_name": "ats-smoke", "redirect_uris": [CALLBACK], "token_endpoint_auth_method": "client_secret_basic",
+        headers={"Authorization": f"Bearer {SCENARIO.registration_token}"},
+        json={"client_name": "ats-smoke", "redirect_uris": [callback], "token_endpoint_auth_method": "client_secret_basic",
               "grant_types": ["authorization_code"], "response_types": ["code"]},
         timeout=30,
     )
@@ -689,14 +696,14 @@ def login_through_muster(base_url: str, ca_path: str) -> str:
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     state = secrets.token_urlsafe(24)  # muster rejects a state shorter than 24 characters
     session = requests.Session()
-    session.verify = ca_path  # the lab CA for Dex; ignored on muster's plain-HTTP base URL
+    session.verify = ca_path or True  # the issuer's CA when it has one, else the system store
     url = f"{base_url}/oauth/authorize?" + urlencode({
-        "response_type": "code", "client_id": client_id, "redirect_uri": CALLBACK, "state": state,
+        "response_type": "code", "client_id": client_id, "redirect_uri": callback, "state": state,
         "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups"})
-    # Walk the redirects by hand: muster -> Dex -> login form -> (approval
-    # skipped) -> muster callback -> our loopback redirect, never fetched.
+    # Walk the redirects by hand: muster -> the issuer -> login form ->
+    # (approval skipped) -> muster callback -> the redirect URI, never fetched.
     for _ in range(15):
-        if url.startswith(CALLBACK):
+        if url.startswith(callback):
             break
         r = session.get(url, allow_redirects=False, timeout=30)
         if r.status_code in (301, 302, 303, 307, 308):
@@ -706,8 +713,8 @@ def login_through_muster(base_url: str, ca_path: str) -> str:
         action = re.search(r'action="([^"]+)"', r.text)
         assert action, f"no form to submit on {url}: {r.text[:300]}"
         post_url = urljoin(url, html.unescape(action.group(1)))
-        r = session.post(post_url, data={"login": DEX_USER, "password": DEX_PASSWORD}, allow_redirects=False, timeout=30)
-        assert r.status_code in (302, 303), f"Dex login failed: {r.status_code} {r.text[:300]}"
+        r = session.post(post_url, data={"login": SCENARIO.user, "password": SCENARIO.password}, allow_redirects=False, timeout=30)
+        assert r.status_code in (302, 303), f"the login form was refused: {r.status_code} {r.text[:300]}"
         url = urljoin(post_url, r.headers["Location"])
     else:
         raise AssertionError(f"OAuth flow never reached the redirect URI: {url}")
@@ -716,7 +723,7 @@ def login_through_muster(base_url: str, ca_path: str) -> str:
     assert "code" in query, f"authorization did not yield a code: {url}"
     r = requests.post(
         f"{base_url}/oauth/token", auth=(client_id, client_secret),
-        data={"grant_type": "authorization_code", "code": query["code"][0], "redirect_uri": CALLBACK,
+        data={"grant_type": "authorization_code", "code": query["code"][0], "redirect_uri": callback,
               "client_id": client_id, "code_verifier": verifier},
         timeout=30,
     )
@@ -724,9 +731,10 @@ def login_through_muster(base_url: str, ca_path: str) -> str:
     return r.json()["access_token"]
 
 
-def wait_for_muster_healthy(base_url: str, timeout: float = 600) -> None:
-    """muster's OAuth server answers 503 until OIDC discovery against the lab
-    Dex succeeds (CoreDNS rewrite, TLS, the CA) — poll /health until ok."""
+def wait_for_muster_healthy(base_url: str, timeout: Optional[float] = None) -> None:
+    """muster's OAuth server answers 503 until OIDC discovery against the
+    issuer succeeds (DNS, TLS, the CA) — poll /health until ok."""
+    timeout = READY_TIMEOUT_S if timeout is None else timeout
     def ok() -> bool:
         r = requests.get(f"{base_url}/health", timeout=10)
         return r.ok and r.json().get("status") == "ok"
@@ -785,9 +793,10 @@ def candidate_version(helm: Helm, chart_archive: Path, chart_version: str) -> st
 @pytest.fixture(scope="module")
 def prerequisites(kube: Kube) -> None:
     """The cluster prerequisites, the quick start's order, idempotent: the
-    Gateway API CRDs (the one prerequisite the chart does not bring), the lab
-    Dex with its certificate Job, then CoreDNS restarted so the rewrite is
-    live before muster resolves the issuer."""
+    Gateway API CRDs (the one prerequisite the chart does not bring) and, when
+    the scenario installs it, the lab Dex with its certificate Job, followed by
+    a CoreDNS restart so the rewrite is live before muster resolves the issuer.
+    A cluster that brings its own identity provider installs neither."""
     started = time.monotonic()
     kube.apply_file(GATEWAY_API_CRDS)
     # The ATS image applies the CRD families a Giant Swarm cluster serves
@@ -798,29 +807,40 @@ def prerequisites(kube: Kube) -> None:
     # clusters have. ATS creates it on its own deploy path; the smoke installs
     # the chart itself, so it creates it too (the standalone smoke did the same).
     kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "policy-exceptions"}})
-    kube.apply_file(str(LAB_DEX_MANIFEST))
-    kube.cmd(["-n", NAMESPACE, "wait", "--for=condition=complete", "--timeout=300s", "job/lab-dex-cert-gen"])
-    kube.cmd(["-n", "kube-system", "rollout", "restart", "deployment", "coredns"])
-    kube.cmd(["-n", "kube-system", "rollout", "status", "deployment", "coredns", "--timeout=120s"])
-    kube.wait_deployment(NAMESPACE, "lab-dex", timeout=300)
+    if SCENARIO.install_lab_dex:
+        kube.apply_file(str(LAB_DEX_MANIFEST))
+        kube.cmd(["-n", NAMESPACE, "wait", "--for=condition=complete", "--timeout=300s", "job/lab-dex-cert-gen"])
+        kube.cmd(["-n", "kube-system", "rollout", "restart", "deployment", "coredns"])
+        kube.cmd(["-n", "kube-system", "rollout", "status", "deployment", "coredns", "--timeout=120s"])
+        kube.wait_deployment(NAMESPACE, "lab-dex", timeout=300)
     TIMINGS.record("prerequisites (Gateway API CRDs, lab Dex, CoreDNS)", time.monotonic() - started)
 
 
 @pytest.fixture(scope="module")
-def dex_ca(kube: Kube, prerequisites: None, tmp_path_factory: pytest.TempPathFactory) -> str:
-    """The lab CA, for the test's own TLS connections to Dex."""
-    secret = kube.get("secret", "agent-platform-idp-ca", namespace=NAMESPACE)
-    assert secret, "the lab CA Secret agent-platform-idp-ca is missing"
-    path = tmp_path_factory.mktemp("lab-ca") / "ca.crt"
+def dex_ca(kube: Kube, prerequisites: None, tmp_path_factory: pytest.TempPathFactory) -> Optional[str]:
+    """The issuer's CA, for the test's own TLS connections to it: the Secret the
+    scenario names, in the release namespace. None when the scenario names no
+    Secret, i.e. the issuer is served by a publicly trusted certificate and the
+    test uses its system trust store."""
+    if not SCENARIO.ca_secret:
+        return None
+    secret = kube.get("secret", SCENARIO.ca_secret, namespace=NAMESPACE)
+    assert secret, f"the issuer CA Secret {SCENARIO.ca_secret} is missing from namespace {NAMESPACE}"
+    path = tmp_path_factory.mktemp("idp-ca") / "ca.crt"
     path.write_bytes(base64.b64decode(secret["data"]["ca.crt"]))
     return str(path)
 
 
 @pytest.fixture(scope="module")
-def dex_forward(kube: Kube, prerequisites: None) -> Iterator[PortForward]:
-    """https://dex.127.0.0.1.nip.io:5554 from the test: the port-forward on the issuer's port."""
+def dex_forward(kube: Kube, prerequisites: None) -> Iterator[Optional[PortForward]]:
+    """The scenario's issuer URL, answerable from the test. With the lab Dex the
+    issuer URL is a loopback name carrying its port, so a port-forward on that
+    same port serves it; an issuer the cluster already publishes needs none."""
+    if not SCENARIO.install_lab_dex:
+        yield None
+        return
     wait_for_endpoints(kube, NAMESPACE, "lab-dex")
-    pf = PortForward(kube.kubeconfig, NAMESPACE, "lab-dex", DEX_PORT, DEX_PORT).start()
+    pf = PortForward(kube.kubeconfig, NAMESPACE, "lab-dex", SCENARIO.issuer_port, SCENARIO.issuer_port).start()
     yield pf
     pf.stop()
 
@@ -836,10 +856,15 @@ def registry(kube: Kube) -> str:
 
 
 @pytest.fixture(scope="module")
-def muster_forward(kube: Kube) -> Iterator[PortForward]:
-    """http://localhost:<MUSTER_PORT> from the test: muster's OAuth base URL."""
+def muster_forward(kube: Kube) -> Iterator[Optional[PortForward]]:
+    """muster's base URL, answerable from the test. The scenario says how it is
+    reached: a port-forward to svc/muster on the port the URL carries, or a real
+    hostname served through the Gateway, which needs no forward."""
+    if not SCENARIO.via_port_forward:
+        yield None
+        return
     wait_for_endpoints(kube, NAMESPACE, "muster")
-    pf = PortForward(kube.kubeconfig, NAMESPACE, "muster", MUSTER_PORT, 8090).start()
+    pf = PortForward(kube.kubeconfig, NAMESPACE, "muster", SCENARIO.muster_port, MUSTER_SERVICE_PORT).start()
     yield pf
     pf.stop()
 
@@ -855,7 +880,7 @@ def pushed_chart(kube: Kube, helm: Helm, registry: str, chart_archive: Path, can
     pf = PortForward(kube.kubeconfig, REGISTRY_NAMESPACE, "registry", REGISTRY_PORT, REGISTRY_PORT).start()
 
     def tags(name: str) -> List[str]:
-        r = requests.get(f"http://127.0.0.1:{REGISTRY_PORT}/v2/charts/{name}/tags/list", timeout=30)
+        r = requests.get(f"http://{LOOPBACK}:{REGISTRY_PORT}/v2/charts/{name}/tags/list", timeout=30)
         return (r.json().get("tags") or []) if r.status_code == 200 else []
 
     try:
@@ -865,7 +890,7 @@ def pushed_chart(kube: Kube, helm: Helm, registry: str, chart_archive: Path, can
                 continue
             if archive is None:
                 archive = helm.package(CONNECTIVITY_CHART_DIR, candidate_version, tmp_path_factory.mktemp("connectivity"))
-            helm.push(archive, f"oci://127.0.0.1:{REGISTRY_PORT}/charts")
+            helm.push(archive, f"oci://{LOOPBACK}:{REGISTRY_PORT}/charts")
             assert candidate_version in tags(name), f"pushed tag of {name} not listed"
     finally:
         pf.stop()
