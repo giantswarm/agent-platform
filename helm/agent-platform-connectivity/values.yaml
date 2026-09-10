@@ -1456,7 +1456,12 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway
-      tag: v1.5.0
+      # A release of the Giant Swarm line of agentgateway
+      # (github.com/giantswarm/agentgateway-upstream, FORK.md: upstream v1.5.0
+      # rebuilt, scanned and signed there, mirrored into gsoci by the retagger)
+      # — the same release the giantswarm/agentgateway packaging chart pins for
+      # the controller; move both together.
+      tag: v1.5.1-gs.1
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
