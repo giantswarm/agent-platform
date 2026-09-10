@@ -58,6 +58,11 @@ NEW = {
     ),
 }
 
+# The wiring chart's range: released off the same tag as the meta chart and
+# re-resolved by every installation's Flux, so it stays below the next major --
+# the kagent API v2 line must not reach a 3.x installation ahead of its cut-over.
+CONNECTIVITY_RANGE = ">=1.0.0 <4.0.0"
+
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
     "agent-platform-connectivity": ["muster", "cloudnative-pg", "kserve-resources"],
@@ -150,6 +155,12 @@ def main(meta: str, connectivity: str) -> int:
             if dangling:
                 fail(f"{name} dependsOn {dangling} while those components are off (would block forever)")
     print("ok: the seven are off by default — no release, no dangling dependsOn, roster says false, blocks forwarded")
+
+    # --- the wiring chart's range is bounded below the next major ------------------
+    conn_oci = off.get(("OCIRepository", "agent-platform-connectivity"))
+    if not conn_oci or f'semver: "{CONNECTIVITY_RANGE}"' not in conn_oci:
+        fail(f"the connectivity OCIRepository does not carry versionRange {CONNECTIVITY_RANGE!r}: the 3.x line must not follow the wiring chart into the next major (kagent API v2), which every installation re-resolves on each reconcile")
+    print(f"ok: the connectivity range is {CONNECTIVITY_RANGE} -- bounded below the next major")
 
     # --- all on ---------------------------------------------------------------
     on_manifest = render(meta, [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]])
