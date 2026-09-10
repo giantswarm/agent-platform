@@ -1433,8 +1433,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # Harnesses (kagent main has no skills-init image any more).
     agentImage:
       repository: giantswarm/kagent/golang-adk
-    # Agent Substrate (kagent-dev/substrate 0.0.26), a cluster prerequisite on
-    # this line: agents run as Substrate actors in gVisor worker pods, so the
+    # Agent Substrate — the Giant Swarm line of kagent-dev/substrate
+    # (giantswarm/substrate, branch giantswarm: upstream 0.0.26 plus
+    # cherry-picked fixes, published as ghcr.io/giantswarm/substrate; its
+    # FORK.md is the ledger) — a cluster prerequisite on this line: agents run
+    # as Substrate actors in gVisor worker pods, so the
     # controller talks to ate-api (with its PodCertificate client certificate)
     # and routes through atenet; every Harness names a WorkerPool of the kagent
     # namespace — the one substrateWorkerPool below creates. Substrate itself
@@ -1484,15 +1487,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # The Substrate WorkerPool (ate.dev/v1alpha1) the Harnesses run on, rendered
   # by the kagent chart in the kagent namespace: platform capacity, not an
-  # agent's. workerImage is the gVisor worker of the Substrate release the
-  # cluster runs (the chart requires it when create is true); sandboxClass
-  # gvisor is what kagent's generated ActorTemplates select. Four workers is
-  # the POC's sizing; raise replicas for more concurrent agents.
+  # agent's. workerImage is the gVisor worker of the Substrate version the
+  # cluster runs — the line's image, tagged with the bare version the fork
+  # publishes (agentlab installs the same version; a re-pin of the line moves
+  # both together) — and the chart requires it when create is true;
+  # sandboxClass gvisor is what kagent's generated ActorTemplates select. Four
+  # workers is the POC's sizing; raise replicas for more concurrent agents.
   substrateWorkerPool:
     create: true
     name: kagent-default
     replicas: 4
-    workerImage: ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.26
+    workerImage: ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-dev.giantswarm.2026-09-10.19-33-37.h734ec53
     sandboxClass: gvisor
 
   ui:

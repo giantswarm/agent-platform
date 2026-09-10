@@ -128,7 +128,11 @@ UNINSTALL_BUDGET_S = 120
 # prerelease version (3.19.1-dev.<branch>.<date>.h<sha>, abs), and Masterminds
 # semver — Flux's — never matches a prerelease against a release-only bound
 # (`>=X <4.0.0`), so the derived range would find no tag. A released chart
-# has no prerelease; verify-self asserts the derived range offline.
+# has no prerelease; verify-self asserts the derived range offline. The exact
+# pin also clears the chart's semverFilter: a dev line's default filter admits
+# one branch's builds (`.*-dev\.<branch>\..*`), and the candidate of a pull
+# request against that line carries its own branch name, so an exact pin
+# behind the filter matches nothing (the README's BOM example says the same).
 SELF_INTERVAL = "1m"
 SELF_INTERVAL_S = 60
 
@@ -140,6 +144,7 @@ def self_management_sets(version: str) -> List[str]:
         "gitops.self.insecure=true",
         f"gitops.self.interval={SELF_INTERVAL}",
         f"gitops.self.versionRange={version}",
+        "gitops.self.semverFilter=",
     ]
 
 
@@ -155,12 +160,13 @@ def connectivity_sets(version: str) -> List[str]:
     return [
         f"components.{CONNECTIVITY}.repository={REGISTRY_URL}",
         f"components.{CONNECTIVITY}.versionRange={version}",
+        f"components.{CONNECTIVITY}.semverFilter=",
         f"components.{CONNECTIVITY}.insecure=true",
     ]
 
 
 def connectivity_values(version: str) -> Dict[str, Any]:
-    return {"components": {CONNECTIVITY: {"repository": REGISTRY_URL, "versionRange": version, "insecure": True}}}
+    return {"components": {CONNECTIVITY: {"repository": REGISTRY_URL, "versionRange": version, "semverFilter": "", "insecure": True}}}
 
 # ---------------------------------------------------------------------------
 # Processes, waiting, timing
