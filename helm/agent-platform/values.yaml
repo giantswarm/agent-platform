@@ -1420,9 +1420,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # tag, a silent ImagePullBackOff. A new kagent build re-pins this tag AND
   # the two Harness digests below in one commit (the chart follows the branch
   # through components.kagent; the images are pinned here). This is the fork's
-  # build of 2026-09-09 (commit 7ae93c5; `crane ls
+  # build of 2026-09-10 (commit c231bd6; `crane ls
   # ghcr.io/giantswarm/kagent/controller` lists the builds).
-  tag: "0.11.0-dev.poc-agent-platform.2026-09-09.21-33-35.h7ae93c5"
+  tag: "0.11.0-dev.poc-agent-platform.2026-09-10.20-29-02.hc231bd6"
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
   # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
   # must stay allowed.
@@ -1891,7 +1891,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   harnesses:
     - name: kagent
       type: kagent
-      image: ghcr.io/giantswarm/kagent/golang-adk@sha256:749e34bfb8314604f27946b85328e0cf7509a36d2a76a90ba279d3fab0d0a49a
+      image: ghcr.io/giantswarm/kagent/golang-adk@sha256:99b7b816f0d0b8d846d821587ef79772360b5a1bdcfda01c95b34637dd41fc7e
       env:
         # The Go ADK re-emits the caller's bearer on its MCP calls, so muster
         # sees the person, not the agent.
@@ -1901,7 +1901,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       snapshotLocation: s3://ate-snapshots/kagent
     - name: claude
       type: claude
-      image: ghcr.io/giantswarm/kagent/claude-harness@sha256:f5dd111a06743b9cd9aabac0cb5e6fc7ccbae6168eaccd24d577999eea953589
+      image: ghcr.io/giantswarm/kagent/claude-harness@sha256:4c7cd4b7767b4d05c1877a36b944265f723c6e6f0cd720c2b43c619cf42b192d
       workerPool: kagent-default
       snapshotLocation: s3://ate-snapshots/claude
 

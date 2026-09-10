@@ -401,7 +401,7 @@ This chart version is a build of the `poc/kagent-main` branch — the kagent API
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"ghcr.io"` |  |
-| kagent.tag | string | `"0.11.0-dev.poc-agent-platform.2026-09-09.21-33-35.h7ae93c5"` |  |
+| kagent.tag | string | `"0.11.0-dev.poc-agent-platform.2026-09-10.20-29-02.hc231bd6"` |  |
 | kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
 | kagent.controller.agentImage.repository | string | `"giantswarm/kagent/golang-adk"` |  |
 | kagent.controller.substrate.enabled | bool | `true` |  |
@@ -537,14 +537,14 @@ This chart version is a build of the `poc/kagent-main` branch — the kagent API
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
 | kagent.harnesses[0].name | string | `"kagent"` |  |
 | kagent.harnesses[0].type | string | `"kagent"` |  |
-| kagent.harnesses[0].image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:749e34bfb8314604f27946b85328e0cf7509a36d2a76a90ba279d3fab0d0a49a"` |  |
+| kagent.harnesses[0].image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:99b7b816f0d0b8d846d821587ef79772360b5a1bdcfda01c95b34637dd41fc7e"` |  |
 | kagent.harnesses[0].env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
 | kagent.harnesses[0].env[0].value | string | `"true"` |  |
 | kagent.harnesses[0].workerPool | string | `"kagent-default"` |  |
 | kagent.harnesses[0].snapshotLocation | string | `"s3://ate-snapshots/kagent"` |  |
 | kagent.harnesses[1].name | string | `"claude"` |  |
 | kagent.harnesses[1].type | string | `"claude"` |  |
-| kagent.harnesses[1].image | string | `"ghcr.io/giantswarm/kagent/claude-harness@sha256:f5dd111a06743b9cd9aabac0cb5e6fc7ccbae6168eaccd24d577999eea953589"` |  |
+| kagent.harnesses[1].image | string | `"ghcr.io/giantswarm/kagent/claude-harness@sha256:4c7cd4b7767b4d05c1877a36b944265f723c6e6f0cd720c2b43c619cf42b192d"` |  |
 | kagent.harnesses[1].workerPool | string | `"kagent-default"` |  |
 | kagent.harnesses[1].snapshotLocation | string | `"s3://ate-snapshots/claude"` |  |
 | kagent.modelConfigs | list | `[]` |  |
