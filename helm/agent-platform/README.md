@@ -49,7 +49,7 @@ README.
 | gitops.serviceAccountName | string | `""` |  |
 | gitops.hooks.image.registry | string | `"registry.k8s.io"` |  |
 | gitops.hooks.image.repository | string | `"kubectl"` |  |
-| gitops.hooks.image.tag | string | `"v1.37.0"` |  |
+| gitops.hooks.image.tag | string | `"v1.37.1"` |  |
 | gitops.hooks.helmImage.registry | string | `"docker.io"` |  |
 | gitops.hooks.helmImage.repository | string | `"alpine/k8s"` |  |
 | gitops.hooks.helmImage.tag | string | `"1.37.0"` |  |
