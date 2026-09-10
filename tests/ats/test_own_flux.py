@@ -54,11 +54,10 @@ import yaml
 
 from conftest import (
     AGENT_CHART_SEMVER,
-    Abort,
     AGENT_CHART_URL,
     ATE_NAMESPACE,
+    Abort,
     BASE_VALUES,
-    PODCERT_NAMESPACE,
     HARNESS,
     HARNESS_LABEL,
     INSTALL_TIMEOUT,
@@ -66,15 +65,17 @@ from conftest import (
     KAGENT_NAMESPACE,
     KAGENT_VALUES,
     KEPT_CRDS,
+    Kube,
     MODEL_CONFIG,
     NAMESPACE,
     OPERATOR_CRDS,
+    PODCERT_NAMESPACE,
     REGISTRY_URL,
     RELEASE,
     SANDBOX_CONFIG,
+    SCENARIO,
     TIMINGS,
     TOOLSET,
-    Kube,
     apply_placeholder_provider_secret,
     assert_kept_crds,
     assert_remote_mcp_server,
@@ -181,7 +182,7 @@ def assert_no_engine(kube: Kube, crds_untouched: bool = True) -> None:
 def platform_values() -> Dict[str, Any]:
     """The smoke's base values (engine on there) with the engine off: what the
     README's own-Flux HelmRelease inlines."""
-    return load_values([BASE_VALUES, KAGENT_VALUES], ["components.flux.enabled=false"])
+    return load_values(SCENARIO.own_flux_values, ["components.flux.enabled=false"])
 
 
 def meta_helmrelease(version: str, engine: bool) -> List[Dict[str, Any]]:
