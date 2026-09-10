@@ -312,6 +312,20 @@ llmRouting:
       expression: source.unverifiedWorkload.serviceAccount
     - name: agent_namespace
       expression: source.unverifiedWorkload.namespace
+  # A MutatingAdmissionPolicy that sends a ModelConfig this chart does NOT
+  # render through the LLM listener — one created by Backstage, agent-manager or
+  # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs
+  # below), so the policy never touches them. It writes only when the provider
+  # matches llmRouting.backend.provider and the baseUrl is absent. An object that
+  # names its own baseUrl is never touched.
+  #
+  # Rendered only where the API server serves
+  # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes
+  # 1.36 and later. On 1.34 and 1.35 the API is beta and its feature gate is off
+  # by default, so the object would exist and mutate nothing; the chart renders
+  # nothing there instead. Leaving this true on an older cluster is safe.
+  modelConfigPolicy:
+    enabled: true
   # USD per one million tokens, by provider and model. The deployed gateway
   # ships no built-in price catalog: with no source configured every lookup
   # reports NoCatalog and no cost sample is emitted at all. This block renders a
@@ -1065,10 +1079,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   model: claude-sonnet-4-6
   #   apiKeySecret: kagent-anthropic
   #   apiKeySecretKey: ANTHROPIC_API_KEY
-  #   # Optional. Send this ModelConfig's traffic through the LLM listener
-  #   # (llmRouting), the same redirect the default ModelConfig gets from
-  #   # kagent.providers.<default>.config.baseUrl. Without it an extra
-  #   # ModelConfig calls the provider directly and its usage is unmetered.
+  #   # Optional. An explicit upstream for this entry. Leave it unset: with
+  #   # llmRouting.enabled the chart fills in the LLM listener, so the gateway
+  #   # meters this model's usage. Set it to reach a different upstream — naming the
+  # provider's own URL is how a model stays on the direct, unmetered path. An
+  # entry whose provider differs from llmRouting.backend.provider stays direct
+  # either way: the listener forwards to one provider.
   #   baseUrl: http://agentgateway.<release namespace>.svc:8081
 
   # Additional RemoteMCPServer CRs beyond the shared muster server. Each entry

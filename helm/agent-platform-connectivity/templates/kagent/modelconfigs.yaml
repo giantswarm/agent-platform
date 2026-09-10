@@ -1,6 +1,14 @@
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.modelConfigs }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $routed := include "agent-platform.llmRouting" $ }}
+{{- $listener := include "agent-platform.llmBaseUrl" $ }}
 {{- range .Values.kagent.modelConfigs }}
+{{- $provider := required "kagent.modelConfigs[].provider is required" .provider }}
+{{- /* The listener forwards to one provider (llmRouting.backend.provider). An
+entry for any other provider would reach the wrong upstream, so it keeps the
+direct path even with routing on. */}}
+{{- $onListener := and $routed (eq (lower $provider) (lower $.Values.llmRouting.backend.provider)) }}
+{{- $baseUrl := .baseUrl | default (ternary $listener "" $onListener) }}
 ---
 apiVersion: kagent.dev/v1alpha2
 kind: ModelConfig
@@ -12,17 +20,19 @@ metadata:
     ui.giantswarm.io/display-name: {{ . | quote }}
   {{- end }}
 spec:
-  provider: {{ required "kagent.modelConfigs[].provider is required" .provider | quote }}
+  provider: {{ $provider | quote }}
   model: {{ required "kagent.modelConfigs[].model is required" .model | quote }}
   apiKeySecret: {{ required "kagent.modelConfigs[].apiKeySecret is required" .apiKeySecret | quote }}
   apiKeySecretKey: {{ .apiKeySecretKey | default "ANTHROPIC_API_KEY" | quote }}
-  {{- /* Route this ModelConfig's traffic through the LLM listener too. Without
-  it an extra ModelConfig calls the provider directly and its usage never
-  reaches the gateway's metrics — the default ModelConfig is redirected through
-  the forwarded kagent.providers.<default>.config.baseUrl instead, which this
-  chart does not render. The key is the lower-cased provider name. */}}
-  {{- with .baseUrl }}
-  {{ $.Values.kagent.providers.default | lower }}:
+  {{- /* Traffic through the LLM listener, so the gateway meters this model's
+  usage. The key is the lower-cased provider name of this entry, not the chart's
+  default provider: the two differ once a catalog holds more than one provider.
+  An explicit baseUrl wins, which is how a model reaches any other upstream. The
+  default ModelConfig is redirected through the forwarded
+  kagent.providers.<default>.config.baseUrl instead, which this chart does not
+  render. */}}
+  {{- with $baseUrl }}
+  {{ lower $provider }}:
     baseUrl: {{ . | quote }}
   {{- end }}
 {{- end }}

@@ -1,0 +1,68 @@
+{{- /* Sends a ModelConfig this chart does not render through the LLM listener.
+The chart's own entries already carry the baseUrl, so this policy only reaches
+objects created elsewhere: Backstage, agent-manager, or kubectl. Without it such
+a model calls the provider directly and its usage never reaches the gateway's
+metrics.
+
+Rendered only where the API server serves the GA group. On a beta API server
+(1.34, 1.35) the object is accepted and the admission plugin stays off behind
+its feature gate, so the policy would exist and mutate nothing. An absent object
+is honest; a silent one is not. Confirm with:
+
+  kubernetes_feature_enabled{name="MutatingAdmissionPolicy", job="apiserver"} */ -}}
+{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") }}
+{{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $provider := lower .Values.llmRouting.backend.provider }}
+{{- $name := printf "%s-modelconfig-llm-routing" (include "name" .) }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  {{- /* A model that keeps the direct path costs unmetered usage. A model that
+  cannot be created costs an outage. Ignore is the cheaper failure. */}}
+  failurePolicy: Ignore
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelconfigs"]
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns }}
+  matchConditions:
+    - name: provider-matches
+      expression: >-
+        has(object.spec.provider) &&
+        object.spec.provider.lowerAscii() == {{ $provider | quote }}
+    {{- /* An explicit baseUrl stays untouched. That is the escape hatch: a model
+    reaches the provider directly by naming the provider URL itself. */}}
+    - name: base-url-absent
+      expression: >-
+        !has(object.spec.{{ $provider }}) ||
+        !has(object.spec.{{ $provider }}.baseUrl)
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{spec: Object.spec{ {{ $provider }}: Object.spec.{{ $provider }}{
+            baseUrl: {{ include "agent-platform.llmBaseUrl" . | quote }}
+          }}}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: {{ $name }}
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns }}
+{{- end }}

@@ -40,14 +40,14 @@ kagent:
       # match gateway.name, the release namespace and llmRouting.listener.port.
       config:
         baseUrl: http://agentgateway.default.svc:8081
-  # An extra, chart-owned ModelConfig sent through the same listener.
+  # An extra, chart-owned ModelConfig. It names no baseUrl, so the chart fills in
+  # the listener: a new entry is metered unless somebody names another upstream.
   modelConfigs:
     - name: anthropic-sonnet
       displayName: Anthropic Sonnet 4.6
       provider: Anthropic
       model: claude-sonnet-4-6
       apiKeySecret: kagent-anthropic
-      baseUrl: http://agentgateway.default.svc:8081
 
 muster:
   muster:
