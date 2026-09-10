@@ -341,7 +341,7 @@ On the installation, after the cutover:
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.serviceMonitor.enabled | bool | `true` |  |
+| kagent.serviceMonitor.enabled | bool | `false` |  |
 | kagent.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.otel.tracing.enabled | string | `"auto"` |  |
