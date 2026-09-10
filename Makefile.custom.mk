@@ -533,8 +533,7 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: an entry with no baseUrl stayed direct; a new model would be unmetered by default"; exit 1; }
 	@echo "ok: routed by default"
 	@echo "--> an explicit baseUrl wins (the escape hatch), and an entry for another provider stays direct"
-	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].baseUrl=http://elsewhere:9999' >/tmp/vl-override.out 2>&1 || { cat /tmp/vl-override.out; exit 1; }
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vl-override.out | grep -q 'baseUrl: "http://elsewhere:9999"' || { echo "FAIL: an explicit baseUrl was overwritten by the listener default"; exit 1; }
+	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' /tmp/vl-ci.out | grep -q 'baseUrl: "https://api.anthropic.com"' || { echo "FAIL: an explicit baseUrl was overwritten by the listener default; a model could never leave the gateway"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=OpenAI' >/tmp/vl-other.out 2>&1 || { cat /tmp/vl-other.out; exit 1; }
 	@if awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vl-other.out | grep -q 'baseUrl:'; then \
 		echo "FAIL: a non-Anthropic model was pointed at the Anthropic listener; it would reach the wrong upstream"; exit 1; \
