@@ -270,8 +270,8 @@ components:  # @schema additionalProperties: true
   #   X.Y.Z-b<crc32(branch), 8 hex>t<YYYYMMDDHHMMSS>c<sha7>
   # the constant becomes ".*-bd384adaft.*" (crc32 IEEE of "poc/kagent-main" is
   # d384adaf) on every entry and on gitops.self. kagent and kagent-crds are built
-  # from ANOTHER branch (the kagent fork's poc/agent-platform, see their entries)
-  # and carry that branch's constant, ".*-dev\\.poc-agent-platform\\..*".
+  # from ANOTHER branch (the kagent fork's giantswarm, see their entries)
+  # and carry that branch's constant, ".*-dev\\.giantswarm\\..*".
   #
   # THE RELEASE OF THIS LINE RESETS ALL OF IT: every semverFilter goes, the
   # ranges return to the stable lines (agent-platform-connectivity ">=1.0.0";
@@ -387,11 +387,11 @@ components:  # @schema additionalProperties: true
   kagent:  # @schema additionalProperties: true
     chart: kagent
     # DEV CHANNEL: kagent `main` (API v2, kagent.dev/v1alpha3) built from the
-    # kagent fork's poc/agent-platform branch and published under
+    # kagent fork's giantswarm branch and published under
     # ghcr.io/giantswarm by that repository's own tag workflow — charts
     # oci://ghcr.io/giantswarm/kagent/helm/{kagent,kagent-crds}, images
     # ghcr.io/giantswarm/kagent/{controller,golang-adk,ui,claude-harness}
-    # (multi-arch) — as 0.11.0-dev.poc-agent-platform.<date>.<time>.h<sha7>
+    # (multi-arch) — as 0.11.0-dev.giantswarm.<date>.<time>.h<sha7>
     # (0.11.0: the next upstream minor after 0.10.1; main is the API v2 line).
     # The filter is THAT branch's constant, not the meta chart's: the two
     # branches move independently. Upstream's chart shape: keys at the chart
@@ -403,7 +403,7 @@ components:  # @schema additionalProperties: true
     # `crds: CreateReplace`.
     repository: oci://ghcr.io/giantswarm/kagent/helm
     versionRange: ">=0.11.0-0 <0.12.0-0"
-    semverFilter: ".*-dev\\.poc-agent-platform\\..*"
+    semverFilter: ".*-dev\\.giantswarm\\..*"
     valuesFrom: kagent
     # kagent main ships its CRDs as the kagent-crds chart, so this release
     # dependsOn that component (the render refuses kagent on without it).
@@ -450,7 +450,7 @@ components:  # @schema additionalProperties: true
     # subcharts stay off (kagent-crds: below).
     repository: oci://ghcr.io/giantswarm/kagent/helm
     versionRange: ">=0.11.0-0 <0.12.0-0"
-    semverFilter: ".*-dev\\.poc-agent-platform\\..*"
+    semverFilter: ".*-dev\\.giantswarm\\..*"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -1408,7 +1408,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Pin the release-independent name so the controller Service is always
   # `kagent-controller` regardless of the umbrella release name.
   fullnameOverride: kagent
-  # DEV CHANNEL: the kagent main images of the kagent fork's poc/agent-platform
+  # DEV CHANNEL: the kagent main images of the kagent fork's giantswarm
   # branch, published under ghcr.io/giantswarm by its tag workflow with the
   # upstream repository hierarchy (see components.kagent). The stable line
   # pulls the GS-retagged images from gsoci.azurecr.io/giantswarm with flat
@@ -1420,9 +1420,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # tag, a silent ImagePullBackOff. A new kagent build re-pins this tag AND
   # the two Harness digests below in one commit (the chart follows the branch
   # through components.kagent; the images are pinned here). This is the fork's
-  # build of 2026-09-10 (commit c231bd6; `crane ls
+  # build of 2026-09-10 (commit 0ac5240; `crane ls
   # ghcr.io/giantswarm/kagent/controller` lists the builds).
-  tag: "0.11.0-dev.poc-agent-platform.2026-09-10.20-29-02.hc231bd6"
+  tag: "0.11.0-dev.giantswarm.2026-09-10.22-06-46.h0ac5240"
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
   # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
   # must stay allowed.
@@ -1891,7 +1891,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   harnesses:
     - name: kagent
       type: kagent
-      image: ghcr.io/giantswarm/kagent/golang-adk@sha256:99b7b816f0d0b8d846d821587ef79772360b5a1bdcfda01c95b34637dd41fc7e
+      image: ghcr.io/giantswarm/kagent/golang-adk@sha256:1f016b6530fc92445ac56f03f848060ad85ae805ba7356ffc30f075fa1f15bcd
       env:
         # The Go ADK re-emits the caller's bearer on its MCP calls, so muster
         # sees the person, not the agent.
@@ -1901,7 +1901,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       snapshotLocation: s3://ate-snapshots/kagent
     - name: claude
       type: claude
-      image: ghcr.io/giantswarm/kagent/claude-harness@sha256:4c7cd4b7767b4d05c1877a36b944265f723c6e6f0cd720c2b43c619cf42b192d
+      image: ghcr.io/giantswarm/kagent/claude-harness@sha256:8d52b4ef38f028ecad574250b9f7b0c6f4a85a89b1f5eb67281411318aa2ea01
       workerPool: kagent-default
       snapshotLocation: s3://ate-snapshots/claude
 

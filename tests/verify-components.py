@@ -88,7 +88,7 @@ SWITCHES = ["modelServing"]
 # poc/kagent-main line the meta chart's siblings carry that branch's constant and
 # the kagent charts the kagent fork's (values.yaml `components:` preamble).
 META_FILTER = ".*-dev\\.poc-kagent-main\\..*"
-KAGENT_FILTER = ".*-dev\\.poc-agent-platform\\..*"
+KAGENT_FILTER = ".*-dev\\.giantswarm\\..*"
 DEV_CHANNEL: dict[str, str] = {
     "agent-platform-connectivity": META_FILTER,
     "backstage": META_FILTER,
