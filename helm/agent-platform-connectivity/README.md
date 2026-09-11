@@ -139,10 +139,23 @@ platform needs:
   its OpenID discovery document. Key material comes from `openssl` in an init
   container (`hooks.opensslImage`), the objects from `kubectl`
   (`hooks.kubectlImage`); a pool that exists is never touched (a re-run says
-  `present`), the two namespaces are created bare when missing. Identity:
-  `<release>-hooks`, a ClusterRole on secrets, configmaps and namespaces for
-  the hook's lifetime (`templates/substrate/hooks-rbac.yaml`; the hook Job
-  include is `agent-platform.hooks.job` in `templates/_hooks.tpl`).
+  `present`), the two namespaces are created bare when missing. The trust
+  anchors are applied server-side as pure functions of their pools on every
+  run: `actor-id-ca-certs`, and the podcert signers' cluster-scoped
+  `ClusterTrustBundle`s (`servicedns.podcert.ate.dev:identity:primary-bundle`,
+  `podidentity.podcert.ate.dev:identity:primary-bundle` — the roots of the two
+  podcertificate pools, the objects every Substrate pod projects as its trust
+  anchor). The podcertificate-controller publishes and refreshes those bundles
+  itself, but a pod reads the bundle that exists when it starts, once; the
+  hook runs before the `substrate` release, so a bundle left by a previous
+  install never reaches a pod with roots the current pools do not have
+  (giantswarm/agent-platform#384; a re-run says `present`, `created` or
+  `republished`). Identity: `<release>-hooks`, a ClusterRole on secrets,
+  configmaps, namespaces and clustertrustbundles, with `attest` on the two
+  podcert signers (the apiserver's condition for writing a bundle that names a
+  signer), for the hook's lifetime
+  (`templates/substrate/hooks-rbac.yaml`; the hook Job include is
+  `agent-platform.hooks.job` in `templates/_hooks.tpl`).
 - **The database** (`templates/postgres/databases.yaml`, `databases-hook.yaml`):
   `postgres.databases` is a map of further CNPG `Database`s on the platform
   Cluster, one derived connection Secret `<clusterName>-<key>-app` each (the
