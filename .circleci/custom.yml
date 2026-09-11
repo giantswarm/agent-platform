@@ -98,10 +98,14 @@ jobs:
         # guards) and verify-kagent-crds (every kagent.dev object the connectivity
         # chart renders — the ModelConfig / RemoteMCPServer catalog — validated
         # against the kagent line's CRDs at the pinned release; no v1alpha2 in
-        # any render) are the single source of truth, also run locally. The meta chart's one
-        # dependency is the flux-engine subchart, a directory in its charts/,
-        # which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing
+        # any render) and verify-kagent-harness (the connectivity chart renders
+        # exactly one platform Harness per managed namespace with the shape the
+        # platform owns — the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the
+        # WorkerPool, the snapshot location and the admission label — a tag image
+        # fails, kagent off renders none) are the single source of truth, also
+        # run locally. The meta chart's one dependency is the flux-engine
+        # subchart, a directory in its charts/, which needs no `helm dependency build`.
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing
 
 workflows:
   build:

@@ -72,11 +72,14 @@ KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
-# PolicyException is gone with them, and the kagent controller's ingress policy
+# PolicyException is gone with them, the kagent controller's ingress policy
 # no longer admits the app: kagent agent pods (the actors arrive through Agent
-# Substrate's egress gateway — templates/substrate/netpol.yaml). Empty this list
-# once GOLDEN_REF carries the line.
-GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress
+# Substrate's egress gateway — templates/substrate/netpol.yaml), and `kagent`
+# is the platform Harness the 4.0 connectivity chart renders whenever kagent is
+# on (templates/kagent/harness.yaml — a new object with no 3.x counterpart; its
+# shape is asserted by verify-kagent-harness / verify-kagent-crds). Empty this
+# list once GOLDEN_REF carries the line.
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -898,6 +901,13 @@ verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart ren
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-kagent-harness
+verify-kagent-harness: ## Assert the connectivity chart renders exactly one platform Harness per managed namespace with the shape the platform owns (kagent runtime, the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the meta chart's WorkerPool, the snapshot location, the admission label agent-platform.giantswarm.io/harness: kagent), the workerPoolRef follows kagent.substrateWorkerPool.name, a tag image fails the render, and kagent off renders none (tests/verify-kagent-harness.py; needs PyYAML).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-managers

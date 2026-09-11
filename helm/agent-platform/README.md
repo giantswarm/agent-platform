@@ -25,6 +25,37 @@ README.
 |------------|------|---------|
 |  | flux-engine | 0.1.0 |
 
+## Agent Substrate: worker capacity
+
+On kagent API v2 an agent runs as an Agent Substrate actor inside a gVisor worker
+pod of a `WorkerPool`. The connectivity chart renders one platform `Harness` that
+names this pool (`kagent.substrateWorkerPool.name`, default `kagent-default`); the
+pool is the platform's only capacity and scheduling knob, since the Generic agent
+chart 1.x carries no per-agent `runtime`, `replicas`, `resources`, `nodeSelector`
+or `tolerations`.
+
+- **One worker hosts one actor at a time.** `kagent.substrateWorkerPool.replicas`
+  (default `4`) therefore bounds the number of agents that can be *active at once*;
+  an idle agent holds no worker. Raise it for more concurrency — the node pool
+  budgets `replicas × the worker's limits`.
+- **A worker's resources are one agent's sandbox.**
+  `kagent.substrateWorkerPool.template.resources.limits` bound a single agent: the
+  memory limit its RAM, the CPU limit its vCPU count. The defaults request
+  `250m` / `512Mi` and limit to `2` vCPU / `2Gi`. Measured in agentlab: an idle
+  worker holds ~16Mi and a golden-booted actor ~20Mi; a Go ADK turn's working set
+  (the model client, tool calls and gVisor overhead) stays well under `2Gi`.
+  Raise the limits for heavier agents.
+- **One architecture per pool.** An actor's golden snapshot is
+  architecture-specific, so a mixed-architecture pool wedges the actors that land
+  on the other one. `kagent.substrateWorkerPool.template.nodeSelector` pins the
+  pool to the installation's architecture (`kubernetes.io/arch: amd64` by default;
+  an arm64 installation sets `arm64`).
+
+`kagent.substrateWorkerPool.template` also accepts `tolerations`, `nodeAffinity`
+and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
+"the Generic chart's per-agent placement values are gone, capacity is the
+WorkerPool".
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -436,6 +467,10 @@ README.
 | kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.2"` |  |
 | kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
 | kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
+| kagent.substrateWorkerPool.template.resources.requests.cpu | string | `"250m"` |  |
+| kagent.substrateWorkerPool.template.resources.requests.memory | string | `"512Mi"` |  |
+| kagent.substrateWorkerPool.template.resources.limits.cpu | string | `"2"` |  |
+| kagent.substrateWorkerPool.template.resources.limits.memory | string | `"2Gi"` |  |
 | kagent.database.postgres.vectorEnabled | bool | `true` |  |
 | kagent.database.postgres.bundled.image.repository | string | `"pgvector"` |  |
 | kagent.database.postgres.bundled.image.name | string | `"pgvector"` |  |

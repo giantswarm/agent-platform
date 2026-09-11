@@ -1571,11 +1571,30 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # one CPU architecture: an actor's golden snapshot is architecture-specific
     # and a mixed pool wedges the actors that land on the other one, so the
     # pool is pinned to the installation's — amd64 on every Giant Swarm
-    # management cluster; an arm64 installation sets arm64. Capacity knobs
-    # (resources) join this map.
+    # management cluster; an arm64 installation sets arm64.
+    #
+    # resources is the platform's capacity knob (giantswarm/agent-platform#344,
+    # bumblebee-plans#51 D5). One worker hosts one actor at a time, so a
+    # worker's limits bound one agent's sandbox — the memory limit its RAM, the
+    # CPU limit its vCPU count — and replicas (above) bound the concurrently
+    # active agents. Sizing (measured in agentlab): an idle worker holds ~16Mi
+    # and a golden-booted actor ~20Mi; a Go ADK turn's working set (its model
+    # client, tool calls and the gVisor overhead) is what the limit bounds. The
+    # defaults give one agent up to 2 vCPU / 2Gi and reserve 250m / 512Mi — the
+    # reservation covers a turn's working set, the limit bounds a heavy one;
+    # raise limits for heavier agents, replicas for more concurrency (a
+    # management cluster budgets replicas × limits — 4 × 2Gi/2vCPU here).
+    # README "Agent Substrate: worker capacity".
     template:
       nodeSelector:
         kubernetes.io/arch: amd64
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "2"
+          memory: 2Gi
 
   # The kagent line's memory API needs pgvector. With the bundled Postgres (the
   # chart's default) the image has to carry the extension, so the bundled

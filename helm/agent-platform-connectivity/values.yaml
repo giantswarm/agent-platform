@@ -759,6 +759,32 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     image:
       repository: kagent-ui
 
+  # --- The platform Harness (templates/kagent/harness.yaml) ---
+  # This chart renders ONE kagent Harness per managed namespace: the Go ADK
+  # runtime image plus the Substrate policy (a WorkerPool, a snapshot location)
+  # an AgentTemplate runs under. In a fleet install the meta chart forwards
+  # kagent.harness.* (the line's pinned Go ADK digest and the installation's
+  # snapshot location) — these defaults serve a standalone render of this chart.
+  harness:
+    # The Go ADK runtime image BY DIGEST — the Harness CRD accepts no tag, so a
+    # tag fails the render. The meta chart forwards the line's pinned digest
+    # (kagent.harness.image, moved with kagent.tag on a re-pin); this default is
+    # the same digest for a standalone render and is overridden by the forward.
+    image: ghcr.io/giantswarm/kagent/golang-adk@sha256:969af5f733c8e2bd7756f40766352f5af744964e969a031ba146198d8becd546
+    # Where Substrate keeps the actors' snapshots (the Harness's
+    # snapshotPolicy.location), an object-store URL s3://<bucket>/<prefix>.
+    # REQUIRED with kagent on: the meta chart enforces it
+    # (agent-platform.validateSubstrate) and forwards the installation's value;
+    # this default is a lab's in-cluster store for a standalone render.
+    snapshotLocation: s3://ate-snapshots/kagent
+
+  # The Substrate WorkerPool the platform Harness runs on. The kagent chart
+  # creates it in the kagent namespace (name, replicas, pod template — the
+  # meta chart forwards them); this chart reads only .name for the Harness's
+  # namespace-local workerPoolRef.
+  substrateWorkerPool:
+    name: kagent-default
+
   # Keep kagent core resources in a dedicated namespace separate from the
   # umbrella release namespace. NOTE: the bundled agent subcharts each need
   # their own namespaceOverride — the `kagent.namespace` helper resolves

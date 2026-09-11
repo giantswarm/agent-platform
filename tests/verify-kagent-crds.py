@@ -47,6 +47,7 @@ CRD_URL = "https://raw.githubusercontent.com/giantswarm/kagent-upstream/{ref}/he
 CRD_FILES = {
     "ModelConfig": "kagent.dev_modelconfigs.yaml",
     "RemoteMCPServer": "kagent.dev_remotemcpservers.yaml",
+    "Harness": "kagent.dev_harnesses.yaml",
 }
 API_VERSION = "kagent.dev/v1alpha3"
 # ModelConfigSpec's per-provider blocks: key -> the spec.provider it belongs to
@@ -64,6 +65,23 @@ CATALOG_SHAPE = [
     "--set-json", 'kagent.modelConfigs=[{"name":"anthropic-sonnet","displayName":"Anthropic Sonnet 4.6","provider":"Anthropic","model":"claude-sonnet-4-6","apiKeySecret":"kagent-anthropic","baseUrl":"http://agentgateway.default.svc:8081"}]',
     "--set-json", 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp","description":"an MCP server reached with the propagated token"}]',
 ]
+
+
+# Kubernetes CRD patterns are RE2 (Go), which supports POSIX character classes;
+# Python's re does not read [:space:] & co. inside a class, so translate the ones
+# the CRDs use to their Python equivalents before matching (a no-op on a pattern
+# that has none).
+_POSIX_CLASSES = {
+    "[:space:]": r"\s", "[:digit:]": "0-9", "[:alnum:]": "0-9A-Za-z",
+    "[:alpha:]": "A-Za-z", "[:upper:]": "A-Z", "[:lower:]": "a-z",
+    "[:xdigit:]": "0-9A-Fa-f",
+}
+
+
+def re2_pattern(pattern: str) -> str:
+    for posix, py in _POSIX_CLASSES.items():
+        pattern = pattern.replace(posix, py)
+    return pattern
 
 
 def fail(msg: str) -> None:
@@ -146,7 +164,7 @@ def check(schema: dict, value, path: str, errors: list[str]) -> None:
             errors.append(f"{path}: shorter than minLength {schema['minLength']}")
         if "maxLength" in schema and len(value) > schema["maxLength"]:
             errors.append(f"{path}: longer than maxLength {schema['maxLength']}")
-        if "pattern" in schema and not re.search(schema["pattern"], value):
+        if "pattern" in schema and not re.search(re2_pattern(schema["pattern"]), value):
             errors.append(f"{path}: {value!r} does not match {schema['pattern']}")
     elif t == "integer":
         if isinstance(value, bool) or not isinstance(value, int):
@@ -173,6 +191,17 @@ def check_rules(kind: str, spec: dict, path: str, errors: list[str]) -> None:
                 errors.append(f"{path}.headersFrom[{i}]: exactly one of value or valueFrom must be set")
         if str(spec.get("url", "")).startswith("http://") and "tls" in spec:
             errors.append(f"{path}.tls: must be unset when spec.url has the http:// scheme")
+    if kind == "Harness":
+        runtimes = [r for r in ("kagent", "codex", "claude", "byo") if r in spec]
+        if len(runtimes) != 1:
+            errors.append(f"{path}: exactly one of kagent, codex, claude, byo must be set (got {runtimes or 'none'})")
+        if "byo" in spec and not (spec.get("workload") or {}).get("command"):
+            errors.append(f"{path}: a byo Harness must set workload.command")
+        for i, e in enumerate(spec.get("env") or []):
+            if ("value" in e) == ("credentialRef" in e):
+                errors.append(f"{path}.env[{i}]: exactly one of value or credentialRef must be set")
+        if not ((spec.get("substrate") or {}).get("workerPoolRef") or {}).get("name"):
+            errors.append(f"{path}.substrate.workerPoolRef.name: must not be empty")
     if kind == "ModelConfig":
         provider = spec.get("provider", "OpenAI")
         for key, owner in PROVIDER_BLOCKS.items():
