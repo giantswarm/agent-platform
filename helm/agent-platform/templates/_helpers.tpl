@@ -99,7 +99,8 @@ value drives every consumer. Emits a JSON object; {} for a component with
 nothing derived. A value the component's own block sets must agree with the
 derived one, otherwise the render fails naming the single key to set — a silent
 overwrite would hide a values file that still spells the old key.
-  agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName.
+  agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
+                 muster.url from the muster Service (agent-platform.musterMcpUrl).
 Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
@@ -111,6 +112,12 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "agent-manager.flux.helmReleaseServiceAccount (%s) differs from kagent.fluxServiceAccountName (%s): the agents' HelmReleases have one tenant identity — set kagent.fluxServiceAccountName and leave agent-manager.flux.helmReleaseServiceAccount unset" $own $sa) -}}
 {{- end -}}
 {{- $_ := set $derived "flux" (dict "helmReleaseServiceAccount" $sa) -}}
+{{- $url := include "agent-platform.musterMcpUrl" .root -}}
+{{- $ownUrl := dig "muster" "url" "" (index .root.Values "agent-manager" | default dict) -}}
+{{- if and $ownUrl (ne $ownUrl $url) -}}
+{{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
+{{- end -}}
+{{- $_ := set $derived "muster" (dict "url" $url) -}}
 {{- end -}}
 {{- $derived | toJson -}}
 {{- end -}}
@@ -300,10 +307,28 @@ failure instead of a silent 503.
 {{- end -}}
 
 {{/*
-Port muster listens on; defaults to 8090 when unset from parent context.
+Port muster listens on; defaults to 8090. nil-safe: the muster service tree is
+the muster release's own, so .Values.muster.service is normally unset here.
 */}}
 {{- define "agent-platform.musterServicePort" -}}
-{{- .Values.muster.service.port | default 8090 -}}
+{{- dig "service" "port" 8090 (.Values.muster | default dict) -}}
+{{- end -}}
+
+{{/*
+The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
+RemoteMCPServer targets: http://<muster Service>.<release namespace>.svc.cluster.local:<port>/mcp
+while the muster component is on, "" otherwise. ONE helper, two consumers, one
+name in both charts: this copy derives agent-manager's chart value muster.url
+(componentDerivedValues, next to flux.helmReleaseServiceAccount); the
+connectivity chart's copy renders the portal's app-config key
+agentPlatform.musterMcpUrl. Both composers hand it to the Generic agent chart
+1.x as muster.url, whose own default is the same URL on a default install.
+Usage: include "agent-platform.musterMcpUrl" .
+*/}}
+{{- define "agent-platform.musterMcpUrl" -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
