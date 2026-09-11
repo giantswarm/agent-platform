@@ -271,7 +271,7 @@ def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_fl
         kube.apply([
             {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
              "metadata": {"name": "agent", "namespace": KAGENT_NAMESPACE},
-             "spec": {"interval": "10m", "url": AGENT_CHART_URL, "ref": {"semver": "x.x.x"}}},
+             "spec": {"interval": "10m", "url": AGENT_CHART_URL, "ref": {"semver": ">=0.2.1 <1.0.0"}}},  # the 0.x chart: 1.0.0 renders kagent API v2
             {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
              "metadata": {"name": AGENT, "namespace": KAGENT_NAMESPACE},
              "spec": {"interval": "10m", "releaseName": AGENT, "serviceAccountName": KAGENT_FLUX_SA,
