@@ -1,0 +1,57 @@
+{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
+{{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{/* The platform Harness (kagent API v2). On the line "how an agent runs" is a
+Harness: a digest-pinned runtime image, an environment and the Substrate policy
+(a WorkerPool, a snapshot location). An AgentTemplate becomes Ready only when a
+Harness admits it (allowedAgentTemplates.selector), reading its readiness back
+from AgentTemplate.status.harnesses[] (Harness.status is never written).
+
+4.0 renders exactly ONE Harness — `kagent`, the Go ADK runtime — per managed
+namespace (today the kagent namespace; a WorkerPool and a workerPoolRef are
+namespace-local, so a second managed namespace would need its own of each). The
+Generic agent chart 1.x labels every AgentTemplate
+agent-platform.giantswarm.io/harness: kagent (the value is this Harness's name),
+and that label is the whole admission contract: an operator places a template on
+the runtime with one label and never touches images, worker pools or snapshot
+locations. No free list of arbitrary Harness types is a platform value in 4.0; a
+second runtime (e.g. `claude`, giantswarm/giantswarm#37625) is a later, separate
+object.
+
+The image is digest-pinned because the CRD demands it (a Harness is an immutable
+runtime; a moving tag would silently change every agent under it), so a tag fails
+here at render time instead of at admission. The env carries only
+KAGENT_PROPAGATE_TOKEN (the Go ADK re-emits the caller's bearer on its MCP calls,
+so muster sees the person, not the platform); the private-skills credential is
+added here only if the D8 spike chooses the per-namespace-credential route (a
+credentialRef to a same-namespace Secret) — undecided, so nothing more today. */}}
+{{- $harness := "kagent" }}
+{{- $image := required "kagent.harness.image is required (the Go ADK runtime image, the meta chart forwards the line's pinned digest)" .Values.kagent.harness.image }}
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" $image) }}
+{{- fail (printf "kagent.harness.image %q: the platform Harness is digest-pinned (<repository>@sha256:<64 hex digits>); the kagent.dev Harness CRD rejects a tag. Pin the Go ADK image by digest (the meta chart's kagent.harness.image, moved with kagent.tag on a re-pin)." $image) }}
+{{- end }}
+{{- $workerPool := required "kagent.substrateWorkerPool.name is required (the Substrate WorkerPool in the kagent namespace the Harness runs on)" .Values.kagent.substrateWorkerPool.name }}
+{{- $snapshotLocation := required "kagent.harness.snapshotLocation is required (the Substrate snapshot store, s3://<bucket>/<prefix>); the meta chart makes it required with kagent on and forwards the installation's value" .Values.kagent.harness.snapshotLocation }}
+---
+apiVersion: kagent.dev/v1alpha3
+kind: Harness
+metadata:
+  name: {{ $harness }}
+  namespace: {{ $ns }}
+spec:
+  {{/* Exactly one of kagent|codex|claude|byo; the Go ADK runtime adapter. */}}
+  kagent: {}
+  workload:
+    image: {{ $image | quote }}
+  env:
+  - name: KAGENT_PROPAGATE_TOKEN
+    value: "true"
+  substrate:
+    workerPoolRef:
+      name: {{ $workerPool | quote }}
+    snapshotPolicy:
+      location: {{ $snapshotLocation | quote }}
+  allowedAgentTemplates:
+    selector:
+      matchLabels:
+        agent-platform.giantswarm.io/harness: {{ $harness | quote }}
+{{- end }}
