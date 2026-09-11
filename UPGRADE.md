@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the Substrate line re-pins to `v0.0.27-gs.3`: the `ate.dev` CRDs are kept on uninstall)
+
+`components.substrate-crds` and `components.substrate` move to `>=0.0.27-gs.3 <0.0.28-0` and `kagent.substrateWorkerPool.workerImage` to `ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.3` — the line's third release of upstream 0.0.26, `v0.0.27-gs.2` plus one carried patch (giantswarm/substrate#12): the `substrate-crds` chart's three CRD templates (`workerpools`, `sandboxconfigs`, `csidriverconfigs.ate.dev`) carry `helm.sh/resource-policy: keep`, the convention the kagent line's `kagent-crds` already follows (giantswarm/kagent-upstream#10). Without it, uninstalling the platform on a cluster that runs its own Flux raced the CRD charts: helm-controller finalizes the platform `HelmRelease`s concurrently, `substrate-crds` could go before `substrate`, whose uninstall then failed for good on its `SandboxConfig` and left the meta `HelmRelease` stuck in deletion (giantswarm/agent-platform#385).
+
+### Operator action
+
+- **None to install.** The pins move together (`make verify-components` holds the two ranges, the BOM pin and the worker-image tag to one Substrate version); the release is inert behind the fleet's `<4.0.0` bound like every 4.x release before the cut-over.
+- **Uninstall semantics change on Substrate.** Uninstalling the `substrate-crds` release now leaves the three `ate.dev` CRDs in place, as `kagent-crds` leaves the `kagent.dev` ones; their objects go with the releases that own them (the `substrate` release's `SandboxConfig gvisor-default`, the kagent release's `WorkerPool`), and a `WorkerPool` or `SandboxConfig` created by hand survives a Substrate uninstall until deleted explicitly. To remove the CRDs, `kubectl delete crd workerpools.ate.dev sandboxconfigs.ate.dev csidriverconfigs.ate.dev` — it deletes the objects behind them. A reinstall adopts the kept CRDs (the same release name and storage namespace, `ate-system`).
+- **On a cluster that runs its own Flux the uninstall order is now the operator's only concern for the agents**: delete the agents' `HelmRelease`s first, while the kagent controller still runs, then the chart's `HelmRelease`; that Flux finalizes the component releases in any order and every one goes clean (README "Clusters that run Flux"). On an installation still on `v0.0.27-gs.2` or earlier, delete the component `HelmRelease`s in reverse dependency order by hand first (`kagent`, `substrate`, then the CRD charts).
+- **The bundled engine's ordered teardown is unchanged**: `helm uninstall` still deletes the platform `HelmRelease`s in reverse dependency waves; it no longer depends on that order for Substrate.
+
 ## \<current\> → \<next\> (the agentgateway controller reaches an external JWKS host)
 
 The agentgateway controller's network policy opens egress to every external JWKS host the `jwtAuthentication` routes name (giantswarm/agent-platform#312), in both network-policy flavours. The controller fetches each policy's JWKS and pushes the keys to the data plane over xDS, so this is the controller's egress, not the data plane's; the data-plane policies do not change.
