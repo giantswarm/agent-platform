@@ -8,7 +8,7 @@ reference), so every server an agent can use lives where the templates do.
 There is NO shared muster server here any more. The Generic agent chart 1.x
 renders one RemoteMCPServer per agent — named after the agent, in the agent's
 namespace, muster's in-cluster URL (chart value muster.url, composed by
-agent-manager and the portal from the agent-platform.musterMcpUrl helper),
+agent-manager from the agent-platform.musterMcpUrl helper's value),
 STREAMABLE_HTTP, the toolset header X-Muster-Toolset in headersFrom and the
 discovery opt-out label kagent.dev/discovery=disabled while muster's OAuth is
 on — and binds it (docs/authentication.md, "Tool discovery by the kagent

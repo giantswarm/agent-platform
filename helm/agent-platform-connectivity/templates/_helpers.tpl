@@ -201,15 +201,16 @@ owned by the muster release now (not merged into this chart's values), so
 {{/*
 The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
 RemoteMCPServer targets: http://<muster Service>.<release namespace>.svc.cluster.local:<port>/mcp
-while the muster component is on, "" otherwise. ONE helper, two consumers, one
+while the muster component is on, "" otherwise. ONE helper, one consumer, one
 name in both charts: the meta chart derives agent-manager's chart value
 muster.url from its copy (componentDerivedValues, next to
-flux.helmReleaseServiceAccount), this chart renders it into the portal's
-app-config as agentPlatform.musterMcpUrl (templates/backstage/app-config.yaml).
-Both composers hand it to the Generic agent chart 1.x as muster.url, whose own
-default is the same URL on a default install (muster.fullnameOverride "muster",
-release namespace agent-platform, port 8090) — the value exists so an
-installation whose muster answers elsewhere changes it in one place.
+flux.helmReleaseServiceAccount); agent-manager hands it to the Generic agent
+chart 1.x as muster.url on every agent it composes and reports it in get_info.
+The portal sends none (create_agent takes no muster argument), so the app-config
+this chart renders carries no muster URL. The agent chart's own default is the
+same URL on a default install (muster.fullnameOverride "muster", release
+namespace agent-platform, port 8090) — the value exists so an installation
+whose muster answers elsewhere changes it in one place.
 Usage: include "agent-platform.musterMcpUrl" .
 */}}
 {{- define "agent-platform.musterMcpUrl" -}}
