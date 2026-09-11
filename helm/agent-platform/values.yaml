@@ -2819,7 +2819,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.1.0
+      tag: 1.1.1
     dryRun: false
     githubToken:
       secretName: kagent-skills-token
