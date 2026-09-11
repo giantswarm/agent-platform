@@ -35,8 +35,8 @@ networkPolicy:
 
 # The kagent API v2 cut-over Job (agentManager.migration, on by default with
 # kagent and agent-manager on) runs `agent-manager migrate` (agent-manager
-# 1.1.0). Off here: the bare smoke serves no live kagent API v2 for migrate to
-# act on, so the Job would only report "v2 not served"; the migration rehearsal
+# 1.1.0). Off here: the smoke's kagent is fresh — there is no 0.10 agent to
+# migrate, so the Job would only report an empty run; the migration rehearsal
 # (agentlab#143) is the Job's proof, not this smoke.
 agentManager:
   migration:

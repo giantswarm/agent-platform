@@ -1860,7 +1860,7 @@ verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the c
 .PHONY: verify-migration
 verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; a PLAIN Job named with the hash of its spec (no hook: a migrate failure never fails the release, and the meta chart stops the connectivity HelmRelease from waiting on Jobs), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), GITHUB_TOKEN optional from the value-named Secret, its inputs as environment; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
-	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — the bare smoke has no live kagent API v2 for migrate to act on (agentlab#143 rehearses the migration)"
+	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — its kagent is fresh, there is no 0.10 agent to migrate (agentlab#143 rehearses the migration)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vmig-off.out 2>&1 || { cat /tmp/vmig-off.out; exit 1; }
 	@if grep -q 'agent-manager-migrate' /tmp/vmig-off.out; then echo "FAIL: the migration renders with agent-manager off"; exit 1; else echo "ok: inert without agent-manager"; fi
 	@echo "--> on: a PLAIN Job (no hook) in the kagent namespace, named with an 8-hex hash of its image, args and environment, as the tenant identity, agent-manager's image, migrate, its inputs as environment, the optional token"

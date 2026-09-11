@@ -14,8 +14,10 @@ management cluster) on the ATS kind cluster, after the smoke's uninstall.
      FluxInstance, exactly one helm-controller, the Flux CRDs' field managers
      exactly what `flux install` left (`flux` and the apiserver);
   4. an agent deploys through the cluster's Flux: an OCIRepository + HelmRelease
-     of the agent chart in the kagent namespace, run as the kagent-flux identity
-     the connectivity release rendered, reach Ready; the Agent reaches Ready;
+     of the agent chart 1.x in the kagent namespace, run as the kagent-flux
+     identity the connectivity release rendered, reach Ready; the AgentTemplate
+     reaches Ready on the platform Harness — Agent Substrate, from the chart
+     through that Flux, runs it — and the agent's RemoteMCPServer is Accepted;
   5. the render guard: flipping the value to true makes the HelmRelease FAIL
      with `this cluster runs Flux; set components.flux.enabled=false or install
      the chart through it` — no operator, no FluxInstance, the platform and the
@@ -31,12 +33,10 @@ management cluster) on the ATS kind cluster, after the smoke's uninstall.
      Flux); the Flux install is removed last.
 
 Runs as the `functional` scenario (one pytest process after the smoke's); the
-smoke leaves the lab Dex, the registry with the chart and the four operator
-CRDs behind, and nothing else the guard could mistake for an engine.
-
-values-kagent.yaml leaves kagent off (the kagent line cannot run on the ATS
-kind cluster yet — the file says why), so step 4 is skipped with that reason
-and the kagent assertions are gated on KAGENT_ON.
+smoke leaves the lab Dex, the registry with the chart, the four operator CRDs
+and the kept kagent CRDs behind (this scenario's kagent-crds release adopts
+them: the same release name and namespace), and nothing else the guard could
+mistake for an engine.
 """
 
 import logging
@@ -48,23 +48,39 @@ import requests
 import yaml
 
 from conftest import (
+    AGENT_CHART_SEMVER,
+    Abort,
+    AGENT_CHART_URL,
+    ATE_NAMESPACE,
     BASE_VALUES,
+    PODCERT_NAMESPACE,
+    HARNESS,
+    HARNESS_LABEL,
+    INSTALL_TIMEOUT,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
-    KAGENT_ON,
     KAGENT_VALUES,
+    MODEL_CONFIG,
     NAMESPACE,
-    NO_KAGENT_REASON,
     OPERATOR_CRDS,
     REGISTRY_URL,
     RELEASE,
     TIMINGS,
+    TOOLSET,
     Kube,
+    apply_placeholder_provider_secret,
+    assert_remote_mcp_server,
     condition,
     connectivity_values,
+    dump_agents,
     is_ready,
     load_values,
+    template_ready,
+    template_state,
     wait_for,
+    wait_for_namespaces_settled,
+    wait_for_substrate,
+    wait_for_template_ready,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,10 +91,10 @@ FLUX_NAMESPACE = "flux-system"
 FLUX_COMPONENTS = {"source-controller", "helm-controller"}
 FLUX_FIELD_MANAGER = "flux"
 GUARD_MESSAGE = "this cluster runs Flux; set components.flux.enabled=false or install the chart through it"
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", *(("kagent",) if KAGENT_ON else ()))
+# The component HelmReleases the smoke's base + kagent values turn on (no
+# agent-manager here: it belongs to the round-trips values of the smoke).
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds")
 AGENT = "ats-flux-agent"
-AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
-MODEL_CONFIG = "default-model-config"
 
 
 class State:
@@ -96,10 +112,11 @@ def dump(kube: Kube) -> None:
         f"-n {FLUX_NAMESPACE} get helmrelease {RELEASE} -o yaml",
         f"-n {NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io,ocirepositories.source.toolkit.fluxcd.io -o wide",
         f"-n {NAMESPACE} get pods -o wide",
-        f"-n {KAGENT_NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io,agents.kagent.dev,pods -o wide",
+        f"-n {ATE_NAMESPACE} get pods -o wide",
         f"-n {FLUX_NAMESPACE} logs deployment/helm-controller --tail=60",
         f"-n {FLUX_NAMESPACE} logs deployment/source-controller --tail=40",
     ])
+    dump_agents(kube)
 
 
 def flux_crd_managers(kube: Kube) -> Dict[str, Set[str]]:
@@ -158,12 +175,38 @@ def meta_helmrelease(version: str, engine: bool) -> List[Dict[str, Any]]:
         {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
          "metadata": {"name": RELEASE, "namespace": FLUX_NAMESPACE},
          "spec": {"interval": "1m", "url": f"{REGISTRY_URL}/{RELEASE}", "insecure": True, "ref": {"semver": version}}},
+        # timeout: helm-controller runs the Helm 4 SDK, whose --wait holds the
+        # install until the component HelmReleases are Ready — the sequential
+        # CRDs -> connectivity -> Substrate -> kagent chain takes 4-6 minutes on
+        # the CI executor, longer than Flux's 5-minute default (the smoke's
+        # `helm install --wait` gets the same 12 minutes).
         {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
          "metadata": {"name": RELEASE, "namespace": FLUX_NAMESPACE},
-         "spec": {"interval": "1m", "releaseName": RELEASE, "targetNamespace": NAMESPACE,
+         "spec": {"interval": "1m", "timeout": INSTALL_TIMEOUT, "releaseName": RELEASE, "targetNamespace": NAMESPACE,
                   "chartRef": {"kind": "OCIRepository", "name": RELEASE},
                   "install": {"createNamespace": True}, "values": values}},
     ]
+
+
+def delete_platform_releases_in_waves(kube: Kube) -> None:
+    """Delete the platform HelmReleases the meta chart rendered in reverse
+    dependency order (waves from their dependsOn), waiting per wave — what the
+    bundled engine's pre-delete hook does, and what a cluster's own Flux does
+    NOT do when the meta HelmRelease is deleted: it deletes them all at once,
+    helm-controller uninstalls them concurrently, and a CRD chart's release
+    (substrate-crds) can go before the release whose objects are its CRs
+    (substrate), whose uninstall then fails on the vanished kind and is retried
+    until the meta HelmRelease's finalizer times out. The way back deletes the
+    components first, then the meta HelmRelease finds nothing left to uninstall."""
+    hrs = kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)
+    depends_on = {hr["metadata"]["name"]: {d["name"] for d in hr["spec"].get("dependsOn", []) or []} for hr in hrs}
+    remaining = set(depends_on)
+    while remaining:
+        wave = sorted(n for n in remaining if not any(n in depends_on[o] for o in remaining if o != n))
+        assert wave, f"dependsOn cycle among {sorted(remaining)}"
+        logger.info("the way back: deleting HelmReleases %s", wave)
+        kube.delete("helmreleases.helm.toolkit.fluxcd.io", *wave, namespace=NAMESPACE, timeout="5m")
+        remaining -= set(wave)
 
 
 # ---------------------------------------------------------------------------
@@ -196,10 +239,10 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     STATE.crd_specs = flux_crd_specs(kube)
     # The cluster owns its namespaces: the fleet bases create kagent's on every
     # management cluster; here the test does (README "Clusters that run Flux").
-    # The smoke's teardown deleted the namespace with the connectivity release;
-    # its termination may still be running when this scenario starts.
-    wait_for(f"namespace {KAGENT_NAMESPACE} gone or Active (not Terminating)",
-             lambda: (kube.get("namespace", KAGENT_NAMESPACE) or {}).get("status", {}).get("phase", "gone") != "Terminating", 300)
+    # The smoke's teardown deleted the kagent namespace and Substrate's two
+    # (conftest.remove_substrate_leftovers); their termination may still be
+    # running when this scenario starts, and Substrate's bootstrap needs them gone.
+    wait_for_namespaces_settled(kube, KAGENT_NAMESPACE, ATE_NAMESPACE, PODCERT_NAMESPACE)
     kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": KAGENT_NAMESPACE}})
     TIMINGS.record(f"flux install ({', '.join(sorted(FLUX_COMPONENTS))} {FLUX_VERSION}; {len(keep)} objects, components dropped: {dropped})", time.monotonic() - started)
     logger.info("Flux CRD managers after flux install: %s", sorted({m for ms in STATE.crd_managers.values() for m in ms}))
@@ -210,9 +253,8 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     try:
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE, timeout="3m")
         kube.delete("ocirepositories.source.toolkit.fluxcd.io", "agent", namespace=KAGENT_NAMESPACE, timeout="1m")
+        delete_platform_releases_in_waves(kube)
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="3m")
-        wait_for("the platform HelmReleases uninstalled by the cluster's Flux",
-                 lambda: not kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE), 120)
         kube.delete("ocirepositories.source.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="1m")
         kube.cmd(["delete", "--ignore-not-found", "--wait=false", "-f", "-"], stdin=yaml.safe_dump_all(STATE.flux_manifest), check=False)
         TIMINGS.record("the way back: HelmRelease deleted, platform uninstalled by the cluster's Flux, Flux removed", time.monotonic() - started)
@@ -228,15 +270,22 @@ def platform_through_flux(kube: Kube, own_flux: None, pushed_chart: str, candida
     started = time.monotonic()
     kube.apply(meta_helmrelease(candidate_version, engine=False))
     try:
-        wait_for(f"HelmRelease {FLUX_NAMESPACE}/{RELEASE} Ready",
-                 lambda: is_ready(kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE)), 600)
+        def meta_ready() -> Any:
+            hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE)
+            if hr and condition(hr).get("status") == "False" and "failed" in condition(hr).get("message", ""):
+                raise Abort(f"HelmRelease {RELEASE} failed: {condition(hr).get('message')}")
+            return is_ready(hr)
+
+        # The Helm timeout (12 min) plus a reconcile; a failed install ends the
+        # wait at once (Abort) instead of being waited out.
+        wait_for(f"HelmRelease {FLUX_NAMESPACE}/{RELEASE} Ready", meta_ready, 900)
         TIMINGS.record("HelmRelease agent-platform Ready through the cluster's Flux (engine off)", time.monotonic() - started)
 
         def components_ready() -> bool:
             hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
             return set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values())
 
-        wait_for("the platform HelmReleases Ready under the cluster's Flux", components_ready, 600)
+        wait_for("the platform HelmReleases Ready under the cluster's Flux", components_ready, 300)
     except AssertionError:
         dump(kube)
         raise
@@ -255,8 +304,7 @@ def test_platform_installs_through_the_clusters_flux(kube: Kube, platform_throug
     for name, hr in hrs.items():
         assert is_ready(hr), f"{name}: {condition(hr)}"
         assert "serviceAccountName" not in hr["spec"], f"{name} names a serviceAccountName with the engine off: {hr['spec'].get('serviceAccountName')}"
-    if KAGENT_ON:
-        assert hrs["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "engine off: the kagent HelmRelease must keep gitops.targetNamespace (the fleet render)"
+    assert hrs["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "engine off: the kagent HelmRelease must keep gitops.targetNamespace (the fleet render)"
     assert_no_engine(kube)
     hook_jobs = [j["metadata"]["name"] for j in kube.items("jobs", "-l", f"app.kubernetes.io/instance={RELEASE}", namespace=NAMESPACE)]
     assert not hook_jobs, f"the chart rendered hooks with the engine off: {hook_jobs}"
@@ -267,32 +315,38 @@ def test_platform_installs_through_the_clusters_flux(kube: Kube, platform_throug
 
 
 @pytest.mark.functional
-@pytest.mark.skipif(not KAGENT_ON, reason=NO_KAGENT_REASON)
 def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_flux: None) -> None:
+    """The agent chart 1.x through the cluster's Flux as the tenant identity:
+    the AgentTemplate it renders reaches Ready on the platform Harness (Agent
+    Substrate from the chart, through that Flux, runs it) and the agent's
+    RemoteMCPServer is Accepted."""
     started = time.monotonic()
     try:
         kube.wait_deployment(KAGENT_NAMESPACE, "kagent-controller", timeout=600)
         wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
         assert kube.get("serviceaccount", KAGENT_FLUX_SA, namespace=KAGENT_NAMESPACE), f"the connectivity release did not render ServiceAccount {KAGENT_FLUX_SA}"
-        kube.apply({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "kagent-anthropic", "namespace": KAGENT_NAMESPACE},
-                    "stringData": {"ANTHROPIC_API_KEY": "lab-only-placeholder-key"}})
+        apply_placeholder_provider_secret(kube)
+        wait_for_substrate(kube)
         kube.apply([
             {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
              "metadata": {"name": "agent", "namespace": KAGENT_NAMESPACE},
-             "spec": {"interval": "10m", "url": AGENT_CHART_URL, "ref": {"semver": ">=0.2.1 <1.0.0"}}},  # the 0.x chart: 1.0.0 renders kagent API v2
+             "spec": {"interval": "10m", "url": AGENT_CHART_URL, "ref": {"semver": AGENT_CHART_SEMVER}}},
             {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
              "metadata": {"name": AGENT, "namespace": KAGENT_NAMESPACE},
              "spec": {"interval": "10m", "releaseName": AGENT, "serviceAccountName": KAGENT_FLUX_SA,
                       "chartRef": {"kind": "OCIRepository", "name": "agent"},
                       "values": {"agent": {"description": "ATS own-Flux agent (lab only)", "systemMessage": "You are the ATS own-Flux agent."},
-                                 "modelConfig": {"name": MODEL_CONFIG}, "toolset": ["preset:none"]}}},
+                                 "modelConfig": {"name": MODEL_CONFIG}, "toolset": TOOLSET}}},
         ])
         wait_for(f"HelmRelease {AGENT} Ready", lambda: is_ready(kube.get("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE)), 600)
-        wait_for(f"Agent {AGENT} Ready", lambda: is_ready(kube.get("agents.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), 600)
+        template = wait_for_template_ready(kube, AGENT)
+        assert (template["metadata"].get("labels") or {}).get(HARNESS_LABEL) == HARNESS, template["metadata"].get("labels")
+        assert_remote_mcp_server(kube, AGENT)
     except AssertionError:
         dump(kube)
         raise
-    TIMINGS.record("agent through the cluster's Flux: HelmRelease + Agent Ready", time.monotonic() - started)
+    TIMINGS.record(f"agent through the cluster's Flux: HelmRelease Ready, AgentTemplate Ready on Harness {HARNESS}, RemoteMCPServer Accepted", time.monotonic() - started)
+    logger.info("AgentTemplate %s on Harness %s: %s", AGENT, HARNESS, template_state(template))
 
 
 @pytest.mark.functional
@@ -311,8 +365,7 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
         assert set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values()), {n: condition(h) for n, h in hrs.items()}
         assert all("serviceAccountName" not in hr["spec"] for hr in hrs.values()), "the failed upgrade changed the platform HelmReleases"
-        if KAGENT_ON:
-            assert is_ready(kube.get("agents.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent is no longer Ready"
+        assert template_ready(kube.get("agenttemplates.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent's template is no longer Ready on the Harness"
         logger.info("guard fired: %s", messages[:300])
         # the way out the message names: the value back to false recovers
         kube.apply(meta_helmrelease(candidate_version, engine=False))

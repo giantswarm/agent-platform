@@ -895,6 +895,72 @@ Usage: include "agent-platform.platformReleaseNames" . | fromYamlArray
 {{- end -}}
 
 {{/*
+The platform HelmReleases in teardown order: waves of release names, each wave
+the releases no release still standing dependsOn — so a release is uninstalled
+only after every release whose objects are its CRs. Helm's uninstall deletes a
+release's objects and fails ("failed to delete release: <name>") when one of
+their kinds is already gone — its CRD chart uninstalled first — and
+helm-controller then retries that uninstall until the teardown hook times out
+(measured on the ATS kind smoke: substrate's SandboxConfig racing
+substrate-crds). The releases of one wave uninstall concurrently. The graph is
+the roster's dependsOn, filtered as components.yaml filters it (a reference to a
+toggled-off component names no release); a cycle fails the render.
+Usage: include "agent-platform.teardownWaves" . | fromYamlArray  (a list of lists)
+*/}}
+{{- define "agent-platform.teardownWaves" -}}
+{{- $root := . -}}
+{{- $deps := dict -}}
+{{- range $key, $c := .Values.components -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" $key)) (hasKey $c "chart") -}}
+{{- $on := list -}}
+{{- range ($c.dependsOn | default list) -}}
+{{- if and (hasKey $root.Values.components .) (include "agent-platform.componentEnabled" (dict "root" $root "name" .)) (hasKey (index $root.Values.components .) "chart") -}}
+{{- $on = append $on (index $root.Values.components .).chart -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $deps $c.chart $on -}}
+{{- end -}}
+{{- end -}}
+{{- $waves := list -}}
+{{- $remaining := keys $deps | sortAlpha -}}
+{{- range until (len $deps) -}}
+{{- if $remaining -}}
+{{- $wave := list -}}
+{{- range $name := $remaining -}}
+{{- $needed := false -}}
+{{- range $other := $remaining -}}
+{{- if has $name (index $deps $other) -}}{{- $needed = true -}}{{- end -}}
+{{- end -}}
+{{- if not $needed -}}{{- $wave = append $wave $name -}}{{- end -}}
+{{- end -}}
+{{- if not $wave -}}{{- fail (printf "components.*.dependsOn is cyclic among %s; the ordered teardown needs an acyclic graph" (join ", " $remaining)) -}}{{- end -}}
+{{- $waves = append $waves $wave -}}
+{{- $next := list -}}
+{{- range $name := $remaining -}}{{- if not (has $name $wave) -}}{{- $next = append $next $name -}}{{- end -}}{{- end -}}
+{{- $remaining = $next -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $waves -}}
+{{- end -}}
+
+{{/*
+The teardown-releases hook's script: one `kubectl delete --wait` per wave of
+agent-platform.teardownWaves, in gitops.namespace (the release namespace with
+the engine on). Each wave's releases uninstall concurrently; the next wave
+starts when helm-controller has removed the last HelmRelease of the previous one.
+*/}}
+{{- define "agent-platform.teardownScript" -}}
+{{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
+# The platform HelmReleases in reverse dependency order (a CRD chart's release
+# only after the releases whose objects are its CRs); kubectl waits for
+# helm-controller to uninstall a wave before the next one starts.
+{{- range $i, $wave := include "agent-platform.teardownWaves" . | fromYamlArray }}
+echo "wave {{ add1 $i }}: {{ join " " $wave }}"
+kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace {{ $ns }} --ignore-not-found --wait --timeout=5m {{ join " " $wave }}
+{{- end }}
+{{- end -}}
+
+{{/*
 Self-management resolved: "true" when this release renders its own
 OCIRepository + HelmRelease (templates/self/) and the admission policy that
 makes the Helm CLI day-0 only, empty otherwise. gitops.self.enabled is

@@ -4,8 +4,14 @@ objects in one kind-sorted pass, so `helm uninstall --wait` would remove the
 engine together with the objects whose finalizers it processes and hang for its
 timeout (measured). Two pre-delete hooks run while the controllers still do:
   weight 0  delete the platform HelmReleases this chart rendered — by name, in
-            gitops.namespace (the release namespace with the engine on) — and
-            wait for helm-controller to uninstall their releases;
+            gitops.namespace (the release namespace with the engine on), in
+            reverse dependency order: waves computed from the roster's
+            dependsOn (agent-platform.teardownWaves), each wave's releases
+            concurrently, the next wave once helm-controller has uninstalled
+            the last of them — so a CRD chart's release (kagent-crds,
+            substrate-crds) goes only after the releases whose objects are its
+            CRs; a Helm uninstall cannot delete an object whose kind is already
+            gone and helm-controller would retry it until this hook times out;
   weight 5  delete the FluxInstance and wait for the operator to uninstall Flux,
             CRDs included, which takes every remaining HelmRelease object (the
             agents' included) with it; their workloads and Helm storage stay.
@@ -16,10 +22,10 @@ platform HelmReleases, and this chart never touches it.
 */ -}}
 {{- if eq (include "agent-platform.engineEnabled" .) "true" }}
 {{- $ns := .Values.gitops.namespace | default .Release.Namespace }}
-{{- $releases := include "agent-platform.platformReleaseNames" . | fromYamlArray }}
 {{ include "agent-platform.hooks.job" (dict "root" . "name" "teardown-releases" "hook" "pre-delete" "weight" 0
-      "about" "delete the platform HelmReleases while helm-controller still runs, and wait for their releases to be uninstalled"
-      "args" (concat (list "delete" "helmreleases.helm.toolkit.fluxcd.io" "--namespace" $ns "--ignore-not-found" "--wait" "--timeout=5m") $releases)) }}
+      "image" (include "agent-platform.hooks.helmImage" .)
+      "about" "delete the platform HelmReleases in reverse dependency order while helm-controller still runs, waiting for each wave's releases to be uninstalled"
+      "script" (include "agent-platform.teardownScript" .)) }}
 ---
 {{ include "agent-platform.hooks.job" (dict "root" . "name" "teardown-engine" "hook" "pre-delete" "weight" 5
       "about" "delete the FluxInstance while the operator still runs, and wait for it to uninstall Flux and its CRDs"

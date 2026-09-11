@@ -6,7 +6,8 @@ Two scenarios run on the one kind cluster the CI job creates, in this order:
                                 test pushed to an in-cluster registry and installed
                                 with the bundled engine and self-management ON
                                 against that registry — adoption, the auth round
-                                trip, the agent round trips (a declarative Agent,
+                                trip, the agent round trips (a declarative
+                                AgentTemplate Ready on the platform Harness,
                                 agent-manager's create_agent through muster), the
                                 fixpoint, the refused CLI, the ordered teardown
   functional  test_own_flux.py  a cluster that runs its own Flux: the chart through
@@ -20,7 +21,14 @@ with KUBECONFIG, ATS_CHART_PATH and ATS_CHART_VERSION set (docs/TEST_CONTRACT.md
 in app-test-suite); ``kube_cluster`` (pytest-helm-charts) carries the
 kubeconfig. Helm 4 and kubectl come with the ATS image. What the smoke leaves on
 the cluster is what the functional scenario expects to find (the lab Dex, the
-registry with the chart, the four operator CRDs).
+registry with the chart, the four operator CRDs, the kept kagent CRDs).
+
+The platform's kagent is the kagent line (kagent API v2, kagent.dev/v1alpha3):
+agents are AgentTemplates a Harness admits and runs as Agent Substrate actors in
+gVisor worker pods. Both scenarios get Substrate from the chart under test and
+assert readiness on the platform Harness (AgentTemplate.status.harnesses[]); the
+CI job's kind cluster carries the feature gates Substrate needs
+(.ats/kind-config.yaml), on the `large` class (tests/ats/README.md).
 
 Local run (a throwaway kind cluster; the lab URLs carry fixed ports, so 5554 and
 8090 must be free — ATS_MUSTER_PORT picks another muster port, see lab-dex.yaml):
@@ -61,6 +69,36 @@ NAMESPACE = "agent-platform"
 KAGENT_NAMESPACE = "kagent"
 TENANT_SA = "agent-platform-flux"
 KAGENT_FLUX_SA = "kagent-flux"
+# kagent API v2: the platform Harness the connectivity chart renders in the
+# kagent namespace, the label that places an AgentTemplate on it (the whole
+# admission contract; the agent chart 1.x sets it), the Substrate WorkerPool the
+# Harness runs on (the kagent chart renders it, sized in values-kagent.yaml) and
+# the namespace of Substrate's control plane.
+HARNESS = "kagent"
+HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
+WORKER_POOL = "kagent-default"
+ATE_NAMESPACE = "ate-system"
+# Substrate's podcertificate-controller and the CA pools the connectivity
+# bootstrap mints for it; the signers whose ClusterTrustBundles it publishes.
+PODCERT_NAMESPACE = "podcertificate-controller-system"
+PODCERT_SIGNER_SUFFIX = ".podcert.ate.dev/identity"
+# The kagent line's CRDs: their templates carry helm.sh/resource-policy: keep, so
+# uninstalling the kagent-crds release leaves them — and every AgentTemplate and
+# RemoteMCPServer — in place (Substrate's ate.dev CRDs carry no such policy).
+KAGENT_CRDS = {f"{plural}.kagent.dev" for plural in ("agenttemplates", "harnesses", "modelconfigs", "modelproviderconfigs", "remotemcpservers")}
+# The chart's default ModelConfig every agent of the smoke starts from, and the
+# provider Secret it references: a placeholder key is enough for a template to
+# reach Ready (Ready means the Harness booted the actor's golden snapshot, not
+# that a model answered).
+MODEL_CONFIG = "default-model-config"
+PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API_KEY"}
+# The Generic agent chart, 1.x = kagent API v2 (0.x rendered the retired Agent).
+AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
+AGENT_CHART_SEMVER = "1.x"
+# The toolset of the smoke's managed agents: a shipped muster preset, so the
+# agent chart renders the agent's own RemoteMCPServer — the toolset carrier,
+# the X-Muster-Toolset header on it; ["preset:none"] alone renders none.
+TOOLSET = ["preset:read-only"]
 SELF_SA = f"{RELEASE}-self"
 SELF_POLICY = f"{RELEASE}-self-managed-{NAMESPACE}"
 VALUES_SECRET = "agent-platform-values"
@@ -113,14 +151,18 @@ REGISTRY_MANIFEST = ATS_DIR / "registry.yaml"
 REGISTRY_NAMESPACE = "registry"
 REGISTRY_PORT = 5000
 REGISTRY_URL = f"oci://registry.{REGISTRY_NAMESPACE}.svc.cluster.local:{REGISTRY_PORT}/charts"
+# muster's MCP endpoint as in-cluster callers reach it: the URL every agent's
+# RemoteMCPServer carries (the agent chart's default, what agent-manager composes).
+MUSTER_MCP_URL = f"http://muster.{NAMESPACE}.svc.cluster.local:8090/mcp"
 
 INSTALL_TIMEOUT = "12m"
 UNINSTALL_TIMEOUT = "5m"
 # The ordered teardown's budget. Measured: 12–16 s with muster + dicebear +
-# connectivity (the shape PRD Q9's "under a minute" was measured on), ~65 s
-# with kagent and agent-manager on — the long pole is the kagent namespace's
-# termination (the connectivity release owns the Namespace, its pods and PVC go
-# with it), which the teardown hook waits for.
+# connectivity (the shape PRD Q9's "under a minute" was measured on); with
+# kagent, Substrate and agent-manager on the teardown uninstalls seven more
+# releases in dependency order (managers, kagent, substrate, connectivity, the
+# two CRD charts) and their pods, PVCs and the WorkerPool's workers go with them
+# — measured 31–33 s on CI (tests/ats/README.md); the budget is about four times that.
 UNINSTALL_BUDGET_S = 120
 # Self-management in the smoke: the chart's own OCIRepository follows the
 # in-cluster registry the candidate was pushed to, at the candidate's exact
@@ -172,10 +214,16 @@ def run(args: List[str], timeout: int = 900, stdin: Optional[str] = None) -> sub
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False, input=stdin)  # nosec
 
 
+class Abort(Exception):
+    """Raised by a wait_for predicate that has seen a terminal state (a failed
+    HelmRelease, a refused install): the wait ends at once with this message
+    instead of running out its timeout."""
+
+
 def wait_for(what: str, predicate: Callable[[], Any], timeout: float, interval: float = 5) -> Any:
     """Poll until ``predicate`` returns a truthy value (returned) or the
     timeout passes (AssertionError naming the last outcome). Exceptions inside
-    the predicate count as "not yet"."""
+    the predicate count as "not yet" — except Abort, which ends the wait."""
     deadline = time.monotonic() + timeout
     last: Any = "not evaluated"
     while True:
@@ -184,6 +232,8 @@ def wait_for(what: str, predicate: Callable[[], Any], timeout: float, interval: 
             if value:
                 return value
             last = value
+        except Abort as exc:
+            raise AssertionError(f"gave up waiting for {what}: {exc}") from exc
         except Exception as exc:  # the predicate reads a cluster that is still converging
             last = f"{type(exc).__name__}: {exc}"
         if time.monotonic() >= deadline:
@@ -304,6 +354,50 @@ def condition(obj: Optional[Dict[str, Any]], kind: str = "Ready") -> Dict[str, A
 
 def is_ready(obj: Optional[Dict[str, Any]]) -> bool:
     return condition(obj).get("status") == "True"
+
+
+def is_accepted(obj: Optional[Dict[str, Any]]) -> bool:
+    """A RemoteMCPServer's (or ModelConfig's) Accepted condition — with tool
+    discovery off (kagent.dev/discovery: disabled, the agent chart's default)
+    the controller accepts the server without dialing it."""
+    return condition(obj, "Accepted").get("status") == "True"
+
+
+def harness_entry(template: Optional[Dict[str, Any]], harness: str = HARNESS) -> Optional[Dict[str, Any]]:
+    """The AgentTemplate's status entry for one Harness (status.harnesses[] is
+    keyed by harness), or None while no Harness admits it — a template the
+    platform Harness does not select (no label) has an empty list with
+    observedGeneration caught up."""
+    for entry in (template or {}).get("status", {}).get("harnesses", []) or []:
+        if entry.get("harness") == harness:
+            return entry
+    return None
+
+
+def harness_condition(template: Optional[Dict[str, Any]], kind: str = "Ready", harness: str = HARNESS) -> Dict[str, Any]:
+    for c in (harness_entry(template, harness) or {}).get("conditions", []) or []:
+        if c.get("type") == kind:
+            return c
+    return {}
+
+
+def template_ready(template: Optional[Dict[str, Any]], harness: str = HARNESS) -> bool:
+    """Ready on the platform Harness: admitted (an entry for the Harness) and
+    the entry's Ready condition True — the Harness booted the actor's golden
+    snapshot on the Substrate WorkerPool."""
+    return harness_condition(template, "Ready", harness).get("status") == "True"
+
+
+def template_state(template: Optional[Dict[str, Any]], harness: str = HARNESS) -> str:
+    """One line for a failure message: admitted or not, and the conditions."""
+    if not template:
+        return "absent"
+    entry = harness_entry(template, harness)
+    if entry is None:
+        status = template.get("status", {})
+        return (f"not admitted by Harness {harness}: harnesses={status.get('harnesses')} "
+                f"observedGeneration={status.get('observedGeneration')} generation={template['metadata'].get('generation')}")
+    return ", ".join(f"{c.get('type')}={c.get('status')} ({c.get('reason')}: {str(c.get('message', ''))[:120]})" for c in entry.get("conditions", []) or []) or "admitted, no conditions yet"
 
 
 # ---------------------------------------------------------------------------
@@ -434,23 +528,6 @@ def load_values(files: List[Path], sets: Optional[List[str]] = None) -> Dict[str
     return merged
 
 
-# What the smoke values turn on, read from the files so the tests and the values
-# cannot disagree. values-kagent.yaml leaves kagent off — the kagent line
-# (kagent.dev/v1alpha3) runs its agents as Agent Substrate actors and needs
-# Substrate plus apiserver feature gates the ATS kind cluster does not have yet
-# (giantswarm/agent-platform#343) — and values-round-trips.yaml agent-manager
-# (it composes agents for that kagent). The agent round trips skip with
-# NO_KAGENT_REASON; agentlab proves them on a cluster that has both.
-def _component_on(files: List[Path], name: str) -> bool:
-    return bool(load_values(files).get("components", {}).get(name, {}).get("enabled"))
-
-
-KAGENT_ON = _component_on([BASE_VALUES, KAGENT_VALUES], "kagent")
-AGENT_MANAGER_ON = _component_on(SMOKE_VALUES, "agent-manager")
-NO_KAGENT_REASON = ("kagent is off in tests/ats/values-kagent.yaml: the kagent line needs Agent Substrate and the "
-                    "ClusterTrustBundle / PodCertificateRequest feature gates the ATS kind cluster does not have yet; agentlab proves the agent round trips")
-
-
 # ---------------------------------------------------------------------------
 # Reaching Services from the test: kubectl port-forward
 # ---------------------------------------------------------------------------
@@ -513,6 +590,131 @@ class PortForward:
             except subprocess.TimeoutExpired:
                 self._proc.kill()
             self._proc = None
+
+
+def wait_for_substrate(kube: Kube, timeout: float = 600) -> Dict[str, Any]:
+    """Agent Substrate, installed by the chart under test, ready to run actors:
+    the control plane's Deployments in ate-system, the WorkerPool of the kagent
+    namespace with every worker Ready (the gVisor worker pods atelet admitted),
+    and the platform Harness the connectivity release rendered. Returns the
+    WorkerPool. Not part of `helm install --wait`: the kagent HelmRelease is
+    Ready when the kagent chart's workloads are, the WorkerPool is a CR whose
+    workers come up behind it."""
+    started = time.monotonic()
+    for name in ("ate-api-server", "ate-controller"):
+        kube.wait_deployment(ATE_NAMESPACE, name, timeout=timeout)
+
+    def workers_ready() -> Any:
+        wp = kube.get("workerpools.ate.dev", WORKER_POOL, namespace=KAGENT_NAMESPACE)
+        want = (wp or {}).get("spec", {}).get("replicas", 0)
+        return wp if wp and want and wp.get("status", {}).get("readyReplicas", 0) >= want else False
+
+    wp = wait_for(f"WorkerPool {KAGENT_NAMESPACE}/{WORKER_POOL} with every worker Ready", workers_ready, timeout)
+    harness = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+    assert harness, f"the connectivity release rendered no Harness {HARNESS} in {KAGENT_NAMESPACE}"
+    assert harness["spec"]["substrate"]["workerPoolRef"]["name"] == WORKER_POOL, harness["spec"]["substrate"]
+    assert harness["spec"]["allowedAgentTemplates"]["selector"]["matchLabels"] == {HARNESS_LABEL: HARNESS}, harness["spec"]["allowedAgentTemplates"]
+    TIMINGS.record(f"Substrate ready (ate-system control plane, WorkerPool {WORKER_POOL} {wp['status'].get('readyReplicas')}/{wp['spec']['replicas']} workers, Harness {HARNESS})", time.monotonic() - started)
+    logger.info("Substrate ready: WorkerPool %s %s/%s workers on %s, Harness %s on %s",
+                WORKER_POOL, wp["status"].get("readyReplicas"), wp["spec"]["replicas"], wp["spec"].get("workerImage"), HARNESS, harness["spec"]["workload"]["image"])
+    return wp
+
+
+def wait_for_template_ready(kube: Kube, name: str, timeout: float = 600) -> Dict[str, Any]:
+    """The AgentTemplate Ready on the platform Harness; the failure message
+    carries the template's state (not admitted, or which condition is off)."""
+    def ready() -> Any:
+        template = kube.get("agenttemplates.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        return template if template_ready(template) else False
+
+    try:
+        return wait_for(f"AgentTemplate {name} Ready on Harness {HARNESS}", ready, timeout)
+    except AssertionError as exc:
+        template = kube.get("agenttemplates.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        raise AssertionError(f"{exc}; AgentTemplate {name}: {template_state(template)}") from exc
+
+
+def assert_remote_mcp_server(kube: Kube, name: str, toolset: Optional[List[str]] = None) -> Dict[str, Any]:
+    """The agent's own RemoteMCPServer — the toolset carrier the agent chart
+    renders next to the AgentTemplate: muster's in-cluster URL, the toolset as
+    the X-Muster-Toolset header, controller-side tool discovery off (agents
+    resolve the tools at run time as the caller), never a static Authorization
+    header (the Harness propagates the caller's token; a static one would make
+    every user act as one identity) — and Accepted by the controller."""
+    toolset = TOOLSET if toolset is None else toolset
+
+    def accepted() -> Any:
+        server = kube.get("remotemcpservers.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        return server if is_accepted(server) else False
+
+    server = wait_for(f"RemoteMCPServer {name} Accepted", accepted, 300)
+    spec = server["spec"]
+    assert spec.get("url") == MUSTER_MCP_URL, spec.get("url")
+    assert spec.get("protocol") == "STREAMABLE_HTTP", spec.get("protocol")
+    headers = {h.get("name"): h.get("value") for h in spec.get("headersFrom", []) or []}
+    assert headers.get("X-Muster-Toolset") == ",".join(toolset), headers
+    assert "Authorization" not in headers, f"a static Authorization header on RemoteMCPServer {name}: it would override the propagated caller token"
+    assert (server["metadata"].get("labels") or {}).get("kagent.dev/discovery") == "disabled", server["metadata"].get("labels")
+    return server
+
+
+def substrate_trust_bundles(kube: Kube) -> List[str]:
+    """The cluster-scoped ClusterTrustBundles of Substrate's podcertificate
+    signers (published by the podcertificate-controller, never Helm-owned)."""
+    return sorted(b["metadata"]["name"] for b in kube.items("clustertrustbundles.certificates.k8s.io")
+                  if str(b.get("spec", {}).get("signerName", "")).endswith(PODCERT_SIGNER_SUFFIX))
+
+
+def remove_substrate_leftovers(kube: Kube) -> None:
+    """What a Substrate uninstall leaves behind, removed so the next install on
+    this cluster is a first install: the ate-system namespace (the actor-id
+    pools, ate-api-server's authentication config, the bundled Postgres's claim),
+    the podcertificate-controller's namespace when the release did not take it
+    (its two CA pools) and the signers' ClusterTrustBundles. A reinstall that
+    keeps them does not work today: the substrate release owns and deletes
+    podcertificate-controller-system, the bootstrap then mints new roots, and
+    the surviving bundles keep the old ones — every client fails the TLS
+    handshake against ate-api-server (giantswarm/agent-platform#384)."""
+    bundles = substrate_trust_bundles(kube)
+    logger.info("Substrate left behind: namespaces %s, ClusterTrustBundles %s — removed for the next scenario",
+                [ns for ns in (ATE_NAMESPACE, PODCERT_NAMESPACE) if kube.get("namespace", ns)], bundles)
+    if bundles:
+        kube.delete("clustertrustbundles.certificates.k8s.io", *bundles, timeout="1m")
+    for ns in (ATE_NAMESPACE, PODCERT_NAMESPACE):
+        kube.delete("namespace", ns, wait=False)
+
+
+def wait_for_namespaces_settled(kube: Kube, *namespaces: str, timeout: float = 300) -> None:
+    """Each namespace gone or Active — never Terminating (a bootstrap into a
+    terminating namespace is refused, a create of an existing one is a no-op)."""
+    for ns in namespaces:
+        wait_for(f"namespace {ns} gone or Active (not Terminating)",
+                 lambda ns=ns: (kube.get("namespace", ns) or {}).get("status", {}).get("phase", "gone") != "Terminating", timeout)
+
+
+def apply_placeholder_provider_secret(kube: Kube) -> None:
+    """The Secret the chart's default ModelConfig references, with a placeholder
+    key: enough for the controller to resolve the ModelConfig and for a template
+    to reach Ready (no model is called)."""
+    kube.apply({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": PLACEHOLDER_PROVIDER_SECRET["name"], "namespace": KAGENT_NAMESPACE},
+                "stringData": {PLACEHOLDER_PROVIDER_SECRET["key"]: "lab-only-placeholder-key"}})
+
+
+def dump_agents(kube: Kube) -> None:
+    """The agent path's state when an assertion fails: the kagent API v2 objects,
+    Substrate's control plane and the WorkerPool's workers, their logs."""
+    kube.dump([
+        f"-n {KAGENT_NAMESPACE} get agenttemplates.kagent.dev,remotemcpservers.kagent.dev,modelconfigs.kagent.dev -o yaml",
+        f"-n {KAGENT_NAMESPACE} get harnesses.kagent.dev,workerpools.ate.dev -o yaml",
+        f"-n {KAGENT_NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io,ocirepositories.source.toolkit.fluxcd.io -o wide",
+        f"-n {KAGENT_NAMESPACE} get pods -o wide",
+        f"-n {ATE_NAMESPACE} get pods -o wide",
+        f"-n {KAGENT_NAMESPACE} get events --sort-by=.lastTimestamp",
+        f"-n {ATE_NAMESPACE} get events --sort-by=.lastTimestamp",
+        f"-n {KAGENT_NAMESPACE} logs deployment/kagent-controller --tail=80",
+        f"-n {ATE_NAMESPACE} logs deployment/ate-controller --tail=60",
+        f"-n {ATE_NAMESPACE} logs daemonset/atelet --tail=60",
+    ])
 
 
 def wait_for_endpoints(kube: Kube, namespace: str, service: str, timeout: float = 600) -> None:
