@@ -127,27 +127,48 @@ from the `Gateway`. This chart shapes it through `AgentgatewayParameters`
 
 - `replicas: 2` — two pods survive a node reboot or drain.
 - `podDisruptionBudget` (`enabled: true`) — a drain evicts one pod at a time.
-  The keys other than `enabled` are the PDB spec as written; with neither
-  `minAvailable` nor `maxUnavailable` set, the template emits
-  `maxUnavailable: 1` (that default lives in the template so `minAvailable`
-  can be chosen through the meta chart, where a null never reaches this
-  chart's defaults). The render refuses both fields together, a non-percentage
-  string or a fractional number, and any budget that allows no eviction — an
-  integer `minAvailable` at or above `replicas`, a percentage `minAvailable`
-  that rounds up to every replica, a zero `maxUnavailable` — since it would
-  hang every node drain.
+  The keys other than `enabled` are the PDB spec as written (`minAvailable`,
+  `maxUnavailable`, `unhealthyPodEvictionPolicy`); with neither `minAvailable`
+  nor `maxUnavailable` set, the template fills in `maxUnavailable: 1` (that
+  default lives in the template so `minAvailable` can be chosen through the
+  meta chart, where a null never reaches this chart's defaults — and it fills
+  the missing field in rather than replacing the spec, so an
+  `unhealthyPodEvictionPolicy` set on its own survives it). The render refuses
+  a key that is not one of those three (keeping the two budget fields out of
+  `values.yaml` is what leaves the block open in the schema, so a typo would
+  otherwise be dropped in silence), both fields together, a string that is not
+  a percentage from `0%` to `100%`, a fractional or negative number, an
+  `unhealthyPodEvictionPolicy` outside the API's enum, and any budget that
+  allows no eviction — an integer `minAvailable` at or above `replicas`, a
+  percentage `minAvailable` that rounds up to every replica, a zero
+  `maxUnavailable` — since it would hang every node drain.
 - `spread` — one `topologySpreadConstraint` per `topologyKeys` entry
   (`kubernetes.io/hostname`; add `topology.kubernetes.io/zone` on a multi-zone
   pool), `whenUnsatisfiable: ScheduleAnyway` so a single-node lab still
-  schedules both pods. A drain of that single node then waits on the budget
-  (the replacement pod cannot schedule); turn `podDisruptionBudget.enabled`
-  off there.
+  schedules both pods, and `matchLabelKeys: [pod-template-hash]` so a rollout
+  spreads the new ReplicaSet against itself instead of against the revision it
+  is replacing — without it, once the old pods drain both survivors can be
+  left on one node and `ScheduleAnyway` never moves them back. A drain of that
+  single node then waits on the budget (the replacement pod cannot schedule);
+  turn `podDisruptionBudget.enabled` off there.
+
+`replicas`, `spread.maxSkew` and `spread.whenUnsatisfiable` are each refused
+when unset. A `null` set through the meta chart does not travel — Helm deletes
+the key at that layer — so it arrives here as a missing key, which no schema
+keyword can floor; unguarded, `replicas` alone would render `0` and scale the
+data plane to zero.
 
 A pod's exit runs inside the data-plane shutdown window the controller's chart
-defaults to (10 s still accepting so the endpoint is gone first, then up to
-55 s draining inside a 60 s grace period). Streamable-HTTP MCP sessions
-survive a pod change (the session id carries the state, encoded with the
-per-Gateway session key both pods share); legacy SSE sessions are pod-local.
+defaults to. Both ends of it are deadlines measured from `SIGTERM`, not phases
+that add up: 10 s still accepting so the endpoint is gone first, and draining
+until the 55 s deadline, inside a 60 s grace period. Streamable-HTTP MCP
+sessions survive a pod change (the session id carries the state, encoded with
+the per-Gateway session key both pods share). Legacy SSE sessions are
+pod-local, and pod-local costs more at two replicas than it did at one: the
+session lives on the pod that answered `/sse`, the ClusterIP Service balances
+each later POST on its own, and a POST that lands on the other pod finds no
+session — so a legacy SSE client fails against a two-pod data plane whether or
+not a pod ever changes. Use streamable-HTTP.
 The meta chart forwards `agentgateway.controller.replicaCount: 2` (every
 replica serves xDS; the leader alone writes status and reconciles the data
 plane), so a data-plane pod that starts on a rebooted node finds its config

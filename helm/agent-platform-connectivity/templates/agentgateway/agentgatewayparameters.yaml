@@ -16,39 +16,65 @@ so a set global endpoint wins over the defaults without duplicating env names. *
 {{- $env = append $env . }}
 {{- end }}
 {{- end }}
+{{- $params := .Values.gateway.parameters }}
+{{- /* The replica count. A key Helm deleted — `replicas: null` set through the
+meta chart, or an emptied entry in a values file — is not a value the schema's
+`minimum` can see, and `nil | int` is 0: the overlay would scale the data-plane
+Deployment to zero and take every agent offline. Refuse it here instead. */ -}}
+{{- if kindIs "invalid" $params.replicas }}
+{{- fail "gateway.parameters.replicas is unset; the overlay would ask the data-plane Deployment for 0 replicas and every MCP call and, with llmRouting on, every model call would fail. A null set through the meta chart deletes the key rather than passing it on, so the schema's minimum never sees it — set the key to 1 or more" }}
+{{- end }}
+{{- $replicas := $params.replicas | int }}
 {{- /* The PodDisruptionBudget. The keys other than `enabled` are the PDB spec
 as written; with neither minAvailable nor maxUnavailable set the spec is
 maxUnavailable: 1 — the default lives HERE and not in values.yaml, because a
 `maxUnavailable: null` set through the meta chart is consumed by Helm at that
 layer and never reaches this chart, whose own default would then come back
-next to the operator's minAvailable. Guards: Kubernetes rejects a spec with
-both fields, or a string that is not a percentage, or a fractional number; a
-budget that allows no eviction — an integer minAvailable at or above the
-replica count, a percentage minAvailable that rounds up to every replica
-(ceil(p × replicas / 100) ≥ replicas), a zero maxUnavailable — hangs every
-node drain on the cluster on the data plane. All fail the render instead of
-the deployer or the drain. */ -}}
-{{- $replicas := .Values.gateway.parameters.replicas | int }}
-{{- $pdb := .Values.gateway.parameters.podDisruptionBudget }}
-{{- $pdbSpec := omit $pdb "enabled" }}
+next to the operator's minAvailable. Keeping the two fields out of values.yaml
+is also why the block stays `additionalProperties: true`: the schema generator
+derives properties from the values, so a key with no default there cannot be
+declared, and every check below is the template's to make. Guards: a key that
+is not one of the three passed through (a typo would otherwise be dropped in
+silence, or ride into the spec and leave the deployer with a PDB it cannot
+create); a spec with both fields; a string that is not a percentage from 0% to
+100%, a fractional number, a negative one; an unhealthyPodEvictionPolicy
+outside the API's enum; and a budget that allows no eviction — an integer
+minAvailable at or above the replica count, a percentage minAvailable that
+rounds up to every replica (ceil(p × replicas / 100) ≥ replicas), a zero
+maxUnavailable — which hangs every node drain on the cluster on the data
+plane. All fail the render instead of the deployer or the drain. */ -}}
+{{- $pdb := $params.podDisruptionBudget }}
+{{- $pdbFields := list "minAvailable" "maxUnavailable" "unhealthyPodEvictionPolicy" }}
+{{- $pdbSpec := dict }}
 {{- if $pdb.enabled }}
+{{- range $field, $value := $pdb }}
+{{- if and (ne $field "enabled") (not (has $field $pdbFields)) }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.%s is not one of the PodDisruptionBudget spec fields this chart passes through (%s); the block is open in the schema so that the two budget fields need no default there, which leaves the spelling to this guard" $field (join ", " $pdbFields)) }}
+{{- end }}
+{{- end }}
 {{- $min := $pdb.minAvailable }}
 {{- $max := $pdb.maxUnavailable }}
-{{- if and (kindIs "invalid" $min) (kindIs "invalid" $max) }}
-{{- $pdbSpec = dict "maxUnavailable" 1 }}
-{{- else if and (not (kindIs "invalid" $min)) (not (kindIs "invalid" $max)) }}
+{{- if and (not (kindIs "invalid" $min)) (not (kindIs "invalid" $max)) }}
 {{- fail "gateway.parameters.podDisruptionBudget sets both minAvailable and maxUnavailable; a PodDisruptionBudget takes one of them" }}
 {{- end }}
 {{- range $field, $value := dict "minAvailable" $min "maxUnavailable" $max }}
 {{- if not (kindIs "invalid" $value) }}
 {{- if kindIs "string" $value }}
-{{- if not (regexMatch "^[0-9]+%$" $value) }}
-{{- fail (printf "gateway.parameters.podDisruptionBudget.%s=%q is neither an integer nor a percentage (\"50%%\"); Kubernetes rejects the budget" $field $value) }}
+{{- if not (regexMatch "^(100|[0-9]{1,2})%$" $value) }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.%s=%q is neither an integer nor a percentage from 0%% to 100%% (\"50%%\"); Kubernetes rejects the budget" $field $value) }}
 {{- end }}
 {{- else if ne (toString $value) (toString ($value | int)) }}
 {{- fail (printf "gateway.parameters.podDisruptionBudget.%s=%v is not a whole number; Kubernetes rejects the budget" $field $value) }}
+{{- else if lt ($value | int) 0 }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.%s=%v is negative; Kubernetes rejects the budget, and the deployer would leave the data plane running with no budget at all" $field $value) }}
 {{- end }}
 {{- end }}
+{{- end }}
+{{- with $pdb.unhealthyPodEvictionPolicy }}
+{{- if not (has . (list "IfHealthyBudget" "AlwaysAllow")) }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.unhealthyPodEvictionPolicy=%q is not a PodDisruptionBudget eviction policy (IfHealthyBudget, AlwaysAllow); Kubernetes rejects the budget" .) }}
+{{- end }}
+{{- $_ := set $pdbSpec "unhealthyPodEvictionPolicy" . }}
 {{- end }}
 {{- if not (kindIs "invalid" $min) }}
 {{- if kindIs "string" $min }}
@@ -59,16 +85,36 @@ the deployer or the drain. */ -}}
 {{- else if ge ($min | int) $replicas }}
 {{- fail (printf "gateway.parameters.podDisruptionBudget.minAvailable=%v is not below gateway.parameters.replicas=%d; the budget would allow no eviction and every node drain would hang on the data plane" $min $replicas) }}
 {{- end }}
-{{- end }}
-{{- if not (kindIs "invalid" $max) }}
+{{- $_ := set $pdbSpec "minAvailable" $min }}
+{{- else if not (kindIs "invalid" $max) }}
 {{- if eq (toString $max | trimSuffix "%" | int) 0 }}
 {{- fail (printf "gateway.parameters.podDisruptionBudget.maxUnavailable=%v allows no eviction; every node drain would hang on the data plane" $max) }}
 {{- end }}
+{{- $_ := set $pdbSpec "maxUnavailable" $max }}
+{{- else }}
+{{- $_ := set $pdbSpec "maxUnavailable" 1 }}
 {{- end }}
 {{- end }}
-{{- with .Values.gateway.parameters.spread }}
-{{- if and .enabled (not .topologyKeys) }}
+{{- /* The spread. Each field is interpolated straight into a PodSpec the
+deployer patches onto the data-plane Deployment, so an unset one (again, the
+shape a null takes by the time it reaches this chart) would render a
+constraint the API server refuses and the Deployment would never be patched —
+worse than the single replica this is replacing. */ -}}
+{{- $spread := $params.spread }}
+{{- if $spread.enabled }}
+{{- if not $spread.topologyKeys }}
 {{- fail "gateway.parameters.spread.enabled needs at least one gateway.parameters.spread.topologyKeys entry (kubernetes.io/hostname spreads across nodes); set spread.enabled=false to run the replicas unspread" }}
+{{- end }}
+{{- range $spread.topologyKeys }}
+{{- if not . }}
+{{- fail "gateway.parameters.spread.topologyKeys has an empty entry; Kubernetes rejects a topologySpreadConstraint whose topologyKey is empty and the data-plane Deployment would never be patched" }}
+{{- end }}
+{{- end }}
+{{- if kindIs "invalid" $spread.maxSkew }}
+{{- fail "gateway.parameters.spread.maxSkew is unset; the constraint would render maxSkew: 0, which Kubernetes rejects. A null set through the meta chart deletes the key rather than passing it on, so the schema's minimum never sees it — set the key to 1 or more" }}
+{{- end }}
+{{- if not $spread.whenUnsatisfiable }}
+{{- fail "gateway.parameters.spread.whenUnsatisfiable is unset; the constraint would render an empty value, which Kubernetes rejects. Set ScheduleAnyway (two pods on one node beat one pod) or DoNotSchedule" }}
 {{- end }}
 {{- end }}
 apiVersion: agentgateway.dev/v1alpha1
@@ -121,20 +167,26 @@ spec:
           automountServiceAccountToken: true
           securityContext:
             {{- toYaml .Values.gateway.parameters.podSecurityContext | nindent 12 }}
-          {{- with .Values.gateway.parameters.spread }}
-          {{- if .enabled }}
+          {{- if $spread.enabled }}
           {{- /* One constraint per topology key, all selecting the data-plane
-          pods by the label the deployer stamps from the Gateway's name. */}}
+          pods by the label the deployer stamps from the Gateway's name.
+          matchLabelKeys adds the revision hash to that selector, so a rollout
+          spreads the new ReplicaSet against itself: without it the surge pod
+          is balanced against the pods of the old revision too, and once those
+          drain both survivors can be left on one node — with ScheduleAnyway
+          nothing moves them back, so a routine image bump would quietly
+          restore the failure this constraint exists to prevent. */}}
           topologySpreadConstraints:
-            {{- range .topologyKeys }}
-            - maxSkew: {{ $.Values.gateway.parameters.spread.maxSkew | int }}
+            {{- range $spread.topologyKeys }}
+            - maxSkew: {{ $spread.maxSkew | int }}
               topologyKey: {{ . }}
-              whenUnsatisfiable: {{ $.Values.gateway.parameters.spread.whenUnsatisfiable }}
+              whenUnsatisfiable: {{ $spread.whenUnsatisfiable }}
               labelSelector:
                 matchLabels:
                   gateway.networking.k8s.io/gateway-name: {{ $.Values.gateway.name }}
+              matchLabelKeys:
+                - pod-template-hash
             {{- end }}
-          {{- end }}
           {{- end }}
           {{- with .Values.gateway.parameters.dataPlaneVolumes }}
           volumes:
