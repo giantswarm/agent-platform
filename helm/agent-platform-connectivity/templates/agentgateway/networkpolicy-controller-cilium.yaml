@@ -1,4 +1,12 @@
 {{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
+{{- $external := include "agent-platform.jwks.externalTargets" . | fromJsonArray }}
+{{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
+{{- $extraCidrs := $extra.cidrs | default list }}
+{{- $extraPort := $extra.port | default 443 | int }}
+{{- /* A toFQDNs selector matches nothing without the DNS proxy clause, so the
+policy renders the proxy variant of the DNS rule as soon as one name is
+selected, and the plain variant otherwise. */}}
+{{- $needsDnsProxy := gt (len (include "agent-platform.jwks.externalNamedPorts" . | fromJsonArray)) 0 }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -58,5 +66,34 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
+    {{- /* Each external issuer the routes name, on its own JWKS port: by name,
+    or as a single-address block for an address literal. */}}
+    {{- range $external }}
+    {{- if .cidr }}
+    - toCIDR:
+        - {{ .cidr | quote }}
+    {{- else }}
+    - toFQDNs:
+        - matchName: {{ .host | quote }}
+    {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ .port | toString | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- /* gateway.jwksEgress.external.cidrs: an issuer the routes do not name,
+    or one the kubernetes flavour's IPv4 wide rule cannot reach. */}}
+    {{- with $extraCidrs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: {{ $extraPort | toString | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if $needsDnsProxy }}
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- else }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- end }}
 {{- end }}

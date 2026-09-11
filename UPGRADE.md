@@ -2,6 +2,24 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the agentgateway controller reaches an external JWKS host)
+
+The agentgateway controller's network policy opens egress to every external JWKS host the `jwtAuthentication` routes name (giantswarm/agent-platform#312), in both network-policy flavours. The controller fetches each policy's JWKS and pushes the keys to the data plane over xDS, so this is the controller's egress, not the data plane's; the data-plane policies do not change.
+
+New keys: `gateway.jwksEgress.external.cidrs` and `.port` (443), for IP blocks the routes do not name.
+
+### Operator action
+
+- **None on an installation whose JWKS hosts are in-cluster.** The whole render is byte-identical to before, in both flavours, for the fleet render and the lab render. `make verify-wiring` asserts that against `origin/main`.
+- **An installation with an external issuer can drop its hand-written controller policy.** Name the issuer in the route's `jwtAuthentication.jwks` (host and port) and the chart's controller policy opens it: a `toFQDNs` `matchName` in the cilium flavour, an address block minus `networkPolicy.kubernetes.worldExcludedCIDRs` in the kubernetes flavour. Remove the hand-written `CiliumNetworkPolicy` after the release lands and confirm a request with a valid token is still accepted through the JWT policy.
+- **A route on port 443 now originates TLS to the issuer without `jwks.tls.enabled`.** The port serves no plain HTTP, so the key is implied. An installation that set it stays as it is, and an in-cluster Dex on 5556 keeps its plain-HTTP fetch. Before this release, port 443 without the key left the fetch on plain HTTP and every caller read `401 token uses the unknown key`.
+- **Three `jwks.host` shapes now fail the render**, each of them a green render and that same `401` before. The message names the value to set.
+  - A host that carries its port (`dex.example.com:5556`). Split it into `jwks.host` and `jwks.port`.
+  - A host that looks like an address literal but is not a valid one (`1.2.3.999`).
+  - A two-label host whose second label is not `gateway.jwksEgress.namespace` (`okta.com`). `dex.giantswarm` (a Service reached by its short name) and `okta.com` (a public issuer) are the same shape, and only the namespace tells them apart. A short Service name in that namespace still renders, and renders the same policy as its qualified form. Write the qualified Service name for an in-cluster issuer, or a host with three or more labels for a public one. This guard follows `networkPolicy.enabled`.
+- **`gateway.jwksEgress.enabled` is no longer demanded for an external `jwks.host`.** The three render guards asked for it on any JWT policy; they now ask only when the host is in-cluster (`svc` as its third dot-separated label, or fewer than three labels), and only under `networkPolicy.enabled`. An installation that set the key on to satisfy the old guard while pointing the route at an external issuer can turn it off: the in-cluster rule it renders reaches nothing. Leaving it on is harmless.
+- **In the kubernetes flavour the wide rule is IPv4 only.** A named host renders `0.0.0.0/0` minus `worldExcludedCIDRs`, so an issuer the cluster resolves to an IPv6 address, or one inside a private block, is not reached. Name its blocks in `gateway.jwksEgress.external.cidrs`, which takes either family in both flavours.
+
 ## 3.x → 4.0 (the kagent line: kagent API v2)
 
 4.0 replaces the kagent the platform runs. `components.kagent` and the new `components.kagent-crds` deliver **kagent API v2** — `kagent.dev/v1alpha3`: `AgentTemplate`, `Harness`, `ModelConfig`, `ModelProviderConfig`, `RemoteMCPServer`; agents run as Agent Substrate actors in gVisor worker pods — from the kagent line [giantswarm/kagent-upstream](https://github.com/giantswarm/kagent-upstream) (`oci://ghcr.io/giantswarm/kagent/helm`, releases `0.11.0-gs.N`) instead of the `giantswarm/kagent` 0.x wrapper (kagent 0.10, `v1alpha2`) from gsoci. The 4.x line of this chart is the kagent API v2 migration (giantswarm/giantswarm#37705); this release is its first step — the roster and the values — and the connectivity chart's v1alpha3 templates, the platform Harness, Substrate inside the chart and the cut-over of an installation's agents follow in the 4.0.x releases.

@@ -84,9 +84,10 @@ callers, a route the API server rejects, or an MCPServer CR without its CRD.
       {{- if not $am.route.jwtAuthentication.issuer }}
         {{- $_ := include "agent-platform.issuerUrl" (dict "ctx" . "for" "agentManager.route.jwtAuthentication (or set its .issuer)") }}
       {{- end }}
-      {{- if not .Values.gateway.jwksEgress.enabled }}
-        {{- fail "agentManager.route.jwtAuthentication.enabled is true but gateway.jwksEgress.enabled is false. The agentgateway data plane cannot reach the issuer's JWKS endpoint, so signature validation fails closed. Set gateway.jwksEgress.enabled: true (and its namespace/port to the issuer's)." }}
-      {{- end }}
+      {{- /* An in-cluster JWKS endpoint needs jwksEgress; an external one is
+             covered by the controller policy's own rules, but only over TLS.
+             The shared helper carries every JWKS guard. */ -}}
+      {{- $_ := include "agent-platform.jwks.validate" (dict "ctx" . "path" "agentManager.route.jwtAuthentication" "jwks" $am.route.jwtAuthentication.jwks) }}
     {{- end }}
   {{- end }}
 {{- end }}

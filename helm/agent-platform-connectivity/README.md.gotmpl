@@ -158,4 +158,73 @@ platform needs:
 The meta chart's README ("Agent Substrate") has the prerequisites, the version
 pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 
+## `gateway.jwksEgress` — reaching the issuer's JWKS
+
+The agentgateway controller fetches the JWKS of every `jwtAuthentication`
+policy this chart renders and pushes the keys to the data plane over xDS. The
+data plane fetches nothing. So the controller's network policy, not the data
+plane's, must reach every issuer.
+
+Under `networkPolicy.enabled` the controller's egress is the kube-apiserver,
+muster, DNS and the destinations below. Without a rule for the issuer the fetch
+is denied on a default-deny cluster and every request that carries a valid
+token is answered `401 token uses the unknown key`.
+
+Three route blocks name a JWKS host and port, and the controller policy reads
+them directly — there is no second list to keep in sync:
+
+- `kagent.controllerRoute.jwtAuthentication.jwks`
+- `modelManager.route.jwtAuthentication.jwks`
+- `agentManager.route.jwtAuthentication.jwks`
+
+Only a rendered policy contributes: the component, its route and its
+`jwtAuthentication` must all be on.
+
+| The host | cilium flavour | kubernetes flavour |
+|---|---|---|
+| In-cluster (`svc` as the third dot-separated label, or a single label) | the `gateway.jwksEgress` rule: that namespace on that port | the same, as a namespace selector |
+| An external name (`www.googleapis.com`) | a `toFQDNs` `matchName` on the JWKS port, behind the policy's DNS proxy rule | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs`, on the JWKS port |
+| A literal IP address | a `toCIDR` on the JWKS port: `/32` for IPv4, `/128` for IPv6 | the same, as an `ipBlock` |
+
+`gateway.jwksEgress.enabled` is required only for an in-cluster host. An
+external host needs it not at all, and leaving it on changes nothing else.
+
+Two render guards refuse a host that reaches no issuer in any flavour. Each one
+is a green render and a runtime `401` without it, and the route subtrees are
+open objects in `values.schema.json`, so no schema pattern can hold them:
+
+| The shape | Why no rule reaches it |
+|---|---|
+| A host that carries a port (`dex.example.com:5556`) | the port belongs in `jwks.port`; both the JWKS backend and the egress rule are built from the two keys |
+| A host that looks like an address literal but is not one (`1.2.3.999`) | a name selector never resolves it, and the API server rejects the block it would render |
+
+Two more depend on the rule that renders, so they follow `networkPolicy.enabled`:
+
+| The shape | Why no rule reaches it |
+|---|---|
+| A two-label host whose second label is not `gateway.jwksEgress.namespace` (`okta.com`) | a short Service name and a public issuer are the same shape; only the namespace tells them apart, so `dex.giantswarm` renders and `okta.com` does not |
+| An in-cluster host while `gateway.jwksEgress` is off | nothing opens its port |
+
+With no policy rendered, every destination is reachable and neither key decides
+anything.
+
+All three routes originate TLS to the issuer when `jwks.port` is 443, which
+serves no plain HTTP, or when `jwks.tls.enabled` is set for another port. The
+route's `AgentgatewayBackend` then verifies against `jwks.tls.caSecretName`,
+else `global.identity.ca.secretName`, else the controller's system trust. An
+in-cluster Dex on 5556 keeps its plain-HTTP fetch.
+
+`gateway.jwksEgress.external.cidrs` covers an issuer the routes do not name,
+and the one the kubernetes flavour cannot reach by name: the wide rule it
+renders for a name is `0.0.0.0/0`, so it reaches public IPv4 destinations only.
+A private identity provider inside one of `worldExcludedCIDRs`, and an issuer
+the cluster resolves over IPv6, belong there. The list opens `external.port`
+(443 by default) as its own rule in both flavours, and applies whether or not
+`gateway.jwksEgress.enabled` is set.
+
+The cilium controller policy renders the DNS proxy clause only while a name is
+selected. With in-cluster hosts alone the whole render is what it was before
+this section existed, in both flavours; `make verify-wiring` asserts that
+against `origin/main`.
+
 {{ template "chart.valuesSection" . }}

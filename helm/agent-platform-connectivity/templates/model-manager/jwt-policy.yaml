@@ -13,7 +13,7 @@ metadata:
   labels:
     {{- include "agent-platform.modelManager.labels" . | nindent 4 }}
 spec:
-  {{- if ($jwt.jwks.tls).enabled }}
+  {{- if include "agent-platform.jwks.tlsEnabled" $jwt.jwks }}
   {{- /* An issuer serving its JWKS over TLS (a Dex with web.https): originate
   TLS and verify against the named CA Secret (key ca.crt), defaulting to the
   platform's identity CA (global.identity.ca.secretName, the standalone
@@ -21,7 +21,7 @@ spec:
   SAN follow the host above. */}}
   policies:
     tls:
-      {{- $ca := $jwt.jwks.tls.caSecretName | default (dig "identity" "ca" "secretName" "" .Values.global) }}
+      {{- $ca := ($jwt.jwks.tls).caSecretName | default (dig "identity" "ca" "secretName" "" .Values.global) }}
       {{- if $ca }}
       caCertificateRefs:
         - kind: Secret
