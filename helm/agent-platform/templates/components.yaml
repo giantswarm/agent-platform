@@ -83,7 +83,10 @@ knowledge:
       it is not the platform's (gitops.targetNamespace, else the release
       namespace). For a chart whose objects are fixed to one namespace by name
       (the substrate chart's Roles and Service names are upstream's canonical
-      ate-system render): helm-controller creates it (install.createNamespace).
+      ate-system render): helm-controller creates it (install.createNamespace)
+      and keeps the release history there too (storageNamespace — where
+      `helm -n <ns>` stores it), so a release installed by hand in that
+      namespace is adopted by name instead of re-installed beside it.
   dependsOn     — Flux dependsOn ordering (CRD-owning component before its CR
       consumers). References that name a component which is toggled
       off are dropped at render time (see the componentEnabled helper) so an
@@ -224,6 +227,9 @@ spec:
   interval: {{ $g.interval }}
   releaseName: {{ $name }}
   targetNamespace: {{ $c.targetNamespace | default $targetNs }}
+  {{- with $c.targetNamespace }}
+  storageNamespace: {{ . }}
+  {{- end }}
   {{- with $sa }}
   serviceAccountName: {{ . }}
   {{- end }}

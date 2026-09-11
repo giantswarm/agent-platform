@@ -254,6 +254,8 @@ def main(meta: str, connectivity: str) -> int:
         hr = off.get(("HelmRelease", name))
         if not hr or f"\n  targetNamespace: {SUBSTRATE_NAMESPACE}\n" not in hr:
             fail(f"the {name} release does not target {SUBSTRATE_NAMESPACE} (components.{name}.targetNamespace; the substrate chart's Roles and Services name it)")
+        if f"\n  storageNamespace: {SUBSTRATE_NAMESPACE}\n" not in hr:
+            fail(f"the {name} release history is not stored in {SUBSTRATE_NAMESPACE} (a release installed there by hand — `helm -n {SUBSTRATE_NAMESPACE}` — must be adopted by name, not re-installed beside it)")
     render_fails(meta, [*ci, "--set", "components.substrate.enabled=false"], "components.substrate.enabled or components.substrate-crds.enabled is not",
                  "kagent on with substrate off")
     render_fails(meta, [*ci, "--set", "components.substrate-crds.enabled=false"], "components.substrate.enabled or components.substrate-crds.enabled is not",
