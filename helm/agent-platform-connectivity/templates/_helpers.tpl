@@ -958,29 +958,33 @@ Usage: include "agent-platform.kagent.userIdClaim" .
 
 {{/*
 The rules of the kagent controller GRPCRoute (a `rules:` list), from
-kagent.controllerRoute.grpc.services: one rule per service, one exact
-service/method match per RPC, every rule forwarding to the backend given as
-`.backendRefs` (a YAML string). Exact service/method matches are the one shape
-the agentgateway controller translates into a path that requests have (a
-service-only match becomes the exact path "/<service>/", `type:
-RegularExpression` is ignored), and they outrank the MCP catch-all's PathPrefix.
+kagent.controllerRoute.grpc.services: one rule per service, forwarding to the
+backend given as `.backendRefs` (a YAML string). A service with an EMPTY method
+list gets one service-only match — every RPC of the service, translated by the
+agentgateway controller (chart >= 2.1.1) into the path prefix "/<service>/";
+a service with methods listed gets one exact service/method match per RPC — the
+shape an older controller needs, and a way to expose a subset. Either shape
+outranks the MCP catch-all's PathPrefix /.
 Usage: include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" $refs) | nindent 4
 */}}
 {{- define "agent-platform.kagent.grpcRules" -}}
 {{- $services := dig "controllerRoute" "grpc" "services" (dict) .ctx.Values.kagent }}
 {{- if not $services }}
-{{- fail "kagent.controllerRoute.grpc.services is empty: the controller GRPCRoute needs at least one service with its methods" }}
+{{- fail "kagent.controllerRoute.grpc.services is empty: the controller GRPCRoute needs at least one service" }}
 {{- end }}
 {{- range $svc, $methods := $services }}
-{{- if not $methods }}
-{{- fail (printf "kagent.controllerRoute.grpc.services[%s] lists no methods: the agentgateway controller cannot route a service-only match" $svc) }}
-{{- end }}
 - matches:
+{{- if $methods }}
 {{- range $methods }}
     - method:
         type: Exact
         service: {{ $svc }}
         method: {{ . }}
+{{- end }}
+{{- else }}
+    - method:
+        type: Exact
+        service: {{ $svc }}
 {{- end }}
   backendRefs:
 {{ $.backendRefs | indent 4 }}

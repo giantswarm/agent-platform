@@ -781,7 +781,7 @@ define kagent_route_doc
 endef
 
 .PHONY: verify-kagent-route
-verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by every RPC of the kagent API v2 + A2A v1 services (exact service/method, one rule per service) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, and the guards.
+verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services (one service-only match per service by default, one exact service/method match per listed RPC as the fallback) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, and the guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> the default shape: GRPCRoutes on both hops, no REST route, no path prefix"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true >/tmp/vkr.out 2>&1 || { cat /tmp/vkr.out; exit 1; }
@@ -796,9 +796,9 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	done
 	@for f in /tmp/vkr-inner.out /tmp/vkr-public.out; do \
 		[ "$$(grep -c '^    - matches:' $$f)" = "5" ] || { echo "FAIL: $$f does not carry one rule per service (5)"; grep -c '^    - matches:' $$f; exit 1; }; \
-		[ "$$(grep -c '^            service: ' $$f)" = "39" ] || { echo "FAIL: $$f does not match the 39 RPCs of the line's five services"; grep -c '^            service: ' $$f; exit 1; }; \
-		[ "$$(grep -c '^            method: ' $$f)" = "39" ] || { echo "FAIL: $$f has a service-only match — the agentgateway controller translates it into an exact path no request has"; exit 1; }; \
-		grep -A1 '^            service: lf.a2a.v1.A2AService$$' $$f | grep -q 'method: SendStreamingMessage' || { echo "FAIL: $$f does not route A2AService/SendStreamingMessage"; exit 1; }; \
+		[ "$$(grep -c '^            service: ' $$f)" = "5" ] || { echo "FAIL: $$f does not match exactly the line's five services once each"; grep -c '^            service: ' $$f; exit 1; }; \
+		if grep -q '^            method: ' $$f; then echo "FAIL: $$f lists methods by default — the default is one service-only match per service (agentgateway chart >= 2.1.1 translates it to the path prefix /<service>/)"; exit 1; fi; \
+		grep -q '^            service: lf.a2a.v1.A2AService$$' $$f || { echo "FAIL: $$f does not route lf.a2a.v1.A2AService"; exit 1; }; \
 	done
 	@if grep -q '^  hostnames:' /tmp/vkr-inner.out; then echo "FAIL: the inner GRPCRoute is hostname-scoped (the in-cluster authority agentgateway.<ns>.svc.cluster.local:8080 would not match)"; exit 1; fi
 	@grep -q 'kind: AgentgatewayBackend' /tmp/vkr-inner.out || { echo "FAIL: the inner GRPCRoute does not target the kagent AgentgatewayBackend"; exit 1; }
@@ -872,14 +872,14 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	$(call managers_must_fail,the JWT policy needs jwksEgress,$(KAGENT_ROUTE) --set gateway.jwksEgress.enabled=false,gateway.jwksEgress.enabled is false)
 	$(call managers_must_fail,the JWT policy needs an issuer,$(KAGENT_ROUTE) --set global.identity.issuerUrl=,needs the login issuer)
 	$(call managers_must_fail,the identity claim is a plain claim name,$(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=x-claim,is not a plain claim name)
-	$(call managers_must_fail,a service without methods fails (a service-only match never routes),$(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"svc.Only":[]}',lists no methods)
 	$(call managers_must_fail,an empty service map fails,$(KAGENT_ROUTE) --set kagent.controllerRoute.grpc.services=null,grpc.services is empty)
-	@echo "--> an extra RPC in kagent.controllerRoute.grpc.services reaches both GRPCRoutes"
-	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"kagent.api.v1alpha1.SystemService":["GetVersion","NewRpc"]}' >/tmp/vkr-extra.out 2>&1 || { cat /tmp/vkr-extra.out; exit 1; }
-	@[ "$$(grep -c 'method: NewRpc' /tmp/vkr-extra.out)" = "2" ] || { echo "FAIL: an added RPC does not reach both GRPCRoutes"; exit 1; }
-	@[ "$$(grep -c '^            service: kagent.api.v1alpha1.SystemService$$' /tmp/vkr-extra.out)" = "4" ] || { echo "FAIL: a service's method list is not replaced by the override (Helm merges the map per service, replaces the list)"; grep -c '^            service: kagent.api.v1alpha1.SystemService$$' /tmp/vkr-extra.out; exit 1; }
-	@[ "$$(grep -c '^            service: ' /tmp/vkr-extra.out)" = "74" ] || { echo "FAIL: the other services' lists did not survive a one-service override"; grep -c '^            service: ' /tmp/vkr-extra.out; exit 1; }
-	@echo "ok: the RPC list is a value (a service's list replaces, the map merges)"
+	@echo "--> a service with RPCs listed renders one exact service/method match per RPC (the shape an agentgateway chart < 2.1.1 needs); the other services stay service-only"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"kagent.api.v1alpha1.SystemService":["GetVersion","GetCurrentUser"]}' >/tmp/vkr-extra.out 2>&1 || { cat /tmp/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c 'method: GetCurrentUser' /tmp/vkr-extra.out)" = "2" ] || { echo "FAIL: a listed RPC does not reach both GRPCRoutes"; exit 1; }
+	@[ "$$(grep -c '^            service: kagent.api.v1alpha1.SystemService$$' /tmp/vkr-extra.out)" = "4" ] || { echo "FAIL: the listed service does not render one match per RPC on both routes"; grep -c '^            service: kagent.api.v1alpha1.SystemService$$' /tmp/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c '^            service: ' /tmp/vkr-extra.out)" = "12" ] || { echo "FAIL: the other services' service-only matches did not survive a one-service override"; grep -c '^            service: ' /tmp/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c '^            method: ' /tmp/vkr-extra.out)" = "4" ] || { echo "FAIL: methods rendered for a service without a list"; exit 1; }
+	@echo "ok: the RPC list is the per-service fallback (the map merges, a list replaces)"
 	@echo "--> every connectivity CI values file renders"
 	@for f in $(CONNECTIVITY_DIR)/ci/*.yaml; do \
 		helm template t $(CONNECTIVITY_DIR) --namespace agent-platform -f $$f >/tmp/vkr-ci.out 2>&1 || { echo "FAIL: $$f does not render"; cat /tmp/vkr-ci.out | tail -5; exit 1; }; \
