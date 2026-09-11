@@ -593,6 +593,78 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@echo "ok: cutover forwarded"
 	@echo "All llmRouting behaviors verified."
 
+# The agentgateway data plane is the platform's critical path: every MCP call
+# and, with llmRouting on, every model call crosses the Deployment the
+# controller reconciles from the Gateway. The AgentgatewayParameters shapes it
+# for a node reboot or drain: two replicas, a PodDisruptionBudget and a
+# hostname spread, each behind a knob, with guards on the budget shapes that
+# Kubernetes rejects or that would hang every drain.
+AGP_DOC := awk '/^kind: AgentgatewayParameters$$/{f=1} f{print} f&&/^---/{exit}'
+.PHONY: verify-dataplane-ha
+verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape: two replicas, a PodDisruptionBudget (maxUnavailable) and a hostname spread by default on the AgentgatewayParameters, the pod selector following gateway.name, one constraint per topologyKeys entry, the knobs off, minAvailable passed through, the guards (both budget fields, minAvailable at or above replicas, spread without a key, the whenUnsatisfiable enum), none in muster-direct, the meta chart forwarding the keys at the same defaults and two controller replicas.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> default: replicas 2, PDB maxUnavailable 1, one hostname spread constraint selecting the data-plane pods"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) >/tmp/vha-on.out 2>&1 || { cat /tmp/vha-on.out; exit 1; }
+	@$(AGP_DOC) /tmp/vha-on.out >/tmp/vha-params.out
+	@grep -qE '^      replicas: 2$$' /tmp/vha-params.out || { echo "FAIL: the data-plane Deployment is not asked for two replicas; one pod is one node reboot away from taking every agent offline"; exit 1; }
+	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-params.out | grep -q 'maxUnavailable: 1' || { echo "FAIL: no PodDisruptionBudget with maxUnavailable 1; a drain could evict both data-plane pods at once"; exit 1; }
+	@if grep -q 'minAvailable' /tmp/vha-params.out; then echo "FAIL: the default budget uses minAvailable; a lone replica could never be evicted"; exit 1; fi
+	@grep -A5 '^          topologySpreadConstraints:$$' /tmp/vha-params.out | grep -q 'topologyKey: kubernetes.io/hostname' || { echo "FAIL: no hostname topologySpreadConstraint; both replicas may land on the node that reboots"; exit 1; }
+	@grep -A5 '^          topologySpreadConstraints:$$' /tmp/vha-params.out | grep -q 'whenUnsatisfiable: ScheduleAnyway' || { echo "FAIL: the spread is not ScheduleAnyway; a single-node lab would leave the second pod Pending"; exit 1; }
+	@grep -A8 '^          topologySpreadConstraints:$$' /tmp/vha-params.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' || { echo "FAIL: the spread constraint does not select the data-plane pods by the Gateway's name label"; exit 1; }
+	@if [ "$$(grep -c 'topologyKey:' /tmp/vha-params.out)" != "1" ]; then echo "FAIL: expected exactly one topologySpreadConstraint by default"; exit 1; fi
+	@echo "ok: default shape"
+	@echo "--> the pod selector follows gateway.name, and each topologyKeys entry is one constraint"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.name=edge --set-json 'gateway.parameters.spread.topologyKeys=["kubernetes.io/hostname","topology.kubernetes.io/zone"]' >/tmp/vha-two.out 2>&1 || { cat /tmp/vha-two.out; exit 1; }
+	@$(AGP_DOC) /tmp/vha-two.out >/tmp/vha-two-params.out
+	@if [ "$$(grep -c 'topologyKey:' /tmp/vha-two-params.out)" != "2" ] || ! grep -q 'topologyKey: topology.kubernetes.io/zone' /tmp/vha-two-params.out; then echo "FAIL: two topologyKeys did not render two constraints"; exit 1; fi
+	@if [ "$$(grep -c 'gateway.networking.k8s.io/gateway-name: edge' /tmp/vha-two-params.out)" != "2" ] || grep -q 'gateway-name: agentgateway' /tmp/vha-two-params.out; then echo "FAIL: the spread selector does not follow gateway.name; the constraint would select nothing"; exit 1; fi
+	@echo "ok: selector + keys"
+	@echo "--> knobs off: one replica, no budget, no spread"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.replicas=1 --set gateway.parameters.podDisruptionBudget.enabled=false --set gateway.parameters.spread.enabled=false >/tmp/vha-off.out 2>&1 || { cat /tmp/vha-off.out; exit 1; }
+	@$(AGP_DOC) /tmp/vha-off.out >/tmp/vha-off-params.out
+	@grep -qE '^      replicas: 1$$' /tmp/vha-off-params.out || { echo "FAIL: gateway.parameters.replicas does not reach the Deployment"; exit 1; }
+	@if grep -qE 'podDisruptionBudget|topologySpreadConstraints' /tmp/vha-off-params.out; then echo "FAIL: the budget or the spread renders with its knob off"; exit 1; fi
+	@echo "ok: knobs off"
+	@echo "--> minAvailable alone is passed through (an integer below replicas, or a percentage)"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=1 --set gateway.parameters.podDisruptionBudget.maxUnavailable=null >/tmp/vha-min.out 2>&1 || { cat /tmp/vha-min.out; exit 1; }
+	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-min.out | grep -q 'minAvailable: 1' || { echo "FAIL: minAvailable 1 below replicas 2 was not rendered"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=50% --set gateway.parameters.podDisruptionBudget.maxUnavailable=null >/tmp/vha-pct.out 2>&1 || { cat /tmp/vha-pct.out; exit 1; }
+	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-pct.out | grep -q 'minAvailable: 50%' || { echo "FAIL: a percentage minAvailable was not rendered"; exit 1; }
+	@echo "ok: minAvailable pass-through"
+	@echo "--> guards: both budget fields; minAvailable at or above replicas; spread with no key; the whenUnsatisfiable enum"
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=1 >/tmp/vha-both.out 2>&1; then \
+		echo "FAIL: a budget with both minAvailable and maxUnavailable rendered; Kubernetes rejects it"; exit 1; \
+	elif ! grep -q "sets both minAvailable and maxUnavailable" /tmp/vha-both.out; then \
+		echo "FAIL: the both-fields guard failed for the wrong reason"; cat /tmp/vha-both.out; exit 1; \
+	else echo "ok: both-fields guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=2 --set gateway.parameters.podDisruptionBudget.maxUnavailable=null >/tmp/vha-hang.out 2>&1; then \
+		echo "FAIL: minAvailable equal to replicas rendered; that budget allows no eviction and hangs every node drain"; exit 1; \
+	elif ! grep -q "is not below gateway.parameters.replicas" /tmp/vha-hang.out; then \
+		echo "FAIL: the minAvailable guard failed for the wrong reason"; cat /tmp/vha-hang.out; exit 1; \
+	else echo "ok: minAvailable guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.spread.topologyKeys=null >/tmp/vha-nokey.out 2>&1; then \
+		echo "FAIL: spread with no topology key rendered an empty constraint list"; exit 1; \
+	elif ! grep -q "needs at least one gateway.parameters.spread.topologyKeys" /tmp/vha-nokey.out; then \
+		echo "FAIL: the empty-keys guard failed for the wrong reason"; cat /tmp/vha-nokey.out; exit 1; \
+	else echo "ok: empty-keys guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.spread.whenUnsatisfiable=Maybe >/tmp/vha-enum.out 2>&1; then \
+		echo "FAIL: a bogus whenUnsatisfiable passed the schema"; exit 1; \
+	else echo "ok: whenUnsatisfiable enum"; fi
+	@echo "--> muster-direct (no data plane): no AgentgatewayParameters at all"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vha-direct.out 2>&1 || { cat /tmp/vha-direct.out; exit 1; }
+	@if grep -q 'kind: AgentgatewayParameters' /tmp/vha-direct.out; then echo "FAIL: AgentgatewayParameters renders without the agentgateway data plane"; exit 1; else echo "ok: none in muster-direct"; fi
+	@echo "--> the meta chart forwards the keys at the same defaults, and two controller replicas"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) >/tmp/vha-meta.out 2>&1 || { cat /tmp/vha-meta.out; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vha-meta.out >/tmp/vha-meta-conn.out
+	@awk '/^    gateway:$$/{f=1;print;next} f&&/^    [a-zA-Z]/{exit} f' /tmp/vha-meta-conn.out >/tmp/vha-meta-gw.out
+	@grep -qE '^        replicas: 2$$' /tmp/vha-meta-gw.out || { echo "FAIL: the meta chart does not forward gateway.parameters.replicas: 2 to the connectivity release"; exit 1; }
+	@grep -A2 '^        podDisruptionBudget:$$' /tmp/vha-meta-gw.out | grep -q 'maxUnavailable: 1' || { echo "FAIL: the meta chart does not forward the default budget"; exit 1; }
+	@grep -A6 '^        spread:$$' /tmp/vha-meta-gw.out | grep -q 'kubernetes.io/hostname' || { echo "FAIL: the meta chart does not forward the default spread"; exit 1; }
+	@./tests/verify-agentgateway-wiring.py /tmp/vha-meta.out
+	@echo "ok: forwarded + controller replicas"
+	@echo "All data-plane availability behaviors verified."
+
 .PHONY: verify-engine
 verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"

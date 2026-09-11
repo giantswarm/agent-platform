@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the agentgateway data plane runs two replicas behind a `PodDisruptionBudget`, spread across nodes)
+
+`gateway.parameters` gains `replicas` (`2`), `podDisruptionBudget` (`enabled: true`, `maxUnavailable: 1`) and `spread` (`enabled: true`, `topologyKeys: [kubernetes.io/hostname]`, `maxSkew: 1`, `whenUnsatisfiable: ScheduleAnyway`), rendered into the `AgentgatewayParameters` the agentgateway controller reconciles the data-plane `Deployment` from (`templates/agentgateway/agentgatewayparameters.yaml`). The meta chart declares the same keys at the same defaults and forwards `agentgateway.controller.replicaCount: 2` to the controller release.
+
+### Operator action
+
+- **None** for the default shape. Every installation with the agentgateway component on rolls the data plane once (the second pod, the `PodDisruptionBudget` and the spread constraint arrive in one Deployment revision; the default `RollingUpdate` surges first) and the controller once (a second pod behind the chart's leader election). Budget two more pods of the data plane's and the controller's size on the node pool.
+- Two nodes are not required: `whenUnsatisfiable: ScheduleAnyway` lets a single-node cluster schedule both pods on the one node. `DoNotSchedule` pins the spread; the second pod then stays Pending on one node.
+- A multi-zone node pool spreads across zones too with a second key: `gateway.parameters.spread.topologyKeys: [kubernetes.io/hostname, topology.kubernetes.io/zone]`.
+- The previous shape is `gateway.parameters.replicas: 1`, `gateway.parameters.podDisruptionBudget.enabled: false`, `gateway.parameters.spread.enabled: false` (and `agentgateway.controller.replicaCount: 1` through the meta chart).
+- The render refuses `podDisruptionBudget` with both `minAvailable` and `maxUnavailable`, an integer `minAvailable` at or above `replicas`, and `spread.enabled` with an empty `topologyKeys`.
+
 ## 3.x → 4.0 (the kagent line: kagent API v2)
 
 4.0 replaces the kagent the platform runs. `components.kagent` and the new `components.kagent-crds` deliver **kagent API v2** — `kagent.dev/v1alpha3`: `AgentTemplate`, `Harness`, `ModelConfig`, `ModelProviderConfig`, `RemoteMCPServer`; agents run as Agent Substrate actors in gVisor worker pods — from the kagent line [giantswarm/kagent-upstream](https://github.com/giantswarm/kagent-upstream) (`oci://ghcr.io/giantswarm/kagent/helm`, releases `0.11.0-gs.N`) instead of the `giantswarm/kagent` 0.x wrapper (kagent 0.10, `v1alpha2`) from gsoci. The 4.x line of this chart is the kagent API v2 migration (giantswarm/giantswarm#37705); this release is its first step — the roster and the values — and the connectivity chart's v1alpha3 templates, the platform Harness, Substrate inside the chart and the cut-over of an installation's agents follow in the 4.0.x releases.

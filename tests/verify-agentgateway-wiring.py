@@ -10,6 +10,10 @@ both fail only at reconcile time, in the child HelmRelease:
   * forwarding `enabled`, which is this umbrella's toggle and not one of the
     chart's keys. The chart validates values with additionalProperties: false.
 
+It also holds the controller at two or more replicas (controller.replicaCount):
+the data plane fetches its config over xDS, and a data-plane pod rescheduled
+onto a rebooted node waits for a controller to answer.
+
 Reads a rendered meta-package manifest. Deliberately stdlib-only: the CI image
 has no PyYAML.
 """
@@ -51,6 +55,13 @@ def main(path: str) -> int:
         sys.exit("FAIL: `enabled` forwarded to the agentgateway chart, whose schema is additionalProperties:false")
     if "repository: giantswarm/agentgateway-controller" not in values.get("controller", []):
         sys.exit("FAIL: agentgateway values lost controller.image.repository")
+    replicas = [l.split(":", 1)[1].strip() for l in values.get("controller", []) if l.startswith("replicaCount:")]
+    if not replicas or not replicas[0].isdigit() or int(replicas[0]) < 2:
+        sys.exit(
+            "FAIL: controller.replicaCount is not forwarded at 2 or more (got "
+            f"{replicas[0] if replicas else 'nothing'}); a lone controller pod leaves a data-plane pod that starts "
+            "on a rebooted node without an xDS server until the controller is rescheduled"
+        )
     return 0
 
 

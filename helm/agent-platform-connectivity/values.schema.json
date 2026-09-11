@@ -363,6 +363,21 @@
                         "name": {
                             "type": "string"
                         },
+                        "podDisruptionBudget": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "maxUnavailable": {
+                                    "type": [
+                                        "integer",
+                                        "string"
+                                    ]
+                                }
+                            }
+                        },
                         "podSecurityContext": {
                             "type": "object",
                             "additionalProperties": false,
@@ -381,8 +396,37 @@
                                 }
                             }
                         },
+                        "replicas": {
+                            "type": "integer"
+                        },
                         "serviceType": {
                             "type": "string"
+                        },
+                        "spread": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "maxSkew": {
+                                    "type": "integer"
+                                },
+                                "topologyKeys": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "minItems": 1
+                                },
+                                "whenUnsatisfiable": {
+                                    "type": "string",
+                                    "enum": [
+                                        "ScheduleAnyway",
+                                        "DoNotSchedule"
+                                    ]
+                                }
+                            }
                         }
                     }
                 }

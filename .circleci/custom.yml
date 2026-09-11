@@ -13,7 +13,7 @@
 #     `make verify-engine` + `make verify-self` + `make verify-labels` + `make verify-postgres` +
 #     `make verify-secrets` + `make verify-login-connector` +
 #     `make verify-components` + `make verify-auto` + `make verify-identity` +
-#     `make verify-wiring` + `make verify-llm-routing` + `make verify-kagent-crds` + `make verify-kyverno` checks on branches (ingress-mode guards, the global.*
+#     `make verify-wiring` + `make verify-llm-routing` + `make verify-dataplane-ha` + `make verify-kagent-crds` + `make verify-kyverno` checks on branches (ingress-mode guards, the global.*
 #     contract, the model-manager / agent-manager wiring, the kagent tool-server
 #     egress, app-of-apps meta-package render, the bundled Flux engine's two
 #     shapes, the self-management shapes, the postgres.backup wiring and guards,
@@ -95,7 +95,9 @@ jobs:
         # app-config surface, the mcp-kubernetes MCPServer, model serving on
         # the kserve components and its guards, toggles off = no object) and
         # verify-llm-routing (the llmRouting toggle, both states, and its
-        # guards) and verify-kagent-crds (every kagent.dev object the connectivity
+        # guards), verify-dataplane-ha (the agentgateway data plane's replicas,
+        # PodDisruptionBudget and node spread by default, the knobs, the guards,
+        # the meta chart's forwarding) and verify-kagent-crds (every kagent.dev object the connectivity
         # chart renders — the ModelConfig / RemoteMCPServer catalog — validated
         # against the kagent line's CRDs at the pinned release; no v1alpha2 in
         # any render) and verify-kagent-harness (the connectivity chart renders
@@ -109,7 +111,7 @@ jobs:
         # ClusterRoleBinding as prerequisites) are the single source of truth, also
         # run locally. The meta chart's one dependency is the flux-engine
         # subchart, a directory in its charts/, which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-migration
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-dataplane-ha verify-migration
 
 workflows:
   build:
