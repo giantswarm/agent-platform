@@ -80,16 +80,17 @@ KAGENT_RANGE = ">=0.11.0-gs.1 <0.11.1-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin
 # (the build the WorkerPool's worker image names), both landing in ate-system,
-# both following components.kagent. The pin is an exact dev build until the
-# line's first release tag; then the release range, the kagent entry's shape.
+# both following components.kagent. The pin is the line's release range, the
+# kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_PIN = "0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627"
+SUBSTRATE_RANGE = ">=0.0.27-gs.2 <0.0.28-0"
+SUBSTRATE_PIN = "0.0.27-gs.2"  # the range's floor: the BOM pin and the worker image tag
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
-    "substrate": (SUBSTRATE_LINE, SUBSTRATE_PIN, ["substrate-crds", "agent-platform-connectivity"]),
-    "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_PIN, []),
+    "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
+    "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
     "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
 }
@@ -340,8 +341,8 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"examples/customer-bom.yaml does not pin components.{name}.versionRange")
         pin = m.group(1)
         # Exact: X.Y.Z, or a prerelease of it — the kagent and Substrate lines'
-        # releases are vX.Y.Z-gs.N by scheme, and the Substrate line's first
-        # release is not cut yet, so its pin is an exact dev build until then.
+        # releases are vX.Y.Z-gs.N by scheme; a dogfooding BOM may pin a line's
+        # dev build (X.Y.Z-dev.<branch>.<date>.<time>.h<sha7>) instead.
         if not re.fullmatch(r"\d+\.\d+\.\d+(-gs\.\d+|-dev\.[a-z0-9-]+\.\d{4}-\d{2}-\d{2}\.\d{2}-\d{2}-\d{2}\.h[0-9a-f]{7})?", pin):
             fail(f"the BOM pin for {name} is not an exact version: {pin!r}")
         if f'semver: "{pin}"' not in bom[("OCIRepository", name)]:
@@ -353,8 +354,10 @@ def main(meta: str, connectivity: str) -> int:
     if len(substrate_pins) != 1:
         fail(f"the BOM pins substrate and substrate-crds to different builds {sorted(substrate_pins)}; the two charts are one build of the Substrate line")
     worker_image = re.search(r"^\s*workerImage:\s*(\S+)$", open(f"{meta}/values.yaml").read(), re.M).group(1)
+    if not SUBSTRATE_RANGE.startswith(f">={SUBSTRATE_PIN} "):
+        fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
     if not worker_image.endswith(":" + SUBSTRATE_PIN) or substrate_pins != {SUBSTRATE_PIN}:
-        fail(f"the Substrate pin is not one string: components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)}, kagent.substrateWorkerPool.workerImage {worker_image!r} — the control plane and the workers are one Substrate version")
+        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)}, kagent.substrateWorkerPool.workerImage {worker_image!r} — the control plane and the workers are one Substrate version")
     print("ok: the customer BOM pins the seven, the kagent line, the managers and the wiring chart exactly")
 
     # --- the forwarded tree validates against the connectivity chart --------------

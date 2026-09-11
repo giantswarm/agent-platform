@@ -453,16 +453,16 @@ components:  # @schema additionalProperties: true
     # on and gets its runtime; an explicit false with kagent on fails the
     # render — agent-platform.validateSubstrate). Both releases land in
     # ate-system (targetNamespace; the chart's Roles name that namespace), and
-    # both carry ONE version pin: the same string in the two versionRanges,
-    # which is also the Substrate version kagent.substrateWorkerPool.workerImage
-    # names — a re-pin of Substrate moves the three together with the kagent
-    # pin (README "Agent Substrate"). Today the pin is the exact dev build the
-    # kagent line was proven with; it becomes the line's release range
-    # (>=0.0.27-gs.1 <0.0.28-0, the kagent entry's shape) with the line's first
-    # release tag. A mirror sets `repository` here and substrate.image.registry
-    # below.
+    # both carry ONE version pin: the same range in the two versionRanges
+    # (>=0.0.27-gs.2 <0.0.28-0, the kagent entry's shape — the line's releases
+    # of upstream 0.0.27 from gs.2 on: the egress gateway's frontend policy for
+    # its agentgateway dataplane, the connection string from a Secret, atelet
+    # scheduling), whose floor is also the Substrate version
+    # kagent.substrateWorkerPool.workerImage names — a re-pin of Substrate moves
+    # the three together with the kagent pin (README "Agent Substrate"). A
+    # mirror sets `repository` here and substrate.image.registry below.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: "0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627"
+    versionRange: ">=0.0.27-gs.2 <0.0.28-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -484,7 +484,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: "0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627"
+    versionRange: ">=0.0.27-gs.2 <0.0.28-0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -1564,7 +1564,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     create: true
     name: kagent-default
     replicas: 4
-    workerImage: ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627
+    workerImage: ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.2
     sandboxClass: gvisor
     # The worker pods' template (WorkerPool.spec.template: nodeSelector,
     # tolerations, priorityClassName, nodeAffinity, resources). One pool runs

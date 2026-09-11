@@ -69,8 +69,6 @@ UNRELEASED = {
     "backstage": "the Dev Portal 1.0.0 (kagent API v2, giantswarm/backstage#2343)",
     "kagent": "the kagent line's first release tag (giantswarm/giantswarm#37010)",
     "kagent-crds": "the kagent line's first release tag (giantswarm/giantswarm#37010)",
-    "substrate": "the Substrate line's first release tag (giantswarm/giantswarm#37757)",
-    "substrate-crds": "the Substrate line's first release tag (giantswarm/giantswarm#37757)",
 }
 QUICKSTART = [
     "--set", "global.domain=example.com",
@@ -165,15 +163,14 @@ RENDER_AGAINST = {
 }
 
 
-def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str, substrate_version: str) -> str:
+def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
     """The chart to render against while nothing the constraint admits is
     published: the kagent build the values name (kagent.tag — the chart version
-    of the same build), the Substrate build the WorkerPool's worker image names
-    (one Substrate version for control plane and workers), the branch build
-    RENDER_AGAINST names, else the newest release tag."""
+    of the same build), the branch build RENDER_AGAINST names, else the newest
+    release tag."""
     if name not in UNRELEASED:
         sys.exit(f"FAIL: no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED)")
-    chosen = kagent_tag if name in KAGENT else substrate_version if name in SUBSTRATE else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
+    chosen = kagent_tag if name in KAGENT else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
     if not chosen or chosen not in tags:
         sys.exit(f"FAIL: no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
     print(f"NOTE: {name}: {constraint!r} matches no published chart yet (waits for {UNRELEASED[name]}); rendering against {chosen}")
@@ -200,8 +197,6 @@ def main(meta: str) -> int:
     pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *on]))
     m = re.search(r"^tag: \"?([^\"\n]+)\"?$", hr_values(wide[("HelmRelease", "kagent")]), re.M)
     kagent_tag = m.group(1) if m else ""
-    m = re.search(r"^  workerImage: \S+:(\S+)$", hr_values(wide[("HelmRelease", "kagent")]), re.M)
-    substrate_version = m.group(1) if m else ""
     for name in COMPONENTS:
         url, rng = source(wide[("OCIRepository", name)])
         _, pin = source(pinned[("OCIRepository", name)])
@@ -210,7 +205,7 @@ def main(meta: str) -> int:
             f.write(values)
         tags = registry_tags(url)
         for label, constraint in (("range", rng), ("BOM pin", pin)):
-            version = fluxsemver.resolve(tags, constraint) or fallback(name, constraint, tags, kagent_tag, substrate_version)
+            version = fluxsemver.resolve(tags, constraint) or fallback(name, constraint, tags, kagent_tag)
             with tempfile.TemporaryDirectory() as d:
                 resolved = pull(url, version, d)
                 r = run(["helm", "template", name, f"{d}/{name}", "-n", "agent-platform", "-f", f.name, *API_VERSIONS])

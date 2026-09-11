@@ -49,7 +49,7 @@ Substrate is an early project; its own [threat model](https://github.com/kagent-
 - **No authorization in ate-api.** Every authenticated caller of ate-api has full control of every atespace, actor, template and worker; the kagent controller is the only intended caller, the network policies keep it so, and the JWT provider admits only the cluster's ServiceAccount tokens for the ate-api audience.
 - **Control plane next to the workers.** The threat model recommends running the control plane and the egress gateway on nodes the sandboxes do not share; `substrate.atelet.nodeSelector` and the WorkerPool's `template.nodeSelector` make that a node-pool decision of the installation.
 - **The gVisor runtime as a downloaded asset.** `atelet` fetches `runsc` from `storage.googleapis.com` at prewarm, verified by the sha256 the `SandboxConfig` names; the asset is not an image and not scanned by the registry's scanner.
-- **Egress for an actor while it resumes** — the carried patch of the Substrate line that lets a harness fetch its skills before it is ready; complete only with an egress dataplane that admits a resuming actor (the line's ledger, giantswarm/giantswarm#37742 rows 8 and 13).
+- **Egress for an actor while it resumes** — the carried patch of the Substrate line that lets a harness fetch its skills before it is ready; complete with the egress dataplane the pinned release runs (the agentgateway line's `v1.5.1-gs.2`, which authorizes a resuming actor at CONNECT time as a frontend policy; the line's ledger, giantswarm/giantswarm#37742 rows 8 and 13).
 - Everything the platform carries against upstream, with its upstream exit: giantswarm/giantswarm#37742 (the Substrate rows) and the line's `FORK.md`.
 
 ## What an installation owner does
