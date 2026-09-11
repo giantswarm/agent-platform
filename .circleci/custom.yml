@@ -47,11 +47,20 @@ jobs:
         command: |
           # python3 is in cimg/base, PyYAML is not: tests/verify-kagent-crds.py
           # and tests/verify-kyverno.py parse rendered objects (and the kagent
-          # line's CRDs) with it.
-          (command -v make >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null) || (sudo apt-get update -qq && sudo apt-get install -y -qq make python3-yaml)
+          # line's CRDs) with it. Every network call here is bounded and retried:
+          # a stalled apt mirror or get.helm.sh download used to sit silently until
+          # CircleCI's 10-minute no-output timeout killed the job (twice on one PR,
+          # 2026-09-11) — `set -x` shows which command a future stall is in.
+          set -x
+          for attempt in 1 2 3; do
+            (command -v make >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null) && break
+            (sudo timeout 180 apt-get update -qq && sudo timeout 180 apt-get install -y -qq make python3-yaml) && break
+            echo "apt attempt $attempt failed or stalled; retrying" >&2; sleep 15
+          done
+          command -v make && python3 -c 'import yaml'
           # Pinned (not `main`) so a mid-queue Helm minor can't change behaviour;
           # 3.17.x is well past OCI dependency GA (3.8). Avoids the curl|bash pattern.
-          curl -fsSL https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz | tar xz -C /tmp
+          curl -fsSL --connect-timeout 20 --max-time 180 --retry 5 --retry-delay 10 --retry-all-errors https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz | tar xz -C /tmp
           sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
           helm version
     - run:
