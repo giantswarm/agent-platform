@@ -686,8 +686,10 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
 # CRDs), so enabling kagent installs them too.
 #
 # When postgres.enabled is true, configure the CNPG DSN wiring below so kagent
-# uses the platform Postgres instead of its bundled instance. CNPG auto-generates
-# Secret `kagent-pg-app` in the kagent namespace; mount its `uri` key:
+# uses the platform Postgres instead of its bundled instance. The controller's
+# database is kagent_v2 (postgres.databases); this chart derives its
+# connection Secret `kagent-pg-kagent-v2-app` in the kagent namespace from the
+# Cluster's bootstrap Secret. Mount its `uri` key:
 #
 #   kagent:
 #     database:
@@ -699,7 +701,7 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
 #       volumes:
 #         - name: cnpg-dsn
 #           secret:
-#             secretName: kagent-pg-app
+#             secretName: kagent-pg-kagent-v2-app
 #             items: [{ key: uri, path: uri }]
 #       volumeMounts:
 #         - { name: cnpg-dsn, mountPath: /etc/cnpg, readOnly: true }
@@ -1285,6 +1287,13 @@ postgres:
     name: kagent
     owner: kagent
     schema: kagent
+    # The 0.10 database's fate after the kagent API v2 cut-over, in the
+    # ImageVolume extension mode where this database is a Database object of
+    # the chart (vector.extensionImage.reference set): `absent` makes CNPG drop
+    # it — the 30-day step of UPGRADE.md, declarative because the chart would
+    # otherwise re-create the object (and CNPG the database) after a DROP by
+    # hand. Without an extension image the drop is the psql command there.
+    ensure: present  # @schema enum: [present, absent]
   # Optional Klaus resultstore database. Off by default — pending the
   # subplan-core-runtime decision on Klaus session persistence.
   sessionsDatabase:
@@ -1318,6 +1327,22 @@ postgres:
       reclaimPolicy: retain
       secretNamespaces:
         - ate-system
+    # kagent-v2 is the database the kagent API v2 controller uses
+    # (giantswarm/agent-platform#346): the new controller refuses the 0.10
+    # schema (goose against the 0.10 schema_migrations table) and no
+    # conversation history is migrated, so it starts on a fresh database on
+    # the same Cluster — the kagent controller mounts
+    # <clusterName>-kagent-v2-app's `uri` as database.postgres.urlFile (the
+    # fleet template's secretName). The 0.10 database `kagent` stays untouched
+    # for 30 days, then is dropped (UPGRADE.md).
+    kagent-v2:
+      enabled: true
+      name: kagent_v2
+      extensions:
+        - vector
+      reclaimPolicy: retain
+      component: kagent
+      secretNamespaces: []
   # Backups. Off by default: a Cluster rendered without them is protected by
   # its PVCs alone, carries the annotation
   # agent-platform.giantswarm.io/backup: none and NOTES warns about it. Turn
@@ -1961,6 +1986,54 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
       cidrs: []
+  # The per-installation cut-over of the agents to the kagent API v2 line
+  # (giantswarm/agent-platform#346; bumblebee-plans#51 D11): a plain Job,
+  # <chart>-agent-manager-migrate-<8-hex hash of its image, args and
+  # environment> in the kagent namespace (templates/kagent/migrate-*.yaml),
+  # runs `agent-manager migrate` from agent-manager's image as the tenant
+  # identity kagent.fluxServiceAccountName — the rewrite of every
+  # portal-created Generic-chart release to chart 1.x values (removed keys
+  # dropped, muster.toolNames → muster.tools, skills pinned to commits, the
+  # range moved to 1.x), a diff for each GitOps-owned release, and — once every
+  # AgentTemplate is Ready on the platform Harness — the deletion of the
+  # leftover v1alpha2 Agents and the five removed CRDs. Not a Helm hook: a
+  # migrate failure must never fail the upgrade that renders the Harness (the
+  # meta chart also stops the connectivity release from waiting on Jobs). The
+  # Job runs when connectivity 4.0 first renders it; a changed image, args or
+  # environment renders a new Job (the old-named one is removed); the contract
+  # phase is a re-run — a clone of the Job by hand, or the next upgrade after
+  # its ttlSecondsAfterFinished (UPGRADE.md). Idempotent: a run with nothing
+  # left to do changes nothing. Rendered when kagent and agent-manager are on.
+  # The report is the ConfigMap agent-manager-migrate-report in the kagent
+  # namespace; a failed phase leaves the v1alpha2 objects in place. Retires,
+  # with its migration-only bindings, in a later 4.x release once the last
+  # installation is cut over.
+  migration:
+    enabled: true
+    # agent-manager's image; the tag is the meta chart's BOM pin for the
+    # agent-manager component (components.agent-manager) and moves with it —
+    # `migrate` exists from 1.1.0.
+    image:
+      registry: gsoci.azurecr.io
+      repository: giantswarm/agent-manager
+      tag: 1.1.0
+    # --dry-run: the report and the diffs, nothing written — a rehearsal of
+    # one installation's cut-over before the real run.
+    dryRun: false
+    # The read token the skills phase resolves private repositories with
+    # (GITHUB_TOKEN), a Secret in the kagent namespace; optional — without it
+    # public repositories resolve and private refs are reported as pending.
+    # The default is the Secret the private-skill agents use today (the agent
+    # chart 0.x skills.gitAuthSecretRef, key `token`). Empty secretName: no
+    # token.
+    githubToken:
+      secretName: kagent-skills-token
+      key: token
+    # Namespaces the GitOps-owned agents' HelmReleases and OCIRepositories live
+    # in (a HelmRelease with targetNamespace: kagent applied from elsewhere —
+    # the fleet's flux-giantswarm): the Job reads them there (get, list; a Role
+    # per namespace) and emits their rewrite as a diff, never writes them.
+    gitopsNamespaces: []
 
 # === The standalone chart's extras: component chart values and their wiring ===
 # Values of the backstage, mcp-kubernetes, cloudnative-pg and kserve component

@@ -102,10 +102,14 @@ jobs:
         # exactly one platform Harness per managed namespace with the shape the
         # platform owns — the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the
         # WorkerPool, the snapshot location and the admission label — a tag image
-        # fails, kagent off renders none) are the single source of truth, also
+        # fails, kagent off renders none) and verify-migration (the agent-manager
+        # migrate Job of the kagent API v2 cut-over: gating, identity, image,
+        # token, RBAC set, network policy in both flavors, guards; verify-postgres
+        # and verify-identity carry the kagent_v2 database and the one
+        # ClusterRoleBinding as prerequisites) are the single source of truth, also
         # run locally. The meta chart's one dependency is the flux-engine
         # subchart, a directory in its charts/, which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-migration
 
 workflows:
   build:

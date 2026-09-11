@@ -722,6 +722,13 @@ components:  # @schema additionalProperties: true
     # installation moves majors through the meta chart's own range.
     versionRange: ">=4.0.0 <5.0.0"
     forwardAllValues: true
+    # The release carries the agent-manager migrate Job (agentManager.migration,
+    # the kagent API v2 cut-over of an installation's agents) as a plain Job
+    # next to the platform's wiring: helm-controller must not wait for it, so a
+    # migrate failure (the command's non-zero exits) never fails the upgrade
+    # that renders the Harness. Hooks (the database Secret derivation) still
+    # complete before the release is reported.
+    disableWaitForJobs: true
     # The seven values blocks of the standalone chart's extras are no longer
     # held back from this release: every top-level block the connectivity chart
     # reads is declared there (make verify-meta asserts the symmetry, nested keys
@@ -1449,8 +1456,10 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
 # CRDs), so enabling kagent installs them too.
 #
 # When postgres.enabled is true, configure the CNPG DSN wiring below so kagent
-# uses the platform Postgres instead of its bundled instance. CNPG auto-generates
-# Secret `kagent-pg-app` in the kagent namespace; mount its `uri` key:
+# uses the platform Postgres instead of its bundled instance. The controller's
+# database is kagent_v2 (postgres.databases); the connectivity chart derives
+# its connection Secret `kagent-pg-kagent-v2-app` in the kagent namespace from
+# the Cluster's bootstrap Secret. Mount its `uri` key:
 #
 #   kagent:
 #     database:
@@ -1462,7 +1471,7 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
 #       volumes:
 #         - name: cnpg-dsn
 #           secret:
-#             secretName: kagent-pg-app
+#             secretName: kagent-pg-kagent-v2-app
 #             items: [{ key: uri, path: uri }]
 #       volumeMounts:
 #         - { name: cnpg-dsn, mountPath: /etc/cnpg, readOnly: true }
@@ -2053,6 +2062,10 @@ postgres:
     name: kagent
     owner: kagent
     schema: kagent
+    # `absent` drops the 0.10 database through its Database object in the
+    # ImageVolume extension mode — the 30-day step after the kagent API v2
+    # cut-over (UPGRADE.md).
+    ensure: present  # @schema enum: [present, absent]
   # Optional Klaus resultstore database. Off by default — pending the
   # subplan-core-runtime decision on Klaus session persistence.
   sessionsDatabase:
@@ -2084,6 +2097,19 @@ postgres:
       reclaimPolicy: retain
       secretNamespaces:
         - ate-system
+    # kagent-v2 is the kagent API v2 controller's database: fresh on the same
+    # Cluster, the 0.10 database `kagent` kept for 30 days (UPGRADE.md). The
+    # connectivity chart derives its Secret <clusterName>-kagent-v2-app in the
+    # kagent namespace; the controller mounts its `uri` as
+    # database.postgres.urlFile.
+    kagent-v2:
+      enabled: true
+      name: kagent_v2
+      extensions:
+        - vector
+      reclaimPolicy: retain
+      component: kagent
+      secretNamespaces: []
   # Backups. Off by default: a Cluster rendered without them is protected by
   # its PVCs alone, carries the annotation
   # agent-platform.giantswarm.io/backup: none and NOTES warns about it. Turn
@@ -2759,6 +2785,25 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
       cidrs: []
+  # The per-installation cut-over Job the connectivity chart renders when
+  # kagent and agent-manager are on: `agent-manager migrate` as the tenant
+  # identity kagent.fluxServiceAccountName, a plain Job in the kagent
+  # namespace (not a hook — its failure never fails the release, and
+  # components.agent-platform-connectivity.disableWaitForJobs stops the
+  # release from waiting on it), idempotent (giantswarm/agent-platform#346). The
+  # image tag is this chart's BOM pin for the agent-manager component and
+  # moves with it; the connectivity chart's values.yaml documents the rest.
+  migration:
+    enabled: true
+    image:
+      registry: gsoci.azurecr.io
+      repository: giantswarm/agent-manager
+      tag: 1.1.0
+    dryRun: false
+    githubToken:
+      secretName: kagent-skills-token
+      key: token
+    gitopsNamespaces: []
 
 # === The standalone chart's extras: values blocks ===
 # One block per component of the agent-platform-standalone umbrella that joined
@@ -2945,7 +2990,6 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
 # the operator cluster-wide with its CRDs (crds.create) and without a
 # PodMonitor (monitoring.podMonitorEnabled), the shape the standalone shipped.
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
-
 # === kagent-crds (the kagent line's CRD chart) ===
 # Values forwarded verbatim to the kagent-crds component release (the CRDs of
 # the kagent line as their own chart, which the kagent release dependsOn). The

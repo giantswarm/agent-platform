@@ -103,6 +103,13 @@ knowledge:
       dependant of the component has installed — kagent's controller mounts the
       CNPG Secret the connectivity release renders, while connectivity dependsOn
       kagent for its CRDs — so that the pair can bootstrap instead of deadlocking.
+  disableWaitForJobs — render `disableWaitForJobs: true` on the child
+      HelmRelease's install and upgrade: helm-controller then does not wait for
+      the release's plain Jobs to complete (hooks are unaffected). For a release
+      that carries a Job whose failure must not fail the release — the
+      connectivity chart's agent-manager migrate Job, the per-installation
+      cut-over of the agents next to the platform Harness the same release
+      renders.
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
       HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
@@ -245,11 +252,17 @@ spec:
     {{- if $c.installDisableWait }}
     disableWait: true
     {{- end }}
+    {{- if $c.disableWaitForJobs }}
+    disableWaitForJobs: true
+    {{- end }}
     remediation:
       retries: {{ $g.retries }}
   upgrade:
     {{- with $c.crds }}
     crds: {{ . }}
+    {{- end }}
+    {{- if $c.disableWaitForJobs }}
+    disableWaitForJobs: true
     {{- end }}
     remediation:
       retries: {{ $g.retries }}

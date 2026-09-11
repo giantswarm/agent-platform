@@ -1,0 +1,92 @@
+{{- /*
+The migration-only rights of the cut-over Job (migrate-job.yaml), on top of the
+namespace admin the tenant identity already holds in the kagent namespace
+(flux-service-account.yaml: HelmReleases, OCIRepositories, kagent CRs, the
+report ConfigMap). Plain objects of the release, like the Job (a hook's
+lifetime would not cover the Job's re-runs), rendered while the migration is
+on and retired with it in a later 4.x release:
+
+1. ONE ClusterRole on customresourcedefinitions, confined by resourceNames to
+   the five CRDs the kagent API v2 line removed and the contract phase deletes,
+   with the verbs get and delete, bound by ONE ClusterRoleBinding to the tenant
+   ServiceAccount — the only cluster-scoped binding of this chart
+   (verify-identity asserts exactly that one, and none while the migration is
+   off).
+2. A Role + RoleBinding per namespace in agentManager.migration.gitopsNamespaces
+   (the fleet: flux-giantswarm, where the GitOps-owned agents' HelmReleases and
+   OCIRepositories live with targetNamespace: kagent): get and list on those
+   two kinds, so the Job can emit their rewrite as a diff. Never write.
+*/ -}}
+{{- if (include "agent-platform.kagent.migration" .) }}
+{{- $sa := include "agent-platform.kagent.fluxServiceAccountName" . }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $name := include "agent-platform.kagent.migration.name" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-crds
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    resourceNames:
+      - agents.kagent.dev
+      - sandboxagents.kagent.dev
+      - agentharnesses.kagent.dev
+      - memories.kagent.dev
+      - toolservers.kagent.dev
+    verbs: ["get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-crds
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-crds
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $kagentNs }}
+{{- range .Values.agentManager.migration.gitopsNamespaces }}
+{{- if not . }}
+{{- fail "agentManager.migration.gitopsNamespaces: every entry is a non-empty namespace name" }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ . }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["ocirepositories"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ . }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $kagentNs }}
+{{- end }}
+{{- end }}

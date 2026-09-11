@@ -1082,6 +1082,13 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "ensure": {
+                            "type": "string",
+                            "enum": [
+                                "present",
+                                "absent"
+                            ]
+                        },
                         "name": {
                             "type": "string"
                         },
@@ -1377,6 +1384,33 @@
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
+                        "kagent-v2": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "component": {
+                                    "type": "string"
+                                },
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "extensions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "reclaimPolicy": {
+                                    "type": "string"
+                                },
+                                "secretNamespaces": {
+                                    "type": "array"
+                                }
+                            }
+                        },
                         "substrate": {
                             "type": "object",
                             "additionalProperties": false,
