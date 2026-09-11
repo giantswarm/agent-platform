@@ -19,11 +19,23 @@ FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-ver
 # isolated under test, and the fleet's API groups are served so the fleet shape
 # renders. Neither chart has subcharts anymore, so no `helm dependency build`
 # and no subchart-fail quieting is needed.
-VM := --set ingress.parentRefs[0].name=x $(FLEET_APIS)
+# kagent.harness.snapshotLocation is required with kagent on (the meta chart's
+# agent-platform.validateSubstrate); set on every render so a target can turn
+# kagent on without repeating it. The connectivity chart (and GOLDEN_REF's)
+# accepts the key in its open kagent block.
+VM := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents $(FLEET_APIS)
+# Agent Substrate on, as the meta chart forwards it (the two Substrate entries
+# follow components.kagent there; the connectivity chart reads the roster).
+SUBSTRATE_ON := --set components.substrate.enabled=true --set components.substrate-crds.enabled=true
 
-# The two components that own a kyverno.io object (kagent: two ClusterPolicies + the
-# seccomp PolicyException; agentSandbox: the pod-security ClusterPolicy), so the
-# kyvernoPolicies assertions below see all four objects.
+# The components that own a kyverno.io object: agentSandbox's pod-security
+# ClusterPolicy is the one left with kagent on and Substrate off — kagent owns
+# no ClusterPolicy since kagent API v2 (agents run as Substrate actors, so no
+# Agent CR, per-agent Deployment or config Secret is left to mutate) and no
+# PolicyException either (the v1alpha2 agent Deployments' seccomp exception went
+# with them; its successor is Substrate's substrate-workers). With Agent
+# Substrate on, its four PolicyExceptions join (verify-kyverno holds their rule
+# lists to the workloads).
 KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent-sandbox.enabled=true
 # The golden render deliberately uses the kubernetes networkPolicy flavor: the
 # cilium flavor's CNPG section is now gated on postgres.enabled, the one intended
@@ -44,10 +56,30 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # selector.
 # kagent.namespaceOverride=default (the release namespace of `helm template t`) drops the kagent Namespace object from both renders: this branch
 # keeps it (helm.sh/resource-policy: keep), an intended difference to GOLDEN_REF; every other kagent object renders alike on both sides.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
+# The fifth intended change (connectivity 4.0, kagent API v2): the shared muster RemoteMCPServer and the two kagent declarative-agent
+# ClusterPolicies are gone — the Generic agent chart 1.x renders one RemoteMCPServer per agent, and there is no Agent CR, per-agent
+# Deployment or config Secret left to mutate. There is no toggle to render both sides without them, so the golden side is compared with
+# those three objects removed (GOLDEN_RETIRED) and everything else byte for byte; verify-kagent-discovery and verify-modes assert the absence.
+GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n---\n"); keep=[x for x in d if not (("kind: RemoteMCPServer\n" in x and "\n  name: muster\n" in x) or ("kind: ClusterPolicy\n" in x and ("kagent-declarative-pod-security\n" in x or "kagent-srt-settings\n" in x)))]; out="\n---\n".join(keep); open(sys.argv[1],"w").write(out if out.endswith("\n") else out+"\n")'
+# The sixth intended change is the kagent controller's ingress admission (#345: the
+# data-plane pods and the UI only, in both flavors): both sides render with the
+# network policies off, and verify-kagent-route asserts the admission in both
+# flavors (verify-kagent-netpol, verify-managers and verify-llm-routing cover the
+# other policies).
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
+# Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
+# golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
+# PolicyException is gone with them, the kagent controller's ingress policy
+# no longer admits the app: kagent agent pods (the actors arrive through Agent
+# Substrate's egress gateway — templates/substrate/netpol.yaml), and `kagent`
+# is the platform Harness the 4.0 connectivity chart renders whenever kagent is
+# on (templates/kagent/harness.yaml — a new object with no 3.x counterpart; its
+# shape is asserted by verify-kagent-harness / verify-kagent-crds). Empty this
+# list once GOLDEN_REF carries the line.
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -100,11 +132,21 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if grep -q "kyverno.io" /tmp/vm-pe-none.out; then \
 		echo "FAIL: kyverno.io objects still render under kyvernoPolicies.enabled=false"; grep -n "kyverno.io" /tmp/vm-pe-none.out; exit 1; \
 	else echo "ok: no kyverno.io kinds"; fi
-	@echo "--> the default (kyverno) render still carries all four kyverno.io objects"
+	@echo "--> the default (kyverno) render carries one kyverno.io object — the agent-sandbox ClusterPolicy — no kagent Agent mutation and no app: kagent exception; Substrate on adds its four PolicyExceptions"
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) >/tmp/vm-pe-kyverno.out 2>&1 || { cat /tmp/vm-pe-kyverno.out; exit 1; }
-	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "4" ]; then \
-		echo "FAIL: expected 4 kyverno.io objects, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; exit 1; \
-	else echo "ok: 4 kyverno.io objects"; fi
+	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "1" ]; then \
+		echo "FAIL: expected 1 kyverno.io object, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; grep -n -A3 '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out; exit 1; \
+	elif grep -qE 'kagent-declarative-pod-security|kagent-srt-settings|kagent\.dev/v1alpha2' /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: a kagent v1alpha2 Agent mutation is back (no Agent CR, per-agent Deployment or config Secret exists on kagent API v2)"; exit 1; \
+	elif grep -q 'kagent-declarative-seccomp' /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: the v1alpha2 agent Deployments' seccomp exception is back; nothing carries app: kagent on kagent API v2 (substrate-workers is its successor)"; exit 1; \
+	elif [ "$$(grep -c '^kind: ClusterPolicy$$' /tmp/vm-pe-kyverno.out)" != "1" ] || ! grep -q 'agent-sandbox-pod-security' /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: the one ClusterPolicy must be the agent-sandbox pod-security policy"; exit 1; \
+	else echo "ok: 1 kyverno.io object, no Agent mutation, no app: kagent exception"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) $(SUBSTRATE_ON) >/tmp/vm-pe-substrate.out 2>&1 || { cat /tmp/vm-pe-substrate.out; exit 1; }
+	@if [ "$$(grep -c '^kind: PolicyException' /tmp/vm-pe-substrate.out)" != "4" ]; then \
+		echo "FAIL: expected the four Substrate PolicyExceptions, got $$(grep -c '^kind: PolicyException' /tmp/vm-pe-substrate.out)"; exit 1; \
+	else echo "ok: Substrate on renders substrate-atelet, substrate-workers, substrate-control-plane, substrate-podcertificate-controller"; fi
 	@echo "--> the CNPG ImageVolume exception renders only with an extension image"
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true >/tmp/vm-pe-noimg.out 2>&1 || { cat /tmp/vm-pe-noimg.out; exit 1; }
 	@if grep -q "image-volume" /tmp/vm-pe-noimg.out; then \
@@ -116,12 +158,14 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	elif ! grep -q "cnpg.io/cluster: kagent-pg" /tmp/vm-pe-img.out; then \
 		echo "FAIL: the exception is not scoped to the Cluster's own pods"; exit 1; \
 	else echo "ok: ImageVolume exception scoped to cnpg.io/cluster"; fi
-	@echo "--> an exception naming no rule must fail (it would match nothing)"
-	@if helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) --set 'kyvernoPolicies.volumeTypesRuleNames[0]=' >/tmp/vm-pe-rule.out 2>&1; then \
-		echo "FAIL: the empty-rule guard did not fire"; exit 1; \
-	elif ! grep -q "volumeTypesRuleNames must name at least one non-empty rule" /tmp/vm-pe-rule.out; then \
-		echo "FAIL: the empty-rule guard failed for the wrong reason"; cat /tmp/vm-pe-rule.out; exit 1; \
-	else echo "ok: empty-rule guard"; fi
+	@echo "--> a rule with no ClusterPolicy in kyvernoPolicies.rules must fail (an exception naming no policy matches nothing)"
+	@if helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) --set kyvernoPolicies.rules.restricted-volumes=null >/tmp/vm-pe-rule.out 2>&1; then \
+		echo "FAIL: the unknown-rule guard did not fire"; exit 1; \
+	elif ! grep -q 'names no ClusterPolicy for the rule "restricted-volumes"' /tmp/vm-pe-rule.out; then \
+		echo "FAIL: the unknown-rule guard failed for the wrong reason"; cat /tmp/vm-pe-rule.out; exit 1; \
+	else echo "ok: unknown-rule guard"; fi
+	@grep -A3 'name: kagent-pg-image-volume' /tmp/vm-pe-img.out >/dev/null && grep -q 'autogen-restricted-volumes' /tmp/vm-pe-img.out || { echo "FAIL: the ImageVolume exception does not cite the rule's autogen copy"; exit 1; }
+	@echo "ok: exceptions cite <rule> and autogen-<rule> from kyvernoPolicies.rules"
 	@echo "--> the agent-sandbox policy carries no helm.sh/resource-policy (Helm must prune it; the kagent Namespace is the one kept object)"
 	@if awk 'BEGIN{RS="\n---\n"} /kind: ClusterPolicy/ && /helm.sh\/resource-policy/ {found=1} END{exit !found}' /tmp/vm-pe-kyverno.out; then \
 		echo "FAIL: helm.sh/resource-policy is back on a ClusterPolicy; the policy would be orphaned on removal"; exit 1; \
@@ -161,9 +205,11 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		helm template t $$tree/$(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN_REF) >$$out/golden 2>&1 \
 			|| { echo "FAIL: the $(GOLDEN_REF) render failed"; cat $$out/golden; git worktree remove --force $$tree; exit 1; }; \
 		git worktree remove --force $$tree; \
+		$(GOLDEN_RETIRED) $$out/golden; \
 		helm template t $(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN) >$$out/head 2>&1 \
 			|| { echo "FAIL: the working-tree render failed"; cat $$out/head; exit 1; }; \
-		if diff -u $$out/golden $$out/head; then echo "ok: default render unchanged"; \
+		for f in golden head; do python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).rstrip("\n"); open(sys.argv[1],"w").write(out+"\n")' $$out/$$f "$(GOLDEN_EXCLUDE)"; done; \
+		if diff -u $$out/golden $$out/head; then echo "ok: default render unchanged (excluding $(GOLDEN_EXCLUDE))"; \
 		else echo "FAIL: the default render drifted from $(GOLDEN_REF)"; exit 1; fi; \
 	fi
 	@echo "All mode guards verified."
@@ -197,13 +243,19 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 		if grep -q "$$pattern" /tmp/vg-mon.out; then echo "FAIL: monitor-gated render still contains $$pattern"; exit 1; fi; \
 	done
 	@echo "ok: monitor gate"
-	@echo "--> the default render keeps the ServiceMonitor and the CNPG PodMonitor (fleet behavior)"
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true >/tmp/vg-mon-on.out 2>&1 || { cat /tmp/vg-mon-on.out; exit 1; }
-	@grep -q 'kind: ServiceMonitor' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the kagent ServiceMonitor"; exit 1; }
-	@grep -q 'enablePodMonitor: true' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the CNPG PodMonitor"; exit 1; }
-	@grep -q 'observability.giantswarm.io/tenant: giantswarm' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the tenant label"; exit 1; }
-	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-on.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
-	@echo "ok: fleet monitor defaults + CNPG keep"
+	@echo "--> the default render keeps the CNPG PodMonitor (fleet behavior) and renders NO kagent ServiceMonitor or metrics Service: the kagent line serves no /metrics (kagent.serviceMonitor.enabled: false)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true >/tmp/vg-mon-default.out 2>&1 || { cat /tmp/vg-mon-default.out; exit 1; }
+	@if grep -q 'kind: ServiceMonitor' /tmp/vg-mon-default.out; then echo "FAIL: the default render carries a kagent ServiceMonitor; the line's controller serves no /metrics and the monitor would sit at up=0"; exit 1; fi
+	@if grep -q 'kagent-controller-metrics' /tmp/vg-mon-default.out; then echo "FAIL: the default render carries the kagent controller metrics Service; nothing listens behind it on the line"; exit 1; fi
+	@grep -q 'enablePodMonitor: true' /tmp/vg-mon-default.out || { echo "FAIL: default render lost the CNPG PodMonitor"; exit 1; }
+	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-default.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
+	@echo "ok: default: no kagent monitor, CNPG PodMonitor + keep"
+	@echo "--> kagent.serviceMonitor.enabled=true (for when upstream serves metrics) renders the Service and the ServiceMonitor under the global gate"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true --set kagent.serviceMonitor.enabled=true >/tmp/vg-mon-on.out 2>&1 || { cat /tmp/vg-mon-on.out; exit 1; }
+	@grep -q 'kind: ServiceMonitor' /tmp/vg-mon-on.out || { echo "FAIL: kagent.serviceMonitor.enabled=true renders no ServiceMonitor"; exit 1; }
+	@grep -q 'observability.giantswarm.io/tenant: giantswarm' /tmp/vg-mon-on.out || { echo "FAIL: the kagent ServiceMonitor lost the tenant label"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.serviceMonitor.enabled=true --set global.observability.metrics.serviceMonitor.enabled=false 2>/dev/null | grep -q 'kind: ServiceMonitor' && { echo "FAIL: the global monitor gate no longer holds the kagent ServiceMonitor back"; exit 1; } || true
+	@echo "ok: the toggle under the global gate"
 	@echo "--> the kagent controller metrics Service selects kagent's own release instance (the pods' label), the ServiceMonitor this chart's Service"
 	@python3 -c 'import re,sys; docs=open("/tmp/vg-mon-on.out").read().split("\n---\n"); svc=[d for d in docs if "\nkind: Service\n" in d and re.search(r"^  name: t-kagent-controller-metrics$$", d, re.M)]; sys.exit("FAIL: the kagent controller metrics Service did not render") if len(svc)!=1 else None; sel=svc[0][svc[0].index("  selector:"):]; sys.exit("FAIL: the metrics Service does not select app.kubernetes.io/instance: kagent (the kagent release name the meta chart fixes):\n"+sel) if not re.search(r"^    app.kubernetes.io/instance: kagent$$", sel, re.M) else None; sys.exit("FAIL: the metrics Service selects this release (t) — under the meta chart that matches no pod (#305)") if re.search(r"^    app.kubernetes.io/instance: \"?t\"?$$", sel, re.M) else None; sm=[d for d in docs if "kind: ServiceMonitor" in d and "-kagent-controller\n" in d]; sys.exit("FAIL: the kagent ServiceMonitor did not render") if len(sm)!=1 else None; sys.exit("FAIL: the ServiceMonitor must select this chart\x27s Service (instance t)") if "      app.kubernetes.io/instance: \"t\"" not in sm[0] else None; print("ok: metrics Service selects instance kagent; the ServiceMonitor selects this release\x27s Service")'
 	@echo "--> no kagent-targeting selector, Service name or hostname in this chart derives from .Release.Name (the standalone umbrella's one-release assumption)"
@@ -232,11 +284,12 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 		echo "FAIL: identity consistency check failed for the wrong reason"; cat /tmp/vg-idp.out; exit 1; \
 	else echo "ok: identity consistency guard"; fi
 	@echo "--> edge mode renders the HTTPS listener, pins public routes to it, and suppresses the layer-1 routes"
-	@helm template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true >/tmp/vg-edge.out 2>&1 || { cat /tmp/vg-edge.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com >/tmp/vg-edge.out 2>&1 || { cat /tmp/vg-edge.out; exit 1; }
 	@grep -q 'hostname: "\*.ci.example.com"' /tmp/vg-edge.out || { echo "FAIL: edge HTTPS listener missing"; exit 1; }
 	@grep -q 'sectionName: https' /tmp/vg-edge.out || { echo "FAIL: public routes not pinned to the HTTPS listener (plaintext 8080 would ride the LB)"; exit 1; }
 	@grep -A2 '^  service:' /tmp/vg-edge.out | grep -q '^      type: LoadBalancer' || { echo "FAIL: edge data-plane Service type is not nested at spec.service.spec.type (the CRD prunes a bare spec.service.type)"; exit 1; }
 	@if grep -q 'name: kagent-controller-public' /tmp/vg-edge.out; then echo "FAIL: layer-1 kagent route rendered with the edge as data plane"; exit 1; fi
+	@grep -A3 '^kind: GRPCRoute$$' /tmp/vg-edge.out | grep -q '^  name: kagent-controller$$' || { echo "FAIL: the kagent controller GRPCRoute is missing in edge mode"; exit 1; }
 	@if grep -qE '^      value: /mcp' /tmp/vg-edge.out; then echo "FAIL: layer-1 /mcp route rendered with the edge as data plane"; exit 1; fi
 	@grep -B4 -A4 '"world", "cluster"' /tmp/vg-edge.out | grep -q '"443"' || { echo "FAIL: edge network policy does not admit world traffic on 443"; exit 1; }
 	@echo "ok: edge mode"
@@ -350,16 +403,20 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@grep -qE '^    - name: agentgateway$$' /tmp/ap-flux.out || { echo "FAIL: a CR consumer no longer dependsOn its CRD-owning component (agentgateway)"; exit 1; }
 	@echo "--> kagent's first install does not wait for the controller (it mounts the CNPG Secret connectivity renders, and connectivity dependsOn kagent)"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent.enabled=true >/tmp/ap-kag.out 2>&1 || { cat /tmp/ap-kag.out; exit 1; }
-	@python3 -c 'import re,sys; docs=open("/tmp/ap-kag.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: kagent HelmRelease not rendered") if not hr else None; sys.exit("FAIL: kagent install waits for the controller (install.disableWait missing)") if "disableWait: true" not in hr[0] else None; others=[d for d in docs if "kind: HelmRelease" in d and "disableWait: true" in d and not re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: disableWait leaked to "+", ".join(re.search(r"^  name: (.*)$$", d, re.M).group(1) for d in others)) if others else print("ok: kagent install.disableWait, no other component")'
+	@python3 -c 'import re,sys; docs=open("/tmp/ap-kag.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: kagent HelmRelease not rendered") if not hr else None; waived=[re.search(r"^  name: (.*)$$", d, re.M).group(1) for d in docs if "kind: HelmRelease" in d and "disableWait: true" in d]; sys.exit("FAIL: a component install no longer waits for its workload: "+", ".join(waived)+" (kagent and substrate depend on the connectivity release, whose hooks mint what their pods start against, so every install waits)") if waived else print("ok: every component install waits for its workload (no install.disableWait)")'
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
 	@grep -q 'semver: "2.x"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not 2.x (the flattened chart line)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
-	@echo "--> kagent flattened-chart wiring (0.2.0+): forwarded values are FLAT and carry no umbrella-only key"
+	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out
-	@grep -q 'semver: ">=0.2.0 <1.0.0"' /tmp/ap-flux.out || { echo "FAIL: kagent range is not >=0.2.0 <1.0.0 (floor: the flattened chart; ceiling: the next major, so wrapper minors roll)"; exit 1; }
-	@echo "ok: kagent flattened-chart wiring"
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent-crds.enabled=false >/tmp/ap-kag-crds.out 2>&1; then \
+		echo "FAIL: kagent on with kagent-crds off rendered; the controller would run without its CRDs"; exit 1; \
+	elif ! grep -q "components.kagent-crds.enabled is not" /tmp/ap-kag-crds.out; then \
+		echo "FAIL: the kagent-crds guard failed for the wrong reason"; cat /tmp/ap-kag-crds.out; exit 1; \
+	else echo "ok: kagent on without kagent-crds is refused"; fi
+	@echo "ok: the kagent line's wiring"
 	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease (no raw CRs)"
 	@if grep -E '^kind:' /tmp/ap-flux.out | grep -vqE '^kind: (OCIRepository|HelmRelease)$$'; then \
 		echo "FAIL: root rendered a non-app-of-apps kind:"; grep -E '^kind:' /tmp/ap-flux.out | grep -vE '^kind: (OCIRepository|HelmRelease)$$'; exit 1; \
@@ -465,7 +522,7 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-off.out | grep -q '"15020"' || { echo "FAIL: the data-plane policy does not admit the scrape port; the PodMonitor target reports up=0 and every metric is lost"; exit 1; }
 	@echo "ok: PodMonitor + tenant label + scrape port"
 	@echo "--> on: the llm listener, the pinned route, the AI backend, the Gateway policy and the price catalog"
-	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true >/tmp/vl-on.out 2>&1 || { cat /tmp/vl-on.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) >/tmp/vl-on.out 2>&1 || { cat /tmp/vl-on.out; exit 1; }
 	@grep -q 'name: llm' /tmp/vl-on.out || { echo "FAIL: no llm listener on the Gateway"; exit 1; }
 	@grep -q 'sectionName: llm' /tmp/vl-on.out || { echo "FAIL: the LLM route is not pinned to its listener; in edge mode it would attach to the public HTTPS listener"; exit 1; }
 	@grep -A4 'kind: AgentgatewayBackend' /tmp/vl-on.out >/dev/null || { echo "FAIL: no AgentgatewayBackend"; exit 1; }
@@ -508,7 +565,7 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@echo "--> the network policies admit the LLM port in both flavors"
 	@grep -A24 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-on.out | grep -q '"8081"' || { echo "FAIL: the cilium data-plane policy does not admit the LLM port"; exit 1; }
 	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-on.out | grep -q '"15020"' || { echo "FAIL: the cilium data-plane policy does not admit the scrape port"; exit 1; }
-	@grep -A40 'kagent-agent-muster-egress' /tmp/vl-on.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' || { echo "FAIL: agent pods have no egress to the data plane's LLM port"; exit 1; }
+	@awk "/^  name: substrate-atenet-egress$$/,/^---/" /tmp/vl-on.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' || { echo "FAIL: the actors' egress gateway (substrate-atenet-egress) has no egress to the data plane's LLM port"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes >/tmp/vl-k8s.out 2>&1 || { cat /tmp/vl-k8s.out; exit 1; }
 	@grep -A24 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-k8s.out | grep -q 'port: 8081' || { echo "FAIL: the kubernetes data-plane policy does not admit the LLM port"; exit 1; }
 	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-k8s.out | grep -q 'port: 15020' || { echo "FAIL: the kubernetes data-plane policy does not admit the scrape port"; exit 1; }
@@ -588,13 +645,13 @@ verify-labels: ## Assert every label value stays valid at the versions the chart
 	@echo "label values verified."
 
 .PHONY: verify-components
-verify-components: ## Assert the roster entries of the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts): off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema.
+verify-components: ## Assert the roster: the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts) off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema; the kagent line and the managers on their ranges, kagent-crds following kagent; the connectivity range holds its own major.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-components.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "component roster verified."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Pull the seven component charts (at the range's resolution and at the BOM pin) and render each with the values the meta chart forwards to it. Network: gsoci.azurecr.io, ghcr.io.
+verify-components-charts: ## Pull the component charts the meta chart composes values for — the seven extras, the two managers (closed schemas: a forwarded key they do not declare fails the release), the kagent line's kagent + kagent-crds — at the range's resolution and at the BOM pin, resolved the way Flux does, and render each with the values the meta chart forwards to it. Network: gsoci.azurecr.io, ghcr.io.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
@@ -628,17 +685,50 @@ endef
 # kagent-tool-server RemoteMCPServer never becomes Accepted (SYN dropped, "Policy
 # denied") and the agents that reference it run without tools. Off by default
 # and off in the golden render, so the default render is unchanged.
-KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent
+KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent
+# The two files of the v1alpha2 agent templates giantswarm/agent-platform#299
+# deletes; until then they are the only place `app: kagent` may still appear.
+KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
 .PHONY: verify-kagent-netpol
-verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-in tool server renders iff kagent.kagent-tools.enabled, in the tools namespace and port; and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
+verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the tools namespace and port; Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> Agent Substrate on, cilium: the worker pods' egress is the egress gateway, the dns and the cluster DNS — nothing else"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-sub.out 2>&1 || { cat /tmp/vkn-sub.out; exit 1; }
+	@awk "/^  name: substrate-workers$$/,/^---/" /tmp/vkn-sub.out >/tmp/vkn-sub-workers.out
+	@grep -q 'ate.dev/worker-pool' /tmp/vkn-sub-workers.out || { echo "FAIL: the worker-pod policy does not select ate.dev/worker-pool (the label ate-controller puts on every worker pod)"; exit 1; }
+	@grep -q 'app: atenet-egress' /tmp/vkn-sub-workers.out || { echo "FAIL: the worker pods cannot reach the egress gateway"; exit 1; }
+	@if grep -qE 'app.kubernetes.io/name: muster|toEntities:' /tmp/vkn-sub-workers.out; then echo "FAIL: the worker-pod policy opens the actors' destinations directly; those belong on the egress gateway"; cat /tmp/vkn-sub-workers.out; exit 1; fi
+	@awk "/^  name: substrate-atenet-egress$$/,/^---/" /tmp/vkn-sub.out >/tmp/vkn-sub-egress.out
+	@grep -q 'app.kubernetes.io/name: muster' /tmp/vkn-sub-egress.out || { echo "FAIL: the egress gateway has no egress to muster (the actors' tool calls)"; exit 1; }
+	@grep -A6 'app.kubernetes.io/component: controller' /tmp/vkn-sub-egress.out | grep -q 'port: "8083"' || { echo "FAIL: the egress gateway has no egress to the kagent controller API"; exit 1; }
+	@grep -B1 -A4 -- '- world' /tmp/vkn-sub-egress.out | grep -q 'port: "443"' || { echo "FAIL: the egress gateway has no world:443 (the LLM provider, git)"; exit 1; }
+	@grep -q 'port: "10443"' /tmp/vkn-sub-egress.out || { echo "FAIL: the egress gateway lost the cluster 443/10443 rule (muster's OAuth endpoints behind an internal LB)"; exit 1; }
+	@awk "/^  name: substrate-actors-to-kagent-controller$$/,/^---/" /tmp/vkn-sub.out | grep -q 'app: atenet-egress' || { echo "FAIL: the kagent controller does not admit the actors' egress gateway"; exit 1; }
+	@awk "/^  name: agent-platform-connectivity-kagent-controller-egress$$/,/^---/" /tmp/vkn-sub.out >/tmp/vkn-sub-ctl.out
+	@grep -A4 'app: ate-api-server' /tmp/vkn-sub-ctl.out | grep -q 'port: "443"' || { echo "FAIL: the kagent controller has no egress to ate-api"; exit 1; }
+	@grep -A4 'app: atenet-router' /tmp/vkn-sub-ctl.out | grep -q 'port: "8080"' || { echo "FAIL: the kagent controller has no egress to the atenet router"; exit 1; }
+	@for n in substrate-ate-api-server substrate-ate-controller substrate-atelet substrate-atenet-router substrate-dns substrate-podcertificate-controller; do grep -q "^  name: $$n$$" /tmp/vkn-sub.out || { echo "FAIL: no policy $$n"; exit 1; }; done
+	@awk "/^  name: substrate-ate-api-server$$/,/^---/" /tmp/vkn-sub.out | grep -q 'port: "8085"' || { echo "FAIL: ate-api-server has no egress to atelet's hostPort 8085 (the bootstrap API → node agent rule upstream lacks)"; exit 1; }
+	@if grep -q 'kagent-agent-muster-egress' /tmp/vkn-sub.out; then echo "FAIL: the v1alpha2 agent pods' egress policy is back; the actors' egress is the egress gateway's"; exit 1; fi
+	@echo "ok: Substrate hops (cilium)"
+	@echo "--> Agent Substrate on, kubernetes flavour: the ingress policies of the hops, no egress policy, no cilium.io object"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes >/tmp/vkn-sub-k8s.out 2>&1 || { cat /tmp/vkn-sub-k8s.out; exit 1; }
+	@for n in substrate-ate-api-server-ingress substrate-atenet-router-ingress substrate-atenet-egress-ingress substrate-dns-ingress substrate-workers-ingress substrate-actors-to-kagent-controller; do grep -q "^  name: $$n$$" /tmp/vkn-sub-k8s.out || { echo "FAIL: kubernetes flavour: no policy $$n"; exit 1; }; done
+	@if grep -q 'cilium.io' /tmp/vkn-sub-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavour"; exit 1; fi
+	@if grep -q 'policyTypes: \[Egress\]' /tmp/vkn-sub-k8s.out; then echo "FAIL: the kubernetes flavour renders an egress policy for Substrate; it renders ingress only, as for kagent"; exit 1; fi
+	@echo "ok: Substrate hops (kubernetes)"
+	@echo "--> Substrate off: none of its policies renders"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set muster.enabled=true --set networkPolicy.flavor=cilium >/tmp/vkn-nosub.out 2>&1 || { cat /tmp/vkn-nosub.out; exit 1; }
+	@if grep -q 'name: substrate-' /tmp/vkn-nosub.out; then echo "FAIL: Substrate policies render while the component is off"; exit 1; else echo "ok: inert while Substrate is off"; fi
+	@echo "--> no app: kagent selector remains (the v1alpha2 agent Deployments' label) outside the two templates #299 deletes"
+	@if grep -rln 'app: kagent$$' $(CONNECTIVITY_DIR)/templates $(CHART_DIR)/templates | grep -vxF -e "$$(printf '%s\n' $(KAGENT_V1ALPHA2_TEMPLATES))"; then echo "FAIL: an app: kagent selector remains in the chart (above); on kagent API v2 no pod carries it"; exit 1; else echo "ok: no app: kagent selector left"; fi
 	@echo "--> kagent-tools off (the default): no tool-server egress"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-off.out 2>&1 || { cat /tmp/vkn-off.out; exit 1; }
 	@if grep -q 'kagent-tools' /tmp/vkn-off.out; then echo "FAIL: tool-server egress renders while kagent-tools is off"; grep -n 'kagent-tools' /tmp/vkn-off.out | head; exit 1; else echo "ok: inert while off"; fi
-	@echo "--> kagent-tools on: controller and agent egress to the kagent-tools pods on 8084 in the kagent namespace"
+	@echo "--> kagent-tools on: the controller's and the actors' egress (Substrate's egress gateway) to the kagent-tools pods on 8084 in the kagent namespace"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true >/tmp/vkn-on.out 2>&1 || { cat /tmp/vkn-on.out; exit 1; }
-	@for n in kagent-controller-egress kagent-agent-muster-egress; do \
-		awk "/^  name: agent-platform-connectivity-$$n$$/,/^---/" /tmp/vkn-on.out >/tmp/vkn-on-$$n.out; \
+	@for n in agent-platform-connectivity-kagent-controller-egress substrate-atenet-egress; do \
+		awk "/^  name: $$n$$/,/^---/" /tmp/vkn-on.out >/tmp/vkn-on-$$n.out; \
 		grep -q 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out || { echo "FAIL: $$n has no egress to the kagent-tools pods"; exit 1; }; \
 		grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out | grep -q 'io.kubernetes.pod.namespace: kagent$$' || { echo "FAIL: $$n tool-server egress is not pinned to the kagent namespace"; exit 1; }; \
 		grep -A4 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out | grep -q 'port: "8084"' || { echo "FAIL: $$n tool-server egress does not open port 8084"; exit 1; }; \
@@ -670,31 +760,178 @@ verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-
 	@echo "--> oauth2-proxy off: no oauth2-proxy policy, peers ignored"
 	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.oauth2ProxyIngress.additionalPeers=[{"app":"teleport-kube-agent"}]' 2>&1 | grep -q 'teleport-kube-agent'; then echo "FAIL: oauth2-proxy peers render while oauth2-proxy is off"; exit 1; else echo "ok: inert while oauth2-proxy is off"; fi
 
-.PHONY: verify-kagent-discovery
-verify-kagent-discovery: ## Assert the shared muster RemoteMCPServer opts out of controller-side tool discovery (kagent.dev/discovery=disabled) iff muster runs with OAuth on, carries no headersFrom, and the operator-defined kagent.remoteMcpServers are untouched.
+# The kagent controller route in its fleet shape: agentgateway-muster with the
+# agentgateway and kagent components on, the route on its default hostname, the
+# issuer from global.identity, jwksEgress open (the JWT policy is on by default).
+KAGENT_ROUTE := $(VM) --namespace agent-platform --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set kagent.controllerRoute.enabled=true --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set gateway.jwksEgress.enabled=true
+# $(call kagent_route_doc,<kind>,<name>,<render file>,<out file>): one rendered object.
+define kagent_route_doc
+	@python3 -c 'import sys; docs=open("$(3)").read().split("\n---\n"); hit=[d for d in docs if "\nkind: $(1)\n" in d and "\n  name: $(2)\n" in d]; sys.exit("FAIL: $(1) $(2) missing from the render") if len(hit)!=1 else open("$(4)","w").write(hit[0])'
+endef
+
+.PHONY: verify-kagent-route
+verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by every RPC of the kagent API v2 + A2A v1 services (exact service/method, one rule per service) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, and the guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> muster OAuth on (the default): the muster RemoteMCPServer carries the opt-out label and no headersFrom"
-	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"}]' >/tmp/vkd-on.out 2>&1 || { cat /tmp/vkd-on.out; exit 1; }
-	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-on.out | awk "/^  name: muster$$/,/^---/" >/tmp/vkd-on-muster.out
-	@grep -q 'kind: RemoteMCPServer' /tmp/vkd-on.out || { echo "FAIL: no RemoteMCPServer rendered"; exit 1; }
-	@grep -q '^  name: muster$$' /tmp/vkd-on-muster.out || { echo "FAIL: no muster RemoteMCPServer rendered"; cat /tmp/vkd-on.out | grep -n 'RemoteMCPServer' ; exit 1; }
-	@grep -q '^    kagent.dev/discovery: disabled$$' /tmp/vkd-on-muster.out || { echo "FAIL: the muster RemoteMCPServer does not opt out of controller-side discovery while muster OAuth is on"; cat /tmp/vkd-on-muster.out; exit 1; }
-	@if grep -q 'headersFrom' /tmp/vkd-on-muster.out; then echo "FAIL: the muster RemoteMCPServer carries headersFrom — a static header there overrides the propagated caller token in every agent"; cat /tmp/vkd-on-muster.out; exit 1; fi
-	@echo "ok: muster opts out, no static header"
-	@echo "--> operator-defined kagent.remoteMcpServers: no opt-out label, tokenSecret still renders headersFrom"
-	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-on.out | awk "/^  name: \"external\"$$/,/^---/" >/tmp/vkd-on-external.out
-	@grep -q '^  name: "external"$$' /tmp/vkd-on-external.out || { echo "FAIL: the operator-defined RemoteMCPServer did not render"; grep -n 'name:' /tmp/vkd-on.out | grep -i remote; exit 1; }
-	@if grep -q 'kagent.dev/discovery' /tmp/vkd-on-external.out; then echo "FAIL: the opt-out label leaked onto an operator-defined RemoteMCPServer"; cat /tmp/vkd-on-external.out; exit 1; fi
-	@grep -q 'headersFrom' /tmp/vkd-on-external.out || { echo "FAIL: tokenSecret no longer renders headersFrom on an operator-defined RemoteMCPServer"; cat /tmp/vkd-on-external.out; exit 1; }
-	@echo "ok: operator-defined servers untouched"
-	@echo "--> muster OAuth off: the controller can list tools anonymously, no opt-out label"
+	@echo "--> the default shape: GRPCRoutes on both hops, no REST route, no path prefix"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true >/tmp/vkr.out 2>&1 || { cat /tmp/vkr.out; exit 1; }
+	$(call kagent_route_doc,GRPCRoute,kagent-controller,/tmp/vkr.out,/tmp/vkr-inner.out)
+	$(call kagent_route_doc,GRPCRoute,kagent-controller-public,/tmp/vkr.out,/tmp/vkr-public.out)
+	@if grep -A3 '^kind: HTTPRoute$$' /tmp/vkr.out | grep -q 'name: kagent-controller'; then echo "FAIL: a kagent-controller HTTPRoute still renders (the REST /kagent route was retired)"; exit 1; fi
+	@if grep -qE 'value: /kagent$$|pathPrefix|replacePrefixMatch: /$$' /tmp/vkr.out; then echo "FAIL: the render still carries a /kagent path prefix"; grep -nE 'value: /kagent$$|pathPrefix' /tmp/vkr.out | head; exit 1; fi
+	@for svc in kagent.api.v1alpha1.AgentInstanceService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService; do \
+		for f in /tmp/vkr-inner.out /tmp/vkr-public.out; do \
+			grep -B1 "^            service: $$svc$$" $$f | grep -q 'type: Exact' || { echo "FAIL: $$f has no exact match for $$svc"; exit 1; }; \
+		done; \
+	done
+	@for f in /tmp/vkr-inner.out /tmp/vkr-public.out; do \
+		[ "$$(grep -c '^    - matches:' $$f)" = "5" ] || { echo "FAIL: $$f does not carry one rule per service (5)"; grep -c '^    - matches:' $$f; exit 1; }; \
+		[ "$$(grep -c '^            service: ' $$f)" = "39" ] || { echo "FAIL: $$f does not match the 39 RPCs of the line's five services"; grep -c '^            service: ' $$f; exit 1; }; \
+		[ "$$(grep -c '^            method: ' $$f)" = "39" ] || { echo "FAIL: $$f has a service-only match — the agentgateway controller translates it into an exact path no request has"; exit 1; }; \
+		grep -A1 '^            service: lf.a2a.v1.A2AService$$' $$f | grep -q 'method: SendStreamingMessage' || { echo "FAIL: $$f does not route A2AService/SendStreamingMessage"; exit 1; }; \
+	done
+	@if grep -q '^  hostnames:' /tmp/vkr-inner.out; then echo "FAIL: the inner GRPCRoute is hostname-scoped (the in-cluster authority agentgateway.<ns>.svc.cluster.local:8080 would not match)"; exit 1; fi
+	@grep -q 'kind: AgentgatewayBackend' /tmp/vkr-inner.out || { echo "FAIL: the inner GRPCRoute does not target the kagent AgentgatewayBackend"; exit 1; }
+	@grep -q '"agentgateway.ci.example.com"' /tmp/vkr-public.out || { echo "FAIL: the public GRPCRoute does not derive its hostname from global.domain"; exit 1; }
+	@grep -A2 'backendRefs:' /tmp/vkr-public.out | grep -q 'name: agentgateway' || { echo "FAIL: the public GRPCRoute does not forward to the agentgateway Service"; exit 1; }
+	@grep -A2 'backendRefs:' /tmp/vkr-public.out | grep -q 'port: 8080' || { echo "FAIL: the public GRPCRoute does not forward to port 8080"; exit 1; }
+	@echo "ok: GRPCRoutes"
+	@echo "--> the controller backend: passthrough of the bearer, no protocol pin (h2c inferred for gRPC, HTTP/1.1 kept for gRPC-Web)"
+	$(call kagent_route_doc,AgentgatewayBackend,kagent,/tmp/vkr.out,/tmp/vkr-backend.out)
+	@grep -q 'passthrough: {}' /tmp/vkr-backend.out || { echo "FAIL: the kagent backend no longer passes the bearer through"; exit 1; }
+	@if grep -qE '^ +version: HTTP' /tmp/vkr-backend.out; then echo "FAIL: the kagent backend pins a protocol version — pinned HTTP/2 sends gRPC-Web to the controller's native gRPC server (415); agentgateway infers h2c for gRPC and keeps HTTP/1.1 for gRPC-Web"; exit 1; fi
+	@grep -q 'host: kagent-controller.kagent.svc.cluster.local' /tmp/vkr-backend.out || { echo "FAIL: the kagent backend does not target the controller Service in the kagent namespace"; exit 1; }
+	@echo "ok: backend"
+	@echo "--> the JWT policy: on by default, Strict, on the GRPCRoute, the identity transformation and the claim requirement"
+	$(call kagent_route_doc,AgentgatewayPolicy,kagent-controller-jwt,/tmp/vkr.out,/tmp/vkr-jwt.out)
+	$(call kagent_route_doc,AgentgatewayBackend,kagent-controller-jwks,/tmp/vkr.out,/tmp/vkr-jwks.out)
+	@grep -A2 'targetRefs:' /tmp/vkr-jwt.out | grep -q 'kind: GRPCRoute' || { echo "FAIL: the JWT policy does not target the GRPCRoute"; exit 1; }
+	@grep -A3 'targetRefs:' /tmp/vkr-jwt.out | grep -q 'name: kagent-controller$$' || { echo "FAIL: the JWT policy targets the wrong route"; exit 1; }
+	@grep -q 'mode: Strict' /tmp/vkr-jwt.out || { echo "FAIL: the JWT policy is not Strict by default"; exit 1; }
+	@grep -q 'issuer: "https://dex.ci.example.com"' /tmp/vkr-jwt.out || { echo "FAIL: the JWT issuer is not defaulted from global.identity.issuerUrl"; exit 1; }
+	@grep -A4 '^        set:' /tmp/vkr-jwt.out | grep -q 'name: x-user-id' || { echo "FAIL: the transformation does not set x-user-id"; exit 1; }
+	@grep -A4 '^        set:' /tmp/vkr-jwt.out | grep -q 'value: "jwt.email"' || { echo "FAIL: x-user-id is not set from the email claim (kagent.controller.auth.userIdClaim)"; exit 1; }
+	@if grep -q 'remove:' /tmp/vkr-jwt.out; then echo "FAIL: the policy removes a header — agentgateway applies remove after set, which would strip the identity header it just set"; exit 1; fi
+	@grep -q 'action: Require' /tmp/vkr-jwt.out || { echo "FAIL: the policy does not require the identity claim"; exit 1; }
+	@grep -q -- '- "has(jwt.email)"' /tmp/vkr-jwt.out || { echo "FAIL: the claim requirement does not name the email claim"; exit 1; }
+	@grep -q 'host: dex.giantswarm.svc.cluster.local' /tmp/vkr-jwks.out || { echo "FAIL: the JWKS backend does not default to the dex Service"; exit 1; }
+	@if grep -q 'tls:' /tmp/vkr-jwks.out; then echo "FAIL: the JWKS backend originates TLS without jwks.tls.enabled"; exit 1; fi
+	@echo "ok: JWT policy + identity transformation"
+	@echo "--> kagent.controller.auth.userIdClaim drives both the header and the requirement; jwks.tls verifies against the named CA"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=sub --set kagent.controllerRoute.jwtAuthentication.jwks.tls.enabled=true --set kagent.controllerRoute.jwtAuthentication.jwks.tls.caSecretName=dex-ca >/tmp/vkr-sub.out 2>&1 || { cat /tmp/vkr-sub.out; exit 1; }
+	@grep -q 'value: "jwt.sub"' /tmp/vkr-sub.out || { echo "FAIL: the transformation does not follow kagent.controller.auth.userIdClaim"; exit 1; }
+	@grep -q -- '- "has(jwt.sub)"' /tmp/vkr-sub.out || { echo "FAIL: the claim requirement does not follow kagent.controller.auth.userIdClaim"; exit 1; }
+	@grep -B1 -A3 'caCertificateRefs:' /tmp/vkr-sub.out | grep -q 'name: dex-ca' || { echo "FAIL: jwks.tls.caSecretName does not reach the JWKS backend"; exit 1; }
+	@echo "ok: claim + JWKS TLS knobs"
+	@echo "--> the public hop's Envoy timeout policy targets the public GRPCRoute; nothing of it in edge mode"
+	$(call kagent_route_doc,BackendTrafficPolicy,kagent-controller-public,/tmp/vkr.out,/tmp/vkr-btp.out)
+	@grep -A3 'targetRefs:' /tmp/vkr-btp.out | grep -q 'kind: GRPCRoute' || { echo "FAIL: the kagent BackendTrafficPolicy does not target the GRPCRoute"; exit 1; }
+	@grep -q 'requestTimeout: "0s"' /tmp/vkr-btp.out || { echo "FAIL: the kagent BackendTrafficPolicy does not carry ingress.backendTrafficPolicy.timeout"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) >/tmp/vkr-nobtp.out 2>&1 || { cat /tmp/vkr-nobtp.out; exit 1; }
+	@if grep -A3 '^kind: BackendTrafficPolicy$$' /tmp/vkr-nobtp.out | grep -q 'kagent-controller-public'; then echo "FAIL: the kagent BackendTrafficPolicy renders with ingress.backendTrafficPolicy off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com --set ingress.backendTrafficPolicy.enabled=true >/tmp/vkr-edge.out 2>&1 || { cat /tmp/vkr-edge.out; exit 1; }
+	@if grep -q 'kagent-controller-public' /tmp/vkr-edge.out; then echo "FAIL: the public GRPCRoute or its BackendTrafficPolicy renders with the edge as data plane"; exit 1; fi
+	@grep -A3 '^kind: AgentgatewayPolicy$$' /tmp/vkr-edge.out | grep -q 'name: kagent-controller-jwt' || { echo "FAIL: the JWT policy is missing in edge mode"; exit 1; }
+	@echo "ok: public-hop timeout policy + edge mode"
+	@echo "--> the off switch: no policy, no JWKS backend, the route stays"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controllerRoute.jwtAuthentication.enabled=false --set gateway.jwksEgress.enabled=false >/tmp/vkr-off.out 2>&1 || { cat /tmp/vkr-off.out; exit 1; }
+	@if grep -qE 'kagent-controller-jwt|kagent-controller-jwks|name: x-user-id' /tmp/vkr-off.out; then echo "FAIL: JWT objects render with jwtAuthentication.enabled=false"; exit 1; fi
+	@grep -A3 '^kind: GRPCRoute$$' /tmp/vkr-off.out | grep -q '^  name: kagent-controller$$' || { echo "FAIL: the GRPCRoute is gone with the JWT policy off"; exit 1; }
+	@echo "ok: off switch"
+	@echo "--> the UI route strips the identity header, with and without oauth2-proxy"
+	@for proxy in true false; do \
+		helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.uiRoute.enabled=true --set kagent.oauth2-proxy.enabled=$$proxy >/tmp/vkr-ui-$$proxy.out 2>&1 || { cat /tmp/vkr-ui-$$proxy.out; exit 1; }; \
+		python3 -c 'import sys; docs=open("/tmp/vkr-ui-'$$proxy'.out").read().split("\n---\n"); ui=[d for d in docs if "\nkind: HTTPRoute\n" in d and "\n  name: agent-platform-connectivity-ui\n" in d]; sys.exit("FAIL: the kagent UI HTTPRoute did not render") if len(ui)!=1 else None; r=ui[0]; sys.exit("FAIL: the UI route has no RequestHeaderModifier filter") if "type: RequestHeaderModifier" not in r else None; sys.exit("FAIL: the UI route does not remove x-user-id") if "remove:\n              - x-user-id" not in r else None; print("ok: UI route strips x-user-id (oauth2-proxy '$$proxy')")' || exit 1; \
+	done
+	@echo "--> network policy: the controller admits the data plane and the UI only, in both flavors"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set networkPolicy.flavor=cilium --set muster.enabled=true >/tmp/vkr-np-cilium.out 2>&1 || { cat /tmp/vkr-np-cilium.out; exit 1; }
+	$(call kagent_route_doc,CiliumNetworkPolicy,agent-platform-connectivity-kagent-from-agentgateway,/tmp/vkr-np-cilium.out,/tmp/vkr-np-cilium-ingress.out)
+	@[ "$$(grep -c 'fromEndpoints:' /tmp/vkr-np-cilium-ingress.out)" = "1" ] || { echo "FAIL: the cilium controller ingress has more than one rule"; cat /tmp/vkr-np-cilium-ingress.out; exit 1; }
+	@[ "$$(grep -c 'matchLabels:' /tmp/vkr-np-cilium-ingress.out)" = "3" ] || { echo "FAIL: the cilium controller ingress does not admit exactly the data plane and the UI (plus its own selector)"; cat /tmp/vkr-np-cilium-ingress.out; exit 1; }
+	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vkr-np-cilium-ingress.out || { echo "FAIL: the cilium controller ingress does not admit the data plane"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: ui' /tmp/vkr-np-cilium-ingress.out || { echo "FAIL: the cilium controller ingress does not admit the UI"; exit 1; }
+	@if grep -q '^            app: kagent$$' /tmp/vkr-np-cilium-ingress.out; then echo "FAIL: the cilium controller ingress still admits app: kagent pods"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set networkPolicy.flavor=kubernetes >/tmp/vkr-np-k8s.out 2>&1 || { cat /tmp/vkr-np-k8s.out; exit 1; }
+	$(call kagent_route_doc,NetworkPolicy,agent-platform-connectivity-kagent-controller-ingress,/tmp/vkr-np-k8s.out,/tmp/vkr-np-k8s-ingress.out)
+	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vkr-np-k8s-ingress.out || { echo "FAIL: the kubernetes controller ingress admits the whole release namespace instead of the data-plane pods"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: ui' /tmp/vkr-np-k8s-ingress.out || { echo "FAIL: the kubernetes controller ingress does not admit the UI"; exit 1; }
+	@if grep -q '^              app: kagent$$' /tmp/vkr-np-k8s-ingress.out; then echo "FAIL: the kubernetes controller ingress still admits app: kagent pods"; exit 1; fi
+	@echo "ok: controller ingress in both flavors"
+	@echo "--> the guards"
+	$(call managers_must_fail,a stale pathPrefix fails the render,$(KAGENT_ROUTE) --set kagent.controllerRoute.pathPrefix=/kagent,pathPrefix was retired with 4.0)
+	$(call managers_must_fail,the JWT policy needs jwksEgress,$(KAGENT_ROUTE) --set gateway.jwksEgress.enabled=false,gateway.jwksEgress.enabled is false)
+	$(call managers_must_fail,the JWT policy needs an issuer,$(KAGENT_ROUTE) --set global.identity.issuerUrl=,needs the login issuer)
+	$(call managers_must_fail,the identity claim is a plain claim name,$(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=x-claim,is not a plain claim name)
+	$(call managers_must_fail,a service without methods fails (a service-only match never routes),$(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"svc.Only":[]}',lists no methods)
+	$(call managers_must_fail,an empty service map fails,$(KAGENT_ROUTE) --set kagent.controllerRoute.grpc.services=null,grpc.services is empty)
+	@echo "--> an extra RPC in kagent.controllerRoute.grpc.services reaches both GRPCRoutes"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"kagent.api.v1alpha1.SystemService":["GetVersion","NewRpc"]}' >/tmp/vkr-extra.out 2>&1 || { cat /tmp/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c 'method: NewRpc' /tmp/vkr-extra.out)" = "2" ] || { echo "FAIL: an added RPC does not reach both GRPCRoutes"; exit 1; }
+	@[ "$$(grep -c '^            service: kagent.api.v1alpha1.SystemService$$' /tmp/vkr-extra.out)" = "4" ] || { echo "FAIL: a service's method list is not replaced by the override (Helm merges the map per service, replaces the list)"; grep -c '^            service: kagent.api.v1alpha1.SystemService$$' /tmp/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c '^            service: ' /tmp/vkr-extra.out)" = "74" ] || { echo "FAIL: the other services' lists did not survive a one-service override"; grep -c '^            service: ' /tmp/vkr-extra.out; exit 1; }
+	@echo "ok: the RPC list is a value (a service's list replaces, the map merges)"
+	@echo "--> every connectivity CI values file renders"
+	@for f in $(CONNECTIVITY_DIR)/ci/*.yaml; do \
+		helm template t $(CONNECTIVITY_DIR) --namespace agent-platform -f $$f >/tmp/vkr-ci.out 2>&1 || { echo "FAIL: $$f does not render"; cat /tmp/vkr-ci.out | tail -5; exit 1; }; \
+	done
+	@echo "ok: CI values"
+	@echo "All kagent controller route behaviors verified."
+
+.PHONY: verify-kagent-discovery
+verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for muster (the Generic agent chart 1.x renders one per agent, with the toolset header and the discovery opt-out label), nothing it renders for muster carries a static header, the operator-defined kagent.remoteMcpServers are kagent.dev/v1alpha3 in the kagent namespace (tokenSecret = a Secret-sourced Authorization header, no opt-out label), and the muster MCP URL reaches the portal's app-config from the one helper.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> kagent + muster on (OAuth on, the default) with operator extras: no RemoteMCPServer for muster; every RemoteMCPServer kagent.dev/v1alpha3 in the kagent namespace"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp"}]' >/tmp/vkd-on.out 2>&1 || { cat /tmp/vkd-on.out; exit 1; }
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/' /tmp/vkd-on.out >/tmp/vkd-on-rms.out
+	@[ "$$(grep -c '^kind: RemoteMCPServer$$' /tmp/vkd-on.out)" = "2" ] || { echo "FAIL: expected the two operator RemoteMCPServers and nothing else, got $$(grep -c '^kind: RemoteMCPServer$$' /tmp/vkd-on.out)"; grep -n -A3 '^kind: RemoteMCPServer$$' /tmp/vkd-on.out; exit 1; }
+	@if grep -qE '^  name: "?muster"?$$' /tmp/vkd-on-rms.out; then echo "FAIL: a RemoteMCPServer named muster is back — the Generic agent chart 1.x renders one per agent (docs/authentication.md, tool discovery)"; exit 1; fi
+	@if grep -q 'svc.cluster.local:8090/mcp' /tmp/vkd-on-rms.out; then echo "FAIL: a RemoteMCPServer of the platform's own targets muster — the per-agent carrier is the agent chart's; a static header here would override the propagated caller token in every agent"; exit 1; fi
+	@if grep -q 'allowedNamespaces' /tmp/vkd-on-rms.out; then echo "FAIL: allowedNamespaces is back on a RemoteMCPServer (the v1alpha2 cross-namespace grant; an AgentTemplate binds a same-namespace server only)"; exit 1; fi
+	@[ "$$(grep -c '^apiVersion: kagent.dev/v1alpha3$$' /tmp/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not kagent.dev/v1alpha3"; grep -n apiVersion /tmp/vkd-on-rms.out; exit 1; }
+	@[ "$$(grep -c '^  namespace: kagent$$' /tmp/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not in the kagent namespace, where the AgentTemplates that bind it live"; exit 1; }
+	@if grep -q 'kagent.dev/v1alpha2' /tmp/vkd-on.out; then echo "FAIL: a kagent.dev/v1alpha2 object renders"; grep -n 'v1alpha2' /tmp/vkd-on.out; exit 1; fi
+	@if grep -q 'kagent.dev/discovery' /tmp/vkd-on-rms.out; then echo "FAIL: the discovery opt-out label leaked onto an operator-defined RemoteMCPServer (the Generic agent chart sets it on the per-agent carrier)"; exit 1; fi
+	@echo "ok: no muster server, v1alpha3 in the kagent namespace, no allowedNamespaces, no v1alpha2, no opt-out label on the extras"
+	@echo "--> tokenSecret renders a Secret-sourced Authorization header in the v1alpha3 shape; without it no headersFrom"
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/ && /\n  name: "external"\n/' /tmp/vkd-on.out >/tmp/vkd-on-external.out
+	@grep -q '^  name: "external"$$' /tmp/vkd-on-external.out || { echo "FAIL: the operator-defined RemoteMCPServer external did not render"; exit 1; }
+	@for pattern in '^  headersFrom:$$' '^  - name: Authorization$$' '^    valueFrom:$$' '^      type: Secret$$' '^      name: "external-token"$$' '^      key: token$$'; do \
+		grep -q -- "$$pattern" /tmp/vkd-on-external.out || { echo "FAIL: tokenSecret no longer renders headersFrom {name: Authorization, valueFrom: {type: Secret, name, key: token}} — missing $$pattern"; cat /tmp/vkd-on-external.out; exit 1; }; \
+	done
+	@if grep -q '^    value:' /tmp/vkd-on-external.out; then echo "FAIL: the Authorization header carries an inline value next to valueFrom (the CRD takes exactly one)"; exit 1; fi
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/ && /\n  name: "open"\n/' /tmp/vkd-on.out >/tmp/vkd-on-open.out
+	@grep -q '^  name: "open"$$' /tmp/vkd-on-open.out || { echo "FAIL: the operator-defined RemoteMCPServer open did not render"; exit 1; }
+	@if grep -q 'headersFrom' /tmp/vkd-on-open.out; then echo "FAIL: an operator-defined RemoteMCPServer without tokenSecret carries headersFrom"; cat /tmp/vkd-on-open.out; exit 1; fi
+	@grep -q '^  description: "open MCP server"$$' /tmp/vkd-on-open.out || { echo "FAIL: the default description (required by the v1alpha3 CRD) is gone"; exit 1; }
+	@echo "ok: operator extras"
+	@echo "--> muster OAuth off, no extras: still no RemoteMCPServer of the platform's own"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set muster.muster.oauth.server.enabled=false >/tmp/vkd-off.out 2>&1 || { cat /tmp/vkd-off.out; exit 1; }
-	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-off.out | awk "/^  name: muster$$/,/^---/" >/tmp/vkd-off-muster.out
-	@grep -q '^  name: muster$$' /tmp/vkd-off-muster.out || { echo "FAIL: no muster RemoteMCPServer rendered with OAuth off"; exit 1; }
-	@if grep -q 'kagent.dev/discovery' /tmp/vkd-off-muster.out; then echo "FAIL: the opt-out label renders while muster OAuth is off"; cat /tmp/vkd-off-muster.out; exit 1; fi
-	@echo "ok: no label with OAuth off"
-	@echo "--> kagent off: no RemoteMCPServer at all"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.enabled=true 2>&1 | grep -q 'kind: RemoteMCPServer'; then echo "FAIL: a RemoteMCPServer renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
+	@if grep -q '^kind: RemoteMCPServer$$' /tmp/vkd-off.out; then echo "FAIL: a RemoteMCPServer renders with no kagent.remoteMcpServers (the shared muster server is retired)"; exit 1; else echo "ok: nothing without extras"; fi
+	@echo "--> kagent off: no RemoteMCPServer at all, extras included"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp"}]' 2>&1 | grep -q 'kind: RemoteMCPServer'; then echo "FAIL: a RemoteMCPServer renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
+	@echo "--> the muster MCP URL: one helper (agent-platform.musterMcpUrl) into the portal's app-config; follows muster.fullnameOverride / muster.service.port; absent with kagent or muster off"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true >/tmp/vkd-url.out 2>&1 || { cat /tmp/vkd-url.out; exit 1; }
+	@grep -q '^      musterMcpUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp$$' /tmp/vkd-url.out || { echo "FAIL: the app-config lacks agentPlatform.musterMcpUrl at the default muster URL"; grep -n musterMcpUrl /tmp/vkd-url.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set muster.fullnameOverride=other-muster --set muster.service.port=9999 2>/dev/null | grep -q 'musterMcpUrl: http://other-muster.agent-platform.svc.cluster.local:9999/mcp' || { echo "FAIL: agentPlatform.musterMcpUrl does not follow muster.fullnameOverride / muster.service.port"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) >/tmp/vkd-url-nokagent.out 2>&1 || { cat /tmp/vkd-url-nokagent.out; exit 1; }
+	@if grep -q 'musterMcpUrl' /tmp/vkd-url-nokagent.out; then echo "FAIL: agentPlatform.musterMcpUrl renders with kagent off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set components.muster.enabled=false >/tmp/vkd-url-nomuster.out 2>&1 || { cat /tmp/vkd-url-nomuster.out; exit 1; }
+	@if grep -q 'musterMcpUrl' /tmp/vkd-url-nomuster.out; then echo "FAIL: agentPlatform.musterMcpUrl renders with the muster component off"; exit 1; fi
+	@echo "ok: musterMcpUrl"
+	@echo "kagent tool-discovery invariants verified."
+
+.PHONY: verify-kagent-crds
+verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — and no render of the chart carries kagent.dev/v1alpha2 (tests/verify-kagent-crds.py; needs PyYAML).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-kagent-harness
+verify-kagent-harness: ## Assert the connectivity chart renders exactly one platform Harness per managed namespace with the shape the platform owns (kagent runtime, the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the meta chart's WorkerPool, the snapshot location, the admission label agent-platform.giantswarm.io/harness: kagent), the workerPoolRef follows kagent.substrateWorkerPool.name, a tag image fails the render, and kagent off renders none (tests/verify-kagent-harness.py; needs PyYAML).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
 
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
@@ -935,6 +1172,21 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/vid-meta.out 2>&1 || { cat /tmp/vid-meta.out; exit 1; }
 	@grep -q 'helmReleaseServiceAccount: kagent-flux' /tmp/vid-meta.out || { echo "FAIL: agent-manager lost flux.helmReleaseServiceAccount"; exit 1; }
 	@if grep -q 'helmReleaseServiceAccount:' $(CHART_DIR)/values.yaml $(CONNECTIVITY_DIR)/values.yaml; then echo "FAIL: agent-manager.flux.helmReleaseServiceAccount is set in a values.yaml again; it is derived from kagent.fluxServiceAccountName"; exit 1; fi
+	@echo "--> agent-manager receives the platform's muster MCP URL (muster.url) from the same derivation — the helper agent-platform.musterMcpUrl in both charts — never from values.yaml; it follows muster.fullnameOverride; a disagreeing agent-manager.muster.url fails naming the source"
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' /tmp/vid-meta.out >/tmp/vid-meta-am-url.out
+	@grep -q '^      url: http://muster.default.svc.cluster.local:8090/mcp$$' /tmp/vid-meta-am-url.out || { echo "FAIL: agent-manager's muster.url is not derived from the muster Service"; grep -n -A4 '^    muster:' /tmp/vid-meta-am-url.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set muster.fullnameOverride=other-muster 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' | grep -q 'url: http://other-muster.default.svc.cluster.local:8090/mcp' || { echo "FAIL: agent-manager's muster.url does not follow muster.fullnameOverride"; exit 1; }
+	@if awk '/^agent-manager:/{f=1} f&&/^[a-z]/&&!/^agent-manager/{f=0} f' $(CHART_DIR)/values.yaml | grep -qE '^    url:'; then echo "FAIL: agent-manager.muster.url is set in the meta chart's values.yaml; it is derived from the muster Service"; exit 1; fi
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.muster.url=http://other/mcp >/tmp/vid-url-guard.out 2>&1; then \
+		echo "FAIL: a disagreeing agent-manager.muster.url was accepted"; exit 1; \
+	elif ! grep -q "leave agent-manager.muster.url unset" /tmp/vid-url-guard.out; then \
+		echo "FAIL: the muster.url guard failed for the wrong reason"; cat /tmp/vid-url-guard.out; exit 1; \
+	else echo "ok: muster.url guard"; fi
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.muster.url=http://muster.default.svc.cluster.local:8090/mcp >/dev/null 2>&1 || { echo "FAIL: an agreeing agent-manager.muster.url must pass"; exit 1; }
+	@grep -q 'define "agent-platform.musterMcpUrl"' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the connectivity chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
+	@grep -q 'define "agent-platform.musterMcpUrl"' $(CHART_DIR)/templates/_helpers.tpl || { echo "FAIL: the meta chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.muster.enabled=false 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' >/tmp/vid-meta-am-nomuster.out; if grep -q 'url: http://' /tmp/vid-meta-am-nomuster.out; then echo "FAIL: agent-manager's muster.url is derived while the muster component is off"; exit 1; fi
+	@echo "ok: muster MCP URL — one helper, two consumers (agent-manager muster.url, the portal's agentPlatform.musterMcpUrl)"
 	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >/tmp/vid-empty.out 2>&1 || { cat /tmp/vid-empty.out; exit 1; }
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' /tmp/vid-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still renders the identity"; exit 1; fi
@@ -956,7 +1208,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.uiRoute.enabled=true --set kagent.uiRoute.hostname=kagent.ci.example.com --set kagent.oauth2-proxy.enabled=false >/tmp/vid-ui.out 2>&1 || { cat /tmp/vid-ui.out; exit 1; }
 	@grep -q '^        - name: kagent-ui$$' /tmp/vid-ui.out || { echo "FAIL: the kagent UI route does not target the Service named from kagent.fullnameOverride"; grep -n -- '-ui$$' /tmp/vid-ui.out; exit 1; }
 	@echo "ok: UI route backend follows fullnameOverride"
-	@for case in "kagent.controllerRoute:--set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true" \
+	@for case in "kagent.controllerRoute:--set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com" \
 	             "klausGateway.agentgatewayRoute:--set components.klaus-gateway.enabled=true --set klausGateway.agentgatewayRoute.enabled=true" \
 	             "agent-platform-mcps.agentgateway:$(MCPS_ONE)"; do \
 		knob=$${case%%:*}; flags=$${case#*:}; \
@@ -1108,6 +1360,47 @@ verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + Sche
 	@echo "--> kubernetes flavor: no cilium.io object, the CNPG pods keep their unrestricted egress"
 	@helm template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set networkPolicy.flavor=kubernetes >/tmp/vp-k8s.out 2>&1 || { cat /tmp/vp-k8s.out; exit 1; }
 	@if grep -q 'cilium.io' /tmp/vp-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavor"; exit 1; else echo "ok: kubernetes flavor"; fi
+	@echo "--> postgres.databases: with Substrate on, the Database kagent-pg-substrate and the derived-Secret hook render; the Secret lands in the Cluster's namespace and in ate-system; the CNPG policy admits ate-api-server; the substrate release gets the Secret reference"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) $(SUBSTRATE_ON) >/tmp/vp-db.out 2>&1 || { cat /tmp/vp-db.out; exit 1; }
+	@awk "/^kind: Database$$/,/^---/" /tmp/vp-db.out | grep -q '^  name: kagent-pg-substrate$$' || { echo "FAIL: no Database kagent-pg-substrate with Substrate on"; exit 1; }
+	@awk "/^  name: kagent-pg-substrate$$/,/^---/" /tmp/vp-db.out | grep -q 'name: substrate$$' || { echo "FAIL: the Substrate Database's spec.name is not substrate"; exit 1; }
+	@awk "/^  name: kagent-pg-substrate$$/,/^---/" /tmp/vp-db.out | grep -q 'databaseReclaimPolicy: retain' || { echo "FAIL: the Substrate Database is not retained"; exit 1; }
+	@awk "/^  name: t-postgres-databases$$/,/^---/" /tmp/vp-db.out >/tmp/vp-db-hook.out
+	@grep -q 'helm.sh/hook: post-install,post-upgrade' /tmp/vp-db-hook.out || { echo "FAIL: the databases hook is not a post-install,post-upgrade hook"; exit 1; }
+	@grep -q 'wait --for=create "secret/$$src"' /tmp/vp-db-hook.out || { echo "FAIL: the databases hook does not wait for the CNPG app Secret"; exit 1; }
+	@grep -q 'derive "substrate" "substrate" "kagent"' /tmp/vp-db-hook.out || { echo "FAIL: the databases hook does not derive the Secret into the Cluster's namespace"; exit 1; }
+	@grep -q 'derive "substrate" "substrate" "ate-system"' /tmp/vp-db-hook.out || { echo "FAIL: the databases hook does not derive the Secret into ate-system (where ate-api-server reads it)"; exit 1; }
+	@awk "/^  name: kagent-pg-cluster$$/,/^---/" /tmp/vp-db.out | grep -A1 'app: ate-api-server' | grep -q 'io.kubernetes.pod.namespace: ate-system' || { echo "FAIL: the CNPG policy does not admit ate-api-server from ate-system"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false --set postgres.enabled=true >/tmp/vp-db-meta.out 2>&1 || { cat /tmp/vp-db-meta.out; exit 1; }
+	@awk "/^  name: substrate$$/,/^---/" /tmp/vp-db-meta.out | grep -A2 'connectionStringSecretRef:' | grep -q 'name: kagent-pg-substrate-app' || { echo "FAIL: the meta chart does not derive substrate.postgres.connectionStringSecretRef from the Cluster"; exit 1; }
+	@awk "/^  name: substrate$$/,/^---/" /tmp/vp-db-meta.out | grep -A6 '^    postgres:' | grep -q 'enabled: false' || { echo "FAIL: the bundled Substrate Postgres is not off with the platform Cluster on"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false >/tmp/vp-db-meta-off.out 2>&1 || { cat /tmp/vp-db-meta-off.out; exit 1; }
+	@awk "/^  name: substrate$$/,/^---/" /tmp/vp-db-meta-off.out | grep -A6 '^    postgres:' | grep -q 'enabled: true' || { echo "FAIL: without the platform Cluster the substrate release does not run its bundled Postgres (auto)"; exit 1; }
+	@if grep -q 'enabled: auto' /tmp/vp-db-meta-off.out; then echo "FAIL: an unresolved substrate.postgres.enabled: auto reached a child release"; exit 1; fi
+	@echo "ok: the Substrate database on the Cluster"
+	@echo "--> postgres.databases: an installation's own entry renders a Database and a derived Secret; a name that is not an identifier, or the initdb database's, fails"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.databases.sessions-v2.name=sessions_v2 --set 'postgres.databases.sessions-v2.extensions[0]=vector' >/tmp/vp-db-own.out 2>&1 || { cat /tmp/vp-db-own.out; exit 1; }
+	@awk "/^  name: kagent-pg-sessions-v2$$/,/^---/" /tmp/vp-db-own.out | grep -q -- '- name: vector' || { echo "FAIL: an own database entry did not render with its extension"; exit 1; }
+	@grep -q 'derive "sessions-v2" "sessions_v2" "kagent"' /tmp/vp-db-own.out || { echo "FAIL: an own database entry gets no derived Secret"; exit 1; }
+	@if grep -q 'kagent-pg-substrate' /tmp/vp-db-own.out; then echo "FAIL: the Substrate database renders while the component is off"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.databases.bad.name=Bad-Name >/tmp/vp-db-g1.out 2>&1; then echo "FAIL: a database name that is no identifier rendered"; exit 1; \
+	elif ! grep -q 'is not a plain PostgreSQL identifier' /tmp/vp-db-g1.out; then echo "FAIL: bad database name failed for the wrong reason"; cat /tmp/vp-db-g1.out; exit 1; else echo "ok: database name guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.databases.dup.name=kagent >/tmp/vp-db-g2.out 2>&1; then echo "FAIL: a database named like the initdb database rendered"; exit 1; \
+	elif ! grep -q 'names the initdb database' /tmp/vp-db-g2.out; then echo "FAIL: initdb name clash failed for the wrong reason"; cat /tmp/vp-db-g2.out; exit 1; else echo "ok: initdb name guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_ON) $(SUBSTRATE_ON) --set 'postgres.databases.substrate.secretNamespaces[0]=elsewhere' >/tmp/vp-db-g3.out 2>&1; then echo "FAIL: the Substrate database's Secret rendered without ate-system among its namespaces"; exit 1; \
+	elif ! grep -q 'secretNamespaces must include ate-system' /tmp/vp-db-g3.out; then echo "FAIL: secretNamespaces guard failed for the wrong reason"; cat /tmp/vp-db-g3.out; exit 1; else echo "ok: ate-system Secret guard"; fi
+	@echo "--> postgres off: no Database, no hook; Substrate then runs its bundled Postgres (auto)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) >/tmp/vp-db-off.out 2>&1 || { cat /tmp/vp-db-off.out; exit 1; }
+	@if grep -qE 'kind: Database|t-postgres-databases' /tmp/vp-db-off.out; then echo "FAIL: databases render without the platform Cluster"; exit 1; fi
+	@awk "/^  name: substrate-ate-api-server$$/,/^---/" /tmp/vp-db-off.out | grep -q 'app: postgres' || { echo "FAIL: without the Cluster, ate-api-server's policy does not open the bundled Postgres"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --set substrate.postgres.enabled=false >/tmp/vp-db-g4.out 2>&1; then echo "FAIL: Substrate with no database at all rendered"; exit 1; \
+	elif ! grep -q 'has no database' /tmp/vp-db-g4.out; then echo "FAIL: the no-database guard failed for the wrong reason"; cat /tmp/vp-db-g4.out; exit 1; else echo "ok: no-database guard"; fi
+	@echo "ok: $@"
+
+.PHONY: verify-kyverno
+verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every Substrate workload — the substrate chart's Deployments and DaemonSet at the pinned build, rendered with the values the meta chart forwards, and the worker pod ate-controller renders for a WorkerPool — is matched by an exception that names exactly the restricted-PSS rules its pod spec violates (computed here), each with its autogen copy; nothing else is excepted; no exception selects app: kagent. Network: ghcr.io (the substrate chart); needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-kyverno.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 # The muster chart version the platform toolset presets need: the first with the
@@ -1176,7 +1469,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' /tmp/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >/tmp/vw-bs-cm.out
 	@[ -s /tmp/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com/kagent/api' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'musterMcpUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
 		grep -q -- "$$pattern" /tmp/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' /tmp/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
@@ -1303,3 +1596,199 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.modelServing.enabled=true 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' | awk '/^      policies:$$/{f=1;next} f&&/^      [a-z]/{f=0} f' | grep -q '^        enabled: false' || { echo "FAIL: policies knob not false on the vanilla render with the switch on"; exit 1; }
 	@echo "ok: switch block forwarded only while on, policies knob resolved"
 	@echo "the standalone's ported wiring verified."
+
+# The kagent API v2 cut-over of an installation (#346): the kagent_v2 database
+# with its derived connection Secret (postgres.databases, the hook Job in
+# templates/postgres/databases-hook.yaml) and the agent-manager migrate
+# Job (agentManager.migration, templates/kagent/migrate-*.yaml). PICK selects one
+# object of a render by kind and name (tests/pick-doc.py; an awk range picks the
+# first object of a kind, wrong as soon as two Jobs render).
+PICK := python3 tests/pick-doc.py
+MIGRATION_ON := $(MANAGERS_MIN) --set components.agent-manager.enabled=true
+MIGRATION_JOB := agent-platform-connectivity-agent-manager-migrate
+
+.PHONY: verify-postgres-kagent-v2
+verify-postgres: verify-postgres-kagent-v2
+verify-postgres-kagent-v2: ## Assert the kagent_v2 database entry (#346): the CNPG Database (name, owner, vector, retain) on the platform Cluster, the 30-day drop of the 0.10 database (applicationDatabase.ensure), the entry reaching the connectivity databases hook (its mechanism is verify-postgres' own, #342) to feed the derived Secret kagent-pg-kagent-v2-app, the controller mount example, the meta chart's forwarding, and the entry's component/postgres gating.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@echo "--> postgres on: ONE Database, kagent-pg-kagent-v2 (kagent_v2, owner kagent, vector, retain) on the existing Cluster; the 0.10 database is no Database of the chart by default"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) >/tmp/vpv2.out 2>&1 || { cat /tmp/vpv2.out; exit 1; }
+	@[ "$$(grep -c '^kind: Database$$' /tmp/vpv2.out)" = "1" ] || { echo "FAIL: expected exactly one Database in the default postgres shape"; grep -n -A3 '^kind: Database$$' /tmp/vpv2.out; exit 1; }
+	@$(PICK) /tmp/vpv2.out Database kagent-pg-kagent-v2 kagent >/tmp/vpv2-db.out || { echo "FAIL: no Database kagent-pg-kagent-v2 in the kagent namespace"; exit 1; }
+	@grep -q '^  name: kagent_v2$$' /tmp/vpv2-db.out || { echo "FAIL: spec.name is not kagent_v2"; exit 1; }
+	@grep -q '^  owner: kagent$$' /tmp/vpv2-db.out || { echo "FAIL: the owner is not kagent (the bootstrap owner, whose Secret is derived)"; exit 1; }
+	@grep -A1 '^  cluster:$$' /tmp/vpv2-db.out | grep -q 'name: kagent-pg' || { echo "FAIL: the Database does not name the existing Cluster kagent-pg"; exit 1; }
+	@grep -q '^  databaseReclaimPolicy: retain$$' /tmp/vpv2-db.out || { echo "FAIL: databaseReclaimPolicy is not retain"; exit 1; }
+	@grep -A1 '^  extensions:$$' /tmp/vpv2-db.out | grep -q 'name: vector' || { echo "FAIL: the vector extension is missing"; exit 1; }
+	@if $(PICK) /tmp/vpv2.out Database kagent-pg-kagent kagent >/dev/null 2>&1; then echo "FAIL: the 0.10 database (kagent-pg-kagent) rendered as a Database by default (ImageVolume off)"; exit 1; fi
+	@if ! grep -q '^kind: Cluster$$' /tmp/vpv2.out; then echo "FAIL: the Cluster is gone"; exit 1; fi
+	@echo "ok: Database"
+	@echo "--> ImageVolume mode: the existing kagent-pg-kagent Database (the bootstrap database's extension) renders untouched next to kagent-v2"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) >/tmp/vpv2-iv.out 2>&1 || { cat /tmp/vpv2-iv.out; exit 1; }
+	@[ "$$(grep -c '^kind: Database$$' /tmp/vpv2-iv.out)" = "2" ] || { echo "FAIL: expected the bootstrap database's Database and kagent-v2"; exit 1; }
+	@$(PICK) /tmp/vpv2-iv.out Database kagent-pg-kagent kagent >/tmp/vpv2-iv-db.out || { echo "FAIL: the bootstrap database's Database kagent-pg-kagent is gone"; exit 1; }
+	@grep -q '^  name: kagent$$' /tmp/vpv2-iv-db.out || { echo "FAIL: the bootstrap database's Database kagent-pg-kagent changed"; exit 1; }
+	@if grep -q 'ensure:' /tmp/vpv2-iv-db.out; then echo "FAIL: ensure renders by default (the object must stay byte-identical)"; exit 1; fi
+	@echo "--> the 30-day drop in that mode: postgres.applicationDatabase.ensure=absent renders ensure: absent on that object only"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) --set postgres.applicationDatabase.ensure=absent >/tmp/vpv2-drop.out 2>&1 || { cat /tmp/vpv2-drop.out; exit 1; }
+	@$(PICK) /tmp/vpv2-drop.out Database kagent-pg-kagent kagent | grep -q '^  ensure: absent$$' || { echo "FAIL: ensure=absent did not reach the 0.10 database's object"; exit 1; }
+	@if $(PICK) /tmp/vpv2-drop.out Database kagent-pg-kagent-v2 kagent | grep -q 'ensure:'; then echo "FAIL: ensure=absent leaked onto kagent-v2"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.applicationDatabase.ensure=gone >/tmp/vpv2-g0.out 2>&1; then echo "FAIL: a bogus ensure rendered"; exit 1; \
+	elif ! grep -q 'ensure' /tmp/vpv2-g0.out; then echo "FAIL: the ensure schema check failed for the wrong reason"; cat /tmp/vpv2-g0.out; exit 1; else echo "ok: ensure enum"; fi
+	@echo "ok: ImageVolume mode"
+	@echo "--> the entry reaches the connectivity databases hook (#342's mechanism, tested by verify-postgres): its derive line feeds the derived Secret kagent-pg-kagent-v2-app in the kagent namespace"
+	@$(PICK) /tmp/vpv2.out Job t-postgres-databases >/tmp/vpv2-job.out || { echo "FAIL: no databases derive hook Job for the kagent-v2 entry"; exit 1; }
+	@grep -q 'derive "kagent-v2" "kagent_v2" "kagent"' /tmp/vpv2-job.out || { echo "FAIL: the databases hook does not derive kagent-v2 (kagent_v2) in the kagent namespace"; grep derive /tmp/vpv2-job.out; exit 1; }
+	@grep -q 'cluster="kagent-pg"' /tmp/vpv2-job.out || { echo "FAIL: the derive hook does not source the bootstrap Secret of the kagent-pg Cluster"; exit 1; }
+	@echo "ok: derive hook carries kagent-v2"
+	@echo "--> the controller mount follows the derived Secret kagent-pg-kagent-v2-app where the chart documents it"
+	@grep -q 'secretName: kagent-pg-kagent-v2-app' $(CONNECTIVITY_DIR)/ci/test-postgres-values.yaml || { echo "FAIL: ci/test-postgres-values.yaml does not mount kagent-pg-kagent-v2-app"; exit 1; }
+	@grep -q 'urlFile: /etc/cnpg/uri' $(CONNECTIVITY_DIR)/ci/test-postgres-values.yaml || { echo "FAIL: ci/test-postgres-values.yaml lost the urlFile mount"; exit 1; }
+	@grep -q 'secretName: kagent-pg-kagent-v2-app' $(CONNECTIVITY_DIR)/values.yaml || { echo "FAIL: the connectivity values.yaml mount example still names the bootstrap Secret"; exit 1; }
+	@grep -q 'secretName: kagent-pg-kagent-v2-app' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta values.yaml mount example still names the bootstrap Secret"; exit 1; }
+	@if grep -q 'secretName: kagent-pg-app' $(CONNECTIVITY_DIR)/values.yaml $(CHART_DIR)/values.yaml $(CONNECTIVITY_DIR)/ci/test-postgres-values.yaml; then echo "FAIL: a mount example still names the bootstrap Secret kagent-pg-app"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) -f $(CONNECTIVITY_DIR)/ci/test-postgres-values.yaml >/dev/null 2>&1 || { echo "FAIL: ci/test-postgres-values.yaml does not render"; exit 1; }
+	@echo "ok: mount example"
+	@echo "--> the meta chart declares and forwards the entry: the connectivity release's values carry postgres.databases.kagent-v2 and hooks.kubectlImage"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set postgres.enabled=true >/tmp/vpv2-meta.out 2>&1 || { cat /tmp/vpv2-meta.out; exit 1; }
+	@$(PICK) /tmp/vpv2-meta.out HelmRelease agent-platform-connectivity >/tmp/vpv2-meta-conn.out || { echo "FAIL: no connectivity HelmRelease"; exit 1; }
+	@grep -A8 '^        kagent-v2:$$' /tmp/vpv2-meta-conn.out | grep -q 'name: kagent_v2' || { echo "FAIL: postgres.databases.kagent-v2 is not forwarded to the connectivity release"; grep -n -A8 'kagent-v2:' /tmp/vpv2-meta-conn.out | head -12; exit 1; }
+	@grep -q 'repository: alpine/k8s' /tmp/vpv2-meta-conn.out || { echo "FAIL: hooks.kubectlImage is not forwarded to the connectivity release"; exit 1; }
+	@echo "ok: forwarded"
+	@echo "--> the kagent-v2 entry drops with a disabled entry, its component off, or postgres off (the map mechanism itself is verify-postgres' own)"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set 'postgres.databases.kagent-v2.enabled=false' >/tmp/vpv2-disabled.out 2>&1 || { cat /tmp/vpv2-disabled.out; exit 1; }
+	@if grep -q 'kagent-pg-kagent-v2' /tmp/vpv2-disabled.out; then echo "FAIL: a disabled kagent-v2 entry still renders its Database"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set postgres.enabled=true >/tmp/vpv2-comp.out 2>&1 || { cat /tmp/vpv2-comp.out; exit 1; }
+	@if grep -q 'kagent-pg-kagent-v2' /tmp/vpv2-comp.out; then echo "FAIL: the kagent-v2 entry renders while its component (kagent) is off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vpv2-off.out 2>&1 || { cat /tmp/vpv2-off.out; exit 1; }
+	@if grep -q 'kagent-pg-kagent-v2' /tmp/vpv2-off.out; then echo "FAIL: the kagent-v2 Database renders with postgres off"; exit 1; fi
+	@echo "ok: enabled, component, postgres off"
+	@echo "ok: $@"
+
+.PHONY: verify-identity-migration
+verify-identity: verify-identity-migration
+verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the chart's only cluster-scoped binding (#346): exactly one when the migration is on — named, bound to the CRD ClusterRole (get, delete on the five removed CRDs, nothing more) and to the tenant ServiceAccount, following a renamed identity — and none when the migration or agent-manager is off.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> migration on: exactly one ClusterRoleBinding and one ClusterRole, the CRD pair"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >/tmp/vim-on.out 2>&1 || { cat /tmp/vim-on.out; exit 1; }
+	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' /tmp/vim-on.out)" = "1" ] || { echo "FAIL: expected exactly one ClusterRoleBinding with the migration on"; grep -n -A3 '^kind: ClusterRoleBinding$$' /tmp/vim-on.out; exit 1; }
+	@[ "$$(grep -c '^kind: ClusterRole$$' /tmp/vim-on.out)" = "1" ] || { echo "FAIL: expected exactly one ClusterRole with the migration on"; exit 1; }
+	@$(PICK) /tmp/vim-on.out ClusterRoleBinding $(MIGRATION_JOB)-crds >/tmp/vim-crb.out || { echo "FAIL: the ClusterRoleBinding is not $(MIGRATION_JOB)-crds"; exit 1; }
+	@grep -A3 '^roleRef:' /tmp/vim-crb.out | grep -q 'kind: ClusterRole' || { echo "FAIL: the roleRef is not a ClusterRole"; exit 1; }
+	@grep -A3 '^roleRef:' /tmp/vim-crb.out | grep -q 'name: $(MIGRATION_JOB)-crds' || { echo "FAIL: the roleRef does not name the CRD ClusterRole"; exit 1; }
+	@grep -A3 '^subjects:' /tmp/vim-crb.out | grep -q 'name: kagent-flux' || { echo "FAIL: the subject is not the tenant ServiceAccount"; exit 1; }
+	@grep -A3 '^subjects:' /tmp/vim-crb.out | grep -q 'namespace: kagent' || { echo "FAIL: the subject is not in the kagent namespace"; exit 1; }
+	@if grep -q 'helm.sh/hook' /tmp/vim-crb.out; then echo "FAIL: the binding is a hook resource; the migration's Job is plain and re-runs, its rights must outlive one hook event"; exit 1; fi
+	@$(PICK) /tmp/vim-on.out ClusterRole $(MIGRATION_JOB)-crds >/tmp/vim-cr.out || { echo "FAIL: no CRD ClusterRole"; exit 1; }
+	@for crd in agents.kagent.dev sandboxagents.kagent.dev agentharnesses.kagent.dev memories.kagent.dev toolservers.kagent.dev; do grep -q "^      - $$crd$$" /tmp/vim-cr.out || { echo "FAIL: the ClusterRole does not name $$crd"; exit 1; }; done
+	@[ "$$(grep -c '^      - .*\.kagent\.dev$$' /tmp/vim-cr.out)" = "5" ] || { echo "FAIL: the ClusterRole names more or fewer than the five removed CRDs"; exit 1; }
+	@grep -q 'verbs: \["get", "delete"\]' /tmp/vim-cr.out || { echo "FAIL: the ClusterRole's verbs are not exactly get, delete"; grep verbs /tmp/vim-cr.out; exit 1; }
+	@grep -q 'resources: \["customresourcedefinitions"\]' /tmp/vim-cr.out || { echo "FAIL: the ClusterRole is not confined to customresourcedefinitions"; exit 1; }
+	@echo "ok: the one ClusterRoleBinding"
+	@echo "--> a renamed identity: the subject follows kagent.fluxServiceAccountName"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x >/tmp/vim-x.out 2>&1 || { cat /tmp/vim-x.out; exit 1; }
+	@$(PICK) /tmp/vim-x.out ClusterRoleBinding $(MIGRATION_JOB)-crds | grep -A3 '^subjects:' | grep -q 'name: tenant-x' || { echo "FAIL: the subject did not follow the renamed identity"; exit 1; }
+	@if grep -q 'kagent-flux' /tmp/vim-x.out; then echo "FAIL: the old name survives with a renamed identity"; grep -n kagent-flux /tmp/vim-x.out; exit 1; fi
+	@echo "ok: renamed identity"
+	@echo "--> off: no ClusterRoleBinding with the migration off, with agent-manager off (verify-identity's own kagent-only case), with kagent off"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.enabled=false >/tmp/vim-off.out 2>&1 || { cat /tmp/vim-off.out; exit 1; }
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' /tmp/vim-off.out; then echo "FAIL: a cluster-scoped object renders with the migration off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >/tmp/vim-noam.out 2>&1 || { cat /tmp/vim-noam.out; exit 1; }
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' /tmp/vim-noam.out; then echo "FAIL: a cluster-scoped object renders with agent-manager off"; exit 1; fi
+	@echo "ok: none while off"
+	@echo "ok: $@"
+
+.PHONY: verify-migration
+verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; a PLAIN Job named with the hash of its spec (no hook: a migrate failure never fails the release, and the meta chart stops the connectivity HelmRelease from waiting on Jobs), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), GITHUB_TOKEN optional from the value-named Secret, its inputs as environment; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — the bare smoke has no live kagent API v2 for migrate to act on (agentlab#143 rehearses the migration)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vmig-off.out 2>&1 || { cat /tmp/vmig-off.out; exit 1; }
+	@if grep -q 'agent-manager-migrate' /tmp/vmig-off.out; then echo "FAIL: the migration renders with agent-manager off"; exit 1; else echo "ok: inert without agent-manager"; fi
+	@echo "--> on: a PLAIN Job (no hook) in the kagent namespace, named with an 8-hex hash of its image, args and environment, as the tenant identity, agent-manager's image, migrate, its inputs as environment, the optional token"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >/tmp/vmig-on.out 2>&1 || { cat /tmp/vmig-on.out; exit 1; }
+	@$(PICK) /tmp/vmig-on.out Job '$(MIGRATION_JOB)-*' kagent >/tmp/vmig-job.out || { echo "FAIL: no Job $(MIGRATION_JOB)-<hash> in the kagent namespace"; exit 1; }
+	@grep -qE '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-job.out || { echo "FAIL: the Job's name does not carry the 8-hex spec hash"; grep '^  name:' /tmp/vmig-job.out; exit 1; }
+	@if grep -q 'helm.sh/hook' /tmp/vmig-job.out; then echo "FAIL: the Job is a Helm hook; a migrate failure would fail the connectivity upgrade that renders the Harness"; exit 1; fi
+	@grep -q 'ttlSecondsAfterFinished: 86400' /tmp/vmig-job.out || { echo "FAIL: the finished Job is not kept a day"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=9.9.9 >/tmp/vmig-hash.out 2>&1 || { cat /tmp/vmig-hash.out; exit 1; }
+	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-hash.out)" != "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-on.out)" ] || { echo "FAIL: a changed image did not change the Job's name (Job.spec.template is immutable)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >/tmp/vmig-again.out 2>&1 || { cat /tmp/vmig-again.out; exit 1; }
+	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-again.out)" = "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-on.out)" ] || { echo "FAIL: the Job's name is not stable across identical renders"; exit 1; }
+	@grep -q 'serviceAccountName: kagent-flux' /tmp/vmig-job.out || { echo "FAIL: the Job does not run as the tenant identity"; exit 1; }
+	@if grep -q 'kagent-flux' $(CONNECTIVITY_DIR)/templates/kagent/migrate-job.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-rbac.yaml $(CONNECTIVITY_DIR)/templates/kagent/_migrate.tpl; then echo "FAIL: a migration template carries the literal kagent-flux; the identity comes from the helper"; exit 1; fi
+	@grep -q 'image: "gsoci.azurecr.io/giantswarm/agent-manager:1.1.0"' /tmp/vmig-job.out || { echo "FAIL: the image is not agent-manager at the BOM pin 1.1.0"; grep image: /tmp/vmig-job.out; exit 1; }
+	@grep -q '^            - migrate$$' /tmp/vmig-job.out || { echo "FAIL: the Job does not run \`migrate\`"; exit 1; }
+	@if grep -q -- '--dry-run' /tmp/vmig-job.out; then echo "FAIL: --dry-run renders by default"; exit 1; fi
+	@grep -q 'restartPolicy: Never' /tmp/vmig-job.out || { echo "FAIL: restartPolicy"; exit 1; }
+	@grep -q 'runAsNonRoot: true' /tmp/vmig-job.out || { echo "FAIL: the Job is not restricted (runAsNonRoot)"; exit 1; }
+	@grep -q 'readOnlyRootFilesystem: true' /tmp/vmig-job.out || { echo "FAIL: the Job is not restricted (readOnlyRootFilesystem)"; exit 1; }
+	@for env in 'KUBERNETES_IN_CLUSTER' 'KAGENT_NAMESPACE' 'AGENT_CHART_OCI_URL' 'AGENT_CHART_SEMVER' 'AGENT_HARNESS_NAME' 'GITHUB_TOKEN' 'HOME'; do grep -q "name: $$env$$" /tmp/vmig-job.out || { echo "FAIL: env $$env missing"; exit 1; }; done
+	@grep -A1 'name: KAGENT_NAMESPACE' /tmp/vmig-job.out | grep -q 'value: kagent' || { echo "FAIL: KAGENT_NAMESPACE is not the kagent namespace"; exit 1; }
+	@if grep -q 'AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' /tmp/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES renders without gitopsNamespaces"; exit 1; fi
+	@grep -A1 'name: AGENT_HARNESS_NAME' /tmp/vmig-job.out | grep -q 'value: kagent' || { echo "FAIL: AGENT_HARNESS_NAME is not the platform Harness"; exit 1; }
+	@grep -A1 'name: AGENT_CHART_OCI_URL' /tmp/vmig-job.out | grep -q 'oci://gsoci.azurecr.io/charts/giantswarm/agent' || { echo "FAIL: AGENT_CHART_OCI_URL does not follow agent-manager.agentChart.ociUrl"; exit 1; }
+	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'name: kagent-skills-token' || { echo "FAIL: GITHUB_TOKEN does not read the default token Secret"; exit 1; }
+	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'key: token' || { echo "FAIL: GITHUB_TOKEN does not read the key token"; exit 1; }
+	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'optional: true' || { echo "FAIL: the token Secret is not optional"; exit 1; }
+	@if grep -q 'AGENT_MANAGER_MANAGED_NAMESPACES' /tmp/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MANAGED_NAMESPACES renders without additional namespaces"; exit 1; fi
+	@echo "ok: the Job"
+	@echo "--> the values: the tag follows agentManager.migration.image.tag, dryRun renders --dry-run, an empty secretName drops the token, additional namespaces reach the Job, a renamed identity follows"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=1.2.3 --set agentManager.migration.dryRun=true --set agentManager.migration.githubToken.secretName= --set 'agent-manager.kagent.additionalNamespaces[0]=team-a' --set 'agent-manager.kagent.additionalNamespaces[1]=team-b' --set kagent.fluxServiceAccountName=tenant-x >/tmp/vmig-vals.out 2>&1 || { cat /tmp/vmig-vals.out; exit 1; }
+	@$(PICK) /tmp/vmig-vals.out Job '$(MIGRATION_JOB)-*' kagent >/tmp/vmig-vals-job.out || { echo "FAIL: no Job with the values set"; exit 1; }
+	@grep -q 'agent-manager:1.2.3"' /tmp/vmig-vals-job.out || { echo "FAIL: the image tag does not follow the value"; exit 1; }
+	@grep -q -- '- --dry-run' /tmp/vmig-vals-job.out || { echo "FAIL: dryRun does not render --dry-run"; exit 1; }
+	@if grep -q 'GITHUB_TOKEN' /tmp/vmig-vals-job.out; then echo "FAIL: an empty secretName still renders GITHUB_TOKEN"; exit 1; fi
+	@grep -A1 'name: AGENT_MANAGER_MANAGED_NAMESPACES' /tmp/vmig-vals-job.out | grep -q 'value: team-a,team-b' || { echo "FAIL: the additional namespaces do not reach the Job"; exit 1; }
+	@grep -q 'serviceAccountName: tenant-x' /tmp/vmig-vals-job.out || { echo "FAIL: the Job's ServiceAccount did not follow the renamed identity"; exit 1; }
+	@echo "ok: values"
+	@echo "--> RBAC: the CRD pair (verify-identity-migration asserts its shape) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
+	@if $(PICK) /tmp/vmig-on.out Role $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' --set 'agentManager.migration.gitopsNamespaces[1]=flux-team' >/tmp/vmig-gitops.out 2>&1 || { cat /tmp/vmig-gitops.out; exit 1; }
+	@for ns in flux-giantswarm flux-team; do \
+		$(PICK) /tmp/vmig-gitops.out Role $(MIGRATION_JOB) $$ns >/tmp/vmig-role-$$ns.out || { echo "FAIL: no Role in $$ns"; exit 1; }; \
+		grep -q 'resources: \["helmreleases"\]' /tmp/vmig-role-$$ns.out || { echo "FAIL: the Role in $$ns does not read helmreleases"; exit 1; }; \
+		grep -q 'resources: \["ocirepositories"\]' /tmp/vmig-role-$$ns.out || { echo "FAIL: the Role in $$ns does not read ocirepositories"; exit 1; }; \
+		[ "$$(grep -c 'verbs: \["get", "list"\]' /tmp/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
+		$(PICK) /tmp/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding in $$ns does not bind the tenant identity"; exit 1; }; \
+	done
+	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' /tmp/vmig-gitops.out)" = "1" ] || { echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; }
+	@$(PICK) /tmp/vmig-gitops.out Job '$(MIGRATION_JOB)-*' kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
+	@if grep -q 'helm.sh/hook' /tmp/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
+	@echo "ok: RBAC"
+	@echo "--> network policy: cilium (DNS with the proxy clause, kube-apiserver, api.github.com and the agent chart registry by name on 443) and kubernetes (DNS, the API server CIDR, world on 443), selecting the Job's pods; none with networkPolicy off"
+	@$(PICK) /tmp/vmig-on.out CiliumNetworkPolicy $(MIGRATION_JOB) kagent >/tmp/vmig-cnp.out || { echo "FAIL: no CiliumNetworkPolicy for the Job"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: agent-manager-migrate' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy does not select the Job's pods"; exit 1; }
+	@grep -q 'matchName: api.github.com' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no GitHub API egress"; exit 1; }
+	@grep -q 'matchName: gsoci.azurecr.io' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no agent chart registry egress"; exit 1; }
+	@grep -q -- '- kube-apiserver' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no API server egress"; exit 1; }
+	@grep -B2 -A2 'matchPattern: "\*"' /tmp/vmig-cnp.out | grep -q 'dns:' || { echo "FAIL: the cilium policy has no DNS proxy clause for the FQDN selectors"; exit 1; }
+	@if grep -q 'ingress:' /tmp/vmig-cnp.out; then echo "FAIL: the Job serves nothing; no ingress rule expected"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.flavor=kubernetes >/tmp/vmig-k8s.out 2>&1 || { cat /tmp/vmig-k8s.out; exit 1; }
+	@$(PICK) /tmp/vmig-k8s.out NetworkPolicy $(MIGRATION_JOB) kagent >/tmp/vmig-np.out || { echo "FAIL: no NetworkPolicy for the Job in the kubernetes flavor"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: agent-manager-migrate' /tmp/vmig-np.out || { echo "FAIL: the kubernetes policy does not select the Job's pods"; exit 1; }
+	@grep -q 'policyTypes: \[Egress\]' /tmp/vmig-np.out || { echo "FAIL: the kubernetes policy is not egress-only"; exit 1; }
+	@grep -q 'cidr: 0.0.0.0/0' /tmp/vmig-np.out || { echo "FAIL: the kubernetes policy has no world egress (GitHub, the registry)"; exit 1; }
+	@grep -q 'port: 6443' /tmp/vmig-np.out || { echo "FAIL: the kubernetes policy has no API server egress"; exit 1; }
+	@if $(PICK) /tmp/vmig-k8s.out CiliumNetworkPolicy $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a cilium policy renders in the kubernetes flavor"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.enabled=false >/tmp/vmig-nonp.out 2>&1 || { cat /tmp/vmig-nonp.out; exit 1; }
+	@if grep -qE 'kind: (CiliumNetworkPolicy|NetworkPolicy)' /tmp/vmig-nonp.out; then echo "FAIL: a network policy renders with networkPolicy off"; exit 1; fi
+	@$(PICK) /tmp/vmig-nonp.out Job '$(MIGRATION_JOB)-*' kagent >/dev/null || { echo "FAIL: the Job is gone with networkPolicy off"; exit 1; }
+	@echo "ok: network policy"
+	@echo "--> guards: an empty tenant identity fails naming kagent.fluxServiceAccountName; an empty GitOps namespace fails"
+	@if helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName= >/tmp/vmig-g1.out 2>&1; then echo "FAIL: the migration rendered without a tenant identity"; exit 1; \
+	elif ! grep -q 'kagent.fluxServiceAccountName is empty' /tmp/vmig-g1.out; then echo "FAIL: the identity guard failed for the wrong reason"; cat /tmp/vmig-g1.out; exit 1; else echo "ok: identity guard"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName= --set agentManager.migration.enabled=false >/dev/null 2>&1 || { echo "FAIL: an empty identity with the migration off must render"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=' >/tmp/vmig-g2.out 2>&1; then echo "FAIL: an empty GitOps namespace rendered"; exit 1; \
+	elif ! grep -q 'non-empty namespace name' /tmp/vmig-g2.out; then echo "FAIL: the namespace guard failed for the wrong reason"; cat /tmp/vmig-g2.out; exit 1; else echo "ok: namespace guard"; fi
+	@echo "--> the meta chart declares and forwards agentManager.migration (the BOM tag) to the connectivity release"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.kagent.enabled=true --set components.agent-manager.enabled=true >/tmp/vmig-meta.out 2>&1 || { cat /tmp/vmig-meta.out; exit 1; }
+	@$(PICK) /tmp/vmig-meta.out HelmRelease agent-platform-connectivity >/tmp/vmig-meta-conn.out || { echo "FAIL: no connectivity HelmRelease"; exit 1; }
+	@grep -A12 '^      migration:$$' /tmp/vmig-meta-conn.out | grep -q 'tag: 1.1.0' || { echo "FAIL: agentManager.migration.image.tag (the BOM pin) is not forwarded to the connectivity release"; grep -n -A12 'migration:' /tmp/vmig-meta-conn.out | head -16; exit 1; }
+	@grep -q 'agentManager.migration.image.tag\|tag: 1.1.0' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta values.yaml does not declare the BOM tag"; exit 1; }
+	@grep -q 'disableWaitForJobs: true' /tmp/vmig-meta-conn.out || { echo "FAIL: the connectivity HelmRelease waits for Jobs (components.agent-platform-connectivity.disableWaitForJobs); a migrate failure would fail the release"; exit 1; }
+	@[ "$$(grep -c 'disableWaitForJobs: true' /tmp/vmig-meta-conn.out)" = "2" ] || { echo "FAIL: disableWaitForJobs must be rendered on install and upgrade"; exit 1; }
+	@$(PICK) /tmp/vmig-meta.out HelmRelease agent-manager >/tmp/vmig-meta-am.out || { echo "FAIL: no agent-manager HelmRelease"; exit 1; }
+	@if grep -q 'disableWaitForJobs' /tmp/vmig-meta-am.out; then echo "FAIL: disableWaitForJobs leaked onto another component's HelmRelease"; exit 1; fi
+	@if grep -q 'migration' /tmp/vmig-meta-am.out; then echo "FAIL: agentManager.migration leaked into the agent-manager chart's values"; exit 1; fi
+	@echo "ok: forwarded"
+	@echo "ok: $@"

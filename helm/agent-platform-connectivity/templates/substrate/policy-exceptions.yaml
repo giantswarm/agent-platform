@@ -1,0 +1,149 @@
+{{- /*
+Kyverno PolicyExceptions for Agent Substrate's workloads on a cluster that
+enforces the restricted Pod Security Standard through Kyverno (Giant Swarm's
+kyverno-policies: the baseline and restricted ClusterPolicies). Each exception
+selects one workload by its labels in its namespace and names exactly the rules
+that workload violates — `make verify-kyverno` computes the violations from
+the substrate chart's rendered pod specs (and from the worker pod ate-controller
+renders for a WorkerPool) and holds the lists to them:
+
+  * atelet, the per-node agent (DaemonSet, ate-system): privileged, hostPorts
+    8085 (its gRPC API for ate-api-server) and 9090 (metrics), hostPath mounts of
+    /var/lib/ateom-gvisor (the sandboxes' state), /var/lib/kubelet/plugins and
+    /var/lib/kubelet/device-plugins (the CSI and device plugins it registers)
+    and /dev, no securityContext beyond privileged (no drop ALL, no runAsNonRoot,
+    no allowPrivilegeEscalation: false, no seccompProfile).
+  * the worker pods of every WorkerPool (Deployments ate-controller renders in
+    the kagent namespace, label ate.dev/worker-pool): root, the capabilities an
+    unprivileged gVisor sandbox needs (NET_ADMIN, SYS_ADMIN, SYS_CHROOT,
+    SYS_PTRACE, SETUID, SETGID, SETPCAP, DAC_OVERRIDE, FOWNER, CHOWN, MKNOD,
+    NET_RAW, SETFCAP — beyond the baseline's set and the restricted's
+    NET_BIND_SERVICE), AppArmor and seccomp Unconfined (runsc installs its own
+    seccomp filters), a hostPath of /var/lib/ateom-gvisor with HostToContainer
+    propagation, no allowPrivilegeEscalation: false.
+  * the control plane (Deployments in ate-system: ate-api-server, ate-controller,
+    atenet-router, atenet-egress, dns): no securityContext declared at all — no
+    runAsNonRoot, no drop ALL, no allowPrivilegeEscalation: false, no
+    seccompProfile (the images run as non-root distroless users; the fields are
+    what restricted PSS checks). atenet-egress's sysctl
+    net.ipv4.ip_unprivileged_port_start is in the safe set and violates nothing.
+  * the podcertificate-controller (Deployment, podcertificate-controller-system):
+    drops ALL, adds NET_BIND_SERVICE, allowPrivilegeEscalation false, read-only
+    root — but no runAsNonRoot and no seccompProfile.
+
+Kinds: the Pod and the controller kind of each workload (Kyverno evaluates the
+controller through its autogen rules, then the pod). Namespaces: Substrate's
+two, and the kagent namespace for the worker pods. The kagent-declarative-seccomp
+exception of the v1alpha2 agent Deployments (label app: kagent) is gone with
+them — on kagent API v2 nothing carries that label; the worker pods' exception
+is its successor.
+*/ -}}
+{{- if and (include "agent-platform.substrate.enabled" .) (include "agent-platform.kyvernoPolicies" .) }}
+{{- $ns := include "agent-platform.substrate.namespace" . }}
+{{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $polexNs := .Values.kyvernoPolicies.policyExceptionNamespace }}
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: substrate-atelet
+  namespace: {{ $polexNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: atelet
+spec:
+  exceptions:
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "privileged-containers" "host-ports-none" "host-path" "restricted-volumes" "require-drop-all" "run-as-non-root" "privilege-escalation" "check-seccomp-strict")) | nindent 2 }}
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - DaemonSet
+        namespaces:
+        - {{ $ns }}
+        selector:
+          matchLabels:
+            app: atelet
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: substrate-workers
+  namespace: {{ $polexNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: workers
+spec:
+  exceptions:
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "host-path" "restricted-volumes" "adding-capabilities" "adding-capabilities-strict" "run-as-non-root" "run-as-non-root-user" "privilege-escalation" "check-seccomp" "check-seccomp-strict" "app-armor")) | nindent 2 }}
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - Deployment
+        - ReplicaSet
+        namespaces:
+        - {{ $kagentNs }}
+        selector:
+          matchExpressions:
+          - key: ate.dev/worker-pool
+            operator: Exists
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: substrate-control-plane
+  namespace: {{ $polexNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: control-plane
+spec:
+  exceptions:
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "require-drop-all" "run-as-non-root" "privilege-escalation" "check-seccomp-strict")) | nindent 2 }}
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - Deployment
+        - ReplicaSet
+        namespaces:
+        - {{ $ns }}
+        selector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - ate-api-server
+            - ate-controller
+            - atenet-router
+            - atenet-egress
+            - dns
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: substrate-podcertificate-controller
+  namespace: {{ $polexNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: podcertificate-controller
+spec:
+  exceptions:
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "run-as-non-root" "check-seccomp-strict")) | nindent 2 }}
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - Deployment
+        - ReplicaSet
+        namespaces:
+        - {{ $pcNs }}
+        selector:
+          matchLabels:
+            app: podcertificate-controller
+{{- end }}

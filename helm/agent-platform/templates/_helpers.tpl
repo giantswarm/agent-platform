@@ -46,7 +46,8 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 Whether a component is enabled — reads `components.<name>.enabled`, the single
 on/off switch. `name` is the components.<key> name, which equals the component's
 chart name and is therefore what a dependsOn entry references. A component with
-no `enabled` key is force-enabled. Emits "true" when on, empty string otherwise.
+no `enabled` key is force-enabled — except kagent-crds, which then follows
+components.kagent. Emits "true" when on, empty string otherwise.
 
 Used to drop a dependsOn reference to a component that is toggled off, so a
 consumer does not wait forever on a HelmRelease that was never rendered. With
@@ -62,7 +63,15 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- $c := index $root.Values.components .name -}}
 {{- if $c -}}
 {{- $on := true -}}
-{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}{{- end }}
+{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}
+{{- else if has .name (list "kagent-crds" "substrate" "substrate-crds") }}
+{{- /* The kagent line ships its CRDs as their own chart and has no runtime
+       without Agent Substrate; without an explicit switch these three follow
+       components.kagent, so a consumer turns on kagent and gets its CRDs and
+       its runtime (an explicit false with kagent on is refused by
+       agent-platform.validateKagentCrds / agent-platform.validateSubstrate). */ -}}
+{{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true" }}
+{{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
 true
@@ -91,7 +100,14 @@ value drives every consumer. Emits a JSON object; {} for a component with
 nothing derived. A value the component's own block sets must agree with the
 derived one, otherwise the render fails naming the single key to set — a silent
 overwrite would hide a values file that still spells the old key.
-  agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName.
+  agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
+                 muster.url from the muster Service (agent-platform.musterMcpUrl).
+  substrate: postgres.connectionStringSecretRef, on the platform Cluster —
+    the derived CNPG connection Secret <postgres.clusterName>-substrate-app
+    (key uri) the connectivity release's hook writes into ate-system for
+    postgres.databases.substrate (agent-platform.substrate.postgresMode; the
+    `auto` of substrate.postgres.enabled itself is resolved by
+    agent-platform.shape.apply, with the other cluster-shape knobs).
 Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
@@ -103,8 +119,105 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "agent-manager.flux.helmReleaseServiceAccount (%s) differs from kagent.fluxServiceAccountName (%s): the agents' HelmReleases have one tenant identity — set kagent.fluxServiceAccountName and leave agent-manager.flux.helmReleaseServiceAccount unset" $own $sa) -}}
 {{- end -}}
 {{- $_ := set $derived "flux" (dict "helmReleaseServiceAccount" $sa) -}}
+{{- $url := include "agent-platform.musterMcpUrl" .root -}}
+{{- $ownUrl := dig "muster" "url" "" (index .root.Values "agent-manager" | default dict) -}}
+{{- if and $ownUrl (ne $ownUrl $url) -}}
+{{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
+{{- end -}}
+{{- $_ := set $derived "muster" (dict "url" $url) -}}
+{{- end -}}
+{{- if and (eq .name "substrate") (eq (include "agent-platform.substrate.postgresMode" .root) "cnpg") -}}
+{{- $ref := dict "name" (include "agent-platform.substrate.databaseSecretName" .root) "key" "uri" -}}
+{{- $own := dig "postgres" "connectionStringSecretRef" dict (.root.Values.substrate | default dict) -}}
+{{- $ownName := dig "name" "" $own -}}
+{{- $ownKey := dig "key" "" $own -}}
+{{- if or (and $ownName (ne $ownName $ref.name)) (and $ownKey (ne $ownKey $ref.key)) -}}
+{{- fail (printf "substrate.postgres.connectionStringSecretRef (%s/%s) differs from the Secret the connectivity release derives for postgres.databases.substrate (%s/%s): leave it unset — it follows postgres.clusterName — or name an external database in substrate.postgres.connectionString" $ownName $ownKey $ref.name $ref.key) -}}
+{{- end -}}
+{{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
 {{- end -}}
 {{- $derived | toJson -}}
+{{- end -}}
+
+{{/*
+Where Agent Substrate's control-plane database lives: "bundled" (the substrate
+chart's single-instance StatefulSet — substrate.postgres.enabled true, or `auto`
+while neither of the other two applies), "external" (an explicit
+substrate.postgres.connectionString), "cnpg" (the platform's CNPG Cluster,
+postgres.enabled, through postgres.databases.substrate and the derived Secret),
+or "" when none of the three holds (substrate.postgres.enabled false without a
+Cluster or a connection string) — which validateSubstrate refuses. The
+connectivity chart carries the same helper and resolves `auto` the same way.
+Usage: include "agent-platform.substrate.postgresMode" .
+*/}}
+{{- define "agent-platform.substrate.postgresMode" -}}
+{{- $sub := .Values.substrate | default dict -}}
+{{- $bundled := dig "postgres" "enabled" "auto" $sub | toString -}}
+{{- $conn := dig "postgres" "connectionString" "" $sub -}}
+{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
+{{- if not (has $bundled (list "auto" "true" "false")) -}}
+{{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
+{{- end -}}
+{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg)) -}}bundled
+{{- else if $conn -}}external
+{{- else if $cnpg -}}cnpg
+{{- end -}}
+{{- end -}}
+
+{{/*
+The derived CNPG connection Secret of postgres.databases.substrate, as the
+connectivity release names it: <postgres.clusterName>-substrate-app.
+*/}}
+{{- define "agent-platform.substrate.databaseSecretName" -}}
+{{- printf "%s-substrate-app" .Values.postgres.clusterName -}}
+{{- end -}}
+
+{{/*
+Agent Substrate is kagent API v2's runtime: refuse the shapes that install a
+kagent with nothing to run agents on, or a Substrate with nothing to start
+against, at render time — and, where the render is live, a cluster that cannot
+run it.
+  * kagent on with substrate or substrate-crds switched off (both follow kagent
+    unless switched explicitly).
+  * kagent on without kagent.harness.snapshotLocation: the platform Harness's
+    snapshotPolicy.location is the installation's snapshot store — an S3 bucket
+    on CAPA with IRSA, an S3-compatible store with its endpoint in
+    substrate.atelet.extraEnv, a lab's in-cluster store — and has no default.
+  * Substrate on with no control-plane database: neither the bundled
+    StatefulSet, nor an explicit connectionString, nor the platform's CNPG
+    Cluster with postgres.databases.substrate.
+  * Substrate on under a LIVE render (the Helm CLI, --dry-run=server,
+    helm-controller: .Capabilities.APIVersions then lists kinds, which Helm's
+    offline set never does — so `helm template` and CI, which see no cluster,
+    are never refused) of a cluster that does not serve
+    certificates.k8s.io/v1beta1 PodCertificateRequest: Substrate's atelet,
+    ate-api-server and atenet get their identities through it. That is
+    Kubernetes 1.35 with the PodCertificateRequest, ClusterTrustBundle and
+    ClusterTrustBundleProjection feature gates on kube-apiserver and
+    kube-controller-manager; the same three gates on every kubelet cannot be
+    seen from the apiserver, the message says so.
+*/}}
+{{- define "agent-platform.validateSubstrate" -}}
+{{- $kagent := eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true" -}}
+{{- $substrate := eq (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) "true" -}}
+{{- $crds := eq (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate-crds")) "true" -}}
+{{- if and $kagent (not (and $substrate $crds)) -}}
+{{- fail "components.kagent.enabled is true but components.substrate.enabled or components.substrate-crds.enabled is not: kagent API v2 runs every agent as an Agent Substrate actor and has no runtime without it; turn both on (they follow components.kagent when left unset)" -}}
+{{- end -}}
+{{- if and $substrate (not $crds) -}}
+{{- fail "components.substrate.enabled is true but components.substrate-crds.enabled is not: the substrate chart's WorkerPool, SandboxConfig and CSIDriverConfig objects need the ate.dev CRDs the substrate-crds chart renders; turn both on" -}}
+{{- end -}}
+{{- if and $kagent (not (dig "harness" "snapshotLocation" "" (.Values.kagent | default dict))) -}}
+{{- fail "kagent.harness.snapshotLocation is required when components.kagent is on: the Substrate snapshot location the platform Harness writes the actors' snapshots to (snapshotPolicy.location), an object-store URL such as s3://<bucket>/<prefix> — the installation's S3 bucket (IRSA on CAPA), an S3-compatible store with its endpoint and credentials in substrate.atelet.extraEnv, or a lab's in-cluster store (substrate.rustfs.enabled: true, s3://ate-snapshots/<prefix>)" -}}
+{{- end -}}
+{{- if and $substrate (not (include "agent-platform.substrate.postgresMode" .)) -}}
+{{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; postgres.databases.substrate renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionString" -}}
+{{- end -}}
+{{- if and $substrate (.Capabilities.APIVersions.Has "v1/Namespace") -}}
+{{- if not (.Capabilities.APIVersions.Has "certificates.k8s.io/v1beta1/PodCertificateRequest") -}}
+{{- fail (printf "Agent Substrate (components.substrate) needs a cluster that serves certificates.k8s.io/v1beta1 PodCertificateRequest, and this one (Kubernetes %s) does not: Substrate's atelet, ate-api-server and atenet take their identities from it. That is Kubernetes 1.35 with the feature gates PodCertificateRequest, ClusterTrustBundle and ClusterTrustBundleProjection on kube-apiserver and kube-controller-manager — and on every kubelet, which the apiserver cannot show; turn all three on for all three components (on a Giant Swarm cluster the cluster chart's internal.advancedConfiguration.{controlPlane.apiServer,controlPlane.controllerManager,kubelet}.featureGates until giantswarm/cluster#1005 is the default) and let the nodes roll before turning kagent on" .Capabilities.KubeVersion.Version) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -136,6 +249,20 @@ needs no entry: the root schema rejects it already.
 {{- end -}}
 {{- with $found -}}
 {{- fail (printf "component toggles moved into components.<name>.enabled and the old keys are ignored; move %s (see UPGRADE.md)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The kagent line ships its CRDs as the kagent-crds chart (a roster entry the
+kagent release dependsOn, the kserve-crd shape). kagent on with kagent-crds off
+would install a controller without its CRDs and fail every kagent CR the
+connectivity release renders at apply time ("no matches for kind"); refuse it
+at render time instead.
+*/}}
+{{- define "agent-platform.validateKagentCrds" -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true")
+           (ne (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) "true") -}}
+{{- fail "components.kagent.enabled is true but components.kagent-crds.enabled is not: the kagent line ships its CRDs as the kagent-crds chart, which the kagent release and the connectivity release's kagent CRs depend on; turn both on" -}}
 {{- end -}}
 {{- end -}}
 
@@ -278,10 +405,28 @@ failure instead of a silent 503.
 {{- end -}}
 
 {{/*
-Port muster listens on; defaults to 8090 when unset from parent context.
+Port muster listens on; defaults to 8090. nil-safe: the muster service tree is
+the muster release's own, so .Values.muster.service is normally unset here.
 */}}
 {{- define "agent-platform.musterServicePort" -}}
-{{- .Values.muster.service.port | default 8090 -}}
+{{- dig "service" "port" 8090 (.Values.muster | default dict) -}}
+{{- end -}}
+
+{{/*
+The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
+RemoteMCPServer targets: http://<muster Service>.<release namespace>.svc.cluster.local:<port>/mcp
+while the muster component is on, "" otherwise. ONE helper, two consumers, one
+name in both charts: this copy derives agent-manager's chart value muster.url
+(componentDerivedValues, next to flux.helmReleaseServiceAccount); the
+connectivity chart's copy renders the portal's app-config key
+agentPlatform.musterMcpUrl. Both composers hand it to the Generic agent chart
+1.x as muster.url, whose own default is the same URL on a default install.
+Usage: include "agent-platform.musterMcpUrl" .
+*/}}
+{{- define "agent-platform.musterMcpUrl" -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -562,6 +707,13 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- end -}}
 {{- if kindIs "map" (dig "policies" nil (index $v "modelServing" | default dict)) -}}
 {{- $_ := set (index $v "modelServing" "policies") "enabled" $servingPolicies -}}
+{{- end -}}
+{{- /* substrate.postgres.enabled: `auto` resolved to the boolean the substrate
+chart takes — bundled iff neither the platform Cluster nor a connection string
+holds (agent-platform.substrate.postgresMode); the substrate release and the
+connectivity release both read the resolved value. */ -}}
+{{- if kindIs "map" (dig "postgres" nil (index $v "substrate" | default dict)) -}}
+{{- $_ := set (index $v "substrate" "postgres") "enabled" (eq (include "agent-platform.substrate.postgresMode" $root) "bundled") -}}
 {{- end -}}
 {{- /* Derived component copies: only a leaf left at auto is written. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "networkPolicy" "flavor") "value" $flavor) -}}

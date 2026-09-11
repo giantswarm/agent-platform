@@ -4,9 +4,10 @@ Giant Swarm Agent Platform — connectivity / integration layer. Renders the
 consumer-side wiring that turns the platform components into a working whole on
 a cluster: the public muster route and the agentgateway data-plane Gateway +
 AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
-the kagent and klaus-gateway routes, the kagent declarative-agent wiring, the
-CloudNativePG Cluster, and — gated on the component toggles — the Backstage
-app-config and route, the mcp-kubernetes MCPServer registration with muster and
+the kagent and klaus-gateway routes, the kagent catalog (ModelConfigs and
+RemoteMCPServers at kagent.dev/v1alpha3) and tenant identity, the CloudNativePG
+Cluster, and — gated on the component toggles — the Backstage app-config and
+route, the mcp-kubernetes MCPServer registration with muster and
 the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO
 workloads of its own — those are separate releases rendered by the agent-platform
 meta-chart. The CRDs these CRs consume are app-owned: each component
@@ -116,6 +117,55 @@ On the installation, after the cutover:
 - The data-plane `PodMonitor` is gated on the agentgateway component, not on
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
+
+## Agent Substrate
+
+With `components.substrate` on (the meta chart turns it on with kagent) this
+chart renders what Agent Substrate's own chart does not, in the shapes the
+platform needs:
+
+- **The bootstrap** (`templates/substrate/bootstrap.yaml`): a
+  `pre-install,pre-upgrade` hook Job that mints the CA pools
+  `service-dns-ca-pool` and `pod-identity-ca-pool` (`podcertificate-controller-system`),
+  the JWT authority pool `actor-id-jwt-pool`, the CA pool `actor-id-ca-pool`
+  and the trust anchor `actor-id-ca-certs` derived from it (`ate-system`), and
+  the ConfigMap `ate-api-authentication` with the apiserver's issuer read from
+  its OpenID discovery document. Key material comes from `openssl` in an init
+  container (`hooks.opensslImage`), the objects from `kubectl`
+  (`hooks.kubectlImage`); a pool that exists is never touched (a re-run says
+  `present`), the two namespaces are created bare when missing. Identity:
+  `<release>-hooks`, a ClusterRole on secrets, configmaps and namespaces for
+  the hook's lifetime (`templates/substrate/hooks-rbac.yaml`; the hook Job
+  include is `agent-platform.hooks.job` in `templates/_hooks.tpl`).
+- **The database** (`templates/postgres/databases.yaml`, `databases-hook.yaml`):
+  `postgres.databases` is a map of further CNPG `Database`s on the platform
+  Cluster, one derived connection Secret `<clusterName>-<key>-app` each (the
+  `post-install,post-upgrade` hook waits for CNPG's `<clusterName>-app` and
+  rewrites `dbname`, `uri`, `jdbc-uri`, `pgpass`; copied into every
+  `secretNamespaces` entry). The shipped `substrate` entry is ate-api-server's
+  database while `substrate.postgres.enabled` resolves to the Cluster
+  (`agent-platform.substrate.postgresMode`: `auto` — the Cluster with
+  `postgres.enabled`, the chart's bundled StatefulSet without it; `true`,
+  `false`, or an explicit `connectionString`).
+- **Kyverno** (`templates/substrate/policy-exceptions.yaml`): one
+  `PolicyException` per Substrate workload — `substrate-atelet`,
+  `substrate-workers` (every WorkerPool's pods, label `ate.dev/worker-pool`),
+  `substrate-control-plane`, `substrate-podcertificate-controller` — naming
+  exactly the restricted-PSS rules the workload violates, each with its
+  `autogen-` copy, looked up in `kyvernoPolicies.rules` (rule → ClusterPolicy).
+  `make verify-kyverno` computes the violations and holds the lists.
+- **Network policies** (`templates/substrate/netpol.yaml`, both flavours):
+  Substrate's hops and the actors' destinations on the egress gateway
+  `atenet-egress`, where an actor's connections leave (muster, the kagent
+  controller, the LLM path, DNS); the worker pods reach only the egress
+  gateway, the dns and the cluster DNS. The kubernetes flavour renders the
+  ingress policies. `make verify-kagent-netpol` asserts the render.
+- **Guards** (`templates/substrate/validate.yaml`): a Substrate with no
+  database, a `postgres.databases` entry whose name is not an identifier or is
+  the initdb database's, the Substrate Secret not copied into `ate-system`.
+
+The meta chart's README ("Agent Substrate") has the prerequisites, the version
+pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 
 ## Values
 
@@ -254,12 +304,25 @@ On the installation, after the cutover:
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
-| kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
-| kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
-| kyvernoPolicies.seccompRuleNames[1] | string | `"autogen-check-seccomp-strict"` |  |
-| kyvernoPolicies.volumeTypesPolicyName | string | `"restrict-volume-types"` |  |
-| kyvernoPolicies.volumeTypesRuleNames[0] | string | `"restricted-volumes"` |  |
-| kyvernoPolicies.volumeTypesRuleNames[1] | string | `"autogen-restricted-volumes"` |  |
+| kyvernoPolicies.rules.privileged-containers | string | `"disallow-privileged-containers"` |  |
+| kyvernoPolicies.rules.host-ports-none | string | `"disallow-host-ports"` |  |
+| kyvernoPolicies.rules.host-path | string | `"disallow-host-path"` |  |
+| kyvernoPolicies.rules.restricted-volumes | string | `"restrict-volume-types"` |  |
+| kyvernoPolicies.rules.adding-capabilities | string | `"disallow-capabilities"` |  |
+| kyvernoPolicies.rules.require-drop-all | string | `"disallow-capabilities-strict"` |  |
+| kyvernoPolicies.rules.adding-capabilities-strict | string | `"disallow-capabilities-strict"` |  |
+| kyvernoPolicies.rules.run-as-non-root | string | `"require-run-as-nonroot"` |  |
+| kyvernoPolicies.rules.run-as-non-root-user | string | `"require-run-as-non-root-user"` |  |
+| kyvernoPolicies.rules.privilege-escalation | string | `"disallow-privilege-escalation"` |  |
+| kyvernoPolicies.rules.check-seccomp | string | `"restrict-seccomp"` |  |
+| kyvernoPolicies.rules.check-seccomp-strict | string | `"restrict-seccomp-strict"` |  |
+| kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
+| hooks.kubectlImage.registry | string | `"docker.io"` |  |
+| hooks.kubectlImage.repository | string | `"alpine/k8s"` |  |
+| hooks.kubectlImage.tag | string | `"1.37.0"` |  |
+| hooks.opensslImage.registry | string | `"docker.io"` |  |
+| hooks.opensslImage.repository | string | `"alpine/openssl"` |  |
+| hooks.opensslImage.tag | string | `"3.5.8"` |  |
 | extraObjects | list | `[]` |  |
 | dicebear | object | `{}` |  |
 | muster.enabled | bool | `true` |  |
@@ -330,6 +393,9 @@ On the installation, after the cutover:
 | kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
+| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:7db42765cc401f4e356f876cf76a25de39c5109e56fabc9fe45ec0bf7e2d3137"` |  |
+| kagent.harness.snapshotLocation | string | `"s3://ate-snapshots/kagent"` |  |
+| kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |
 | kagent.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | kagent.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -342,7 +408,7 @@ On the installation, after the cutover:
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.serviceMonitor.enabled | bool | `true` |  |
+| kagent.serviceMonitor.enabled | bool | `false` |  |
 | kagent.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.otel.tracing.enabled | string | `"auto"` |  |
@@ -423,16 +489,56 @@ On the installation, after the cutover:
 | kagent.oauth2ProxyIngress.additionalPeers | list | `[]` |  |
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it), and named from this ONE value into agent-manager (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the portal's `agentPlatform.fluxServiceAccountName` (through the `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
 | kagent.controllerRoute.enabled | bool | `false` |  |
-| kagent.controllerRoute.pathPrefix | string | `"/kagent"` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
 | kagent.controllerRoute.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| kagent.controllerRoute.jwtAuthentication.enabled | bool | `false` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[0] | string | `"CreateAgentInstance"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[1] | string | `"CreateAgentInstanceShare"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[2] | string | `"DeleteAgentInstance"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[3] | string | `"GetAgentInstance"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[4] | string | `"ListAgentInstanceShares"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[5] | string | `"ListAgentInstances"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[6] | string | `"ResumeAgentInstance"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[7] | string | `"RevokeAgentInstanceShare"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[8] | string | `"SuspendAgentInstance"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[9] | string | `"UpdateAgentInstanceName"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[0] | string | `"CreateAgentTemplate"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[1] | string | `"DeleteAgentTemplate"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[2] | string | `"GetAgentTemplate"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[3] | string | `"ListAgentTemplates"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[4] | string | `"UpdateAgentTemplate"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[0] | string | `"CreateModelConfig"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[1] | string | `"DeleteModelConfig"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[2] | string | `"GetModelConfig"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[3] | string | `"ListConfiguredProviders"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[4] | string | `"ListModelConfigs"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[5] | string | `"ListProviderModels"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[6] | string | `"ListSupportedModelProviders"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[7] | string | `"ListSupportedModels"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[8] | string | `"UpdateModelConfig"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[0] | string | `"GetCurrentUser"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[1] | string | `"GetSubstrateStatus"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[2] | string | `"GetVersion"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[3] | string | `"ListNamespaces"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[0] | string | `"CancelTask"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[1] | string | `"CreateTaskPushNotificationConfig"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[2] | string | `"DeleteTaskPushNotificationConfig"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[3] | string | `"GetExtendedAgentCard"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[4] | string | `"GetTask"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[5] | string | `"GetTaskPushNotificationConfig"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[6] | string | `"ListTaskPushNotificationConfigs"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[7] | string | `"ListTasks"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[8] | string | `"SendMessage"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[9] | string | `"SendStreamingMessage"` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[10] | string | `"SubscribeToTask"` |  |
+| kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.host | string | `"dex.giantswarm.svc.cluster.local"` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.port | int | `5556` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.path | string | `"/keys"` |  |
+| kagent.controllerRoute.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
+| kagent.controllerRoute.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | kagent.uiRoute.enabled | bool | `false` |  |
 | kagent.uiRoute.hostname | string | `""` |  |
 | kagent.uiRoute.parentRef.name | string | `"giantswarm-default"` |  |
@@ -455,9 +561,22 @@ On the installation, after the cutover:
 | postgres.applicationDatabase.name | string | `"kagent"` |  |
 | postgres.applicationDatabase.owner | string | `"kagent"` |  |
 | postgres.applicationDatabase.schema | string | `"kagent"` |  |
+| postgres.applicationDatabase.ensure | string | `"present"` |  |
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
+| postgres.databases.substrate.enabled | bool | `true` |  |
+| postgres.databases.substrate.name | string | `"substrate"` |  |
+| postgres.databases.substrate.component | string | `"substrate"` |  |
+| postgres.databases.substrate.extensions | list | `[]` |  |
+| postgres.databases.substrate.reclaimPolicy | string | `"retain"` |  |
+| postgres.databases.substrate.secretNamespaces[0] | string | `"ate-system"` |  |
+| postgres.databases.kagent-v2.enabled | bool | `true` |  |
+| postgres.databases.kagent-v2.name | string | `"kagent_v2"` |  |
+| postgres.databases.kagent-v2.extensions[0] | string | `"vector"` |  |
+| postgres.databases.kagent-v2.reclaimPolicy | string | `"retain"` |  |
+| postgres.databases.kagent-v2.component | string | `"kagent"` |  |
+| postgres.databases.kagent-v2.secretNamespaces | list | `[]` |  |
 | postgres.backup.enabled | bool | `false` |  |
 | postgres.backup.method | string | `"plugin"` |  |
 | postgres.backup.schedule | string | `"0 0 2 * * *"` |  |
@@ -536,7 +655,7 @@ On the installation, after the cutover:
 | klausGateway.cli.enabled | bool | `false` |  |
 | klausGateway.a2a.enabled | bool | `false` |  |
 | klausGateway.a2a.defaultAgent | string | `""` |  |
-| klausGateway.a2a.url | string | `"http://agentgateway.agent-platform.svc.cluster.local:8080/kagent/api/a2a/kagent"` |  |
+| klausGateway.a2a.url | string | `"grpc://agentgateway.agent-platform.svc.cluster.local:8080"` |  |
 | klausGateway.a2a.saToken.enabled | bool | `false` |  |
 | klausGateway.a2a.saToken.audience | string | `"kagent"` |  |
 | klausGateway.agentgatewayRoute.enabled | bool | `false` |  |
@@ -547,7 +666,7 @@ On the installation, after the cutover:
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"v1.5.0"` |  |
+| agentgateway.proxy.image.tag | string | `"v1.5.1-gs.1"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -613,7 +732,7 @@ On the installation, after the cutover:
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
-| agent-manager.agentChart.semver | string | `"x.x.x"` |  |
+| agent-manager.agentChart.semver | string | `">=0.2.1 <1.0.0"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
@@ -643,6 +762,14 @@ On the installation, after the cutover:
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | agentManager.networkPolicy.egress.fqdns[1].matchName | string | `"api.github.com"` |  |
 | agentManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| agentManager.migration.enabled | bool | `true` |  |
+| agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
+| agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
+| agentManager.migration.image.tag | string | `"1.1.0"` |  |
+| agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
+| agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
+| agentManager.migration.githubToken.key | string | `"token"` |  |
+| agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |
@@ -672,6 +799,18 @@ On the installation, after the cutover:
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
 | cloudnative-pg | object | `{}` |  |
+| kagent-crds | object | `{}` |  |
+| substrate.createNamespace | bool | `false` |  |
+| substrate.postgres.enabled | string | `"auto"` |  |
+| substrate.postgres.connectionString | string | `""` |  |
+| substrate.postgres.schema | string | `"public"` |  |
+| substrate.rustfs.enabled | bool | `false` |  |
+| substrate.atelet.storageBackend | string | `"s3"` |  |
+| substrate.atelet.nodeSelector | object | `{}` |  |
+| substrate.atelet.tolerations | list | `[]` |  |
+| substrate.atelet.affinity | object | `{}` |  |
+| substrate.atelet.extraEnv | list | `[]` |  |
+| substrate-crds | object | `{}` |  |
 | kserve-crd | object | `{}` |  |
 | kserve-resources | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |

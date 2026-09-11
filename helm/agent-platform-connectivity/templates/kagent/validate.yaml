@@ -16,7 +16,25 @@ producing a silently-broken release.
 
   {{- /* Same footgun on the agentgateway path. */ -}}
   {{- if .Values.kagent.controllerRoute.enabled }}
-    {{- $_ := include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" .Values.kagent.controllerRoute.hostname "key" "kagent.controllerRoute.hostname") }}
+    {{- $_ := include "agent-platform.kagent.controllerHostname" . }}
+  {{- end }}
+
+  {{- /* The controller route is a GRPCRoute matched by gRPC service since 4.0:
+         there is no REST on the controller, no path prefix and nothing to
+         strip. A pathPrefix left in an installation's values is a stale
+         3.x shape — it would be forwarded silently (the kagent block is
+         additionalProperties: true), so fail the render and say so. */ -}}
+  {{- if hasKey .Values.kagent.controllerRoute "pathPrefix" }}
+    {{- fail "kagent.controllerRoute.pathPrefix was retired with 4.0: the controller is a GRPCRoute matched by gRPC service (kagent.api.v1alpha1.*, lf.a2a.v1.A2AService) on kagent.controllerRoute.hostname with no path prefix; remove the key. Clients dial https://<hostname> (gRPC origin) or grpc://agentgateway.<release namespace>.svc.cluster.local:8080 in-cluster." }}
+  {{- end }}
+
+  {{- /* The identity header the gateway sets is `jwt.<claim>` in CEL, so the
+         claim must be a bare identifier; Dex claims are (email, sub, name). */ -}}
+  {{- if and .Values.kagent.controllerRoute.enabled ((.Values.kagent.controllerRoute.jwtAuthentication).enabled) }}
+    {{- $claim := include "agent-platform.kagent.userIdClaim" . }}
+    {{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $claim) }}
+      {{- fail (printf "kagent.controller.auth.userIdClaim %q is not a plain claim name ([A-Za-z_][A-Za-z0-9_]*); the controller route's identity transformation reads it as jwt.<claim>" $claim) }}
+    {{- end }}
   {{- end }}
 
   {{- /* A parentRef override needs both halves: a route with namespace ""

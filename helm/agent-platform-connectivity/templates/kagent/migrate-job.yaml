@@ -1,0 +1,145 @@
+{{- /*
+The cut-over of one installation's agents to the kagent API v2 line
+(giantswarm/agent-platform#346; bumblebee-plans#51 D11, expand–contract):
+`agent-manager migrate`, run as a Job of this release, in the kagent namespace,
+as the tenant identity of the agents' Flux HelmReleases
+(kagent.fluxServiceAccountName — never the literal; verify-identity forbids
+it). The command rewrites every portal-created Generic-chart release to chart
+1.x values (removed keys dropped, muster.toolNames → muster.tools, every git
+skill pinned to a commit, the per-namespace OCIRepository moved to 1.x), emits
+the same rewrite as a diff for every GitOps-owned release (read in the
+namespaces of agentManager.migration.gitopsNamespaces, never written), records
+its report in the ConfigMap agent-manager-migrate-report of the kagent
+namespace, and — once every AgentTemplate is Ready on the platform Harness and
+no release is left on 0.x — deletes the leftover kagent.dev/v1alpha2 Agents and
+the five removed CRDs (agents, sandboxagents, agentharnesses, memories,
+toolservers), which the kagent upgrade leaves in place (helm.sh/resource-policy:
+keep). Every phase is idempotent and gated on the previous one; a failed phase
+leaves the v1alpha2 objects in place; a run that finds nothing left changes
+nothing.
+
+A PLAIN Job, deliberately not a Helm hook: this release also renders the
+platform Harness, and a migrate failure (the API refused, kagent v2 not served,
+the report not writable — the command's non-zero exits) must never fail the
+upgrade that carries it and let helm-controller remediate the platform's wiring.
+The meta chart therefore also stops the connectivity HelmRelease from waiting
+on Jobs (components.agent-platform-connectivity.disableWaitForJobs). The Job's
+name carries an 8-hex hash of its image, args and environment: an upgrade that
+changes any of them renders a new Job (Helm creates it and removes the
+old-named one) instead of hitting Job.spec.template's immutability; an upgrade
+that changes none leaves the completed Job in place, so the command's expand
+phase runs when connectivity 4.0 first renders the Job, and the contract phase
+— once the templates are Ready — is a re-run: by hand, a clone of the Job
+under a new name (`kubectl create job --from` takes CronJob sources only;
+UPGRADE.md carries the command), or the next upgrade after
+ttlSecondsAfterFinished removed the completed one (giantswarm/agentlab#143
+rehearses the sequence; `migrate` exits 0 while something is pending, so no
+in-Job waiting).
+
+The Job takes its inputs the way `agent-manager serve` does, as environment:
+the kagent namespace, the further managed namespaces, the agent chart's OCI URL
+and range (1.x on the 4.0 meta chart), the GitOps namespaces the GitOps-owned
+releases are read from, the platform Harness name, and GITHUB_TOKEN from the
+read token Secret the private-skill agents use (optional: without it public
+repositories resolve and private refs are reported as pending). The Job, its
+migration-only bindings (migrate-rbac.yaml) and this note retire in a later 4.x
+release once the last installation is cut over.
+*/ -}}
+{{- if (include "agent-platform.kagent.migration" .) }}
+{{- $sa := include "agent-platform.kagent.fluxServiceAccountName" . }}
+{{- if not $sa }}
+{{- fail "agentManager.migration.enabled is true but kagent.fluxServiceAccountName is empty: the agent-manager migrate Job runs as the tenant identity of the agents' HelmReleases and has no other identity. Set kagent.fluxServiceAccountName (the tenant ServiceAccount the fleet's agent HelmReleases run as), or set agentManager.migration.enabled: false" }}
+{{- end }}
+{{- $m := .Values.agentManager.migration }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $am := include "agent-platform.agentManager.chartValues" . | fromJson }}
+{{- $image := include "agent-platform.kagent.migration.image" . }}
+{{- $args := list "migrate" }}
+{{- if $m.dryRun }}{{- $args = append $args "--dry-run" }}{{- end }}
+{{- $env := list
+      (dict "name" "KUBERNETES_IN_CLUSTER" "value" "true")
+      (dict "name" "KAGENT_NAMESPACE" "value" $kagentNs) }}
+{{- with (dig "kagent" "additionalNamespaces" list $am) }}
+{{- $env = append $env (dict "name" "AGENT_MANAGER_MANAGED_NAMESPACES" "value" (join "," .)) }}
+{{- end }}
+{{- $env = append $env (dict "name" "AGENT_CHART_OCI_URL" "value" (dig "agentChart" "ociUrl" "oci://gsoci.azurecr.io/charts/giantswarm/agent" $am)) }}
+{{- $env = append $env (dict "name" "AGENT_CHART_SEMVER" "value" (dig "agentChart" "semver" "1.x" $am | toString)) }}
+{{- with $m.gitopsNamespaces }}
+{{- /* The namespaces the GitOps-owned releases are read from (the Roles of
+migrate-rbac.yaml grant exactly that read there). */ -}}
+{{- $env = append $env (dict "name" "AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES" "value" (join "," .)) }}
+{{- end }}
+{{- /* The platform Harness every migrated template must become Ready on. Its
+name is fixed by the kagent API v2 contract (the Harness `kagent`, admission
+label agent-platform.giantswarm.io/harness: kagent), so it is written here,
+not read from kagent.harness. */ -}}
+{{- $env = append $env (dict "name" "AGENT_HARNESS_NAME" "value" "kagent") }}
+{{- if $m.githubToken.secretName }}
+{{- $env = append $env (dict "name" "GITHUB_TOKEN" "valueFrom" (dict "secretKeyRef" (dict "name" $m.githubToken.secretName "key" $m.githubToken.key "optional" true))) }}
+{{- end }}
+{{- /* The chart's schema and the skill resolver cache under $HOME; the root
+filesystem is read-only. */ -}}
+{{- $env = append $env (dict "name" "HOME" "value" "/tmp") }}
+{{- $hash := printf "%s|%s|%s" $image (toJson $args) (toJson $env) | sha256sum | trunc 8 }}
+{{- $name := printf "%s-%s" (include "agent-platform.kagent.migration.name" .) $hash }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" . | nindent 4 }}
+  annotations:
+    agent-platform.giantswarm.io/about: "agent-manager migrate: the cut-over of this installation's agents to chart 1.x on the kagent API v2 line; re-run by cloning the Job (UPGRADE.md)"
+spec:
+  # The command is idempotent, so a retry after a transient API error is safe.
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  # A finished Job stays a day for the report's context and the hand re-run;
+  # an upgrade after that re-creates and re-runs it (idempotent).
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "agent-platform.kagent.migration.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $sa }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "map" . }}{{ .name }}{{ else }}{{ . }}{{ end }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ $image | quote }}
+          args:
+            {{- toYaml $args | nindent 12 }}
+          env:
+            {{- toYaml $env | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

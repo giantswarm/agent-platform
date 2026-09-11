@@ -8,22 +8,23 @@
 # auto-updates. (Not under ci/ on purpose, so chart-testing does not treat it as
 # an install test case.)
 #
-# Snapshot of the internal dogfooding track on 2026-09-07. The muster pin is the
-# floor of components.muster.versionRange: the toolset presets in values.yaml
-# select by the tool-group label, which a muster before 5.12.0 does not know
-# (it refuses to start), and which agent-platform-mcps, agent-manager and
-# model-manager stamp on their MCPServer CRs from the versions below. The
-# model-manager pin is a floor for the same reason: values.yaml forwards the
-# whole model-manager block, `lmstudio` included, to every release, and that
-# key only exists from 0.19.0 — a chart before it rejects the values outright
-# (its schema is additionalProperties: false), whether or not the
-# installation uses LM Studio. Selecting that backend needs one more thing
-# this snapshot does not have: an agent-platform-connectivity newer than
-# 3.11.0, the release carrying the lmstudio render guard and the egress arm.
-# The 3.10.0 pin below predates both, so `backend: lmstudio` would fail the
-# render with "must be one of: ollama, kserve, lemonade" — bump that pin too
-# when the release exists. An installation that does not select lmstudio is
-# unaffected either way.
+# Snapshot of the internal dogfooding track for the 4.0 line (kagent API v2).
+# The muster pin is the floor of components.muster.versionRange: the toolset
+# presets in values.yaml select by the tool-group label, which a muster before
+# 5.12.0 does not know (it refuses to start), and which agent-platform-mcps,
+# agent-manager and model-manager stamp on their MCPServer CRs from the versions
+# below. The model-manager pin is a floor for the same reason: values.yaml
+# forwards the whole model-manager block, `lmstudio` included, to every
+# release, and that key only exists from 0.19.0 — a chart before it rejects the
+# values outright (its schema is additionalProperties: false). kagent and
+# kagent-crds pin the SAME release of the kagent line (one build: kagent.tag and
+# kagent.harness.image in values.yaml name it too; the line's releases are
+# prereleases by scheme, vX.Y.Z-gs.N, so the pin carries the suffix).
+# agent-manager and backstage pin the first releases of their kagent API v2
+# lines; the connectivity chart the release of this chart is published with.
+# substrate and substrate-crds pin the SAME release of the Substrate line — the
+# version kagent.substrateWorkerPool.workerImage names in values.yaml (vX.Y.Z-gs.N
+# like kagent's; the floor of components.substrate.versionRange).
 # =============================================================================
 
 gitops:
@@ -35,18 +36,21 @@ components:
   agentgateway:                  { versionRange: "2.0.7" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "0.2.0" }
+  kagent:                        { versionRange: "0.11.0-gs.2" }
+  kagent-crds:                   { versionRange: "0.11.0-gs.2" }
+  substrate:                     { versionRange: "0.0.27-gs.2" }
+  substrate-crds:                { versionRange: "0.0.27-gs.2" }
   klaus-gateway:                 { versionRange: "0.39.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
-  model-manager:                 { versionRange: "0.19.0" }
-  agent-manager:                 { versionRange: "0.4.0" }
-  agent-platform-connectivity: { versionRange: "3.10.0" }
+  model-manager:                 { versionRange: "0.20.0" }
+  agent-manager:                 { versionRange: "1.0.0" }
+  agent-platform-connectivity: { versionRange: "4.0.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the three kserve charts and the two
   # llmisvc charts move together (one upstream repository).
-  backstage:                     { versionRange: "0.243.0" }
+  backstage:                     { versionRange: "1.0.0" }
   mcp-kubernetes:                { versionRange: "1.1.8" }
   cloudnative-pg:                { versionRange: "0.29.0" }
   kserve-crd:                    { versionRange: "0.2.2" }

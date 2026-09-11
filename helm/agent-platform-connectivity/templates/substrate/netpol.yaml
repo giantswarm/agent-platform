@@ -1,0 +1,756 @@
+{{- /*
+Network policies for Agent Substrate's hops, in both flavours. What talks to
+what (the substrate chart's arguments and Service definitions):
+
+  actors ── (atunnel, CONNECT) ──▶ atenet-egress :8443 ──▶ the actors' destinations:
+        muster (tool calls), the kagent controller :8083 (A2A, task and session
+        state), the LLM provider (world:443, or the agentgateway LLM listener),
+        the built-in tool server when it is on, cluster:443/10443 (a public
+        hostname behind an internal LB); atenet-egress asks ate-api :443 which
+        actor a connection belongs to (the substrateEgress policy) — nothing
+        leaves a worker pod for those destinations directly; the sandbox's
+        outbound traffic is tunnelled to atenet-egress, so the actors' egress
+        allow-list lives on atenet-egress and the worker pods reach only the
+        egress gateway, the atenet dns and the cluster DNS.
+  kagent controller ──▶ ate-api :443 (actor lifecycle), atenet-router :8080
+        (a turn's ingress, atenetRouterURL); atenet-router ──▶ ate-api :443
+        (which worker hosts the actor), the worker's tunnel :443.
+  ate-api-server ──▶ atelet :8085 (a hostPort on every node — the bootstrap API
+        drives the node agent; the egress rule upstream lacks), atenet-egress
+        :443 (the egress gateway address), Postgres (the platform's CNPG
+        Cluster, the bundled StatefulSet or an external one), the snapshot
+        store (world:443, or the bundled in-cluster store :9000), the apiserver.
+  atelet ──▶ ate-api :443, the apiserver, world:443 (the actor images it pulls,
+        the gVisor asset from storage.googleapis.com, the S3 snapshot store; a
+        registry mirror behind a private address is cluster:443), the bundled
+        store :9000.
+  ate-controller, dns, podcertificate-controller ──▶ the apiserver (and
+        ate-controller ──▶ ate-api :443); dns answers the actors' lookups.
+  Prometheus scrapes the annotated pods (atelet 9090, ate-api-server 9090,
+  ate-controller 8080, atenet-router 9090, the agentgateway sidecars 15020) —
+  admitted from the cluster entity, as the platform's other metrics ports are.
+
+The kubernetes flavour renders the ingress policies only — the chart's
+kubernetes flavour restricts what reaches a workload and leaves egress open,
+as it does for kagent. The kagent controller's ingress from atenet-egress is
+its own policy here (the controller's ingress policy in templates/kagent admits
+the gateway and the UI); Cilium and Kubernetes union the policies that select a
+pod. The runtime proof of these rules is an installation with Cilium enforcing
+— agentlab renders no network policies; `make verify-kagent-netpol` asserts
+the render.
+*/ -}}
+{{- if and (include "agent-platform.substrate.enabled" .) .Values.networkPolicy.enabled }}
+{{- $ns := include "agent-platform.substrate.namespace" . }}
+{{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $controllerPort := "8083" }}
+{{- $pgMode := include "agent-platform.substrate.postgresMode" . }}
+{{- $rustfs := dig "rustfs" "enabled" false (.Values.substrate | default dict) }}
+{{- $toolsValues := index .Values.kagent "kagent-tools" | default dict }}
+{{- $toolsNs := $toolsValues.namespaceOverride | default $kagentNs }}
+{{- $toolsPort := dig "service" "ports" "tools" "targetPort" "8084" $toolsValues | toString }}
+{{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
+
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# ate-api-server: Substrate's control plane. Ingress from every Substrate
+# component that asks it (atelet, ate-controller, the atenet router and egress
+# gateway) and from the kagent controller; metrics from the cluster.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-ate-api-server
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ate-api-server
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: atelet
+        - matchLabels:
+            app: ate-controller
+        - matchLabels:
+            app: atenet-router
+        - matchLabels:
+            app: atenet-egress
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- if $kagentOn }}
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    # The bootstrap API drives the node agent on its hostPort: the pod behind
+    # the hostPort and the node the port is published on (which of the two
+    # Cilium sees depends on how the hostPort is implemented).
+    - toEndpoints:
+        - matchLabels:
+            app: atelet
+      toPorts:
+        - ports:
+            - port: "8085"
+              protocol: TCP
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8085"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app: atenet-egress
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    {{- if eq $pgMode "cnpg" }}
+    # The platform's CNPG Cluster (postgres.databases.substrate).
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: {{ .Values.postgres.clusterName }}
+            io.kubernetes.pod.namespace: {{ .Values.postgres.namespace | default .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    {{- else if eq $pgMode "bundled" }}
+    - toEndpoints:
+        - matchLabels:
+            app: postgres
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    {{- else }}
+    # An external database: wherever substrate.postgres.connectionString points.
+    - toEntities:
+        - cluster
+        - world
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    {{- end }}
+    # The snapshot store: an S3 (or S3-compatible) endpoint, and a CAPA
+    # cluster's IRSA token exchange with STS; the OTLP gateway.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
+    {{- if $rustfs }}
+    - toEndpoints:
+        - matchLabels:
+            app: rustfs
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    {{- end }}
+---
+# ate-controller: reconciles WorkerPools into worker Deployments through the
+# apiserver and registers the workers with ate-api.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-ate-controller
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ate-controller
+  ingress:
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            app: ate-api-server
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# atelet: the per-node agent. Its gRPC API (hostPort 8085, mTLS with the pod
+# identity CA) is driven by ate-api-server; the source of hostPort traffic is
+# the node or the calling pod depending on the hostPort implementation, so the
+# cluster entity admits it (the API authenticates every client certificate).
+# It pulls the actors' images and the gVisor asset and writes snapshots.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-atelet
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: atelet
+  ingress:
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "8085"
+              protocol: TCP
+            - port: "9090"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            app: ate-api-server
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # Registries (the actor images by digest), storage.googleapis.com (the
+    # gVisor release asset the SandboxConfig names), the S3 snapshot store; a
+    # mirror or store behind a private address is cluster.
+    - toEntities:
+        - world
+        - cluster
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- if $rustfs }}
+    - toEndpoints:
+        - matchLabels:
+            app: rustfs
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    {{- end }}
+---
+# atenet-router: a turn's ingress. The kagent controller sends it the request
+# (atenetRouterURL, Service port 80 → 8080); it asks ate-api which worker hosts
+# the actor and connects to that worker's tunnel on 443 (mTLS).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-atenet-router
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: atenet-router
+  ingress:
+    {{- if $kagentOn }}
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- end }}
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+            - port: "15020"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            app: ate-api-server
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchExpressions:
+            - key: ate.dev/worker-pool
+              operator: Exists
+            - key: io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# atenet-egress: the actors' egress gateway. The worker pods' tunnels come in
+# on 8443; every connection an actor opens leaves from here, so this is where
+# the actors' destinations are allowed: muster (tool calls as the caller), the
+# kagent controller (A2A, sessions), the LLM provider — through the
+# agentgateway LLM listener when llmRouting is on, the provider's endpoint on
+# world:443 either way — the built-in tool server when it is on, and
+# cluster:443/10443 (muster's OAuth endpoints on the public hostname resolve to
+# an internal LB VIP; 10443 is the Envoy listener after an Azure LB DNAT).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-atenet-egress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: atenet-egress
+  ingress:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: ate.dev/worker-pool
+              operator: Exists
+            - key: io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "15020"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            app: ate-api-server
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- if and $kagentOn .Values.muster.enabled }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ include "agent-platform.musterServicePort" . | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if $kagentOn }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if (include "agent-platform.llmRouting" .) }}
+    # Model inference through the agentgateway LLM listener. Additive: the
+    # world:443 rule below still stands, so a direct call to the provider keeps
+    # working.
+    - toEndpoints:
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ .Values.llmRouting.listener.port | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if $toolsValues.enabled }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: kagent-tools
+            io.kubernetes.pod.namespace: {{ $toolsNs }}
+      toPorts:
+        - ports:
+            - port: {{ $toolsPort | quote }}
+              protocol: TCP
+    {{- end }}
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "10443"
+              protocol: TCP
+---
+# dns: the actors' resolver (CoreDNS with a controller that writes the
+# Corefile from the router's Service); it forwards to the cluster DNS.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-dns
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: dns
+  ingress:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: ate.dev/worker-pool
+              operator: Exists
+            - key: io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+---
+# podcertificate-controller: signs the Substrate pods' PodCertificateRequests
+# from the two CA pools; it needs the apiserver and nothing else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-podcertificate-controller
+  namespace: {{ $pcNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: podcertificate-controller
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+---
+# The worker pods of every WorkerPool in the kagent namespace: a turn comes in
+# from atenet-router on the tunnel (443); the actors' outbound traffic leaves
+# through atenet-egress (8443) — nothing else leaves a worker: the sandbox's
+# destinations are decided at the egress gateway, not here. The node agent
+# reaches the worker through the node's filesystem (the hostPath socket), not
+# the network; readiness (8080) is the kubelet's.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-workers
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: ate.dev/worker-pool
+        operator: Exists
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: atenet-router
+            io.kubernetes.pod.namespace: {{ $ns }}
+        - matchLabels:
+            app: ate-api-server
+            io.kubernetes.pod.namespace: {{ $ns }}
+        - matchLabels:
+            app: atelet
+            io.kubernetes.pod.namespace: {{ $ns }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "8443"
+              protocol: TCP
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEndpoints:
+        - matchLabels:
+            app: dns
+            io.kubernetes.pod.namespace: {{ $ns }}
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app: atenet-egress
+            io.kubernetes.pod.namespace: {{ $ns }}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+{{- if $kagentOn }}
+---
+# The actors reach the kagent controller through atenet-egress: admitted on the
+# API port next to the controller's own ingress policy (the gateway and the UI).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-actors-to-kagent-controller
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: atenet-egress
+            io.kubernetes.pod.namespace: {{ $ns }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+{{- end }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-ate-api-server-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: ate-api-server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [atelet, ate-controller, atenet-router, atenet-egress]
+        {{- if $kagentOn }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/name: kagent
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+    - ports:
+        - port: 9090
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-atenet-router-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: atenet-router
+  policyTypes: [Ingress]
+  ingress:
+    {{- if $kagentOn }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/name: kagent
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+    - ports:
+        - port: 9090
+          protocol: TCP
+        - port: 15020
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-atenet-egress-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: atenet-egress
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchExpressions:
+              - key: ate.dev/worker-pool
+                operator: Exists
+      ports:
+        - port: 8443
+          protocol: TCP
+    - ports:
+        - port: 15020
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-dns-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: dns
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchExpressions:
+              - key: ate.dev/worker-pool
+                operator: Exists
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-workers-ingress
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: ate.dev/worker-pool
+        operator: Exists
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [atenet-router, ate-api-server, atelet]
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+    - ports:
+        - port: 8080
+          protocol: TCP
+{{- if $kagentOn }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-actors-to-kagent-controller
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              app: atenet-egress
+      ports:
+        - port: {{ $controllerPort | int }}
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

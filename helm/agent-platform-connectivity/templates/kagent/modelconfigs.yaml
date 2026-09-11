@@ -10,7 +10,7 @@ direct path even with routing on. */}}
 {{- $onListener := and $routed (eq (lower $provider) (lower $.Values.llmRouting.backend.provider)) }}
 {{- $baseUrl := .baseUrl | default (ternary $listener "" $onListener) }}
 ---
-apiVersion: kagent.dev/v1alpha2
+apiVersion: kagent.dev/v1alpha3
 kind: ModelConfig
 metadata:
   name: {{ required "kagent.modelConfigs[].name is required" .name | quote }}

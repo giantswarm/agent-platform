@@ -9,11 +9,11 @@
 #
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
-#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-kagent-discovery` + `make verify-meta` +
+#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-kagent-route` + `make verify-kagent-discovery` + `make verify-meta` +
 #     `make verify-engine` + `make verify-self` + `make verify-labels` + `make verify-postgres` +
 #     `make verify-secrets` + `make verify-login-connector` +
 #     `make verify-components` + `make verify-auto` + `make verify-identity` +
-#     `make verify-wiring` + `make verify-llm-routing` checks on branches (ingress-mode guards, the global.*
+#     `make verify-wiring` + `make verify-llm-routing` + `make verify-kagent-crds` + `make verify-kyverno` checks on branches (ingress-mode guards, the global.*
 #     contract, the model-manager / agent-manager wiring, the kagent tool-server
 #     egress, app-of-apps meta-package render, the bundled Flux engine's two
 #     shapes, the self-management shapes, the postgres.backup wiring and guards,
@@ -21,10 +21,10 @@
 #     charts' acceptance of the forwarded values, the cluster-shape `auto` knobs,
 #     the kagent-flux tenant identity, the standalone's ported wiring, the
 #     LLM routing toggle)
-#   - the standalone agent-platform-connectivity chart (build, tag push), the
-#     consumer-side wiring rendered by the meta-package as a HelmRelease
-#   versioned in lockstep with agent-platform off the same git tag. This
-#   repo has no Dockerfile, so no chart depends on an image build.
+#   - the standalone agent-platform-connectivity chart (build, branch dev push,
+#     tag push), the consumer-side wiring rendered by the meta-package as a
+#     HelmRelease versioned in lockstep with agent-platform off the same git
+#     commit. This repo has no Dockerfile, so no chart depends on an image build.
 #
 # The agent-platform-crds chart has been RETIRED — every component now ships
 # its own CRDs (app-owned CRDs), so there is no longer a CRD-bundle chart to
@@ -43,9 +43,12 @@ jobs:
     steps:
     - checkout
     - run:
-        name: install helm + make
+        name: install helm + make + PyYAML
         command: |
-          command -v make >/dev/null 2>&1 || (sudo apt-get update -qq && sudo apt-get install -y -qq make)
+          # python3 is in cimg/base, PyYAML is not: tests/verify-kagent-crds.py
+          # and tests/verify-kyverno.py parse rendered objects (and the kagent
+          # line's CRDs) with it.
+          (command -v make >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null) || (sudo apt-get update -qq && sudo apt-get install -y -qq make python3-yaml)
           # Pinned (not `main`) so a mid-queue Helm minor can't change behaviour;
           # 3.17.x is well past OCI dependency GA (3.8). Avoids the curl|bash pattern.
           curl -fsSL https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz | tar xz -C /tmp
@@ -57,6 +60,9 @@ jobs:
         # global.* contract behaviors and their guards), verify-managers (the
         # model-manager / agent-manager wiring and guards), verify-kagent-netpol
         # (the kagent controller/agent egress to the built-in tool server),
+        # verify-kagent-route (the kagent controller GRPCRoute on both hops,
+        # the JWT policy with the identity transformation, the UI route's
+        # header strip, the controller's ingress admission and the guards),
         # verify-kagent-discovery (the muster RemoteMCPServer opts out of
         # controller-side tool discovery iff muster runs with OAuth on, and
         # never carries a static header),
@@ -89,10 +95,21 @@ jobs:
         # app-config surface, the mcp-kubernetes MCPServer, model serving on
         # the kserve components and its guards, toggles off = no object) and
         # verify-llm-routing (the llmRouting toggle, both states, and its
-        # guards) are the single source of truth, also run locally. The meta chart's one
-        # dependency is the flux-engine subchart, a directory in its charts/,
-        # which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing
+        # guards) and verify-kagent-crds (every kagent.dev object the connectivity
+        # chart renders — the ModelConfig / RemoteMCPServer catalog — validated
+        # against the kagent line's CRDs at the pinned release; no v1alpha2 in
+        # any render) and verify-kagent-harness (the connectivity chart renders
+        # exactly one platform Harness per managed namespace with the shape the
+        # platform owns — the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the
+        # WorkerPool, the snapshot location and the admission label — a tag image
+        # fails, kagent off renders none) and verify-migration (the agent-manager
+        # migrate Job of the kagent API v2 cut-over: gating, identity, image,
+        # token, RBAC set, network policy in both flavors, guards; verify-postgres
+        # and verify-identity carry the kagent_v2 database and the one
+        # ClusterRoleBinding as prerequisites) are the single source of truth, also
+        # run locally. The meta chart's one dependency is the flux-engine
+        # subchart, a directory in its charts/, which needs no `helm dependency build`.
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-migration
 
 workflows:
   build:
@@ -124,6 +141,27 @@ workflows:
         filters:
           tags:
             only: /^v.*/
+          branches:
+            ignore:
+            - main
+
+    # Branch (branchPublish): publish the connectivity dev chart in lockstep with
+    # the generated push-chart -- same commit, same gitsemver version, same gsoci
+    # repository and giantswarm-test-catalog -- so a lab can follow a PR's
+    # connectivity chart (agentlab: components.agent-platform-connectivity
+    # versionRange + semverFilter). Gated on the meta chart's kind tests too.
+    - architect/push-to-app-catalog:
+        executor: app-build-suite
+        context: architect
+        name: push-connectivity-chart
+        app_catalog: giantswarm-catalog
+        app_catalog_test: giantswarm-test-catalog
+        chart: agent-platform-connectivity
+        explicit_allow_chart_name_mismatch: true
+        requires:
+        - build-connectivity-chart
+        - execute-chart-tests
+        filters:
           branches:
             ignore:
             - main

@@ -1,0 +1,65 @@
+{{- /*
+The identity the hook Jobs of this release run as (templates/_hooks.tpl): a
+ServiceAccount in the release namespace bound to a ClusterRole on secrets,
+configmaps and namespaces — get, list, watch, create and patch (server-side
+apply), never delete. Cluster-scoped because the bootstrap writes into two
+namespaces the substrate release has not created yet (a Role there cannot
+precede its namespace) and the databases hook into every namespace of
+postgres.databases.*.secretNamespaces. Created for each hook event at weight
+-5, ahead of the Jobs at 0, and removed once the event's hooks succeeded.
+*/ -}}
+{{- if include "agent-platform.hooks.enabled" . }}
+{{- $name := include "agent-platform.hooks.serviceAccountName" . }}
+{{- $events := "pre-install,pre-upgrade,post-install,post-upgrade" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $events }}
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $events }}
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $events }}
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

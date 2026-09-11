@@ -199,6 +199,26 @@ owned by the muster release now (not merged into this chart's values), so
 {{- end -}}
 
 {{/*
+The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
+RemoteMCPServer targets: http://<muster Service>.<release namespace>.svc.cluster.local:<port>/mcp
+while the muster component is on, "" otherwise. ONE helper, two consumers, one
+name in both charts: the meta chart derives agent-manager's chart value
+muster.url from its copy (componentDerivedValues, next to
+flux.helmReleaseServiceAccount), this chart renders it into the portal's
+app-config as agentPlatform.musterMcpUrl (templates/backstage/app-config.yaml).
+Both composers hand it to the Generic agent chart 1.x as muster.url, whose own
+default is the same URL on a default install (muster.fullnameOverride "muster",
+release namespace agent-platform, port 8090) — the value exists so an
+installation whose muster answers elsewhere changes it in one place.
+Usage: include "agent-platform.musterMcpUrl" .
+*/}}
+{{- define "agent-platform.musterMcpUrl" -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Merged HTTPRoute labels for a named route. The shared base
 (ingress.httpRoute.labels) applies to every route; optional per-route overrides
 (ingress.httpRoute.<route>.labels) win on key collision, letting a downstream
@@ -900,4 +920,181 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- define "agent-platform.postgres.crossplaneStoreName" -}}
 {{- $xp := .Values.postgres.backup.crossplane -}}
 {{- if eq $xp.provider "azure" -}}{{- $xp.azure.containerName -}}{{- else -}}{{- $xp.aws.bucketName -}}{{- end -}}
+{{- end -}}
+
+{{/*
+The public hostname of the kagent controller route: kagent.controllerRoute.hostname
+when set, else agentgateway.<global.domain>; a render failure with neither. The
+gRPC origin the Dev Portal dials (app-config apiBaseUrl) and the hostname of the
+public GRPCRoute.
+Usage: include "agent-platform.kagent.controllerHostname" .
+*/}}
+{{- define "agent-platform.kagent.controllerHostname" -}}
+{{- include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" .Values.kagent.controllerRoute.hostname "key" "kagent.controllerRoute.hostname") -}}
+{{- end -}}
+
+{{/*
+The JWT claim the caller's identity is taken from — kagent.controller.auth.userIdClaim
+(default email), the ONE value both authentication layers read: the controller's
+AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation
+(templates/kagent/controller-jwt-policy.yaml), so the two cannot disagree.
+Usage: include "agent-platform.kagent.userIdClaim" .
+*/}}
+{{- define "agent-platform.kagent.userIdClaim" -}}
+{{- dig "controller" "auth" "userIdClaim" "email" (.Values.kagent | default dict) -}}
+{{- end -}}
+
+{{/*
+The rules of the kagent controller GRPCRoute (a `rules:` list), from
+kagent.controllerRoute.grpc.services: one rule per service, one exact
+service/method match per RPC, every rule forwarding to the backend given as
+`.backendRefs` (a YAML string). Exact service/method matches are the one shape
+the agentgateway controller translates into a path that requests have (a
+service-only match becomes the exact path "/<service>/", `type:
+RegularExpression` is ignored), and they outrank the MCP catch-all's PathPrefix.
+Usage: include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" $refs) | nindent 4
+*/}}
+{{- define "agent-platform.kagent.grpcRules" -}}
+{{- $services := dig "controllerRoute" "grpc" "services" (dict) .ctx.Values.kagent }}
+{{- if not $services }}
+{{- fail "kagent.controllerRoute.grpc.services is empty: the controller GRPCRoute needs at least one service with its methods" }}
+{{- end }}
+{{- range $svc, $methods := $services }}
+{{- if not $methods }}
+{{- fail (printf "kagent.controllerRoute.grpc.services[%s] lists no methods: the agentgateway controller cannot route a service-only match" $svc) }}
+{{- end }}
+- matches:
+{{- range $methods }}
+    - method:
+        type: Exact
+        service: {{ $svc }}
+        method: {{ . }}
+{{- end }}
+  backendRefs:
+{{ $.backendRefs | indent 4 }}
+{{- end }}
+{{- end -}}
+
+{{/*
+=== Agent Substrate ===
+
+Substrate's namespaces are fixed: the substrate chart's Roles, Service names and
+the kagent controller's ate-api / atenet-router endpoints name ate-system
+(upstream's canonical render), and the chart renders the
+podcertificate-controller into podcertificate-controller-system. The meta chart
+targets its two Substrate releases at the same names.
+*/}}
+{{- define "agent-platform.substrate.namespace" -}}ate-system{{- end -}}
+{{- define "agent-platform.substrate.podcertNamespace" -}}podcertificate-controller-system{{- end -}}
+
+{{/*
+Truthy when the platform runs Agent Substrate: the substrate component is on
+(absent from the roster = off, a chart that predates it renders none of this).
+*/}}
+{{- define "agent-platform.substrate.enabled" -}}
+{{- include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "substrate") -}}
+{{- end -}}
+
+{{/*
+Where Substrate's control-plane database lives: "bundled" (the substrate chart's
+StatefulSet — substrate.postgres.enabled true, or `auto` while neither of the
+other two applies), "external" (an explicit substrate.postgres.connectionString),
+"cnpg" (the platform's CNPG Cluster, through postgres.databases.substrate and its
+derived Secret), or "" for none — the meta chart refuses the last and resolves
+`auto` to the boolean the substrate chart takes; this chart's guard says the
+same on its own render.
+*/}}
+{{- define "agent-platform.substrate.postgresMode" -}}
+{{- $sub := .Values.substrate | default dict -}}
+{{- $bundled := dig "postgres" "enabled" "auto" $sub | toString -}}
+{{- $conn := dig "postgres" "connectionString" "" $sub -}}
+{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
+{{- if not (has $bundled (list "auto" "true" "false")) -}}
+{{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
+{{- end -}}
+{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg)) -}}bundled
+{{- else if $conn -}}external
+{{- else if $cnpg -}}cnpg
+{{- end -}}
+{{- end -}}
+
+{{/*
+The derived CNPG connection Secret of postgres.databases.substrate, the DSN the
+meta chart hands ate-api-server: <postgres.clusterName>-substrate-app.
+*/}}
+{{- define "agent-platform.substrate.databaseSecretName" -}}
+{{- printf "%s-substrate-app" .Values.postgres.clusterName -}}
+{{- end -}}
+
+{{/*
+postgres.databases resolved: a JSON array of the enabled entries whose
+component (if any) is on, while the platform Cluster renders — each with key,
+name (spec.name; default the key with - as _), owner (the application role),
+cluster, namespace (postgres.namespace), crName (<cluster>-<key>),
+reclaimPolicy, extensions, secretNamespaces (postgres.namespace first, then the
+entry's, deduplicated). Empty array otherwise. Consumers: the Database CRs, the
+derived-Secret hook, the guards, the policies that open Postgres to a consumer.
+Usage: include "agent-platform.postgres.databases" . | fromJsonArray
+*/}}
+{{- define "agent-platform.postgres.databases" -}}
+{{- $out := list -}}
+{{- if .Values.postgres.enabled -}}
+{{- $pg := .Values.postgres -}}
+{{- $ns := $pg.namespace | default .Release.Namespace -}}
+{{- range $key, $db := ($pg.databases | default dict) -}}
+{{- if not (kindIs "map" $db) -}}
+{{- fail (printf "postgres.databases.%s must be a map (enabled, name, component, extensions, reclaimPolicy, secretNamespaces)" $key) -}}
+{{- end -}}
+{{- $component := dig "component" "" $db -}}
+{{- $on := and (ne (dig "enabled" true $db) false) (or (not $component) (include "agent-platform.optionalComponentEnabled" (dict "root" $ "name" $component))) -}}
+{{- if $on -}}
+{{- $targets := list $ns -}}
+{{- range (dig "secretNamespaces" list $db) -}}{{- if not (has . $targets) -}}{{- $targets = append $targets . -}}{{- end -}}{{- end -}}
+{{- $out = append $out (dict
+      "key" $key
+      "name" (dig "name" (replace "-" "_" $key) $db)
+      "owner" ($pg.applicationDatabase.owner | default "kagent")
+      "cluster" $pg.clusterName
+      "namespace" $ns
+      "crName" (printf "%s-%s" $pg.clusterName $key)
+      "reclaimPolicy" (dig "reclaimPolicy" "retain" $db)
+      "extensions" (dig "extensions" list $db)
+      "component" $component
+      "secretNamespaces" $targets) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+=== Kyverno PolicyExceptions ===
+
+The `exceptions:` list of a PolicyException from the rules one workload
+violates: each rule is looked up in kyvernoPolicies.rules (rule → the
+ClusterPolicy of the cluster's PSS set; a rule without an entry fails the
+render naming it), the rules are grouped by policy, and each rule is cited
+with its autogen-<rule> — the copy Kyverno generates for the controller kinds
+(Deployment, DaemonSet, ...) a pod-level rule matches through. Rendered as YAML
+list items; the caller provides the `exceptions:` key.
+Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "host-path" "privileged-containers"))
+*/}}
+{{- define "agent-platform.kyverno.exceptions" -}}
+{{- $root := .root -}}
+{{- $byPolicy := dict -}}
+{{- range .rules -}}
+{{- $policy := index ($root.Values.kyvernoPolicies.rules | default dict) . -}}
+{{- if not $policy -}}
+{{- fail (printf "kyvernoPolicies.rules names no ClusterPolicy for the rule %q; add `%s: <policy>` (the PSS policy of the cluster's kyverno-policies chart that carries the rule)" . .) -}}
+{{- end -}}
+{{- $_ := set $byPolicy $policy (append (index $byPolicy $policy | default list) .) -}}
+{{- end -}}
+{{- range $policy, $rules := $byPolicy }}
+- policyName: {{ $policy }}
+  ruleNames:
+  {{- range $rules }}
+    - {{ . }}
+    - autogen-{{ . }}
+  {{- end }}
+{{- end }}
 {{- end -}}
