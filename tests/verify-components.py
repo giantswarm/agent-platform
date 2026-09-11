@@ -83,8 +83,8 @@ KAGENT_RANGE = ">=0.11.0-gs.1 <0.11.1-0"
 # both following components.kagent. The pin is the line's release range, the
 # kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.27-gs.3 <0.0.28-0"
-SUBSTRATE_PIN = "0.0.27-gs.3"  # the range's floor: the BOM pin and the worker image tag
+SUBSTRATE_RANGE = ">=0.0.27-gs.4 <0.0.28-0"
+SUBSTRATE_PIN = "0.0.27-gs.4"  # the range's floor: the BOM pin and the worker image tag
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
