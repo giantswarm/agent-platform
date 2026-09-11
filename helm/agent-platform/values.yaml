@@ -2356,7 +2356,13 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     namespace: kagent
   agentChart:
     ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-    semver: x.x.x
+    # The 3.x line composes the 0.x agent chart. Generic chart 1.0.0 renders the
+    # kagent API v2 shape (kagent.dev/v1alpha3 AgentTemplate), which no 3.x
+    # installation can install; an open range here would pull it into every
+    # namespace agent-manager writes an agent OCIRepository for. This explicit
+    # forward wins over agent-manager 0.4.5's own bounded default, so the bound
+    # has to be set here as well. The 4.0 line moves it to 1.x.
+    semver: ">=0.2.1 <1.0.0"
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:

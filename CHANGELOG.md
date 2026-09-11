@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `agent-manager.agentChart.semver` is `>=0.2.1 <1.0.0` (was `x.x.x`) in both charts. Generic `agent` chart 1.0.0 (published 2026-09-11) renders the kagent API v2 shape (`kagent.dev/v1alpha3 AgentTemplate`), which no 3.x installation can install; agent-manager composes this range into the per-namespace `agent` `OCIRepository` it writes on every `create_agent`, and the meta chart's explicit forward wins over agent-manager 0.4.5's own bounded default — so an open range here pulled 1.0.0 into every new managed namespace (the ATS round trip on this branch reproduced it: `HelmRelease ats-managed-agent` InstallFailed `no matches for kind AgentTemplate`). The three pre-existing per-namespace `OCIRepository` objects were bounded by hand already; this makes every future one bounded too. **Every installation with agent-manager on rolls the agent-manager pod once** (`--agent-chart-semver` changes); nothing else in the render differs. The 4.0 line moves the range to `1.x`.
+
 ### Changed
 
 - The agentgateway data plane runs the **Giant Swarm line of agentgateway**: the connectivity chart's `agentgateway.proxy.image.tag` (rendered into `AgentgatewayParameters`) is `v1.5.1-gs.1` — upstream v1.5.0 rebuilt, scanned and signed in [giantswarm/agentgateway-upstream](https://github.com/giantswarm/agentgateway-upstream) (its `FORK.md`; tracking giantswarm/giantswarm#37758) and mirrored into gsoci by the retagger — the same release the `giantswarm/agentgateway` packaging chart pins for the controller, so a fix the platform needs in agentgateway can be carried on the line and reaches every installation as the next `-gs.N` release. **Every installation with the agentgateway component on rolls its data-plane pods once** to an image built from the same source as before; nothing else in the render changes.
