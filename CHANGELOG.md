@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The kagent controller `GRPCRoute` matches by gRPC **service** again — one service-only match per service of `kagent.controllerRoute.grpc.services` (the five services with empty method lists by default), which the agentgateway controller of chart 2.1.1 (the Giant Swarm line's `v1.5.1-gs.3`, carrying the GRPCRoute translation fix) turns into the path prefix `/<service>/`; a service with RPCs listed keeps one exact service/method match per RPC, the fallback for an installation whose agentgateway chart is older and a way to expose a subset. The 39-RPC enumeration #345 shipped as a workaround is gone from the default; an RPC the kagent line adds is reachable without a values change. **Needs the agentgateway component at chart ≥ 2.1.1** (the meta chart's `components.agentgateway.versionRange` 2.x resolves it; the render cannot check the controller's version). `make verify-kagent-route` asserts the default and the fallback.
+
 ### Fixed
 
 - **`components.backstage.versionRange` is `>=1.0.0 <3.0.0`** (was `1.x`). The complete kagent API v2 Dev Portal is backstage **2.0.0** — giantswarm/backstage#2344 (the backend's Connect client against the controller's gRPC origin, the portal's sessions and chat) was released as a major, on top of 1.0.0 (the reader, #2343), 1.1.0 (create, #2296) and 1.2.0 (edit/delete, #2298). `1.x` resolved 1.2.0, a portal without the gRPC backend that answers the 4.0 controller route with `404`s; the range now admits 2.0.0 and stays bounded below the next major. `tests/verify-components.py` and `UPGRADE.md` move with it. **No installation acts** — the component is off by default and the release stays inert behind the fleet's `<4.0.0` bound.
