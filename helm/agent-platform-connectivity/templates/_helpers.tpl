@@ -939,8 +939,10 @@ port, an address literal, and a host that is no valid hostname.
 Only under networkPolicy.enabled, which is what renders the controller policy
 that carries the egress. With no policy rendered every destination is reachable
 and neither key decides anything: a host of fewer than three labels, which is
-neither a qualified Service name nor a public issuer; and an in-cluster host
-while gateway.jwksEgress is off, so nothing opens its port.
+neither a qualified Service name nor a public issuer; an in-cluster host while
+gateway.jwksEgress is off, so nothing opens its port; and an in-cluster host in
+a namespace or on a port gateway.jwksEgress does not name, so the one rule it
+renders reaches a different endpoint.
 Usage: include "agent-platform.jwks.validate" (dict "ctx" . "path" "kagent.controllerRoute.jwtAuthentication" "jwks" $jwks)
 */}}
 {{- define "agent-platform.jwks.validate" -}}
@@ -969,6 +971,19 @@ Usage: include "agent-platform.jwks.validate" (dict "ctx" . "path" "kagent.contr
 {{- end -}}
 {{- if and (include "agent-platform.jwks.inCluster" $host) (not $egress.enabled) -}}
 {{- fail (printf "%s.enabled is true with an in-cluster jwks.host (%q) but gateway.jwksEgress.enabled is false. The agentgateway controller cannot reach the JWKS endpoint to fetch the keys, so signature validation fails closed. Set gateway.jwksEgress.enabled: true (and its namespace/port to the issuer's)." .path $host) -}}
+{{- end -}}
+{{- if include "agent-platform.jwks.inCluster" $host -}}
+{{- /* gateway.jwksEgress renders one rule, for one namespace on one port. An
+in-cluster host is qualified, so its second label is the namespace it resolves
+in and a mismatch is decidable here rather than at runtime. */ -}}
+{{- $ns := index (splitList "." (include "agent-platform.jwks.normalizeHost" $host)) 1 -}}
+{{- if ne $ns ($egress.namespace | toString) -}}
+{{- fail (printf "%s.jwks.host is %q, which resolves in namespace %q, but gateway.jwksEgress.namespace is %q. The controller's only in-cluster JWKS rule opens the namespace that key names, so the fetch is denied and signature validation fails closed. Set gateway.jwksEgress.namespace: %s." .path $host $ns ($egress.namespace | toString) $ns) -}}
+{{- end -}}
+{{- $port := $jwks.port | int -}}
+{{- if ne $port ($egress.port | int) -}}
+{{- fail (printf "%s.jwks.port is %d but gateway.jwksEgress.port is %d. The controller's only in-cluster JWKS rule opens the port that key names, so the fetch is denied and signature validation fails closed. Set gateway.jwksEgress.port: %d." .path $port ($egress.port | int) $port) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

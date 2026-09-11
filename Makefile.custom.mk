@@ -1745,7 +1745,12 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		echo "FAIL: gateway.jwksEgress.external.fqdns accepted a bare string, which the Cilium CRD refuses at apply"; exit 1; fi
 	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(FLEET_APIS) --set 'gateway.jwksEgress.external.fqdns[0]=keys.example.com' >/dev/null 2>&1; then \
 		echo "FAIL: the meta chart accepted a bare string in gateway.jwksEgress.external.fqdns"; exit 1; fi
+	@echo "--> an in-cluster host outside gateway.jwksEgress's namespace or port fails the render"
+	$(call managers_must_fail,an in-cluster host in another namespace,$(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=keycloak.identity.svc.cluster.local --set kagent.controllerRoute.jwtAuthentication.jwks.port=5556,gateway.jwksEgress.namespace is)
+	$(call managers_must_fail,an in-cluster host on another port,$(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.port=8443,gateway.jwksEgress.port is 5556)
+	$(call managers_must_pass,the matching namespace and port are accepted,$(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=keycloak.identity.svc.cluster.local --set gateway.jwksEgress.namespace=identity)
 	@echo "--> the guards that only a rendered policy decides are silent without one"
+	$(call managers_must_pass,a mismatched namespace with the policies off,$(JWKS_INCLUSTER) --set networkPolicy.enabled=false --set kagent.controllerRoute.jwtAuthentication.jwks.host=keycloak.identity.svc.cluster.local --set kagent.controllerRoute.jwtAuthentication.jwks.port=5556)
 	$(call managers_must_pass,a two-label public issuer with the policies off,$(JWKS_INCLUSTER) --set networkPolicy.enabled=false --set kagent.controllerRoute.jwtAuthentication.jwks.host=okta.com --set kagent.controllerRoute.jwtAuthentication.jwks.port=5556)
 	$(call managers_must_pass,a short Service name with the policies off,$(JWKS_INCLUSTER) --set networkPolicy.enabled=false --set kagent.controllerRoute.jwtAuthentication.jwks.host=dex.giantswarm --set kagent.controllerRoute.jwtAuthentication.jwks.port=5556)
 	$(call managers_must_pass,an in-cluster host without jwksEgress and the policies off,$(JWKS_BASE) --set networkPolicy.enabled=false --set global.identity.issuerUrl=https://dex.ci.example.com)
