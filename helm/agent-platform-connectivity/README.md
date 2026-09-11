@@ -118,6 +118,55 @@ On the installation, after the cutover:
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
 
+## Agent Substrate
+
+With `components.substrate` on (the meta chart turns it on with kagent) this
+chart renders what Agent Substrate's own chart does not, in the shapes the
+platform needs:
+
+- **The bootstrap** (`templates/substrate/bootstrap.yaml`): a
+  `pre-install,pre-upgrade` hook Job that mints the CA pools
+  `service-dns-ca-pool` and `pod-identity-ca-pool` (`podcertificate-controller-system`),
+  the JWT authority pool `actor-id-jwt-pool`, the CA pool `actor-id-ca-pool`
+  and the trust anchor `actor-id-ca-certs` derived from it (`ate-system`), and
+  the ConfigMap `ate-api-authentication` with the apiserver's issuer read from
+  its OpenID discovery document. Key material comes from `openssl` in an init
+  container (`hooks.opensslImage`), the objects from `kubectl`
+  (`hooks.kubectlImage`); a pool that exists is never touched (a re-run says
+  `present`), the two namespaces are created bare when missing. Identity:
+  `<release>-hooks`, a ClusterRole on secrets, configmaps and namespaces for
+  the hook's lifetime (`templates/substrate/hooks-rbac.yaml`; the hook Job
+  include is `agent-platform.hooks.job` in `templates/_hooks.tpl`).
+- **The database** (`templates/postgres/databases.yaml`, `databases-hook.yaml`):
+  `postgres.databases` is a map of further CNPG `Database`s on the platform
+  Cluster, one derived connection Secret `<clusterName>-<key>-app` each (the
+  `post-install,post-upgrade` hook waits for CNPG's `<clusterName>-app` and
+  rewrites `dbname`, `uri`, `jdbc-uri`, `pgpass`; copied into every
+  `secretNamespaces` entry). The shipped `substrate` entry is ate-api-server's
+  database while `substrate.postgres.enabled` resolves to the Cluster
+  (`agent-platform.substrate.postgresMode`: `auto` — the Cluster with
+  `postgres.enabled`, the chart's bundled StatefulSet without it; `true`,
+  `false`, or an explicit `connectionString`).
+- **Kyverno** (`templates/substrate/policy-exceptions.yaml`): one
+  `PolicyException` per Substrate workload — `substrate-atelet`,
+  `substrate-workers` (every WorkerPool's pods, label `ate.dev/worker-pool`),
+  `substrate-control-plane`, `substrate-podcertificate-controller` — naming
+  exactly the restricted-PSS rules the workload violates, each with its
+  `autogen-` copy, looked up in `kyvernoPolicies.rules` (rule → ClusterPolicy).
+  `make verify-kyverno` computes the violations and holds the lists.
+- **Network policies** (`templates/substrate/netpol.yaml`, both flavours):
+  Substrate's hops and the actors' destinations on the egress gateway
+  `atenet-egress`, where an actor's connections leave (muster, the kagent
+  controller, the LLM path, DNS); the worker pods reach only the egress
+  gateway, the dns and the cluster DNS. The kubernetes flavour renders the
+  ingress policies. `make verify-kagent-netpol` asserts the render.
+- **Guards** (`templates/substrate/validate.yaml`): a Substrate with no
+  database, a `postgres.databases` entry whose name is not an identifier or is
+  the initdb database's, the Substrate Secret not copied into `ate-system`.
+
+The meta chart's README ("Agent Substrate") has the prerequisites, the version
+pin and the snapshot store; `docs/substrate-security.md` the security write-up.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -254,12 +303,25 @@ On the installation, after the cutover:
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
-| kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
-| kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
-| kyvernoPolicies.seccompRuleNames[1] | string | `"autogen-check-seccomp-strict"` |  |
-| kyvernoPolicies.volumeTypesPolicyName | string | `"restrict-volume-types"` |  |
-| kyvernoPolicies.volumeTypesRuleNames[0] | string | `"restricted-volumes"` |  |
-| kyvernoPolicies.volumeTypesRuleNames[1] | string | `"autogen-restricted-volumes"` |  |
+| kyvernoPolicies.rules.privileged-containers | string | `"disallow-privileged-containers"` |  |
+| kyvernoPolicies.rules.host-ports-none | string | `"disallow-host-ports"` |  |
+| kyvernoPolicies.rules.host-path | string | `"disallow-host-path"` |  |
+| kyvernoPolicies.rules.restricted-volumes | string | `"restrict-volume-types"` |  |
+| kyvernoPolicies.rules.adding-capabilities | string | `"disallow-capabilities"` |  |
+| kyvernoPolicies.rules.require-drop-all | string | `"disallow-capabilities-strict"` |  |
+| kyvernoPolicies.rules.adding-capabilities-strict | string | `"disallow-capabilities-strict"` |  |
+| kyvernoPolicies.rules.run-as-non-root | string | `"require-run-as-nonroot"` |  |
+| kyvernoPolicies.rules.run-as-non-root-user | string | `"require-run-as-non-root-user"` |  |
+| kyvernoPolicies.rules.privilege-escalation | string | `"disallow-privilege-escalation"` |  |
+| kyvernoPolicies.rules.check-seccomp | string | `"restrict-seccomp"` |  |
+| kyvernoPolicies.rules.check-seccomp-strict | string | `"restrict-seccomp-strict"` |  |
+| kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
+| hooks.kubectlImage.registry | string | `"docker.io"` |  |
+| hooks.kubectlImage.repository | string | `"alpine/k8s"` |  |
+| hooks.kubectlImage.tag | string | `"1.37.0"` |  |
+| hooks.opensslImage.registry | string | `"docker.io"` |  |
+| hooks.opensslImage.repository | string | `"alpine/openssl"` |  |
+| hooks.opensslImage.tag | string | `"3.5.8"` |  |
 | extraObjects | list | `[]` |  |
 | dicebear | object | `{}` |  |
 | muster.enabled | bool | `true` |  |
@@ -498,6 +560,12 @@ On the installation, after the cutover:
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
+| postgres.databases.substrate.enabled | bool | `true` |  |
+| postgres.databases.substrate.name | string | `"substrate"` |  |
+| postgres.databases.substrate.component | string | `"substrate"` |  |
+| postgres.databases.substrate.extensions | list | `[]` |  |
+| postgres.databases.substrate.reclaimPolicy | string | `"retain"` |  |
+| postgres.databases.substrate.secretNamespaces[0] | string | `"ate-system"` |  |
 | postgres.backup.enabled | bool | `false` |  |
 | postgres.backup.method | string | `"plugin"` |  |
 | postgres.backup.schedule | string | `"0 0 2 * * *"` |  |
@@ -713,6 +781,17 @@ On the installation, after the cutover:
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
+| substrate.createNamespace | bool | `false` |  |
+| substrate.postgres.enabled | string | `"auto"` |  |
+| substrate.postgres.connectionString | string | `""` |  |
+| substrate.postgres.schema | string | `"public"` |  |
+| substrate.rustfs.enabled | bool | `false` |  |
+| substrate.atelet.storageBackend | string | `"s3"` |  |
+| substrate.atelet.nodeSelector | object | `{}` |  |
+| substrate.atelet.tolerations | list | `[]` |  |
+| substrate.atelet.affinity | object | `{}` |  |
+| substrate.atelet.extraEnv | list | `[]` |  |
+| substrate-crds | object | `{}` |  |
 | kserve-crd | object | `{}` |  |
 | kserve-resources | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |

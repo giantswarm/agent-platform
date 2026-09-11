@@ -109,4 +109,53 @@ On the installation, after the cutover:
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
 
+## Agent Substrate
+
+With `components.substrate` on (the meta chart turns it on with kagent) this
+chart renders what Agent Substrate's own chart does not, in the shapes the
+platform needs:
+
+- **The bootstrap** (`templates/substrate/bootstrap.yaml`): a
+  `pre-install,pre-upgrade` hook Job that mints the CA pools
+  `service-dns-ca-pool` and `pod-identity-ca-pool` (`podcertificate-controller-system`),
+  the JWT authority pool `actor-id-jwt-pool`, the CA pool `actor-id-ca-pool`
+  and the trust anchor `actor-id-ca-certs` derived from it (`ate-system`), and
+  the ConfigMap `ate-api-authentication` with the apiserver's issuer read from
+  its OpenID discovery document. Key material comes from `openssl` in an init
+  container (`hooks.opensslImage`), the objects from `kubectl`
+  (`hooks.kubectlImage`); a pool that exists is never touched (a re-run says
+  `present`), the two namespaces are created bare when missing. Identity:
+  `<release>-hooks`, a ClusterRole on secrets, configmaps and namespaces for
+  the hook's lifetime (`templates/substrate/hooks-rbac.yaml`; the hook Job
+  include is `agent-platform.hooks.job` in `templates/_hooks.tpl`).
+- **The database** (`templates/postgres/databases.yaml`, `databases-hook.yaml`):
+  `postgres.databases` is a map of further CNPG `Database`s on the platform
+  Cluster, one derived connection Secret `<clusterName>-<key>-app` each (the
+  `post-install,post-upgrade` hook waits for CNPG's `<clusterName>-app` and
+  rewrites `dbname`, `uri`, `jdbc-uri`, `pgpass`; copied into every
+  `secretNamespaces` entry). The shipped `substrate` entry is ate-api-server's
+  database while `substrate.postgres.enabled` resolves to the Cluster
+  (`agent-platform.substrate.postgresMode`: `auto` — the Cluster with
+  `postgres.enabled`, the chart's bundled StatefulSet without it; `true`,
+  `false`, or an explicit `connectionString`).
+- **Kyverno** (`templates/substrate/policy-exceptions.yaml`): one
+  `PolicyException` per Substrate workload — `substrate-atelet`,
+  `substrate-workers` (every WorkerPool's pods, label `ate.dev/worker-pool`),
+  `substrate-control-plane`, `substrate-podcertificate-controller` — naming
+  exactly the restricted-PSS rules the workload violates, each with its
+  `autogen-` copy, looked up in `kyvernoPolicies.rules` (rule → ClusterPolicy).
+  `make verify-kyverno` computes the violations and holds the lists.
+- **Network policies** (`templates/substrate/netpol.yaml`, both flavours):
+  Substrate's hops and the actors' destinations on the egress gateway
+  `atenet-egress`, where an actor's connections leave (muster, the kagent
+  controller, the LLM path, DNS); the worker pods reach only the egress
+  gateway, the dns and the cluster DNS. The kubernetes flavour renders the
+  ingress policies. `make verify-kagent-netpol` asserts the render.
+- **Guards** (`templates/substrate/validate.yaml`): a Substrate with no
+  database, a `postgres.databases` entry whose name is not an identifier or is
+  the initdb database's, the Substrate Secret not copied into `ate-system`.
+
+The meta chart's README ("Agent Substrate") has the prerequisites, the version
+pin and the snapshot store; `docs/substrate-security.md` the security write-up.
+
 {{ template "chart.valuesSection" . }}

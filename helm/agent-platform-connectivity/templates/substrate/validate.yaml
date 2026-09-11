@@ -1,0 +1,25 @@
+{{- /*
+Render-time guards for Agent Substrate's wiring. The meta chart refuses the
+same shapes before this release exists (agent-platform.validateSubstrate); a
+render of this chart on its own says the same.
+*/ -}}
+{{- if include "agent-platform.substrate.enabled" . }}
+  {{- if not (include "agent-platform.substrate.postgresMode" .) }}
+    {{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster — postgres.databases.substrate renders the Database and the post-install hook derives the connection Secret), or substrate.postgres.enabled (the chart's bundled StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionString" }}
+  {{- end }}
+  {{- if eq (include "agent-platform.substrate.postgresMode" .) "cnpg" }}
+    {{- $targets := list }}
+    {{- range include "agent-platform.postgres.databases" . | fromJsonArray }}{{- if eq .key "substrate" }}{{- $targets = .secretNamespaces }}{{- end }}{{- end }}
+    {{- if not (has (include "agent-platform.substrate.namespace" .) $targets) }}
+      {{- fail (printf "postgres.databases.substrate.secretNamespaces must include %s: ate-api-server reads the derived connection Secret %s there" (include "agent-platform.substrate.namespace" .) (include "agent-platform.substrate.databaseSecretName" .)) }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- range include "agent-platform.postgres.databases" . | fromJsonArray }}
+  {{- if not (regexMatch "^[a-z_][a-z0-9_]*$" .name) }}
+    {{- fail (printf "postgres.databases.%s.name %q is not a plain PostgreSQL identifier (lowercase letters, digits, underscore)" .key .name) }}
+  {{- end }}
+  {{- if eq .name ($.Values.postgres.applicationDatabase.name | default "kagent") }}
+    {{- fail (printf "postgres.databases.%s names the initdb database %q, which the Cluster creates itself (postgres.applicationDatabase) and whose Secret CNPG mints; a further database needs its own name" .key .name) }}
+  {{- end }}
+{{- end }}

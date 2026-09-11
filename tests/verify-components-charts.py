@@ -54,7 +54,13 @@ EXTRAS = [
 ]
 MANAGERS = ["model-manager", "agent-manager"]
 KAGENT = ["kagent-crds", "kagent"]
-COMPONENTS = [*EXTRAS, *MANAGERS, *KAGENT]
+# The Substrate line's two charts: rendered with the substrate: block the meta
+# chart forwards (the derived postgres.enabled boolean, the CNPG connection
+# Secret reference) — the substrate chart has no schema, so this is what proves
+# the forwarded keys (postgres.connectionStringSecretRef, atelet.nodeSelector /
+# tolerations / affinity) exist in the pinned build.
+SUBSTRATE = ["substrate-crds", "substrate"]
+COMPONENTS = [*EXTRAS, *MANAGERS, *KAGENT, *SUBSTRATE]
 # component -> the release its range / BOM pin waits for. While nothing the
 # range admits is published, the forwarded block is rendered against the newest
 # chart the line has (see fallback()); the entry goes when the release exists.
@@ -72,6 +78,11 @@ QUICKSTART = [
     # model-manager's chart requires the endpoint of its default backend (an
     # installation input, empty in the meta chart's values).
     "--set", "model-manager.ollama.endpoint=http://ollama.example.com:11434",
+    # kagent on requires the Harness's snapshot store (the meta chart's guard).
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    # The platform Cluster on, so the Substrate render exercises the CNPG path
+    # (the derived connection Secret reference) rather than the bundled one.
+    "--set", "postgres.enabled=true",
 ]
 API_VERSIONS = [
     "--api-versions", "cilium.io/v2",
@@ -180,7 +191,8 @@ def pull(url: str, version: str, dest: str) -> str:
 
 
 def main(meta: str) -> int:
-    on = [f"--set=components.{n}.enabled=true" for n in COMPONENTS if n != "kagent-crds"]  # kagent-crds follows kagent
+    follow_kagent = {"kagent-crds", *SUBSTRATE}  # no switch of their own: on with kagent
+    on = [f"--set=components.{n}.enabled=true" for n in COMPONENTS if n not in follow_kagent]
     wide = docs(render_meta(meta, [*QUICKSTART, *on]))
     pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *on]))
     m = re.search(r"^tag: \"?([^\"\n]+)\"?$", hr_values(wide[("HelmRelease", "kagent")]), re.M)

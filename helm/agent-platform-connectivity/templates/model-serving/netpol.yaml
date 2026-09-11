@@ -33,12 +33,13 @@ spec:
         operator: Exists
   ingress:
     - fromEndpoints:
-        {{- if $kagentOn }}
-        # kagent agent pods: the auto-created ModelConfig dials the predictor
-        # Service (:80, translated to the pod port before policy evaluation).
+        {{- if and $kagentOn (include "agent-platform.substrate.enabled" .) }}
+        # The agents: an actor's ModelConfig dials the predictor Service (:80,
+        # translated to the pod port before policy evaluation) through Agent
+        # Substrate's egress gateway, which is where the connection leaves.
         - matchLabels:
-            app: kagent
-            io.kubernetes.pod.namespace: {{ $kagentNs }}
+            app: atenet-egress
+            io.kubernetes.pod.namespace: {{ include "agent-platform.substrate.namespace" . }}
         {{- end }}
         # The release namespace: Backstage, model-manager, the agentgateway
         # data plane.
@@ -93,13 +94,13 @@ apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: {{ $name }}-kagent-agents-to-model-serving
-  namespace: {{ $kagentNs }}
+  namespace: {{ include "agent-platform.substrate.namespace" . }}
   labels:
     {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
 spec:
   endpointSelector:
     matchLabels:
-      app: kagent
+      app: atenet-egress
   egress:
     - toEndpoints:
         - matchExpressions:
@@ -135,15 +136,15 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        {{- if $kagentOn }}
-        # kagent agent pods: the auto-created ModelConfig dials the predictor
-        # Service (:80, translated to the pod port before policy evaluation).
+        {{- if and $kagentOn (include "agent-platform.substrate.enabled" .) }}
+        # The agents: an actor's ModelConfig dials the predictor through Agent
+        # Substrate's egress gateway, which is where the connection leaves.
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $kagentNs }}
+              kubernetes.io/metadata.name: {{ include "agent-platform.substrate.namespace" . }}
           podSelector:
             matchLabels:
-              app: kagent
+              app: atenet-egress
         {{- end }}
         # The release namespace: Backstage, model-manager, the agentgateway
         # data plane.

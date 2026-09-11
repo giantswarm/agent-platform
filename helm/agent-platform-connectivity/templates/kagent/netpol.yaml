@@ -72,7 +72,8 @@ spec:
               protocol: TCP
 ---
 # Egress from the kagent controller: DNS, Postgres, Kubernetes API, OTLP, muster,
-# the agent pods, and the built-in tool server when it is enabled.
+# Substrate's ate-api and atenet router, and the built-in tool server when it is
+# enabled.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -117,14 +118,26 @@ spec:
             - port: {{ include "agent-platform.musterServicePort" . | quote }}
               protocol: TCP
     {{- end }}
+    {{- if (include "agent-platform.substrate.enabled" .) }}
+    # Agent Substrate: the actors' lifecycle through ate-api (gRPC, mTLS) and a
+    # turn's ingress through the atenet router (Service port 80 → 8080).
     - toEndpoints:
         - matchLabels:
-            app: kagent
-            io.kubernetes.pod.namespace: {{ $kagentNs }}
+            app: ate-api-server
+            io.kubernetes.pod.namespace: {{ include "agent-platform.substrate.namespace" . }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app: atenet-router
+            io.kubernetes.pod.namespace: {{ include "agent-platform.substrate.namespace" . }}
       toPorts:
         - ports:
             - port: "8080"
               protocol: TCP
+    {{- end }}
     {{- if $toolsEnabled }}
     # Tool discovery (MCP initialize + tools/list) against the built-in tool
     # server's RemoteMCPServer URL; without it the RemoteMCPServer never becomes
@@ -242,87 +255,24 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+    {{- if eq (include "agent-platform.substrate.postgresMode" .) "cnpg" }}
+    # Agent Substrate's control plane keeps its database on this Cluster
+    # (postgres.databases.substrate).
+    - fromEndpoints:
+        - matchLabels:
+            app: ate-api-server
+            io.kubernetes.pod.namespace: {{ include "agent-platform.substrate.namespace" . }}
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    {{- end }}
 {{- end }}
 
-{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.muster.enabled }}
----
-# Egress from all kagent-managed agent pods to muster (MCP tool calls), to the
-# built-in tool server when it is enabled (MCP tool calls), and to the Anthropic
-# API (model inference). DNS included.
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: {{ include "name" . }}-kagent-agent-muster-egress
-  namespace: {{ $kagentNs }}
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-spec:
-  endpointSelector:
-    matchLabels:
-      app: kagent
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: muster
-            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
-      toPorts:
-        - ports:
-            - port: {{ include "agent-platform.musterServicePort" . | quote }}
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/component: controller
-            app.kubernetes.io/name: kagent
-            io.kubernetes.pod.namespace: {{ $kagentNs }}
-      toPorts:
-        - ports:
-            - port: {{ $controllerPort | quote }}
-              protocol: TCP
-    {{- if (include "agent-platform.llmRouting" .) }}
-    # Model inference through the agentgateway LLM listener. Additive: the
-    # world:443 rule below still stands, so a direct call to the provider keeps
-    # working. Egress tightening is a separate change.
-    - toEndpoints:
-        - matchLabels:
-            gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
-            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
-      toPorts:
-        - ports:
-            - port: {{ .Values.llmRouting.listener.port | quote }}
-              protocol: TCP
-    {{- end }}
-    - toEntities:
-        - world
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-    # muster's OAuth/STS endpoints (well-known + /oauth/token) are served only on
-    # the public ingress hostname, which resolves to the internal Envoy LB VIP (a
-    # private IP, classified as cluster). The agent's STS token exchange for OBO
-    # needs this path. 443 = LB VIP; 10443 = Envoy listener after Azure LB DNAT.
-    - toEntities:
-        - cluster
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-            - port: "10443"
-              protocol: TCP
-    {{- if $toolsEnabled }}
-    # The agents call the built-in tool server's MCP endpoint directly, the same
-    # way they call muster.
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: kagent-tools
-            io.kubernetes.pod.namespace: {{ $toolsNs }}
-      toPorts:
-        - ports:
-            - port: {{ $toolsPort | quote }}
-              protocol: TCP
-    {{- end }}
-    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
-{{- end }}
+{{- /* The agents' own egress — muster, the controller, the LLM path, DNS — is
+Substrate's egress gateway's on kagent API v2 (templates/substrate/netpol.yaml,
+substrate-atenet-egress): an actor's outbound connections are tunnelled there,
+and no agent pod carries the v1alpha2 Deployments' app: kagent label any more. */ -}}
 {{- if index .Values.kagent "oauth2-proxy" "enabled" }}
 {{- /* Extra callers admitted on oauth2-proxy's proxy port next to the public
 Gateway's Envoy pods (kagent.oauth2ProxyIngress.additionalPeers): pod label maps,
