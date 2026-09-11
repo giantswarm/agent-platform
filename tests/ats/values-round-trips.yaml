@@ -24,13 +24,12 @@ global:
       secretName: agent-platform-idp-ca
 
 components:
-  # agent-manager is OFF here — it composes agents for the kagent line
-  # (kagent.dev/v1alpha3) and needs kagent's CRDs and controller, and kagent is
-  # off in values-kagent.yaml (why: there). The auth round trips below do not
-  # need it; the agent-manager round trip is skipped (conftest.py
-  # AGENT_MANAGER_ON).
+  # The write path of the agent round trips: agent-manager composes agents as
+  # Generic chart 1.x HelmReleases (an AgentTemplate on the platform Harness
+  # plus the agent's muster RemoteMCPServer) for the kagent of
+  # values-kagent.yaml.
   agent-manager:
-    enabled: false
+    enabled: true
 
 muster:
   # CI sizing (two cores), see values-kagent.yaml.

@@ -16,17 +16,19 @@
 #               install promises (deployed, FluxInstance Ready, component
 #               HelmReleases Ready as agent-platform-flux), the adoption, the
 #               auth round trip (401 chain, a Dex user through the password grant
-#               and through muster's login flow), the agent round trips (a
-#               declarative Agent Ready; agent-manager's create_agent through
-#               muster -> a HelmRelease as kagent-flux -> Agent Ready), the
+#               and through muster's login flow), the agent round trips on
+#               kagent API v2 (Substrate from the chart under test, its
+#               WorkerPool's gVisor worker Ready; a declarative AgentTemplate
+#               Ready on the platform Harness; agent-manager's create_agent
+#               through muster -> a HelmRelease as kagent-flux -> the
+#               AgentTemplate Ready and its RemoteMCPServer Accepted), the
 #               self-management fixpoint and the values Secret, the refused
 #               `helm upgrade`, then the ordered teardown (`helm uninstall
-#               --wait` clean in under a minute, no Flux CRD left, the operator
-#               CRDs still there). kagent and agent-manager are off in those
-#               values (the kagent line cannot run on this cluster yet —
-#               tests/ats/values-kagent.yaml), so the agent round trips are
-#               skipped with that reason; giantswarm/agent-platform#343 brings
-#               them back.
+#               --wait` clean within budget, no Flux CRD left, the operator
+#               CRDs still there, the kagent CRDs and the agents' templates
+#               kept — the line's keep policy — and nothing else). The kind
+#               cluster carries the feature gates Substrate needs
+#               (.ats/kind-config.yaml).
 #   functional  tests/ats/test_own_flux.py — a cluster that runs its own Flux:
 #               source-controller + helm-controller from the upstream manifest,
 #               the chart THROUGH a HelmRelease with components.flux.enabled

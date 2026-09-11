@@ -1,28 +1,29 @@
-# The kagent runtime for the ATS agent round trips, layered over
-# tests/test-values.yaml (tests/ats/conftest.py): the kind smoke's declarative
-# Agent and agent-manager's create_agent need the controller; the own-Flux
-# scenario deploys a declarative agent through the cluster's own Flux with the
-# same file. Sized for the CI executor (two cores): modest CPU requests so the
-# controller and its bundled Postgres schedule next to the engine and the
-# platform pods; the kagent UI stays off (nothing in the smoke reaches it, and
-# its image is the largest pull of the install — the chart has no ui.enabled
-# switch, zero replicas keeps the Deployment without a pod).
+# The kagent runtime of the ATS agent round trips, layered over
+# tests/test-values.yaml (tests/ats/conftest.py): the smoke's declarative
+# AgentTemplate and agent-manager's create_agent need the kagent controller, and
+# on this line the controller needs Agent Substrate — every agent is a Substrate
+# actor in a gVisor worker pod. The own-Flux scenario deploys an agent through
+# the cluster's own Flux with the same file. Substrate comes from the chart under
+# test (components.substrate and substrate-crds follow components.kagent), the
+# way an installation gets it; what the cluster must bring — Kubernetes 1.35 or
+# newer with the ClusterTrustBundle, ClusterTrustBundleProjection and
+# PodCertificateRequest feature gates and certificates.k8s.io/v1beta1 — the CI
+# job's kind cluster gets from .ats/kind-config.yaml (the render refuses a
+# cluster without the API).
 #
-# kagent is OFF here. The platform's kagent is the kagent line (kagent API v2,
-# kagent.dev/v1alpha3), and it cannot run on the ATS kind cluster as the job
-# creates it: agents are Agent Substrate actors, so the controller needs
-# Substrate in ate-system and the apiserver feature gates ClusterTrustBundle,
-# ClusterTrustBundleProjection, PodCertificateRequest (+
-# certificates.k8s.io/v1beta1), none of which the cluster has — feature gates
-# are fixed at `kind create`, which the generated CI job owns
-# (giantswarm/agent-platform#343 and the CI-tooling chain it depends on bring
-# them). The agent round trips are skipped with that reason
-# (tests/ats/conftest.py KAGENT_ON); agentlab, with the gates and Substrate,
-# proves them. The sizing below is inert while off and is what the smoke gets
-# back when kagent returns.
+# Sized for the CI executor (the `large` class, one 4-vCPU / 15 GB node): one
+# gVisor worker with modest requests — one worker hosts one actor at a time and
+# the smoke's templates boot in turn — under the Substrate control plane the
+# chart renders (single replicas, ate-api-server two), its bundled Postgres at a
+# fraction of the chart's 1-CPU request, the bundled RustFS as the snapshot
+# store (a lab's shape; an installation names its own bucket), the kagent UI at
+# zero replicas (nothing in the smoke reaches it, and its image is the largest
+# pull of the install — the chart has no ui.enabled switch, zero replicas keeps
+# the Deployment without a pod) and the controller's bundled Postgres with a
+# small request. tests/ats/README.md carries the measured timings.
 components:
   kagent:
-    enabled: false
+    enabled: true
 
 kagent:
   controller:
@@ -37,3 +38,29 @@ kagent:
         resources:
           requests:
             cpu: 50m
+  harness:
+    # The actors' snapshot store: the bundled RustFS below, s3://<bucket>/<prefix>.
+    snapshotLocation: s3://ate-snapshots/kagent
+  substrateWorkerPool:
+    replicas: 1
+    template:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+
+substrate:
+  # The in-cluster S3 store (the chart's static lab credentials) the snapshot
+  # location above names. The control plane's Postgres is the chart's bundled
+  # StatefulSet: substrate.postgres.enabled `auto` resolves to it without the
+  # platform's CNPG Cluster (postgres.enabled is off in the smoke).
+  rustfs:
+    enabled: true
+  postgres:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi

@@ -24,20 +24,27 @@ module top to bottom; each one builds on the state the previous left):
      discovery chain; a lab Dex user reaches /mcp with a token from the OAuth
      password grant (a trusted audience) and with muster's own login flow (RFC 7591
      registration, authorization code + PKCE, the Dex login form);
-  6. the agent round trips: a declarative kagent Agent against the chart's
-     default ModelConfig (a placeholder provider key) reaches Ready; and — the
-     write path the standalone's smoke never had — agent-manager's create_agent,
-     called through muster as the Dex user with the forwarded token, writes an
-     OCIRepository + HelmRelease of the agent chart into the kagent namespace,
-     the HelmRelease runs as kagent-flux and reaches Ready, the Agent reaches Ready;
+  6. the agent round trips on kagent API v2: Agent Substrate, installed by the
+     chart under test, has its WorkerPool's gVisor worker Ready; a declarative
+     AgentTemplate labelled for the platform Harness, against the chart's
+     default ModelConfig (a placeholder provider key), reaches Ready on that
+     Harness (status.harnesses[]); and — the write path the standalone's smoke
+     never had — agent-manager's create_agent, called through muster as the Dex
+     user with the forwarded token, writes an OCIRepository + HelmRelease of the
+     agent chart 1.x into the kagent namespace, the HelmRelease runs as
+     kagent-flux and reaches Ready, the AgentTemplate reaches Ready on the
+     Harness and the agent's RemoteMCPServer (the toolset carrier) is Accepted;
   7. the fixpoint: two self-management intervals after the adoption `helm
      history` is unchanged and the values Secret equals the values used;
   8. the Helm CLI is day-0 only: `helm upgrade` is refused by the admission
      policy with its message in Helm's own output, no revision written;
-  9. `helm uninstall --wait`: the ordered teardown returns clean in under a
-     minute, no Flux CRD left, the four operator CRDs remaining, no controller,
-     no hook Job, no release in any state, the agents' HelmRelease objects gone
-     with the CRDs.
+  9. `helm uninstall --wait`: the ordered teardown returns clean within budget,
+     no Flux CRD left, the four operator CRDs remaining, no controller, no hook
+     Job, no release in any state; the kagent-crds release is uninstalled and
+     the kagent CRDs survive it, with the agents' AgentTemplates and
+     RemoteMCPServer (the line's keep policy) — and nothing else does: no
+     Harness, ModelConfig, WorkerPool, worker or controller in the kept kagent
+     namespace, Substrate's control plane and CRDs gone.
 
 The lab shape (`gitops.self.enabled: false`, what agentlab installs) renders
 none of the self-management objects; that shape is asserted offline by
@@ -45,31 +52,33 @@ none of the self-management objects; that shape is asserted offline by
 functional scenario's job (test_own_flux.py installs the chart again, through
 the cluster's own Flux).
 
-The smoke values leave kagent and agent-manager off (values-kagent.yaml says
-why: the kagent line cannot run on the ATS kind cluster yet), so step 6 is
-skipped with that reason and the kagent-only assertions (the kagent namespace,
-the orphaned agents) are gated on KAGENT_ON / AGENT_MANAGER_ON, both read from
-the values.
+The CI job's kind cluster carries the feature gates Substrate needs
+(.ats/kind-config.yaml); values-kagent.yaml sizes Substrate and the kagent
+runtime for the executor (tests/ats/README.md).
 """
 
 import base64
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, List
 
 import pytest
 import yaml
 
 from conftest import (
-    AGENT_MANAGER_ON,
+    AGENT_CHART_SEMVER,
+    AGENT_CHART_URL,
+    ATE_NAMESPACE,
     CROSS_CLIENT_AUDIENCE,
-    KAGENT_ON,
-    NO_KAGENT_REASON,
     DEX_USER,
     FLUX_CRD_SUFFIX,
+    HARNESS,
+    HARNESS_LABEL,
+    KAGENT_CRDS,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
+    MODEL_CONFIG,
     MUSTER_BASE_URL,
     MUSTER_BASE_URL_SETS,
     NAMESPACE,
@@ -80,40 +89,46 @@ from conftest import (
     SMOKE_VALUES,
     TENANT_SA,
     TIMINGS,
+    TOOLSET,
     UNINSTALL_BUDGET_S,
     VALUES_SECRET,
+    WORKER_POOL,
     Helm,
     Kube,
     MusterSession,
     PortForward,
+    apply_placeholder_provider_secret,
+    assert_remote_mcp_server,
     condition,
     connectivity_sets,
     dex_password_grant,
+    dump_agents,
     is_ready,
     jwt_claims,
     load_values,
     login_through_muster,
     self_management_sets,
+    template_state,
     unauthenticated_mcp_challenge,
     wait_for,
     wait_for_muster_healthy,
+    wait_for_substrate,
+    wait_for_template_ready,
 )
 
 logger = logging.getLogger(__name__)
 
-# The component HelmReleases the smoke values leave on (kagent and agent-manager
-# only when the values turn them on, see conftest).
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity",
-              *(("kagent",) if KAGENT_ON else ()), *(("agent-manager",) if AGENT_MANAGER_ON else ()))
-# The Deployments `helm install --wait` leaves running (the kagent controller is
-# waited for separately: its HelmRelease reports Ready once the manifests are
-# applied, installDisableWait).
-CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", *(("agent-manager",) if AGENT_MANAGER_ON else ()))
+# The component HelmReleases the smoke values turn on: the quick start's three,
+# kagent with its CRD chart, Agent Substrate with its CRD chart (both follow
+# components.kagent) and agent-manager.
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "agent-manager")
+# The Deployments `helm install --wait` leaves running in the release namespace
+# (the kagent controller runs in the kagent namespace and is waited for separately).
+CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager")
 DECLARATIVE_AGENT = "ats-smoke-agent"
 MANAGED_AGENT = "ats-managed-agent"
+MANAGED_AGENT_DISPLAY_NAME = "ATS managed agent"
 AGENT_CHART_REPOSITORY = "agent"  # the shared per-namespace OCIRepository agent-manager writes
-MODEL_CONFIG = "default-model-config"
-PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API_KEY"}
 POLICY_MESSAGE = f"release {RELEASE} manages itself through its bundled Flux"
 
 
@@ -135,6 +150,7 @@ def dump_platform(kube: Kube) -> None:
         f"-n {NAMESPACE} get ocirepositories.source.toolkit.fluxcd.io -o wide",
         f"-n {NAMESPACE} get pods -o wide",
         f"-n {KAGENT_NAMESPACE} get pods -o wide",
+        f"-n {ATE_NAMESPACE} get pods -o wide",
         f"-n {NAMESPACE} get events --sort-by=.lastTimestamp",
         f"-n {NAMESPACE} logs deployment/helm-controller --tail=60",
     ])
@@ -142,17 +158,7 @@ def dump_platform(kube: Kube) -> None:
 
 def dump_auth(kube: Kube) -> None:
     kube.dump([f"-n {NAMESPACE} logs deployment/muster --tail=120", f"-n {NAMESPACE} logs deployment/lab-dex --tail=60",
-               *([f"-n {NAMESPACE} logs deployment/agent-manager --tail=60"] if AGENT_MANAGER_ON else [])])
-
-
-def dump_agents(kube: Kube) -> None:
-    kube.dump([
-        f"-n {KAGENT_NAMESPACE} get agents.kagent.dev -o yaml",
-        f"-n {KAGENT_NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io,ocirepositories.source.toolkit.fluxcd.io -o wide",
-        f"-n {KAGENT_NAMESPACE} get pods -o wide",
-        f"-n {KAGENT_NAMESPACE} get events --sort-by=.lastTimestamp",
-        f"-n {KAGENT_NAMESPACE} logs deployment/kagent-controller --tail=60",
-    ])
+               f"-n {NAMESPACE} logs deployment/agent-manager --tail=60"])
 
 
 # ---------------------------------------------------------------------------
@@ -202,12 +208,19 @@ def kagent_controller(kube: Kube, app_deployment: float) -> None:
     started = time.monotonic()
     kube.wait_deployment(KAGENT_NAMESPACE, "kagent-controller", timeout=600)
     wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
-    # The chart's default ModelConfig references this Secret; a placeholder key
-    # is enough for the controller to accept an Agent (Ready means reconciled,
-    # not that a model answered).
-    kube.apply({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": PLACEHOLDER_PROVIDER_SECRET["name"], "namespace": KAGENT_NAMESPACE},
-                "stringData": {PLACEHOLDER_PROVIDER_SECRET["key"]: "lab-only-placeholder-key"}})
+    apply_placeholder_provider_secret(kube)
     TIMINGS.record("kagent controller Ready after the install returned", time.monotonic() - started)
+
+
+@pytest.fixture(scope="module")
+def substrate(kube: Kube, app_deployment: float) -> Dict[str, Any]:
+    """Agent Substrate from the chart under test, ready to run actors: the
+    WorkerPool's worker Ready, the platform Harness rendered. Returns the WorkerPool."""
+    try:
+        return wait_for_substrate(kube)
+    except AssertionError:
+        dump_agents(kube)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -229,8 +242,7 @@ def assert_platform_running(kube: Kube, helm: Helm) -> None:
         for name, hr in platform.items():
             assert is_ready(hr), f"HelmRelease {name} not Ready: {condition(hr)}"
             assert hr["spec"].get("serviceAccountName") == TENANT_SA, f"HelmRelease {name} does not run as {TENANT_SA}"
-        if KAGENT_ON:
-            assert platform["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "the kagent HelmRelease must target the platform namespace (the pre-install hook creates the kagent namespace)"
+        assert platform["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "the kagent HelmRelease must target the platform namespace (the pre-install hook creates the kagent namespace)"
         for name in CORE_DEPLOYMENTS:
             assert kube.deployment_ready(NAMESPACE, name), f"Deployment {name} is not ready"
         logger.info("deployed; FluxInstance Ready at %s; %d component HelmReleases Ready as %s", revision, len(platform), TENANT_SA)
@@ -258,8 +270,7 @@ def test_engine_objects(kube: Kube, app_deployment: float) -> None:
              lambda: "flux-operator" in kube.managers("crd", "helmreleases.helm.toolkit.fluxcd.io"), 120, interval=3)
     assert kube.get("serviceaccount", TENANT_SA, namespace=NAMESPACE), f"ServiceAccount {TENANT_SA} missing"
     assert kube.get("clusterrolebinding", TENANT_SA), f"ClusterRoleBinding {TENANT_SA} missing"
-    if KAGENT_ON:  # the namespace hook renders with kagent on only
-        assert kube.get("namespace", KAGENT_NAMESPACE), "the pre-install hook did not create the kagent namespace"
+    assert kube.get("namespace", KAGENT_NAMESPACE), "the pre-install hook did not create the kagent namespace"
     # No hook object lingers after a successful install (Helm removes them once
     # every hook of the event succeeded, moments after the install returns; the
     # detached resumer Job is not a hook and stays for an hour to be read).
@@ -375,34 +386,54 @@ def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: PortFo
 
 
 @pytest.mark.smoke
-@pytest.mark.skipif(not KAGENT_ON, reason=NO_KAGENT_REASON)
-def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None) -> None:
-    """A minimal declarative Agent against the chart's default ModelConfig (the
-    provider key is a placeholder: Ready means the controller accepted and
-    reconciled the Agent, not that a model call succeeded)."""
-    started = time.monotonic()
-    kube.apply({"apiVersion": "kagent.dev/v1alpha2", "kind": "Agent",
-                "metadata": {"name": DECLARATIVE_AGENT, "namespace": KAGENT_NAMESPACE},
-                "spec": {"description": "ATS smoke agent (lab only)", "type": "Declarative",
-                         "declarative": {"modelConfig": MODEL_CONFIG, "systemMessage": "You are the ATS smoke agent."}}})
-    try:
-        wait_for(f"Agent {DECLARATIVE_AGENT} Ready", lambda: is_ready(kube.get("agents.kagent.dev", DECLARATIVE_AGENT, namespace=KAGENT_NAMESPACE)), 600)
-    except AssertionError:
-        dump_agents(kube)
-        raise
-    TIMINGS.record("declarative Agent Ready", time.monotonic() - started)
+def test_substrate_runs_a_worker_for_the_platform_harness(kube: Kube, substrate: Dict[str, Any]) -> None:
+    """Agent Substrate from the chart under test on the CI job's kind cluster:
+    the cluster serves certificates.k8s.io/v1beta1 with the feature gates on
+    (.ats/kind-config.yaml — Substrate projects pod identities and trust bundles
+    through PodCertificateRequest and ClusterTrustBundle), the control plane runs
+    in ate-system, the WorkerPool of the kagent namespace has its gVisor
+    worker(s) Running and Ready, and the platform Harness points at it."""
+    assert "certificates.k8s.io/v1beta1" in kube.text(["api-versions"]).split(), "the cluster does not serve certificates.k8s.io/v1beta1 (the kind config's runtimeConfig)"
+    resources = {line.split()[0] for line in kube.text(["api-resources", "--api-group=certificates.k8s.io", "--no-headers"]).splitlines() if line.strip()}
+    assert {"podcertificaterequests", "clustertrustbundles"} <= resources, sorted(resources)
+    workers = kube.items("pods", "-l", f"ate.dev/worker-pool={WORKER_POOL}", namespace=KAGENT_NAMESPACE)
+    phases = {p["metadata"]["name"]: p["status"].get("phase") for p in workers}
+    assert len(workers) == substrate["spec"]["replicas"] and all(phase == "Running" for phase in phases.values()), phases
+    logger.info("Substrate worker(s) Running on %s: %s", substrate["spec"].get("workerImage"), sorted(phases))
 
 
 @pytest.mark.smoke
-@pytest.mark.skipif(not (KAGENT_ON and AGENT_MANAGER_ON), reason=NO_KAGENT_REASON)
-def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: PortForward, dex: str, kagent_controller: None) -> None:
+def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, substrate: Dict[str, Any]) -> None:
+    """A minimal declarative AgentTemplate labelled for the platform Harness,
+    against the chart's default ModelConfig (a placeholder provider key): Ready
+    on that Harness means the Harness admitted the template and Substrate booted
+    the actor's golden snapshot on the WorkerPool — not that a model call
+    succeeded."""
+    started = time.monotonic()
+    kube.apply({"apiVersion": "kagent.dev/v1alpha3", "kind": "AgentTemplate",
+                "metadata": {"name": DECLARATIVE_AGENT, "namespace": KAGENT_NAMESPACE, "labels": {HARNESS_LABEL: HARNESS}},
+                "spec": {"description": "ATS smoke agent (lab only)", "modelConfig": {"name": MODEL_CONFIG},
+                         "systemPrompt": "You are the ATS smoke agent."}})
+    try:
+        template = wait_for_template_ready(kube, DECLARATIVE_AGENT)
+    except AssertionError:
+        dump_agents(kube)
+        raise
+    TIMINGS.record(f"declarative AgentTemplate Ready on Harness {HARNESS}", time.monotonic() - started)
+    logger.info("AgentTemplate %s on Harness %s: %s", DECLARATIVE_AGENT, HARNESS, template_state(template))
+
+
+@pytest.mark.smoke
+def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: PortForward, dex: str, kagent_controller: None, substrate: Dict[str, Any]) -> None:
     """agent-manager's create_agent through muster, as the Dex user: muster
     forwards the bearer to agent-manager (MCPServer auth.forwardToken; the
     token carries the required cross-client audience), agent-manager validates
-    it against the lab Dex and writes the agent's HelmRelease (and the shared
-    OCIRepository of the agent chart) into the kagent namespace with its own
-    ServiceAccount; the bundled helm-controller executes the HelmRelease as
-    kagent-flux, renders the Agent, and kagent runs it."""
+    it against the lab Dex and writes the agent's HelmRelease of the Generic
+    chart 1.x (and the shared OCIRepository of the chart) into the kagent
+    namespace with its own ServiceAccount; the bundled helm-controller executes
+    the HelmRelease as kagent-flux, the chart renders the AgentTemplate labelled
+    for the platform Harness and the agent's RemoteMCPServer, the Harness admits
+    the template and Substrate boots it."""
     started = time.monotonic()
     token = STATE.dex_token or dex_password_grant(dex)
     session = MusterSession(MUSTER_BASE_URL, token, "ats-agent-manager").initialize()
@@ -411,16 +442,20 @@ def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, must
         # authenticated request; the tools appear once the SSO connection is up.
         wait_for("agent-manager's tools in muster's aggregated tool list", lambda: "x_agent-manager_create_agent" in session.aggregated_tools(), 120, interval=3)
         info = session.call_server_json("x_agent-manager_get_info")
-        logger.info("agent-manager get_info: version %s, chart %s, flux %s", info.get("version"), info.get("chart", {}).get("ociUrl"), info.get("flux"))
+        logger.info("agent-manager get_info: version %s, chart %s %s, harness %s, muster %s, apiVersions %s",
+                    info.get("version"), info.get("chart", {}).get("ociUrl"), info.get("chart", {}).get("semver"), info.get("harness"), info.get("muster"), info.get("apiVersions"))
         assert info.get("flux", {}).get("serviceAccountName") == KAGENT_FLUX_SA, info.get("flux")
-        assert info.get("chart", {}).get("ociUrl") == "oci://gsoci.azurecr.io/charts/giantswarm/agent", info.get("chart")
+        assert info.get("chart", {}).get("ociUrl") == AGENT_CHART_URL, info.get("chart")
+        assert info.get("chart", {}).get("semver") == AGENT_CHART_SEMVER, info.get("chart")
+        assert info.get("harness", {}).get("name") == HARNESS, info.get("harness")
         # Clean up an earlier attempt (a flaky rerun) so create_agent does not refuse a duplicate.
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", MANAGED_AGENT, namespace=KAGENT_NAMESPACE, timeout="2m")
         result = session.call_server_json("x_agent-manager_create_agent", {
-            "name": MANAGED_AGENT, "modelConfig": MODEL_CONFIG, "displayName": "ATS managed agent",
+            "name": MANAGED_AGENT, "modelConfig": MODEL_CONFIG, "displayName": MANAGED_AGENT_DISPLAY_NAME,
             "description": "created through agent-manager by the ATS smoke (lab only)",
-            "systemMessage": "You are the ATS managed agent.", "toolset": ["preset:none"]})
+            "systemMessage": "You are the ATS managed agent.", "toolset": TOOLSET})
         logger.info("create_agent returned: %s", str(result)[:400])
+        assert result.get("requestedBy") == DEX_USER, f"the write is not attributed to the Dex user: {result.get('requestedBy')!r}"
     except AssertionError:
         dump_auth(kube)
         dump_agents(kube)
@@ -429,23 +464,36 @@ def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, must
         oci = wait_for(f"OCIRepository {AGENT_CHART_REPOSITORY} in {KAGENT_NAMESPACE} Ready",
                        lambda: is_ready(kube.get("ocirepositories.source.toolkit.fluxcd.io", AGENT_CHART_REPOSITORY, namespace=KAGENT_NAMESPACE))
                        and kube.get("ocirepositories.source.toolkit.fluxcd.io", AGENT_CHART_REPOSITORY, namespace=KAGENT_NAMESPACE), 300)
-        assert oci["spec"]["url"] == "oci://gsoci.azurecr.io/charts/giantswarm/agent", oci["spec"]
+        assert oci["spec"]["url"] == AGENT_CHART_URL, oci["spec"]
+        assert oci["spec"].get("ref", {}).get("semver") == AGENT_CHART_SEMVER, f"the shared OCIRepository does not track the 1.x chart: {oci['spec'].get('ref')}"
         hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", MANAGED_AGENT, namespace=KAGENT_NAMESPACE)
         assert hr, f"agent-manager wrote no HelmRelease {MANAGED_AGENT}"
         assert hr["spec"].get("serviceAccountName") == KAGENT_FLUX_SA, f"the agent HelmRelease does not run as {KAGENT_FLUX_SA}: {hr['spec'].get('serviceAccountName')!r}"
         assert hr["spec"]["chartRef"]["name"] == AGENT_CHART_REPOSITORY, hr["spec"]["chartRef"]
+        values = hr["spec"].get("values", {})
+        assert values.get("toolset") == TOOLSET, values.get("toolset")
+        assert values.get("agent", {}).get("harness") == HARNESS, f"agent-manager composed no agent.harness for the platform Harness: {values.get('agent')}"
         wait_for(f"HelmRelease {MANAGED_AGENT} Ready", lambda: is_ready(kube.get("helmreleases.helm.toolkit.fluxcd.io", MANAGED_AGENT, namespace=KAGENT_NAMESPACE)), 600)
-        wait_for(f"Agent {MANAGED_AGENT} Ready", lambda: is_ready(kube.get("agents.kagent.dev", MANAGED_AGENT, namespace=KAGENT_NAMESPACE)), 600)
-        status = session.call_server_json("x_agent-manager_get_agent_status", {"name": MANAGED_AGENT})
-        assert status.get("verdict") in ("ready", "progressing"), status
+        template = wait_for_template_ready(kube, MANAGED_AGENT)
+        assert (template["metadata"].get("labels") or {}).get(HARNESS_LABEL) == HARNESS, template["metadata"].get("labels")
+        assert (template["metadata"].get("annotations") or {}).get("ui.giantswarm.io/display-name") == MANAGED_AGENT_DISPLAY_NAME, template["metadata"].get("annotations")
+        assert any(((t.get("mcp") or {}).get("server") or {}).get("name") == MANAGED_AGENT for t in template["spec"].get("tools", []) or []), \
+            f"the template does not bind the agent's RemoteMCPServer: {template['spec'].get('tools')}"
+        assert_remote_mcp_server(kube, MANAGED_AGENT)
+
+        def status_ready() -> Any:
+            status = session.call_server_json("x_agent-manager_get_agent_status", {"name": MANAGED_AGENT})
+            return status if status.get("verdict") == "ready" else False
+
+        status = wait_for("agent-manager get_agent_status verdict ready", status_ready, 120, interval=5)
         listed = session.call_server_json("x_agent-manager_list_agents")
         names = {a.get("name") for a in (listed.get("agents") if isinstance(listed, dict) else listed) or []}
         assert MANAGED_AGENT in names, f"list_agents does not list {MANAGED_AGENT}: {names}"
     except AssertionError:
         dump_agents(kube)
         raise
-    TIMINGS.record("agent-manager create_agent -> HelmRelease Ready -> Agent Ready", time.monotonic() - started)
-    logger.info("agent-manager wrote %s (as %s); status verdict %s", MANAGED_AGENT, KAGENT_FLUX_SA, status.get("verdict"))
+    TIMINGS.record(f"agent-manager create_agent -> HelmRelease Ready -> AgentTemplate Ready on Harness {HARNESS} + RemoteMCPServer Accepted", time.monotonic() - started)
+    logger.info("agent-manager wrote %s (as %s, requested by %s); status verdict %s: %s", MANAGED_AGENT, KAGENT_FLUX_SA, result.get("requestedBy"), status.get("verdict"), status.get("summary"))
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +547,11 @@ def test_cli_upgrade_is_refused(kube: Kube, helm: Helm, chart_archive: Path, smo
 @pytest.mark.smoke
 def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deployment: float) -> None:
     agent_hrs_before = [hr["metadata"]["name"] for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=KAGENT_NAMESPACE)]
+    templates_before = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.kagent.dev", namespace=KAGENT_NAMESPACE))
+    servers_before = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.kagent.dev", namespace=KAGENT_NAMESPACE))
+    assert MANAGED_AGENT in agent_hrs_before, f"the managed agent's HelmRelease was not there before the uninstall: {agent_hrs_before}"
+    assert templates_before == sorted((DECLARATIVE_AGENT, MANAGED_AGENT)), templates_before
+    assert servers_before == [MANAGED_AGENT], servers_before
     try:
         elapsed = helm.uninstall()
     except AssertionError:
@@ -519,23 +572,40 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     assert kube.get("secret", VALUES_SECRET, namespace=NAMESPACE) is None, "the values Secret survived"
     wait_for("the admission policy gone (it lingers a second in the apiserver cache)",
              lambda: kube.get("validatingadmissionpolicies.admissionregistration.k8s.io", SELF_POLICY) is None, 60, interval=2)
-    # The agents' HelmRelease objects went with the Flux CRDs (the CRD is gone,
-    # so is every object of its kind); their workloads stay behind, orphaned:
-    # the kagent namespace is kept (helm.sh/resource-policy: keep on the
-    # connectivity release's Namespace), the Agent CRs with it (the kagent CRDs
-    # are app-owned, Helm never deletes crds/), and the agents' Deployments run on.
-    if KAGENT_ON and AGENT_MANAGER_ON:
-        assert MANAGED_AGENT in agent_hrs_before, f"the managed agent's HelmRelease was not there before the uninstall: {agent_hrs_before}"
-        assert kube.get("namespace", KAGENT_NAMESPACE), "the kagent namespace went with the uninstall; it must be kept (the agents live there)"
-        orphans = {d["metadata"]["name"] for d in kube.items("deployments", namespace=KAGENT_NAMESPACE)}
-        assert {DECLARATIVE_AGENT, MANAGED_AGENT} <= orphans, f"the agents' Deployments did not survive the uninstall: {sorted(orphans)}"
-        assert kube.get("agents.kagent.dev", MANAGED_AGENT, namespace=KAGENT_NAMESPACE), "the managed agent's Agent CR did not survive"
-        logger.info("orphaned in %s after the uninstall: Deployments %s (their HelmReleases %s are gone with the CRDs)", KAGENT_NAMESPACE, sorted(orphans), agent_hrs_before)
+    # The keep policy of the kagent line: the ordered teardown uninstalled the
+    # kagent-crds release with the others, and its CRDs — templates carrying
+    # helm.sh/resource-policy: keep — survived it, so every AgentTemplate and
+    # RemoteMCPServer is still there in the kept kagent namespace (the agents'
+    # HelmRelease objects went with the Flux CRDs; the declarative template was
+    # never Helm's). Nothing else of the agent runtime survives: the Harness
+    # (the connectivity release's), the ModelConfig, the WorkerPool and its
+    # workers, the controller and its Postgres (the kagent release's) and
+    # Substrate's control plane and CRDs (ate.dev carries no keep policy) go.
+    # What stays in ate-system by design: the bootstrap hook's CA/JWT pools and
+    # the bundled Postgres's claim (a StatefulSet's PVC), neither Helm-owned.
+    assert KAGENT_CRDS <= set(crds), f"kagent CRDs gone with the kagent-crds release (keep policy missing): {sorted(KAGENT_CRDS - set(crds))}"
+    for name in sorted(KAGENT_CRDS):
+        annotations = kube.get("crd", name)["metadata"].get("annotations") or {}
+        assert annotations.get("helm.sh/resource-policy") == "keep", f"{name} carries no helm.sh/resource-policy: keep: {annotations}"
+    assert kube.get("namespace", KAGENT_NAMESPACE), "the kagent namespace went with the uninstall; it must be kept (the agents live there)"
+    templates = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.kagent.dev", namespace=KAGENT_NAMESPACE))
+    assert templates == templates_before, f"AgentTemplates after the uninstall {templates} != before {templates_before}"
+    servers = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.kagent.dev", namespace=KAGENT_NAMESPACE))
+    assert servers == servers_before, f"RemoteMCPServers after the uninstall {servers} != before {servers_before}"
+    assert kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE) is None, "the platform Harness survived the uninstall of the connectivity release"
+    assert not kube.items("modelconfigs.kagent.dev", namespace=KAGENT_NAMESPACE), "ModelConfigs survived the uninstall of the kagent release"
+    wait_for("Substrate's CRDs gone with the substrate-crds release (no keep policy on ate.dev)",
+             lambda: not [n for n in kube.crd_names() if n.endswith(".ate.dev")], 120, interval=3)
+    wait_for(f"no workload left in {KAGENT_NAMESPACE} (the controller, the UI, its Postgres, the WorkerPool's workers)",
+             lambda: not (kube.items("deployments", namespace=KAGENT_NAMESPACE) or kube.items("statefulsets", namespace=KAGENT_NAMESPACE) or kube.items("pods", namespace=KAGENT_NAMESPACE)), 180, interval=3)
+    wait_for(f"Substrate's control plane gone from {ATE_NAMESPACE}", lambda: not kube.items("pods", namespace=ATE_NAMESPACE), 180, interval=3)
+    logger.info("kept in %s after the uninstall: CRDs %s, AgentTemplates %s, RemoteMCPServers %s (their HelmReleases %s are gone with the Flux CRDs); nothing else of the runtime",
+                KAGENT_NAMESPACE, sorted(KAGENT_CRDS), templates, servers, agent_hrs_before)
     assert elapsed < UNINSTALL_BUDGET_S, f"helm uninstall --wait took {elapsed:.0f}s (budget {UNINSTALL_BUDGET_S}s)"
     logger.info("uninstall clean in %.0f s: no Flux CRD, operator CRDs kept, no controller, no Job, no release", elapsed)
-    # Leave the next scenario a cluster without the orphans (its own kagent
-    # runs there); the namespace's termination completes in the background.
-    if KAGENT_ON:
-        kube.delete("namespace", KAGENT_NAMESPACE, wait=False)
+    # Leave the next scenario a cluster without the kept templates (its own
+    # kagent runs there; the kept CRDs it adopts); the namespace's termination
+    # completes in the background.
+    kube.delete("namespace", KAGENT_NAMESPACE, wait=False)
     for phase, seconds in TIMINGS.entries.items():
         logger.info("TIMING %-90s %6.0f s", phase, seconds)
