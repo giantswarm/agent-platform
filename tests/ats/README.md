@@ -117,19 +117,20 @@ Flux deletes them all at once when the meta HelmRelease goes and `substrate`
 then races `substrate-crds` (giantswarm/agent-platform#385).
 
 **Measured on CI** (`execute-chart-tests` on the `large` class, cold image
-pulls; each test logs `TIMING <phase>`):
+pulls, [CircleCI job 6033](https://circleci.com/gh/giantswarm/agent-platform/6033)
+of PR #380; each test logs `TIMING <phase>`):
 
 | Phase | Seconds |
 |---|---|
-| kind create (the job) | 37 |
-| `helm install --wait` (engine, muster + OAuth, dicebear, connectivity, kagent + CRDs, Substrate + CRDs, agent-manager, self on) | 198 |
+| kind create (the job) | 36 |
+| `helm install --wait` (engine, muster + OAuth, dicebear, connectivity, kagent + CRDs, Substrate + CRDs, agent-manager, self on) | 220 |
 | Substrate ready after the install returned (ate-system, the WorkerPool's worker, the Harness) | 0 |
-| declarative `AgentTemplate` Ready on the Harness | 10 |
-| agent-manager `create_agent` → HelmRelease Ready → `AgentTemplate` Ready + `RemoteMCPServer` Accepted | 21 |
-| `helm uninstall --wait` (the ordered teardown; budget `UNINSTALL_BUDGET_S` = 120 s) | 33 |
-| own-Flux: platform HelmReleases Ready through the cluster's Flux | 375 |
-| own-Flux: agent through the cluster's Flux (HelmRelease, template Ready, server Accepted) | TBD |
-| the whole `execute-chart-tests` job | TBD |
+| declarative `AgentTemplate` Ready on the Harness | 20 |
+| agent-manager `create_agent` → HelmRelease Ready → `AgentTemplate` Ready + `RemoteMCPServer` Accepted | 16 |
+| `helm uninstall --wait` (the ordered teardown; budget `UNINSTALL_BUDGET_S` = 120 s) | 31 |
+| own-Flux: platform HelmReleases Ready through the cluster's Flux | 289 |
+| own-Flux: agent through the cluster's Flux (HelmRelease, template Ready, server Accepted) | 36 |
+| the whole `execute-chart-tests` job | 16:55 min |
 
 ## Render assertions (no cluster)
 

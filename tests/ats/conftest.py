@@ -162,7 +162,7 @@ UNINSTALL_TIMEOUT = "5m"
 # kagent, Substrate and agent-manager on the teardown uninstalls seven more
 # releases in dependency order (managers, kagent, substrate, connectivity, the
 # two CRD charts) and their pods, PVCs and the WorkerPool's workers go with them
-# — measured 33 s on CI (tests/ats/README.md); the budget is twice that, rounded up.
+# — measured 31–33 s on CI (tests/ats/README.md); the budget is about four times that.
 UNINSTALL_BUDGET_S = 120
 # Self-management in the smoke: the chart's own OCIRepository follows the
 # in-cluster registry the candidate was pushed to, at the candidate's exact
