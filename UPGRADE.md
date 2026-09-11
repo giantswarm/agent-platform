@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the agentgateway data plane runs two replicas behind a `PodDisruptionBudget`, spread across nodes)
+
+`gateway.parameters` gains `replicas` (`2`), `podDisruptionBudget` (`enabled: true`, `maxUnavailable: 1`) and `spread` (`enabled: true`, `topologyKeys: [kubernetes.io/hostname]`, `maxSkew: 1`, `whenUnsatisfiable: ScheduleAnyway`), rendered into the `AgentgatewayParameters` the agentgateway controller reconciles the data-plane `Deployment` from (`templates/agentgateway/agentgatewayparameters.yaml`). The meta chart declares the same keys at the same defaults and forwards `agentgateway.controller.replicaCount: 2` to the controller release.
+
+### Operator action
+
+- **None** for the default shape. Every installation with the agentgateway component on rolls the data plane once (the second pod, the `PodDisruptionBudget` and the spread constraint arrive in one Deployment revision; the default `RollingUpdate` surges first) and the controller once (a second pod behind the chart's leader election). Budget two more pods of the data plane's and the controller's size on the node pool.
+- Two nodes are not required: `whenUnsatisfiable: ScheduleAnyway` lets a single-node cluster schedule both pods on the one node. `DoNotSchedule` pins the spread; the second pod then stays Pending on one node.
+- A multi-zone node pool spreads across zones too with a second key: `gateway.parameters.spread.topologyKeys: [kubernetes.io/hostname, topology.kubernetes.io/zone]`.
+- The previous shape is `gateway.parameters.replicas: 1`, `gateway.parameters.podDisruptionBudget.enabled: false`, `gateway.parameters.spread.enabled: false` (and `agentgateway.controller.replicaCount: 1` through the meta chart).
+- The render refuses `podDisruptionBudget` with both `minAvailable` and `maxUnavailable`, an integer `minAvailable` at or above `replicas`, and `spread.enabled` with an empty `topologyKeys`.
+
 ## \<current\> → \<next\> (kagent follows the wrapper's 0.x line)
 
 `components.kagent.versionRange` is `>=0.2.0 <1.0.0` (was `0.2.x`): the floor stays at the flattened chart the wiring needs, the ceiling moves to the next major, as for the other 0.x components. The `giantswarm/kagent` wrapper released 0.3.0 and 0.3.1 on 2026-09-09 from CI-only changes — a `feat(ci)` title is a minor bump to git-cliff — with a chart identical to 0.2.2 in templates, values and dependencies; the minor-holding range excluded them, and would have excluded every following wrapper release, the next fix included.

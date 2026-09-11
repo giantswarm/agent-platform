@@ -16,6 +16,27 @@ so a set global endpoint wins over the defaults without duplicating env names. *
 {{- $env = append $env . }}
 {{- end }}
 {{- end }}
+{{- /* Availability guards. The PodDisruptionBudget keys other than `enabled`
+are the PDB spec as written. Kubernetes rejects a spec with both minAvailable
+and maxUnavailable, and an integer minAvailable at or above the replica count
+lets no pod be evicted — every node drain on the cluster hangs on the data
+plane. Both fail the render here instead of the deployer or the drain. */ -}}
+{{- $replicas := .Values.gateway.parameters.replicas | int }}
+{{- $pdb := .Values.gateway.parameters.podDisruptionBudget }}
+{{- if $pdb.enabled }}
+{{- $min := $pdb.minAvailable }}
+{{- if and (not (kindIs "invalid" $min)) (not (kindIs "invalid" $pdb.maxUnavailable)) }}
+{{- fail "gateway.parameters.podDisruptionBudget sets both minAvailable and maxUnavailable; a PodDisruptionBudget takes one of them" }}
+{{- end }}
+{{- if and (not (kindIs "invalid" $min)) (not (kindIs "string" $min)) (ge ($min | int) $replicas) }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.minAvailable=%v is not below gateway.parameters.replicas=%d; the budget would allow no eviction and every node drain would hang on the data plane" $min $replicas) }}
+{{- end }}
+{{- end }}
+{{- with .Values.gateway.parameters.spread }}
+{{- if and .enabled (not .topologyKeys) }}
+{{- fail "gateway.parameters.spread.enabled needs at least one gateway.parameters.spread.topologyKeys entry (kubernetes.io/hostname spreads across nodes); set spread.enabled=false to run the replicas unspread" }}
+{{- end }}
+{{- end }}
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters
 metadata:
@@ -51,13 +72,36 @@ spec:
       {{- else }}
       type: {{ .Values.gateway.parameters.serviceType }}
       {{- end }}
+  {{- if $pdb.enabled }}
+  {{- /* The deployer creates the PDB and sets its selector to the data-plane
+  pods; only the spec is ours. */}}
+  podDisruptionBudget:
+    spec:
+      {{- toYaml (omit $pdb "enabled") | nindent 6 }}
+  {{- end }}
   deployment:
     spec:
+      replicas: {{ $replicas }}
       template:
         spec:
           automountServiceAccountToken: true
           securityContext:
             {{- toYaml .Values.gateway.parameters.podSecurityContext | nindent 12 }}
+          {{- with .Values.gateway.parameters.spread }}
+          {{- if .enabled }}
+          {{- /* One constraint per topology key, all selecting the data-plane
+          pods by the label the deployer stamps from the Gateway's name. */}}
+          topologySpreadConstraints:
+            {{- range .topologyKeys }}
+            - maxSkew: {{ $.Values.gateway.parameters.spread.maxSkew | int }}
+              topologyKey: {{ . }}
+              whenUnsatisfiable: {{ $.Values.gateway.parameters.spread.whenUnsatisfiable }}
+              labelSelector:
+                matchLabels:
+                  gateway.networking.k8s.io/gateway-name: {{ $.Values.gateway.name }}
+            {{- end }}
+          {{- end }}
+          {{- end }}
           {{- with .Values.gateway.parameters.dataPlaneVolumes }}
           volumes:
             {{- toYaml . | nindent 12 }}

@@ -117,6 +117,28 @@ On the installation, after the cutover:
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
 
+## Data-plane availability
+
+Every MCP call and, with LLM routing on, every model call crosses the
+agentgateway data plane, a `Deployment` the agentgateway controller reconciles
+from the `Gateway`. This chart shapes it through `AgentgatewayParameters`
+(`gateway.parameters`):
+
+- `replicas: 2` — two pods survive a node reboot or drain.
+- `podDisruptionBudget` (`enabled: true`, `maxUnavailable: 1`) — a drain evicts
+  one pod at a time. The keys other than `enabled` are the PDB spec as written;
+  the render refuses both `minAvailable` and `maxUnavailable` together, and an
+  integer `minAvailable` at or above `replicas` (it would hang every drain).
+- `spread` — one `topologySpreadConstraint` per `topologyKeys` entry
+  (`kubernetes.io/hostname`; add `topology.kubernetes.io/zone` on a multi-zone
+  pool), `whenUnsatisfiable: ScheduleAnyway` so a single-node lab still
+  schedules both pods.
+
+The controller's own shutdown window (10 s before the listener closes, 60 s to
+drain) covers a pod's exit. The meta chart forwards
+`agentgateway.controller.replicaCount: 2` so a data-plane pod that starts on a
+rebooted node always finds an xDS server.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -193,6 +215,13 @@ On the installation, after the cutover:
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
+| gateway.parameters.replicas | int | `2` |  |
+| gateway.parameters.podDisruptionBudget.enabled | bool | `true` |  |
+| gateway.parameters.podDisruptionBudget.maxUnavailable | int | `1` |  |
+| gateway.parameters.spread.enabled | bool | `true` |  |
+| gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
+| gateway.parameters.spread.maxSkew | int | `1` |  |
+| gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |

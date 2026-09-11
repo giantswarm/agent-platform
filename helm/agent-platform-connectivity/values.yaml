@@ -220,6 +220,39 @@ gateway:
         ephemeral-storage: 50Mi
       limits:
         ephemeral-storage: 512Mi
+    # === Availability ===
+    # Every MCP call and, with llmRouting on, every model call of the platform
+    # crosses this Deployment: one pod is one node reboot away from an outage
+    # for every agent. The controller reconciles the Deployment from the
+    # Gateway; the three knobs below reach it through AgentgatewayParameters
+    # (deployment.spec and podDisruptionBudget, strategic merge). The
+    # controller's own shutdown window (10 s before the listener closes so the
+    # endpoint is gone first, 60 s to drain what is in flight) covers the
+    # pod's exit on a drain or a rollout.
+    #
+    # Data-plane pods. Two survive a node reboot or drain; the Deployment's
+    # default RollingUpdate surges first, so a rollout keeps one serving.
+    replicas: 2
+    # PodDisruptionBudget on the data-plane pods: a drain evicts one pod at a
+    # time, never both. Keys other than `enabled` are the PDB spec
+    # (maxUnavailable, minAvailable, unhealthyPodEvictionPolicy). The default
+    # is maxUnavailable rather than minAvailable so a lone replica is still
+    # evictable; a minAvailable equal to or above replicas would block every
+    # drain, and the render refuses it.
+    podDisruptionBudget:  # @schema additionalProperties: true
+      enabled: true
+      maxUnavailable: 1  # @schema type: [integer, string]
+    # Spread the replicas across nodes: one topologySpreadConstraint per key,
+    # selecting the data-plane pods by gateway.name. Add
+    # topology.kubernetes.io/zone on a multi-zone node pool. ScheduleAnyway:
+    # two pods on one node beat one pod, and a single-node lab still schedules
+    # both.
+    spread:
+      enabled: true
+      topologyKeys:  # @schema minItems: 1; item: string
+        - kubernetes.io/hostname
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway  # @schema enum: [ScheduleAnyway, DoNotSchedule]
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
