@@ -786,7 +786,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # tag fails the render. The meta chart forwards the line's pinned digest
     # (kagent.harness.image, moved with kagent.tag on a re-pin); this default is
     # the same digest for a standalone render and is overridden by the forward.
-    image: ghcr.io/giantswarm/kagent/golang-adk@sha256:7db42765cc401f4e356f876cf76a25de39c5109e56fabc9fe45ec0bf7e2d3137
+    image: ghcr.io/giantswarm/kagent/golang-adk@sha256:a2d23f5eb9c01e1903459a6e742f7d4aaa5e950d7e9aa6f07f8982761be0163a
     # Where Substrate keeps the actors' snapshots (the Harness's
     # snapshotPolicy.location), an object-store URL s3://<bucket>/<prefix>.
     # REQUIRED with kagent on: the meta chart enforces it
