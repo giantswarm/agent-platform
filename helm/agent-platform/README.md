@@ -241,6 +241,12 @@ README.
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
+| gateway.parameters.replicas | int | `2` |  |
+| gateway.parameters.podDisruptionBudget.enabled | bool | `true` |  |
+| gateway.parameters.spread.enabled | bool | `true` |  |
+| gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
+| gateway.parameters.spread.maxSkew | int | `1` |  |
+| gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -618,6 +624,7 @@ README.
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
+| agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |

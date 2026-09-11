@@ -10,6 +10,10 @@ both fail only at reconcile time, in the child HelmRelease:
   * forwarding `enabled`, which is this umbrella's toggle and not one of the
     chart's keys. The chart validates values with additionalProperties: false.
 
+It also holds the controller at two or more replicas (controller.replicaCount):
+the data plane fetches its config over xDS, and a data-plane pod rescheduled
+onto a rebooted node waits for a controller to answer.
+
 Reads a rendered meta-package manifest. Deliberately stdlib-only: the CI image
 has no PyYAML.
 """
@@ -17,6 +21,8 @@ has no PyYAML.
 import sys
 
 VALUES_INDENT = "    "
+# One YAML nesting step inside the forwarded block (`toYaml | nindent 4`).
+NEST = "  "
 
 
 def helm_release(manifest: str, name: str) -> list[str]:
@@ -28,7 +34,7 @@ def helm_release(manifest: str, name: str) -> list[str]:
 
 
 def forwarded_values(lines: list[str]) -> dict[str, list[str]]:
-    """The spec.values block, as top-level key -> its nested lines."""
+    """The spec.values block, as top-level key -> its nested lines, indentation kept."""
     values: dict[str, list[str]] = {}
     key = None
     for line in lines[lines.index("  values:") + 1 :]:
@@ -38,8 +44,23 @@ def forwarded_values(lines: list[str]) -> dict[str, list[str]]:
             key = line.strip().rstrip(":").split(":")[0]
             values[key] = []
         elif key:
-            values[key].append(line.strip())
+            values[key].append(line)
     return values
+
+
+def direct_child(block: list[str], name: str) -> str | None:
+    """The scalar value of a DIRECT child of one forwarded top-level key.
+
+    Anchored on that child's own indentation, so a same-named key nested
+    deeper -- a `replicaCount` under `controller.horizontalPodAutoscaler`,
+    say -- cannot answer for it. Quotes are stripped: a YAML `"2"` is the
+    same replica count as a bare 2.
+    """
+    prefix = VALUES_INDENT + NEST + name + ":"
+    for line in block:
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip().strip("\"'")
+    return None
 
 
 def main(path: str) -> int:
@@ -49,8 +70,16 @@ def main(path: str) -> int:
         sys.exit("FAIL: agentgateway values still nested under an agentgateway key; the 2.x chart is flat")
     if "enabled" in values:
         sys.exit("FAIL: `enabled` forwarded to the agentgateway chart, whose schema is additionalProperties:false")
-    if "repository: giantswarm/agentgateway-controller" not in values.get("controller", []):
+    controller = values.get("controller", [])
+    if "repository: giantswarm/agentgateway-controller" not in [l.strip() for l in controller]:
         sys.exit("FAIL: agentgateway values lost controller.image.repository")
+    replicas = direct_child(controller, "replicaCount")
+    if replicas is None or not replicas.isdigit() or int(replicas) < 2:
+        sys.exit(
+            "FAIL: controller.replicaCount is not forwarded at 2 or more (got "
+            f"{replicas if replicas is not None else 'nothing'}); a lone controller pod leaves a data-plane pod that "
+            "starts on a rebooted node without an xDS server until the controller is rescheduled"
+        )
     return 0
 
 

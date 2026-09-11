@@ -363,6 +363,15 @@
                         "name": {
                             "type": "string"
                         },
+                        "podDisruptionBudget": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                }
+                            }
+                        },
                         "podSecurityContext": {
                             "type": "object",
                             "additionalProperties": false,
@@ -381,8 +390,39 @@
                                 }
                             }
                         },
+                        "replicas": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
                         "serviceType": {
                             "type": "string"
+                        },
+                        "spread": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "maxSkew": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "topologyKeys": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "minItems": 1
+                                },
+                                "whenUnsatisfiable": {
+                                    "type": "string",
+                                    "enum": [
+                                        "ScheduleAnyway",
+                                        "DoNotSchedule"
+                                    ]
+                                }
+                            }
                         }
                     }
                 }
