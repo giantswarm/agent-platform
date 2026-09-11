@@ -14,7 +14,11 @@ the fleet, the kind quick start or the sibling slices rely on:
   gitops.serviceAccountName is set, the roster says `flux: enabled: false`;
 - engine ON (the default): exactly the eleven CRDs, the operator objects, the
   FluxInstance (two controllers, multitenant), the identity, the hook
-  ServiceAccount at weight -10, the two teardown Jobs at weights 0 and 5, the
+  ServiceAccount at weight -10, the two teardown Jobs at weights 0 and 5 — the
+  first a script in the helm image that deletes the platform HelmReleases in
+  waves of reverse dependency order (every rendered dependsOn edge points from
+  an earlier wave to a later one, so a CRD chart's release goes after its CR
+  consumers), the second one kubectl command deleting the FluxInstance — the
   self-management hooks at -6/-5 with their identity <release>-self (they
   render whenever the engine is on), the kagent namespace hook at -8 (ci-values
   turn kagent on) — and every platform HelmRelease naming agent-platform-flux.
@@ -290,9 +294,26 @@ def main(chart: str) -> int:
     if events != expected_events:
         fail(f"hook events/weights differ:\n  got      {events}\n  expected {expected_events}")
     hr_names = sorted(n for k, _, n, _ in on if k == "HelmRelease")
-    rel = job_args(one(on, "Job", f"{RELEASE}-teardown-releases"))
-    if rel[:7] != ["delete", "helmreleases.helm.toolkit.fluxcd.io", "--namespace", NAMESPACE, "--ignore-not-found", "--wait", "--timeout=5m"] or sorted(rel[7:]) != hr_names:
-        fail(f"teardown-releases Job does not delete exactly the rendered HelmReleases by name: {rel}")
+    # teardown-releases: a script, one `kubectl delete --wait` per wave; the waves
+    # are the reverse of the rendered dependsOn graph — a release is deleted only
+    # after every release that dependsOn it (a CRD chart after its CR consumers:
+    # Helm cannot delete an object whose kind is gone, and helm-controller would
+    # retry that uninstall until the hook times out).
+    rel_job = one(on, "Job", f"{RELEASE}-teardown-releases")
+    waves = [line.split()[8:] for line in rel_job.splitlines()
+             if line.strip().startswith(f"kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace {NAMESPACE} --ignore-not-found --wait --timeout=5m ")]
+    if not waves or sorted(n for w in waves for n in w) != hr_names or any(not w for w in waves):
+        fail(f"teardown-releases Job does not delete exactly the rendered HelmReleases by name, in waves: {waves} vs {hr_names}")
+    wave_of = {n: i for i, w in enumerate(waves) for n in w}
+    depends_on = {n: re.findall(r"^  dependsOn:\n((?:    - name: .*\n)+)", d + "\n", re.M) for k, _, n, d in on if k == "HelmRelease"}
+    edges = [(n, dep) for n, blocks in depends_on.items() for block in blocks for dep in re.findall(r"^    - name: (\S+)$", block, re.M)]
+    if not edges:
+        fail("no dependsOn edge among the rendered HelmReleases; the wave assertion has nothing to check")
+    for dependent, dependency in edges:
+        if dependency not in wave_of:
+            fail(f"HelmRelease {dependent} dependsOn {dependency}, which the teardown does not delete")
+        if wave_of[dependent] >= wave_of[dependency]:
+            fail(f"teardown order: {dependent} (wave {wave_of[dependent] + 1}) dependsOn {dependency} (wave {wave_of[dependency] + 1}); the dependent must go first")
     eng = job_args(one(on, "Job", f"{RELEASE}-teardown-engine"))
     if eng != ["delete", "fluxinstances.fluxcd.controlplane.io", "--namespace", NAMESPACE, "flux", "--ignore-not-found", "--wait", "--timeout=5m"]:
         fail(f"teardown-engine Job does not delete the FluxInstance flux and wait: {eng}")
@@ -300,20 +321,20 @@ def main(chart: str) -> int:
     if not hooks_image:
         fail("gitops.hooks.image is not a registry/repository/tag block (the Renovate regex needs the three lines)")
     image = "/".join(hooks_image.group(1, 2)) + ":" + hooks_image.group(3)
-    for job in (f"{RELEASE}-teardown-releases", f"{RELEASE}-teardown-engine"):
-        d = one(on, "Job", job)
-        for needle in (f'image: "{image}"', "restartPolicy: Never", "runAsNonRoot: true", "readOnlyRootFilesystem: true", "allowPrivilegeEscalation: false", "- ALL", "type: RuntimeDefault", f"serviceAccountName: {RELEASE}-hooks"):
-            if needle not in d:
-                fail(f"hook Job {job} lacks {needle!r}")
-        if "command:" in d:
-            fail(f"hook Job {job} overrides the image entrypoint; hooks pass kubectl arguments only")
-    print(f"ok: hooks — SA/CRB at -10, kagent namespace hook at -8, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases by name), teardown-engine at 5, restricted pods running {image}")
-
-    # --- the kagent namespace hook (giantswarm/agent-platform#306)
     helm_image = re.search(r"^    helmImage:\n      registry: (\S+)\n      repository: (\S+)\n      tag: (\S+)$", values, re.M)
     if not helm_image:
         fail("gitops.hooks.helmImage is not a registry/repository/tag block")
     helm_ref = "/".join(helm_image.group(1, 2)) + ":" + helm_image.group(3)
+    for job, ref, scripted in ((f"{RELEASE}-teardown-releases", helm_ref, True), (f"{RELEASE}-teardown-engine", image, False)):
+        d = one(on, "Job", job)
+        for needle in (f'image: "{ref}"', "restartPolicy: Never", "runAsNonRoot: true", "readOnlyRootFilesystem: true", "allowPrivilegeEscalation: false", "- ALL", "type: RuntimeDefault", f"serviceAccountName: {RELEASE}-hooks"):
+            if needle not in d:
+                fail(f"hook Job {job} lacks {needle!r}")
+        if scripted != ('command: ["/bin/sh", "-eu", "-c"]' in d):
+            fail(f"hook Job {job}: {'a script in the helm image' if scripted else 'one kubectl command, no entrypoint override'} expected")
+    print(f"ok: hooks — SA/CRB at -10, kagent namespace hook at -8, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases in {len(waves)} waves, reverse of {len(edges)} dependsOn edges: {' > '.join(','.join(w) for w in waves)}), teardown-engine at 5, restricted pods running {image} / {helm_ref}")
+
+    # --- the kagent namespace hook (giantswarm/agent-platform#306)
     ns_job = one(on, "Job", f"{RELEASE}-kagent-namespace")
     for needle in (f'image: "{helm_ref}"', 'command: ["/bin/sh", "-eu", "-c"]', f"serviceAccountName: {RELEASE}-hooks", 'ns="kagent"',
                    'kubectl create namespace "$ns"', 'kubectl wait --for=delete "namespace/$ns"', "Terminating)", "left as it is",

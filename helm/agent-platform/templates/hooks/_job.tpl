@@ -16,7 +16,8 @@ self-management hooks — as the regular ServiceAccount <release>-self
        pre-delete — and pre-upgrade when self-management is off, the hand-back)
    -5  suspend the chart's own HelmRelease and drop the values Secret
        (hooks/self.yaml; same events as -6)
-    0  delete the platform HelmReleases and wait (teardown.yaml, pre-delete);
+    0  delete the platform HelmReleases in reverse dependency order and wait
+       per wave (teardown.yaml, pre-delete; a script in the helm image);
        write the user-supplied values into the values Secret and start the
        resumer (hooks/self.yaml, post-install + post-upgrade)
     5  delete the FluxInstance and wait (teardown.yaml, pre-delete)

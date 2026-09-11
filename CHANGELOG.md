@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The ordered teardown uninstalls the platform releases in reverse dependency order.** The pre-delete hook deleted every platform HelmRelease at once, so helm-controller uninstalled them concurrently and a CRD chart (`substrate-crds`, `kagent-crds`) could go before the releases whose objects are its CRs — Helm then fails the consumer's uninstall (`failed to delete release: substrate`: its `SandboxConfig` kind was gone), helm-controller retries it forever and the hook waits out its timeout, failing `helm uninstall`. Found by the ATS smoke the moment it ran kagent and Substrate (giantswarm/agent-platform#343). The hook now deletes in waves computed from the roster's `dependsOn` (`agent-platform.teardownWaves`: each wave's releases concurrently, the next wave once the last is gone), as a script in `gitops.hooks.helmImage`; `make verify-engine` asserts the wave order against the rendered `dependsOn`.
+
 ### Changed
 
 - **The ATS smoke runs the agent path on kagent API v2** (giantswarm/agent-platform#343): `tests/ats/values-kagent.yaml` turns kagent and agent-manager back on; Agent Substrate comes from the chart under test (one gVisor worker, the bundled RustFS as the snapshot store, the bundled Postgres at CI requests) on the CI job's kind cluster with the `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` gates (`.ats/kind-config.yaml`, the `large` class). The assertions are `kagent.dev/v1alpha3`: a declarative `AgentTemplate` reaches Ready on the platform Harness (`status.harnesses[]`), agent-manager's `create_agent` through muster as a Dex user ends in a Ready HelmRelease, a Ready `AgentTemplate` and an Accepted per-agent `RemoteMCPServer` carrying the toolset header, the own-Flux agent likewise; the ordered teardown uninstalls the `kagent-crds` release and asserts the CRDs and the templates survive (the line's `keep` policy) and nothing else does. The `KAGENT_ON`/`AGENT_MANAGER_ON` skips are gone. `tests/ats/README.md` documents the cluster shape, the sizing and the measured timings.
