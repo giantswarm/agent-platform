@@ -42,12 +42,12 @@ WIRING = {
     # on by default); the guards need a backend endpoint / the kagent runtime.
     "model-manager": (
         "agent-platform-connectivity-model-manager-egress",
-        ["--set", "model-manager.ollama.endpoint=http://10.0.0.1:11434", "--set", "components.kagent.enabled=true", "--set", "model-manager.oauth.enabled=false"],
+        ["--set", "model-manager.ollama.endpoint=http://10.0.0.1:11434", "--set", "components.kagent.enabled=true", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "model-manager.oauth.enabled=false"],
         [],
     ),
     "agent-manager": (
         "agent-platform-connectivity-agent-manager-egress",
-        ["--set", "components.kagent.enabled=true", "--set", "agent-manager.oauth.enabled=false"],
+        ["--set", "components.kagent.enabled=true", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "agent-manager.oauth.enabled=false"],
         [],
     ),
 }

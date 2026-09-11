@@ -22,6 +22,9 @@
 # prereleases by scheme, vX.Y.Z-gs.N, so the pin carries the suffix).
 # agent-manager and backstage pin the first releases of their kagent API v2
 # lines; the connectivity chart the release of this chart is published with.
+# substrate and substrate-crds pin the SAME build of the Substrate line — the
+# version kagent.substrateWorkerPool.workerImage names in values.yaml (the
+# line's first release, vX.Y.Z-gs.N, replaces the dev build once it is cut).
 # =============================================================================
 
 gitops:
@@ -35,6 +38,8 @@ components:
   agent-platform-mcps:         { versionRange: "0.9.0" }
   kagent:                        { versionRange: "0.11.0-gs.1" }
   kagent-crds:                   { versionRange: "0.11.0-gs.1" }
+  substrate:                     { versionRange: "0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627" }
+  substrate-crds:                { versionRange: "0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627" }
   klaus-gateway:                 { versionRange: "0.39.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }

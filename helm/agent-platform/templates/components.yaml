@@ -79,6 +79,11 @@ knowledge:
       new key, closed here without a follow-up release. A dependsOn reference
       to a switch is filtered like any other (it names no release, so keep
       switches out of dependsOn lists).
+  targetNamespace — the namespace this component's release installs into, when
+      it is not the platform's (gitops.targetNamespace, else the release
+      namespace). For a chart whose objects are fixed to one namespace by name
+      (the substrate chart's Roles and Service names are upstream's canonical
+      ate-system render): helm-controller creates it (install.createNamespace).
   dependsOn     — Flux dependsOn ordering (CRD-owning component before its CR
       consumers). References that name a component which is toggled
       off are dropped at render time (see the componentEnabled helper) so an
@@ -104,6 +109,7 @@ knowledge:
 */ -}}
 {{- include "agent-platform.validateLegacyToggles" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
+{{- include "agent-platform.validateSubstrate" . -}}
 {{- include "agent-platform.validateInlineSecrets" . -}}
 {{- include "agent-platform.validatePinnedLoginConnector" . -}}
 {{- include "agent-platform.validateToolsetPresets" . -}}
@@ -217,7 +223,7 @@ metadata:
 spec:
   interval: {{ $g.interval }}
   releaseName: {{ $name }}
-  targetNamespace: {{ $targetNs }}
+  targetNamespace: {{ $c.targetNamespace | default $targetNs }}
   {{- with $sa }}
   serviceAccountName: {{ . }}
   {{- end }}

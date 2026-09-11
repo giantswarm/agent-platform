@@ -965,3 +965,127 @@ Usage: include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" $re
 {{ $.backendRefs | indent 4 }}
 {{- end }}
 {{- end -}}
+
+{{/*
+=== Agent Substrate ===
+
+Substrate's namespaces are fixed: the substrate chart's Roles, Service names and
+the kagent controller's ate-api / atenet-router endpoints name ate-system
+(upstream's canonical render), and the chart renders the
+podcertificate-controller into podcertificate-controller-system. The meta chart
+targets its two Substrate releases at the same names.
+*/}}
+{{- define "agent-platform.substrate.namespace" -}}ate-system{{- end -}}
+{{- define "agent-platform.substrate.podcertNamespace" -}}podcertificate-controller-system{{- end -}}
+
+{{/*
+Truthy when the platform runs Agent Substrate: the substrate component is on
+(absent from the roster = off, a chart that predates it renders none of this).
+*/}}
+{{- define "agent-platform.substrate.enabled" -}}
+{{- include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "substrate") -}}
+{{- end -}}
+
+{{/*
+Where Substrate's control-plane database lives: "bundled" (the substrate chart's
+StatefulSet — substrate.postgres.enabled true, or `auto` while neither of the
+other two applies), "external" (an explicit substrate.postgres.connectionString),
+"cnpg" (the platform's CNPG Cluster, through postgres.databases.substrate and its
+derived Secret), or "" for none — the meta chart refuses the last and resolves
+`auto` to the boolean the substrate chart takes; this chart's guard says the
+same on its own render.
+*/}}
+{{- define "agent-platform.substrate.postgresMode" -}}
+{{- $sub := .Values.substrate | default dict -}}
+{{- $bundled := dig "postgres" "enabled" "auto" $sub | toString -}}
+{{- $conn := dig "postgres" "connectionString" "" $sub -}}
+{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
+{{- if not (has $bundled (list "auto" "true" "false")) -}}
+{{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
+{{- end -}}
+{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg)) -}}bundled
+{{- else if $conn -}}external
+{{- else if $cnpg -}}cnpg
+{{- end -}}
+{{- end -}}
+
+{{/*
+The derived CNPG connection Secret of postgres.databases.substrate, the DSN the
+meta chart hands ate-api-server: <postgres.clusterName>-substrate-app.
+*/}}
+{{- define "agent-platform.substrate.databaseSecretName" -}}
+{{- printf "%s-substrate-app" .Values.postgres.clusterName -}}
+{{- end -}}
+
+{{/*
+postgres.databases resolved: a JSON array of the enabled entries whose
+component (if any) is on, while the platform Cluster renders — each with key,
+name (spec.name; default the key with - as _), owner (the application role),
+cluster, namespace (postgres.namespace), crName (<cluster>-<key>),
+reclaimPolicy, extensions, secretNamespaces (postgres.namespace first, then the
+entry's, deduplicated). Empty array otherwise. Consumers: the Database CRs, the
+derived-Secret hook, the guards, the policies that open Postgres to a consumer.
+Usage: include "agent-platform.postgres.databases" . | fromJsonArray
+*/}}
+{{- define "agent-platform.postgres.databases" -}}
+{{- $out := list -}}
+{{- if .Values.postgres.enabled -}}
+{{- $pg := .Values.postgres -}}
+{{- $ns := $pg.namespace | default .Release.Namespace -}}
+{{- range $key, $db := ($pg.databases | default dict) -}}
+{{- if not (kindIs "map" $db) -}}
+{{- fail (printf "postgres.databases.%s must be a map (enabled, name, component, extensions, reclaimPolicy, secretNamespaces)" $key) -}}
+{{- end -}}
+{{- $component := dig "component" "" $db -}}
+{{- $on := and (ne (dig "enabled" true $db) false) (or (not $component) (include "agent-platform.optionalComponentEnabled" (dict "root" $ "name" $component))) -}}
+{{- if $on -}}
+{{- $targets := list $ns -}}
+{{- range (dig "secretNamespaces" list $db) -}}{{- if not (has . $targets) -}}{{- $targets = append $targets . -}}{{- end -}}{{- end -}}
+{{- $out = append $out (dict
+      "key" $key
+      "name" (dig "name" (replace "-" "_" $key) $db)
+      "owner" ($pg.applicationDatabase.owner | default "kagent")
+      "cluster" $pg.clusterName
+      "namespace" $ns
+      "crName" (printf "%s-%s" $pg.clusterName $key)
+      "reclaimPolicy" (dig "reclaimPolicy" "retain" $db)
+      "extensions" (dig "extensions" list $db)
+      "component" $component
+      "secretNamespaces" $targets) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+=== Kyverno PolicyExceptions ===
+
+The `exceptions:` list of a PolicyException from the rules one workload
+violates: each rule is looked up in kyvernoPolicies.rules (rule → the
+ClusterPolicy of the cluster's PSS set; a rule without an entry fails the
+render naming it), the rules are grouped by policy, and each rule is cited
+with its autogen-<rule> — the copy Kyverno generates for the controller kinds
+(Deployment, DaemonSet, ...) a pod-level rule matches through. Rendered as YAML
+list items; the caller provides the `exceptions:` key.
+Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "host-path" "privileged-containers"))
+*/}}
+{{- define "agent-platform.kyverno.exceptions" -}}
+{{- $root := .root -}}
+{{- $byPolicy := dict -}}
+{{- range .rules -}}
+{{- $policy := index ($root.Values.kyvernoPolicies.rules | default dict) . -}}
+{{- if not $policy -}}
+{{- fail (printf "kyvernoPolicies.rules names no ClusterPolicy for the rule %q; add `%s: <policy>` (the PSS policy of the cluster's kyverno-policies chart that carries the rule)" . .) -}}
+{{- end -}}
+{{- $_ := set $byPolicy $policy (append (index $byPolicy $policy | default list) .) -}}
+{{- end -}}
+{{- range $policy, $rules := $byPolicy }}
+- policyName: {{ $policy }}
+  ruleNames:
+  {{- range $rules }}
+    - {{ . }}
+    - autogen-{{ . }}
+  {{- end }}
+{{- end }}
+{{- end -}}

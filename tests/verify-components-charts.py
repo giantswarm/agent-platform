@@ -54,7 +54,13 @@ EXTRAS = [
 ]
 MANAGERS = ["model-manager", "agent-manager"]
 KAGENT = ["kagent-crds", "kagent"]
-COMPONENTS = [*EXTRAS, *MANAGERS, *KAGENT]
+# The Substrate line's two charts: rendered with the substrate: block the meta
+# chart forwards (the derived postgres.enabled boolean, the CNPG connection
+# Secret reference) — the substrate chart has no schema, so this is what proves
+# the forwarded keys (postgres.connectionStringSecretRef, atelet.nodeSelector /
+# tolerations / affinity) exist in the pinned build.
+SUBSTRATE = ["substrate-crds", "substrate"]
+COMPONENTS = [*EXTRAS, *MANAGERS, *KAGENT, *SUBSTRATE]
 # component -> the release its range / BOM pin waits for. While nothing the
 # range admits is published, the forwarded block is rendered against the newest
 # chart the line has (see fallback()); the entry goes when the release exists.
@@ -63,6 +69,8 @@ UNRELEASED = {
     "backstage": "the Dev Portal 1.0.0 (kagent API v2, giantswarm/backstage#2343)",
     "kagent": "the kagent line's first release tag (giantswarm/giantswarm#37010)",
     "kagent-crds": "the kagent line's first release tag (giantswarm/giantswarm#37010)",
+    "substrate": "the Substrate line's first release tag (giantswarm/giantswarm#37757)",
+    "substrate-crds": "the Substrate line's first release tag (giantswarm/giantswarm#37757)",
 }
 QUICKSTART = [
     "--set", "global.domain=example.com",
@@ -72,6 +80,11 @@ QUICKSTART = [
     # model-manager's chart requires the endpoint of its default backend (an
     # installation input, empty in the meta chart's values).
     "--set", "model-manager.ollama.endpoint=http://ollama.example.com:11434",
+    # kagent on requires the Harness's snapshot store (the meta chart's guard).
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    # The platform Cluster on, so the Substrate render exercises the CNPG path
+    # (the derived connection Secret reference) rather than the bundled one.
+    "--set", "postgres.enabled=true",
 ]
 API_VERSIONS = [
     "--api-versions", "cilium.io/v2",
@@ -152,14 +165,15 @@ RENDER_AGAINST = {
 }
 
 
-def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
+def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str, substrate_version: str) -> str:
     """The chart to render against while nothing the constraint admits is
     published: the kagent build the values name (kagent.tag — the chart version
-    of the same build), the branch build RENDER_AGAINST names, else the newest
-    release tag."""
+    of the same build), the Substrate build the WorkerPool's worker image names
+    (one Substrate version for control plane and workers), the branch build
+    RENDER_AGAINST names, else the newest release tag."""
     if name not in UNRELEASED:
         sys.exit(f"FAIL: no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED)")
-    chosen = kagent_tag if name in KAGENT else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
+    chosen = kagent_tag if name in KAGENT else substrate_version if name in SUBSTRATE else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
     if not chosen or chosen not in tags:
         sys.exit(f"FAIL: no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
     print(f"NOTE: {name}: {constraint!r} matches no published chart yet (waits for {UNRELEASED[name]}); rendering against {chosen}")
@@ -180,11 +194,14 @@ def pull(url: str, version: str, dest: str) -> str:
 
 
 def main(meta: str) -> int:
-    on = [f"--set=components.{n}.enabled=true" for n in COMPONENTS if n != "kagent-crds"]  # kagent-crds follows kagent
+    follow_kagent = {"kagent-crds", *SUBSTRATE}  # no switch of their own: on with kagent
+    on = [f"--set=components.{n}.enabled=true" for n in COMPONENTS if n not in follow_kagent]
     wide = docs(render_meta(meta, [*QUICKSTART, *on]))
     pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *on]))
     m = re.search(r"^tag: \"?([^\"\n]+)\"?$", hr_values(wide[("HelmRelease", "kagent")]), re.M)
     kagent_tag = m.group(1) if m else ""
+    m = re.search(r"^  workerImage: \S+:(\S+)$", hr_values(wide[("HelmRelease", "kagent")]), re.M)
+    substrate_version = m.group(1) if m else ""
     for name in COMPONENTS:
         url, rng = source(wide[("OCIRepository", name)])
         _, pin = source(pinned[("OCIRepository", name)])
@@ -193,7 +210,7 @@ def main(meta: str) -> int:
             f.write(values)
         tags = registry_tags(url)
         for label, constraint in (("range", rng), ("BOM pin", pin)):
-            version = fluxsemver.resolve(tags, constraint) or fallback(name, constraint, tags, kagent_tag)
+            version = fluxsemver.resolve(tags, constraint) or fallback(name, constraint, tags, kagent_tag, substrate_version)
             with tempfile.TemporaryDirectory() as d:
                 resolved = pull(url, version, d)
                 r = run(["helm", "template", name, f"{d}/{name}", "-n", "agent-platform", "-f", f.name, *API_VERSIONS])

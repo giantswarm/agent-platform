@@ -1,0 +1,149 @@
+{{- /*
+The Agent Substrate bootstrap: what the substrate chart mounts but does not
+render, minted once by a pre-install / pre-upgrade hook Job and kept.
+
+  * the CA pools service-dns-ca-pool and pod-identity-ca-pool in
+    podcertificate-controller-system — the podcertificate-controller signs the
+    Substrate pods' PodCertificateRequests from them;
+  * the JWT authority pool actor-id-jwt-pool and the CA pool actor-id-ca-pool in
+    ate-system — ate-api-server mints actor identity tokens and certificates
+    from them — and the trust anchor actor-id-ca-certs derived from the latter
+    (its active root as PEM; atenet-egress trusts actor certificates against it);
+  * the ConfigMap ate-api-authentication — ate-api-server accepts the cluster's
+    ServiceAccount tokens for the audience api.ate-system.svc, verified against
+    the apiserver's own issuer, spelled exactly as its OpenID discovery document
+    spells it (a kubeadm cluster issues https://kubernetes.default.svc.cluster.local,
+    a CAPA cluster with IRSA its public issuer; ate-api-server compares the
+    token's iss claim to it verbatim).
+
+Upstream does this with four `kubectl-ate admin` invocations and a shell step;
+this Job is the same key material in the Secrets' wire format (localca.Marshal /
+localjwtauthority.Marshal: JSON with the ID, the PKCS#8 signing key and, for a
+CA, the root certificate DER — Go's []byte as base64; a CA pool Secret is
+kubernetes.io/tls with the root as tls.crt/tls.key next to the pool), minted with
+openssl in an init container (an ED25519 CA, 365 days, IsCA + keyCertSign; an
+ECDSA P-256 ES256 authority) and written with kubectl. A pool that exists is
+never touched: a regenerated root would orphan every certificate and token
+issued from it while the pods holding them keep running — so a re-run, every
+upgrade, is a no-op that says "present". The trust anchor is a pure function
+of the pool and is applied (server-side) so it follows a pool an operator
+rotated by hand; an authentication ConfigMap that exists is kept and its issuer
+compared, the difference logged. The two namespaces are created bare when
+missing (the substrate release then adopts them — helm-controller takes
+ownership of a bare object). The kagent chart's WorkerPool and the platform
+Harness come with kagent and the kagent wiring; the pools' rotation is an
+operational procedure of Substrate, not this chart's.
+*/ -}}
+{{- if include "agent-platform.substrate.enabled" . }}
+{{- $ns := include "agent-platform.substrate.namespace" . }}
+{{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "substrate-bootstrap" "hook" "pre-install,pre-upgrade"
+      "about" (printf "mint the Agent Substrate CA/JWT pools, the actor-identity trust anchor and ate-api-server's authentication config in %s and %s when they are missing; keep them when they exist" $ns $pcNs)
+      "init" (dict "name" "openssl" "image" (include "agent-platform.hooks.imageRef" .Values.hooks.opensslImage) "script" (include "agent-platform.substrate.bootstrap.mint" .))
+      "script" (include "agent-platform.substrate.bootstrap.apply" (dict "root" $ "ns" $ns "pcNs" $pcNs))) }}
+{{- end }}
+
+{{- /* The init container: one candidate per pool under /work/<pool>. Whether a
+candidate is used is the main container's decision (a pool that exists wins);
+an unused candidate dies with the pod's in-memory volume. */ -}}
+{{- define "agent-platform.substrate.bootstrap.mint" -}}
+ca_pool() {
+  mkdir -p "/work/$1"
+  openssl genpkey -algorithm ed25519 -out "/work/$1/key.pem"
+  openssl req -x509 -new -key "/work/$1/key.pem" -days 365 -subj "/CN=$(openssl rand -hex 12)" \
+    -addext basicConstraints=critical,CA:TRUE \
+    -addext keyUsage=critical,digitalSignature,keyCertSign \
+    -out "/work/$1/cert.pem"
+  openssl pkcs8 -topk8 -nocrypt -in "/work/$1/key.pem" -outform DER -out "/work/$1/key.der"
+  openssl x509 -in "/work/$1/cert.pem" -outform DER -out "/work/$1/cert.der"
+}
+# The pool holds the key as PKCS#8 DER (Substrate parses it with
+# x509.ParsePKCS8PrivateKey); `openssl pkcs8 -topk8 -outform DER` guarantees
+# that form for an EC key too, where `openssl pkey -outform DER` may write the
+# traditional SEC1 ECPrivateKey (seen with alpine/openssl 3.5).
+jwt_pool() {
+  mkdir -p "/work/$1"
+  openssl ecparam -name prime256v1 -genkey -noout -out "/work/$1/sec1.pem"
+  openssl pkcs8 -topk8 -nocrypt -in "/work/$1/sec1.pem" -outform DER -out "/work/$1/key.der"
+}
+ca_pool service-dns-ca-pool
+ca_pool pod-identity-ca-pool
+ca_pool actor-id-ca-pool
+jwt_pool actor-id-jwt-pool
+echo "candidates minted for 3 CA pools and 1 JWT authority pool"
+{{- end -}}
+
+{{- define "agent-platform.substrate.bootstrap.apply" -}}
+ns={{ .ns | quote }}
+pc_ns={{ .pcNs | quote }}
+pool_id="1"
+audience="api.${ns}.svc"
+b64() { base64 < "$1" | tr -d '\n'; }
+ensure_ns() {
+  if kubectl get namespace "$1" >/dev/null 2>&1; then
+    echo "namespace $1: present"
+  else
+    kubectl create namespace "$1" >/dev/null
+    echo "namespace $1: created (the substrate release adopts it)"
+  fi
+}
+ca_pool() {
+  if kubectl -n "$1" get secret "$2" >/dev/null 2>&1; then
+    echo "CA pool $1/$2: present, kept (a regenerated root would orphan every certificate issued from it)"
+    return
+  fi
+  pool=$(jq -cn --arg id "$pool_id" --arg key "$(b64 "/work/$2/key.der")" --arg der "$(b64 "/work/$2/cert.der")" \
+    '{CAs: [{ID: $id, SigningKeyPKCS8: $key, RootCertificateDER: $der}], ActiveForSigning: $id}')
+  kubectl -n "$1" create secret generic "$2" --type=kubernetes.io/tls \
+    --from-literal=pool="$pool" --from-file=tls.crt="/work/$2/cert.pem" --from-file=tls.key="/work/$2/key.pem" >/dev/null
+  echo "CA pool $1/$2: created (ED25519 root, id $pool_id, 365 days)"
+}
+jwt_pool() {
+  if kubectl -n "$1" get secret "$2" >/dev/null 2>&1; then
+    echo "JWT authority pool $1/$2: present, kept (a regenerated key would orphan every token issued from it)"
+    return
+  fi
+  pool=$(jq -cn --arg id "$pool_id" --arg key "$(b64 "/work/$2/key.der")" \
+    '{Authorities: [{ID: $id, Algorithm: "ES256", SigningKeyPKCS8: $key}], ActiveForSigning: $id}')
+  kubectl -n "$1" create secret generic "$2" --from-literal=pool="$pool" >/dev/null
+  echo "JWT authority pool $1/$2: created (ECDSA P-256, ES256, id $pool_id)"
+}
+ensure_ns "$pc_ns"
+ensure_ns "$ns"
+ca_pool "$pc_ns" service-dns-ca-pool
+ca_pool "$pc_ns" pod-identity-ca-pool
+jwt_pool "$ns" actor-id-jwt-pool
+ca_pool "$ns" actor-id-ca-pool
+# The trust anchor: the active root of actor-id-ca-pool as PEM (DER is already
+# base64 in the pool; PEM is that base64 in 64-column lines between the markers).
+root=$(kubectl -n "$ns" get secret actor-id-ca-pool -o jsonpath='{.data.pool}' | base64 -d \
+  | jq -r '. as $p | (($p.CAs | map(select(.ID == $p.ActiveForSigning)) | .[0]) // $p.CAs[0]) | .RootCertificateDER')
+[ -n "$root" ] || { echo "actor-id-ca-pool carries no root certificate"; exit 1; }
+{ echo '-----BEGIN CERTIFICATE-----'; printf '%s\n' "$root" | fold -w 64; echo '-----END CERTIFICATE-----'; } > /tmp/ca.crt
+if kubectl -n "$ns" get secret actor-id-ca-certs >/dev/null 2>&1; then state=present; else state=created; fi
+kubectl -n "$ns" create secret generic actor-id-ca-certs --from-file=ca.crt=/tmp/ca.crt --dry-run=client -o yaml \
+  | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
+echo "trust anchor $ns/actor-id-ca-certs: $state (the active root of actor-id-ca-pool)"
+# ate-api-server's authentication config: the apiserver's own issuer, verbatim.
+issuer=$(kubectl get --raw /.well-known/openid-configuration | jq -r '.issuer // empty')
+[ -n "$issuer" ] || { echo "the apiserver's OpenID discovery document names no issuer"; exit 1; }
+{
+  printf 'actorIdentityJWTProvider: kubernetes\njwtProviders:\n- name: kubernetes\n  issuer: %s\n  audiences: [%s]\n' "$issuer" "$audience"
+  case "$issuer" in
+    https://kubernetes.default.svc|https://kubernetes.default.svc.cluster.local)
+      printf '  certificateAuthorityFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt\n  discoveryTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token\n' ;;
+  esac
+} > /tmp/authentication.yaml
+if kubectl -n "$ns" get configmap ate-api-authentication >/dev/null 2>&1; then
+  have=$(kubectl -n "$ns" get configmap ate-api-authentication -o jsonpath='{.data.authentication\.yaml}' | sed -n 's/^  issuer: //p' | head -1)
+  if [ "$have" = "$issuer" ]; then
+    echo "authentication config $ns/ate-api-authentication: present (issuer $issuer)"
+  else
+    echo "authentication config $ns/ate-api-authentication: present, kept — its issuer '$have' is not the apiserver's '$issuer'; ate-api-server reads it at start, rewrite it by hand if the apiserver's issuer changed"
+  fi
+else
+  kubectl -n "$ns" create configmap ate-api-authentication --from-file=authentication.yaml=/tmp/authentication.yaml >/dev/null
+  echo "authentication config $ns/ate-api-authentication: created (issuer $issuer, audience $audience)"
+fi
+echo "Agent Substrate bootstrap complete"
+{{- end -}}

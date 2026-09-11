@@ -240,8 +240,12 @@ def check_sources(docs, kagent_range: str) -> None:
         v = template.format(**shapes)
         if fluxsemver.satisfies(v, kagent_range):
             fail(f"components.kagent.versionRange {kagent_range!r} admits {v}; the range must select the line's releases of one upstream version only")
-    if "kagent-crds" not in depends_on(docs[("HelmRelease", "kagent")]):
-        fail("the kagent release does not dependsOn kagent-crds (its CRDs are their own chart)")
+    deps = depends_on(docs[("HelmRelease", "kagent")])
+    for dep, why in (("kagent-crds", "its CRDs are their own chart"), ("substrate-crds", "its WorkerPool is an ate.dev CR"),
+                     ("substrate", "the controller dials ate-api and routes through atenet"),
+                     ("agent-platform-connectivity", "its hooks mint the CNPG connection Secret the controller starts against")):
+        if dep not in deps:
+            fail(f"the kagent release does not dependsOn {dep} ({why})")
     crds = docs[("HelmRelease", "kagent-crds")]
     if any(line.strip().startswith("crds: ") for line in crds):
         fail("kagent-crds carries a crds: policy, but its CRDs are templates (the kserve-crd shape)")

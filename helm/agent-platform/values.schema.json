@@ -308,9 +308,6 @@
                         "enabled": {
                             "type": "boolean"
                         },
-                        "installDisableWait": {
-                            "type": "boolean"
-                        },
                         "omitKeys": {
                             "type": "array",
                             "items": {
@@ -540,6 +537,60 @@
                             "type": "string"
                         },
                         "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "substrate": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "substrate-crds": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
                             "type": "string"
                         },
                         "valuesFrom": {
@@ -991,6 +1042,42 @@
                 }
             }
         },
+        "hooks": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "kubectlImage": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "registry": {
+                            "type": "string"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "tag": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "opensslImage": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "registry": {
+                            "type": "string"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "tag": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "ingress": {
             "type": "object",
             "additionalProperties": false,
@@ -1119,27 +1206,50 @@
                 "policyExceptionNamespace": {
                     "type": "string"
                 },
-                "seccompPolicyName": {
-                    "type": "string"
-                },
-                "seccompRuleNames": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "minItems": 1,
-                    "uniqueItems": true
-                },
-                "volumeTypesPolicyName": {
-                    "type": "string"
-                },
-                "volumeTypesRuleNames": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "minItems": 1,
-                    "uniqueItems": true
+                "rules": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "adding-capabilities": {
+                            "type": "string"
+                        },
+                        "adding-capabilities-strict": {
+                            "type": "string"
+                        },
+                        "app-armor": {
+                            "type": "string"
+                        },
+                        "check-seccomp": {
+                            "type": "string"
+                        },
+                        "check-seccomp-strict": {
+                            "type": "string"
+                        },
+                        "host-path": {
+                            "type": "string"
+                        },
+                        "host-ports-none": {
+                            "type": "string"
+                        },
+                        "privilege-escalation": {
+                            "type": "string"
+                        },
+                        "privileged-containers": {
+                            "type": "string"
+                        },
+                        "require-drop-all": {
+                            "type": "string"
+                        },
+                        "restricted-volumes": {
+                            "type": "string"
+                        },
+                        "run-as-non-root": {
+                            "type": "string"
+                        },
+                        "run-as-non-root-user": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         },
@@ -1777,6 +1887,39 @@
                 "clusterName": {
                     "type": "string"
                 },
+                "databases": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "substrate": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "component": {
+                                    "type": "string"
+                                },
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "extensions": {
+                                    "type": "array"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "reclaimPolicy": {
+                                    "type": "string"
+                                },
+                                "secretNamespaces": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -1847,6 +1990,14 @@
         },
         "subscriptionID": {
             "type": "string"
+        },
+        "substrate": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "substrate-crds": {
+            "type": "object",
+            "additionalProperties": true
         },
         "valkey": {
             "type": "object",

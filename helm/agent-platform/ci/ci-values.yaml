@@ -21,3 +21,7 @@ components:
     enabled: true
   agent-manager:
     enabled: true
+# kagent on needs the Harness's snapshot store (agent-platform.validateSubstrate).
+kagent:
+  harness:
+    snapshotLocation: s3://ci-agent-snapshots/agents

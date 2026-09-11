@@ -92,6 +92,9 @@ README.
 | components.kagent.versionRange | string | `">=0.11.0-gs.1 <0.11.1-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
+| components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
+| components.kagent.dependsOn[2] | string | `"substrate"` |  |
+| components.kagent.dependsOn[3] | string | `"agent-platform-connectivity"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
 | components.kagent.omitKeys[2] | string | `"harness"` |  |
@@ -101,12 +104,25 @@ README.
 | components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
 | components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
 | components.kagent.enabled | bool | `false` |  |
-| components.kagent.installDisableWait | bool | `true` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
 | components.kagent-crds.versionRange | string | `">=0.11.0-gs.1 <0.11.1-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
+| components.substrate-crds.chart | string | `"substrate-crds"` |  |
+| components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
+| components.substrate-crds.versionRange | string | `"0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627"` |  |
+| components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
+| components.substrate-crds.injectGlobal | bool | `false` |  |
+| components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
+| components.substrate.chart | string | `"substrate"` |  |
+| components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
+| components.substrate.versionRange | string | `"0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627"` |  |
+| components.substrate.valuesFrom | string | `"substrate"` |  |
+| components.substrate.injectGlobal | bool | `false` |  |
+| components.substrate.targetNamespace | string | `"ate-system"` |  |
+| components.substrate.dependsOn[0] | string | `"substrate-crds"` |  |
+| components.substrate.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.klaus-gateway.versionRange | string | `"0.x"` |  |
@@ -199,9 +215,10 @@ README.
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
-| components.agent-platform-connectivity.dependsOn[2] | string | `"kagent"` |  |
-| components.agent-platform-connectivity.dependsOn[3] | string | `"cloudnative-pg"` |  |
-| components.agent-platform-connectivity.dependsOn[4] | string | `"kserve-resources"` |  |
+| components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
+| components.agent-platform-connectivity.dependsOn[3] | string | `"kagent-crds"` |  |
+| components.agent-platform-connectivity.dependsOn[4] | string | `"cloudnative-pg"` |  |
+| components.agent-platform-connectivity.dependsOn[5] | string | `"kserve-resources"` |  |
 | flux-engine | object | `{}` |  |
 | dicebear.route.enabled | string | `"auto"` |  |
 | dicebear.route.parentRefs | list | `[]` |  |
@@ -308,12 +325,19 @@ README.
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster, detected once by the meta chart (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
-| kyvernoPolicies.seccompPolicyName | string | `"restrict-seccomp-strict"` |  |
-| kyvernoPolicies.seccompRuleNames[0] | string | `"check-seccomp-strict"` |  |
-| kyvernoPolicies.seccompRuleNames[1] | string | `"autogen-check-seccomp-strict"` |  |
-| kyvernoPolicies.volumeTypesPolicyName | string | `"restrict-volume-types"` |  |
-| kyvernoPolicies.volumeTypesRuleNames[0] | string | `"restricted-volumes"` |  |
-| kyvernoPolicies.volumeTypesRuleNames[1] | string | `"autogen-restricted-volumes"` |  |
+| kyvernoPolicies.rules.privileged-containers | string | `"disallow-privileged-containers"` |  |
+| kyvernoPolicies.rules.host-ports-none | string | `"disallow-host-ports"` |  |
+| kyvernoPolicies.rules.host-path | string | `"disallow-host-path"` |  |
+| kyvernoPolicies.rules.restricted-volumes | string | `"restrict-volume-types"` |  |
+| kyvernoPolicies.rules.adding-capabilities | string | `"disallow-capabilities"` |  |
+| kyvernoPolicies.rules.require-drop-all | string | `"disallow-capabilities-strict"` |  |
+| kyvernoPolicies.rules.adding-capabilities-strict | string | `"disallow-capabilities-strict"` |  |
+| kyvernoPolicies.rules.run-as-non-root | string | `"require-run-as-nonroot"` |  |
+| kyvernoPolicies.rules.run-as-non-root-user | string | `"require-run-as-non-root-user"` |  |
+| kyvernoPolicies.rules.privilege-escalation | string | `"disallow-privilege-escalation"` |  |
+| kyvernoPolicies.rules.check-seccomp | string | `"restrict-seccomp"` |  |
+| kyvernoPolicies.rules.check-seccomp-strict | string | `"restrict-seccomp-strict"` |  |
+| kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
 | extraObjects | list | `[]` |  |
 | muster.enabled | bool | `true` |  |
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
@@ -411,6 +435,7 @@ README.
 | kagent.substrateWorkerPool.replicas | int | `4` |  |
 | kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-dev.giantswarm.2026-09-10.22-37-39.h1817627"` |  |
 | kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
+| kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
 | kagent.database.postgres.vectorEnabled | bool | `true` |  |
 | kagent.database.postgres.bundled.image.repository | string | `"pgvector"` |  |
 | kagent.database.postgres.bundled.image.name | string | `"pgvector"` |  |
@@ -486,6 +511,7 @@ README.
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
 | kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:969af5f733c8e2bd7756f40766352f5af744964e969a031ba146198d8becd546"` |  |
+| kagent.harness.snapshotLocation | string | `""` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
@@ -562,6 +588,12 @@ README.
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
+| postgres.databases.substrate.enabled | bool | `true` |  |
+| postgres.databases.substrate.name | string | `"substrate"` |  |
+| postgres.databases.substrate.component | string | `"substrate"` |  |
+| postgres.databases.substrate.extensions | list | `[]` |  |
+| postgres.databases.substrate.reclaimPolicy | string | `"retain"` |  |
+| postgres.databases.substrate.secretNamespaces[0] | string | `"ate-system"` |  |
 | postgres.backup.enabled | bool | `false` |  |
 | postgres.backup.method | string | `"plugin"` |  |
 | postgres.backup.schedule | string | `"0 0 2 * * *"` |  |
@@ -810,6 +842,23 @@ README.
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds.kmcp.enabled | bool | `false` |  |
 | kagent-crds.substrate.enabled | bool | `false` |  |
+| substrate.createNamespace | bool | `false` |  |
+| substrate.postgres.enabled | string | `"auto"` |  |
+| substrate.postgres.connectionString | string | `""` |  |
+| substrate.postgres.schema | string | `"public"` |  |
+| substrate.rustfs.enabled | bool | `false` |  |
+| substrate.atelet.storageBackend | string | `"s3"` |  |
+| substrate.atelet.nodeSelector | object | `{}` |  |
+| substrate.atelet.tolerations | list | `[]` |  |
+| substrate.atelet.affinity | object | `{}` |  |
+| substrate.atelet.extraEnv | list | `[]` |  |
+| substrate-crds | object | `{}` |  |
+| hooks.kubectlImage.registry | string | `"docker.io"` |  |
+| hooks.kubectlImage.repository | string | `"alpine/k8s"` |  |
+| hooks.kubectlImage.tag | string | `"1.37.0"` |  |
+| hooks.opensslImage.registry | string | `"docker.io"` |  |
+| hooks.opensslImage.repository | string | `"alpine/openssl"` |  |
+| hooks.opensslImage.tag | string | `"3.5.8"` |  |
 | kserve-crd | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |
 | kserve-resources.kserve.controller.deploymentMode | string | `"Standard"` |  |
