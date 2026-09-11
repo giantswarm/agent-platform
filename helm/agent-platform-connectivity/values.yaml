@@ -1235,10 +1235,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   apiKeySecretKey: ANTHROPIC_API_KEY
   #   # Optional. An explicit upstream for this entry. Leave it unset: with
   #   # llmRouting.enabled the chart fills in the LLM listener, so the gateway
-  #   # meters this model's usage. Set it to reach a different upstream — naming the
-  # provider's own URL is how a model stays on the direct, unmetered path. An
-  # entry whose provider differs from llmRouting.backend.provider stays direct
-  # either way: the listener forwards to one provider.
+  #   # meters this model's usage. Set it to reach a different upstream: the
+  #   # provider's own URL is how a model stays on the direct, unmetered path.
+  #   # An entry whose provider differs from llmRouting.backend.provider stays
+  #   # direct either way: the listener forwards to one provider. Only the
+  #   # Anthropic, OpenAI and SAPAICore providers carry a baseUrl in
+  #   # ModelConfigSpec; the render fails for any other provider.
   #   baseUrl: http://agentgateway.<release namespace>.svc:8081
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).

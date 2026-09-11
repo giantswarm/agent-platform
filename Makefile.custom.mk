@@ -595,6 +595,17 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@if awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vl-other.out | grep -q 'baseUrl:'; then \
 		echo "FAIL: a non-Anthropic model was pointed at the Anthropic listener; it would reach the wrong upstream"; exit 1; \
 	else echo "ok: explicit URL and foreign provider"; fi
+	@echo "--> an entry whose provider has no baseUrl in ModelConfigSpec fails the render, naming the entry"
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].provider=Ollama' >/tmp/vl-nourl.out 2>&1; then \
+		echo "FAIL: a baseUrl rendered under a provider block the CRD prunes; the model would stay direct in silence"; exit 1; \
+	else grep -q 'anthropic-opus-direct' /tmp/vl-nourl.out || { cat /tmp/vl-nourl.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
+	@echo "ok: provider without a baseUrl"
+	@echo "--> the MutatingAdmissionPolicy writes the provider's own block name"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.backend.provider=openai >/tmp/vl-openai.out 2>&1 || { cat /tmp/vl-openai.out; exit 1; }
+	@grep -q 'object.spec.openAI.baseUrl' /tmp/vl-openai.out || { echo "FAIL: the policy reads the lower-cased provider name, not the ModelConfigSpec block; every CEL evaluation would error"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.backend.provider=ollama 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
+		echo "FAIL: the policy renders for a provider whose block carries no baseUrl; the mutation would be pruned"; exit 1; \
+	else echo "ok: provider block name"; fi
 	@echo "--> the MutatingAdmissionPolicy renders only where the API server serves the GA group"
 	@if grep -q 'kind: MutatingAdmissionPolicy' /tmp/vl-ci.out; then \
 		echo "FAIL: the policy rendered without the GA API version; on 1.34/1.35 it would exist and mutate nothing"; exit 1; \

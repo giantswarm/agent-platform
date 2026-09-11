@@ -10,7 +10,8 @@ its feature gate, so the policy would exist and mutate nothing. An absent object
 is honest; a silent one is not. Confirm with:
 
   kubernetes_feature_enabled{name="MutatingAdmissionPolicy", job="apiserver"} */ -}}
-{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") }}
+{{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" .Values.llmRouting.backend.provider }}
+{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled $urlKey (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $provider := lower .Values.llmRouting.backend.provider }}
 {{- $name := printf "%s-modelconfig-llm-routing" (include "name" .) }}
@@ -43,13 +44,13 @@ spec:
     reaches the provider directly by naming the provider URL itself. */}}
     - name: base-url-absent
       expression: >-
-        !has(object.spec.{{ $provider }}) ||
-        !has(object.spec.{{ $provider }}.baseUrl)
+        !has(object.spec.{{ $urlKey }}) ||
+        !has(object.spec.{{ $urlKey }}.baseUrl)
   mutations:
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
-          Object{spec: Object.spec{ {{ $provider }}: Object.spec.{{ $provider }}{
+          Object{spec: Object.spec{ {{ $urlKey }}: Object.spec.{{ $urlKey }}{
             baseUrl: {{ include "agent-platform.llmBaseUrl" . | quote }}
           }}}
 ---
