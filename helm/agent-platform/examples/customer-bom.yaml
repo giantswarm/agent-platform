@@ -40,7 +40,7 @@ components:
   kagent-crds:                   { versionRange: "0.11.0-gs.3" }
   substrate:                     { versionRange: "0.0.27-gs.5" }
   substrate-crds:                { versionRange: "0.0.27-gs.5" }
-  klaus-gateway:                 { versionRange: "0.39.0" }
+  klaus-gateway:                 { versionRange: "1.0.2" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.20.0" }
