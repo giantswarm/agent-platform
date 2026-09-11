@@ -625,6 +625,27 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
+In-cluster URL of the LLM listener on the data-plane Gateway. The host is
+gateway.name: the agentgateway controller provisions the data-plane Service
+under the Gateway's own name.
+*/}}
+{{- define "agent-platform.llmBaseUrl" -}}
+{{- printf "http://%s.%s.svc:%d" .Values.gateway.name .Release.Namespace (.Values.llmRouting.listener.port | int) -}}
+{{- end -}}
+
+{{/*
+Key of the ModelConfigSpec provider block that carries baseUrl, for a
+spec.provider value. The key is not the lower-cased provider name, and only
+three of the ten providers have a baseUrl at all: a block the CRD does not know
+is pruned at admission and the model would keep the direct path in silence.
+Emits nothing for every other provider (empty string = falsy).
+*/}}
+{{- define "agent-platform.modelConfigBaseUrlKey" -}}
+{{- $keys := dict "anthropic" "anthropic" "openai" "openAI" "sapaicore" "sapAICore" -}}
+{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the model-price ConfigMap — defaults to <release>-model-catalog.
 */}}
 {{- define "agent-platform.modelCatalogName" -}}

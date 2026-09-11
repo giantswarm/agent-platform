@@ -1007,6 +1007,15 @@
                         }
                     }
                 },
+                "modelConfigPolicy": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "pathPrefixes": {
                     "type": "array",
                     "items": {
