@@ -584,8 +584,42 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	else echo "ok: port-collision guard"; fi
 	@echo "--> the CI scenario renders, and a chart-owned ModelConfig can ride the listener"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >/tmp/vl-ci.out 2>&1 || { cat /tmp/vl-ci.out; exit 1; }
-	@grep -A3 'anthropic:' /tmp/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: kagent.modelConfigs[].baseUrl does not reach the rendered ModelConfig; that agent would bypass the listener"; exit 1; }
+	@grep -A3 'anthropic:' /tmp/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: a chart-owned ModelConfig does not reach the listener; that agent would bypass it"; exit 1; }
 	@echo "ok: CI scenario"
+	@echo "--> a ModelConfig that names no baseUrl rides the listener"
+	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: an entry with no baseUrl stayed direct; a new model would be unmetered by default"; exit 1; }
+	@echo "ok: routed by default"
+	@echo "--> an explicit baseUrl wins (the escape hatch), and an entry for another provider stays direct"
+	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' /tmp/vl-ci.out | grep -q 'baseUrl: "https://api.anthropic.com"' || { echo "FAIL: an explicit baseUrl was overwritten by the listener default; a model could never leave the gateway"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=OpenAI' >/tmp/vl-other.out 2>&1 || { cat /tmp/vl-other.out; exit 1; }
+	@if awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vl-other.out | grep -q 'baseUrl:'; then \
+		echo "FAIL: a non-Anthropic model was pointed at the Anthropic listener; it would reach the wrong upstream"; exit 1; \
+	else echo "ok: explicit URL and foreign provider"; fi
+	@echo "--> an entry whose provider has no baseUrl in ModelConfigSpec fails the render, naming the entry"
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].provider=Ollama' >/tmp/vl-nourl.out 2>&1; then \
+		echo "FAIL: a baseUrl rendered under a provider block the CRD prunes; the model would stay direct in silence"; exit 1; \
+	else grep -q 'anthropic-opus-direct' /tmp/vl-nourl.out || { cat /tmp/vl-nourl.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
+	@echo "ok: provider without a baseUrl"
+	@echo "--> the MutatingAdmissionPolicy writes the provider's own block name"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.backend.provider=openai >/tmp/vl-openai.out 2>&1 || { cat /tmp/vl-openai.out; exit 1; }
+	@grep -q 'object.spec.openAI.baseUrl' /tmp/vl-openai.out || { echo "FAIL: the policy reads the lower-cased provider name, not the ModelConfigSpec block; every CEL evaluation would error"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.backend.provider=ollama 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
+		echo "FAIL: the policy renders for a provider whose block carries no baseUrl; the mutation would be pruned"; exit 1; \
+	else echo "ok: provider block name"; fi
+	@echo "--> the MutatingAdmissionPolicy renders only where the API server serves the GA group"
+	@if grep -q 'kind: MutatingAdmissionPolicy' /tmp/vl-ci.out; then \
+		echo "FAIL: the policy rendered without the GA API version; on 1.34/1.35 it would exist and mutate nothing"; exit 1; \
+	fi
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy >/tmp/vl-map.out 2>&1 || { cat /tmp/vl-map.out; exit 1; }
+	@grep -q 'kind: MutatingAdmissionPolicy$$' /tmp/vl-map.out || { echo "FAIL: no MutatingAdmissionPolicy on a 1.36 API server; a ModelConfig created outside the chart would be unmetered"; exit 1; }
+	@grep -q 'kind: MutatingAdmissionPolicyBinding' /tmp/vl-map.out || { echo "FAIL: the policy has no binding; it matches nothing"; exit 1; }
+	@grep -q 'failurePolicy: Ignore' /tmp/vl-map.out || { echo "FAIL: the policy fails closed; a CEL error would block every ModelConfig write"; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: kagent' /tmp/vl-map.out || { echo "FAIL: the policy is not scoped to the kagent namespace"; exit 1; }
+	@grep -q 'base-url-absent' /tmp/vl-map.out || { echo "FAIL: the policy has no baseUrl guard; it would overwrite a model pointed at another upstream"; exit 1; }
+	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' /tmp/vl-map.out || { echo "FAIL: the policy writes the wrong listener URL"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.modelConfigPolicy.enabled=false 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
+		echo "FAIL: llmRouting.modelConfigPolicy.enabled=false still rendered the policy"; exit 1; \
+	else echo "ok: admission policy gated on the GA group and its own toggle"; fi
 	@echo "--> the meta chart forwards the cutover value to the kagent release"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.providers.anthropic.config.baseUrl=http://agentgateway.default.svc:8081 >/tmp/vl-meta.out 2>&1 || { cat /tmp/vl-meta.out; exit 1; }
 	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' /tmp/vl-meta.out >/tmp/vl-meta-kagent.out
