@@ -417,10 +417,8 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 		echo "FAIL: the kagent-crds guard failed for the wrong reason"; cat /tmp/ap-kag-crds.out; exit 1; \
 	else echo "ok: kagent on without kagent-crds is refused"; fi
 	@echo "ok: the kagent line's wiring"
-	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease (no raw CRs)"
-	@if grep -E '^kind:' /tmp/ap-flux.out | grep -vqE '^kind: (OCIRepository|HelmRelease)$$'; then \
-		echo "FAIL: root rendered a non-app-of-apps kind:"; grep -E '^kind:' /tmp/ap-flux.out | grep -vE '^kind: (OCIRepository|HelmRelease)$$'; exit 1; \
-	else echo "ok: pure renderer (only OCIRepository/HelmRelease)"; fi
+	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease as release objects (no raw CRs; the storage-version hooks of #396 are Helm hooks, verify-kagent-storage-version's)"
+	@python3 -c 'import re,sys; docs=open("/tmp/ap-flux.out").read().split("\n---\n"); bad=[re.search(r"^kind: (\S+)$$", d, re.M).group(1) for d in docs if re.search(r"^kind: ", d, re.M) and "helm.sh/hook:" not in d and not re.search(r"^kind: (OCIRepository|HelmRelease)$$", d, re.M)]; sys.exit("FAIL: root rendered a non-app-of-apps kind: " + ", ".join(bad)) if bad else print("ok: pure renderer (only OCIRepository/HelmRelease besides the hooks)")'
 	@echo "--> Flux is the only engine: the render carries no argoproj.io object"
 	@if grep -q 'argoproj.io' /tmp/ap-flux.out; then \
 		echo "FAIL: an argoproj.io object rendered; the Argo render engine was removed"; grep -n 'argoproj.io' /tmp/ap-flux.out; exit 1; \
@@ -465,9 +463,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: customer BOM pinned"
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agent-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
-	@if grep -E '^  namespace:' /tmp/ap-ns.out | grep -vq 'flux-giantswarm'; then \
-		echo "FAIL: a rendered CR is not in the gitops.namespace"; grep -E '^  namespace:' /tmp/ap-ns.out | grep -v 'flux-giantswarm'; exit 1; \
-	else echo "ok: all CRs in flux-giantswarm"; fi
+	@python3 -c 'import re,sys; docs=open("/tmp/ap-ns.out").read().split("\n---\n"); bad=[(re.search(r"^kind: (\S+)$$", d, re.M).group(1), re.search(r"^  namespace: (\S+)$$", d, re.M).group(1)) for d in docs if re.search(r"^kind: (OCIRepository|HelmRelease)$$", d, re.M) and re.search(r"^  namespace: (\S+)$$", d, re.M) and re.search(r"^  namespace: (\S+)$$", d, re.M).group(1) != "flux-giantswarm"]; sys.exit("FAIL: a rendered CR is not in the gitops.namespace: " + str(bad)) if bad else print("ok: all CRs in flux-giantswarm (the hook Jobs stay in the release namespace, where Helm runs them)")'
 	@grep -q 'targetNamespace: agent-platform' /tmp/ap-ns.out || { echo "FAIL: HelmRelease targetNamespace not routed"; exit 1; }
 	@echo "ok: gitops namespace routing"
 	@echo "--> components.<name>.enabled=false skips that component's release"
@@ -1954,4 +1950,94 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if grep -q 'disableWaitForJobs' /tmp/vmig-meta-am.out; then echo "FAIL: disableWaitForJobs leaked onto another component's HelmRelease"; exit 1; fi
 	@if grep -q 'migration' /tmp/vmig-meta-am.out; then echo "FAIL: agentManager.migration leaked into the agent-manager chart's values"; exit 1; fi
 	@echo "ok: forwarded"
+	@echo "ok: $@"
+
+# The kagent CRDs' storage-version hooks (giantswarm/agent-platform#396): the meta chart's renders.
+STORAGE_ON := -f $(CHART_DIR)/ci/ci-values.yaml
+STORAGE_BACKUP := t-kagent-storage-version-backup
+STORAGE_RESTORE := t-kagent-storage-version-restore
+STORAGE_CM := kagent-storage-version-migration
+
+.PHONY: verify-kagent-storage-version
+verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over (#396): with kagent on, the backup Job (pre-install,pre-upgrade, -7: records the objects of modelconfigs/modelproviderconfigs/remotemcpservers.kagent.dev still stored at v1alpha2 into the migration ConfigMap, then deletes those CRDs) and the restore Job (post-install,post-upgrade, 0: waits for modelconfigs.kagent.dev to serve v1alpha3, re-creates the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3, tolerates AlreadyExists, marks restored-at) as the hook identity in the helm image, the identity at their events; with the engine off (the fleet) the same pair and nothing else; with kagent off none of it; the kagent namespace follows kagent.namespaceOverride; helm lint.
+	@echo "====> $@ ($(CHART_DIR))"
+	@echo "--> engine on, kagent on (ci-values): both hook Jobs, their events and weights, the identity at theirs"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) >/tmp/vsv-on.out 2>&1 || { cat /tmp/vsv-on.out; exit 1; }
+	@$(PICK) /tmp/vsv-on.out Job $(STORAGE_BACKUP) >/tmp/vsv-backup.out || { echo "FAIL: no backup hook Job $(STORAGE_BACKUP)"; exit 1; }
+	@grep -q 'helm.sh/hook: pre-install,pre-upgrade$$' /tmp/vsv-backup.out || { echo "FAIL: the backup hook is not pre-install,pre-upgrade"; grep helm.sh/hook /tmp/vsv-backup.out; exit 1; }
+	@grep -q 'helm.sh/hook-weight: "-7"' /tmp/vsv-backup.out || { echo "FAIL: the backup hook is not at weight -7 (after the kagent namespace hook at -8, ahead of the self hooks at -6)"; exit 1; }
+	@$(PICK) /tmp/vsv-on.out Job $(STORAGE_RESTORE) >/tmp/vsv-restore.out || { echo "FAIL: no restore hook Job $(STORAGE_RESTORE)"; exit 1; }
+	@grep -q 'helm.sh/hook: post-install,post-upgrade$$' /tmp/vsv-restore.out || { echo "FAIL: the restore hook is not post-install,post-upgrade"; grep helm.sh/hook /tmp/vsv-restore.out; exit 1; }
+	@grep -q 'helm.sh/hook-weight: "0"' /tmp/vsv-restore.out || { echo "FAIL: the restore hook is not at weight 0"; exit 1; }
+	@for f in /tmp/vsv-backup.out /tmp/vsv-restore.out; do \
+		grep -q 'helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded' $$f || { echo "FAIL: $$f: the hook delete policy is not before-hook-creation,hook-succeeded"; exit 1; }; \
+		grep -q 'serviceAccountName: t-hooks' $$f || { echo "FAIL: $$f: the Job does not run as the hook identity t-hooks"; exit 1; }; \
+		grep -q 'image: "docker.io/alpine/k8s:' $$f || { echo "FAIL: $$f: the Job does not run the helm image (a script needs sh, kubectl and jq)"; exit 1; }; \
+		grep -q 'command: \["/bin/sh", "-eu", "-c"\]' $$f || { echo "FAIL: $$f: the Job is not a script under sh -eu"; exit 1; }; \
+		grep -q 'ns="kagent"' $$f || { echo "FAIL: $$f: the script does not name the kagent namespace"; exit 1; }; \
+		grep -q 'cm="$(STORAGE_CM)"' $$f || { echo "FAIL: $$f: the script does not name the ConfigMap $(STORAGE_CM)"; exit 1; }; \
+		for needle in 'runAsNonRoot: true' 'readOnlyRootFilesystem: true' 'allowPrivilegeEscalation: false' 'type: RuntimeDefault' 'restartPolicy: Never'; do grep -q "$$needle" $$f || { echo "FAIL: $$f lacks $$needle"; exit 1; }; done; \
+	done
+	@echo "ok: two hook Jobs as t-hooks in the helm image, restricted pods"
+	@echo "--> the backup script: the three CRDs, v1alpha2 as the stale version, status and server-set metadata stripped, the record written before the delete, kubectl delete crd --wait"
+	@grep -q 'for crd in modelconfigs.kagent.dev modelproviderconfigs.kagent.dev remotemcpservers.kagent.dev; do' /tmp/vsv-backup.out || { echo "FAIL: the backup does not walk exactly the three CRDs"; exit 1; }
+	@grep -q 'stale="v1alpha2"' /tmp/vsv-backup.out || { echo "FAIL: the backup does not name v1alpha2 as the stale storage version"; exit 1; }
+	@grep -q "jsonpath='{.status.storedVersions}'" /tmp/vsv-backup.out || { echo "FAIL: the backup does not read status.storedVersions"; exit 1; }
+	@grep -q 'del(.status, .metadata.managedFields, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.generation)' /tmp/vsv-backup.out || { echo "FAIL: the record does not strip status and the server-set metadata (the 1 MiB ConfigMap limit)"; exit 1; }
+	@grep -q '\.data\["recorded-at"\] = \$$at' /tmp/vsv-backup.out || { echo "FAIL: the record carries no recorded-at"; exit 1; }
+	@grep -q 'kubectl delete customresourcedefinitions.apiextensions.k8s.io "\$$crd" --wait --timeout=3m' /tmp/vsv-backup.out || { echo "FAIL: the backup does not delete the CRD with --wait"; exit 1; }
+	@[ "$$(grep -n 'kubectl create -f /tmp/cm.json' /tmp/vsv-backup.out | cut -d: -f1)" -lt "$$(grep -n 'kubectl delete customresourcedefinitions' /tmp/vsv-backup.out | cut -d: -f1)" ] || { echo "FAIL: the backup deletes a CRD before the record is written"; exit 1; }
+	@grep -q 'nothing to migrate' /tmp/vsv-backup.out || { echo "FAIL: the backup has no no-op branch (a fresh install, a second run)"; exit 1; }
+	@echo "--> the backup re-points the three kinds to v1alpha3 in every Helm release manifest that still names them at v1alpha2 (Helm reads a manifest back through a served version), on every run, one Secret at a time, the patch through a file"
+	@grep -q 'kubectl get secrets -A -l owner=helm --field-selector type=helm.sh/release.v1' /tmp/vsv-backup.out || { echo "FAIL: the backup does not scan the Helm release Secrets"; exit 1; }
+	@grep -qF "kinds='(^|\n)kind: (ModelConfig|ModelProviderConfig|RemoteMCPServer)\n'" /tmp/vsv-backup.out || { echo "FAIL: the re-point is not confined to documents of the three kinds"; grep -n "kinds=" /tmp/vsv-backup.out; exit 1; }
+	@grep -qF 'gsub("apiVersion: kagent.dev/v1alpha2\n"; "apiVersion: kagent.dev/v1alpha3\n")' /tmp/vsv-backup.out || { echo "FAIL: the re-point does not swap kagent.dev/v1alpha2 for v1alpha3"; exit 1; }
+	@grep -q 'base64 -d < /tmp/release.b64 | base64 -d | gzip -dc' /tmp/vsv-backup.out || { echo "FAIL: the re-point does not decode Helm storage (base64 twice, gzip)"; exit 1; }
+	@grep -q 'kubectl patch secret -n "\$$sns" "\$$sname" --type merge --patch-file /tmp/release-patch.json' /tmp/vsv-backup.out || { echo "FAIL: the re-point does not patch the Secret through a file"; exit 1; }
+	@[ "$$(grep -n 'kubectl delete customresourcedefinitions' /tmp/vsv-backup.out | cut -d: -f1)" -lt "$$(grep -n '^ *kinds=' /tmp/vsv-backup.out | cut -d: -f1)" ] || { echo "FAIL: the re-point must follow the CRD deletion"; exit 1; }
+	@if grep -qE '^ *exit 0' /tmp/vsv-backup.out; then echo "FAIL: the backup exits early; the re-point must run on every backup, also when no CRD stores v1alpha2 any more (a re-run after a failed first attempt)"; exit 1; fi
+	@echo "ok: backup script"
+	@echo "--> the restore script: waits for modelconfigs.kagent.dev Established serving v1alpha3, skips Helm-owned objects, swaps the apiVersion, tolerates AlreadyExists, fails otherwise, marks restored-at and runs once"
+	@grep -q 'crd="modelconfigs.kagent.dev"' /tmp/vsv-restore.out || { echo "FAIL: the restore does not wait on modelconfigs.kagent.dev"; exit 1; }
+	@grep -q 'version="v1alpha3"' /tmp/vsv-restore.out || { echo "FAIL: the restore does not name v1alpha3"; exit 1; }
+	@grep -q 'type=="Established"' /tmp/vsv-restore.out || { echo "FAIL: the restore does not wait for the CRD to be Established"; exit 1; }
+	@grep -q 'deadline=\$$(( \$$(date +%s) + 480 ))' /tmp/vsv-restore.out || { echo "FAIL: the restore's wait is not bounded at 480 s"; exit 1; }
+	@grep -q 'select(.metadata.annotations\["meta.helm.sh/release-name"\] == null)' /tmp/vsv-restore.out || { echo "FAIL: the restore does not skip the Helm-owned ModelConfigs (they come back from their releases)"; exit 1; }
+	@grep -q '{apiVersion: \$$v, kind, metadata: (.metadata | {name, namespace, labels, annotations} | with_entries(select(.value != null))), spec}' /tmp/vsv-restore.out || { echo "FAIL: the restore does not re-create name, namespace, labels, annotations and spec at the new apiVersion"; exit 1; }
+	@grep -q '\*AlreadyExists\*) echo "ModelConfig \$$ref: already present (re-created by its owner)"' /tmp/vsv-restore.out || { echo "FAIL: the restore does not tolerate AlreadyExists"; exit 1; }
+	@grep -q '\*) echo "ModelConfig \$$ref: \$$out" >&2; exit 1 ;;' /tmp/vsv-restore.out || { echo "FAIL: the restore does not fail the Job on another refusal"; exit 1; }
+	@grep -q 'restored-at' /tmp/vsv-restore.out || { echo "FAIL: the restore does not mark restored-at"; exit 1; }
+	@grep -q 'restored at \$$restored; nothing to do' /tmp/vsv-restore.out || { echo "FAIL: the restore does not run once (a ModelConfig removed after the cut-over would come back)"; exit 1; }
+	@grep -q 'recorded, not restored: \$$n \$$k' /tmp/vsv-restore.out || { echo "FAIL: the restore does not report the recorded RemoteMCPServers / ModelProviderConfigs"; exit 1; }
+	@echo "ok: restore script"
+	@echo "--> the hook identity is created for the hooks' events (pre-install,pre-upgrade,post-install,post-upgrade) and the engine's pre-delete"
+	@for kind in ServiceAccount ClusterRoleBinding; do \
+		$(PICK) /tmp/vsv-on.out $$kind t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' || { echo "FAIL: the hook $$kind t-hooks is not created for pre-install,pre-upgrade,post-install,post-upgrade,pre-delete"; $(PICK) /tmp/vsv-on.out $$kind t-hooks | grep helm.sh/hook; exit 1; }; \
+	done
+	@echo "ok: identity events"
+	@echo "--> engine off (the fleet, a cluster's own Flux): the same pair and the identity at their events, nothing else hooked"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --set components.flux.enabled=false >/tmp/vsv-off.out 2>&1 || { cat /tmp/vsv-off.out; exit 1; }
+	@$(PICK) /tmp/vsv-off.out Job $(STORAGE_BACKUP) >/dev/null || { echo "FAIL: the backup hook is gone with the engine off (every installation that ran kagent 0.10 needs it)"; exit 1; }
+	@$(PICK) /tmp/vsv-off.out Job $(STORAGE_RESTORE) >/dev/null || { echo "FAIL: the restore hook is gone with the engine off"; exit 1; }
+	@[ "$$(grep -c '^    helm.sh/hook: ' /tmp/vsv-off.out)" = "4" ] || { echo "FAIL: engine off must hook exactly the two Jobs and the identity (SA + CRB)"; grep -n 'helm.sh/hook: ' /tmp/vsv-off.out; exit 1; }
+	@for kind in ServiceAccount ClusterRoleBinding; do \
+		$(PICK) /tmp/vsv-off.out $$kind t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade$$' || { echo "FAIL: engine off: the hook $$kind t-hooks is not at pre-install,pre-upgrade,post-install,post-upgrade (no pre-delete without the engine)"; exit 1; }; \
+	done
+	@if grep -q 'helm.sh/hook: .*pre-delete' /tmp/vsv-off.out; then echo "FAIL: engine off renders a pre-delete hook"; exit 1; fi
+	@echo "ok: engine off"
+	@echo "--> kagent off: none of it; the identity back to pre-delete (engine on), gone (engine off)"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --set components.kagent.enabled=false >/tmp/vsv-kagoff.out 2>&1 || { cat /tmp/vsv-kagoff.out; exit 1; }
+	@if grep -q 'kagent-storage-version' /tmp/vsv-kagoff.out; then echo "FAIL: the storage-version hooks render with kagent off"; exit 1; fi
+	@$(PICK) /tmp/vsv-kagoff.out ServiceAccount t-hooks | grep -q 'helm.sh/hook: pre-delete$$' || { echo "FAIL: kagent off: the hook identity is not back to pre-delete only"; exit 1; }
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --set components.kagent.enabled=false --set components.flux.enabled=false >/tmp/vsv-alloff.out 2>&1 || { cat /tmp/vsv-alloff.out; exit 1; }
+	@if grep -q 'helm.sh/hook\|t-hooks' /tmp/vsv-alloff.out; then echo "FAIL: engine off, kagent off: a hook or the hook identity renders (the pure app-of-apps render)"; exit 1; fi
+	@echo "ok: kagent off"
+	@echo "--> the kagent namespace: kagent.namespaceOverride, else the HelmReleases' target namespace"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --set kagent.namespaceOverride=models >/tmp/vsv-ns.out 2>&1 || { cat /tmp/vsv-ns.out; exit 1; }
+	@[ "$$(grep -c 'ns="models"' /tmp/vsv-ns.out)" -ge 2 ] || { echo "FAIL: the hooks do not follow kagent.namespaceOverride"; exit 1; }
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --set kagent.namespaceOverride= --set gitops.targetNamespace=plat --set components.flux.enabled=false >/tmp/vsv-ns2.out 2>&1 || { cat /tmp/vsv-ns2.out; exit 1; }
+	@[ "$$(grep -c 'ns="plat"' /tmp/vsv-ns2.out)" = "2" ] || { echo "FAIL: without an override the hooks do not fall back to gitops.targetNamespace"; grep -n 'ns=' /tmp/vsv-ns2.out; exit 1; }
+	@echo "ok: namespace"
+	@helm lint $(CHART_DIR) $(STORAGE_ON) >/tmp/vsv-lint.out 2>&1 || { cat /tmp/vsv-lint.out; exit 1; }
+	@echo "ok: helm lint"
 	@echo "ok: $@"

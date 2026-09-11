@@ -13,7 +13,7 @@
 #     `make verify-engine` + `make verify-self` + `make verify-labels` + `make verify-postgres` +
 #     `make verify-secrets` + `make verify-login-connector` +
 #     `make verify-components` + `make verify-auto` + `make verify-identity` +
-#     `make verify-wiring` + `make verify-llm-routing` + `make verify-kagent-crds` + `make verify-kyverno` checks on branches (ingress-mode guards, the global.*
+#     `make verify-wiring` + `make verify-llm-routing` + `make verify-kagent-crds` + `make verify-kyverno` + `make verify-kagent-storage-version` checks on branches (ingress-mode guards, the global.*
 #     contract, the model-manager / agent-manager wiring, the kagent tool-server
 #     egress, app-of-apps meta-package render, the bundled Flux engine's two
 #     shapes, the self-management shapes, the postgres.backup wiring and guards,
@@ -115,10 +115,14 @@ jobs:
         # migrate Job of the kagent API v2 cut-over: gating, identity, image,
         # token, RBAC set, network policy in both flavors, guards; verify-postgres
         # and verify-identity carry the kagent_v2 database and the one
-        # ClusterRoleBinding as prerequisites) are the single source of truth, also
-        # run locally. The meta chart's one dependency is the flux-engine
+        # ClusterRoleBinding as prerequisites) and verify-kagent-storage-version (the
+        # kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over: the backup
+        # at pre-upgrade records the v1alpha2 catalog and removes the three CRDs,
+        # the restore at post-upgrade brings the hand-created ModelConfigs back at
+        # v1alpha3; with the engine off too, nothing with kagent off) are the
+        # single source of truth, also run locally. The meta chart's one dependency is the flux-engine
         # subchart, a directory in its charts/, which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-migration
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-kyverno verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-migration verify-kagent-storage-version
 
 workflows:
   build:

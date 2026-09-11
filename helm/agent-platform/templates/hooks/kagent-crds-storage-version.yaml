@@ -1,0 +1,186 @@
+{{- /*
+The kagent CRDs' storage version across the 3.x → 4.x upgrade
+(giantswarm/agent-platform#396). A cluster that ran kagent 0.10 has
+modelconfigs, modelproviderconfigs and remotemcpservers.kagent.dev stored at
+v1alpha2 (status.storedVersions); the kagent line's kagent-crds chart declares
+v1alpha3 only, and the apiserver refuses a CRD update that drops a version still
+listed there — kagent-crds never installs, the connectivity and kagent releases
+(dependsOn kagent-crds) never move, the meta chart's revision times out. Two hook
+Jobs, as the hook identity, a script each in the helm image, rendered whenever
+components.kagent-crds is on — with or without the bundled engine: a cluster's
+own Flux runs this chart's hooks too, and every installation that ran 0.10
+needs the step (agent-platform.kagent.storageVersionHooks).
+  -7  kagent-storage-version-backup (pre-install, pre-upgrade; after the kagent
+      namespace hook at -8): for each of the three CRDs that stores v1alpha2,
+      record its objects (status and the server-set metadata stripped) into
+      ConfigMap kagent-storage-version-migration in the kagent namespace —
+      keys modelconfigs.json, modelproviderconfigs.json, remotemcpservers.json,
+      recorded-at; replaced whole on every run that records — then delete the
+      CRD: its objects go with it, and kagent-crds installs it at v1alpha3. A CRD
+      that is absent, or does not store v1alpha2 (a fresh 4.x install, a second
+      run), is left alone, and so is the record: a re-run after a failed first
+      upgrade keeps what the first run recorded for the restore. Nothing is
+      deleted before the record is written. Then, on
+      every run: Helm reads a release's stored manifest back through the
+      cluster's REST mappings on each upgrade and uninstall, so once v1alpha2
+      is gone every release that rendered one of the three kinds at v1alpha2
+      — the 3.x connectivity release's catalog, the kagent 0.x release's
+      default ModelConfig and tool-server RemoteMCPServer — fails with `unable
+      to build kubernetes objects from current release manifest: no matches for
+      kind "RemoteMCPServer" in version "kagent.dev/v1alpha2"` (the lab did).
+      The hook re-points those objects to kagent.dev/v1alpha3 in Helm's storage
+      (the release Secrets, what `helm mapkubeapis` does for removed APIs); the
+      objects themselves went with the CRDs, and the release's next upgrade
+      creates what its new chart renders and drops the rest. Idempotent: a
+      manifest without v1alpha2 objects of the three kinds is left alone.
+   0  kagent-storage-version-restore (post-install, post-upgrade): once
+      modelconfigs.kagent.dev is Established and serves v1alpha3 (polled every
+      10 s, up to 8 min: under a cluster's own Flux the post hooks run as soon
+      as the HelmReleases are applied, before kagent-crds has installed),
+      re-create every recorded ModelConfig no Helm release owned — no
+      meta.helm.sh/release-name annotation; the chart-rendered ones come back
+      from their releases (the kagent release's providers, the connectivity
+      release's kagent.modelConfigs[]), model-manager re-creates the ones it
+      manages and updates a restored one in place — at kagent.dev/v1alpha3:
+      name, namespace, labels, annotations and spec kept, the apiVersion
+      swapped (the ModelConfig spec is the same in both versions). One that is
+      already present is left to its owner; any other refusal fails the Job,
+      and Helm reports it. RemoteMCPServers and ModelProviderConfigs are
+      recorded, never restored: the 4.x charts render their own (UPGRADE.md).
+      Runs once: the ConfigMap's restored-at marks it done and stays as the
+      operator's record until it is deleted — a hand-created ModelConfig an
+      operator removes after the cut-over must not come back on the next
+      upgrade. A failed restore leaves no mark, so the next upgrade retries.
+*/ -}}
+{{- if include "agent-platform.kagent.storageVersionHooks" . }}
+{{ include "agent-platform.hooks.job" (dict "root" . "name" "kagent-storage-version-backup" "hook" "pre-install,pre-upgrade" "weight" -7
+      "image" (include "agent-platform.hooks.helmImage" .)
+      "about" "record the objects of the kagent CRDs still stored at v1alpha2 (modelconfigs, modelproviderconfigs, remotemcpservers) into the migration ConfigMap and delete those CRDs, so kagent-crds installs them at v1alpha3"
+      "script" (include "agent-platform.kagent.storageVersionBackupScript" .)) }}
+---
+{{ include "agent-platform.hooks.job" (dict "root" . "name" "kagent-storage-version-restore" "hook" "post-install,post-upgrade" "weight" 0
+      "image" (include "agent-platform.hooks.helmImage" .)
+      "about" "re-create the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3 once kagent-crds serves it; the chart-rendered ones come back from their releases"
+      "script" (include "agent-platform.kagent.storageVersionRestoreScript" .)) }}
+{{- end }}
+
+{{- define "agent-platform.kagent.storageVersionBackupScript" -}}
+ns={{ include "agent-platform.kagent.namespace" . | quote }}
+cm="kagent-storage-version-migration"
+rel={{ .Release.Name | quote }}
+stale="v1alpha2"
+mkdir -p /tmp/record
+recorded=0
+for crd in modelconfigs.kagent.dev modelproviderconfigs.kagent.dev remotemcpservers.kagent.dev; do
+  stored="$(kubectl get customresourcedefinitions.apiextensions.k8s.io "$crd" -o jsonpath='{.status.storedVersions}' --ignore-not-found)"
+  case "$stored" in
+    "") echo "$crd: absent; nothing to migrate"; continue ;;
+    *"\"$stale\""*) ;;
+    *) echo "$crd: stores $stored, no $stale; left as it is"; continue ;;
+  esac
+  kubectl get "$crd" -A -o json > /tmp/raw.json
+  jq -c '[.items[] | del(.status, .metadata.managedFields, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.generation)]' /tmp/raw.json > "/tmp/record/${crd%%.*}.json"
+  echo "$crd: stores $stored: $(jq length "/tmp/record/${crd%%.*}.json") objects recorded"
+  recorded=$((recorded + 1))
+done
+if [ "$recorded" -eq 0 ]; then
+  echo "no kagent CRD stores $stale: nothing to migrate"
+else
+  # the record, written before anything is deleted: one ConfigMap in the kagent
+  # namespace, replaced whole on every run that records (a fresh record per
+  # migration; a run that finds nothing at v1alpha2 leaves it alone)
+  kubectl create configmap "$cm" -n "$ns" --from-file=/tmp/record --dry-run=client -o json > /tmp/cm-raw.json
+  jq --arg at "$(date -u +%FT%TZ)" --arg rel "$rel" '.data["recorded-at"] = $at | .metadata.labels = {"app.kubernetes.io/instance": $rel, "app.kubernetes.io/component": "kagent-storage-version-migration", "app.kubernetes.io/managed-by": "agent-platform-hooks"}' /tmp/cm-raw.json > /tmp/cm.json
+  kubectl delete configmap "$cm" -n "$ns" --ignore-not-found
+  kubectl create -f /tmp/cm.json
+  echo "recorded into ConfigMap $ns/$cm ($(wc -c < /tmp/cm.json | tr -d ' ') bytes)"
+  for f in /tmp/record/*.json; do
+    crd="$(basename "$f" .json).kagent.dev"
+    kubectl delete customresourcedefinitions.apiextensions.k8s.io "$crd" --wait --timeout=3m
+    echo "$crd deleted, its objects with it; kagent-crds installs it at v1alpha3"
+  done
+fi
+# on every run: the Helm release manifests that still name the three kinds at v1alpha2
+{{ include "agent-platform.kagent.storageVersionManifestScript" . }}
+{{- end -}}
+
+{{- /* Re-point the three kinds from kagent.dev/v1alpha2 to v1alpha3 in every Helm
+release manifest that still names them — Helm cannot read a manifest back through
+a version the cluster no longer serves. Runs on every backup, so a re-run after a
+failed first attempt still finishes the job; a fresh install scans and changes
+nothing. One Secret at a time (a release manifest can be large, the pod has 128Mi);
+the patch goes through a file (a release's storage exceeds the length of one
+command argument). */ -}}
+{{- define "agent-platform.kagent.storageVersionManifestScript" -}}
+kinds='(^|\n)kind: (ModelConfig|ModelProviderConfig|RemoteMCPServer)\n'
+rewritten=0
+kubectl get secrets -A -l owner=helm --field-selector type=helm.sh/release.v1 -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' > /tmp/releases.txt
+while read -r sns sname; do
+  [ -n "$sname" ] || continue
+  kubectl get secret -n "$sns" "$sname" -o jsonpath='{.data.release}' > /tmp/release.b64
+  base64 -d < /tmp/release.b64 | base64 -d | gzip -dc > /tmp/release.json
+  n="$(jq -r --arg k "$kinds" '[.manifest | split("\n---\n")[] | select(test($k) and test("apiVersion: kagent.dev/v1alpha2\n"))] | length' /tmp/release.json)"
+  [ "$n" -gt 0 ] || continue
+  jq --arg k "$kinds" '.manifest |= (split("\n---\n") | map(if test($k) then gsub("apiVersion: kagent.dev/v1alpha2\n"; "apiVersion: kagent.dev/v1alpha3\n") else . end) | join("\n---\n"))' /tmp/release.json > /tmp/release-new.json
+  printf '{"data":{"release":"%s"}}' "$(gzip -c /tmp/release-new.json | base64 | tr -d '\n' | base64 | tr -d '\n')" > /tmp/release-patch.json
+  kubectl patch secret -n "$sns" "$sname" --type merge --patch-file /tmp/release-patch.json >/dev/null
+  echo "release $sns/$(jq -r .name /tmp/release.json) revision $(jq -r .version /tmp/release.json): $n objects re-pointed to kagent.dev/v1alpha3 in Helm's stored manifest (Helm reads it back through a served version on the next upgrade)"
+  rewritten=$((rewritten + 1))
+done < /tmp/releases.txt
+echo "$(wc -l < /tmp/releases.txt | tr -d ' ') Helm release Secrets scanned, $rewritten re-pointed"
+{{- end -}}
+
+{{- define "agent-platform.kagent.storageVersionRestoreScript" -}}
+ns={{ include "agent-platform.kagent.namespace" . | quote }}
+cm="kagent-storage-version-migration"
+crd="modelconfigs.kagent.dev"
+version="v1alpha3"
+kubectl get configmap "$cm" -n "$ns" -o json --ignore-not-found > /tmp/cm.json
+if [ ! -s /tmp/cm.json ]; then
+  echo "no ConfigMap $ns/$cm: nothing was recorded, nothing to restore"
+  exit 0
+fi
+restored="$(jq -r '.data["restored-at"] // ""' /tmp/cm.json)"
+if [ -n "$restored" ]; then
+  echo "ConfigMap $ns/$cm: restored at $restored; nothing to do (the record stays until it is deleted)"
+  exit 0
+fi
+for k in remotemcpservers modelproviderconfigs; do
+  n="$(jq -r --arg k "$k.json" '.data[$k] // "[]" | fromjson | length' /tmp/cm.json)"
+  [ "$n" = 0 ] || echo "recorded, not restored: $n $k (the 4.x charts render their own; the record is $ns/$cm)"
+done
+jq -r '.data["modelconfigs.json"] // "[]"' /tmp/cm.json > /tmp/modelconfigs.json
+jq -c '[.[] | select(.metadata.annotations["meta.helm.sh/release-name"] == null)]' /tmp/modelconfigs.json > /tmp/unowned.json
+total="$(jq length /tmp/modelconfigs.json)"
+n="$(jq length /tmp/unowned.json)"
+echo "$total ModelConfigs recorded, $n owned by no Helm release (the other $((total - n)) come back from their releases)"
+if [ "$n" -gt 0 ]; then
+  deadline=$(( $(date +%s) + 480 ))
+  while :; do
+    state="$(kubectl get customresourcedefinitions.apiextensions.k8s.io "$crd" -o jsonpath='{.status.conditions[?(@.type=="Established")].status} {.spec.versions[*].name}' --ignore-not-found)"
+    case "$state" in True*"$version"*) break ;; esac
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "$crd is not Established serving $version after 480 s (${state:-absent}): the kagent-crds release has not installed it; the record stays, the next upgrade retries" >&2
+      exit 1
+    fi
+    echo "$(date -u +%FT%TZ) waiting for $crd to be Established serving $version (${state:-absent})"
+    sleep 10
+  done
+fi
+i=0; created=0; present=0
+while [ "$i" -lt "$n" ]; do
+  jq -c --arg v "kagent.dev/$version" --argjson i "$i" '.[$i] | {apiVersion: $v, kind, metadata: (.metadata | {name, namespace, labels, annotations} | with_entries(select(.value != null))), spec}' /tmp/unowned.json > /tmp/obj.json
+  ref="$(jq -r '"\(.metadata.namespace)/\(.metadata.name)"' /tmp/obj.json)"
+  if out="$(kubectl create -f /tmp/obj.json 2>&1)"; then
+    echo "ModelConfig $ref: re-created at kagent.dev/$version"; created=$((created + 1))
+  else
+    case "$out" in
+      *AlreadyExists*) echo "ModelConfig $ref: already present (re-created by its owner)"; present=$((present + 1)) ;;
+      *) echo "ModelConfig $ref: $out" >&2; exit 1 ;;
+    esac
+  fi
+  i=$((i + 1))
+done
+kubectl patch configmap "$cm" -n "$ns" --type merge -p "{\"data\":{\"restored-at\":\"$(date -u +%FT%TZ)\"}}"
+echo "restored: $created re-created, $present already present, $((total - n)) chart-owned left to their releases; the record $ns/$cm stays (UPGRADE.md says when to delete it)"
+{{- end -}}

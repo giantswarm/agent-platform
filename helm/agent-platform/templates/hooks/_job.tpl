@@ -5,19 +5,28 @@ no shell) or a small shell script in alpine/k8s (gitops.hooks.helmImage: kubectl
 helm, jq, /bin/sh) where the hook needs helm or has to tolerate a missing
 object. Every hook runs under the restricted pod security profile (the
 namespace the FluxInstance labels warns on anything less), as the hook
-ServiceAccount (rbac.yaml, cluster-admin, itself a pre-delete hook) or — the
-self-management hooks — as the regular ServiceAccount <release>-self
-(self/rbac.yaml, a namespaced Role). Hook weights in use:
+ServiceAccount (rbac.yaml, cluster-admin, itself a hook at the events its Jobs
+need) or — the self-management hooks — as the regular ServiceAccount
+<release>-self (self/rbac.yaml, a namespaced Role). Every hook but the
+storage-version pair renders only with the bundled engine. Hook weights in use:
   -10  the hook ServiceAccount + ClusterRoleBinding (rbac.yaml, pre-delete; and
-       pre-install + pre-upgrade while the kagent namespace hook renders)
+       pre-install + pre-upgrade while the kagent namespace hook or the
+       storage-version backup hook renders, post-install + post-upgrade while
+       the storage-version restore hook renders)
    -8  create the namespace the kagent component installs into if it is
        missing (hooks/kagent-namespace.yaml; pre-install, pre-upgrade)
+   -7  record the objects of the kagent CRDs still stored at v1alpha2 and
+       delete those CRDs, so kagent-crds installs them at v1alpha3
+       (hooks/kagent-crds-storage-version.yaml; pre-install, pre-upgrade)
    -6  stop a resumer Job still running from the last operation (hooks/self.yaml;
        pre-delete — and pre-upgrade when self-management is off, the hand-back)
    -5  suspend the chart's own HelmRelease and drop the values Secret
        (hooks/self.yaml; same events as -6)
     0  delete the platform HelmReleases in reverse dependency order and wait
        per wave (teardown.yaml, pre-delete; a script in the helm image);
+       re-create the recorded ModelConfigs no Helm release owned at v1alpha3
+       once kagent-crds serves it (hooks/kagent-crds-storage-version.yaml,
+       post-install + post-upgrade);
        write the user-supplied values into the values Secret and start the
        resumer (hooks/self.yaml, post-install + post-upgrade)
     5  delete the FluxInstance and wait (teardown.yaml, pre-delete)
