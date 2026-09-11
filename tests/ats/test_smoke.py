@@ -96,6 +96,9 @@ from conftest import (
     UNINSTALL_BUDGET_S,
     VALUES_SECRET,
     WORKER_POOL,
+    assert_substrate_trust_chain,
+    PODCERT_SIGNERS,
+    PODCERT_NAMESPACE,
     Helm,
     Kube,
     MusterSession,
@@ -108,7 +111,6 @@ from conftest import (
     dex_password_grant,
     dump_agents,
     is_ready,
-    remove_substrate_leftovers,
     jwt_claims,
     load_values,
     login_through_muster,
@@ -117,6 +119,7 @@ from conftest import (
     unauthenticated_mcp_challenge,
     wait_for,
     wait_for_muster_healthy,
+    substrate_trust_bundles,
     wait_for_substrate,
     wait_for_template_ready,
 )
@@ -158,6 +161,10 @@ def dump_platform(kube: Kube) -> None:
         f"-n {ATE_NAMESPACE} get pods -o wide",
         f"-n {NAMESPACE} get events --sort-by=.lastTimestamp",
         f"-n {NAMESPACE} logs deployment/helm-controller --tail=60",
+        # The connectivity release's hook Jobs (the Substrate bootstrap, the
+        # databases hook): a failed pre-install is theirs to explain.
+        f"-n {NAMESPACE} logs -l app.kubernetes.io/component=hooks --all-containers --prefix --tail=40",
+        f"-n {NAMESPACE} logs -l job-name=agent-platform-connectivity-substrate-bootstrap --all-containers --prefix --tail=40",
     ])
 
 
@@ -589,9 +596,16 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # three ate.dev CRDs stay too — the Substrate line's keep policy (from
     # v0.0.27-gs.3 on), the same convention as kagent-crds', so a consumer's
     # uninstall can always delete its CRs whatever order the releases go in
-    # (giantswarm/agent-platform#385). What stays in ate-system by design: the
-    # bootstrap hook's CA/JWT pools and the bundled Postgres's claim (a
-    # StatefulSet's PVC), neither Helm-owned.
+    # (giantswarm/agent-platform#385). What stays by design, and what the next
+    # install on this cluster relies on: in ate-system the bootstrap hook's
+    # CA/JWT pools, ate-api-server's authentication config and the bundled
+    # Postgres's claim (a StatefulSet's PVC), none Helm-owned; the
+    # podcertificate-controller's namespace with its two CA pools, kept by the
+    # Substrate line's chart (helm.sh/resource-policy: keep, from v0.0.27-gs.5
+    # on — the pools it signs from must outlive the release); and the signers'
+    # cluster-scoped ClusterTrustBundles, which carry those pools' roots
+    # (giantswarm/agent-platform#384). The own-Flux scenario reinstalls onto
+    # exactly this.
     assert_kept_crds(kube)
     assert kube.get("namespace", KAGENT_NAMESPACE), "the kagent namespace went with the uninstall; it must be kept (the agents live there)"
     templates = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.kagent.dev", namespace=KAGENT_NAMESPACE))
@@ -605,15 +619,25 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     wait_for(f"no workload left in {KAGENT_NAMESPACE} (the controller, the UI, its Postgres, the WorkerPool's workers)",
              lambda: not (kube.items("deployments", namespace=KAGENT_NAMESPACE) or kube.items("statefulsets", namespace=KAGENT_NAMESPACE) or kube.items("pods", namespace=KAGENT_NAMESPACE)), 180, interval=3)
     wait_for(f"Substrate's control plane gone from {ATE_NAMESPACE}", lambda: not kube.items("pods", namespace=ATE_NAMESPACE), 180, interval=3)
-    logger.info("kept after the uninstall: CRDs %s; in %s AgentTemplates %s, RemoteMCPServers %s (their HelmReleases %s are gone with the Flux CRDs); nothing else of the runtime",
-                sorted(KEPT_CRDS), KAGENT_NAMESPACE, templates, servers, agent_hrs_before)
+    wait_for(f"the podcertificate-controller gone from {PODCERT_NAMESPACE}", lambda: not kube.items("pods", namespace=PODCERT_NAMESPACE), 180, interval=3)
+    podcert_ns = kube.get("namespace", PODCERT_NAMESPACE)
+    assert podcert_ns and podcert_ns["status"].get("phase") == "Active", f"{PODCERT_NAMESPACE} went with the substrate release (the Substrate line's keep policy missing): {podcert_ns and podcert_ns['status']}"
+    assert (podcert_ns["metadata"].get("annotations") or {}).get("helm.sh/resource-policy") == "keep", podcert_ns["metadata"].get("annotations")
+    for pool in PODCERT_SIGNERS.values():
+        assert kube.get("secret", pool, namespace=PODCERT_NAMESPACE), f"CA pool {PODCERT_NAMESPACE}/{pool} went with the uninstall"
+    for pool in ("actor-id-ca-pool", "actor-id-jwt-pool", "actor-id-ca-certs"):
+        assert kube.get("secret", pool, namespace=ATE_NAMESPACE), f"{ATE_NAMESPACE}/{pool} went with the uninstall"
+    bundles = substrate_trust_bundles(kube)
+    assert bundles == sorted(s.replace("/", ":") + ":primary-bundle" for s in PODCERT_SIGNERS), f"the podcert signers' ClusterTrustBundles after the uninstall: {bundles}"
+    assert_substrate_trust_chain(kube)
+    logger.info("kept after the uninstall: CRDs %s; in %s AgentTemplates %s, RemoteMCPServers %s (their HelmReleases %s are gone with the Flux CRDs); of Substrate: %s with its pools, %s with its two CA pools (keep policy), the ClusterTrustBundles %s carrying the pools' roots",
+                sorted(KEPT_CRDS), KAGENT_NAMESPACE, templates, servers, agent_hrs_before, ATE_NAMESPACE, PODCERT_NAMESPACE, bundles)
     assert elapsed < UNINSTALL_BUDGET_S, f"helm uninstall --wait took {elapsed:.0f}s (budget {UNINSTALL_BUDGET_S}s)"
     logger.info("uninstall clean in %.0f s: no Flux CRD, operator CRDs kept, no controller, no Job, no release", elapsed)
     # Leave the next scenario a cluster without the kept templates (its own
-    # kagent runs there; the kept CRDs it adopts) and without Substrate's
-    # leftovers (its next install must be a first install); the namespaces'
-    # termination completes in the background.
+    # kagent runs there; the kept CRDs it adopts); the namespace's termination
+    # completes in the background. Substrate's leftovers stay: the own-Flux
+    # scenario is the reinstall onto them (giantswarm/agent-platform#384).
     kube.delete("namespace", KAGENT_NAMESPACE, wait=False)
-    remove_substrate_leftovers(kube)
     for phase, seconds in TIMINGS.entries.items():
         logger.info("TIMING %-90s %6.0f s", phase, seconds)

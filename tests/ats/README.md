@@ -96,24 +96,30 @@ The control plane the chart renders anyway: `ate-api-server` ×2,
 (`ate.dev/worker-pool=kagent-default`) — two PVCs (1Gi each, kind's local-path
 provisioner).
 
-**What an uninstall leaves behind, and why the own-Flux scenario starts
-clean.** `helm uninstall` (the smoke's ordered teardown, the bundled engine on)
-removes every release in reverse dependency order — the `kagent-crds` CRDs and
-the agents' templates stay by the line's keep policy — but Substrate also
-leaves what no release owned: the `ate-system` namespace with the bootstrap's
-`actor-id-*` pools, ate-api-server's authentication config and the bundled
-Postgres's claim, and the cluster-scoped `ClusterTrustBundle`s of the
-`*.podcert.ate.dev/identity` signers. The `podcertificate-controller-system`
-namespace, by contrast, goes **with** the `substrate` release (the chart renders
-it) and takes the two CA pools the bootstrap minted there — so a reinstall
-mints new roots while the surviving bundles keep the old ones, and every
-Substrate client fails the TLS handshake against ate-api-server
-(giantswarm/agent-platform#384). The smoke's teardown therefore removes
-`ate-system`, `podcertificate-controller-system` and those bundles after its
-assertions (`remove_substrate_leftovers`), and the functional scenario waits
-for the namespaces to be gone before its bootstrap runs. The kept CRDs of both
-lines stay between the scenarios: the functional scenario's `kagent-crds` and
-`substrate-crds` releases adopt them (the same release names and storage
+**What an uninstall leaves behind, and why the own-Flux scenario is a
+reinstall.** `helm uninstall` (the smoke's ordered teardown, the bundled engine
+on) removes every release in reverse dependency order — the `kagent-crds` CRDs
+and the agents' templates stay by the line's keep policy — and Substrate
+leaves what no release owned or what its chart keeps: the `ate-system`
+namespace with the bootstrap's `actor-id-*` pools, ate-api-server's
+authentication config and the bundled Postgres's claim; the
+`podcertificate-controller-system` namespace with the two CA pools the
+podcertificate-controller signs from (the Substrate line's chart annotates
+the namespace `helm.sh/resource-policy: keep`, 0.0.27-gs.3); and the
+cluster-scoped `ClusterTrustBundle`s of the `*.podcert.ate.dev/identity`
+signers, which carry those pools' roots. Before the keep policy the namespace
+went **with** the `substrate` release and took the pools, so a reinstall minted
+new roots while the surviving bundles kept the old ones; every Substrate pod
+projected the stale bundle when it started and read it once, and failed the
+TLS handshake against ate-api-server (giantswarm/agent-platform#384). The smoke
+now asserts what the uninstall keeps (`assert_substrate_trust_chain`: each
+signer's bundle carries its pool's roots) and leaves it in place; the own-Flux
+scenario installs onto exactly that — the reinstall the issue describes — and
+asserts the same trust chain once Substrate is ready (the bootstrap found the
+pools `present` and republished the bundles from them before any Substrate pod
+started). The kept CRDs of both
+lines stay between the scenarios too: the functional scenario's `kagent-crds`
+and `substrate-crds` releases adopt them (the same release names and storage
 namespaces). Its way back deletes the meta HelmRelease and nothing else — a
 cluster's own Flux uninstalls the components all at once, which is clean
 exactly because the CRDs are kept (giantswarm/agent-platform#385; before the

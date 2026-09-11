@@ -78,6 +78,7 @@ from conftest import (
     apply_placeholder_provider_secret,
     assert_kept_crds,
     assert_remote_mcp_server,
+    assert_substrate_trust_chain,
     condition,
     connectivity_values,
     dump_agents,
@@ -130,6 +131,7 @@ def dump(kube: Kube) -> None:
         f"-n {ATE_NAMESPACE} get pods -o wide",
         f"-n {FLUX_NAMESPACE} logs deployment/helm-controller --tail=60",
         f"-n {FLUX_NAMESPACE} logs deployment/source-controller --tail=40",
+        f"-n {NAMESPACE} logs -l job-name=agent-platform-connectivity-substrate-bootstrap --all-containers --prefix --tail=40",
     ])
     dump_agents(kube)
 
@@ -233,9 +235,14 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     STATE.crd_specs = flux_crd_specs(kube)
     # The cluster owns its namespaces: the fleet bases create kagent's on every
     # management cluster; here the test does (README "Clusters that run Flux").
-    # The smoke's teardown deleted the kagent namespace and Substrate's two
-    # (conftest.remove_substrate_leftovers); their termination may still be
-    # running when this scenario starts, and Substrate's bootstrap needs them gone.
+    # The smoke's teardown deleted the kagent namespace; its termination may
+    # still be running when this scenario starts. Substrate's two namespaces
+    # it left in place on purpose — the ate-system pools, the kept
+    # podcertificate-controller-system with its CA pools, the signers'
+    # ClusterTrustBundles — so this install is the reinstall onto a cluster
+    # with Substrate's leftovers (giantswarm/agent-platform#384); the settle
+    # wait only guards against a Terminating namespace, which a bootstrap
+    # cannot write into.
     wait_for_namespaces_settled(kube, KAGENT_NAMESPACE, ATE_NAMESPACE, PODCERT_NAMESPACE)
     kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": KAGENT_NAMESPACE}})
     TIMINGS.record(f"flux install ({', '.join(sorted(FLUX_COMPONENTS))} {FLUX_VERSION}; {len(keep)} objects, components dropped: {dropped})", time.monotonic() - started)
@@ -322,6 +329,11 @@ def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_fl
         assert kube.get("serviceaccount", KAGENT_FLUX_SA, namespace=KAGENT_NAMESPACE), f"the connectivity release did not render ServiceAccount {KAGENT_FLUX_SA}"
         apply_placeholder_provider_secret(kube)
         wait_for_substrate(kube)
+        # The reinstall's trust chain: each signer's bundle carries the roots
+        # of the pool the podcertificate-controller signs from — with the pools
+        # kept and the bundles republished by the bootstrap, the roots the smoke
+        # ran on (giantswarm/agent-platform#384).
+        logger.info("Substrate trust chain consistent after the reinstall: %s", assert_substrate_trust_chain(kube))
         kube.apply([
             {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
              "metadata": {"name": "agent", "namespace": KAGENT_NAMESPACE},

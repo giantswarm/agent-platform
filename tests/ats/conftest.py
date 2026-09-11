@@ -48,6 +48,7 @@ import re
 import secrets
 import socket
 import subprocess  # nosec: fixed argv throughout; the archive path comes from ATS
+import textwrap
 import threading
 import time
 from pathlib import Path
@@ -79,9 +80,13 @@ HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 WORKER_POOL = "kagent-default"
 ATE_NAMESPACE = "ate-system"
 # Substrate's podcertificate-controller and the CA pools the connectivity
-# bootstrap mints for it; the signers whose ClusterTrustBundles it publishes.
+# bootstrap mints for it — kept across an uninstall by the Substrate line's
+# chart (helm.sh/resource-policy: keep on the namespace) — and the signers
+# whose cluster-scoped ClusterTrustBundles the controller and the bootstrap
+# publish from those pools (giantswarm/agent-platform#384).
 PODCERT_NAMESPACE = "podcertificate-controller-system"
 PODCERT_SIGNER_SUFFIX = ".podcert.ate.dev/identity"
+PODCERT_SIGNERS = {"servicedns.podcert.ate.dev/identity": "service-dns-ca-pool", "podidentity.podcert.ate.dev/identity": "pod-identity-ca-pool"}
 # The CRD charts' CRDs: their templates carry helm.sh/resource-policy: keep, so
 # uninstalling the kagent-crds release leaves the kagent CRDs — and every
 # AgentTemplate and RemoteMCPServer — in place, and uninstalling substrate-crds
@@ -684,26 +689,37 @@ def assert_kept_crds(kube: Kube) -> None:
         assert annotations.get("helm.sh/resource-policy") == "keep", f"{name} carries no helm.sh/resource-policy: keep: {annotations}"
 
 
-def remove_substrate_leftovers(kube: Kube) -> None:
-    """What a Substrate uninstall leaves behind, removed so the next install on
-    this cluster is a first install: the ate-system namespace (the actor-id
-    pools, ate-api-server's authentication config, the bundled Postgres's claim),
-    the podcertificate-controller's namespace when the release did not take it
-    (its two CA pools) and the signers' ClusterTrustBundles. Not removed: the
-    three kept ate.dev CRDs — the next scenario's substrate-crds release adopts
-    them (the same release name and storage namespace), as kagent-crds adopts
-    the kept kagent CRDs. A reinstall that
-    keeps them does not work today: the substrate release owns and deletes
-    podcertificate-controller-system, the bootstrap then mints new roots, and
-    the surviving bundles keep the old ones — every client fails the TLS
-    handshake against ate-api-server (giantswarm/agent-platform#384)."""
-    bundles = substrate_trust_bundles(kube)
-    logger.info("Substrate left behind: namespaces %s, ClusterTrustBundles %s — removed for the next scenario",
-                [ns for ns in (ATE_NAMESPACE, PODCERT_NAMESPACE) if kube.get("namespace", ns)], bundles)
-    if bundles:
-        kube.delete("clustertrustbundles.certificates.k8s.io", *bundles, timeout="1m")
-    for ns in (ATE_NAMESPACE, PODCERT_NAMESPACE):
-        kube.delete("namespace", ns, wait=False)
+
+def substrate_pool_roots(kube: Kube, pool: str) -> List[str]:
+    """The root certificates of a podcertificate CA pool as PEM blocks (the
+    pool's wire format: JSON with the roots as base64 DER; PEM is that base64
+    in 64-column lines between the markers) — what the signer's bundle must
+    carry."""
+    secret = kube.get("secret", pool, namespace=PODCERT_NAMESPACE)
+    assert secret, f"CA pool {PODCERT_NAMESPACE}/{pool} missing"
+    cas = json.loads(base64.b64decode(secret["data"]["pool"]))["CAs"]
+    return ["-----BEGIN CERTIFICATE-----\n" + "\n".join(textwrap.wrap(ca["RootCertificateDER"], 64)) + "\n-----END CERTIFICATE-----\n" for ca in cas]
+
+
+def assert_substrate_trust_chain(kube: Kube) -> Dict[str, int]:
+    """Each podcert signer's ClusterTrustBundle carries the roots of the pool the
+    podcertificate-controller signs from — the trust chain every Substrate pod
+    projects is the one its peers' certificates descend from. This is what a
+    reinstall onto a cluster with Substrate's leftovers used to break
+    (giantswarm/agent-platform#384). Returns the roots per signer."""
+    roots_per_signer = {}
+    for signer, pool in PODCERT_SIGNERS.items():
+        name = signer.replace("/", ":") + ":primary-bundle"
+        bundle = kube.get("clustertrustbundles.certificates.k8s.io", name)
+        assert bundle, f"ClusterTrustBundle {name} missing"
+        assert bundle["spec"].get("signerName") == signer, bundle["spec"]
+        assert (bundle["metadata"].get("labels") or {}).get("podcert.ate.dev/canarying") == "live", bundle["metadata"].get("labels")
+        roots = substrate_pool_roots(kube, pool)
+        assert roots, f"CA pool {pool} carries no root"
+        missing = [r for r in roots if r not in bundle["spec"]["trustBundle"]]
+        assert not missing, f"ClusterTrustBundle {name} does not carry {len(missing)} of the {len(roots)} root(s) of {PODCERT_NAMESPACE}/{pool}: the trust chain is broken"
+        roots_per_signer[signer] = len(roots)
+    return roots_per_signer
 
 
 def wait_for_namespaces_settled(kube: Kube, *namespaces: str, timeout: float = 300) -> None:
