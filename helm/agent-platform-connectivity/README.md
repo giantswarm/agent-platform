@@ -392,7 +392,7 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
-| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:969af5f733c8e2bd7756f40766352f5af744964e969a031ba146198d8becd546"` |  |
+| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:7db42765cc401f4e356f876cf76a25de39c5109e56fabc9fe45ec0bf7e2d3137"` |  |
 | kagent.harness.snapshotLocation | string | `"s3://ate-snapshots/kagent"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |

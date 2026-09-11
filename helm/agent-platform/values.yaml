@@ -1496,7 +1496,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # together, from the line's ledger: builds.md on the fork's `ledger` branch
   # has one row per published build with every image's index digest (README
   # "Re-pinning the kagent line").
-  tag: "0.11.0-gs.1"
+  tag: "0.11.0-gs.2"
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
   # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
   # must stay allowed.
@@ -1822,7 +1822,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # names (builds.md on the fork's `ledger` branch, column golang-adk; `crane
     # digest ghcr.io/giantswarm/kagent/golang-adk:<tag>` says the same); a
     # re-pin moves it with `tag`.
-    image: ghcr.io/giantswarm/kagent/golang-adk@sha256:969af5f733c8e2bd7756f40766352f5af744964e969a031ba146198d8becd546
+    image: ghcr.io/giantswarm/kagent/golang-adk@sha256:7db42765cc401f4e356f876cf76a25de39c5109e56fabc9fe45ec0bf7e2d3137
     # Where Substrate keeps the actors' snapshots for this Harness — the
     # Harness's snapshotPolicy.location: an object-store URL, s3://<bucket>/<prefix>
     # (the prefix keeps one bucket's Harnesses apart). REQUIRED whenever
@@ -1866,7 +1866,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # match into an exact path "/<service>/" that no request has, and ignores
       # `type: RegularExpression` — a service-only match would fall through to
       # the MCP catch-all route; exact service/method matches outrank it. The
-      # list is the kagent line's proto/ at its pin (v0.11.0-gs.1); an RPC the
+      # list is the kagent line's proto/ at its pin (v0.11.0-gs.2); an RPC the
       # line adds is reachable only once it is listed here. An RPC absent here
       # fails loudly (the catch-all answers 406), never silently.
       services:
