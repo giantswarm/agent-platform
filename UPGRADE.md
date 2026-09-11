@@ -4,15 +4,17 @@ Operator action required between releases. CHANGELOG.md captures the diff; UPGRA
 
 ## \<current\> → \<next\> (the agentgateway data plane runs two replicas behind a `PodDisruptionBudget`, spread across nodes)
 
-`gateway.parameters` gains `replicas` (`2`), `podDisruptionBudget` (`enabled: true`, `maxUnavailable: 1`) and `spread` (`enabled: true`, `topologyKeys: [kubernetes.io/hostname]`, `maxSkew: 1`, `whenUnsatisfiable: ScheduleAnyway`), rendered into the `AgentgatewayParameters` the agentgateway controller reconciles the data-plane `Deployment` from (`templates/agentgateway/agentgatewayparameters.yaml`). The meta chart declares the same keys at the same defaults and forwards `agentgateway.controller.replicaCount: 2` to the controller release.
+`gateway.parameters` gains `replicas` (`2`), `podDisruptionBudget` (`enabled: true`; the spec is `maxUnavailable: 1` unless `minAvailable` or `maxUnavailable` is set) and `spread` (`enabled: true`, `topologyKeys: [kubernetes.io/hostname]`, `maxSkew: 1`, `whenUnsatisfiable: ScheduleAnyway`), rendered into the `AgentgatewayParameters` the agentgateway controller reconciles the data-plane `Deployment` from (`templates/agentgateway/agentgatewayparameters.yaml`). The meta chart declares the same keys at the same defaults and forwards `agentgateway.controller.replicaCount: 2` to the controller release.
 
 ### Operator action
 
 - **None** for the default shape. Every installation with the agentgateway component on rolls the data plane once (the second pod, the `PodDisruptionBudget` and the spread constraint arrive in one Deployment revision; the default `RollingUpdate` surges first) and the controller once (a second pod behind the chart's leader election). Budget two more pods of the data plane's and the controller's size on the node pool.
-- Two nodes are not required: `whenUnsatisfiable: ScheduleAnyway` lets a single-node cluster schedule both pods on the one node. `DoNotSchedule` pins the spread; the second pod then stays Pending on one node.
+- Two nodes are not required to schedule: `whenUnsatisfiable: ScheduleAnyway` lets a single-node cluster place both pods on its one node. A **drain of that single node then waits on the budget** (the first eviction succeeds, the replacement pod cannot schedule on the cordoned node, the second eviction is refused until the drain times out); set `gateway.parameters.podDisruptionBudget.enabled: false` on a single-node cluster. `DoNotSchedule` pins the spread; the second pod then stays Pending on one node.
 - A multi-zone node pool spreads across zones too with a second key: `gateway.parameters.spread.topologyKeys: [kubernetes.io/hostname, topology.kubernetes.io/zone]`.
+- `minAvailable` is set as such (`gateway.parameters.podDisruptionBudget.minAvailable: 1`, or a percentage) — through the meta chart too, with no `maxUnavailable: null` next to it: the `maxUnavailable: 1` default is emitted by the connectivity template only when neither field is set.
 - The previous shape is `gateway.parameters.replicas: 1`, `gateway.parameters.podDisruptionBudget.enabled: false`, `gateway.parameters.spread.enabled: false` (and `agentgateway.controller.replicaCount: 1` through the meta chart).
-- The render refuses `podDisruptionBudget` with both `minAvailable` and `maxUnavailable`, an integer `minAvailable` at or above `replicas`, and `spread.enabled` with an empty `topologyKeys`.
+- The render refuses `podDisruptionBudget` with both `minAvailable` and `maxUnavailable`, a non-percentage string or a fractional number, any budget that allows no eviction (an integer `minAvailable` at or above `replicas`, a percentage `minAvailable` that rounds up to every replica — above 50% at two replicas —, a zero `maxUnavailable`), `spread.enabled` with an empty `topologyKeys`, and `replicas` or `maxSkew` below 1.
+- MCP clients that still use the legacy SSE transport through the data plane hold pod-local sessions and reconnect on a pod change; streamable-HTTP sessions (the platform's `RemoteMCPServer`s) survive it.
 
 ## \<current\> → \<next\> (kagent follows the wrapper's 0.x line)
 

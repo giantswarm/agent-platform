@@ -369,12 +369,6 @@
                             "properties": {
                                 "enabled": {
                                     "type": "boolean"
-                                },
-                                "maxUnavailable": {
-                                    "type": [
-                                        "integer",
-                                        "string"
-                                    ]
                                 }
                             }
                         },
@@ -397,7 +391,8 @@
                             }
                         },
                         "replicas": {
-                            "type": "integer"
+                            "type": "integer",
+                            "minimum": 1
                         },
                         "serviceType": {
                             "type": "string"
@@ -410,7 +405,8 @@
                                     "type": "boolean"
                                 },
                                 "maxSkew": {
-                                    "type": "integer"
+                                    "type": "integer",
+                                    "minimum": 1
                                 },
                                 "topologyKeys": {
                                     "type": "array",
