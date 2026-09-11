@@ -1573,3 +1573,199 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.modelServing.enabled=true 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' | awk '/^      policies:$$/{f=1;next} f&&/^      [a-z]/{f=0} f' | grep -q '^        enabled: false' || { echo "FAIL: policies knob not false on the vanilla render with the switch on"; exit 1; }
 	@echo "ok: switch block forwarded only while on, policies knob resolved"
 	@echo "the standalone's ported wiring verified."
+
+# The kagent API v2 cut-over of an installation (#346): the kagent_v2 database
+# with its derived connection Secret (postgres.databases, the hook Job in
+# templates/postgres/databases-hook.yaml) and the agent-manager migrate
+# Job (agentManager.migration, templates/kagent/migrate-*.yaml). PICK selects one
+# object of a render by kind and name (tests/pick-doc.py; an awk range picks the
+# first object of a kind, wrong as soon as two Jobs render).
+PICK := python3 tests/pick-doc.py
+MIGRATION_ON := $(MANAGERS_MIN) --set components.agent-manager.enabled=true
+MIGRATION_JOB := agent-platform-connectivity-agent-manager-migrate
+
+.PHONY: verify-postgres-kagent-v2
+verify-postgres: verify-postgres-kagent-v2
+verify-postgres-kagent-v2: ## Assert the kagent_v2 database entry (#346): the CNPG Database (name, owner, vector, retain) on the platform Cluster, the 30-day drop of the 0.10 database (applicationDatabase.ensure), the entry reaching the connectivity databases hook (its mechanism is verify-postgres' own, #342) to feed the derived Secret kagent-pg-kagent-v2-app, the controller mount example, the meta chart's forwarding, and the entry's component/postgres gating.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@echo "--> postgres on: ONE Database, kagent-pg-kagent-v2 (kagent_v2, owner kagent, vector, retain) on the existing Cluster; the 0.10 database is no Database of the chart by default"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) >/tmp/vpv2.out 2>&1 || { cat /tmp/vpv2.out; exit 1; }
+	@[ "$$(grep -c '^kind: Database$$' /tmp/vpv2.out)" = "1" ] || { echo "FAIL: expected exactly one Database in the default postgres shape"; grep -n -A3 '^kind: Database$$' /tmp/vpv2.out; exit 1; }
+	@$(PICK) /tmp/vpv2.out Database kagent-pg-kagent-v2 kagent >/tmp/vpv2-db.out || { echo "FAIL: no Database kagent-pg-kagent-v2 in the kagent namespace"; exit 1; }
+	@grep -q '^  name: kagent_v2$$' /tmp/vpv2-db.out || { echo "FAIL: spec.name is not kagent_v2"; exit 1; }
+	@grep -q '^  owner: kagent$$' /tmp/vpv2-db.out || { echo "FAIL: the owner is not kagent (the bootstrap owner, whose Secret is derived)"; exit 1; }
+	@grep -A1 '^  cluster:$$' /tmp/vpv2-db.out | grep -q 'name: kagent-pg' || { echo "FAIL: the Database does not name the existing Cluster kagent-pg"; exit 1; }
+	@grep -q '^  databaseReclaimPolicy: retain$$' /tmp/vpv2-db.out || { echo "FAIL: databaseReclaimPolicy is not retain"; exit 1; }
+	@grep -A1 '^  extensions:$$' /tmp/vpv2-db.out | grep -q 'name: vector' || { echo "FAIL: the vector extension is missing"; exit 1; }
+	@if $(PICK) /tmp/vpv2.out Database kagent-pg-kagent kagent >/dev/null 2>&1; then echo "FAIL: the 0.10 database (kagent-pg-kagent) rendered as a Database by default (ImageVolume off)"; exit 1; fi
+	@if ! grep -q '^kind: Cluster$$' /tmp/vpv2.out; then echo "FAIL: the Cluster is gone"; exit 1; fi
+	@echo "ok: Database"
+	@echo "--> ImageVolume mode: the existing kagent-pg-kagent Database (the bootstrap database's extension) renders untouched next to kagent-v2"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) >/tmp/vpv2-iv.out 2>&1 || { cat /tmp/vpv2-iv.out; exit 1; }
+	@[ "$$(grep -c '^kind: Database$$' /tmp/vpv2-iv.out)" = "2" ] || { echo "FAIL: expected the bootstrap database's Database and kagent-v2"; exit 1; }
+	@$(PICK) /tmp/vpv2-iv.out Database kagent-pg-kagent kagent >/tmp/vpv2-iv-db.out || { echo "FAIL: the bootstrap database's Database kagent-pg-kagent is gone"; exit 1; }
+	@grep -q '^  name: kagent$$' /tmp/vpv2-iv-db.out || { echo "FAIL: the bootstrap database's Database kagent-pg-kagent changed"; exit 1; }
+	@if grep -q 'ensure:' /tmp/vpv2-iv-db.out; then echo "FAIL: ensure renders by default (the object must stay byte-identical)"; exit 1; fi
+	@echo "--> the 30-day drop in that mode: postgres.applicationDatabase.ensure=absent renders ensure: absent on that object only"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) --set postgres.applicationDatabase.ensure=absent >/tmp/vpv2-drop.out 2>&1 || { cat /tmp/vpv2-drop.out; exit 1; }
+	@$(PICK) /tmp/vpv2-drop.out Database kagent-pg-kagent kagent | grep -q '^  ensure: absent$$' || { echo "FAIL: ensure=absent did not reach the 0.10 database's object"; exit 1; }
+	@if $(PICK) /tmp/vpv2-drop.out Database kagent-pg-kagent-v2 kagent | grep -q 'ensure:'; then echo "FAIL: ensure=absent leaked onto kagent-v2"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.applicationDatabase.ensure=gone >/tmp/vpv2-g0.out 2>&1; then echo "FAIL: a bogus ensure rendered"; exit 1; \
+	elif ! grep -q 'ensure' /tmp/vpv2-g0.out; then echo "FAIL: the ensure schema check failed for the wrong reason"; cat /tmp/vpv2-g0.out; exit 1; else echo "ok: ensure enum"; fi
+	@echo "ok: ImageVolume mode"
+	@echo "--> the entry reaches the connectivity databases hook (#342's mechanism, tested by verify-postgres): its derive line feeds the derived Secret kagent-pg-kagent-v2-app in the kagent namespace"
+	@$(PICK) /tmp/vpv2.out Job t-postgres-databases >/tmp/vpv2-job.out || { echo "FAIL: no databases derive hook Job for the kagent-v2 entry"; exit 1; }
+	@grep -q 'derive "kagent-v2" "kagent_v2" "kagent"' /tmp/vpv2-job.out || { echo "FAIL: the databases hook does not derive kagent-v2 (kagent_v2) in the kagent namespace"; grep derive /tmp/vpv2-job.out; exit 1; }
+	@grep -q 'cluster="kagent-pg"' /tmp/vpv2-job.out || { echo "FAIL: the derive hook does not source the bootstrap Secret of the kagent-pg Cluster"; exit 1; }
+	@echo "ok: derive hook carries kagent-v2"
+	@echo "--> the controller mount follows the derived Secret kagent-pg-kagent-v2-app where the chart documents it"
+	@grep -q 'secretName: kagent-pg-kagent-v2-app' $(CONNECTIVITY_DIR)/ci/test-postgres-values.yaml || { echo "FAIL: ci/test-postgres-values.yaml does not mount kagent-pg-kagent-v2-app"; exit 1; }
+	@grep -q 'urlFile: /etc/cnpg/uri' $(CONNECTIVITY_DIR)/ci/test-postgres-values.yaml || { echo "FAIL: ci/test-postgres-values.yaml lost the urlFile mount"; exit 1; }
+	@grep -q 'secretName: kagent-pg-kagent-v2-app' $(CONNECTIVITY_DIR)/values.yaml || { echo "FAIL: the connectivity values.yaml mount example still names the bootstrap Secret"; exit 1; }
+	@grep -q 'secretName: kagent-pg-kagent-v2-app' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta values.yaml mount example still names the bootstrap Secret"; exit 1; }
+	@if grep -q 'secretName: kagent-pg-app' $(CONNECTIVITY_DIR)/values.yaml $(CHART_DIR)/values.yaml $(CONNECTIVITY_DIR)/ci/test-postgres-values.yaml; then echo "FAIL: a mount example still names the bootstrap Secret kagent-pg-app"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) -f $(CONNECTIVITY_DIR)/ci/test-postgres-values.yaml >/dev/null 2>&1 || { echo "FAIL: ci/test-postgres-values.yaml does not render"; exit 1; }
+	@echo "ok: mount example"
+	@echo "--> the meta chart declares and forwards the entry: the connectivity release's values carry postgres.databases.kagent-v2 and hooks.kubectlImage"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set postgres.enabled=true >/tmp/vpv2-meta.out 2>&1 || { cat /tmp/vpv2-meta.out; exit 1; }
+	@$(PICK) /tmp/vpv2-meta.out HelmRelease agent-platform-connectivity >/tmp/vpv2-meta-conn.out || { echo "FAIL: no connectivity HelmRelease"; exit 1; }
+	@grep -A8 '^        kagent-v2:$$' /tmp/vpv2-meta-conn.out | grep -q 'name: kagent_v2' || { echo "FAIL: postgres.databases.kagent-v2 is not forwarded to the connectivity release"; grep -n -A8 'kagent-v2:' /tmp/vpv2-meta-conn.out | head -12; exit 1; }
+	@grep -q 'repository: alpine/k8s' /tmp/vpv2-meta-conn.out || { echo "FAIL: hooks.kubectlImage is not forwarded to the connectivity release"; exit 1; }
+	@echo "ok: forwarded"
+	@echo "--> the kagent-v2 entry drops with a disabled entry, its component off, or postgres off (the map mechanism itself is verify-postgres' own)"
+	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set 'postgres.databases.kagent-v2.enabled=false' >/tmp/vpv2-disabled.out 2>&1 || { cat /tmp/vpv2-disabled.out; exit 1; }
+	@if grep -q 'kagent-pg-kagent-v2' /tmp/vpv2-disabled.out; then echo "FAIL: a disabled kagent-v2 entry still renders its Database"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set postgres.enabled=true >/tmp/vpv2-comp.out 2>&1 || { cat /tmp/vpv2-comp.out; exit 1; }
+	@if grep -q 'kagent-pg-kagent-v2' /tmp/vpv2-comp.out; then echo "FAIL: the kagent-v2 entry renders while its component (kagent) is off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vpv2-off.out 2>&1 || { cat /tmp/vpv2-off.out; exit 1; }
+	@if grep -q 'kagent-pg-kagent-v2' /tmp/vpv2-off.out; then echo "FAIL: the kagent-v2 Database renders with postgres off"; exit 1; fi
+	@echo "ok: enabled, component, postgres off"
+	@echo "ok: $@"
+
+.PHONY: verify-identity-migration
+verify-identity: verify-identity-migration
+verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the chart's only cluster-scoped binding (#346): exactly one when the migration is on — named, bound to the CRD ClusterRole (get, delete on the five removed CRDs, nothing more) and to the tenant ServiceAccount, following a renamed identity — and none when the migration or agent-manager is off.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> migration on: exactly one ClusterRoleBinding and one ClusterRole, the CRD pair"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >/tmp/vim-on.out 2>&1 || { cat /tmp/vim-on.out; exit 1; }
+	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' /tmp/vim-on.out)" = "1" ] || { echo "FAIL: expected exactly one ClusterRoleBinding with the migration on"; grep -n -A3 '^kind: ClusterRoleBinding$$' /tmp/vim-on.out; exit 1; }
+	@[ "$$(grep -c '^kind: ClusterRole$$' /tmp/vim-on.out)" = "1" ] || { echo "FAIL: expected exactly one ClusterRole with the migration on"; exit 1; }
+	@$(PICK) /tmp/vim-on.out ClusterRoleBinding $(MIGRATION_JOB)-crds >/tmp/vim-crb.out || { echo "FAIL: the ClusterRoleBinding is not $(MIGRATION_JOB)-crds"; exit 1; }
+	@grep -A3 '^roleRef:' /tmp/vim-crb.out | grep -q 'kind: ClusterRole' || { echo "FAIL: the roleRef is not a ClusterRole"; exit 1; }
+	@grep -A3 '^roleRef:' /tmp/vim-crb.out | grep -q 'name: $(MIGRATION_JOB)-crds' || { echo "FAIL: the roleRef does not name the CRD ClusterRole"; exit 1; }
+	@grep -A3 '^subjects:' /tmp/vim-crb.out | grep -q 'name: kagent-flux' || { echo "FAIL: the subject is not the tenant ServiceAccount"; exit 1; }
+	@grep -A3 '^subjects:' /tmp/vim-crb.out | grep -q 'namespace: kagent' || { echo "FAIL: the subject is not in the kagent namespace"; exit 1; }
+	@if grep -q 'helm.sh/hook' /tmp/vim-crb.out; then echo "FAIL: the binding is a hook resource; the migration's Job is plain and re-runs, its rights must outlive one hook event"; exit 1; fi
+	@$(PICK) /tmp/vim-on.out ClusterRole $(MIGRATION_JOB)-crds >/tmp/vim-cr.out || { echo "FAIL: no CRD ClusterRole"; exit 1; }
+	@for crd in agents.kagent.dev sandboxagents.kagent.dev agentharnesses.kagent.dev memories.kagent.dev toolservers.kagent.dev; do grep -q "^      - $$crd$$" /tmp/vim-cr.out || { echo "FAIL: the ClusterRole does not name $$crd"; exit 1; }; done
+	@[ "$$(grep -c '^      - .*\.kagent\.dev$$' /tmp/vim-cr.out)" = "5" ] || { echo "FAIL: the ClusterRole names more or fewer than the five removed CRDs"; exit 1; }
+	@grep -q 'verbs: \["get", "delete"\]' /tmp/vim-cr.out || { echo "FAIL: the ClusterRole's verbs are not exactly get, delete"; grep verbs /tmp/vim-cr.out; exit 1; }
+	@grep -q 'resources: \["customresourcedefinitions"\]' /tmp/vim-cr.out || { echo "FAIL: the ClusterRole is not confined to customresourcedefinitions"; exit 1; }
+	@echo "ok: the one ClusterRoleBinding"
+	@echo "--> a renamed identity: the subject follows kagent.fluxServiceAccountName"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x >/tmp/vim-x.out 2>&1 || { cat /tmp/vim-x.out; exit 1; }
+	@$(PICK) /tmp/vim-x.out ClusterRoleBinding $(MIGRATION_JOB)-crds | grep -A3 '^subjects:' | grep -q 'name: tenant-x' || { echo "FAIL: the subject did not follow the renamed identity"; exit 1; }
+	@if grep -q 'kagent-flux' /tmp/vim-x.out; then echo "FAIL: the old name survives with a renamed identity"; grep -n kagent-flux /tmp/vim-x.out; exit 1; fi
+	@echo "ok: renamed identity"
+	@echo "--> off: no ClusterRoleBinding with the migration off, with agent-manager off (verify-identity's own kagent-only case), with kagent off"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.enabled=false >/tmp/vim-off.out 2>&1 || { cat /tmp/vim-off.out; exit 1; }
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' /tmp/vim-off.out; then echo "FAIL: a cluster-scoped object renders with the migration off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >/tmp/vim-noam.out 2>&1 || { cat /tmp/vim-noam.out; exit 1; }
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' /tmp/vim-noam.out; then echo "FAIL: a cluster-scoped object renders with agent-manager off"; exit 1; fi
+	@echo "ok: none while off"
+	@echo "ok: $@"
+
+.PHONY: verify-migration
+verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; a PLAIN Job named with the hash of its spec (no hook: a migrate failure never fails the release, and the meta chart stops the connectivity HelmRelease from waiting on Jobs), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), GITHUB_TOKEN optional from the value-named Secret, its inputs as environment; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — the bare smoke has no live kagent API v2 for migrate to act on (agentlab#143 rehearses the migration)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vmig-off.out 2>&1 || { cat /tmp/vmig-off.out; exit 1; }
+	@if grep -q 'agent-manager-migrate' /tmp/vmig-off.out; then echo "FAIL: the migration renders with agent-manager off"; exit 1; else echo "ok: inert without agent-manager"; fi
+	@echo "--> on: a PLAIN Job (no hook) in the kagent namespace, named with an 8-hex hash of its image, args and environment, as the tenant identity, agent-manager's image, migrate, its inputs as environment, the optional token"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >/tmp/vmig-on.out 2>&1 || { cat /tmp/vmig-on.out; exit 1; }
+	@$(PICK) /tmp/vmig-on.out Job '$(MIGRATION_JOB)-*' kagent >/tmp/vmig-job.out || { echo "FAIL: no Job $(MIGRATION_JOB)-<hash> in the kagent namespace"; exit 1; }
+	@grep -qE '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-job.out || { echo "FAIL: the Job's name does not carry the 8-hex spec hash"; grep '^  name:' /tmp/vmig-job.out; exit 1; }
+	@if grep -q 'helm.sh/hook' /tmp/vmig-job.out; then echo "FAIL: the Job is a Helm hook; a migrate failure would fail the connectivity upgrade that renders the Harness"; exit 1; fi
+	@grep -q 'ttlSecondsAfterFinished: 86400' /tmp/vmig-job.out || { echo "FAIL: the finished Job is not kept a day"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=9.9.9 >/tmp/vmig-hash.out 2>&1 || { cat /tmp/vmig-hash.out; exit 1; }
+	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-hash.out)" != "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-on.out)" ] || { echo "FAIL: a changed image did not change the Job's name (Job.spec.template is immutable)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >/tmp/vmig-again.out 2>&1 || { cat /tmp/vmig-again.out; exit 1; }
+	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-again.out)" = "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-on.out)" ] || { echo "FAIL: the Job's name is not stable across identical renders"; exit 1; }
+	@grep -q 'serviceAccountName: kagent-flux' /tmp/vmig-job.out || { echo "FAIL: the Job does not run as the tenant identity"; exit 1; }
+	@if grep -q 'kagent-flux' $(CONNECTIVITY_DIR)/templates/kagent/migrate-job.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-rbac.yaml $(CONNECTIVITY_DIR)/templates/kagent/_migrate.tpl; then echo "FAIL: a migration template carries the literal kagent-flux; the identity comes from the helper"; exit 1; fi
+	@grep -q 'image: "gsoci.azurecr.io/giantswarm/agent-manager:1.1.0"' /tmp/vmig-job.out || { echo "FAIL: the image is not agent-manager at the BOM pin 1.1.0"; grep image: /tmp/vmig-job.out; exit 1; }
+	@grep -q '^            - migrate$$' /tmp/vmig-job.out || { echo "FAIL: the Job does not run \`migrate\`"; exit 1; }
+	@if grep -q -- '--dry-run' /tmp/vmig-job.out; then echo "FAIL: --dry-run renders by default"; exit 1; fi
+	@grep -q 'restartPolicy: Never' /tmp/vmig-job.out || { echo "FAIL: restartPolicy"; exit 1; }
+	@grep -q 'runAsNonRoot: true' /tmp/vmig-job.out || { echo "FAIL: the Job is not restricted (runAsNonRoot)"; exit 1; }
+	@grep -q 'readOnlyRootFilesystem: true' /tmp/vmig-job.out || { echo "FAIL: the Job is not restricted (readOnlyRootFilesystem)"; exit 1; }
+	@for env in 'KUBERNETES_IN_CLUSTER' 'KAGENT_NAMESPACE' 'AGENT_CHART_OCI_URL' 'AGENT_CHART_SEMVER' 'AGENT_HARNESS_NAME' 'GITHUB_TOKEN' 'HOME'; do grep -q "name: $$env$$" /tmp/vmig-job.out || { echo "FAIL: env $$env missing"; exit 1; }; done
+	@grep -A1 'name: KAGENT_NAMESPACE' /tmp/vmig-job.out | grep -q 'value: kagent' || { echo "FAIL: KAGENT_NAMESPACE is not the kagent namespace"; exit 1; }
+	@if grep -q 'AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' /tmp/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES renders without gitopsNamespaces"; exit 1; fi
+	@grep -A1 'name: AGENT_HARNESS_NAME' /tmp/vmig-job.out | grep -q 'value: kagent' || { echo "FAIL: AGENT_HARNESS_NAME is not the platform Harness"; exit 1; }
+	@grep -A1 'name: AGENT_CHART_OCI_URL' /tmp/vmig-job.out | grep -q 'oci://gsoci.azurecr.io/charts/giantswarm/agent' || { echo "FAIL: AGENT_CHART_OCI_URL does not follow agent-manager.agentChart.ociUrl"; exit 1; }
+	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'name: kagent-skills-token' || { echo "FAIL: GITHUB_TOKEN does not read the default token Secret"; exit 1; }
+	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'key: token' || { echo "FAIL: GITHUB_TOKEN does not read the key token"; exit 1; }
+	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'optional: true' || { echo "FAIL: the token Secret is not optional"; exit 1; }
+	@if grep -q 'AGENT_MANAGER_MANAGED_NAMESPACES' /tmp/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MANAGED_NAMESPACES renders without additional namespaces"; exit 1; fi
+	@echo "ok: the Job"
+	@echo "--> the values: the tag follows agentManager.migration.image.tag, dryRun renders --dry-run, an empty secretName drops the token, additional namespaces reach the Job, a renamed identity follows"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=1.2.3 --set agentManager.migration.dryRun=true --set agentManager.migration.githubToken.secretName= --set 'agent-manager.kagent.additionalNamespaces[0]=team-a' --set 'agent-manager.kagent.additionalNamespaces[1]=team-b' --set kagent.fluxServiceAccountName=tenant-x >/tmp/vmig-vals.out 2>&1 || { cat /tmp/vmig-vals.out; exit 1; }
+	@$(PICK) /tmp/vmig-vals.out Job '$(MIGRATION_JOB)-*' kagent >/tmp/vmig-vals-job.out || { echo "FAIL: no Job with the values set"; exit 1; }
+	@grep -q 'agent-manager:1.2.3"' /tmp/vmig-vals-job.out || { echo "FAIL: the image tag does not follow the value"; exit 1; }
+	@grep -q -- '- --dry-run' /tmp/vmig-vals-job.out || { echo "FAIL: dryRun does not render --dry-run"; exit 1; }
+	@if grep -q 'GITHUB_TOKEN' /tmp/vmig-vals-job.out; then echo "FAIL: an empty secretName still renders GITHUB_TOKEN"; exit 1; fi
+	@grep -A1 'name: AGENT_MANAGER_MANAGED_NAMESPACES' /tmp/vmig-vals-job.out | grep -q 'value: team-a,team-b' || { echo "FAIL: the additional namespaces do not reach the Job"; exit 1; }
+	@grep -q 'serviceAccountName: tenant-x' /tmp/vmig-vals-job.out || { echo "FAIL: the Job's ServiceAccount did not follow the renamed identity"; exit 1; }
+	@echo "ok: values"
+	@echo "--> RBAC: the CRD pair (verify-identity-migration asserts its shape) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
+	@if $(PICK) /tmp/vmig-on.out Role $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' --set 'agentManager.migration.gitopsNamespaces[1]=flux-team' >/tmp/vmig-gitops.out 2>&1 || { cat /tmp/vmig-gitops.out; exit 1; }
+	@for ns in flux-giantswarm flux-team; do \
+		$(PICK) /tmp/vmig-gitops.out Role $(MIGRATION_JOB) $$ns >/tmp/vmig-role-$$ns.out || { echo "FAIL: no Role in $$ns"; exit 1; }; \
+		grep -q 'resources: \["helmreleases"\]' /tmp/vmig-role-$$ns.out || { echo "FAIL: the Role in $$ns does not read helmreleases"; exit 1; }; \
+		grep -q 'resources: \["ocirepositories"\]' /tmp/vmig-role-$$ns.out || { echo "FAIL: the Role in $$ns does not read ocirepositories"; exit 1; }; \
+		[ "$$(grep -c 'verbs: \["get", "list"\]' /tmp/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
+		$(PICK) /tmp/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding in $$ns does not bind the tenant identity"; exit 1; }; \
+	done
+	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' /tmp/vmig-gitops.out)" = "1" ] || { echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; }
+	@$(PICK) /tmp/vmig-gitops.out Job '$(MIGRATION_JOB)-*' kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
+	@if grep -q 'helm.sh/hook' /tmp/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
+	@echo "ok: RBAC"
+	@echo "--> network policy: cilium (DNS with the proxy clause, kube-apiserver, api.github.com and the agent chart registry by name on 443) and kubernetes (DNS, the API server CIDR, world on 443), selecting the Job's pods; none with networkPolicy off"
+	@$(PICK) /tmp/vmig-on.out CiliumNetworkPolicy $(MIGRATION_JOB) kagent >/tmp/vmig-cnp.out || { echo "FAIL: no CiliumNetworkPolicy for the Job"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: agent-manager-migrate' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy does not select the Job's pods"; exit 1; }
+	@grep -q 'matchName: api.github.com' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no GitHub API egress"; exit 1; }
+	@grep -q 'matchName: gsoci.azurecr.io' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no agent chart registry egress"; exit 1; }
+	@grep -q -- '- kube-apiserver' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no API server egress"; exit 1; }
+	@grep -B2 -A2 'matchPattern: "\*"' /tmp/vmig-cnp.out | grep -q 'dns:' || { echo "FAIL: the cilium policy has no DNS proxy clause for the FQDN selectors"; exit 1; }
+	@if grep -q 'ingress:' /tmp/vmig-cnp.out; then echo "FAIL: the Job serves nothing; no ingress rule expected"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.flavor=kubernetes >/tmp/vmig-k8s.out 2>&1 || { cat /tmp/vmig-k8s.out; exit 1; }
+	@$(PICK) /tmp/vmig-k8s.out NetworkPolicy $(MIGRATION_JOB) kagent >/tmp/vmig-np.out || { echo "FAIL: no NetworkPolicy for the Job in the kubernetes flavor"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: agent-manager-migrate' /tmp/vmig-np.out || { echo "FAIL: the kubernetes policy does not select the Job's pods"; exit 1; }
+	@grep -q 'policyTypes: \[Egress\]' /tmp/vmig-np.out || { echo "FAIL: the kubernetes policy is not egress-only"; exit 1; }
+	@grep -q 'cidr: 0.0.0.0/0' /tmp/vmig-np.out || { echo "FAIL: the kubernetes policy has no world egress (GitHub, the registry)"; exit 1; }
+	@grep -q 'port: 6443' /tmp/vmig-np.out || { echo "FAIL: the kubernetes policy has no API server egress"; exit 1; }
+	@if $(PICK) /tmp/vmig-k8s.out CiliumNetworkPolicy $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a cilium policy renders in the kubernetes flavor"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.enabled=false >/tmp/vmig-nonp.out 2>&1 || { cat /tmp/vmig-nonp.out; exit 1; }
+	@if grep -qE 'kind: (CiliumNetworkPolicy|NetworkPolicy)' /tmp/vmig-nonp.out; then echo "FAIL: a network policy renders with networkPolicy off"; exit 1; fi
+	@$(PICK) /tmp/vmig-nonp.out Job '$(MIGRATION_JOB)-*' kagent >/dev/null || { echo "FAIL: the Job is gone with networkPolicy off"; exit 1; }
+	@echo "ok: network policy"
+	@echo "--> guards: an empty tenant identity fails naming kagent.fluxServiceAccountName; an empty GitOps namespace fails"
+	@if helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName= >/tmp/vmig-g1.out 2>&1; then echo "FAIL: the migration rendered without a tenant identity"; exit 1; \
+	elif ! grep -q 'kagent.fluxServiceAccountName is empty' /tmp/vmig-g1.out; then echo "FAIL: the identity guard failed for the wrong reason"; cat /tmp/vmig-g1.out; exit 1; else echo "ok: identity guard"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName= --set agentManager.migration.enabled=false >/dev/null 2>&1 || { echo "FAIL: an empty identity with the migration off must render"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=' >/tmp/vmig-g2.out 2>&1; then echo "FAIL: an empty GitOps namespace rendered"; exit 1; \
+	elif ! grep -q 'non-empty namespace name' /tmp/vmig-g2.out; then echo "FAIL: the namespace guard failed for the wrong reason"; cat /tmp/vmig-g2.out; exit 1; else echo "ok: namespace guard"; fi
+	@echo "--> the meta chart declares and forwards agentManager.migration (the BOM tag) to the connectivity release"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.kagent.enabled=true --set components.agent-manager.enabled=true >/tmp/vmig-meta.out 2>&1 || { cat /tmp/vmig-meta.out; exit 1; }
+	@$(PICK) /tmp/vmig-meta.out HelmRelease agent-platform-connectivity >/tmp/vmig-meta-conn.out || { echo "FAIL: no connectivity HelmRelease"; exit 1; }
+	@grep -A12 '^      migration:$$' /tmp/vmig-meta-conn.out | grep -q 'tag: 1.1.0' || { echo "FAIL: agentManager.migration.image.tag (the BOM pin) is not forwarded to the connectivity release"; grep -n -A12 'migration:' /tmp/vmig-meta-conn.out | head -16; exit 1; }
+	@grep -q 'agentManager.migration.image.tag\|tag: 1.1.0' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta values.yaml does not declare the BOM tag"; exit 1; }
+	@grep -q 'disableWaitForJobs: true' /tmp/vmig-meta-conn.out || { echo "FAIL: the connectivity HelmRelease waits for Jobs (components.agent-platform-connectivity.disableWaitForJobs); a migrate failure would fail the release"; exit 1; }
+	@[ "$$(grep -c 'disableWaitForJobs: true' /tmp/vmig-meta-conn.out)" = "2" ] || { echo "FAIL: disableWaitForJobs must be rendered on install and upgrade"; exit 1; }
+	@$(PICK) /tmp/vmig-meta.out HelmRelease agent-manager >/tmp/vmig-meta-am.out || { echo "FAIL: no agent-manager HelmRelease"; exit 1; }
+	@if grep -q 'disableWaitForJobs' /tmp/vmig-meta-am.out; then echo "FAIL: disableWaitForJobs leaked onto another component's HelmRelease"; exit 1; fi
+	@if grep -q 'migration' /tmp/vmig-meta-am.out; then echo "FAIL: agentManager.migration leaked into the agent-manager chart's values"; exit 1; fi
+	@echo "ok: forwarded"
+	@echo "ok: $@"

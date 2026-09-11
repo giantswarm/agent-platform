@@ -560,6 +560,7 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | postgres.applicationDatabase.name | string | `"kagent"` |  |
 | postgres.applicationDatabase.owner | string | `"kagent"` |  |
 | postgres.applicationDatabase.schema | string | `"kagent"` |  |
+| postgres.applicationDatabase.ensure | string | `"present"` |  |
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
@@ -569,6 +570,12 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | postgres.databases.substrate.extensions | list | `[]` |  |
 | postgres.databases.substrate.reclaimPolicy | string | `"retain"` |  |
 | postgres.databases.substrate.secretNamespaces[0] | string | `"ate-system"` |  |
+| postgres.databases.kagent-v2.enabled | bool | `true` |  |
+| postgres.databases.kagent-v2.name | string | `"kagent_v2"` |  |
+| postgres.databases.kagent-v2.extensions[0] | string | `"vector"` |  |
+| postgres.databases.kagent-v2.reclaimPolicy | string | `"retain"` |  |
+| postgres.databases.kagent-v2.component | string | `"kagent"` |  |
+| postgres.databases.kagent-v2.secretNamespaces | list | `[]` |  |
 | postgres.backup.enabled | bool | `false` |  |
 | postgres.backup.method | string | `"plugin"` |  |
 | postgres.backup.schedule | string | `"0 0 2 * * *"` |  |
@@ -754,6 +761,14 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | agentManager.networkPolicy.egress.fqdns[1].matchName | string | `"api.github.com"` |  |
 | agentManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| agentManager.migration.enabled | bool | `true` |  |
+| agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
+| agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
+| agentManager.migration.image.tag | string | `"1.1.0"` |  |
+| agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
+| agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
+| agentManager.migration.githubToken.key | string | `"token"` |  |
+| agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |
