@@ -104,6 +104,7 @@ from conftest import (
     dex_password_grant,
     dump_agents,
     is_ready,
+    remove_substrate_leftovers,
     jwt_claims,
     load_values,
     login_through_muster,
@@ -604,8 +605,10 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     assert elapsed < UNINSTALL_BUDGET_S, f"helm uninstall --wait took {elapsed:.0f}s (budget {UNINSTALL_BUDGET_S}s)"
     logger.info("uninstall clean in %.0f s: no Flux CRD, operator CRDs kept, no controller, no Job, no release", elapsed)
     # Leave the next scenario a cluster without the kept templates (its own
-    # kagent runs there; the kept CRDs it adopts); the namespace's termination
-    # completes in the background.
+    # kagent runs there; the kept CRDs it adopts) and without Substrate's
+    # leftovers (its next install must be a first install); the namespaces'
+    # termination completes in the background.
     kube.delete("namespace", KAGENT_NAMESPACE, wait=False)
+    remove_substrate_leftovers(kube)
     for phase, seconds in TIMINGS.entries.items():
         logger.info("TIMING %-90s %6.0f s", phase, seconds)

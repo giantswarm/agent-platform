@@ -78,6 +78,10 @@ HARNESS = "kagent"
 HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 WORKER_POOL = "kagent-default"
 ATE_NAMESPACE = "ate-system"
+# Substrate's podcertificate-controller and the CA pools the connectivity
+# bootstrap mints for it; the signers whose ClusterTrustBundles it publishes.
+PODCERT_NAMESPACE = "podcertificate-controller-system"
+PODCERT_SIGNER_SUFFIX = ".podcert.ate.dev/identity"
 # The kagent line's CRDs: their templates carry helm.sh/resource-policy: keep, so
 # uninstalling the kagent-crds release leaves them — and every AgentTemplate and
 # RemoteMCPServer — in place (Substrate's ate.dev CRDs carry no such policy).
@@ -652,6 +656,40 @@ def assert_remote_mcp_server(kube: Kube, name: str, toolset: Optional[List[str]]
     assert "Authorization" not in headers, f"a static Authorization header on RemoteMCPServer {name}: it would override the propagated caller token"
     assert (server["metadata"].get("labels") or {}).get("kagent.dev/discovery") == "disabled", server["metadata"].get("labels")
     return server
+
+
+def substrate_trust_bundles(kube: Kube) -> List[str]:
+    """The cluster-scoped ClusterTrustBundles of Substrate's podcertificate
+    signers (published by the podcertificate-controller, never Helm-owned)."""
+    return sorted(b["metadata"]["name"] for b in kube.items("clustertrustbundles.certificates.k8s.io")
+                  if str(b.get("spec", {}).get("signerName", "")).endswith(PODCERT_SIGNER_SUFFIX))
+
+
+def remove_substrate_leftovers(kube: Kube) -> None:
+    """What a Substrate uninstall leaves behind, removed so the next install on
+    this cluster is a first install: the ate-system namespace (the actor-id
+    pools, ate-api-server's authentication config, the bundled Postgres's claim),
+    the podcertificate-controller's namespace when the release did not take it
+    (its two CA pools) and the signers' ClusterTrustBundles. A reinstall that
+    keeps them does not work today: the substrate release owns and deletes
+    podcertificate-controller-system, the bootstrap then mints new roots, and
+    the surviving bundles keep the old ones — every client fails the TLS
+    handshake against ate-api-server (giantswarm/agent-platform#384)."""
+    bundles = substrate_trust_bundles(kube)
+    logger.info("Substrate left behind: namespaces %s, ClusterTrustBundles %s — removed for the next scenario",
+                [ns for ns in (ATE_NAMESPACE, PODCERT_NAMESPACE) if kube.get("namespace", ns)], bundles)
+    if bundles:
+        kube.delete("clustertrustbundles.certificates.k8s.io", *bundles, timeout="1m")
+    for ns in (ATE_NAMESPACE, PODCERT_NAMESPACE):
+        kube.delete("namespace", ns, wait=False)
+
+
+def wait_for_namespaces_settled(kube: Kube, *namespaces: str, timeout: float = 300) -> None:
+    """Each namespace gone or Active — never Terminating (a bootstrap into a
+    terminating namespace is refused, a create of an existing one is a no-op)."""
+    for ns in namespaces:
+        wait_for(f"namespace {ns} gone or Active (not Terminating)",
+                 lambda ns=ns: (kube.get("namespace", ns) or {}).get("status", {}).get("phase", "gone") != "Terminating", timeout)
 
 
 def apply_placeholder_provider_secret(kube: Kube) -> None:

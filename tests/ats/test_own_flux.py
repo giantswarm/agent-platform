@@ -53,6 +53,7 @@ from conftest import (
     AGENT_CHART_URL,
     ATE_NAMESPACE,
     BASE_VALUES,
+    PODCERT_NAMESPACE,
     HARNESS,
     HARNESS_LABEL,
     INSTALL_TIMEOUT,
@@ -77,6 +78,7 @@ from conftest import (
     template_ready,
     template_state,
     wait_for,
+    wait_for_namespaces_settled,
     wait_for_substrate,
     wait_for_template_ready,
 )
@@ -237,10 +239,10 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     STATE.crd_specs = flux_crd_specs(kube)
     # The cluster owns its namespaces: the fleet bases create kagent's on every
     # management cluster; here the test does (README "Clusters that run Flux").
-    # The smoke's teardown deleted the namespace with the connectivity release;
-    # its termination may still be running when this scenario starts.
-    wait_for(f"namespace {KAGENT_NAMESPACE} gone or Active (not Terminating)",
-             lambda: (kube.get("namespace", KAGENT_NAMESPACE) or {}).get("status", {}).get("phase", "gone") != "Terminating", 300)
+    # The smoke's teardown deleted the kagent namespace and Substrate's two
+    # (conftest.remove_substrate_leftovers); their termination may still be
+    # running when this scenario starts, and Substrate's bootstrap needs them gone.
+    wait_for_namespaces_settled(kube, KAGENT_NAMESPACE, ATE_NAMESPACE, PODCERT_NAMESPACE)
     kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": KAGENT_NAMESPACE}})
     TIMINGS.record(f"flux install ({', '.join(sorted(FLUX_COMPONENTS))} {FLUX_VERSION}; {len(keep)} objects, components dropped: {dropped})", time.monotonic() - started)
     logger.info("Flux CRD managers after flux install: %s", sorted({m for ms in STATE.crd_managers.values() for m in ms}))

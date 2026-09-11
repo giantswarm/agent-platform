@@ -96,6 +96,26 @@ The control plane the chart renders anyway: `ate-api-server` ×2,
 (`ate.dev/worker-pool=kagent-default`) — two PVCs (1Gi each, kind's local-path
 provisioner).
 
+**What an uninstall leaves behind, and why the own-Flux scenario starts
+clean.** `helm uninstall` (the smoke's ordered teardown, the bundled engine on)
+removes every release in reverse dependency order — the `kagent-crds` CRDs and
+the agents' templates stay by the line's keep policy — but Substrate also
+leaves what no release owned: the `ate-system` namespace with the bootstrap's
+`actor-id-*` pools, ate-api-server's authentication config and the bundled
+Postgres's claim, and the cluster-scoped `ClusterTrustBundle`s of the
+`*.podcert.ate.dev/identity` signers. The `podcertificate-controller-system`
+namespace, by contrast, goes **with** the `substrate` release (the chart renders
+it) and takes the two CA pools the bootstrap minted there — so a reinstall
+mints new roots while the surviving bundles keep the old ones, and every
+Substrate client fails the TLS handshake against ate-api-server
+(giantswarm/agent-platform#384). The smoke's teardown therefore removes
+`ate-system`, `podcertificate-controller-system` and those bundles after its
+assertions (`remove_substrate_leftovers`), and the functional scenario waits
+for the namespaces to be gone before its bootstrap runs; its way back deletes
+the platform HelmReleases in dependency waves itself, because a cluster's own
+Flux deletes them all at once when the meta HelmRelease goes and `substrate`
+then races `substrate-crds` (giantswarm/agent-platform#385).
+
 **Measured on CI** (`execute-chart-tests` on the `large` class, cold image
 pulls; each test logs `TIMING <phase>`):
 
@@ -107,7 +127,7 @@ pulls; each test logs `TIMING <phase>`):
 | declarative `AgentTemplate` Ready on the Harness | 10 |
 | agent-manager `create_agent` → HelmRelease Ready → `AgentTemplate` Ready + `RemoteMCPServer` Accepted | 21 |
 | `helm uninstall --wait` (the ordered teardown; budget `UNINSTALL_BUDGET_S` = 120 s) | 33 |
-| own-Flux: platform HelmReleases Ready through the cluster's Flux | TBD |
+| own-Flux: platform HelmReleases Ready through the cluster's Flux | 375 |
 | own-Flux: agent through the cluster's Flux (HelmRelease, template Ready, server Accepted) | TBD |
 | the whole `execute-chart-tests` job | TBD |
 
