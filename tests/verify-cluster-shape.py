@@ -27,6 +27,7 @@ Each case below pins one promise:
 Deliberately stdlib-only: the CI image has no PyYAML.
 """
 
+import re
 import subprocess
 import sys
 
@@ -228,13 +229,19 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     # kagent.serviceMonitor is off by default (the kagent line serves no
     # /metrics), so the one ServiceMonitor the gate can produce is switched on
     # here to see the gate resolve; the default is verify-global's.
-    objects = kinds(render(connectivity, [*PARENT_REF, *ON, *apis(served), "--set", "kagent.serviceMonitor.enabled=true"]))
+    rendered = render(connectivity, [*PARENT_REF, *ON, *apis(served), "--set", "kagent.serviceMonitor.enabled=true"])
+    objects = kinds(rendered)
     cnp, netpol = objects.get("CiliumNetworkPolicy", 0), objects.get("NetworkPolicy", 0)
     expect(not (cnp and netpol), f"{where} connectivity renders both network-policy flavors")
     expect((cnp > 0) == cilium and (netpol > 0) == (not cilium),
            f"{where} connectivity flavor objects: CiliumNetworkPolicy={cnp} NetworkPolicy={netpol}")
     for kind in ("ClusterPolicy", "PolicyException"):
         expect((objects.get(kind, 0) > 0) == kyverno, f"{where} connectivity {kind} count={objects.get(kind, 0)}, kyverno served={kyverno}")
+    # kagent API v2: no Agent CR, per-agent Deployment or config Secret is left to
+    # mutate, so the two kagent declarative-agent ClusterPolicies are gone from
+    # every shape; the chart's ClusterPolicy is the agent-sandbox one.
+    expect(not re.search(r"kagent-declarative-pod-security|kagent-srt-settings|kagent\.dev/v1alpha2", rendered),
+           f"{where} connectivity render carries a kagent v1alpha2 Agent mutation or object")
     expect((objects.get("ServiceMonitor", 0) > 0) == monitors,
            f"{where} connectivity ServiceMonitor count={objects.get('ServiceMonitor', 0)}, monitoring served={monitors}")
 

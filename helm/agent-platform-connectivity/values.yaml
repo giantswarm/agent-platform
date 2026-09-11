@@ -390,9 +390,11 @@ networkPolicy:
       - 192.168.0.0/16
       - 169.254.0.0/16
 
-# The chart's kyverno.io objects: the kagent declarative-agent mutate policies, the
-# kagent seccomp PolicyException, the CNPG ImageVolume PolicyException, and the
-# agent-sandbox pod-security policy. `enabled: auto` (the default) renders them
+# The chart's kyverno.io objects: the kagent seccomp PolicyException, the CNPG
+# ImageVolume PolicyException, and the agent-sandbox pod-security policy (the two
+# kagent declarative-agent mutate policies went with kagent API v2: agents run
+# as Substrate actors, so no Agent CR, per-agent Deployment or config Secret is
+# left to mutate). `enabled: auto` (the default) renders them
 # when kyverno.io/v1 is served on the cluster and skips them otherwise, where
 # they would fail the install on an unknown API group; `true` / `false` force
 # them.
@@ -1053,15 +1055,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # --- Admin-owned kagent CRs (read by connectivity templates, not the subchart) ---
   # Tenant agents — created with the generic agent chart
-  # (https://github.com/giantswarm/agent), one release per agent, per the
-  # creating-agents PRD — reference these by name. The shared muster
-  # RemoteMCPServer is template-owned: rendered when the kagent component is on
-  # and muster.enabled, in the release namespace, its name/namespace fixed as the
-  # platform contract the agent chart's default serverRef depends on.
+  # (https://github.com/giantswarm/agent), one release per agent — reference
+  # these by name. Every object here is kagent.dev/v1alpha3 (kagent API v2) in
+  # the kagent namespace, where the AgentTemplates that bind it live: a template
+  # binds a RemoteMCPServer of its own namespace only. There is no shared muster
+  # RemoteMCPServer: the agent chart 1.x renders one per agent — muster's
+  # in-cluster URL (its value muster.url; agent-manager and the portal compose it
+  # from the agent-platform.musterMcpUrl helper), the toolset header, the
+  # discovery opt-out label — and binds it.
 
   # Additional ModelConfig CRs — the model catalog beyond the
-  # default-model-config the kagent subchart creates from providers.anthropic.
-  # Agents reference a ModelConfig by name via spec.declarative.modelConfig.
+  # default-model-config the kagent chart creates from providers.anthropic.
+  # An AgentTemplate references a ModelConfig by name (spec.modelConfig).
   # The apiKeySecret must be pre-created in the kagent namespace.
   modelConfigs: []
   # - name: anthropic-sonnet
@@ -1076,11 +1081,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # ModelConfig calls the provider directly and its usage is unmetered.
   #   baseUrl: http://agentgateway.<release namespace>.svc:8081
 
-  # Additional RemoteMCPServer CRs beyond the shared muster server. Each entry
-  # creates one CR in the kagent namespace; agents reference it by name. Set
-  # tokenSecret to a pre-existing Secret holding key "token" with value
-  # "Bearer <token>" for servers that need a static credential; omit it for
-  # servers reached with the propagated token.
+  # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
+  # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
+  # by name. Set tokenSecret to a pre-existing Secret holding key "token" with
+  # value "Bearer <token>" for servers that need a static credential — the
+  # runtime applies it after the propagated caller token, so every agent reaches
+  # that server as the credential, not as the person; omit it for servers
+  # reached with the propagated token.
   remoteMcpServers: []
   # - name: external-mcp
   #   url: "https://external-mcp.example.com/mcp"

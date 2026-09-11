@@ -21,9 +21,11 @@ FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-ver
 # and no subchart-fail quieting is needed.
 VM := --set ingress.parentRefs[0].name=x $(FLEET_APIS)
 
-# The two components that own a kyverno.io object (kagent: two ClusterPolicies + the
-# seccomp PolicyException; agentSandbox: the pod-security ClusterPolicy), so the
-# kyvernoPolicies assertions below see all four objects.
+# The two components that own a kyverno.io object (kagent: the seccomp
+# PolicyException the Substrate worker pods inherit; agentSandbox: the
+# pod-security ClusterPolicy), so the kyvernoPolicies assertions below see both.
+# kagent owns no ClusterPolicy since kagent API v2: agents run as Substrate
+# actors, so no Agent CR, per-agent Deployment or config Secret is left to mutate.
 KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent-sandbox.enabled=true
 # The golden render deliberately uses the kubernetes networkPolicy flavor: the
 # cilium flavor's CNPG section is now gated on postgres.enabled, the one intended
@@ -44,6 +46,11 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # selector.
 # kagent.namespaceOverride=default (the release namespace of `helm template t`) drops the kagent Namespace object from both renders: this branch
 # keeps it (helm.sh/resource-policy: keep), an intended difference to GOLDEN_REF; every other kagent object renders alike on both sides.
+# The fifth intended change (connectivity 4.0, kagent API v2): the shared muster RemoteMCPServer and the two kagent declarative-agent
+# ClusterPolicies are gone — the Generic agent chart 1.x renders one RemoteMCPServer per agent, and there is no Agent CR, per-agent
+# Deployment or config Secret left to mutate. There is no toggle to render both sides without them, so the golden side is compared with
+# those three objects removed (GOLDEN_RETIRED) and everything else byte for byte; verify-kagent-discovery and verify-modes assert the absence.
+GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n---\n"); keep=[x for x in d if not (("kind: RemoteMCPServer\n" in x and "\n  name: muster\n" in x) or ("kind: ClusterPolicy\n" in x and ("kagent-declarative-pod-security\n" in x or "kagent-srt-settings\n" in x)))]; open(sys.argv[1],"w").write("\n---\n".join(keep))'
 KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
@@ -100,11 +107,15 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if grep -q "kyverno.io" /tmp/vm-pe-none.out; then \
 		echo "FAIL: kyverno.io objects still render under kyvernoPolicies.enabled=false"; grep -n "kyverno.io" /tmp/vm-pe-none.out; exit 1; \
 	else echo "ok: no kyverno.io kinds"; fi
-	@echo "--> the default (kyverno) render still carries all four kyverno.io objects"
+	@echo "--> the default (kyverno) render carries this shape's two kyverno.io objects — the agent-sandbox ClusterPolicy and the kagent seccomp PolicyException — and no kagent Agent mutation"
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) >/tmp/vm-pe-kyverno.out 2>&1 || { cat /tmp/vm-pe-kyverno.out; exit 1; }
-	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "4" ]; then \
-		echo "FAIL: expected 4 kyverno.io objects, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; exit 1; \
-	else echo "ok: 4 kyverno.io objects"; fi
+	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "2" ]; then \
+		echo "FAIL: expected 2 kyverno.io objects, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; grep -n -A3 '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out; exit 1; \
+	elif grep -qE 'kagent-declarative-pod-security|kagent-srt-settings|kagent\.dev/v1alpha2' /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: a kagent v1alpha2 Agent mutation is back (no Agent CR, per-agent Deployment or config Secret exists on kagent API v2)"; exit 1; \
+	elif [ "$$(grep -c '^kind: ClusterPolicy$$' /tmp/vm-pe-kyverno.out)" != "1" ] || ! grep -q 'agent-sandbox-pod-security' /tmp/vm-pe-kyverno.out; then \
+		echo "FAIL: the one ClusterPolicy must be the agent-sandbox pod-security policy"; exit 1; \
+	else echo "ok: 2 kyverno.io objects, no Agent mutation"; fi
 	@echo "--> the CNPG ImageVolume exception renders only with an extension image"
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true >/tmp/vm-pe-noimg.out 2>&1 || { cat /tmp/vm-pe-noimg.out; exit 1; }
 	@if grep -q "image-volume" /tmp/vm-pe-noimg.out; then \
@@ -161,6 +172,7 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		helm template t $$tree/$(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN_REF) >$$out/golden 2>&1 \
 			|| { echo "FAIL: the $(GOLDEN_REF) render failed"; cat $$out/golden; git worktree remove --force $$tree; exit 1; }; \
 		git worktree remove --force $$tree; \
+		$(GOLDEN_RETIRED) $$out/golden; \
 		helm template t $(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN) >$$out/head 2>&1 \
 			|| { echo "FAIL: the working-tree render failed"; cat $$out/head; exit 1; }; \
 		if diff -u $$out/golden $$out/head; then echo "ok: default render unchanged"; \
@@ -658,30 +670,54 @@ verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-
 	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.oauth2ProxyIngress.additionalPeers=[{"app":"teleport-kube-agent"}]' 2>&1 | grep -q 'teleport-kube-agent'; then echo "FAIL: oauth2-proxy peers render while oauth2-proxy is off"; exit 1; else echo "ok: inert while oauth2-proxy is off"; fi
 
 .PHONY: verify-kagent-discovery
-verify-kagent-discovery: ## Assert the shared muster RemoteMCPServer opts out of controller-side tool discovery (kagent.dev/discovery=disabled) iff muster runs with OAuth on, carries no headersFrom, and the operator-defined kagent.remoteMcpServers are untouched.
+verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for muster (the Generic agent chart 1.x renders one per agent, with the toolset header and the discovery opt-out label), nothing it renders for muster carries a static header, the operator-defined kagent.remoteMcpServers are kagent.dev/v1alpha3 in the kagent namespace (tokenSecret = a Secret-sourced Authorization header, no opt-out label), and the muster MCP URL reaches the portal's app-config from the one helper.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> muster OAuth on (the default): the muster RemoteMCPServer carries the opt-out label and no headersFrom"
-	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"}]' >/tmp/vkd-on.out 2>&1 || { cat /tmp/vkd-on.out; exit 1; }
-	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-on.out | awk "/^  name: muster$$/,/^---/" >/tmp/vkd-on-muster.out
-	@grep -q 'kind: RemoteMCPServer' /tmp/vkd-on.out || { echo "FAIL: no RemoteMCPServer rendered"; exit 1; }
-	@grep -q '^  name: muster$$' /tmp/vkd-on-muster.out || { echo "FAIL: no muster RemoteMCPServer rendered"; cat /tmp/vkd-on.out | grep -n 'RemoteMCPServer' ; exit 1; }
-	@grep -q '^    kagent.dev/discovery: disabled$$' /tmp/vkd-on-muster.out || { echo "FAIL: the muster RemoteMCPServer does not opt out of controller-side discovery while muster OAuth is on"; cat /tmp/vkd-on-muster.out; exit 1; }
-	@if grep -q 'headersFrom' /tmp/vkd-on-muster.out; then echo "FAIL: the muster RemoteMCPServer carries headersFrom — a static header there overrides the propagated caller token in every agent"; cat /tmp/vkd-on-muster.out; exit 1; fi
-	@echo "ok: muster opts out, no static header"
-	@echo "--> operator-defined kagent.remoteMcpServers: no opt-out label, tokenSecret still renders headersFrom"
-	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-on.out | awk "/^  name: \"external\"$$/,/^---/" >/tmp/vkd-on-external.out
-	@grep -q '^  name: "external"$$' /tmp/vkd-on-external.out || { echo "FAIL: the operator-defined RemoteMCPServer did not render"; grep -n 'name:' /tmp/vkd-on.out | grep -i remote; exit 1; }
-	@if grep -q 'kagent.dev/discovery' /tmp/vkd-on-external.out; then echo "FAIL: the opt-out label leaked onto an operator-defined RemoteMCPServer"; cat /tmp/vkd-on-external.out; exit 1; fi
-	@grep -q 'headersFrom' /tmp/vkd-on-external.out || { echo "FAIL: tokenSecret no longer renders headersFrom on an operator-defined RemoteMCPServer"; cat /tmp/vkd-on-external.out; exit 1; }
-	@echo "ok: operator-defined servers untouched"
-	@echo "--> muster OAuth off: the controller can list tools anonymously, no opt-out label"
+	@echo "--> kagent + muster on (OAuth on, the default) with operator extras: no RemoteMCPServer for muster; every RemoteMCPServer kagent.dev/v1alpha3 in the kagent namespace"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp"}]' >/tmp/vkd-on.out 2>&1 || { cat /tmp/vkd-on.out; exit 1; }
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/' /tmp/vkd-on.out >/tmp/vkd-on-rms.out
+	@[ "$$(grep -c '^kind: RemoteMCPServer$$' /tmp/vkd-on.out)" = "2" ] || { echo "FAIL: expected the two operator RemoteMCPServers and nothing else, got $$(grep -c '^kind: RemoteMCPServer$$' /tmp/vkd-on.out)"; grep -n -A3 '^kind: RemoteMCPServer$$' /tmp/vkd-on.out; exit 1; }
+	@if grep -qE '^  name: "?muster"?$$' /tmp/vkd-on-rms.out; then echo "FAIL: a RemoteMCPServer named muster is back — the Generic agent chart 1.x renders one per agent (docs/authentication.md, tool discovery)"; exit 1; fi
+	@if grep -q 'svc.cluster.local:8090/mcp' /tmp/vkd-on-rms.out; then echo "FAIL: a RemoteMCPServer of the platform's own targets muster — the per-agent carrier is the agent chart's; a static header here would override the propagated caller token in every agent"; exit 1; fi
+	@if grep -q 'allowedNamespaces' /tmp/vkd-on-rms.out; then echo "FAIL: allowedNamespaces is back on a RemoteMCPServer (the v1alpha2 cross-namespace grant; an AgentTemplate binds a same-namespace server only)"; exit 1; fi
+	@[ "$$(grep -c '^apiVersion: kagent.dev/v1alpha3$$' /tmp/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not kagent.dev/v1alpha3"; grep -n apiVersion /tmp/vkd-on-rms.out; exit 1; }
+	@[ "$$(grep -c '^  namespace: kagent$$' /tmp/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not in the kagent namespace, where the AgentTemplates that bind it live"; exit 1; }
+	@if grep -q 'kagent.dev/v1alpha2' /tmp/vkd-on.out; then echo "FAIL: a kagent.dev/v1alpha2 object renders"; grep -n 'v1alpha2' /tmp/vkd-on.out; exit 1; fi
+	@if grep -q 'kagent.dev/discovery' /tmp/vkd-on-rms.out; then echo "FAIL: the discovery opt-out label leaked onto an operator-defined RemoteMCPServer (the Generic agent chart sets it on the per-agent carrier)"; exit 1; fi
+	@echo "ok: no muster server, v1alpha3 in the kagent namespace, no allowedNamespaces, no v1alpha2, no opt-out label on the extras"
+	@echo "--> tokenSecret renders a Secret-sourced Authorization header in the v1alpha3 shape; without it no headersFrom"
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/ && /\n  name: "external"\n/' /tmp/vkd-on.out >/tmp/vkd-on-external.out
+	@grep -q '^  name: "external"$$' /tmp/vkd-on-external.out || { echo "FAIL: the operator-defined RemoteMCPServer external did not render"; exit 1; }
+	@for pattern in '^  headersFrom:$$' '^  - name: Authorization$$' '^    valueFrom:$$' '^      type: Secret$$' '^      name: "external-token"$$' '^      key: token$$'; do \
+		grep -q -- "$$pattern" /tmp/vkd-on-external.out || { echo "FAIL: tokenSecret no longer renders headersFrom {name: Authorization, valueFrom: {type: Secret, name, key: token}} — missing $$pattern"; cat /tmp/vkd-on-external.out; exit 1; }; \
+	done
+	@if grep -q '^    value:' /tmp/vkd-on-external.out; then echo "FAIL: the Authorization header carries an inline value next to valueFrom (the CRD takes exactly one)"; exit 1; fi
+	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/ && /\n  name: "open"\n/' /tmp/vkd-on.out >/tmp/vkd-on-open.out
+	@grep -q '^  name: "open"$$' /tmp/vkd-on-open.out || { echo "FAIL: the operator-defined RemoteMCPServer open did not render"; exit 1; }
+	@if grep -q 'headersFrom' /tmp/vkd-on-open.out; then echo "FAIL: an operator-defined RemoteMCPServer without tokenSecret carries headersFrom"; cat /tmp/vkd-on-open.out; exit 1; fi
+	@grep -q '^  description: "open MCP server"$$' /tmp/vkd-on-open.out || { echo "FAIL: the default description (required by the v1alpha3 CRD) is gone"; exit 1; }
+	@echo "ok: operator extras"
+	@echo "--> muster OAuth off, no extras: still no RemoteMCPServer of the platform's own"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set muster.muster.oauth.server.enabled=false >/tmp/vkd-off.out 2>&1 || { cat /tmp/vkd-off.out; exit 1; }
-	@awk "/^kind: RemoteMCPServer$$/,/^---/" /tmp/vkd-off.out | awk "/^  name: muster$$/,/^---/" >/tmp/vkd-off-muster.out
-	@grep -q '^  name: muster$$' /tmp/vkd-off-muster.out || { echo "FAIL: no muster RemoteMCPServer rendered with OAuth off"; exit 1; }
-	@if grep -q 'kagent.dev/discovery' /tmp/vkd-off-muster.out; then echo "FAIL: the opt-out label renders while muster OAuth is off"; cat /tmp/vkd-off-muster.out; exit 1; fi
-	@echo "ok: no label with OAuth off"
-	@echo "--> kagent off: no RemoteMCPServer at all"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.enabled=true 2>&1 | grep -q 'kind: RemoteMCPServer'; then echo "FAIL: a RemoteMCPServer renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
+	@if grep -q '^kind: RemoteMCPServer$$' /tmp/vkd-off.out; then echo "FAIL: a RemoteMCPServer renders with no kagent.remoteMcpServers (the shared muster server is retired)"; exit 1; else echo "ok: nothing without extras"; fi
+	@echo "--> kagent off: no RemoteMCPServer at all, extras included"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp"}]' 2>&1 | grep -q 'kind: RemoteMCPServer'; then echo "FAIL: a RemoteMCPServer renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
+	@echo "--> the muster MCP URL: one helper (agent-platform.musterMcpUrl) into the portal's app-config; follows muster.fullnameOverride / muster.service.port; absent with kagent or muster off"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true >/tmp/vkd-url.out 2>&1 || { cat /tmp/vkd-url.out; exit 1; }
+	@grep -q '^      musterMcpUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp$$' /tmp/vkd-url.out || { echo "FAIL: the app-config lacks agentPlatform.musterMcpUrl at the default muster URL"; grep -n musterMcpUrl /tmp/vkd-url.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set muster.fullnameOverride=other-muster --set muster.service.port=9999 2>/dev/null | grep -q 'musterMcpUrl: http://other-muster.agent-platform.svc.cluster.local:9999/mcp' || { echo "FAIL: agentPlatform.musterMcpUrl does not follow muster.fullnameOverride / muster.service.port"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) >/tmp/vkd-url-nokagent.out 2>&1 || { cat /tmp/vkd-url-nokagent.out; exit 1; }
+	@if grep -q 'musterMcpUrl' /tmp/vkd-url-nokagent.out; then echo "FAIL: agentPlatform.musterMcpUrl renders with kagent off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set components.muster.enabled=false >/tmp/vkd-url-nomuster.out 2>&1 || { cat /tmp/vkd-url-nomuster.out; exit 1; }
+	@if grep -q 'musterMcpUrl' /tmp/vkd-url-nomuster.out; then echo "FAIL: agentPlatform.musterMcpUrl renders with the muster component off"; exit 1; fi
+	@echo "ok: musterMcpUrl"
+	@echo "kagent tool-discovery invariants verified."
+
+.PHONY: verify-kagent-crds
+verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — and no render of the chart carries kagent.dev/v1alpha2 (tests/verify-kagent-crds.py; needs PyYAML).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
 
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
@@ -922,6 +958,21 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/vid-meta.out 2>&1 || { cat /tmp/vid-meta.out; exit 1; }
 	@grep -q 'helmReleaseServiceAccount: kagent-flux' /tmp/vid-meta.out || { echo "FAIL: agent-manager lost flux.helmReleaseServiceAccount"; exit 1; }
 	@if grep -q 'helmReleaseServiceAccount:' $(CHART_DIR)/values.yaml $(CONNECTIVITY_DIR)/values.yaml; then echo "FAIL: agent-manager.flux.helmReleaseServiceAccount is set in a values.yaml again; it is derived from kagent.fluxServiceAccountName"; exit 1; fi
+	@echo "--> agent-manager receives the platform's muster MCP URL (muster.url) from the same derivation — the helper agent-platform.musterMcpUrl in both charts — never from values.yaml; it follows muster.fullnameOverride; a disagreeing agent-manager.muster.url fails naming the source"
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' /tmp/vid-meta.out >/tmp/vid-meta-am-url.out
+	@grep -q '^      url: http://muster.default.svc.cluster.local:8090/mcp$$' /tmp/vid-meta-am-url.out || { echo "FAIL: agent-manager's muster.url is not derived from the muster Service"; grep -n -A4 '^    muster:' /tmp/vid-meta-am-url.out; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set muster.fullnameOverride=other-muster 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' | grep -q 'url: http://other-muster.default.svc.cluster.local:8090/mcp' || { echo "FAIL: agent-manager's muster.url does not follow muster.fullnameOverride"; exit 1; }
+	@if awk '/^agent-manager:/{f=1} f&&/^[a-z]/&&!/^agent-manager/{f=0} f' $(CHART_DIR)/values.yaml | grep -qE '^    url:'; then echo "FAIL: agent-manager.muster.url is set in the meta chart's values.yaml; it is derived from the muster Service"; exit 1; fi
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.muster.url=http://other/mcp >/tmp/vid-url-guard.out 2>&1; then \
+		echo "FAIL: a disagreeing agent-manager.muster.url was accepted"; exit 1; \
+	elif ! grep -q "leave agent-manager.muster.url unset" /tmp/vid-url-guard.out; then \
+		echo "FAIL: the muster.url guard failed for the wrong reason"; cat /tmp/vid-url-guard.out; exit 1; \
+	else echo "ok: muster.url guard"; fi
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.muster.url=http://muster.default.svc.cluster.local:8090/mcp >/dev/null 2>&1 || { echo "FAIL: an agreeing agent-manager.muster.url must pass"; exit 1; }
+	@grep -q 'define "agent-platform.musterMcpUrl"' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the connectivity chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
+	@grep -q 'define "agent-platform.musterMcpUrl"' $(CHART_DIR)/templates/_helpers.tpl || { echo "FAIL: the meta chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.muster.enabled=false 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' >/tmp/vid-meta-am-nomuster.out; if grep -q 'url: http://' /tmp/vid-meta-am-nomuster.out; then echo "FAIL: agent-manager's muster.url is derived while the muster component is off"; exit 1; fi
+	@echo "ok: muster MCP URL — one helper, two consumers (agent-manager muster.url, the portal's agentPlatform.musterMcpUrl)"
 	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >/tmp/vid-empty.out 2>&1 || { cat /tmp/vid-empty.out; exit 1; }
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' /tmp/vid-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still renders the identity"; exit 1; fi
@@ -1163,7 +1214,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' /tmp/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >/tmp/vw-bs-cm.out
 	@[ -s /tmp/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com/kagent/api' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'musterMcpUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp' 'apiBaseUrl: https://agentgateway.ci.example.com/kagent/api' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
 		grep -q -- "$$pattern" /tmp/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' /tmp/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi

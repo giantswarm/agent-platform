@@ -15,6 +15,10 @@ route hostname. */}}
 {{- $musterHostname = include "agent-platform.hostname" (dict "ctx" . "prefix" "muster" "key" "ingress.hostnames") }}
 {{- end }}
 {{- $fluxSa := include "agent-platform.kagent.fluxServiceAccountName" . }}
+{{- $musterMcpUrl := "" }}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) }}
+{{- $musterMcpUrl = include "agent-platform.musterMcpUrl" . }}
+{{- end }}
 # Backstage app-config layered on the image's own: the login provider from
 # global.identity, one installation (backstage.installationName, default the
 # release name), the matching in-cluster Kubernetes entry (the frontend mints
@@ -171,7 +175,7 @@ data:
     {{- if and (include "agent-platform.modelManager.enabled" .) .Values.modelManager.route.enabled }}
     {{- $modelManagerRoute = .Values.modelManager.route }}
     {{- end }}
-    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute $modelManagerRoute }}
+    {{- if or $fluxSa $musterMcpUrl $backstage.skillsRepositories $kagentRoute $modelManagerRoute }}
     agentPlatform:
       {{- with $fluxSa }}
       {{- /* The tenant identity of the agents' HelmReleases: the ONE value
@@ -180,6 +184,15 @@ data:
       by the meta chart. The portal's create flow names it as
       spec.serviceAccountName on every HelmRelease it writes. */}}
       fluxServiceAccountName: {{ . }}
+      {{- end }}
+      {{- with $musterMcpUrl }}
+      {{- /* The in-cluster MCP URL of the platform's muster, from the ONE helper
+      agent-platform.musterMcpUrl (the same value the meta chart derives into
+      agent-manager's muster.url). The portal's create flow passes it to
+      agent-manager as the Generic chart 1.x value muster.url — the URL of the
+      per-agent RemoteMCPServer the chart renders; unset, the chart's default is
+      the same URL on a default install. */}}
+      musterMcpUrl: {{ . }}
       {{- end }}
       {{- with $backstage.skillsRepositories }}
       skills:
