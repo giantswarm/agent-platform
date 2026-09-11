@@ -2,11 +2,12 @@
 {{- $external := include "agent-platform.jwks.externalTargets" . | fromJsonArray }}
 {{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
 {{- $extraCidrs := $extra.cidrs | default list }}
+{{- $extraFqdns := $extra.fqdns | default list }}
 {{- $extraPort := $extra.port | default 443 | int }}
 {{- /* A toFQDNs selector matches nothing without the DNS proxy clause, so the
 policy renders the proxy variant of the DNS rule as soon as one name is
 selected, and the plain variant otherwise. */}}
-{{- $needsDnsProxy := gt (len (include "agent-platform.jwks.externalNamedPorts" . | fromJsonArray)) 0 }}
+{{- $needsDnsProxy := or (gt (len (include "agent-platform.jwks.externalNamedPorts" . | fromJsonArray)) 0) (gt (len $extraFqdns) 0) }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -79,6 +80,17 @@ spec:
       toPorts:
         - ports:
             - port: {{ .port | toString | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- /* gateway.jwksEgress.external.fqdns: an issuer the routes do not name,
+    selected by name. Cilium FQDN selectors verbatim (matchName, matchPattern).
+    */}}
+    {{- if $extraFqdns }}
+    - toFQDNs:
+        {{- toYaml $extraFqdns | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: {{ $extraPort | toString | quote }}
               protocol: TCP
     {{- end }}
     {{- /* gateway.jwksEgress.external.cidrs: an issuer the routes do not name,

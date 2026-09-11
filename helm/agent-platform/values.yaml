@@ -871,6 +871,11 @@ gateway:
     # controller policy opens each of them on its own port. This block applies
     # whether or not gateway.jwksEgress.enabled is set.
     external:
+      # cilium flavour: Cilium FQDN selectors (matchName, matchPattern),
+      # opened on `port` below and resolved through the DNS proxy rule the
+      # policy renders. The kubernetes flavour selects addresses and never
+      # names, so it ignores them: name that issuer's blocks in `cidrs`.
+      fqdns: []
       # IP blocks of either family, opened on `port` below in both flavours, as
       # their own rule. An issuer the cluster resolves over IPv6 belongs here:
       # the kubernetes flavour's wide rule for a name is 0.0.0.0/0 and reaches

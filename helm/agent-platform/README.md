@@ -279,6 +279,7 @@ WorkerPool".
 | gateway.jwksEgress.namespace | string | `"giantswarm"` |  |
 | gateway.jwksEgress.port | int | `5556` |  |
 | gateway.jwksEgress.podSelector | object | `{}` |  |
+| gateway.jwksEgress.external.fqdns | list | `[]` |  |
 | gateway.jwksEgress.external.cidrs | list | `[]` |  |
 | gateway.jwksEgress.external.port | int | `443` |  |
 | gateway.parameters.enabled | bool | `true` |  |

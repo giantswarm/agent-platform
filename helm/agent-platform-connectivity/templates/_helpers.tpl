@@ -927,6 +927,27 @@ Usage: include "agent-platform.jwks.hostCarriesPort" $host
 {{- end -}}
 
 {{/*
+Truthy ("true") when a JWKS host is neither an address literal nor a valid
+hostname: a scheme or a path glued on (accounts.google.com/keys), an empty
+label (a..b.example.com), a label that starts or ends with a hyphen, a
+character no hostname carries, or a name past 253 characters. Such a host
+renders green today and reaches nothing: the JWKS backend resolves no address,
+the kubernetes flavour opens a wide rule the fetch never uses, and the cilium
+matchName the API server accepts selects a name DNS never answers. Addresses
+and hosts carrying a colon are left to addrCIDR, malformedAddr and
+hostCarriesPort, which name their own repair. Underscores pass — Cilium's
+matchName grammar carries them and no Service name can.
+Usage: include "agent-platform.jwks.malformedName" $host
+*/}}
+{{- define "agent-platform.jwks.malformedName" -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" . -}}
+{{- if and (not (contains ":" $host)) (not (include "agent-platform.jwks.addrCIDR" $host)) -}}
+{{- $label := "[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?" -}}
+{{- if or (gt (len $host) 253) (not (regexMatch (printf "^%s([.]%s)*$" $label $label) $host)) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Truthy ("true") when a JWKS host has exactly two dot-separated labels, the one
 shape this chart cannot classify on its own: dex.giantswarm is a Service
 reached by its short name and okta.com is a public issuer. A short Service name
@@ -989,7 +1010,9 @@ Always, because a host of the wrong shape reaches nothing with or without a
 network policy:
   - an empty host, which renders a backend that resolves nothing;
   - a host that carries a port, which belongs in jwks.port;
-  - a host that looks like an address literal but is not one.
+  - a host that looks like an address literal but is not one;
+  - a host that is neither an address nor a valid hostname, a scheme or a
+    path glued on included.
 
 Only under networkPolicy.enabled, which is what renders the controller policy
 that carries the egress (every route that reaches this helper already requires
@@ -1013,6 +1036,9 @@ Usage: include "agent-platform.jwks.validate" (dict "ctx" . "path" "kagent.contr
 {{- end -}}
 {{- if include "agent-platform.jwks.malformedAddr" $host -}}
 {{- fail (printf "%s.jwks.host is %q, which is neither a name nor a valid IP address. The JWKS backend resolves nothing and no egress rule of either network-policy flavour reaches it, so signature validation fails closed. Set a hostname, or a valid address." .path $host) -}}
+{{- end -}}
+{{- if include "agent-platform.jwks.malformedName" $host -}}
+{{- fail (printf "%s.jwks.host is %q, which is not a valid hostname: every dot-separated label is 1 to 63 characters of letters, digits, `-` or `_`, and neither starts nor ends with `-`. The JWKS backend resolves nothing and the controller's egress rule selects a name DNS never answers, so signature validation fails closed. Set %s.jwks.host to the issuer's host alone, with no scheme and no path; the JWKS path belongs in %s.jwks.path." .path $host .path .path) -}}
 {{- end -}}
 {{- if $ctx.Values.networkPolicy.enabled -}}
 {{- $egress := $ctx.Values.gateway.jwksEgress -}}

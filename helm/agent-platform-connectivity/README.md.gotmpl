@@ -193,7 +193,7 @@ therefore the Service it names, not an external host.
 `gateway.jwksEgress.enabled` is required only for an in-cluster host. An
 external host needs it not at all, and leaving it on changes nothing else.
 
-Three render guards refuse a host that reaches no issuer in any flavour. Each one
+Four render guards refuse a host that reaches no issuer in any flavour. Each one
 is a green render and a runtime `401` without it, and the route subtrees are
 open objects in `values.schema.json`, so no schema pattern can hold them:
 
@@ -202,6 +202,10 @@ open objects in `values.schema.json`, so no schema pattern can hold them:
 | An empty host | the JWKS backend renders no host and resolves nothing |
 | A host that carries a port (`dex.example.com:5556`) | the port belongs in `jwks.port`; both the JWKS backend and the egress rule are built from the two keys |
 | A host that looks like an address literal but is not one (`1.2.3.999`) | a name selector never resolves it, and the API server rejects the block it would render |
+| A host that is no hostname either (`accounts.google.com/keys`, `a..b.example.com`) | the backend resolves no address; the kubernetes flavour still opens its wide rule, so the render stays green and the fetch never happens |
+
+A host carries the issuer's name alone. Its scheme belongs to `issuer`, and the
+JWKS path to `jwks.path`.
 
 Two more depend on the rule that renders, so they follow `networkPolicy.enabled`:
 
@@ -224,13 +228,20 @@ verified against a private CA would fail the fetch and answer every caller
 `401 token uses the unknown key`. An in-cluster Dex on 5556 keeps its
 plain-HTTP fetch.
 
-`gateway.jwksEgress.external.cidrs` covers an issuer the routes do not name,
-and the one the kubernetes flavour cannot reach by name: the wide rule it
-renders for a name is `0.0.0.0/0`, so it reaches public IPv4 destinations only.
-A private identity provider inside one of `worldExcludedCIDRs`, and an issuer
-the cluster resolves over IPv6, belong there. The list opens `external.port`
-(443 by default) as its own rule in both flavours, and applies whether or not
-`gateway.jwksEgress.enabled` is set.
+`gateway.jwksEgress.external` covers an issuer the routes do not name. Both
+lists open `external.port` (443 by default) as their own rule, and both apply
+whether or not `gateway.jwksEgress.enabled` is set:
+
+| The key | The flavour that reads it |
+|---|---|
+| `external.fqdns` — Cilium FQDN selectors (`matchName`, `matchPattern`) | cilium, behind the policy's DNS proxy rule. The kubernetes flavour selects addresses and never names, so it ignores them |
+| `external.cidrs` — IP blocks of either family | both |
+
+`external.cidrs` also covers the issuer the kubernetes flavour cannot reach by
+name at all: the wide rule it renders for a name is `0.0.0.0/0`, so it reaches
+public IPv4 destinations only. A private identity provider inside one of
+`worldExcludedCIDRs`, and an issuer the cluster resolves over IPv6, belong
+there.
 
 The cilium controller policy renders the DNS proxy clause only while a name is
 selected. With in-cluster hosts alone the whole render is what it was before

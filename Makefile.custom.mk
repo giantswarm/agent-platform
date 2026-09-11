@@ -1628,6 +1628,13 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@echo "--> an in-cluster host with external.cidrs set renders no wide rule: the narrow form stays narrow"
 	@if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set 'gateway.jwksEgress.external.cidrs[0]=10.20.30.0/24' --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'cidr: 0.0.0.0/0'; then \
 		echo "FAIL: gateway.jwksEgress.external.cidrs alone opened every public destination"; exit 1; fi
+	@echo "--> gateway.jwksEgress.external.fqdns: a cilium name selector on external.port, behind the DNS proxy rule; the kubernetes flavor ignores it"
+	@helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set 'gateway.jwksEgress.external.fqdns[0].matchName=keys.example.com' --set gateway.jwksEgress.external.port=8443 --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-extfqdn.out
+	@grep -q 'matchName: keys.example.com' /tmp/vw-jwks-extfqdn.out || { echo "FAIL: gateway.jwksEgress.external.fqdns did not reach the cilium controller policy"; cat /tmp/vw-jwks-extfqdn.out; exit 1; }
+	@awk '/matchName: keys.example.com/{f=1} f&&/port:/{print;exit}' /tmp/vw-jwks-extfqdn.out | grep -q '"8443"' || { echo "FAIL: gateway.jwksEgress.external.fqdns is not opened on external.port"; exit 1; }
+	@grep -q 'matchPattern: "\*"' /tmp/vw-jwks-extfqdn.out || { echo "FAIL: gateway.jwksEgress.external.fqdns rendered no DNS proxy rule, so its selector matches nothing"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set 'gateway.jwksEgress.external.fqdns[0].matchName=keys.example.com' --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'keys.example.com\|cidr: 0.0.0.0/0'; then \
+		echo "FAIL: the kubernetes controller policy acted on gateway.jwksEgress.external.fqdns, which selects a name it cannot express"; exit 1; fi
 	@echo "--> gateway.jwksEgress.external: null renders, and the schema types cidrs"
 	@printf 'gateway:\n  jwksEgress:\n    enabled: true\n    external: null\n' >/tmp/vw-jwks-null-external.yaml
 	$(call managers_must_pass,an explicitly null external block,$(JWKS_INCLUSTER) -f /tmp/vw-jwks-null-external.yaml)
@@ -1669,6 +1676,12 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	$(call managers_must_fail,an address with the port glued on,$(JWKS_EXTERNAL) --set 'kagent.controllerRoute.jwtAuthentication.jwks.host=10.0.0.1:5556',which carries a port)
 	$(call managers_must_fail,a bracketed IPv6 address with a port,$(JWKS_EXTERNAL) --set 'kagent.controllerRoute.jwtAuthentication.jwks.host=[2001:db8::1]:443',which carries a port)
 	$(call managers_must_fail,an IPv6 literal of the wrong group count,$(JWKS_EXTERNAL) --set 'kagent.controllerRoute.jwtAuthentication.jwks.host=1:2:3' --set kagent.controllerRoute.jwtAuthentication.jwks.port=8443,neither a name nor a valid IP address)
+	@echo "--> a host that is not a hostname fails the render: the JWKS path and the empty label a wide rule would hide"
+	$(call managers_must_fail,the JWKS path glued on,$(JWKS_EXTERNAL) --set 'kagent.controllerRoute.jwtAuthentication.jwks.host=accounts.google.com/keys',which is not a valid hostname)
+	$(call managers_must_fail,an empty label,$(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=a..b.example.com,which is not a valid hostname)
+	$(call managers_must_fail,a label that ends with a hyphen,$(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=keys-.example.com,which is not a valid hostname)
+	$(call managers_must_fail,the same shape with the policies off,$(JWKS_INCLUSTER) --set networkPolicy.enabled=false --set 'kagent.controllerRoute.jwtAuthentication.jwks.host=accounts.google.com/keys',which is not a valid hostname)
+	$(call managers_must_pass,a hostname carrying a hyphen and an underscore,$(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=oidc_keys.my-idp.example.com)
 	@echo "--> an svc label the search path never produces is a public host, not an in-cluster one"
 	$(call managers_must_pass,a public host carrying an svc label,$(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=a.b.svc.example.com)
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=a.b.svc.example.com --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q 'matchName: "a.b.svc.example.com"' || { echo "FAIL: a public host with an svc label was read as in-cluster and got no egress rule"; exit 1; }

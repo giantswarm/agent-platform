@@ -85,7 +85,9 @@ spec:
         {{- end }}
     {{- end }}
     {{- /* gateway.jwksEgress.external.cidrs: an issuer the routes do not name,
-    or one this flavour's IPv4 wide rule cannot reach. */}}
+    or one this flavour's IPv4 wide rule cannot reach. Its sibling
+    external.fqdns is a name selector and this flavour has none, so an issuer
+    reached by name belongs in the blocks here. */}}
     {{- if $extraCidrs }}
     - to:
         {{- range $extraCidrs }}
