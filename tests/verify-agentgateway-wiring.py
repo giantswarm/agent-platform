@@ -12,7 +12,13 @@ both fail only at reconcile time, in the child HelmRelease:
 
 It also holds the controller at two or more replicas (controller.replicaCount):
 the data plane fetches its config over xDS, and a data-plane pod rescheduled
-onto a rebooted node waits for a controller to answer.
+onto a rebooted node waits for a controller to answer — and holds the budget and
+the spread that keep a drain or the scheduler from taking both:
+controller.podDisruptionBudget with maxUnavailable 1, and a root
+topologySpreadConstraints entry on kubernetes.io/hostname selecting the
+controller pods by the chart's own label (agentgateway: agentgateway). The
+packaging chart's schema accepts those keys from 2.1.2, the floor of
+components.agentgateway.versionRange.
 
 Reads a rendered meta-package manifest. Deliberately stdlib-only: the CI image
 has no PyYAML.
@@ -40,7 +46,9 @@ def forwarded_values(lines: list[str]) -> dict[str, list[str]]:
     for line in lines[lines.index("  values:") + 1 :]:
         if line and not line.startswith(VALUES_INDENT):
             break
-        if line.startswith(VALUES_INDENT) and not line[len(VALUES_INDENT)].isspace():
+        # toYaml puts a list's items flush with the key that holds them, so a
+        # `- ` at the values indent is the current key's item, not a new key.
+        if line.startswith(VALUES_INDENT) and not line[len(VALUES_INDENT)].isspace() and not line[len(VALUES_INDENT):].startswith("- "):
             key = line.strip().rstrip(":").split(":")[0]
             values[key] = []
         elif key:
@@ -80,6 +88,17 @@ def main(path: str) -> int:
             f"{replicas if replicas is not None else 'nothing'}); a lone controller pod leaves a data-plane pod that "
             "starts on a rebooted node without an xDS server until the controller is rescheduled"
         )
+    stripped = [l.strip() for l in controller]
+    if "podDisruptionBudget:" not in stripped or "maxUnavailable: 1" not in stripped:
+        sys.exit(
+            "FAIL: controller.podDisruptionBudget with maxUnavailable: 1 is not forwarded; a drain could evict both "
+            "controller pods at once and leave the data plane without xDS"
+        )
+    spread = [l.strip() for l in values.get("topologySpreadConstraints", [])]
+    if "topologyKey: kubernetes.io/hostname" not in spread:
+        sys.exit("FAIL: no root topologySpreadConstraints entry on kubernetes.io/hostname; both controller pods may land on the node that reboots")
+    if "agentgateway: agentgateway" not in spread:
+        sys.exit("FAIL: the controller spread does not select the controller pods by the chart's label (agentgateway: agentgateway); the constraint would select nothing")
     return 0
 
 

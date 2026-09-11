@@ -531,7 +531,7 @@ Rendered as a YAML list item; the caller must provide the surrounding `egress:` 
 The knobs that describe what the cluster can admit — Kyverno policies, the
 network-policy flavor, ServiceMonitors/PodMonitors, dicebear's Envoy route
 filter, the agent-sandbox pod-security policy, the model-serving cache
-policies — accept `auto` (the default):
+policies, the agentgateway VerticalPodAutoscalers — accept `auto` (the default):
 the object renders when its API group is served. `.Capabilities.APIVersions` is
 the live discovery under helm-controller, the Helm CLI and `--dry-run=server`;
 under `helm template` it is Helm's built-in set unless `--api-versions` names
@@ -605,6 +605,17 @@ Gateway HTTPRouteFilters render (auto: gateway.envoyproxy.io/v1alpha1 served).
 {{- end -}}
 
 {{/*
+gateway.parameters.verticalPodAutoscaler.enabled resolved: "true" when the
+agentgateway VerticalPodAutoscalers render (auto: autoscaling.k8s.io/v1 served).
+One answer for two objects: the connectivity chart's data-plane VPA reads the
+forwarded knob, and shape.apply empties the controller's
+agentgateway.controller.verticalPodAutoscaler where the answer is false.
+*/}}
+{{- define "agent-platform.shape.dataPlaneVPA" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "gateway.parameters.verticalPodAutoscaler.enabled" "value" (dig "parameters" "verticalPodAutoscaler" "enabled" "auto" (.Values.gateway | default dict)) "api" "autoscaling.k8s.io/v1") -}}
+{{- end -}}
+
+{{/*
 agentSandbox.podSecurity.enabled resolved: "true" when the agent-sandbox
 pod-security ClusterPolicy renders. It is a Kyverno mutate policy, so `auto`
 follows the RESOLVED kyvernoPolicies.enabled (an explicit
@@ -662,7 +673,7 @@ Usage: include "agent-platform.shape.derive" (dict "values" $v "path" (list "mus
 Resolve every cluster-shape knob in .values (a deep copy of .Values) IN PLACE,
 once, before the component loop inlines them. Emits nothing.
 
-The six knobs (the five above and modelServing.policies.enabled, a Kyverno
+The seven knobs (the six above and modelServing.policies.enabled, a Kyverno
 mutate policy that follows the resolved kyvernoPolicies.enabled) are written
 with their resolved value. The component-level
 copies the standalone overlay used to flip by hand are derived from the same
@@ -683,6 +694,12 @@ Two leaves have no `auto` form and are derived directly, off only:
       fleet's HelmRelease values are unchanged. An explicit value is kept.
   kagent.controller.env[name=OTEL_EXPORTER_OTLP_HEADERS] — the tenant header
       of the OTLP gateway; dropped when both kagent OTel exporters resolve off.
+One leaf follows the VPA knob (gateway.parameters.verticalPodAutoscaler.enabled,
+autoscaling.k8s.io/v1) and has no `auto` form of its own:
+  agentgateway.controller.verticalPodAutoscaler — the packaging chart renders
+      the controller's VerticalPodAutoscaler from a non-empty object; emptied
+      to {} where the knob resolves false (no VPA CRD: a lab), left as written
+      where it resolves true, and left absent when an operator removed the key.
 mcp-kubernetes' Cilium policy joins this list once mcp-kubernetes is a component.
 Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 */}}
@@ -695,6 +712,7 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- $dicebearRoute := eq (include "agent-platform.shape.dicebearRoute" $root) "true" -}}
 {{- $podSecurity := eq (include "agent-platform.shape.agentSandboxPodSecurity" $root) "true" -}}
 {{- $servingPolicies := eq (include "agent-platform.shape.modelServingPolicies" $root) "true" -}}
+{{- $vpa := eq (include "agent-platform.shape.dataPlaneVPA" $root) "true" -}}
 {{- /* The knobs themselves: written resolved whatever they held. */ -}}
 {{- $_ := set $v.kyvernoPolicies "enabled" $kyverno -}}
 {{- $_ := set $v.networkPolicy "flavor" $flavor -}}
@@ -707,6 +725,23 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- end -}}
 {{- if kindIs "map" (dig "policies" nil (index $v "modelServing" | default dict)) -}}
 {{- $_ := set (index $v "modelServing" "policies") "enabled" $servingPolicies -}}
+{{- end -}}
+{{- if kindIs "map" (dig "parameters" "verticalPodAutoscaler" nil (index $v "gateway" | default dict)) -}}
+{{- $_ := set (index $v "gateway" "parameters" "verticalPodAutoscaler") "enabled" $vpa -}}
+{{- end -}}
+{{- /* The agentgateway controller's VPA follows the same answer: the packaging
+chart renders its VerticalPodAutoscaler from a non-empty
+controller.verticalPodAutoscaler, so the object is emptied where the API is not
+served. Only a key that is there is emptied — an operator who removed it keeps
+it removed. */ -}}
+{{- if not $vpa -}}
+{{- $agw := index $v "agentgateway" -}}
+{{- if kindIs "map" $agw -}}
+{{- $ctrl := index $agw "controller" -}}
+{{- if and (kindIs "map" $ctrl) (hasKey $ctrl "verticalPodAutoscaler") -}}
+{{- $_ := set $ctrl "verticalPodAutoscaler" dict -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- /* substrate.postgres.enabled: `auto` resolved to the boolean the substrate
 chart takes — bundled iff neither the platform Cluster nor a connection string

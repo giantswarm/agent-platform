@@ -22,6 +22,9 @@
 # prereleases by scheme, vX.Y.Z-gs.N, so the pin carries the suffix).
 # agent-manager and backstage pin the first releases of their kagent API v2
 # lines; the connectivity chart the release of this chart is published with.
+# The agentgateway pin is the floor of components.agentgateway.versionRange:
+# the controller's budget, spread and VPA forwarded from values.yaml need the
+# schema of 2.1.2 (giantswarm/agentgateway#51); 2.1.1 rejects the keys.
 # substrate and substrate-crds pin the SAME release of the Substrate line — the
 # version kagent.substrateWorkerPool.workerImage names in values.yaml (vX.Y.Z-gs.N
 # like kagent's; the floor of components.substrate.versionRange).
@@ -33,7 +36,7 @@ gitops:
 
 components:
   muster:                        { versionRange: "5.12.0" }
-  agentgateway:                  { versionRange: "2.0.7" }
+  agentgateway:                  { versionRange: "2.1.2" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
   kagent:                        { versionRange: "0.11.0-gs.2" }

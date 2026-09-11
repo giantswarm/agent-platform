@@ -159,7 +159,8 @@ plumbing and are dropped. */ -}}
 {{- /* The values every release is inlined from: one deep copy of the tree with
 every cluster-shape knob (kyvernoPolicies.enabled, networkPolicy.flavor,
 global.observability.metrics.serviceMonitor.enabled, dicebear.route.enabled,
-agentSandbox.podSecurity.enabled) resolved from `auto` ONCE, and the component
+agentSandbox.podSecurity.enabled, gateway.parameters.verticalPodAutoscaler.enabled)
+resolved from `auto` ONCE, and the component
 copies derived from those answers (see agent-platform.shape.apply). Detected
 here, not in the child charts: the connectivity chart receives the resolved
 values and every component the same one flavor. */ -}}
