@@ -44,7 +44,12 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # selector.
 # kagent.namespaceOverride=default (the release namespace of `helm template t`) drops the kagent Namespace object from both renders: this branch
 # keeps it (helm.sh/resource-policy: keep), an intended difference to GOLDEN_REF; every other kagent object renders alike on both sides.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
+# The fifth intended change is the kagent controller's ingress admission (#345: the
+# data-plane pods and the UI only, in both flavors): both sides render with the
+# network policies off, and verify-kagent-route asserts the admission in both
+# flavors (verify-kagent-netpol, verify-managers and verify-llm-routing cover the
+# other policies).
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -238,11 +243,12 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 		echo "FAIL: identity consistency check failed for the wrong reason"; cat /tmp/vg-idp.out; exit 1; \
 	else echo "ok: identity consistency guard"; fi
 	@echo "--> edge mode renders the HTTPS listener, pins public routes to it, and suppresses the layer-1 routes"
-	@helm template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true >/tmp/vg-edge.out 2>&1 || { cat /tmp/vg-edge.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com >/tmp/vg-edge.out 2>&1 || { cat /tmp/vg-edge.out; exit 1; }
 	@grep -q 'hostname: "\*.ci.example.com"' /tmp/vg-edge.out || { echo "FAIL: edge HTTPS listener missing"; exit 1; }
 	@grep -q 'sectionName: https' /tmp/vg-edge.out || { echo "FAIL: public routes not pinned to the HTTPS listener (plaintext 8080 would ride the LB)"; exit 1; }
 	@grep -A2 '^  service:' /tmp/vg-edge.out | grep -q '^      type: LoadBalancer' || { echo "FAIL: edge data-plane Service type is not nested at spec.service.spec.type (the CRD prunes a bare spec.service.type)"; exit 1; }
 	@if grep -q 'name: kagent-controller-public' /tmp/vg-edge.out; then echo "FAIL: layer-1 kagent route rendered with the edge as data plane"; exit 1; fi
+	@grep -A3 '^kind: GRPCRoute$$' /tmp/vg-edge.out | grep -q '^  name: kagent-controller$$' || { echo "FAIL: the kagent controller GRPCRoute is missing in edge mode"; exit 1; }
 	@if grep -qE '^      value: /mcp' /tmp/vg-edge.out; then echo "FAIL: layer-1 /mcp route rendered with the edge as data plane"; exit 1; fi
 	@grep -B4 -A4 '"world", "cluster"' /tmp/vg-edge.out | grep -q '"443"' || { echo "FAIL: edge network policy does not admit world traffic on 443"; exit 1; }
 	@echo "ok: edge mode"
@@ -657,6 +663,109 @@ verify-kagent-netpol: ## Assert the kagent controller/agent egress to the built-
 	@echo "--> oauth2-proxy off: no oauth2-proxy policy, peers ignored"
 	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.oauth2ProxyIngress.additionalPeers=[{"app":"teleport-kube-agent"}]' 2>&1 | grep -q 'teleport-kube-agent'; then echo "FAIL: oauth2-proxy peers render while oauth2-proxy is off"; exit 1; else echo "ok: inert while oauth2-proxy is off"; fi
 
+# The kagent controller route in its fleet shape: agentgateway-muster with the
+# agentgateway and kagent components on, the route on its default hostname, the
+# issuer from global.identity, jwksEgress open (the JWT policy is on by default).
+KAGENT_ROUTE := $(VM) --namespace agent-platform --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set kagent.controllerRoute.enabled=true --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set gateway.jwksEgress.enabled=true
+# $(call kagent_route_doc,<kind>,<name>,<render file>,<out file>): one rendered object.
+define kagent_route_doc
+	@python3 -c 'import sys; docs=open("$(3)").read().split("\n---\n"); hit=[d for d in docs if "\nkind: $(1)\n" in d and "\n  name: $(2)\n" in d]; sys.exit("FAIL: $(1) $(2) missing from the render") if len(hit)!=1 else open("$(4)","w").write(hit[0])'
+endef
+
+.PHONY: verify-kagent-route
+verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services on both hops, h2c to the controller, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, and the guards.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> the default shape: GRPCRoutes on both hops, no REST route, no path prefix"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true >/tmp/vkr.out 2>&1 || { cat /tmp/vkr.out; exit 1; }
+	$(call kagent_route_doc,GRPCRoute,kagent-controller,/tmp/vkr.out,/tmp/vkr-inner.out)
+	$(call kagent_route_doc,GRPCRoute,kagent-controller-public,/tmp/vkr.out,/tmp/vkr-public.out)
+	@if grep -A3 '^kind: HTTPRoute$$' /tmp/vkr.out | grep -q 'name: kagent-controller'; then echo "FAIL: a kagent-controller HTTPRoute still renders (the REST /kagent route was retired)"; exit 1; fi
+	@if grep -qE 'value: /kagent$$|pathPrefix|replacePrefixMatch: /$$' /tmp/vkr.out; then echo "FAIL: the render still carries a /kagent path prefix"; grep -nE 'value: /kagent$$|pathPrefix' /tmp/vkr.out | head; exit 1; fi
+	@for svc in kagent.api.v1alpha1.AgentInstanceService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService; do \
+		for f in /tmp/vkr-inner.out /tmp/vkr-public.out; do \
+			grep -B2 "^            service: $$svc$$" $$f | grep -q 'type: Exact' || { echo "FAIL: $$f has no exact service match for $$svc"; exit 1; }; \
+		done; \
+	done
+	@[ "$$(grep -c '^            service: ' /tmp/vkr-inner.out)" = "5" ] || { echo "FAIL: the inner GRPCRoute matches a service outside the contract"; grep -n 'service:' /tmp/vkr-inner.out; exit 1; }
+	@if grep -q '^  hostnames:' /tmp/vkr-inner.out; then echo "FAIL: the inner GRPCRoute is hostname-scoped (the in-cluster authority agentgateway.<ns>.svc.cluster.local:8080 would not match)"; exit 1; fi
+	@grep -q 'kind: AgentgatewayBackend' /tmp/vkr-inner.out || { echo "FAIL: the inner GRPCRoute does not target the kagent AgentgatewayBackend"; exit 1; }
+	@grep -q '"agentgateway.ci.example.com"' /tmp/vkr-public.out || { echo "FAIL: the public GRPCRoute does not derive its hostname from global.domain"; exit 1; }
+	@grep -A2 'backendRefs:' /tmp/vkr-public.out | grep -q 'name: agentgateway' || { echo "FAIL: the public GRPCRoute does not forward to the agentgateway Service"; exit 1; }
+	@grep -A2 'backendRefs:' /tmp/vkr-public.out | grep -q 'port: 8080' || { echo "FAIL: the public GRPCRoute does not forward to port 8080"; exit 1; }
+	@echo "ok: GRPCRoutes"
+	@echo "--> the controller backend: passthrough of the bearer, HTTP/2 to the controller"
+	$(call kagent_route_doc,AgentgatewayBackend,kagent,/tmp/vkr.out,/tmp/vkr-backend.out)
+	@grep -q 'passthrough: {}' /tmp/vkr-backend.out || { echo "FAIL: the kagent backend no longer passes the bearer through"; exit 1; }
+	@grep -q 'version: HTTP2' /tmp/vkr-backend.out || { echo "FAIL: the kagent backend does not pin HTTP/2 (the controller Service carries no appProtocol)"; exit 1; }
+	@grep -q 'host: kagent-controller.kagent.svc.cluster.local' /tmp/vkr-backend.out || { echo "FAIL: the kagent backend does not target the controller Service in the kagent namespace"; exit 1; }
+	@echo "ok: backend"
+	@echo "--> the JWT policy: on by default, Strict, on the GRPCRoute, the identity transformation and the claim requirement"
+	$(call kagent_route_doc,AgentgatewayPolicy,kagent-controller-jwt,/tmp/vkr.out,/tmp/vkr-jwt.out)
+	$(call kagent_route_doc,AgentgatewayBackend,kagent-controller-jwks,/tmp/vkr.out,/tmp/vkr-jwks.out)
+	@grep -A2 'targetRefs:' /tmp/vkr-jwt.out | grep -q 'kind: GRPCRoute' || { echo "FAIL: the JWT policy does not target the GRPCRoute"; exit 1; }
+	@grep -A3 'targetRefs:' /tmp/vkr-jwt.out | grep -q 'name: kagent-controller$$' || { echo "FAIL: the JWT policy targets the wrong route"; exit 1; }
+	@grep -q 'mode: Strict' /tmp/vkr-jwt.out || { echo "FAIL: the JWT policy is not Strict by default"; exit 1; }
+	@grep -q 'issuer: "https://dex.ci.example.com"' /tmp/vkr-jwt.out || { echo "FAIL: the JWT issuer is not defaulted from global.identity.issuerUrl"; exit 1; }
+	@grep -A4 '^        set:' /tmp/vkr-jwt.out | grep -q 'name: x-user-id' || { echo "FAIL: the transformation does not set x-user-id"; exit 1; }
+	@grep -A4 '^        set:' /tmp/vkr-jwt.out | grep -q 'value: "jwt.email"' || { echo "FAIL: x-user-id is not set from the email claim (kagent.controller.auth.userIdClaim)"; exit 1; }
+	@if grep -q 'remove:' /tmp/vkr-jwt.out; then echo "FAIL: the policy removes a header — agentgateway applies remove after set, which would strip the identity header it just set"; exit 1; fi
+	@grep -q 'action: Require' /tmp/vkr-jwt.out || { echo "FAIL: the policy does not require the identity claim"; exit 1; }
+	@grep -q -- '- "has(jwt.email)"' /tmp/vkr-jwt.out || { echo "FAIL: the claim requirement does not name the email claim"; exit 1; }
+	@grep -q 'host: dex.giantswarm.svc.cluster.local' /tmp/vkr-jwks.out || { echo "FAIL: the JWKS backend does not default to the dex Service"; exit 1; }
+	@if grep -q 'tls:' /tmp/vkr-jwks.out; then echo "FAIL: the JWKS backend originates TLS without jwks.tls.enabled"; exit 1; fi
+	@echo "ok: JWT policy + identity transformation"
+	@echo "--> kagent.controller.auth.userIdClaim drives both the header and the requirement; jwks.tls verifies against the named CA"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=sub --set kagent.controllerRoute.jwtAuthentication.jwks.tls.enabled=true --set kagent.controllerRoute.jwtAuthentication.jwks.tls.caSecretName=dex-ca >/tmp/vkr-sub.out 2>&1 || { cat /tmp/vkr-sub.out; exit 1; }
+	@grep -q 'value: "jwt.sub"' /tmp/vkr-sub.out || { echo "FAIL: the transformation does not follow kagent.controller.auth.userIdClaim"; exit 1; }
+	@grep -q -- '- "has(jwt.sub)"' /tmp/vkr-sub.out || { echo "FAIL: the claim requirement does not follow kagent.controller.auth.userIdClaim"; exit 1; }
+	@grep -B1 -A3 'caCertificateRefs:' /tmp/vkr-sub.out | grep -q 'name: dex-ca' || { echo "FAIL: jwks.tls.caSecretName does not reach the JWKS backend"; exit 1; }
+	@echo "ok: claim + JWKS TLS knobs"
+	@echo "--> the public hop's Envoy timeout policy targets the public GRPCRoute; nothing of it in edge mode"
+	$(call kagent_route_doc,BackendTrafficPolicy,kagent-controller-public,/tmp/vkr.out,/tmp/vkr-btp.out)
+	@grep -A3 'targetRefs:' /tmp/vkr-btp.out | grep -q 'kind: GRPCRoute' || { echo "FAIL: the kagent BackendTrafficPolicy does not target the GRPCRoute"; exit 1; }
+	@grep -q 'requestTimeout: "0s"' /tmp/vkr-btp.out || { echo "FAIL: the kagent BackendTrafficPolicy does not carry ingress.backendTrafficPolicy.timeout"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) >/tmp/vkr-nobtp.out 2>&1 || { cat /tmp/vkr-nobtp.out; exit 1; }
+	@if grep -A3 '^kind: BackendTrafficPolicy$$' /tmp/vkr-nobtp.out | grep -q 'kagent-controller-public'; then echo "FAIL: the kagent BackendTrafficPolicy renders with ingress.backendTrafficPolicy off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com --set ingress.backendTrafficPolicy.enabled=true >/tmp/vkr-edge.out 2>&1 || { cat /tmp/vkr-edge.out; exit 1; }
+	@if grep -q 'kagent-controller-public' /tmp/vkr-edge.out; then echo "FAIL: the public GRPCRoute or its BackendTrafficPolicy renders with the edge as data plane"; exit 1; fi
+	@grep -A3 '^kind: AgentgatewayPolicy$$' /tmp/vkr-edge.out | grep -q 'name: kagent-controller-jwt' || { echo "FAIL: the JWT policy is missing in edge mode"; exit 1; }
+	@echo "ok: public-hop timeout policy + edge mode"
+	@echo "--> the off switch: no policy, no JWKS backend, the route stays"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controllerRoute.jwtAuthentication.enabled=false --set gateway.jwksEgress.enabled=false >/tmp/vkr-off.out 2>&1 || { cat /tmp/vkr-off.out; exit 1; }
+	@if grep -qE 'kagent-controller-jwt|kagent-controller-jwks|name: x-user-id' /tmp/vkr-off.out; then echo "FAIL: JWT objects render with jwtAuthentication.enabled=false"; exit 1; fi
+	@grep -A3 '^kind: GRPCRoute$$' /tmp/vkr-off.out | grep -q '^  name: kagent-controller$$' || { echo "FAIL: the GRPCRoute is gone with the JWT policy off"; exit 1; }
+	@echo "ok: off switch"
+	@echo "--> the UI route strips the identity header, with and without oauth2-proxy"
+	@for proxy in true false; do \
+		helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.uiRoute.enabled=true --set kagent.oauth2-proxy.enabled=$$proxy >/tmp/vkr-ui-$$proxy.out 2>&1 || { cat /tmp/vkr-ui-$$proxy.out; exit 1; }; \
+		python3 -c 'import sys; docs=open("/tmp/vkr-ui-'$$proxy'.out").read().split("\n---\n"); ui=[d for d in docs if "\nkind: HTTPRoute\n" in d and "\n  name: agent-platform-connectivity-ui\n" in d]; sys.exit("FAIL: the kagent UI HTTPRoute did not render") if len(ui)!=1 else None; r=ui[0]; sys.exit("FAIL: the UI route has no RequestHeaderModifier filter") if "type: RequestHeaderModifier" not in r else None; sys.exit("FAIL: the UI route does not remove x-user-id") if "remove:\n              - x-user-id" not in r else None; print("ok: UI route strips x-user-id (oauth2-proxy '$$proxy')")' || exit 1; \
+	done
+	@echo "--> network policy: the controller admits the data plane and the UI only, in both flavors"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set networkPolicy.flavor=cilium --set muster.enabled=true >/tmp/vkr-np-cilium.out 2>&1 || { cat /tmp/vkr-np-cilium.out; exit 1; }
+	$(call kagent_route_doc,CiliumNetworkPolicy,agent-platform-connectivity-kagent-from-agentgateway,/tmp/vkr-np-cilium.out,/tmp/vkr-np-cilium-ingress.out)
+	@[ "$$(grep -c 'fromEndpoints:' /tmp/vkr-np-cilium-ingress.out)" = "1" ] || { echo "FAIL: the cilium controller ingress has more than one rule"; cat /tmp/vkr-np-cilium-ingress.out; exit 1; }
+	@[ "$$(grep -c 'matchLabels:' /tmp/vkr-np-cilium-ingress.out)" = "3" ] || { echo "FAIL: the cilium controller ingress does not admit exactly the data plane and the UI (plus its own selector)"; cat /tmp/vkr-np-cilium-ingress.out; exit 1; }
+	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vkr-np-cilium-ingress.out || { echo "FAIL: the cilium controller ingress does not admit the data plane"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: ui' /tmp/vkr-np-cilium-ingress.out || { echo "FAIL: the cilium controller ingress does not admit the UI"; exit 1; }
+	@if grep -q '^            app: kagent$$' /tmp/vkr-np-cilium-ingress.out; then echo "FAIL: the cilium controller ingress still admits app: kagent pods"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set networkPolicy.flavor=kubernetes >/tmp/vkr-np-k8s.out 2>&1 || { cat /tmp/vkr-np-k8s.out; exit 1; }
+	$(call kagent_route_doc,NetworkPolicy,agent-platform-connectivity-kagent-controller-ingress,/tmp/vkr-np-k8s.out,/tmp/vkr-np-k8s-ingress.out)
+	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vkr-np-k8s-ingress.out || { echo "FAIL: the kubernetes controller ingress admits the whole release namespace instead of the data-plane pods"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: ui' /tmp/vkr-np-k8s-ingress.out || { echo "FAIL: the kubernetes controller ingress does not admit the UI"; exit 1; }
+	@if grep -q '^              app: kagent$$' /tmp/vkr-np-k8s-ingress.out; then echo "FAIL: the kubernetes controller ingress still admits app: kagent pods"; exit 1; fi
+	@echo "ok: controller ingress in both flavors"
+	@echo "--> the guards"
+	$(call managers_must_fail,a stale pathPrefix fails the render,$(KAGENT_ROUTE) --set kagent.controllerRoute.pathPrefix=/kagent,pathPrefix was retired with 4.0)
+	$(call managers_must_fail,the JWT policy needs jwksEgress,$(KAGENT_ROUTE) --set gateway.jwksEgress.enabled=false,gateway.jwksEgress.enabled is false)
+	$(call managers_must_fail,the JWT policy needs an issuer,$(KAGENT_ROUTE) --set global.identity.issuerUrl=,needs the login issuer)
+	$(call managers_must_fail,the identity claim is a plain claim name,$(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=x-claim,is not a plain claim name)
+	@echo "--> every connectivity CI values file renders"
+	@for f in $(CONNECTIVITY_DIR)/ci/*.yaml; do \
+		helm template t $(CONNECTIVITY_DIR) --namespace agent-platform -f $$f >/tmp/vkr-ci.out 2>&1 || { echo "FAIL: $$f does not render"; cat /tmp/vkr-ci.out | tail -5; exit 1; }; \
+	done
+	@echo "ok: CI values"
+	@echo "All kagent controller route behaviors verified."
+
 .PHONY: verify-kagent-discovery
 verify-kagent-discovery: ## Assert the shared muster RemoteMCPServer opts out of controller-side tool discovery (kagent.dev/discovery=disabled) iff muster runs with OAuth on, carries no headersFrom, and the operator-defined kagent.remoteMcpServers are untouched.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
@@ -943,7 +1052,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.uiRoute.enabled=true --set kagent.uiRoute.hostname=kagent.ci.example.com --set kagent.oauth2-proxy.enabled=false >/tmp/vid-ui.out 2>&1 || { cat /tmp/vid-ui.out; exit 1; }
 	@grep -q '^        - name: kagent-ui$$' /tmp/vid-ui.out || { echo "FAIL: the kagent UI route does not target the Service named from kagent.fullnameOverride"; grep -n -- '-ui$$' /tmp/vid-ui.out; exit 1; }
 	@echo "ok: UI route backend follows fullnameOverride"
-	@for case in "kagent.controllerRoute:--set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true" \
+	@for case in "kagent.controllerRoute:--set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com" \
 	             "klausGateway.agentgatewayRoute:--set components.klaus-gateway.enabled=true --set klausGateway.agentgatewayRoute.enabled=true" \
 	             "agent-platform-mcps.agentgateway:$(MCPS_ONE)"; do \
 		knob=$${case%%:*}; flags=$${case#*:}; \
@@ -1163,7 +1272,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' /tmp/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >/tmp/vw-bs-cm.out
 	@[ -s /tmp/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com/kagent/api' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
 		grep -q -- "$$pattern" /tmp/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' /tmp/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi

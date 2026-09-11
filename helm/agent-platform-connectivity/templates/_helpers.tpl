@@ -892,3 +892,40 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- $xp := .Values.postgres.backup.crossplane -}}
 {{- if eq $xp.provider "azure" -}}{{- $xp.azure.containerName -}}{{- else -}}{{- $xp.aws.bucketName -}}{{- end -}}
 {{- end -}}
+
+{{/*
+The public hostname of the kagent controller route: kagent.controllerRoute.hostname
+when set, else agentgateway.<global.domain>; a render failure with neither. The
+gRPC origin the Dev Portal dials (app-config apiBaseUrl) and the hostname of the
+public GRPCRoute.
+Usage: include "agent-platform.kagent.controllerHostname" .
+*/}}
+{{- define "agent-platform.kagent.controllerHostname" -}}
+{{- include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" .Values.kagent.controllerRoute.hostname "key" "kagent.controllerRoute.hostname") -}}
+{{- end -}}
+
+{{/*
+The JWT claim the caller's identity is taken from — kagent.controller.auth.userIdClaim
+(default email), the ONE value both authentication layers read: the controller's
+AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation
+(templates/kagent/controller-jwt-policy.yaml), so the two cannot disagree.
+Usage: include "agent-platform.kagent.userIdClaim" .
+*/}}
+{{- define "agent-platform.kagent.userIdClaim" -}}
+{{- dig "controller" "auth" "userIdClaim" "email" (.Values.kagent | default dict) -}}
+{{- end -}}
+
+{{/*
+The gRPC service matches of the kagent controller route (a GRPCRoute rule's
+`matches:` list): the kagent API v2 services the platform's clients call and the
+A2A v1 service the agents are reached through. Exact service matches, every
+method; a service absent here is unreachable through the gateway by design.
+Usage: include "agent-platform.kagent.grpcServiceMatches" . | nindent 8
+*/}}
+{{- define "agent-platform.kagent.grpcServiceMatches" -}}
+{{- range list "kagent.api.v1alpha1.AgentInstanceService" "kagent.api.v1alpha1.AgentTemplateService" "kagent.api.v1alpha1.ModelService" "kagent.api.v1alpha1.SystemService" "lf.a2a.v1.A2AService" }}
+- method:
+    type: Exact
+    service: {{ . }}
+{{- end }}
+{{- end -}}

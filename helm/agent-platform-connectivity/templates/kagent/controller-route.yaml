@@ -3,7 +3,7 @@
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $kagentFullname := include "agent-platform.kagent.fullname" . }}
 # AgentgatewayBackend — registers the kagent controller as a backend that
-# agentgateway can proxy to after JWT validation.
+# agentgateway proxies to after JWT validation (controller-jwt-policy.yaml).
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -15,27 +15,35 @@ metadata:
 spec:
   policies:
     auth:
-      # Gateway strips the JWT after validation; passthrough re-injects it so
-      # trusted-proxy mode can extract the sub claim.
+      # The gateway strips the JWT after validation; passthrough re-injects it
+      # so the bearer reaches the controller: the controller re-derives the
+      # caller from it (trusted-proxy authenticator, the second layer) and
+      # forwards it to the actor unchanged (KAGENT_PROPAGATE_TOKEN — the person
+      # at muster).
       passthrough: {}
+    http:
+      # The controller serves native gRPC, gRPC-Web and A2A on :8083 with
+      # unencrypted HTTP/2; its Service declares no appProtocol, so the
+      # protocol is pinned here instead of inferred per request. Every hop to
+      # the controller is then h2c — gRPC-Web arriving over HTTP/1.1 included.
+      version: HTTP2
   static:
     host: {{ printf "%s-controller.%s.svc.cluster.local" $kagentFullname $ns }}
     port: 8083
 ---
-# HTTPRoute — exposes the kagent API at <pathPrefix> on the agentgateway Gateway.
-# Path prefix is stripped (URLRewrite) before forwarding so the controller
-# receives requests at /api/... as it expects.
+# GRPCRoute — the kagent controller API on the agentgateway Gateway, matched by
+# gRPC service (the kagent API v2 services and A2A v1), never by path prefix:
+# there is no REST on the controller and no prefix to strip. The same route
+# carries gRPC-Web (application/grpc-web+proto over HTTP/1.1 POST at the same
+# /<service>/<method> paths) for browsers.
 #
 # This is the internal data-plane hop. It is deliberately NOT hostname-scoped:
-# in-cluster A2A callers (e.g. klaus-gateway's --a2a-url, which points at the
-# agentgateway Service's cluster-DNS name) send Host=<svc>.<ns>.svc.cluster.local,
-# which would not match the public hostname. A host-scoped inner route lets those
-# requests fall through to the catch-all MCP route ("/"), where they are handled
-# as MCP Streamable-HTTP and rejected with 406 ("client must accept both
-# application/json and text/event-stream"). The path prefix (/kagent) is more
-# specific than the MCP "/" route, so a hostname-less route wins for every Host.
+# the in-cluster callers (klaus-gateway's a2a.url, the Dev Portal backend) dial
+# the agentgateway Service by its cluster-DNS name, so their :authority is
+# agentgateway.<ns>.svc.cluster.local:8080, which no public hostname matches. A
+# gRPC service match is exact, so a hostname-less route captures nothing else.
 apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+kind: GRPCRoute
 metadata:
   name: kagent-controller
   namespace: {{ .Release.Namespace }}
@@ -49,29 +57,21 @@ spec:
       kind: Gateway
   rules:
     - matches:
-        - path:
-            type: PathPrefix
-            value: {{ $route.pathPrefix }}
-      filters:
-        - type: URLRewrite
-          urlRewrite:
-            path:
-              type: ReplacePrefixMatch
-              replacePrefixMatch: /
+        {{- include "agent-platform.kagent.grpcServiceMatches" . | trim | nindent 8 }}
       backendRefs:
         - name: kagent
           kind: AgentgatewayBackend
           group: agentgateway.dev
 {{- if not (include "agent-platform.edgeIsDataPlane" .) }}
 ---
-# HTTPRoute — exposes the kagent API on the outer public Gateway (TLS-terminating).
-# Forwards <pathPrefix>/* on the public hostname to the agentgateway Service,
-# which then applies JWT validation and the inner URLRewrite before forwarding
-# to the kagent controller. No URLRewrite here: the prefix strip happens at the
-# inner hop only. Not rendered when the data plane is the edge itself: the inner
-# route above then serves <pathPrefix> on the HTTPS listener directly.
+# GRPCRoute — the same services on the outer public Gateway (TLS-terminating),
+# forwarded to the agentgateway Service, which applies the JWT policy and the
+# identity transformation before the controller. A GRPCRoute makes the outer
+# Gateway speak HTTP/2 to the agentgateway Service, so native gRPC survives the
+# hop end to end. Not rendered when the data plane is the edge itself: the
+# inner route above then serves the public hostname on the HTTPS listener.
 apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+kind: GRPCRoute
 metadata:
   name: kagent-controller-public
   namespace: {{ .Release.Namespace }}
@@ -85,15 +85,10 @@ spec:
     {{- end }}
     {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $override "key" "kagent.controllerRoute.parentRef") | nindent 4 }}
   hostnames:
-    - {{ include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" $route.hostname "key" "kagent.controllerRoute.hostname") | quote }}
+    - {{ include "agent-platform.kagent.controllerHostname" . | quote }}
   rules:
     - matches:
-        - path:
-            type: PathPrefix
-            value: {{ $route.pathPrefix }}
-      {{- with (include "agent-platform.routeTimeouts" .) }}
-      {{- . | nindent 6 }}
-      {{- end }}
+        {{- include "agent-platform.kagent.grpcServiceMatches" . | trim | nindent 8 }}
       backendRefs:
         - name: {{ .Values.gateway.name }}
           port: 8080

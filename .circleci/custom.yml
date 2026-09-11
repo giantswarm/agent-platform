@@ -9,7 +9,7 @@
 #
 # What this file carries beyond the golden (single-chart) pipeline:
 #   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
-#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-kagent-discovery` + `make verify-meta` +
+#     `make verify-managers` + `make verify-kagent-netpol` + `make verify-kagent-route` + `make verify-kagent-discovery` + `make verify-meta` +
 #     `make verify-engine` + `make verify-self` + `make verify-labels` + `make verify-postgres` +
 #     `make verify-secrets` + `make verify-login-connector` +
 #     `make verify-components` + `make verify-auto` + `make verify-identity` +
@@ -57,6 +57,9 @@ jobs:
         # global.* contract behaviors and their guards), verify-managers (the
         # model-manager / agent-manager wiring and guards), verify-kagent-netpol
         # (the kagent controller/agent egress to the built-in tool server),
+        # verify-kagent-route (the kagent controller GRPCRoute on both hops,
+        # the JWT policy with the identity transformation, the UI route's
+        # header strip, the controller's ingress admission and the guards),
         # verify-kagent-discovery (the muster RemoteMCPServer opts out of
         # controller-side tool discovery iff muster runs with OAuth on, and
         # never carries a static header),
@@ -92,7 +95,7 @@ jobs:
         # guards) are the single source of truth, also run locally. The meta chart's one
         # dependency is the flux-engine subchart, a directory in its charts/,
         # which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing
 
 workflows:
   build:

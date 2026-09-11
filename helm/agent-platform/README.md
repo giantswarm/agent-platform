@@ -487,16 +487,17 @@ README.
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
 | kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:969af5f733c8e2bd7756f40766352f5af744964e969a031ba146198d8becd546"` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
-| kagent.controllerRoute.pathPrefix | string | `"/kagent"` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
 | kagent.controllerRoute.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| kagent.controllerRoute.jwtAuthentication.enabled | bool | `false` |  |
+| kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.host | string | `"dex.giantswarm.svc.cluster.local"` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.port | int | `5556` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.path | string | `"/keys"` |  |
+| kagent.controllerRoute.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
+| kagent.controllerRoute.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | kagent.uiRoute.enabled | bool | `false` |  |
 | kagent.uiRoute.hostname | string | `""` |  |
 | kagent.uiRoute.parentRef.name | string | `"giantswarm-default"` |  |
@@ -607,7 +608,7 @@ README.
 | klausGateway.cli.enabled | bool | `false` |  |
 | klausGateway.a2a.enabled | bool | `false` |  |
 | klausGateway.a2a.defaultAgent | string | `""` |  |
-| klausGateway.a2a.url | string | `"http://agentgateway.agent-platform.svc.cluster.local:8080/kagent/api/a2a/kagent"` |  |
+| klausGateway.a2a.url | string | `"grpc://agentgateway.agent-platform.svc.cluster.local:8080"` |  |
 | klausGateway.a2a.fallbackIconUrlTemplate | string | `""` |  |
 | klausGateway.a2a.saToken.enabled | bool | `false` |  |
 | klausGateway.a2a.saToken.audience | string | `"kagent"` |  |

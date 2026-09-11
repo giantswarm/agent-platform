@@ -9,6 +9,7 @@
 # When oauth2-proxy is enabled: traffic flows public → oauth2-proxy → kagent UI.
 # When oauth2-proxy is disabled: traffic goes directly to the UI (dev only —
 # anyone with the hostname can access the UI without authentication).
+# Either way the route strips the caller's identity header (see the filter).
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -34,6 +35,17 @@ spec:
       {{- with (include "agent-platform.routeTimeouts" .) }}
       {{- . | nindent 6 }}
       {{- end }}
+      # The UI path is the second door to the controller (the UI's nginx
+      # proxies /api/ and /a2a/ to it and forwards request headers, x-user-id
+      # included). The identity on this path is the bearer oauth2-proxy
+      # forwards, which the controller verifies itself; a client-supplied
+      # identity header is dropped here, at the route, before it can be
+      # trusted (docs/authentication.md, "The kagent controller route").
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-user-id
       backendRefs:
         {{- if $oauth2proxyEnabled }}
         {{- /* The oauth2-proxy subchart of the kagent chart names its Service

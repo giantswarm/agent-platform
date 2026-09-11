@@ -1,6 +1,7 @@
 {{- $route := .Values.kagent.controllerRoute }}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) $route.enabled ($route.jwtAuthentication).enabled }}
 {{- $jwt := $route.jwtAuthentication }}
+{{- $claim := include "agent-platform.kagent.userIdClaim" . }}
 # AgentgatewayBackend — static backend for the issuer's JWKS endpoint. Lives in
 # the release namespace so the policy's jwks backendRef needs no ReferenceGrant
 # into the issuer's namespace.
@@ -13,14 +14,34 @@ metadata:
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
+  {{- if ($jwt.jwks.tls).enabled }}
+  {{- /* An issuer serving its JWKS over TLS (a Dex with web.https): originate
+  TLS and verify against the named CA Secret (key ca.crt), defaulting to the
+  platform's identity CA (global.identity.ca.secretName); with neither, the
+  data plane's system trust. SNI and the verified SAN follow the host. */}}
+  policies:
+    tls:
+      {{- $ca := $jwt.jwks.tls.caSecretName | default (dig "identity" "ca" "secretName" "" .Values.global) }}
+      {{- if $ca }}
+      caCertificateRefs:
+        - kind: Secret
+          name: {{ $ca }}
+      {{- else }}
+      {}
+      {{- end }}
+  {{- end }}
   static:
     host: {{ $jwt.jwks.host }}
     port: {{ $jwt.jwks.port }}
 ---
-# AgentgatewayPolicy — verifies the bearer JWT (signature, issuer, expiry)
-# against dex on the inner kagent-controller HTTPRoute before forwarding. The
-# controller's trusted-proxy mode decodes claims without verification and
-# depends on this boundary being enforced in front of it.
+# AgentgatewayPolicy — the first of the two authentication layers in front of
+# the kagent controller (docs/authentication.md, "The kagent controller route").
+# On the kagent-controller GRPCRoute it verifies the bearer JWT (signature,
+# issuer, expiry) against the issuer, refuses a token that carries no identity
+# claim, and sets the identity header the controller reads — x-user-id — from
+# that claim, replacing whatever the client sent. The controller re-derives the
+# identity from the same bearer (trusted-proxy authenticator, unverified
+# decode), which is why agentgateway must stay the only path to it.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -31,7 +52,7 @@ metadata:
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
-      kind: HTTPRoute
+      kind: GRPCRoute
       name: kagent-controller
   traffic:
     jwtAuthentication:
@@ -47,7 +68,8 @@ spec:
         - issuer: {{ $issuer | quote }}
           # No audiences: any audience the issuer minted is accepted. dex
           # id_tokens carry the originating client id as aud, which varies per
-          # caller; requiring one would break the dex human path.
+          # caller (the portal's, klaus-gateway's, a CLI's); requiring one would
+          # break the human path.
           jwks:
             remote:
               backendRef:
@@ -55,4 +77,22 @@ spec:
                 kind: AgentgatewayBackend
                 name: kagent-controller-jwks
               jwksPath: {{ $jwt.jwks.path | quote }}
+    # A validated token without the identity claim is refused: without it the
+    # header below would be empty and the controller would fall back to its
+    # default user instead of the caller.
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          - {{ printf "has(jwt.%s)" $claim | quote }}
+    # The identity header contract: x-user-id = the verified claim. `set`
+    # overwrites every inbound value of the header (agentgateway applies add,
+    # then set, then remove — a remove of the same name would strip this value
+    # again), so a client-supplied x-user-id never reaches the controller. JWT
+    # authentication runs before transformations, so the claims are available.
+    transformation:
+      request:
+        set:
+          - name: x-user-id
+            value: {{ printf "jwt.%s" $claim | quote }}
 {{- end }}

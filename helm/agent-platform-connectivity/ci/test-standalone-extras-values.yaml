@@ -38,6 +38,12 @@ kagent:
   controllerRoute:
     enabled: true
 
+# The controller route's JWT policy is on by default; the data plane fetches the
+# issuer's JWKS, which gateway.jwksEgress opens.
+gateway:
+  jwksEgress:
+    enabled: true
+
 kserve-resources:
   kserve:
     controller:
