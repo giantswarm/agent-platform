@@ -13,7 +13,7 @@
 #     `make verify-engine` + `make verify-self` + `make verify-labels` + `make verify-postgres` +
 #     `make verify-secrets` + `make verify-login-connector` +
 #     `make verify-components` + `make verify-auto` + `make verify-identity` +
-#     `make verify-wiring` + `make verify-llm-routing` + `make verify-dataplane-ha` checks on branches (ingress-mode guards, the global.*
+#     `make verify-wiring` + `make verify-llm-routing` + `make verify-dataplane-ha` + `make verify-dataplane-vpa` checks on branches (ingress-mode guards, the global.*
 #     contract, the model-manager / agent-manager wiring, the kagent tool-server
 #     egress, app-of-apps meta-package render, the bundled Flux engine's two
 #     shapes, the self-management shapes, the postgres.backup wiring and guards,
@@ -91,10 +91,15 @@ jobs:
         # verify-llm-routing (the llmRouting toggle, both states, and its
         # guards) and verify-dataplane-ha (the agentgateway data plane's replicas,
         # PodDisruptionBudget and node spread by default, the knobs, the guards,
-        # the meta chart's forwarding) are the single source of truth, also run locally. The meta chart's one
+        # the meta chart's forwarding) and verify-dataplane-vpa (the agentgateway
+        # VerticalPodAutoscalers behind one auto knob: the data-plane VPA on the
+        # Gateway's Deployment in the fleet shape, none without the API or in
+        # muster-direct, explicit wins both ways, the meta chart forwards the
+        # knob resolved and empties the controller's VPA where the API is not
+        # served, the controller budget and spread forwarded) are the single source of truth, also run locally. The meta chart's one
         # dependency is the flux-engine subchart, a directory in its charts/,
         # which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-dataplane-ha
+        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-kagent-netpol verify-kagent-discovery verify-postgres verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-dataplane-ha verify-dataplane-vpa
 
 workflows:
   build:

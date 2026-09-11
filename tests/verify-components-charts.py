@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Pull the seven component charts of the standalone chart's extras and render each
-with the values the meta chart forwards to it.
+"""Pull the component charts the meta chart composes values for — the seven
+extras of the standalone chart and the agentgateway control plane — and render
+each with the values the meta chart forwards to it.
 
 The meta chart cannot know whether a component chart accepts the block it
 forwards: the block is inlined into a HelmRelease and validated by helm-controller
@@ -10,6 +11,16 @@ resolves to today (what a dogfooding installation gets) and at the exact pin in
 examples/customer-bom.yaml (what a BOM installation gets). The render uses the
 quick-start inputs Backstage and mcp-kubernetes require (global.domain and
 global.identity) and the API groups the charts' optional objects need.
+
+agentgateway matters most: its chart validates values with a CLOSED schema
+(additionalProperties: false at the root), so one key the meta chart forwards
+from the `agentgateway:` block that the chart the range resolves to does not
+declare fails the HelmRelease on every installation with the component on. The
+block carries the controller's PodDisruptionBudget, topologySpreadConstraints
+and VerticalPodAutoscaler, whose keys the packaging chart's schema accepts from
+2.1.2 (giantswarm/agentgateway#51; the floor of the range); the meta render
+here serves autoscaling.k8s.io/v1 so the VPA spec is forwarded and validated
+rather than emptied.
 
 Network: pulls from gsoci.azurecr.io and ghcr.io (three attempts each).
 Deliberately stdlib-only: the CI image has no PyYAML.
@@ -24,12 +35,24 @@ import time
 NEW = [
     "backstage", "mcp-kubernetes", "cloudnative-pg",
     "kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources",
+    # The agentgateway control plane (the Giant Swarm packaging chart): a strict
+    # schema, and the forwarded controller budget, spread and VPA
+    # (agentgateway.controller.podDisruptionBudget, topologySpreadConstraints,
+    # controller.verticalPodAutoscaler) need 2.1.2 (giantswarm/agentgateway#51).
+    # The range floor (>=2.1.2) matches nothing until 2.1.2 is published, so
+    # the pull fails and this check is RED until then — the intended dependency
+    # signal (release the packaging chart first), not a regression to paper over.
+    "agentgateway",
 ]
 QUICKSTART = [
     "--set", "global.domain=example.com",
     "--set", "global.identity.issuerUrl=https://dex.example.com",
     "--set", "global.identity.clientId=agent-platform",
     "--set", "global.identity.existingSecret=agent-platform-idp",
+    # The VPA API served, so the meta chart forwards the agentgateway
+    # controller's VerticalPodAutoscaler spec (rather than emptying it) and the
+    # packaging chart's schema sees the keys.
+    "--api-versions", "autoscaling.k8s.io/v1",
 ]
 API_VERSIONS = [
     "--api-versions", "cilium.io/v2",

@@ -224,8 +224,9 @@ gateway:
     # Every MCP call and, with llmRouting on, every model call of the platform
     # crosses this Deployment: one pod is one node reboot away from an outage
     # for every agent. The controller reconciles the Deployment from the
-    # Gateway; the three knobs below reach it through AgentgatewayParameters
-    # (deployment.spec and podDisruptionBudget, strategic merge). A pod's exit
+    # Gateway; three of the knobs below reach it through AgentgatewayParameters
+    # (deployment.spec and podDisruptionBudget, strategic merge), the fourth
+    # (verticalPodAutoscaler) is an object of its own on the Deployment. A pod's exit
     # on a drain or a rollout runs inside the data-plane shutdown window the
     # controller's chart defaults to. Both ends of it are deadlines measured
     # from SIGTERM, not phases that add up: 10 s still accepting so the
@@ -276,6 +277,23 @@ gateway:
         - kubernetes.io/hostname
       maxSkew: 1  # @schema minimum: 1
       whenUnsatisfiable: ScheduleAnyway  # @schema enum: [ScheduleAnyway, DoNotSchedule]
+    # Vertical Pod Autoscaler for the data-plane pods (the controller sets the
+    # container's cpu/memory requests from its own defaults, sized for nothing
+    # in particular). `auto` renders the VerticalPodAutoscaler when
+    # autoscaling.k8s.io/v1 is served, detected once (under the meta chart the
+    # knob arrives resolved, and the controller's VPA follows the same answer);
+    # true / false force it. Evictions apply a new size one pod at a time behind
+    # the budget above. The floor keeps a burst of streamed LLM responses from
+    # starving a pod the recommender saw idle.
+    verticalPodAutoscaler:
+      enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+      updateMode: Auto  # @schema enum: [Off, Initial, Recreate, Auto, InPlaceOrRecreate]
+      minAllowed:
+        cpu: 50m  # @schema type: [string, number]
+        memory: 64Mi
+      maxAllowed:
+        cpu: "2"  # @schema type: [string, number]
+        memory: 2Gi
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
