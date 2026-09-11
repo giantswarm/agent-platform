@@ -38,7 +38,13 @@ spec:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
 ---
-# Ingress to the kagent controller: agentgateway (cross-namespace) + intra-namespace.
+# Ingress to the kagent controller: the agentgateway data plane (cross-namespace)
+# and the kagent UI, nothing else. Both are authentication boundaries the
+# controller relies on — agentgateway validates the JWT and sets x-user-id, the
+# UI's route strips it and oauth2-proxy supplies the bearer — while the
+# controller itself decodes the bearer without verifying it, so every other pod
+# is kept off the API port. Agent pods do not call the controller from inside
+# the namespace any more (the Substrate actors' egress is a separate policy).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -56,18 +62,6 @@ spec:
         - matchLabels:
             gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
             io.kubernetes.pod.namespace: {{ .Release.Namespace }}
-      toPorts:
-        - ports:
-            - port: {{ $controllerPort | quote }}
-              protocol: TCP
-    # Intra-namespace clients of the controller API: agent pods (A2A / tool calls)
-    # and the kagent UI backend. The controller runs under trusted-proxy and trusts
-    # forwarded identity headers, so ingress is restricted to these identities on the
-    # API port rather than the whole namespace.
-    - fromEndpoints:
-        - matchLabels:
-            app: kagent
-            io.kubernetes.pod.namespace: {{ $kagentNs }}
         - matchLabels:
             app.kubernetes.io/name: kagent
             app.kubernetes.io/component: ui
@@ -457,22 +451,17 @@ spec:
       app.kubernetes.io/component: controller
       app.kubernetes.io/name: kagent
   policyTypes: [Ingress]
+  # The agentgateway data-plane pods of the release namespace and the kagent UI
+  # only — the two authentication boundaries the controller relies on (see the
+  # cilium policy above for why nothing else is admitted).
   ingress:
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Release.Namespace }}
-      ports:
-        - port: {{ $controllerPort | int }}
-          protocol: TCP
-    # Intra-namespace clients of the controller API: agent pods (A2A / tool calls)
-    # and the kagent UI backend. Restricted to these identities on the API port
-    # rather than the whole namespace, since the controller trusts forwarded
-    # identity headers under trusted-proxy.
-    - from:
-        - podSelector:
+          podSelector:
             matchLabels:
-              app: kagent
+              gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: kagent

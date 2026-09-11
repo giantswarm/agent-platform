@@ -989,41 +989,112 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   fluxServiceAccountName: kagent-flux
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
-  # Expose kagent controller API through agentgateway (JWT-validated).
-  # Creates AgentgatewayBackend + HTTPRoute in the release namespace.
+  # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
+  # (h2c to the controller) and a GRPCRoute in the release namespace, matched by
+  # gRPC service and method (controllerRoute.grpc.services) —
+  # kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService, ModelService,
+  # SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
+  # controller has no REST). Native gRPC over HTTP/2 from the public hostname
+  # and from the in-cluster agentgateway Service
+  # (grpc://agentgateway.<release namespace>.svc.cluster.local:8080, h2c), and
+  # gRPC-Web for browsers on the same route. The Dev Portal and klaus-gateway
+  # dial these two targets.
   controllerRoute:
     enabled: false
-    # Path prefix on the agentgateway Gateway hostname where the kagent API is
-    # mounted. Stripped (URLRewrite) before forwarding to the controller.
-    pathPrefix: /kagent
-    # Hostname that must be declared on the agentgateway Gateway.
-    # Example: agentgateway.<cluster>.<base-domain>
+    # Public hostname of the route; empty derives agentgateway.<global.domain>.
+    # Must be declared on the public Gateway. Example: agentgateway.<cluster>.<base-domain>
     hostname: ""
     # Outer (public) Gateway that terminates TLS. The controller API is reached
-    # at https://<hostname><pathPrefix> through this Gateway, which forwards to
-    # the agentgateway Service (inner hop handles JWT validation + path rewrite).
+    # at https://<hostname> through this Gateway, which forwards to the
+    # agentgateway Service over HTTP/2 (the inner hop validates the JWT and sets
+    # the identity header). Empty name: the chart-owned edge Gateway, else
+    # global.gatewayApi.parentRefs.
     parentRef:
       name: giantswarm-default
       namespace: envoy-gateway-system
-    # JWT validation on the inner kagent-controller HTTPRoute. Renders an
-    # AgentgatewayPolicy (plus a static AgentgatewayBackend for the JWKS
-    # endpoint) so agentgateway verifies the bearer's signature, issuer, and
-    # expiry against dex before forwarding. The controller's trusted-proxy mode
-    # decodes claims without verification and depends on this boundary.
-    # Off by default: enabling it rejects every caller that does not present a
-    # dex-issued JWT (opaque muster tokens, Kubernetes ServiceAccount tokens).
-    # Enable gateway.jwksEgress alongside so the data plane can reach dex.
+    grpc:
+      # The gRPC services and methods the route carries, one GRPCRoute rule per
+      # service with an exact service/method match per RPC. Every RPC is listed
+      # because the agentgateway controller (v1.5.x) translates a service-only
+      # match into an exact path "/<service>/" that no request has, and ignores
+      # `type: RegularExpression` — a service-only match would fall through to
+      # the MCP catch-all route; exact service/method matches outrank it. The
+      # list is the kagent line's proto/ at its pin (v0.11.0-gs.1); an RPC the
+      # line adds is reachable only once it is listed here. An RPC absent here
+      # fails loudly (the catch-all answers 406), never silently.
+      services:
+        kagent.api.v1alpha1.AgentInstanceService:
+          - CreateAgentInstance
+          - CreateAgentInstanceShare
+          - DeleteAgentInstance
+          - GetAgentInstance
+          - ListAgentInstanceShares
+          - ListAgentInstances
+          - ResumeAgentInstance
+          - RevokeAgentInstanceShare
+          - SuspendAgentInstance
+          - UpdateAgentInstanceName
+        kagent.api.v1alpha1.AgentTemplateService:
+          - CreateAgentTemplate
+          - DeleteAgentTemplate
+          - GetAgentTemplate
+          - ListAgentTemplates
+          - UpdateAgentTemplate
+        kagent.api.v1alpha1.ModelService:
+          - CreateModelConfig
+          - DeleteModelConfig
+          - GetModelConfig
+          - ListConfiguredProviders
+          - ListModelConfigs
+          - ListProviderModels
+          - ListSupportedModelProviders
+          - ListSupportedModels
+          - UpdateModelConfig
+        kagent.api.v1alpha1.SystemService:
+          - GetCurrentUser
+          - GetSubstrateStatus
+          - GetVersion
+          - ListNamespaces
+        lf.a2a.v1.A2AService:
+          - CancelTask
+          - CreateTaskPushNotificationConfig
+          - DeleteTaskPushNotificationConfig
+          - GetExtendedAgentCard
+          - GetTask
+          - GetTaskPushNotificationConfig
+          - ListTaskPushNotificationConfigs
+          - ListTasks
+          - SendMessage
+          - SendStreamingMessage
+          - SubscribeToTask
+    # The first of the controller's two authentication layers, on by default
+    # (docs/authentication.md, "The kagent controller route"). Renders an
+    # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
+    # the JWKS endpoint) so agentgateway verifies the bearer's signature, issuer
+    # and expiry, refuses a token without the identity claim, and sets the
+    # identity header the controller reads — x-user-id — from the verified
+    # claim named by kagent.controller.auth.userIdClaim (email), replacing any
+    # value the client sent. The controller re-derives the identity from the
+    # same bearer (its trusted-proxy authenticator decodes it without verifying
+    # the signature), which is why this boundary must stay in front of it and
+    # the network policy admits no other caller.
+    # Every caller must present a JWT the issuer signed (opaque muster tokens
+    # and Kubernetes ServiceAccount tokens are refused). gateway.jwksEgress
+    # must be on so the data plane can reach the issuer's JWKS.
+    # enabled: false is the off switch for local development without a front
+    # proxy: no policy, no transformation — the controller then trusts x-user-id
+    # as sent. Never the fleet shape.
     jwtAuthentication:
-      enabled: false
+      enabled: true
       # Validation strictness. One of Strict, Optional, Permissive.
       #   Strict     reject requests with a missing or invalid token.
       #   Optional   validate the token when present, allow requests with none.
       #   Permissive validate but never reject (observe only, enforces nothing).
-      # Permissive lets an install confirm real traffic carries valid dex tokens
-      # before enforcing; it does not close the gap on its own.
+      # Only Strict keeps the identity header trustworthy: with the other two a
+      # request without a token reaches the controller carrying no identity.
       mode: Strict
-      # dex issuer URL exactly as it appears in the token iss claim.
-      # Example: https://dex.<cluster>.<base-domain>
+      # dex issuer URL exactly as it appears in the token iss claim; empty
+      # takes global.identity.issuerUrl. Example: https://dex.<cluster>.<base-domain>
       issuer: ""
       # In-cluster JWKS source for the issuer, rendered as a static
       # AgentgatewayBackend in the release namespace.
@@ -1031,6 +1102,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
+        # An issuer serving its JWKS over TLS: originate TLS from the data
+        # plane and verify against caSecretName (a Secret with ca.crt), else
+        # global.identity.ca.secretName, else the system trust.
+        tls:
+          enabled: false
+          caSecretName: ""
   # Expose kagent UI. Creates an HTTPRoute on the public Gateway pointing at
   # oauth2-proxy (when enabled) or the UI service directly (dev only).
   # Supply oauth2-proxy credentials and set uiRoute.enabled: true together.
@@ -1393,12 +1470,14 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   a2a:
     enabled: false
     defaultAgent: ""
-    # Required when a2a.enabled is true. Full base URL without trailing agent name.
-    # Traffic routes through the agentgateway data-plane (auth, observability, policy)
-    # to the kagent controller; the path prefix /kagent is stripped by the URLRewrite
-    # on the kagent-controller HTTPRoute before reaching kagent-controller:8083.
+    # Required when a2a.enabled is true. The kagent controller's gRPC target as
+    # reached through the agentgateway data plane (JWT validation, identity
+    # header, observability): grpc://<host>:<port> is plaintext HTTP/2 (h2c) —
+    # the in-cluster agentgateway Service — grpcs:// TLS. The route is the
+    # kagent-controller GRPCRoute (kagent.controllerRoute); A2A calls ride
+    # lf.a2a.v1.A2AService with the person's Dex id_token as authorization.
     # Adjust the namespace if the release is deployed outside agent-platform.
-    url: "http://agentgateway.agent-platform.svc.cluster.local:8080/kagent/api/a2a/kagent"
+    url: "grpc://agentgateway.agent-platform.svc.cluster.local:8080"
     saToken:
       enabled: false
       audience: kagent

@@ -51,7 +51,10 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 # Keys the connectivity chart reads under .Values.kagent that ARE upstream kagent
 # keys, so they must keep being forwarded. Everything else it reads there is
 # umbrella-only and must be in omitKeys.
-UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers"}
+# `controller` is read for controller.auth.userIdClaim: the claim the kagent
+# controller derives the caller from (AUTH_USER_ID_CLAIM) is also the claim the
+# gateway's identity transformation copies into x-user-id (ONE value).
+UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
 LINE_REPOSITORY = "oci://ghcr.io/giantswarm/kagent/helm"

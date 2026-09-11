@@ -912,3 +912,56 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- $xp := .Values.postgres.backup.crossplane -}}
 {{- if eq $xp.provider "azure" -}}{{- $xp.azure.containerName -}}{{- else -}}{{- $xp.aws.bucketName -}}{{- end -}}
 {{- end -}}
+
+{{/*
+The public hostname of the kagent controller route: kagent.controllerRoute.hostname
+when set, else agentgateway.<global.domain>; a render failure with neither. The
+gRPC origin the Dev Portal dials (app-config apiBaseUrl) and the hostname of the
+public GRPCRoute.
+Usage: include "agent-platform.kagent.controllerHostname" .
+*/}}
+{{- define "agent-platform.kagent.controllerHostname" -}}
+{{- include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" .Values.kagent.controllerRoute.hostname "key" "kagent.controllerRoute.hostname") -}}
+{{- end -}}
+
+{{/*
+The JWT claim the caller's identity is taken from — kagent.controller.auth.userIdClaim
+(default email), the ONE value both authentication layers read: the controller's
+AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation
+(templates/kagent/controller-jwt-policy.yaml), so the two cannot disagree.
+Usage: include "agent-platform.kagent.userIdClaim" .
+*/}}
+{{- define "agent-platform.kagent.userIdClaim" -}}
+{{- dig "controller" "auth" "userIdClaim" "email" (.Values.kagent | default dict) -}}
+{{- end -}}
+
+{{/*
+The rules of the kagent controller GRPCRoute (a `rules:` list), from
+kagent.controllerRoute.grpc.services: one rule per service, one exact
+service/method match per RPC, every rule forwarding to the backend given as
+`.backendRefs` (a YAML string). Exact service/method matches are the one shape
+the agentgateway controller translates into a path that requests have (a
+service-only match becomes the exact path "/<service>/", `type:
+RegularExpression` is ignored), and they outrank the MCP catch-all's PathPrefix.
+Usage: include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" $refs) | nindent 4
+*/}}
+{{- define "agent-platform.kagent.grpcRules" -}}
+{{- $services := dig "controllerRoute" "grpc" "services" (dict) .ctx.Values.kagent }}
+{{- if not $services }}
+{{- fail "kagent.controllerRoute.grpc.services is empty: the controller GRPCRoute needs at least one service with its methods" }}
+{{- end }}
+{{- range $svc, $methods := $services }}
+{{- if not $methods }}
+{{- fail (printf "kagent.controllerRoute.grpc.services[%s] lists no methods: the agentgateway controller cannot route a service-only match" $svc) }}
+{{- end }}
+- matches:
+{{- range $methods }}
+    - method:
+        type: Exact
+        service: {{ $svc }}
+        method: {{ . }}
+{{- end }}
+  backendRefs:
+{{ $.backendRefs | indent 4 }}
+{{- end }}
+{{- end -}}

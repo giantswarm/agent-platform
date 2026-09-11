@@ -200,15 +200,18 @@ data:
           {{- toYaml . | nindent 10 }}
       {{- end }}
       {{- if $kagentRoute }}
-      {{- /* Without this the plugin derives kagent.<baseDomain>/api — the
-      kagent UI hostname, which the platform fronts with oauth2-proxy at
-      most, never with the controller API. The controller API lives on the
-      controllerRoute: <hostname><pathPrefix>/* with the prefix stripped
-      before kagent, so its /api sits at <hostname><pathPrefix>/api. */}}
+      {{- /* The kagent controller of this installation, as the portal backend
+      dials it: the gRPC origin of the controller GRPCRoute through agentgateway
+      (templates/kagent/controller-route.yaml) — scheme and hostname, no path;
+      the Connect clients append /<service>/<method> themselves. Without this
+      the plugin would derive kagent.<baseDomain>, the kagent UI hostname behind
+      oauth2-proxy, which is never the controller API. The backend sends the
+      person's bearer and nothing else identifying; the route's JWT policy sets
+      the identity header from it (docs/authentication.md). */}}
       kagent:
         installations:
           {{ $installation }}:
-            apiBaseUrl: https://{{ include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" $kagentRoute.hostname "key" "kagent.controllerRoute.hostname") }}{{ $kagentRoute.pathPrefix }}/api
+            apiBaseUrl: https://{{ include "agent-platform.kagent.controllerHostname" . }}
       {{- end }}
       {{- if $modelManagerRoute }}
       {{- /* The model-manager API of this installation, through the
