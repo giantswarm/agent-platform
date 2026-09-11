@@ -1,0 +1,20 @@
+# Kind cluster configuration for the chart tests. The generated CircleCI job
+# (architect/run-tests-with-ats) passes this file to `kind create cluster
+# --config`; devctl derives the `kind_config` parameter from its presence. The
+# job names the cluster and chooses the node image, so this file carries only
+# what the job does not decide.
+#
+# Agent Substrate (kagent API v2) projects pod identities and trust bundles into
+# its workers through the PodCertificateRequest API (certificates.k8s.io/v1beta1)
+# and ClusterTrustBundle projection. Those are beta feature gates, off by
+# default; kind applies them to the API server, the controller manager, the
+# scheduler and the kubelet. The v1beta1 API needs Kubernetes 1.35 or newer,
+# which the default node image satisfies.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+featureGates:
+  ClusterTrustBundle: true
+  ClusterTrustBundleProjection: true
+  PodCertificateRequest: true
+runtimeConfig:
+  "certificates.k8s.io/v1beta1": "true"
