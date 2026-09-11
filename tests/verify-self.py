@@ -62,7 +62,11 @@ FLEET_APIS = [
     "--api-versions", "monitoring.coreos.com/v1", "--api-versions", "gateway.networking.k8s.io/v1",
     "--api-versions", "gateway.envoyproxy.io/v1alpha1",
 ]
-SELF_MARKERS = ("ValidatingAdmissionPolicy", VALUES_SECRET, SELF_SA, ANNOTATION, "self-management", "helm.sh/hook")
+SELF_MARKERS = ("ValidatingAdmissionPolicy", VALUES_SECRET, SELF_SA, ANNOTATION, "self-management")
+# The kagent CRDs' storage-version hooks (giantswarm/agent-platform#396, verify-engine.py)
+# render with the engine OFF too, as the hook identity: the one hook family the fleet shape carries.
+STORAGE_HOOKS = {f"{RELEASE}-kagent-storage-version-backup": ("pre-install,pre-upgrade", -7), f"{RELEASE}-kagent-storage-version-restore": ("post-install,post-upgrade", 0)}
+STORAGE_FAMILY = {("Job", NAMESPACE, n) for n in STORAGE_HOOKS} | {("ServiceAccount", NAMESPACE, f"{RELEASE}-hooks"), ("ClusterRoleBinding", "", f"{RELEASE}-hooks")}
 
 
 def fail(msg: str) -> None:
@@ -151,14 +155,16 @@ def main(chart: str) -> int:
                   [*ci, *ENGINE_OFF, "--set", "gitops.namespace=flux-giantswarm", "--set", "gitops.targetNamespace=agent-platform", *FLEET_APIS]):
         manifest = helm(chart, flags)
         off = docs(manifest)
-        if set(k for k, *_ in off) - {"OCIRepository", "HelmRelease"}:
-            fail(f"engine off renders a non-Flux kind: {sorted(set(k for k, *_ in off))}")
+        if {k for k in off if k[0] not in ("OCIRepository", "HelmRelease")} != STORAGE_FAMILY:
+            fail(f"engine off renders a non-Flux object beyond the storage-version hooks (ci-values turn kagent on): {sorted(k for k in off if k[0] not in ('OCIRepository', 'HelmRelease'))}")
+        if any("pre-delete" in hook_meta(d)[0] for d in off.values()):
+            fail("engine off renders a pre-delete hook (the ordered teardown is the engine's)")
         if any(n == RELEASE for k, _, n in off):
             fail("engine off renders the self OCIRepository/HelmRelease")
         for needle in SELF_MARKERS:
             if needle in manifest:
                 fail(f"engine off render mentions {needle!r}")
-    print("ok: engine off — no self object, hook, policy, identity or values-Secret reference; fleet shape clean")
+    print("ok: engine off — no self object, self hook, policy, identity or values-Secret reference (the storage-version hooks alone); fleet shape clean")
 
     # --- engine ON, self default (auto → on)
     on_manifest = helm(chart, [*ci, "--include-crds"])
@@ -189,9 +195,10 @@ def main(chart: str) -> int:
         fail("self-management renders a ClusterRole; a namespaced Role is enough")
     hooks = {(k, n): hook_meta(d) for (k, _, n), d in on.items() if "helm.sh/hook:" in d}
     expected_hooks = {
-        # ci-values turn kagent on: the kagent namespace hook (verify-engine.py) and the hook identity at its events
-        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,pre-delete", -10),
+        # ci-values turn kagent on: the kagent namespace hook and the storage-version hooks (verify-engine.py) and the hook identity at their events
+        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10),
         ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
+        **{("Job", n): ev for n, ev in STORAGE_HOOKS.items()},
         ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-delete", -5),
         ("Job", f"{RELEASE}-self-values"): ("post-install,post-upgrade", 0),
         ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("pre-delete", 5),
@@ -245,8 +252,10 @@ def main(chart: str) -> int:
         expected_off[("Job", f"{RELEASE}-self-stop-resumer")] = ("pre-upgrade,pre-delete", -6)
         expected_off[("Job", f"{RELEASE}-self-suspend")] = ("pre-upgrade,pre-delete", -5)
         if label != "self off":
-            # the lab values leave kagent off: no kagent namespace hook, the hook identity at pre-delete only
+            # the lab values leave kagent off: no kagent namespace hook, no storage-version hooks, the hook identity at pre-delete only
             del expected_off[("Job", f"{RELEASE}-kagent-namespace")]
+            for n in STORAGE_HOOKS:
+                del expected_off[("Job", n)]
             expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-delete", -10)
             expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-delete", -10)
         if hooks_off != expected_off:

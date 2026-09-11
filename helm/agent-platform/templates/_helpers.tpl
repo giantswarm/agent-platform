@@ -800,13 +800,42 @@ Usage: include "agent-platform.kagent.hookNamespace" .
 {{- end -}}
 
 {{/*
+The namespace the kagent component's objects live in: kagent.namespaceOverride,
+else the namespace the platform HelmReleases target (gitops.targetNamespace,
+else the release namespace). The storage-version hooks keep their record there
+(hooks/kagent-crds-storage-version.yaml).
+Usage: include "agent-platform.kagent.namespace" .
+*/}}
+{{- define "agent-platform.kagent.namespace" -}}
+{{- dig "namespaceOverride" "" (.Values.kagent | default dict) | default (.Values.gitops.targetNamespace | default .Release.Namespace) -}}
+{{- end -}}
+
+{{/*
+Whether the kagent CRDs' storage-version hooks render
+(hooks/kagent-crds-storage-version.yaml, giantswarm/agent-platform#396): whenever
+the kagent line's CRD component is on — with or without the bundled engine. A
+cluster's own Flux runs this chart's hooks too, and every installation that ran
+kagent 0.10 needs the step; the other hooks stay the engine's. Emits "true" or "".
+*/}}
+{{- define "agent-platform.kagent.storageVersionHooks" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds") }}true{{ end -}}
+{{- end -}}
+
+{{/*
 The Helm hook events the hook ServiceAccount + ClusterRoleBinding (hooks/rbac.yaml)
-are created for: pre-delete for the ordered teardown, and pre-install,pre-upgrade
-too while the kagent namespace hook renders — it runs as that account (creating
-a namespace is cluster-scoped, the namespaced <release>-self identity cannot).
+are created for, in Helm's order: pre-install,pre-upgrade while the kagent
+namespace hook or the storage-version backup hook renders (they run as that
+account — creating a namespace or deleting a CRD is cluster-scoped, the
+namespaced <release>-self identity cannot), post-install,post-upgrade while the
+storage-version restore hook renders, and pre-delete for the ordered teardown
+(the bundled engine). Empty when none of them renders — rbac.yaml renders nothing then.
 */}}
 {{- define "agent-platform.hooks.serviceAccountEvents" -}}
-{{- if include "agent-platform.kagent.hookNamespace" . }}pre-install,pre-upgrade,pre-delete{{ else }}pre-delete{{ end -}}
+{{- $events := list -}}
+{{- if or (include "agent-platform.kagent.hookNamespace" .) (include "agent-platform.kagent.storageVersionHooks" .) }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
+{{- if include "agent-platform.kagent.storageVersionHooks" . }}{{ $events = concat $events (list "post-install" "post-upgrade") }}{{ end -}}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}{{ $events = append $events "pre-delete" }}{{ end -}}
+{{- join "," $events -}}
 {{- end -}}
 
 {{/*
