@@ -888,7 +888,7 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@echo "All kagent controller route behaviors verified."
 
 .PHONY: verify-kagent-discovery
-verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for muster (the Generic agent chart 1.x renders one per agent, with the toolset header and the discovery opt-out label), nothing it renders for muster carries a static header, the operator-defined kagent.remoteMcpServers are kagent.dev/v1alpha3 in the kagent namespace (tokenSecret = a Secret-sourced Authorization header, no opt-out label), and the muster MCP URL reaches the portal's app-config from the one helper.
+verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for muster (the Generic agent chart 1.x renders one per agent, with the toolset header and the discovery opt-out label), nothing it renders for muster carries a static header, the operator-defined kagent.remoteMcpServers are kagent.dev/v1alpha3 in the kagent namespace (tokenSecret = a Secret-sourced Authorization header, no opt-out label).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> kagent + muster on (OAuth on, the default) with operator extras: no RemoteMCPServer for muster; every RemoteMCPServer kagent.dev/v1alpha3 in the kagent namespace"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp"}]' >/tmp/vkd-on.out 2>&1 || { cat /tmp/vkd-on.out; exit 1; }
@@ -919,15 +919,6 @@ verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for m
 	@if grep -q '^kind: RemoteMCPServer$$' /tmp/vkd-off.out; then echo "FAIL: a RemoteMCPServer renders with no kagent.remoteMcpServers (the shared muster server is retired)"; exit 1; else echo "ok: nothing without extras"; fi
 	@echo "--> kagent off: no RemoteMCPServer at all, extras included"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp"}]' 2>&1 | grep -q 'kind: RemoteMCPServer'; then echo "FAIL: a RemoteMCPServer renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
-	@echo "--> the muster MCP URL: one helper (agent-platform.musterMcpUrl) into the portal's app-config; follows muster.fullnameOverride / muster.service.port; absent with kagent or muster off"
-	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true >/tmp/vkd-url.out 2>&1 || { cat /tmp/vkd-url.out; exit 1; }
-	@grep -q '^      musterMcpUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp$$' /tmp/vkd-url.out || { echo "FAIL: the app-config lacks agentPlatform.musterMcpUrl at the default muster URL"; grep -n musterMcpUrl /tmp/vkd-url.out; exit 1; }
-	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set muster.fullnameOverride=other-muster --set muster.service.port=9999 2>/dev/null | grep -q 'musterMcpUrl: http://other-muster.agent-platform.svc.cluster.local:9999/mcp' || { echo "FAIL: agentPlatform.musterMcpUrl does not follow muster.fullnameOverride / muster.service.port"; exit 1; }
-	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) >/tmp/vkd-url-nokagent.out 2>&1 || { cat /tmp/vkd-url-nokagent.out; exit 1; }
-	@if grep -q 'musterMcpUrl' /tmp/vkd-url-nokagent.out; then echo "FAIL: agentPlatform.musterMcpUrl renders with kagent off"; exit 1; fi
-	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set components.muster.enabled=false >/tmp/vkd-url-nomuster.out 2>&1 || { cat /tmp/vkd-url-nomuster.out; exit 1; }
-	@if grep -q 'musterMcpUrl' /tmp/vkd-url-nomuster.out; then echo "FAIL: agentPlatform.musterMcpUrl renders with the muster component off"; exit 1; fi
-	@echo "ok: musterMcpUrl"
 	@echo "kagent tool-discovery invariants verified."
 
 .PHONY: verify-kagent-crds
@@ -1197,7 +1188,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@grep -q 'define "agent-platform.musterMcpUrl"' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the connectivity chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
 	@grep -q 'define "agent-platform.musterMcpUrl"' $(CHART_DIR)/templates/_helpers.tpl || { echo "FAIL: the meta chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.muster.enabled=false 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' >/tmp/vid-meta-am-nomuster.out; if grep -q 'url: http://' /tmp/vid-meta-am-nomuster.out; then echo "FAIL: agent-manager's muster.url is derived while the muster component is off"; exit 1; fi
-	@echo "ok: muster MCP URL — one helper, two consumers (agent-manager muster.url, the portal's agentPlatform.musterMcpUrl)"
+	@echo "ok: muster MCP URL — one helper, one consumer (agent-manager muster.url; the portal sends none)"
 	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
 	@helm template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >/tmp/vid-empty.out 2>&1 || { cat /tmp/vid-empty.out; exit 1; }
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' /tmp/vid-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still renders the identity"; exit 1; fi
@@ -1491,10 +1482,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' /tmp/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >/tmp/vw-bs-cm.out
 	@[ -s /tmp/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'musterMcpUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
 		grep -q -- "$$pattern" /tmp/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' /tmp/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
+	@if grep -q 'musterMcpUrl' /tmp/vw-bs-cm.out; then echo "FAIL: agentPlatform.musterMcpUrl is back in the portal's app-config — the Dev Portal reads no such key (create_agent takes no muster argument); where muster is reaches agent-manager as muster.url (verify-identity)"; exit 1; fi
 	@grep -q 'configMapRef: agent-platform-backstage-app-config' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta chart's backstage: block no longer mounts the ConfigMap this chart renders"; exit 1; }
 	@echo "ok: app-config"
 	@echo "--> the one-value identity: renaming kagent.fluxServiceAccountName renames the portal's agentPlatform.fluxServiceAccountName; kagent off drops it"

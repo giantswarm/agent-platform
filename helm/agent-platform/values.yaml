@@ -1987,8 +1987,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # the kagent namespace, where the AgentTemplates that bind it live: a template
   # binds a RemoteMCPServer of its own namespace only. There is no shared muster
   # RemoteMCPServer: the agent chart 1.x renders one per agent — muster's
-  # in-cluster URL (its value muster.url; agent-manager and the portal compose it
-  # from the agent-platform.musterMcpUrl helper), the toolset header, the
+  # in-cluster URL (its value muster.url; agent-manager composes it from the
+  # agent-platform.musterMcpUrl helper's value), the toolset header, the
   # discovery opt-out label — and binds it.
 
   # Additional ModelConfig CRs — the model catalog beyond the

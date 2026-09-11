@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **The portal's app-config carries no `agentPlatform.musterMcpUrl`** (giantswarm/agent-platform#299): the connectivity chart rendered the platform's muster MCP URL into the Backstage app-config next to `fluxServiceAccountName`, but the Dev Portal reads no such key — it creates agents through agent-manager's tools, and `create_agent` takes no muster argument. Where muster is reaches agent-manager alone: the meta chart derives its chart value `muster.url` from the `agent-platform.musterMcpUrl` helper (unchanged), agent-manager composes it into every agent's `RemoteMCPServer` and reports it in `get_info`. `make verify-wiring` asserts the key stays gone; `verify-identity` keeps asserting the agent-manager leg. **No installation acts** — nothing read the key.
+
 ### Fixed
 
 - **The ordered teardown uninstalls the platform releases in reverse dependency order.** The pre-delete hook deleted every platform HelmRelease at once, so helm-controller uninstalled them concurrently and a CRD chart (`substrate-crds`, `kagent-crds`) could go before the releases whose objects are its CRs — Helm then fails the consumer's uninstall (`failed to delete release: substrate`: its `SandboxConfig` kind was gone), helm-controller retries it forever and the hook waits out its timeout, failing `helm uninstall`. Found by the ATS smoke the moment it ran kagent and Substrate (giantswarm/agent-platform#343). The hook now deletes in waves computed from the roster's `dependsOn` (`agent-platform.teardownWaves`: each wave's releases concurrently, the next wave once the last is gone), as a script in `gitops.hooks.helmImage`; `make verify-engine` asserts the wave order against the rendered `dependsOn`.
