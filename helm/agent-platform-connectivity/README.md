@@ -208,8 +208,9 @@ Every host is classified and selected in its normalized form: lower case, with
 the root label's trailing dot removed. `dex.giantswarm.svc.cluster.local.` is
 therefore the Service it names, not an external host.
 
-`gateway.jwksEgress.enabled` is required only for an in-cluster host. An
-external host needs it not at all, and leaving it on changes nothing else.
+`gateway.jwksEgress.enabled` is required only for an in-cluster host, and its
+`namespace` and `port` must be the ones that host names. An external host needs
+none of them, and leaving `enabled` on changes nothing else.
 
 Five render guards refuse a host or port that reaches no issuer in any flavour.
 Each one is a green render and a runtime `401` without it, and the route
@@ -227,13 +228,14 @@ them:
 A host carries the issuer's name alone. Its scheme belongs to `issuer`, and the
 JWKS path to `jwks.path`.
 
-Two more depend on the rule that renders, so they follow
+Three more depend on the rule that renders, so they follow
 `networkPolicy.enabled`:
 
 | The shape | Why no rule reaches it |
 |---|---|
 | A host of fewer than three labels (`dex`, `dex.giantswarm`, `okta.com`) | it is neither a qualified Service name nor a public issuer. A short Service name resolves through the pod's search path, which the egress rule cannot follow |
 | An in-cluster host while `gateway.jwksEgress` is off | nothing opens its port |
+| An in-cluster host outside `gateway.jwksEgress.namespace` or off its `port` | that key renders one rule, for one namespace on one port |
 
 With no policy rendered, every destination is reachable and neither key decides
 anything.
