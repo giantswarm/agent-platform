@@ -104,7 +104,7 @@ def main(chart: str) -> int:
     print("ok: workerPoolRef resolves to kagent.substrateWorkerPool.name (follows an override)")
 
     # A tag image fails the render, naming the digest requirement.
-    err = render_expect_fail(chart, [*BASE, "--set", "kagent.harness.image=ghcr.io/giantswarm/kagent/golang-adk:v0.11.0-gs.1"])
+    err = render_expect_fail(chart, [*BASE, "--set", "kagent.harness.image=ghcr.io/giantswarm/kagent/golang-adk:v0.11.0-gs.2"])
     if "digest" not in err.lower():
         fail(f"a tag image failed the render but the message did not name the digest requirement:\n{err}")
     print("ok: a Go ADK image given as a tag fails the render naming the digest requirement")
