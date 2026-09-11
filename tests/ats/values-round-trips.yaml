@@ -63,6 +63,14 @@ muster:
         key: ca.crt
 
 agent-manager:
+  # The 3.x meta chart forwards agentChart.semver: x.x.x, which overrides the
+  # bounded default agent-manager 0.4.5 composes; on a fresh namespace that
+  # selects the Generic chart's 1.0.0 (kagent API v2, an AgentTemplate the 0.10
+  # controller has no CRD for) and the managed agent's HelmRelease never
+  # becomes Ready. The smoke installs the 3.x shape, so it composes the fleet
+  # bound.
+  agentChart:
+    semver: ">=0.2.1 <1.0.0"
   oauth:
     # The kind API server of the ATS knows no OIDC issuer, so agent-manager
     # cannot act as the caller against it (the lab, agentlab, wires the kind
