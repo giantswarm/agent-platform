@@ -126,19 +126,32 @@ from the `Gateway`. This chart shapes it through `AgentgatewayParameters`
 (`gateway.parameters`):
 
 - `replicas: 2` — two pods survive a node reboot or drain.
-- `podDisruptionBudget` (`enabled: true`, `maxUnavailable: 1`) — a drain evicts
-  one pod at a time. The keys other than `enabled` are the PDB spec as written;
-  the render refuses both `minAvailable` and `maxUnavailable` together, and an
-  integer `minAvailable` at or above `replicas` (it would hang every drain).
+- `podDisruptionBudget` (`enabled: true`) — a drain evicts one pod at a time.
+  The keys other than `enabled` are the PDB spec as written; with neither
+  `minAvailable` nor `maxUnavailable` set, the template emits
+  `maxUnavailable: 1` (that default lives in the template so `minAvailable`
+  can be chosen through the meta chart, where a null never reaches this
+  chart's defaults). The render refuses both fields together, a non-percentage
+  string or a fractional number, and any budget that allows no eviction — an
+  integer `minAvailable` at or above `replicas`, a percentage `minAvailable`
+  that rounds up to every replica, a zero `maxUnavailable` — since it would
+  hang every node drain.
 - `spread` — one `topologySpreadConstraint` per `topologyKeys` entry
   (`kubernetes.io/hostname`; add `topology.kubernetes.io/zone` on a multi-zone
   pool), `whenUnsatisfiable: ScheduleAnyway` so a single-node lab still
-  schedules both pods.
+  schedules both pods. A drain of that single node then waits on the budget
+  (the replacement pod cannot schedule); turn `podDisruptionBudget.enabled`
+  off there.
 
-The controller's own shutdown window (10 s before the listener closes, 60 s to
-drain) covers a pod's exit. The meta chart forwards
-`agentgateway.controller.replicaCount: 2` so a data-plane pod that starts on a
-rebooted node always finds an xDS server.
+A pod's exit runs inside the data-plane shutdown window the controller's chart
+defaults to (10 s still accepting so the endpoint is gone first, then up to
+55 s draining inside a 60 s grace period). Streamable-HTTP MCP sessions
+survive a pod change (the session id carries the state, encoded with the
+per-Gateway session key both pods share); legacy SSE sessions are pod-local.
+The meta chart forwards `agentgateway.controller.replicaCount: 2` (every
+replica serves xDS; the leader alone writes status and reconciles the data
+plane), so a data-plane pod that starts on a rebooted node finds its config
+unless both controller pods sat on that node.
 
 ## Agent Substrate
 
@@ -267,7 +280,6 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
 | gateway.parameters.replicas | int | `2` |  |
 | gateway.parameters.podDisruptionBudget.enabled | bool | `true` |  |
-| gateway.parameters.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | gateway.parameters.spread.enabled | bool | `true` |  |
 | gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
 | gateway.parameters.spread.maxSkew | int | `1` |  |

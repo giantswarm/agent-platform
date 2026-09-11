@@ -909,33 +909,39 @@ gateway:
     # crosses this Deployment: one pod is one node reboot away from an outage
     # for every agent. The controller reconciles the Deployment from the
     # Gateway; the three knobs below reach it through AgentgatewayParameters
-    # (deployment.spec and podDisruptionBudget, strategic merge). The
-    # controller's own shutdown window (10 s before the listener closes so the
-    # endpoint is gone first, 60 s to drain what is in flight) covers the
-    # pod's exit on a drain or a rollout.
+    # (deployment.spec and podDisruptionBudget, strategic merge). A pod's exit
+    # on a drain or a rollout runs inside the data-plane shutdown window the
+    # controller's chart defaults to: 10 s still accepting so the endpoint is
+    # gone first, then up to 55 s draining inside a 60 s grace period.
     #
     # Data-plane pods. Two survive a node reboot or drain; the Deployment's
     # default RollingUpdate surges first, so a rollout keeps one serving.
-    replicas: 2
+    replicas: 2  # @schema minimum: 1
     # PodDisruptionBudget on the data-plane pods: a drain evicts one pod at a
-    # time, never both. Keys other than `enabled` are the PDB spec
-    # (maxUnavailable, minAvailable, unhealthyPodEvictionPolicy). The default
-    # is maxUnavailable rather than minAvailable so a lone replica is still
-    # evictable; a minAvailable equal to or above replicas would block every
-    # drain, and the render refuses it.
+    # time, never both. The keys other than `enabled` are the PDB spec as
+    # written (minAvailable, maxUnavailable, unhealthyPodEvictionPolicy); with
+    # neither minAvailable nor maxUnavailable set the template emits
+    # `maxUnavailable: 1` — maxUnavailable rather than minAvailable so a lone
+    # replica stays evictable, and set in the template rather than here so an
+    # installation can choose minAvailable through the meta chart (a null set
+    # there never reaches this chart's defaults). The render refuses a spec
+    # with both fields, a non-percentage string or a fractional number, and a
+    # budget that allows no eviction (an integer minAvailable at or above
+    # replicas, a percentage minAvailable that rounds up to every replica, a
+    # zero maxUnavailable): that budget would hang every node drain.
     podDisruptionBudget:  # @schema additionalProperties: true
       enabled: true
-      maxUnavailable: 1  # @schema type: [integer, string]
     # Spread the replicas across nodes: one topologySpreadConstraint per key,
     # selecting the data-plane pods by gateway.name. Add
     # topology.kubernetes.io/zone on a multi-zone node pool. ScheduleAnyway:
     # two pods on one node beat one pod, and a single-node lab still schedules
-    # both.
+    # both (a drain of that one node then waits on the budget above; turn the
+    # budget off there).
     spread:
       enabled: true
       topologyKeys:  # @schema minItems: 1; item: string
         - kubernetes.io/hostname
-      maxSkew: 1
+      maxSkew: 1  # @schema minimum: 1
       whenUnsatisfiable: ScheduleAnyway  # @schema enum: [ScheduleAnyway, DoNotSchedule]
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
@@ -2447,13 +2453,14 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   controller:
     image:
       repository: giantswarm/agentgateway-controller
-    # Two controller pods, with leader election (the chart's default) so the
-    # data plane always finds an xDS server: a data-plane pod that starts on a
-    # rebooted node while the only controller is down waits for its config.
-    # The packaging chart's strict values schema declares
-    # controller.podDisruptionBudget, controller.strategy and affinity as
-    # empty objects (every key inside is rejected), so those stay unset until
-    # it gains a schema for them.
+    # Two controller pods, with leader election (the chart's default; every
+    # replica serves xDS, the leader alone writes status and reconciles the
+    # data plane) so a data-plane pod that starts on a rebooted node finds its
+    # config unless both controller pods sat on that node. The packaging
+    # chart's strict values schema declares controller.podDisruptionBudget,
+    # controller.strategy and affinity as empty objects (every key inside is
+    # rejected), so a budget and a spread for the controller wait for a schema
+    # there.
     replicaCount: 2
   proxy:
     image:

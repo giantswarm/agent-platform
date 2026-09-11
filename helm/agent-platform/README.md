@@ -299,7 +299,6 @@ WorkerPool".
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
 | gateway.parameters.replicas | int | `2` |  |
 | gateway.parameters.podDisruptionBudget.enabled | bool | `true` |  |
-| gateway.parameters.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | gateway.parameters.spread.enabled | bool | `true` |  |
 | gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
 | gateway.parameters.spread.maxSkew | int | `1` |  |

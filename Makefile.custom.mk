@@ -598,10 +598,18 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 # controller reconciles from the Gateway. The AgentgatewayParameters shapes it
 # for a node reboot or drain: two replicas, a PodDisruptionBudget and a
 # hostname spread, each behind a knob, with guards on the budget shapes that
-# Kubernetes rejects or that would hang every drain.
+# Kubernetes rejects or that would allow no eviction and hang every drain.
 AGP_DOC := awk '/^kind: AgentgatewayParameters$$/{f=1} f{print} f&&/^---/{exit}'
+# $(call vha_must_fail,<description>,<helm flags>,<message fragment>)
+define vha_must_fail
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) $(2) >/tmp/vha-fail.out 2>&1; then \
+		echo "FAIL: $(1): the render succeeded"; exit 1; \
+	elif ! grep -q "$(3)" /tmp/vha-fail.out; then \
+		echo "FAIL: $(1): failed for the wrong reason"; cat /tmp/vha-fail.out; exit 1; \
+	else echo "ok: $(1)"; fi
+endef
 .PHONY: verify-dataplane-ha
-verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape: two replicas, a PodDisruptionBudget (maxUnavailable) and a hostname spread by default on the AgentgatewayParameters, the pod selector following gateway.name, one constraint per topologyKeys entry, the knobs off, minAvailable passed through, the guards (both budget fields, minAvailable at or above replicas, spread without a key, the whenUnsatisfiable enum), none in muster-direct, the meta chart forwarding the keys at the same defaults and two controller replicas.
+verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape: two replicas, a PodDisruptionBudget (maxUnavailable 1 from the template) and a hostname spread by default on the AgentgatewayParameters, the pod selector following gateway.name, one constraint per topologyKeys entry, the knobs off, minAvailable and a percentage passed through — also through the meta chart, where a null never reaches the connectivity defaults — the guards (both budget fields, every zero-eviction budget, a fractional or non-percentage value, spread without a key, the schema minimums and the whenUnsatisfiable enum), none in muster-direct, the meta chart forwarding the keys at the same defaults and two controller replicas.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> default: replicas 2, PDB maxUnavailable 1, one hostname spread constraint selecting the data-plane pods"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) >/tmp/vha-on.out 2>&1 || { cat /tmp/vha-on.out; exit 1; }
@@ -626,31 +634,42 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@grep -qE '^      replicas: 1$$' /tmp/vha-off-params.out || { echo "FAIL: gateway.parameters.replicas does not reach the Deployment"; exit 1; }
 	@if grep -qE 'podDisruptionBudget|topologySpreadConstraints' /tmp/vha-off-params.out; then echo "FAIL: the budget or the spread renders with its knob off"; exit 1; fi
 	@echo "ok: knobs off"
-	@echo "--> minAvailable alone is passed through (an integer below replicas, or a percentage)"
-	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=1 --set gateway.parameters.podDisruptionBudget.maxUnavailable=null >/tmp/vha-min.out 2>&1 || { cat /tmp/vha-min.out; exit 1; }
+	@echo "--> a set budget field is passed through as written, with no maxUnavailable next to it: minAvailable 1, minAvailable 50%, maxUnavailable 50%, unhealthyPodEvictionPolicy"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=1 >/tmp/vha-min.out 2>&1 || { cat /tmp/vha-min.out; exit 1; }
 	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-min.out | grep -q 'minAvailable: 1' || { echo "FAIL: minAvailable 1 below replicas 2 was not rendered"; exit 1; }
-	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=50% --set gateway.parameters.podDisruptionBudget.maxUnavailable=null >/tmp/vha-pct.out 2>&1 || { cat /tmp/vha-pct.out; exit 1; }
+	@if grep -q 'maxUnavailable' /tmp/vha-min.out; then echo "FAIL: the template's maxUnavailable default renders next to an operator's minAvailable; Kubernetes rejects the budget"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=50% >/tmp/vha-pct.out 2>&1 || { cat /tmp/vha-pct.out; exit 1; }
 	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-pct.out | grep -q 'minAvailable: 50%' || { echo "FAIL: a percentage minAvailable was not rendered"; exit 1; }
-	@echo "ok: minAvailable pass-through"
-	@echo "--> guards: both budget fields; minAvailable at or above replicas; spread with no key; the whenUnsatisfiable enum"
-	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=1 >/tmp/vha-both.out 2>&1; then \
-		echo "FAIL: a budget with both minAvailable and maxUnavailable rendered; Kubernetes rejects it"; exit 1; \
-	elif ! grep -q "sets both minAvailable and maxUnavailable" /tmp/vha-both.out; then \
-		echo "FAIL: the both-fields guard failed for the wrong reason"; cat /tmp/vha-both.out; exit 1; \
-	else echo "ok: both-fields guard"; fi
-	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=2 --set gateway.parameters.podDisruptionBudget.maxUnavailable=null >/tmp/vha-hang.out 2>&1; then \
-		echo "FAIL: minAvailable equal to replicas rendered; that budget allows no eviction and hangs every node drain"; exit 1; \
-	elif ! grep -q "is not below gateway.parameters.replicas" /tmp/vha-hang.out; then \
-		echo "FAIL: the minAvailable guard failed for the wrong reason"; cat /tmp/vha-hang.out; exit 1; \
-	else echo "ok: minAvailable guard"; fi
-	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.spread.topologyKeys=null >/tmp/vha-nokey.out 2>&1; then \
-		echo "FAIL: spread with no topology key rendered an empty constraint list"; exit 1; \
-	elif ! grep -q "needs at least one gateway.parameters.spread.topologyKeys" /tmp/vha-nokey.out; then \
-		echo "FAIL: the empty-keys guard failed for the wrong reason"; cat /tmp/vha-nokey.out; exit 1; \
-	else echo "ok: empty-keys guard"; fi
-	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.spread.whenUnsatisfiable=Maybe >/tmp/vha-enum.out 2>&1; then \
-		echo "FAIL: a bogus whenUnsatisfiable passed the schema"; exit 1; \
-	else echo "ok: whenUnsatisfiable enum"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.maxUnavailable=50% --set gateway.parameters.podDisruptionBudget.unhealthyPodEvictionPolicy=AlwaysAllow >/tmp/vha-maxpct.out 2>&1 || { cat /tmp/vha-maxpct.out; exit 1; }
+	@grep -A3 '^  podDisruptionBudget:$$' /tmp/vha-maxpct.out | grep -q 'maxUnavailable: 50%' || { echo "FAIL: a percentage maxUnavailable was not rendered"; exit 1; }
+	@grep -A3 '^  podDisruptionBudget:$$' /tmp/vha-maxpct.out | grep -q 'unhealthyPodEvictionPolicy: AlwaysAllow' || { echo "FAIL: unhealthyPodEvictionPolicy is not passed through"; exit 1; }
+	@echo "ok: budget pass-through"
+	@echo "--> through the meta chart: minAvailable set there reaches the connectivity render alone (a null never reaches this chart's defaults; the default is the template's)"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gateway.parameters.podDisruptionBudget.minAvailable=1 >/tmp/vha-meta-min.out 2>&1 || { cat /tmp/vha-meta-min.out; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vha-meta-min.out | awk '/^    gateway:$$/{f=1;print;next} f&&/^    [a-zA-Z]/{exit} f' | sed 's/^    //' >/tmp/vha-meta-min-gw.yaml
+	@grep -q '^gateway:' /tmp/vha-meta-min-gw.yaml || { echo "FAIL: could not extract the forwarded gateway block"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) -f /tmp/vha-meta-min-gw.yaml >/tmp/vha-meta-min-conn.out 2>&1 || { echo "FAIL: the connectivity chart refuses the gateway block the meta chart forwards with minAvailable set (#373 review: a null cannot unset a connectivity default across the forward)"; cat /tmp/vha-meta-min-conn.out | tail -3; exit 1; }
+	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-meta-min-conn.out | grep -q 'minAvailable: 1' || { echo "FAIL: minAvailable set through the meta chart did not reach the AgentgatewayParameters"; exit 1; }
+	@if grep -q 'maxUnavailable' /tmp/vha-meta-min-conn.out; then echo "FAIL: maxUnavailable renders next to the minAvailable set through the meta chart"; exit 1; fi
+	@echo "ok: minAvailable through the meta chart"
+	@echo "--> guards: both budget fields; every zero-eviction budget; a fractional or non-percentage value; spread with no key"
+	$(call vha_must_fail,both-fields guard,--set gateway.parameters.podDisruptionBudget.minAvailable=1 --set gateway.parameters.podDisruptionBudget.maxUnavailable=1,sets both minAvailable and maxUnavailable)
+	$(call vha_must_fail,minAvailable equal to replicas,--set gateway.parameters.podDisruptionBudget.minAvailable=2,is not below gateway.parameters.replicas)
+	$(call vha_must_fail,minAvailable 100%,--set gateway.parameters.podDisruptionBudget.minAvailable=100%,rounds up to every replica)
+	$(call vha_must_fail,minAvailable 51% of 2 (rounds up to 2),--set gateway.parameters.podDisruptionBudget.minAvailable=51%,rounds up to every replica)
+	$(call vha_must_fail,maxUnavailable 0,--set gateway.parameters.podDisruptionBudget.maxUnavailable=0,allows no eviction)
+	$(call vha_must_fail,maxUnavailable 0%,--set gateway.parameters.podDisruptionBudget.maxUnavailable=0%,allows no eviction)
+	$(call vha_must_fail,fractional minAvailable (a float from JSON or a values file),--set-json gateway.parameters.podDisruptionBudget.minAvailable=1.5,is not a whole number)
+	$(call vha_must_fail,fractional minAvailable (--set hands Helm the string),--set gateway.parameters.podDisruptionBudget.minAvailable=1.5,is neither an integer nor a percentage)
+	$(call vha_must_fail,a numeric string budget (no %),--set-string gateway.parameters.podDisruptionBudget.maxUnavailable=1,is neither an integer nor a percentage)
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set-json gateway.parameters.podDisruptionBudget.minAvailable=1 >/tmp/vha-float.out 2>&1 || { echo "FAIL: a whole number from JSON (float64 1) was refused as fractional"; tail -2 /tmp/vha-float.out; exit 1; }
+	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-float.out | grep -q 'minAvailable: 1' || { echo "FAIL: a whole number from JSON did not render as minAvailable: 1"; exit 1; }
+	@echo "ok: a whole float passes"
+	$(call vha_must_fail,empty-keys guard,--set gateway.parameters.spread.topologyKeys=null,needs at least one gateway.parameters.spread.topologyKeys)
+	@echo "--> schema: replicas and maxSkew at least 1, whenUnsatisfiable an enum"
+	$(call vha_must_fail,replicas 0 refused by the schema,--set gateway.parameters.replicas=0,replicas)
+	$(call vha_must_fail,maxSkew 0 refused by the schema,--set gateway.parameters.spread.maxSkew=0,maxSkew)
+	$(call vha_must_fail,whenUnsatisfiable enum,--set gateway.parameters.spread.whenUnsatisfiable=Maybe,whenUnsatisfiable)
 	@echo "--> muster-direct (no data plane): no AgentgatewayParameters at all"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vha-direct.out 2>&1 || { cat /tmp/vha-direct.out; exit 1; }
 	@if grep -q 'kind: AgentgatewayParameters' /tmp/vha-direct.out; then echo "FAIL: AgentgatewayParameters renders without the agentgateway data plane"; exit 1; else echo "ok: none in muster-direct"; fi
@@ -659,7 +678,8 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vha-meta.out >/tmp/vha-meta-conn.out
 	@awk '/^    gateway:$$/{f=1;print;next} f&&/^    [a-zA-Z]/{exit} f' /tmp/vha-meta-conn.out >/tmp/vha-meta-gw.out
 	@grep -qE '^        replicas: 2$$' /tmp/vha-meta-gw.out || { echo "FAIL: the meta chart does not forward gateway.parameters.replicas: 2 to the connectivity release"; exit 1; }
-	@grep -A2 '^        podDisruptionBudget:$$' /tmp/vha-meta-gw.out | grep -q 'maxUnavailable: 1' || { echo "FAIL: the meta chart does not forward the default budget"; exit 1; }
+	@grep -A1 '^        podDisruptionBudget:$$' /tmp/vha-meta-gw.out | grep -q 'enabled: true' || { echo "FAIL: the meta chart does not forward the budget switch"; exit 1; }
+	@if grep -A2 '^        podDisruptionBudget:$$' /tmp/vha-meta-gw.out | grep -q 'maxUnavailable'; then echo "FAIL: the meta chart carries a maxUnavailable default; that default belongs to the connectivity template so a null set through the meta chart is not needed"; exit 1; fi
 	@grep -A6 '^        spread:$$' /tmp/vha-meta-gw.out | grep -q 'kubernetes.io/hostname' || { echo "FAIL: the meta chart does not forward the default spread"; exit 1; }
 	@./tests/verify-agentgateway-wiring.py /tmp/vha-meta.out
 	@echo "ok: forwarded + controller replicas"

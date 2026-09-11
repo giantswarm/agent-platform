@@ -16,20 +16,54 @@ so a set global endpoint wins over the defaults without duplicating env names. *
 {{- $env = append $env . }}
 {{- end }}
 {{- end }}
-{{- /* Availability guards. The PodDisruptionBudget keys other than `enabled`
-are the PDB spec as written. Kubernetes rejects a spec with both minAvailable
-and maxUnavailable, and an integer minAvailable at or above the replica count
-lets no pod be evicted — every node drain on the cluster hangs on the data
-plane. Both fail the render here instead of the deployer or the drain. */ -}}
+{{- /* The PodDisruptionBudget. The keys other than `enabled` are the PDB spec
+as written; with neither minAvailable nor maxUnavailable set the spec is
+maxUnavailable: 1 — the default lives HERE and not in values.yaml, because a
+`maxUnavailable: null` set through the meta chart is consumed by Helm at that
+layer and never reaches this chart, whose own default would then come back
+next to the operator's minAvailable. Guards: Kubernetes rejects a spec with
+both fields, or a string that is not a percentage, or a fractional number; a
+budget that allows no eviction — an integer minAvailable at or above the
+replica count, a percentage minAvailable that rounds up to every replica
+(ceil(p × replicas / 100) ≥ replicas), a zero maxUnavailable — hangs every
+node drain on the cluster on the data plane. All fail the render instead of
+the deployer or the drain. */ -}}
 {{- $replicas := .Values.gateway.parameters.replicas | int }}
 {{- $pdb := .Values.gateway.parameters.podDisruptionBudget }}
+{{- $pdbSpec := omit $pdb "enabled" }}
 {{- if $pdb.enabled }}
 {{- $min := $pdb.minAvailable }}
-{{- if and (not (kindIs "invalid" $min)) (not (kindIs "invalid" $pdb.maxUnavailable)) }}
+{{- $max := $pdb.maxUnavailable }}
+{{- if and (kindIs "invalid" $min) (kindIs "invalid" $max) }}
+{{- $pdbSpec = dict "maxUnavailable" 1 }}
+{{- else if and (not (kindIs "invalid" $min)) (not (kindIs "invalid" $max)) }}
 {{- fail "gateway.parameters.podDisruptionBudget sets both minAvailable and maxUnavailable; a PodDisruptionBudget takes one of them" }}
 {{- end }}
-{{- if and (not (kindIs "invalid" $min)) (not (kindIs "string" $min)) (ge ($min | int) $replicas) }}
+{{- range $field, $value := dict "minAvailable" $min "maxUnavailable" $max }}
+{{- if not (kindIs "invalid" $value) }}
+{{- if kindIs "string" $value }}
+{{- if not (regexMatch "^[0-9]+%$" $value) }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.%s=%q is neither an integer nor a percentage (\"50%%\"); Kubernetes rejects the budget" $field $value) }}
+{{- end }}
+{{- else if ne (toString $value) (toString ($value | int)) }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.%s=%v is not a whole number; Kubernetes rejects the budget" $field $value) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if not (kindIs "invalid" $min) }}
+{{- if kindIs "string" $min }}
+{{- $pct := $min | trimSuffix "%" | int }}
+{{- if gt (mul $pct $replicas) (mul (sub $replicas 1) 100) }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.minAvailable=%s of gateway.parameters.replicas=%d rounds up to every replica; the budget would allow no eviction and every node drain would hang on the data plane" $min $replicas) }}
+{{- end }}
+{{- else if ge ($min | int) $replicas }}
 {{- fail (printf "gateway.parameters.podDisruptionBudget.minAvailable=%v is not below gateway.parameters.replicas=%d; the budget would allow no eviction and every node drain would hang on the data plane" $min $replicas) }}
+{{- end }}
+{{- end }}
+{{- if not (kindIs "invalid" $max) }}
+{{- if eq (toString $max | trimSuffix "%" | int) 0 }}
+{{- fail (printf "gateway.parameters.podDisruptionBudget.maxUnavailable=%v allows no eviction; every node drain would hang on the data plane" $max) }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- with .Values.gateway.parameters.spread }}
@@ -77,7 +111,7 @@ spec:
   pods; only the spec is ours. */}}
   podDisruptionBudget:
     spec:
-      {{- toYaml (omit $pdb "enabled") | nindent 6 }}
+      {{- toYaml $pdbSpec | nindent 6 }}
   {{- end }}
   deployment:
     spec:
