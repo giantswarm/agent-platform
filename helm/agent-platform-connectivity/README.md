@@ -151,6 +151,20 @@ from the `Gateway`. This chart shapes it through `AgentgatewayParameters`
   left on one node and `ScheduleAnyway` never moves them back. A drain of that
   single node then waits on the budget (the replacement pod cannot schedule);
   turn `podDisruptionBudget.enabled` off there.
+- `verticalPodAutoscaler` (`enabled: auto`) — a `VerticalPodAutoscaler` named
+  after the Gateway (`gateway.name`) on the data-plane `Deployment`
+  (`templates/agentgateway/verticalpodautoscaler.yaml`). The controller sizes
+  the container's cpu/memory requests from its own defaults (100m/128Mi for a
+  pod that idles at 1m/10Mi on the fleet); the VPA sizes them from use:
+  `updateMode: Auto`, one `"*"` container policy controlling cpu and memory
+  between `minAllowed` (50m/64Mi — the floor keeps a burst of streamed LLM
+  responses from starving a pod the recommender saw idle) and `maxAllowed`
+  (2/2Gi); ephemeral-storage stays `dataPlaneResources`'. `auto` renders it
+  when `autoscaling.k8s.io/v1` is served, detected once like the other
+  cluster-shape knobs (under the meta chart the knob arrives resolved, and the
+  agentgateway controller's own VPA follows the same answer); `true` / `false`
+  force it. Evictions apply a new size one pod at a time behind the budget
+  above; `updateMode: Off` keeps the recommendations without applying them.
 
 `replicas`, `spread.maxSkew` and `spread.whenUnsatisfiable` are each refused
 when unset. A `null` set through the meta chart does not travel — Helm deletes
@@ -172,7 +186,13 @@ not a pod ever changes. Use streamable-HTTP.
 The meta chart forwards `agentgateway.controller.replicaCount: 2` (every
 replica serves xDS; the leader alone writes status and reconciles the data
 plane), so a data-plane pod that starts on a rebooted node finds its config
-unless both controller pods sat on that node.
+unless both controller pods sat on that node — and, from agentgateway chart
+2.1.2 (the floor of `components.agentgateway.versionRange`),
+`controller.podDisruptionBudget: {maxUnavailable: 1}`, a hostname
+`topologySpreadConstraints` entry selecting the controller pods and, where the
+VPA API is served, `controller.verticalPodAutoscaler` (emptied to `{}` where it
+is not), so a drain evicts one controller pod at a time and the scheduler
+keeps the two apart where it can (`ScheduleAnyway` is best effort).
 
 ## Agent Substrate
 
@@ -305,6 +325,12 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
+| gateway.parameters.verticalPodAutoscaler.enabled | string | `"auto"` |  |
+| gateway.parameters.verticalPodAutoscaler.updateMode | string | `"Auto"` |  |
+| gateway.parameters.verticalPodAutoscaler.minAllowed.cpu | string | `"50m"` |  |
+| gateway.parameters.verticalPodAutoscaler.minAllowed.memory | string | `"64Mi"` |  |
+| gateway.parameters.verticalPodAutoscaler.maxAllowed.cpu | string | `"2"` |  |
+| gateway.parameters.verticalPodAutoscaler.maxAllowed.memory | string | `"2Gi"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |

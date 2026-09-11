@@ -10,11 +10,15 @@ CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 # The API groups a Giant Swarm management cluster serves and the cluster-shape
 # knobs detect (kyvernoPolicies.enabled, networkPolicy.flavor,
 # global.observability.metrics.serviceMonitor.enabled, dicebear.route.enabled,
-# agentSandbox.podSecurity.enabled default to `auto`): Kyverno, Cilium,
-# prometheus-operator, Gateway API, Envoy Gateway. `helm template` alone serves
-# Helm's built-in set, i.e. renders the vanilla shape; the assertions below that
+# agentSandbox.podSecurity.enabled, gateway.parameters.verticalPodAutoscaler.enabled
+# default to `auto`): Kyverno, Cilium, prometheus-operator, Gateway API, Envoy
+# Gateway, the Vertical Pod Autoscaler. `helm template` alone serves Helm's
+# built-in set, i.e. renders the vanilla shape; the assertions below that
 # expect the fleet shape pass these. verify-auto covers the resolution itself.
-FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1
+# FLEET_APIS_NO_VPA is the fleet minus the VPA API, for the one assertion that
+# needs a cluster with everything but autoscaling.k8s.io/v1 (verify-dataplane-vpa).
+FLEET_APIS_NO_VPA := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1
+FLEET_APIS := $(FLEET_APIS_NO_VPA) --api-versions autoscaling.k8s.io/v1
 # parentRefs[0].name satisfies the all-modes ingress guard so a single guard is
 # isolated under test, and the fleet's API groups are served so the fleet shape
 # renders. Neither chart has subcharts anymore, so no `helm dependency build`
@@ -23,7 +27,8 @@ FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-ver
 # agent-platform.validateSubstrate); set on every render so a target can turn
 # kagent on without repeating it. The connectivity chart (and GOLDEN_REF's)
 # accepts the key in its open kagent block.
-VM := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents $(FLEET_APIS)
+VM_BASE := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents
+VM := $(VM_BASE) $(FLEET_APIS)
 # Agent Substrate on, as the meta chart forwards it (the two Substrate entries
 # follow components.kagent there; the connectivity chart reads the roster).
 SUBSTRATE_ON := --set components.substrate.enabled=true --set components.substrate-crds.enabled=true
@@ -407,7 +412,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
-	@grep -q 'semver: "2.x"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not 2.x (the flattened chart line)"; exit 1; }
+	@grep -q 'semver: ">=2.1.2 <3.0.0"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.1.2 <3.0.0 (the flattened chart line, from the schema that accepts the controller's budget, spread and VPA — giantswarm/agentgateway#51)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out
@@ -504,7 +509,8 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "meta-package render verified."
 
 # LLM routing on, with the agentgateway data plane the listener rides on.
-LLM_VM := $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set llmRouting.enabled=true
+LLM_MODE := --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set llmRouting.enabled=true
+LLM_VM := $(VM) $(LLM_MODE)
 
 .PHONY: verify-llm-routing
 verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on renders the listener + routing + metrics, and the guards fire.
@@ -722,6 +728,83 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@echo "ok: forwarded + controller replicas"
 	@echo "All data-plane availability behaviors verified."
 
+# The two VerticalPodAutoscalers of the agentgateway component behind ONE auto
+# knob (gateway.parameters.verticalPodAutoscaler.enabled, autoscaling.k8s.io/v1):
+# the data plane's, rendered by the connectivity chart on the Deployment the
+# controller names after the Gateway, and the controller's own, forwarded to the
+# packaging chart as agentgateway.controller.verticalPodAutoscaler and emptied
+# by the meta chart where the API is not served (a kind lab has no VPA CRD).
+.PHONY: verify-dataplane-vpa
+verify-dataplane-vpa: ## Assert the agentgateway VerticalPodAutoscalers behind one auto knob: the fleet shape renders the data-plane VPA on the Gateway's Deployment (targetRef and name following gateway.name, updateMode Auto, the min/max on the "*" container policy, cpu+memory only), none without autoscaling.k8s.io/v1 or in muster-direct, explicit false with the API renders none and explicit true without it renders it, the schema refuses a bogus updateMode and knob; the meta chart forwards the knob RESOLVED (true in the fleet shape, false in the vanilla), forwards the controller's VPA spec in the fleet shape and empties it in the vanilla, and forwards the controller budget and spread in both.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@echo "--> fleet shape: the data-plane VPA targets the Gateway's Deployment, Auto, the min/max on the container policy"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) >/tmp/vvpa-on.out 2>&1 || { cat /tmp/vvpa-on.out; exit 1; }
+	@if [ "$$(grep -c '^kind: VerticalPodAutoscaler$$' /tmp/vvpa-on.out)" != "1" ]; then echo "FAIL: expected exactly one VerticalPodAutoscaler in the fleet shape, got $$(grep -c '^kind: VerticalPodAutoscaler$$' /tmp/vvpa-on.out)"; exit 1; fi
+	@$(PICK) /tmp/vvpa-on.out VerticalPodAutoscaler agentgateway >/tmp/vvpa-doc.out || { echo "FAIL: no VerticalPodAutoscaler named after the Gateway (gateway.name)"; exit 1; }
+	@grep -q '^  namespace: default$$' /tmp/vvpa-doc.out || { echo "FAIL: the VPA is not in the release namespace"; exit 1; }
+	@grep -A3 '^  targetRef:$$' /tmp/vvpa-doc.out | grep -q 'apiVersion: apps/v1' || { echo "FAIL: targetRef.apiVersion is not apps/v1"; exit 1; }
+	@grep -A3 '^  targetRef:$$' /tmp/vvpa-doc.out | grep -q 'kind: Deployment' || { echo "FAIL: targetRef.kind is not Deployment"; exit 1; }
+	@grep -A3 '^  targetRef:$$' /tmp/vvpa-doc.out | grep -q 'name: agentgateway' || { echo "FAIL: targetRef.name is not the Gateway's name (the deployer names the Deployment after the Gateway)"; exit 1; }
+	@grep -A1 '^  updatePolicy:$$' /tmp/vvpa-doc.out | grep -q 'updateMode: Auto' || { echo "FAIL: updateMode is not Auto"; exit 1; }
+	@grep -q 'containerName: "\*"' /tmp/vvpa-doc.out || { echo "FAIL: the container policy is not the every-container one"; exit 1; }
+	@grep -A2 'controlledResources:' /tmp/vvpa-doc.out | grep -q -- '- cpu' && grep -A2 'controlledResources:' /tmp/vvpa-doc.out | grep -q -- '- memory' || { echo "FAIL: controlledResources is not cpu + memory"; exit 1; }
+	@if grep -q 'ephemeral-storage' /tmp/vvpa-doc.out; then echo "FAIL: the VPA touches ephemeral-storage; that stays the AgentgatewayParameters' (dataPlaneResources)"; exit 1; fi
+	@grep -A2 '^        minAllowed:$$' /tmp/vvpa-doc.out | grep -q 'cpu: 50m' && grep -A2 '^        minAllowed:$$' /tmp/vvpa-doc.out | grep -q 'memory: 64Mi' || { echo "FAIL: minAllowed does not reach the container policy (cpu 50m, memory 64Mi)"; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vvpa-doc.out | grep -q 'cpu: "2"' && grep -A2 '^        maxAllowed:$$' /tmp/vvpa-doc.out | grep -q 'memory: 2Gi' || { echo "FAIL: maxAllowed does not reach the container policy (cpu 2, memory 2Gi)"; exit 1; }
+	@echo "ok: fleet shape"
+	@echo "--> gateway.name=edge, updateMode Initial and other bounds: the object and its targetRef follow the Gateway, the values reach the spec"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.name=edge --set gateway.parameters.verticalPodAutoscaler.updateMode=Initial --set gateway.parameters.verticalPodAutoscaler.minAllowed.memory=256Mi --set gateway.parameters.verticalPodAutoscaler.maxAllowed.cpu=4000m >/tmp/vvpa-edge.out 2>&1 || { cat /tmp/vvpa-edge.out; exit 1; }
+	@$(PICK) /tmp/vvpa-edge.out VerticalPodAutoscaler edge >/tmp/vvpa-edge-doc.out || { echo "FAIL: the VPA does not follow gateway.name"; exit 1; }
+	@grep -A3 '^  targetRef:$$' /tmp/vvpa-edge-doc.out | grep -q 'name: edge' || { echo "FAIL: targetRef.name does not follow gateway.name; the VPA would target nothing"; exit 1; }
+	@if grep -q 'name: agentgateway' /tmp/vvpa-edge-doc.out; then echo "FAIL: the default Gateway name survives a renamed Gateway on the VPA"; exit 1; fi
+	@grep -q 'updateMode: Initial' /tmp/vvpa-edge-doc.out || { echo "FAIL: updateMode does not reach the spec"; exit 1; }
+	@grep -A2 '^        minAllowed:$$' /tmp/vvpa-edge-doc.out | grep -q 'memory: 256Mi' || { echo "FAIL: minAllowed.memory does not reach the spec"; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vvpa-edge-doc.out | grep -q 'cpu: 4000m' || { echo "FAIL: maxAllowed.cpu does not reach the spec"; exit 1; }
+	@echo "ok: follows gateway.name + values"
+	@echo "--> without autoscaling.k8s.io/v1 (every other fleet API served): none — auto resolves false"
+	@helm template t $(CONNECTIVITY_DIR) $(VM_BASE) $(FLEET_APIS_NO_VPA) $(LLM_MODE) >/tmp/vvpa-noapi.out 2>&1 || { cat /tmp/vvpa-noapi.out; exit 1; }
+	@if grep -q 'kind: VerticalPodAutoscaler' /tmp/vvpa-noapi.out; then echo "FAIL: the data-plane VPA renders without autoscaling.k8s.io/v1; a cluster without the CRD would fail the release"; exit 1; else echo "ok: none without the API"; fi
+	@grep -q 'kind: AgentgatewayParameters' /tmp/vvpa-noapi.out || { echo "FAIL: the data plane itself vanished with the VPA API"; exit 1; }
+	@echo "--> explicit wins both ways: false with the API renders none, true without it renders it"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.verticalPodAutoscaler.enabled=false >/tmp/vvpa-off.out 2>&1 || { cat /tmp/vvpa-off.out; exit 1; }
+	@if grep -q 'kind: VerticalPodAutoscaler' /tmp/vvpa-off.out; then echo "FAIL: verticalPodAutoscaler.enabled=false with the API served still renders the VPA"; exit 1; else echo "ok: explicit false"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM_BASE) $(FLEET_APIS_NO_VPA) $(LLM_MODE) --set gateway.parameters.verticalPodAutoscaler.enabled=true >/tmp/vvpa-force.out 2>&1 || { cat /tmp/vvpa-force.out; exit 1; }
+	@$(PICK) /tmp/vvpa-force.out VerticalPodAutoscaler agentgateway >/dev/null || { echo "FAIL: verticalPodAutoscaler.enabled=true without the API served renders no VPA; explicit must win over detection"; exit 1; }
+	@echo "ok: explicit true"
+	@echo "--> muster-direct with the API: none (no data plane to target)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vvpa-direct.out 2>&1 || { cat /tmp/vvpa-direct.out; exit 1; }
+	@if grep -q 'kind: VerticalPodAutoscaler' /tmp/vvpa-direct.out; then echo "FAIL: a VPA renders without the agentgateway data plane"; exit 1; else echo "ok: none in muster-direct"; fi
+	@echo "--> schema: a bogus updateMode and a knob outside auto|true|false are refused"
+	$(call vha_must_fail,updateMode enum,--set gateway.parameters.verticalPodAutoscaler.updateMode=Sometimes,updateMode)
+	$(call vha_must_fail,knob outside auto|true|false,--set gateway.parameters.verticalPodAutoscaler.enabled=maybe,verticalPodAutoscaler)
+	@echo "--> through the meta chart, fleet shape: the knob arrives RESOLVED (true), the controller's VPA spec is forwarded, the controller budget and spread too"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) $(FLEET_APIS) >/tmp/vvpa-meta-fleet.out 2>&1 || { cat /tmp/vvpa-meta-fleet.out; exit 1; }
+	@$(PICK) /tmp/vvpa-meta-fleet.out HelmRelease agent-platform-connectivity | awk '/^    gateway:$$/{f=1;print;next} f&&/^    [a-zA-Z]/{exit} f' >/tmp/vvpa-meta-fleet-gw.out
+	@grep -A1 '^        verticalPodAutoscaler:$$' /tmp/vvpa-meta-fleet-gw.out | grep -q 'enabled: true' || { echo "FAIL: the meta chart does not forward gateway.parameters.verticalPodAutoscaler.enabled resolved to true in the fleet shape"; grep -A3 'verticalPodAutoscaler:' /tmp/vvpa-meta-fleet-gw.out; exit 1; }
+	@if grep -q 'enabled: auto' /tmp/vvpa-meta-fleet-gw.out; then echo "FAIL: an unresolved auto reached the connectivity release"; exit 1; fi
+	@$(PICK) /tmp/vvpa-meta-fleet.out HelmRelease agentgateway >/tmp/vvpa-meta-fleet-agw.out
+	@grep -A16 '^      verticalPodAutoscaler:$$' /tmp/vvpa-meta-fleet-agw.out | grep -q 'updateMode: Auto' || { echo "FAIL: the controller's VPA spec is not forwarded in the fleet shape"; exit 1; }
+	@grep -A16 '^      verticalPodAutoscaler:$$' /tmp/vvpa-meta-fleet-agw.out | grep -q 'memory: 128Mi' || { echo "FAIL: the controller VPA's minAllowed.memory (128Mi) is not forwarded"; exit 1; }
+	@./tests/verify-agentgateway-wiring.py /tmp/vvpa-meta-fleet.out
+	@echo "ok: fleet shape through the meta chart"
+	@echo "--> through the meta chart, vanilla shape: the knob arrives false, the controller's VPA is emptied ({}), the budget and spread stay"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) >/tmp/vvpa-meta-vanilla.out 2>&1 || { cat /tmp/vvpa-meta-vanilla.out; exit 1; }
+	@$(PICK) /tmp/vvpa-meta-vanilla.out HelmRelease agent-platform-connectivity | awk '/^    gateway:$$/{f=1;print;next} f&&/^    [a-zA-Z]/{exit} f' >/tmp/vvpa-meta-vanilla-gw.out
+	@grep -A1 '^        verticalPodAutoscaler:$$' /tmp/vvpa-meta-vanilla-gw.out | grep -q 'enabled: false' || { echo "FAIL: the meta chart does not forward gateway.parameters.verticalPodAutoscaler.enabled resolved to false in the vanilla shape"; exit 1; }
+	@$(PICK) /tmp/vvpa-meta-vanilla.out HelmRelease agentgateway >/tmp/vvpa-meta-vanilla-agw.out
+	@grep -q '^      verticalPodAutoscaler: {}$$' /tmp/vvpa-meta-vanilla-agw.out || { echo "FAIL: the controller's VPA is not emptied in the vanilla shape; the packaging chart would render a VerticalPodAutoscaler on a cluster without the CRD"; grep -A3 'verticalPodAutoscaler' /tmp/vvpa-meta-vanilla-agw.out; exit 1; }
+	@if grep -q 'updateMode' /tmp/vvpa-meta-vanilla-agw.out; then echo "FAIL: the controller VPA spec survives the vanilla shape"; exit 1; fi
+	@./tests/verify-agentgateway-wiring.py /tmp/vvpa-meta-vanilla.out
+	@echo "--> explicit through the meta chart: true on the vanilla shape keeps both, false on the fleet shape empties both; a removed controller key stays removed"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gateway.parameters.verticalPodAutoscaler.enabled=true >/tmp/vvpa-meta-force.out 2>&1 || { cat /tmp/vvpa-meta-force.out; exit 1; }
+	@$(PICK) /tmp/vvpa-meta-force.out HelmRelease agentgateway | grep -q 'updateMode: Auto' || { echo "FAIL: explicit true on the vanilla shape did not keep the controller's VPA spec"; exit 1; }
+	@$(PICK) /tmp/vvpa-meta-force.out HelmRelease agent-platform-connectivity | grep -A1 '^        verticalPodAutoscaler:$$' | grep -q 'enabled: true' || { echo "FAIL: explicit true on the vanilla shape did not reach the connectivity release"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) $(FLEET_APIS) --set gateway.parameters.verticalPodAutoscaler.enabled=false >/tmp/vvpa-meta-off.out 2>&1 || { cat /tmp/vvpa-meta-off.out; exit 1; }
+	@$(PICK) /tmp/vvpa-meta-off.out HelmRelease agentgateway | grep -q '^      verticalPodAutoscaler: {}$$' || { echo "FAIL: explicit false on the fleet shape did not empty the controller's VPA"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set agentgateway.controller.verticalPodAutoscaler=null >/tmp/vvpa-meta-removed.out 2>&1 || { cat /tmp/vvpa-meta-removed.out; exit 1; }
+	@if $(PICK) /tmp/vvpa-meta-removed.out HelmRelease agentgateway | grep -q 'verticalPodAutoscaler'; then echo "FAIL: a removed agentgateway.controller.verticalPodAutoscaler is re-created by the shape pass"; exit 1; else echo "ok: explicit through the meta chart"; fi
+	@echo "All agentgateway VerticalPodAutoscaler behaviors verified."
+
 .PHONY: verify-engine
 verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
@@ -757,7 +840,7 @@ verify-components: ## Assert the roster: the standalone chart's extras (backstag
 	@echo "component roster verified."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Pull the component charts the meta chart composes values for — the seven extras, the two managers (closed schemas: a forwarded key they do not declare fails the release), the kagent line's kagent + kagent-crds — at the range's resolution and at the BOM pin, resolved the way Flux does, and render each with the values the meta chart forwards to it. Network: gsoci.azurecr.io, ghcr.io.
+verify-components-charts: ## Pull the component charts the meta chart composes values for — the seven extras, the two managers and agentgateway (closed schemas: a forwarded key they do not declare fails the release; agentgateway's controller budget, spread and VPA need 2.1.2, so this is RED until giantswarm/agentgateway#51 is released), the kagent line's kagent + kagent-crds, Substrate's two — at the range's resolution and at the BOM pin, resolved the way Flux does, and render each with the values the meta chart forwards to it. Network: gsoci.azurecr.io, ghcr.io.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."

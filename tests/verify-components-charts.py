@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Pull the component charts whose values the meta chart composes — the seven
-extras of the standalone chart, the two managers and the kagent line's two charts
-— and render each with the values the meta chart forwards to it.
+extras of the standalone chart, the two managers, the kagent line's two charts,
+the Substrate line's two and the agentgateway control plane — and render each
+with the values the meta chart forwards to it.
 
 The meta chart cannot know whether a component chart accepts the block it
 forwards: the block is inlined into a HelmRelease and validated by helm-controller
@@ -12,13 +13,18 @@ examples/customer-bom.yaml (what a BOM installation gets). The render uses the
 quick-start inputs Backstage and mcp-kubernetes require (global.domain and
 global.identity) and the API groups the charts' optional objects need.
 
-The two managers matter most: their charts validate values with a CLOSED schema
-(additionalProperties: false at the root), so one key the meta chart forwards —
-from the `agent-manager:` / `model-manager:` block or derived by
-agent-platform.componentDerivedValues — that the chart the range resolves to
-does not declare fails the HelmRelease on every installation that turns the
-component on. agent-manager needs the kagent component on, so the render turns
-kagent on too. The kagent charts have no schema; rendering them proves the
+The two managers and agentgateway matter most: their charts validate values
+with a CLOSED schema (additionalProperties: false at the root), so one key the
+meta chart forwards — from the `agent-manager:` / `model-manager:` /
+`agentgateway:` block or derived by agent-platform.componentDerivedValues —
+that the chart the range resolves to does not declare fails the HelmRelease on
+every installation that turns the component on. agent-manager needs the kagent
+component on, so the render turns kagent on too. The agentgateway block carries
+the controller's PodDisruptionBudget, topologySpreadConstraints and
+VerticalPodAutoscaler, whose keys the packaging chart's schema accepts from
+2.1.2 (giantswarm/agentgateway#51; the floor of the range); the meta render
+here serves autoscaling.k8s.io/v1 so the VPA spec is forwarded and validated
+rather than emptied. The kagent charts have no schema; rendering them proves the
 forwarded block templates (the WorkerPool's required image, the Substrate
 wiring, the bundled Postgres image) against the chart the values name.
 
@@ -60,7 +66,13 @@ KAGENT = ["kagent-crds", "kagent"]
 # the forwarded keys (postgres.connectionStringSecretRef, atelet.nodeSelector /
 # tolerations / affinity) exist in the pinned build.
 SUBSTRATE = ["substrate-crds", "substrate"]
-COMPONENTS = [*EXTRAS, *MANAGERS, *KAGENT, *SUBSTRATE]
+# The agentgateway control plane (the Giant Swarm packaging chart): a strict
+# schema like the managers', and the forwarded controller budget, spread and
+# VPA (agentgateway.controller.podDisruptionBudget, topologySpreadConstraints,
+# controller.verticalPodAutoscaler) need 2.1.2 — against 2.1.1 the render
+# fails on those keys, which is this check's signal until 2.1.2 is published.
+CONTROL_PLANE = ["agentgateway"]
+COMPONENTS = [*EXTRAS, *MANAGERS, *KAGENT, *SUBSTRATE, *CONTROL_PLANE]
 # component -> the release its range / BOM pin waits for. While nothing the
 # range admits is published, the forwarded block is rendered against the newest
 # chart the line has (see fallback()); the entry goes when the release exists.
@@ -69,6 +81,7 @@ UNRELEASED = {
     "backstage": "the Dev Portal 1.0.0 (kagent API v2, giantswarm/backstage#2343)",
     "kagent": "the kagent line's first release tag (giantswarm/giantswarm#37010)",
     "kagent-crds": "the kagent line's first release tag (giantswarm/giantswarm#37010)",
+    "agentgateway": "agentgateway 2.1.2 (giantswarm/agentgateway#51: the schema accepts the controller's budget, spread and VPA)",
 }
 QUICKSTART = [
     "--set", "global.domain=example.com",
@@ -83,6 +96,10 @@ QUICKSTART = [
     # The platform Cluster on, so the Substrate render exercises the CNPG path
     # (the derived connection Secret reference) rather than the bundled one.
     "--set", "postgres.enabled=true",
+    # The VPA API served, so the meta chart forwards the agentgateway
+    # controller's VerticalPodAutoscaler spec (rather than emptying it) and the
+    # packaging chart's schema sees the keys.
+    "--api-versions", "autoscaling.k8s.io/v1",
 ]
 API_VERSIONS = [
     "--api-versions", "cilium.io/v2",

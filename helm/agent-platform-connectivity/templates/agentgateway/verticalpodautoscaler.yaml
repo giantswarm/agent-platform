@@ -1,0 +1,55 @@
+{{- /* The VerticalPodAutoscaler of the agentgateway data plane.
+
+The data-plane Deployment is reconciled by the agentgateway controller from the
+Gateway, and the controller sets the container's cpu/memory requests from its
+own defaults (100m/128Mi) — sized for nothing in particular: on the fleet the
+pod idles at 1m/10Mi. AgentgatewayParameters could pin other numbers, but a
+fixed size is wrong in both directions for a proxy every MCP and model call
+crosses; the VPA's recommender sizes the pods from what they use, and in Auto
+mode the updater applies a new size by eviction, one pod at a time behind the
+PodDisruptionBudget the same AgentgatewayParameters carries. minAllowed keeps a
+burst of streamed LLM responses from starving a pod the recommender saw idle.
+
+The CR targets the deployer's Deployment by the Gateway's name (gateway.name):
+the deployer names the Deployment after the Gateway, not after this release, so
+the object is named the same way and follows a renamed Gateway. Only cpu and
+memory are controlled; the ephemeral-storage requests and limits of
+gateway.parameters.dataPlaneResources stay as the AgentgatewayParameters sets
+them (the VPA never touches them).
+
+Gated on agent-platform.dataPlaneVPA: the knob
+gateway.parameters.verticalPodAutoscaler.enabled resolved (`auto` follows
+autoscaling.k8s.io/v1 being served — under the meta chart it arrives resolved,
+and the controller's own VPA follows the same answer) AND the data plane
+rendering at all (an agentgateway-* mode with gateway.parameters.enabled). */ -}}
+{{- if (include "agent-platform.dataPlaneVPA" .) }}
+{{- $vpa := .Values.gateway.parameters.verticalPodAutoscaler }}
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ .Values.gateway.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.gateway.name }}
+  updatePolicy:
+    updateMode: {{ $vpa.updateMode }}
+  resourcePolicy:
+    containerPolicies:
+      - containerName: "*"
+        controlledResources:
+          - cpu
+          - memory
+        {{- with $vpa.minAllowed }}
+        minAllowed:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with $vpa.maxAllowed }}
+        maxAllowed:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
