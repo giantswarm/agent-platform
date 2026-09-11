@@ -158,8 +158,8 @@ UNINSTALL_TIMEOUT = "5m"
 # kagent, Substrate and agent-manager on the teardown uninstalls seven more
 # releases in dependency order (managers, kagent, substrate, connectivity, the
 # two CRD charts) and their pods, PVCs and the WorkerPool's workers go with them
-# — tests/ats/README.md carries the measured number this budget is set from.
-UNINSTALL_BUDGET_S = 240
+# — measured 33 s on CI (tests/ats/README.md); the budget is twice that, rounded up.
+UNINSTALL_BUDGET_S = 120
 # Self-management in the smoke: the chart's own OCIRepository follows the
 # in-cluster registry the candidate was pushed to, at the candidate's exact
 # version. Exact, not the chart's derived range: a branch build carries a
@@ -210,10 +210,16 @@ def run(args: List[str], timeout: int = 900, stdin: Optional[str] = None) -> sub
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False, input=stdin)  # nosec
 
 
+class Abort(Exception):
+    """Raised by a wait_for predicate that has seen a terminal state (a failed
+    HelmRelease, a refused install): the wait ends at once with this message
+    instead of running out its timeout."""
+
+
 def wait_for(what: str, predicate: Callable[[], Any], timeout: float, interval: float = 5) -> Any:
     """Poll until ``predicate`` returns a truthy value (returned) or the
     timeout passes (AssertionError naming the last outcome). Exceptions inside
-    the predicate count as "not yet"."""
+    the predicate count as "not yet" — except Abort, which ends the wait."""
     deadline = time.monotonic() + timeout
     last: Any = "not evaluated"
     while True:
@@ -222,6 +228,8 @@ def wait_for(what: str, predicate: Callable[[], Any], timeout: float, interval: 
             if value:
                 return value
             last = value
+        except Abort as exc:
+            raise AssertionError(f"gave up waiting for {what}: {exc}") from exc
         except Exception as exc:  # the predicate reads a cluster that is still converging
             last = f"{type(exc).__name__}: {exc}"
         if time.monotonic() >= deadline:

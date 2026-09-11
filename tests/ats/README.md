@@ -101,12 +101,12 @@ pulls; each test logs `TIMING <phase>`):
 
 | Phase | Seconds |
 |---|---|
-| kind create (the job) | TBD |
-| `helm install --wait` (engine, muster + OAuth, dicebear, connectivity, kagent + CRDs, Substrate + CRDs, agent-manager, self on) | TBD |
-| Substrate ready after the install returned (ate-system, the WorkerPool's worker, the Harness) | TBD |
-| declarative `AgentTemplate` Ready on the Harness | TBD |
-| agent-manager `create_agent` → HelmRelease Ready → `AgentTemplate` Ready + `RemoteMCPServer` Accepted | TBD |
-| `helm uninstall --wait` (the ordered teardown; budget `UNINSTALL_BUDGET_S`) | TBD |
+| kind create (the job) | 37 |
+| `helm install --wait` (engine, muster + OAuth, dicebear, connectivity, kagent + CRDs, Substrate + CRDs, agent-manager, self on) | 198 |
+| Substrate ready after the install returned (ate-system, the WorkerPool's worker, the Harness) | 0 |
+| declarative `AgentTemplate` Ready on the Harness | 10 |
+| agent-manager `create_agent` → HelmRelease Ready → `AgentTemplate` Ready + `RemoteMCPServer` Accepted | 21 |
+| `helm uninstall --wait` (the ordered teardown; budget `UNINSTALL_BUDGET_S` = 120 s) | 33 |
 | own-Flux: platform HelmReleases Ready through the cluster's Flux | TBD |
 | own-Flux: agent through the cluster's Flux (HelmRelease, template Ready, server Accepted) | TBD |
 | the whole `execute-chart-tests` job | TBD |

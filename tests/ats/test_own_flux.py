@@ -49,11 +49,13 @@ import yaml
 
 from conftest import (
     AGENT_CHART_SEMVER,
+    Abort,
     AGENT_CHART_URL,
     ATE_NAMESPACE,
     BASE_VALUES,
     HARNESS,
     HARNESS_LABEL,
+    INSTALL_TIMEOUT,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
     KAGENT_VALUES,
@@ -171,12 +173,38 @@ def meta_helmrelease(version: str, engine: bool) -> List[Dict[str, Any]]:
         {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
          "metadata": {"name": RELEASE, "namespace": FLUX_NAMESPACE},
          "spec": {"interval": "1m", "url": f"{REGISTRY_URL}/{RELEASE}", "insecure": True, "ref": {"semver": version}}},
+        # timeout: helm-controller runs the Helm 4 SDK, whose --wait holds the
+        # install until the component HelmReleases are Ready — the sequential
+        # CRDs -> connectivity -> Substrate -> kagent chain takes 4-6 minutes on
+        # the CI executor, longer than Flux's 5-minute default (the smoke's
+        # `helm install --wait` gets the same 12 minutes).
         {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
          "metadata": {"name": RELEASE, "namespace": FLUX_NAMESPACE},
-         "spec": {"interval": "1m", "releaseName": RELEASE, "targetNamespace": NAMESPACE,
+         "spec": {"interval": "1m", "timeout": INSTALL_TIMEOUT, "releaseName": RELEASE, "targetNamespace": NAMESPACE,
                   "chartRef": {"kind": "OCIRepository", "name": RELEASE},
                   "install": {"createNamespace": True}, "values": values}},
     ]
+
+
+def delete_platform_releases_in_waves(kube: Kube) -> None:
+    """Delete the platform HelmReleases the meta chart rendered in reverse
+    dependency order (waves from their dependsOn), waiting per wave — what the
+    bundled engine's pre-delete hook does, and what a cluster's own Flux does
+    NOT do when the meta HelmRelease is deleted: it deletes them all at once,
+    helm-controller uninstalls them concurrently, and a CRD chart's release
+    (substrate-crds) can go before the release whose objects are its CRs
+    (substrate), whose uninstall then fails on the vanished kind and is retried
+    until the meta HelmRelease's finalizer times out. The way back deletes the
+    components first, then the meta HelmRelease finds nothing left to uninstall."""
+    hrs = kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)
+    depends_on = {hr["metadata"]["name"]: {d["name"] for d in hr["spec"].get("dependsOn", []) or []} for hr in hrs}
+    remaining = set(depends_on)
+    while remaining:
+        wave = sorted(n for n in remaining if not any(n in depends_on[o] for o in remaining if o != n))
+        assert wave, f"dependsOn cycle among {sorted(remaining)}"
+        logger.info("the way back: deleting HelmReleases %s", wave)
+        kube.delete("helmreleases.helm.toolkit.fluxcd.io", *wave, namespace=NAMESPACE, timeout="5m")
+        remaining -= set(wave)
 
 
 # ---------------------------------------------------------------------------
@@ -223,9 +251,8 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     try:
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE, timeout="3m")
         kube.delete("ocirepositories.source.toolkit.fluxcd.io", "agent", namespace=KAGENT_NAMESPACE, timeout="1m")
+        delete_platform_releases_in_waves(kube)
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="3m")
-        wait_for("the platform HelmReleases uninstalled by the cluster's Flux",
-                 lambda: not kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE), 300)
         kube.delete("ocirepositories.source.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="1m")
         kube.cmd(["delete", "--ignore-not-found", "--wait=false", "-f", "-"], stdin=yaml.safe_dump_all(STATE.flux_manifest), check=False)
         TIMINGS.record("the way back: HelmRelease deleted, platform uninstalled by the cluster's Flux, Flux removed", time.monotonic() - started)
@@ -241,15 +268,22 @@ def platform_through_flux(kube: Kube, own_flux: None, pushed_chart: str, candida
     started = time.monotonic()
     kube.apply(meta_helmrelease(candidate_version, engine=False))
     try:
-        wait_for(f"HelmRelease {FLUX_NAMESPACE}/{RELEASE} Ready",
-                 lambda: is_ready(kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE)), 600)
+        def meta_ready() -> Any:
+            hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE)
+            if hr and condition(hr).get("status") == "False" and "failed" in condition(hr).get("message", ""):
+                raise Abort(f"HelmRelease {RELEASE} failed: {condition(hr).get('message')}")
+            return is_ready(hr)
+
+        # The Helm timeout (12 min) plus a reconcile; a failed install ends the
+        # wait at once (Abort) instead of being waited out.
+        wait_for(f"HelmRelease {FLUX_NAMESPACE}/{RELEASE} Ready", meta_ready, 900)
         TIMINGS.record("HelmRelease agent-platform Ready through the cluster's Flux (engine off)", time.monotonic() - started)
 
         def components_ready() -> bool:
             hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
             return set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values())
 
-        wait_for("the platform HelmReleases Ready under the cluster's Flux", components_ready, 600)
+        wait_for("the platform HelmReleases Ready under the cluster's Flux", components_ready, 300)
     except AssertionError:
         dump(kube)
         raise
