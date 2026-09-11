@@ -236,7 +236,19 @@
                                     }
                                 },
                                 "fqdns": {
-                                    "type": "array"
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "matchName": {
+                                                "type": "string"
+                                            },
+                                            "matchPattern": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
                                 },
                                 "port": {
                                     "type": "integer",

@@ -1,6 +1,5 @@
 {{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
-{{- $external := include "agent-platform.jwks.externalTargets" . | fromJsonArray }}
-{{- $namedPorts := include "agent-platform.jwks.externalNamedPorts" . | fromJsonArray }}
+{{- $externalPorts := include "agent-platform.jwks.externalPorts" . | fromJsonArray }}
 {{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
 {{- $extraCidrs := $extra.cidrs | default list }}
 {{- $extraPort := $extra.port | default 443 | int }}
@@ -60,26 +59,16 @@ spec:
     {{- end }}
     {{- end }}
     {{- /* Vanilla NetworkPolicy selects addresses, never names: an external
-    issuer named by host reaches the controller as every public destination on
+    issuer the routes name reaches the controller as every public destination on
     its JWKS port, minus networkPolicy.kubernetes.worldExcludedCIDRs — the
-    pattern the manager policies use. An address literal gets its own block. */}}
-    {{- range $external }}
-    {{- if .cidr }}
-    - to:
-        - ipBlock:
-            cidr: {{ .cidr | quote }}
-      ports:
-        - port: {{ .port | int }}
-          protocol: TCP
-    {{- end }}
-    {{- end }}
-    {{- if $namedPorts }}
+    pattern the manager policies use. */}}
+    {{- if $externalPorts }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
-            except:{{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
       ports:
-        {{- range $namedPorts }}
+        {{- range $externalPorts }}
         - port: {{ . | int }}
           protocol: TCP
         {{- end }}

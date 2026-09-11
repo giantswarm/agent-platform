@@ -7,7 +7,7 @@
 {{- /* A toFQDNs selector matches nothing without the DNS proxy clause, so the
 policy renders the proxy variant of the DNS rule as soon as one name is
 selected, and the plain variant otherwise. */}}
-{{- $needsDnsProxy := or (gt (len (include "agent-platform.jwks.externalNamedPorts" . | fromJsonArray)) 0) (gt (len $extraFqdns) 0) }}
+{{- $needsDnsProxy := or (gt (len $external) 0) (gt (len $extraFqdns) 0) }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -67,16 +67,10 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
-    {{- /* Each external issuer the routes name, on its own JWKS port: by name,
-    or as a single-address block for an address literal. */}}
+    {{- /* Each external issuer the routes name, by name on its own JWKS port. */}}
     {{- range $external }}
-    {{- if .cidr }}
-    - toCIDR:
-        - {{ .cidr | quote }}
-    {{- else }}
     - toFQDNs:
         - matchName: {{ .host | quote }}
-    {{- end }}
       toPorts:
         - ports:
             - port: {{ .port | toString | quote }}

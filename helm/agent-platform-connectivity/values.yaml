@@ -187,34 +187,30 @@ gateway:
     # name host and port (kagent.controllerRoute.jwtAuthentication.jwks,
     # modelManager.route.jwtAuthentication.jwks,
     # agentManager.route.jwtAuthentication.jwks) and the controller policy
-    # opens each host that is not in-cluster on its own port: a Cilium
-    # toFQDNs matchName in the cilium flavour, an address block on that port in
-    # the kubernetes flavour. A host counts as in-cluster — covered by the rule
+    # opens each host that is not in-cluster on its own port: a Cilium toFQDNs
+    # matchName in the cilium flavour, an address block on that port in the
+    # kubernetes flavour. A host counts as in-cluster — covered by the rule
     # above, absent from the controller's external rules — when its third
     # dot-separated label is `svc` and the labels after it are empty, `cluster`
-    # or `cluster.local`, or when it is a single label. The host is read in its
-    # normalized form (lower case, root dot removed), so
-    # dex.giantswarm.svc.cluster.local. classifies as the Service it names. A
-    # literal IP
-    # address renders as a single-address block in both flavours (/32 for
-    # IPv4, /128 for IPv6), because no FQDN selector matches an address. A
-    # two-label host outside `namespace` above (okta.com) fails the render: a
-    # short Service name and a public issuer are the same shape, and only the
-    # namespace tells them apart.
+    # or `cluster.local`. The host is read in its normalized form (lower case,
+    # root dot removed). A jwks.host is always a name: an address literal, and
+    # a host of fewer than three labels, fail the render.
     #
-    # This block is for issuers the routes do NOT name, and for the one the
-    # kubernetes flavour cannot reach by name: a private identity provider
-    # inside networkPolicy.kubernetes.worldExcludedCIDRs, or an issuer the
-    # cluster resolves over IPv6, because the wide rule that flavour renders
-    # for a name is 0.0.0.0/0 and reaches public IPv4 only. It applies whether
-    # or not gateway.jwksEgress.enabled is set: `enabled` governs the
-    # in-cluster rule above and nothing here.
+    # This block is for issuers the routes do NOT name, for an issuer reached by
+    # address, and for the one the kubernetes flavour cannot reach by name: a
+    # private identity provider inside networkPolicy.kubernetes.worldExcludedCIDRs,
+    # or an issuer the cluster resolves over IPv6, because the wide rule that
+    # flavour renders for a name is 0.0.0.0/0 and reaches public IPv4 only. It
+    # applies whether or not gateway.jwksEgress.enabled is set: `enabled`
+    # governs the in-cluster rule above and nothing here.
     external:
       # cilium flavour: Cilium FQDN selectors (matchName, matchPattern),
       # opened on `port` below and resolved through the DNS proxy rule the
       # policy renders. The kubernetes flavour selects addresses and never
       # names, so it ignores them: name that issuer's blocks in `cidrs`.
-      fqdns: []
+      # An item is a selector object, never a bare string: the Cilium CRD
+      # refuses a string and the API server rejects the whole policy.
+      fqdns: []  # @schema item: object; itemProperties: {"matchName": {"type": "string"}, "matchPattern": {"type": "string"}}
       # IP blocks of either family, opened on `port` below in both flavours, as
       # their own rule.
       cidrs: []  # @schema item: string; itemPattern: ^(?:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(?:3[0-2]|[12]?[0-9])|(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?:(?::[0-9A-Fa-f]{1,4}){1,7}|:)|::(?:[Ff]{4}(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|(?:[0-9A-Fa-f]{1,4}:){1,4}:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9]))$
@@ -1179,9 +1175,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # In-cluster JWKS source for the issuer, rendered as a static
       # AgentgatewayBackend in the release namespace.
       jwks:
-        # A hostname, or an address literal of either family. The egress rule
-        # the agentgateway controller's network policy renders is built from
-        # this and `port` below, so the port never belongs here.
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
@@ -1808,9 +1806,11 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       mode: Strict
       issuer: ""
       jwks:
-        # A hostname, or an address literal of either family. The egress rule
-        # the agentgateway controller's network policy renders is built from
-        # this and `port` below, so the port never belongs here.
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
@@ -1962,9 +1962,11 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       mode: Strict
       issuer: ""
       jwks:
-        # A hostname, or an address literal of either family. The egress rule
-        # the agentgateway controller's network policy renders is built from
-        # this and `port` below, so the port never belongs here.
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys

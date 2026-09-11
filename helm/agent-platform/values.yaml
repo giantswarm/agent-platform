@@ -862,9 +862,10 @@ gateway:
     # Optional extra pod label selectors to narrow the target beyond namespace.
     podSelector: {}
     # Issuers the routes do NOT name, whose JWKS the agentgateway controller
-    # also fetches, and the ones the kubernetes flavour cannot reach by name: a
-    # private identity provider inside networkPolicy.kubernetes.worldExcludedCIDRs,
-    # or an issuer the cluster resolves over IPv6. The hosts the routes
+    # also fetches, the ones reached by address rather than by name, and the
+    # ones the kubernetes flavour cannot reach by name: a private identity
+    # provider inside networkPolicy.kubernetes.worldExcludedCIDRs, or an issuer
+    # the cluster resolves over IPv6. The hosts the routes
     # DO name (kagent.controllerRoute.jwtAuthentication.jwks,
     # modelManager.route.jwtAuthentication.jwks,
     # agentManager.route.jwtAuthentication.jwks) need nothing here: the
@@ -875,7 +876,9 @@ gateway:
       # opened on `port` below and resolved through the DNS proxy rule the
       # policy renders. The kubernetes flavour selects addresses and never
       # names, so it ignores them: name that issuer's blocks in `cidrs`.
-      fqdns: []
+      # An item is a selector object, never a bare string: the Cilium CRD
+      # refuses a string and the API server rejects the whole policy.
+      fqdns: []  # @schema item: object; itemProperties: {"matchName": {"type": "string"}, "matchPattern": {"type": "string"}}
       # IP blocks of either family, opened on `port` below in both flavours, as
       # their own rule. An issuer the cluster resolves over IPv6 belongs here:
       # the kubernetes flavour's wide rule for a name is 0.0.0.0/0 and reaches
@@ -1938,9 +1941,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # In-cluster JWKS source for the issuer, rendered as a static
       # AgentgatewayBackend in the release namespace.
       jwks:
-        # A hostname, or an address literal of either family. The egress rule
-        # the agentgateway controller's network policy renders is built from
-        # this and `port` below, so the port never belongs here.
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
@@ -2581,9 +2586,11 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       mode: Strict
       issuer: ""
       jwks:
-        # A hostname, or an address literal of either family. The egress rule
-        # the agentgateway controller's network policy renders is built from
-        # this and `port` below, so the port never belongs here.
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
@@ -2736,9 +2743,11 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       mode: Strict
       issuer: ""
       jwks:
-        # A hostname, or an address literal of either family. The egress rule
-        # the agentgateway controller's network policy renders is built from
-        # this and `port` below, so the port never belongs here.
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
