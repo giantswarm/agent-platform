@@ -82,10 +82,18 @@ ATE_NAMESPACE = "ate-system"
 # bootstrap mints for it; the signers whose ClusterTrustBundles it publishes.
 PODCERT_NAMESPACE = "podcertificate-controller-system"
 PODCERT_SIGNER_SUFFIX = ".podcert.ate.dev/identity"
-# The kagent line's CRDs: their templates carry helm.sh/resource-policy: keep, so
-# uninstalling the kagent-crds release leaves them — and every AgentTemplate and
-# RemoteMCPServer — in place (Substrate's ate.dev CRDs carry no such policy).
+# The CRD charts' CRDs: their templates carry helm.sh/resource-policy: keep, so
+# uninstalling the kagent-crds release leaves the kagent CRDs — and every
+# AgentTemplate and RemoteMCPServer — in place, and uninstalling substrate-crds
+# leaves the three ate.dev CRDs (the Substrate line from v0.0.27-gs.3 on). A
+# consumer's uninstall can therefore always delete its CRs, whatever order a
+# concurrent uninstall finalizes the releases in (giantswarm/agent-platform#385).
 KAGENT_CRDS = {f"{plural}.kagent.dev" for plural in ("agenttemplates", "harnesses", "modelconfigs", "modelproviderconfigs", "remotemcpservers")}
+SUBSTRATE_CRDS = {f"{plural}.ate.dev" for plural in ("workerpools", "sandboxconfigs", "csidriverconfigs")}
+KEPT_CRDS = KAGENT_CRDS | SUBSTRATE_CRDS
+# The cluster-scoped SandboxConfig the substrate chart renders — the CR whose
+# vanished kind failed the substrate uninstall before the CRDs were kept.
+SANDBOX_CONFIG = "gvisor-default"
 # The chart's default ModelConfig every agent of the smoke starts from, and the
 # provider Secret it references: a placeholder key is enough for a template to
 # reach Ready (Ready means the Harness booted the actor's golden snapshot, not
@@ -665,12 +673,26 @@ def substrate_trust_bundles(kube: Kube) -> List[str]:
                   if str(b.get("spec", {}).get("signerName", "")).endswith(PODCERT_SIGNER_SUFFIX))
 
 
+def assert_kept_crds(kube: Kube) -> None:
+    """After the platform is uninstalled the CRD charts' CRDs are still there,
+    each carrying the keep policy that left it — the kagent line's five and the
+    Substrate line's three."""
+    crds = set(kube.crd_names())
+    assert KEPT_CRDS <= crds, f"kept CRDs gone with their CRD chart's release (keep policy missing): {sorted(KEPT_CRDS - crds)}"
+    for name in sorted(KEPT_CRDS):
+        annotations = kube.get("crd", name)["metadata"].get("annotations") or {}
+        assert annotations.get("helm.sh/resource-policy") == "keep", f"{name} carries no helm.sh/resource-policy: keep: {annotations}"
+
+
 def remove_substrate_leftovers(kube: Kube) -> None:
     """What a Substrate uninstall leaves behind, removed so the next install on
     this cluster is a first install: the ate-system namespace (the actor-id
     pools, ate-api-server's authentication config, the bundled Postgres's claim),
     the podcertificate-controller's namespace when the release did not take it
-    (its two CA pools) and the signers' ClusterTrustBundles. A reinstall that
+    (its two CA pools) and the signers' ClusterTrustBundles. Not removed: the
+    three kept ate.dev CRDs — the next scenario's substrate-crds release adopts
+    them (the same release name and storage namespace), as kagent-crds adopts
+    the kept kagent CRDs. A reinstall that
     keeps them does not work today: the substrate release owns and deletes
     podcertificate-controller-system, the bootstrap then mints new roots, and
     the surviving bundles keep the old ones — every client fails the TLS
