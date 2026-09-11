@@ -21,6 +21,23 @@ markers `smoke`, `functional`, `upgrade` are the ATS scenarios.
 Both scenarios share the cluster; what the smoke leaves behind is what the
 functional scenario expects to find.
 
+**kagent on this line.** The platform's kagent is the kagent line (kagent API
+v2, `kagent.dev/v1alpha3`), whose agents are Agent Substrate actors: the
+controller needs Substrate in `ate-system` and the apiserver feature gates
+`ClusterTrustBundle`, `ClusterTrustBundleProjection`, `PodCertificateRequest`
+(+ `certificates.k8s.io/v1beta1`), none of which the ATS kind cluster has —
+the gates are fixed at `kind create`, which the generated CI job owns. So
+`values-kagent.yaml` leaves kagent off and `values-round-trips.yaml`
+agent-manager (it composes agents for that kagent); `conftest.py` reads both
+switches from the values (`KAGENT_ON`, `AGENT_MANAGER_ON`) and the agent round
+trips below skip with that reason, the kagent-only assertions are gated. What
+still runs: the install, the engine, the adoption, the auth round trips, the
+fixpoint, the refused CLI, the teardown, and the own-Flux scenario without its
+agent. The agent round trips are agentlab's (`agents-test`, `toolsets-test`,
+`backstage-test` on a lab with the gates and Substrate) until
+giantswarm/agent-platform#343 gives the kind cluster the gates and Substrate
+from the chart and turns both back on.
+
 | Scenario | Module | What it proves |
 |---|---|---|
 | `smoke` | `test_smoke.py` | The quick start on a bare cluster. Prerequisites: the Gateway API CRDs, the lab Dex (`lab-dex.yaml`), an in-cluster registry (`registry.yaml`) the candidate archive is pushed to, together with the connectivity chart packaged from this checkout at the same version (`helm push --plain-http` through a port-forward; the two charts release off one tag and change together, and the published connectivity chart would not carry a PR's connectivity changes — `components.agent-platform-connectivity.{repository,versionRange,insecure}` point the roster at the registry). `helm install --wait` with `tests/test-values.yaml` + `values-kagent.yaml` + `values-round-trips.yaml` and **self-management on against that registry** at the candidate's exact version. Then: deployed, FluxInstance Ready at a Flux 2.x, every component HelmRelease Ready as `agent-platform-flux`, the operator managing the Flux CRDs, the kagent namespace created by the engine; the **adoption** (self HelmRelease Ready, `helm history` = install + one adoption revision); the **auth round trip** (401 with the RFC 9728 chain; a Dex user through the OAuth password grant, trusted audience; the full muster login: RFC 7591 registration, code + PKCE, the Dex form); the **agent round trips** (a declarative Agent Ready against the default ModelConfig with a placeholder key; agent-manager's `create_agent` through muster as the Dex user → OCIRepository + HelmRelease of the agent chart in `kagent`, executed as `kagent-flux`, Ready; the Agent Ready; `get_agent_status`, `list_agents`); the **fixpoint** two intervals after the adoption (history unchanged, the values Secret equals the values used, `helm get values` too); the **refused CLI** (`helm upgrade` fails with the admission policy's message, no revision); the **ordered teardown** (`helm uninstall --wait` rc 0 within budget, no Flux CRD left, the four operator CRDs remaining, no controller, no Job of the release, no release in any state, the policy gone; the agents' HelmRelease objects gone with the CRDs, their Deployments and `Agent` objects orphaned in the kept kagent namespace). |

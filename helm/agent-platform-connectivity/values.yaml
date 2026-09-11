@@ -750,10 +750,15 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       apiKeySecretKey: ANTHROPIC_API_KEY
       apiKey: ""  # Set per-cluster in secret-values; chart creates the Secret
 
-  # ServiceMonitor for controller-runtime Prometheus metrics.
-  # Requires the Prometheus Operator CRDs (monitoring.coreos.com/v1).
+  # The controller metrics Service and ServiceMonitor (templates/kagent/
+  # servicemonitor.yaml), under the global.observability.metrics.serviceMonitor
+  # gate (monitoring.coreos.com/v1). Off: the kagent line's controller serves
+  # no Prometheus /metrics, so the monitor would scrape a refused port and sit
+  # at up=0; nothing reads those metrics (the fleet's KagentControllerDown rule
+  # reads the Deployment's kube-state-metrics series). Back to true when
+  # upstream serves them.
   serviceMonitor:
-    enabled: true
+    enabled: false
     interval: 60s
     # Extra labels on the ServiceMonitor metadata. The tenant label routes
     # metrics to the correct Mimir instance in the GS Observability Platform.
@@ -1930,6 +1935,9 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   kubernetesAudience: dex-k8s-authenticator
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
+# The kagent-crds component's values (kagent main ships its CRDs as their own
+# chart); forwarded by the meta chart, read by nothing here.
+kagent-crds: {}  # @schema skipProperties: true; additionalProperties: true
 kserve-crd: {}  # @schema skipProperties: true; additionalProperties: true
 # The KServe controller chart's values; this chart reads
 # kserve.controller.deploymentMode for its guard (templates/kserve/) and renders

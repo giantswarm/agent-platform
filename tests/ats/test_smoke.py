@@ -44,6 +44,12 @@ none of the self-management objects; that shape is asserted offline by
 `make verify-self`. A second `helm install` on the same cluster is the
 functional scenario's job (test_own_flux.py installs the chart again, through
 the cluster's own Flux).
+
+The smoke values leave kagent and agent-manager off (values-kagent.yaml says
+why: the kagent line cannot run on the ATS kind cluster yet), so step 6 is
+skipped with that reason and the kagent-only assertions (the kagent namespace,
+the orphaned agents) are gated on KAGENT_ON / AGENT_MANAGER_ON, both read from
+the values.
 """
 
 import base64
@@ -56,7 +62,10 @@ import pytest
 import yaml
 
 from conftest import (
+    AGENT_MANAGER_ON,
     CROSS_CLIENT_AUDIENCE,
+    KAGENT_ON,
+    NO_KAGENT_REASON,
     DEX_USER,
     FLUX_CRD_SUFFIX,
     KAGENT_FLUX_SA,
@@ -92,12 +101,14 @@ from conftest import (
 
 logger = logging.getLogger(__name__)
 
-# The component HelmReleases the smoke values leave on.
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "agent-manager")
+# The component HelmReleases the smoke values leave on (kagent and agent-manager
+# only when the values turn them on, see conftest).
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity",
+              *(("kagent",) if KAGENT_ON else ()), *(("agent-manager",) if AGENT_MANAGER_ON else ()))
 # The Deployments `helm install --wait` leaves running (the kagent controller is
 # waited for separately: its HelmRelease reports Ready once the manifests are
 # applied, installDisableWait).
-CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager")
+CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", *(("agent-manager",) if AGENT_MANAGER_ON else ()))
 DECLARATIVE_AGENT = "ats-smoke-agent"
 MANAGED_AGENT = "ats-managed-agent"
 AGENT_CHART_REPOSITORY = "agent"  # the shared per-namespace OCIRepository agent-manager writes
@@ -131,7 +142,7 @@ def dump_platform(kube: Kube) -> None:
 
 def dump_auth(kube: Kube) -> None:
     kube.dump([f"-n {NAMESPACE} logs deployment/muster --tail=120", f"-n {NAMESPACE} logs deployment/lab-dex --tail=60",
-               f"-n {NAMESPACE} logs deployment/agent-manager --tail=60"])
+               *([f"-n {NAMESPACE} logs deployment/agent-manager --tail=60"] if AGENT_MANAGER_ON else [])])
 
 
 def dump_agents(kube: Kube) -> None:
@@ -166,7 +177,7 @@ def app_deployment(kube: Kube, helm: Helm, prerequisites: None, chart_archive: P
     except AssertionError:
         dump_platform(kube)
         raise
-    TIMINGS.record("helm install --wait (engine, muster+OAuth, dicebear, connectivity, kagent, agent-manager, self on)", elapsed)
+    TIMINGS.record(f"helm install --wait (engine, muster+OAuth, {', '.join(c for c in COMPONENTS if c != 'muster')}, self on)", elapsed)
     return elapsed
 
 
@@ -218,7 +229,8 @@ def assert_platform_running(kube: Kube, helm: Helm) -> None:
         for name, hr in platform.items():
             assert is_ready(hr), f"HelmRelease {name} not Ready: {condition(hr)}"
             assert hr["spec"].get("serviceAccountName") == TENANT_SA, f"HelmRelease {name} does not run as {TENANT_SA}"
-        assert platform["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "the kagent HelmRelease must target the platform namespace (the pre-install hook creates the kagent namespace)"
+        if KAGENT_ON:
+            assert platform["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "the kagent HelmRelease must target the platform namespace (the pre-install hook creates the kagent namespace)"
         for name in CORE_DEPLOYMENTS:
             assert kube.deployment_ready(NAMESPACE, name), f"Deployment {name} is not ready"
         logger.info("deployed; FluxInstance Ready at %s; %d component HelmReleases Ready as %s", revision, len(platform), TENANT_SA)
@@ -246,7 +258,8 @@ def test_engine_objects(kube: Kube, app_deployment: float) -> None:
              lambda: "flux-operator" in kube.managers("crd", "helmreleases.helm.toolkit.fluxcd.io"), 120, interval=3)
     assert kube.get("serviceaccount", TENANT_SA, namespace=NAMESPACE), f"ServiceAccount {TENANT_SA} missing"
     assert kube.get("clusterrolebinding", TENANT_SA), f"ClusterRoleBinding {TENANT_SA} missing"
-    assert kube.get("namespace", KAGENT_NAMESPACE), "the pre-install hook did not create the kagent namespace"
+    if KAGENT_ON:  # the namespace hook renders with kagent on only
+        assert kube.get("namespace", KAGENT_NAMESPACE), "the pre-install hook did not create the kagent namespace"
     # No hook object lingers after a successful install (Helm removes them once
     # every hook of the event succeeded, moments after the install returns; the
     # detached resumer Job is not a hook and stays for an hour to be read).
@@ -362,6 +375,7 @@ def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: PortFo
 
 
 @pytest.mark.smoke
+@pytest.mark.skipif(not KAGENT_ON, reason=NO_KAGENT_REASON)
 def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None) -> None:
     """A minimal declarative Agent against the chart's default ModelConfig (the
     provider key is a placeholder: Ready means the controller accepted and
@@ -380,6 +394,7 @@ def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None) ->
 
 
 @pytest.mark.smoke
+@pytest.mark.skipif(not (KAGENT_ON and AGENT_MANAGER_ON), reason=NO_KAGENT_REASON)
 def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: PortForward, dex: str, kagent_controller: None) -> None:
     """agent-manager's create_agent through muster, as the Dex user: muster
     forwards the bearer to agent-manager (MCPServer auth.forwardToken; the
@@ -509,16 +524,18 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # the kagent namespace is kept (helm.sh/resource-policy: keep on the
     # connectivity release's Namespace), the Agent CRs with it (the kagent CRDs
     # are app-owned, Helm never deletes crds/), and the agents' Deployments run on.
-    assert MANAGED_AGENT in agent_hrs_before, f"the managed agent's HelmRelease was not there before the uninstall: {agent_hrs_before}"
-    assert kube.get("namespace", KAGENT_NAMESPACE), "the kagent namespace went with the uninstall; it must be kept (the agents live there)"
-    orphans = {d["metadata"]["name"] for d in kube.items("deployments", namespace=KAGENT_NAMESPACE)}
-    assert {DECLARATIVE_AGENT, MANAGED_AGENT} <= orphans, f"the agents' Deployments did not survive the uninstall: {sorted(orphans)}"
-    assert kube.get("agents.kagent.dev", MANAGED_AGENT, namespace=KAGENT_NAMESPACE), "the managed agent's Agent CR did not survive"
-    logger.info("orphaned in %s after the uninstall: Deployments %s (their HelmReleases %s are gone with the CRDs)", KAGENT_NAMESPACE, sorted(orphans), agent_hrs_before)
+    if KAGENT_ON and AGENT_MANAGER_ON:
+        assert MANAGED_AGENT in agent_hrs_before, f"the managed agent's HelmRelease was not there before the uninstall: {agent_hrs_before}"
+        assert kube.get("namespace", KAGENT_NAMESPACE), "the kagent namespace went with the uninstall; it must be kept (the agents live there)"
+        orphans = {d["metadata"]["name"] for d in kube.items("deployments", namespace=KAGENT_NAMESPACE)}
+        assert {DECLARATIVE_AGENT, MANAGED_AGENT} <= orphans, f"the agents' Deployments did not survive the uninstall: {sorted(orphans)}"
+        assert kube.get("agents.kagent.dev", MANAGED_AGENT, namespace=KAGENT_NAMESPACE), "the managed agent's Agent CR did not survive"
+        logger.info("orphaned in %s after the uninstall: Deployments %s (their HelmReleases %s are gone with the CRDs)", KAGENT_NAMESPACE, sorted(orphans), agent_hrs_before)
     assert elapsed < UNINSTALL_BUDGET_S, f"helm uninstall --wait took {elapsed:.0f}s (budget {UNINSTALL_BUDGET_S}s)"
     logger.info("uninstall clean in %.0f s: no Flux CRD, operator CRDs kept, no controller, no Job, no release", elapsed)
     # Leave the next scenario a cluster without the orphans (its own kagent
     # runs there); the namespace's termination completes in the background.
-    kube.delete("namespace", KAGENT_NAMESPACE, wait=False)
+    if KAGENT_ON:
+        kube.delete("namespace", KAGENT_NAMESPACE, wait=False)
     for phase, seconds in TIMINGS.entries.items():
         logger.info("TIMING %-90s %6.0f s", phase, seconds)

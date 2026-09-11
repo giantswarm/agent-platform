@@ -299,8 +299,11 @@
                         "chart": {
                             "type": "string"
                         },
-                        "crds": {
-                            "type": "string"
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "enabled": {
                             "type": "boolean"
@@ -313,6 +316,27 @@
                             "items": {
                                 "type": "string"
                             }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "kagent-crds": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
                         },
                         "repository": {
                             "type": "string"
@@ -853,6 +877,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "semverFilter": {
+                            "type": "string"
+                        },
                         "versionRange": {
                             "type": "string"
                         }
@@ -1046,6 +1073,10 @@
             }
         },
         "kagent": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kagent-crds": {
             "type": "object",
             "additionalProperties": true
         },

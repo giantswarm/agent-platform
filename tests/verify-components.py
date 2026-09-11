@@ -31,7 +31,12 @@ roster that the fleet, the quick-start values or the connectivity wiring rely on
   but its answer is in the roster forwarded to connectivity, and its values
   block (modelServing:) travels only while the switch is on;
 - every top-level key of the meta chart's schema except gitops is a key of the
-  connectivity chart's schema, for the same reason.
+  connectivity chart's schema, for the same reason;
+- components.<name>.semverFilter reaches OCIRepository.spec.ref.semverFilter
+  (a dev channel: the tags a branch's dev builds carry, matched before the range
+  is evaluated), for exactly the components the defaults put on a dev channel
+  (DEV_CHANNEL) and for a component given one, and for no other; the dead
+  ImagePolicy-shaped `filterTags` block never renders.
 
 Deliberately stdlib-only: the CI image has no PyYAML.
 """
@@ -47,7 +52,7 @@ GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 # component -> (repository, versionRange, dependsOn, a line only the standalone's
 # defaults put into the forwarded values, or None when the block is empty)
 NEW = {
-    "backstage": (GSOCI, "0.x", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
+    "backstage": (GSOCI, "1.x", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
     "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://ghcr.io/cloudnative-pg/charts", "0.29.x", [], None),
     "kserve-crd": (GSOCI, "0.2.x", [], None),
@@ -59,9 +64,25 @@ NEW = {
 }
 
 # The wiring chart's range: released off the same tag as the meta chart and
-# re-resolved by every installation's Flux, so it stays below the next major --
-# the kagent API v2 line must not reach a 3.x installation ahead of its cut-over.
-CONNECTIVITY_RANGE = ">=1.0.0 <4.0.0"
+# re-resolved by every installation's Flux, so it holds its own major -- the
+# 4.x wiring is the kagent API v2 line's, and the next major's wiring must not
+# reach a 4.x installation ahead of its cut-over (the 3.x line held <4.0.0).
+CONNECTIVITY_RANGE = ">=4.0.0 <5.0.0"
+
+# The components whose ranges the kagent API v2 line changed (component ->
+# repository, versionRange, dependsOn with every component on): the kagent line's
+# two charts on the line's release range (one build, kagent after its CRDs), the
+# managers on the lines that speak v1alpha3 (agent-manager 1.x; model-manager
+# 0.x from 0.20.0, dual-version). kagent-crds follows components.kagent and takes no
+# `global` (a chart of two subchart switches).
+KAGENT_LINE = "oci://ghcr.io/giantswarm/kagent/helm"
+KAGENT_RANGE = ">=0.11.0-gs.1 <0.11.1-0"
+LINE = {
+    "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds"]),
+    "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
+    "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
+    "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+}
 
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
@@ -82,6 +103,13 @@ WIRING_KEYS = {
 # Feature switches of the roster: an entry without chart:, no release, forwarded
 # like every other flag.
 SWITCHES = ["modelServing"]
+
+# component -> the semverFilter its default source carries (a dev channel). Every
+# other component's OCIRepository renders none. Empty on the stable line.
+DEV_CHANNEL: dict[str, str] = {}
+# A filter handed to a component that has none by default; the value carries
+# the backslashes a real filter has (`\.`), so the quoting is exercised.
+PROBE_FILTER = ".*-dev\\.x\\..*"
 
 ON = [f"--set=components.{n}.enabled=true" for n in NEW]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
@@ -129,6 +157,33 @@ def fail(msg: str) -> None:
     sys.exit(f"FAIL: {msg}")
 
 
+def semver_filters(manifest: str) -> dict[str, str]:
+    """OCIRepository name -> its spec.ref.semverFilter, for the ones that carry one."""
+    out = {}
+    for (kind, name), d in docs(manifest).items():
+        if kind != "OCIRepository":
+            continue
+        if "filterTags" in d:
+            fail(f"{name} OCIRepository renders filterTags — an ImagePolicy field, not an OCIRepository one; the key is semverFilter")
+        m = re.search(r'^    semverFilter: (".*")$', d, re.M)
+        if m:
+            out[name] = json.loads(m.group(1))  # Go %q quoting == JSON for these strings
+    return out
+
+
+def check_semver_filters(meta: str, ci: list[str]) -> None:
+    every = [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]]
+    got = semver_filters(render(meta, every))
+    if got != DEV_CHANNEL:
+        fail(f"OCIRepository semverFilters differ from the dev-channel defaults: rendered {got}, expected {DEV_CHANNEL}")
+    probe = render(meta, [*every, "--set-json", f"components.muster.semverFilter={json.dumps(PROBE_FILTER)}"])
+    if semver_filters(probe) != {**DEV_CHANNEL, "muster": PROBE_FILTER}:
+        fail(f"components.muster.semverFilter did not reach the muster OCIRepository alone: {semver_filters(probe)}")
+    if f"semverFilter: {json.dumps(PROBE_FILTER)}" not in probe:
+        fail("the semverFilter is not rendered as a double-quoted string with its backslashes escaped (Flux reads it as a Go regexp)")
+    print(f"ok: semverFilter — the dev-channel defaults {sorted(DEV_CHANNEL) or 'none'} and no other component; a component given one renders it verbatim; no filterTags")
+
+
 def main(meta: str, connectivity: str) -> int:
     ci = ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]
 
@@ -156,11 +211,22 @@ def main(meta: str, connectivity: str) -> int:
                 fail(f"{name} dependsOn {dangling} while those components are off (would block forever)")
     print("ok: the seven are off by default — no release, no dangling dependsOn, roster says false, blocks forwarded")
 
+    # --- kagent-crds follows components.kagent -----------------------------------
+    no_kagent = docs(render(meta, [*ci, "--set", "components.kagent.enabled=false"]))
+    for kind in ("OCIRepository", "HelmRelease"):
+        if (kind, "kagent-crds") in no_kagent:
+            fail(f"components.kagent off still rendered the kagent-crds {kind}; without its own switch it follows kagent")
+    if roster(hr_values(no_kagent[("HelmRelease", "agent-platform-connectivity")])).get("kagent-crds") is not False:
+        fail("the roster forwarded to connectivity does not say kagent-crds: enabled: false while kagent is off")
+    if ro.get("kagent-crds") is not True:
+        fail(f"the roster forwarded to connectivity does not say kagent-crds: enabled: true while kagent is on (got {ro.get('kagent-crds')!r})")
+    print("ok: kagent-crds follows components.kagent — on with it, off without it, the roster says which")
+
     # --- the wiring chart's range is bounded below the next major ------------------
     conn_oci = off.get(("OCIRepository", "agent-platform-connectivity"))
     if not conn_oci or f'semver: "{CONNECTIVITY_RANGE}"' not in conn_oci:
-        fail(f"the connectivity OCIRepository does not carry versionRange {CONNECTIVITY_RANGE!r}: the 3.x line must not follow the wiring chart into the next major (kagent API v2), which every installation re-resolves on each reconcile")
-    print(f"ok: the connectivity range is {CONNECTIVITY_RANGE} -- bounded below the next major")
+        fail(f"the connectivity OCIRepository does not carry versionRange {CONNECTIVITY_RANGE!r}: the wiring chart holds its own major, which every installation re-resolves on each reconcile")
+    print(f"ok: the connectivity range is {CONNECTIVITY_RANGE} -- its own major, bounded below the next")
 
     # --- all on ---------------------------------------------------------------
     on_manifest = render(meta, [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]])
@@ -208,21 +274,39 @@ def main(meta: str, connectivity: str) -> int:
         missing = [d for d in deps if d not in have]
         if missing:
             fail(f"{consumer} does not dependsOn {missing} with those components on (got {have})")
-    print("ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release")
+    for name, (repo, rng, deps) in LINE.items():
+        oci, hr = on.get(("OCIRepository", name)), on.get(("HelmRelease", name))
+        if not oci or not hr:
+            fail(f"components.{name} did not render one OCIRepository + one HelmRelease with the CI values")
+        if f"\n  url: {repo}/{name}\n" not in oci:
+            fail(f"{name} OCIRepository url is not {repo}/{name}")
+        if f'semver: "{rng}"' not in oci:
+            fail(f"{name} OCIRepository does not carry versionRange {rng!r} (the kagent API v2 line's range)")
+        if sorted(depends_on(hr)) != sorted(deps):
+            fail(f"{name} dependsOn {depends_on(hr)}, expected {deps}")
+    print("ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges")
+
+    # --- the dev channel: semverFilter ----------------------------------------------
+    check_semver_filters(meta, ci)
 
     # --- the BOM pins every one exactly ------------------------------------------
     bom_file = open(f"{meta}/examples/customer-bom.yaml").read()
     bom = docs(render(meta, [*ci, "-f", f"{meta}/examples/customer-bom.yaml", *ON]))
-    for name in NEW:
+    for name in (*NEW, *LINE, "agent-platform-connectivity"):
         m = re.search(rf"^\s*{re.escape(name)}:\s*\{{\s*versionRange:\s*\"([^\"]+)\"\s*\}}", bom_file, re.M)
         if not m:
             fail(f"examples/customer-bom.yaml does not pin components.{name}.versionRange")
         pin = m.group(1)
-        if not re.fullmatch(r"\d+\.\d+\.\d+", pin):
+        # Exact: X.Y.Z, or a prerelease of it — the kagent line's releases are
+        # vX.Y.Z-gs.N by scheme.
+        if not re.fullmatch(r"\d+\.\d+\.\d+(-gs\.\d+)?", pin):
             fail(f"the BOM pin for {name} is not an exact version: {pin!r}")
         if f'semver: "{pin}"' not in bom[("OCIRepository", name)]:
             fail(f"the BOM pin {pin} for {name} did not reach its OCIRepository")
-    print("ok: the customer BOM pins all seven exactly")
+    kagent_pins = {re.search(rf"^\s*{n}:\s*\{{\s*versionRange:\s*\"([^\"]+)\"", bom_file, re.M).group(1) for n in ("kagent", "kagent-crds")}
+    if len(kagent_pins) != 1:
+        fail(f"the BOM pins kagent and kagent-crds to different releases {sorted(kagent_pins)}; the two charts are one build of the line")
+    print("ok: the customer BOM pins the seven, the kagent line, the managers and the wiring chart exactly")
 
     # --- the forwarded tree validates against the connectivity chart --------------
     # The meta chart's defaults plus the one input every render needs; the CI
