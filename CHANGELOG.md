@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The agentgateway data plane runs the **Giant Swarm line of agentgateway**: the connectivity chart's `agentgateway.proxy.image.tag` (rendered into `AgentgatewayParameters`) is `v1.5.1-gs.1` — upstream v1.5.0 rebuilt, scanned and signed in [giantswarm/agentgateway-upstream](https://github.com/giantswarm/agentgateway-upstream) (its `FORK.md`; tracking giantswarm/giantswarm#37758) and mirrored into gsoci by the retagger — the same release the `giantswarm/agentgateway` packaging chart pins for the controller, so a fix the platform needs in agentgateway can be carried on the line and reaches every installation as the next `-gs.N` release. **Every installation with the agentgateway component on rolls its data-plane pods once** to an image built from the same source as before; nothing else in the render changes.
+
+### Changed
+
 - `components.agent-platform-connectivity.versionRange` is `>=1.0.0 <4.0.0` (was `>=1.0.0`, open upwards). The connectivity chart is released off the same tag as this chart and every installation's Flux re-resolves the range on each reconcile of the connectivity `OCIRepository`, so the first `v4.0.0` tag of this repository -- the kagent API v2 line (giantswarm/giantswarm#37705), whose connectivity templates render `kagent.dev/v1alpha3` objects -- would have upgraded the wiring of every 3.x installation within minutes, ahead of its cut-over (#348). The 3.x line now stays on its own wiring chart; 4.0 resets the range to its line. **No installation needs to act**: the connectivity `OCIRepository`'s `spec.ref.semver` changes (a Flux spec update; the current 3.x release stays resolved) and nothing else in the render differs. `make verify-components` asserts the bound.
 
 ### Added
