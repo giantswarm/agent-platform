@@ -105,7 +105,7 @@ namespace with the bootstrap's `actor-id-*` pools, ate-api-server's
 authentication config and the bundled Postgres's claim; the
 `podcertificate-controller-system` namespace with the two CA pools the
 podcertificate-controller signs from (the Substrate line's chart annotates
-the namespace `helm.sh/resource-policy: keep`, 0.0.27-gs.3); and the
+the namespace `helm.sh/resource-policy: keep`, 0.0.27-gs.5); and the
 cluster-scoped `ClusterTrustBundle`s of the `*.podcert.ate.dev/identity`
 signers, which carry those pools' roots. Before the keep policy the namespace
 went **with** the `substrate` release and took the pools, so a reinstall minted

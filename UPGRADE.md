@@ -14,7 +14,7 @@ Operator action required between releases. CHANGELOG.md captures the diff; UPGRA
 - **The bundled engine's ordered teardown is unchanged**: `helm uninstall` still deletes the platform `HelmRelease`s in reverse dependency waves; it no longer depends on that order for Substrate.
 ## \<current\> → \<next\> (a reinstall after `helm uninstall` keeps Agent Substrate's trust chain)
 
-The `substrate` release no longer deletes `podcertificate-controller-system` on uninstall — the Substrate line's chart keeps the namespace and the two CA pools in it (`helm.sh/resource-policy: keep`, 0.0.27-gs.3, the pin of this release) — and the connectivity bootstrap hook publishes the podcert signers' `ClusterTrustBundle`s from the pools before the Substrate pods start and on every upgrade (giantswarm/agent-platform#384).
+The `substrate` release no longer deletes `podcertificate-controller-system` on uninstall — the Substrate line's chart keeps the namespace and the two CA pools in it (`helm.sh/resource-policy: keep`, 0.0.27-gs.5, the pin of this release) — and the connectivity bootstrap hook publishes the podcert signers' `ClusterTrustBundle`s from the pools before the Substrate pods start and on every upgrade (giantswarm/agent-platform#384).
 
 ### Operator action
 
