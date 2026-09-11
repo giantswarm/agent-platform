@@ -497,7 +497,12 @@ components:  # @schema additionalProperties: true
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.x"
+    # klaus-gateway 1.x speaks kagent API v2: A2A v1 over gRPC through the
+    # controller GRPCRoute this line renders (klausGateway.a2a.url is a
+    # grpc:// target), AgentTemplate discovery, one AgentInstance per thread
+    # (giantswarm/klaus-gateway#234). A 0.x gateway talks REST to the 0.10
+    # controller and gets 404s on this line; the 3.x meta chart keeps 0.x.
+    versionRange: "1.x"
     valuesFrom: klausGateway
     enabled: false
   agent-sandbox:  # @schema additionalProperties: true

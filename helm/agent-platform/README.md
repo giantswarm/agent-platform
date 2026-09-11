@@ -156,7 +156,7 @@ WorkerPool".
 | components.substrate.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.klaus-gateway.versionRange | string | `"0.x"` |  |
+| components.klaus-gateway.versionRange | string | `"1.x"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.chart | string | `"agent-sandbox"` |  |

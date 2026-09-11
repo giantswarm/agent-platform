@@ -73,8 +73,8 @@ CONNECTIVITY_RANGE = ">=4.0.0 <5.0.0"
 # repository, versionRange, dependsOn with every component on): the kagent line's
 # two charts on the line's release range (one build, kagent after its CRDs), the
 # managers on the lines that speak v1alpha3 (agent-manager 1.x; model-manager
-# 0.x from 0.20.0, dual-version). kagent-crds follows components.kagent and takes no
-# `global` (a chart of two subchart switches).
+# 0.x from 0.20.0, dual-version), klaus-gateway 1.x (A2A v1 over gRPC). kagent-crds
+# follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://ghcr.io/giantswarm/kagent/helm"
 KAGENT_RANGE = ">=0.11.0-gs.1 <0.11.1-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
@@ -93,6 +93,10 @@ LINE = {
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
     "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+    # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
+    # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
+    # REST client and belongs to the 3.x meta chart.
+    "klaus-gateway": (GSOCI, "1.x", []),
 }
 
 # CR consumers that come after the operator / control plane when those are on.
@@ -131,7 +135,7 @@ DEV_CHANNEL: dict[str, str] = {}
 # the backslashes a real filter has (`\.`), so the quoting is exercised.
 PROBE_FILTER = ".*-dev\\.x\\..*"
 
-ON = [f"--set=components.{n}.enabled=true" for n in NEW]
+ON = [f"--set=components.{n}.enabled=true" for n in (*NEW, "klaus-gateway")]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
 # The bundled Flux engine (components.flux.enabled, default true) adds its own
 # objects to the render; its two shapes are tests/verify-engine.py's. The roster
