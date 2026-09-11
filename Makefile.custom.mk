@@ -1616,6 +1616,10 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 # first object of a kind, wrong as soon as two Jobs render).
 PICK := python3 tests/pick-doc.py
 MIGRATION_ON := $(MANAGERS_MIN) --set components.agent-manager.enabled=true
+# The migrate Job's image pin: agentManager.migration.image.tag — the meta chart's BOM pin for agent-manager,
+# mirrored as the connectivity chart's default. Read from the values (Renovate bumps both files), never a literal.
+MIGRATION_PIN = python3 -c "import yaml; print(yaml.safe_load(open('$(CHART_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
+MIGRATION_PIN_CONNECTIVITY = python3 -c "import yaml; print(yaml.safe_load(open('$(CONNECTIVITY_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
 MIGRATION_JOB := agent-platform-connectivity-agent-manager-migrate
 
 .PHONY: verify-postgres-kagent-v2
@@ -1727,7 +1731,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-again.out)" = "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-on.out)" ] || { echo "FAIL: the Job's name is not stable across identical renders"; exit 1; }
 	@grep -q 'serviceAccountName: kagent-flux' /tmp/vmig-job.out || { echo "FAIL: the Job does not run as the tenant identity"; exit 1; }
 	@if grep -q 'kagent-flux' $(CONNECTIVITY_DIR)/templates/kagent/migrate-job.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-rbac.yaml $(CONNECTIVITY_DIR)/templates/kagent/_migrate.tpl; then echo "FAIL: a migration template carries the literal kagent-flux; the identity comes from the helper"; exit 1; fi
-	@grep -q 'image: "gsoci.azurecr.io/giantswarm/agent-manager:1.1.0"' /tmp/vmig-job.out || { echo "FAIL: the image is not agent-manager at the BOM pin 1.1.0"; grep image: /tmp/vmig-job.out; exit 1; }
+	@pin=$$($(MIGRATION_PIN)); grep -q "image: \"gsoci.azurecr.io/giantswarm/agent-manager:$$pin\"" /tmp/vmig-job.out || { echo "FAIL: the image is not agent-manager at the BOM pin $$pin (agentManager.migration.image.tag)"; grep image: /tmp/vmig-job.out; exit 1; }
 	@grep -q '^            - migrate$$' /tmp/vmig-job.out || { echo "FAIL: the Job does not run \`migrate\`"; exit 1; }
 	@if grep -q -- '--dry-run' /tmp/vmig-job.out; then echo "FAIL: --dry-run renders by default"; exit 1; fi
 	@grep -q 'restartPolicy: Never' /tmp/vmig-job.out || { echo "FAIL: restartPolicy"; exit 1; }
@@ -1794,8 +1798,8 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@echo "--> the meta chart declares and forwards agentManager.migration (the BOM tag) to the connectivity release"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.kagent.enabled=true --set components.agent-manager.enabled=true >/tmp/vmig-meta.out 2>&1 || { cat /tmp/vmig-meta.out; exit 1; }
 	@$(PICK) /tmp/vmig-meta.out HelmRelease agent-platform-connectivity >/tmp/vmig-meta-conn.out || { echo "FAIL: no connectivity HelmRelease"; exit 1; }
-	@grep -A12 '^      migration:$$' /tmp/vmig-meta-conn.out | grep -q 'tag: 1.1.0' || { echo "FAIL: agentManager.migration.image.tag (the BOM pin) is not forwarded to the connectivity release"; grep -n -A12 'migration:' /tmp/vmig-meta-conn.out | head -16; exit 1; }
-	@grep -q 'agentManager.migration.image.tag\|tag: 1.1.0' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta values.yaml does not declare the BOM tag"; exit 1; }
+	@pin=$$($(MIGRATION_PIN)); grep -A12 '^      migration:$$' /tmp/vmig-meta-conn.out | grep -q "tag: $$pin" || { echo "FAIL: agentManager.migration.image.tag (the BOM pin $$pin) is not forwarded to the connectivity release"; grep -n -A12 'migration:' /tmp/vmig-meta-conn.out | head -16; exit 1; }
+	@pin=$$($(MIGRATION_PIN)); conn=$$($(MIGRATION_PIN_CONNECTIVITY)); [ -n "$$pin" ] && [ "$$pin" = "$$conn" ] || { echo "FAIL: the meta chart's BOM pin ($$pin) and the connectivity chart's default ($$conn) for agentManager.migration.image.tag differ"; exit 1; }
 	@grep -q 'disableWaitForJobs: true' /tmp/vmig-meta-conn.out || { echo "FAIL: the connectivity HelmRelease waits for Jobs (components.agent-platform-connectivity.disableWaitForJobs); a migrate failure would fail the release"; exit 1; }
 	@[ "$$(grep -c 'disableWaitForJobs: true' /tmp/vmig-meta-conn.out)" = "2" ] || { echo "FAIL: disableWaitForJobs must be rendered on install and upgrade"; exit 1; }
 	@$(PICK) /tmp/vmig-meta.out HelmRelease agent-manager >/tmp/vmig-meta-am.out || { echo "FAIL: no agent-manager HelmRelease"; exit 1; }
