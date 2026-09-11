@@ -24,6 +24,9 @@
 # render with "must be one of: ollama, kserve, lemonade" — bump that pin too
 # when the release exists. An installation that does not select lmstudio is
 # unaffected either way.
+# The agentgateway pin is the floor of components.agentgateway.versionRange:
+# the controller's budget, spread and VPA forwarded from values.yaml need the
+# schema of 2.1.2 (giantswarm/agentgateway#51); 2.1.1 rejects the keys.
 # =============================================================================
 
 gitops:
@@ -32,7 +35,7 @@ gitops:
 
 components:
   muster:                        { versionRange: "5.12.0" }
-  agentgateway:                  { versionRange: "2.0.7" }
+  agentgateway:                  { versionRange: "2.1.2" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
   kagent:                        { versionRange: "0.2.0" }

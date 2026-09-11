@@ -773,6 +773,63 @@
                                     ]
                                 }
                             }
+                        },
+                        "verticalPodAutoscaler": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": [
+                                        "boolean",
+                                        "string"
+                                    ],
+                                    "enum": [
+                                        "auto",
+                                        true,
+                                        false
+                                    ]
+                                },
+                                "maxAllowed": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "cpu": {
+                                            "type": [
+                                                "string",
+                                                "number"
+                                            ]
+                                        },
+                                        "memory": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "minAllowed": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "cpu": {
+                                            "type": [
+                                                "string",
+                                                "number"
+                                            ]
+                                        },
+                                        "memory": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "updateMode": {
+                                    "type": "string",
+                                    "enum": [
+                                        "Off",
+                                        "Initial",
+                                        "Recreate",
+                                        "Auto",
+                                        "InPlaceOrRecreate"
+                                    ]
+                                }
+                            }
                         }
                     }
                 }

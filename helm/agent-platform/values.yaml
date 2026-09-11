@@ -304,7 +304,22 @@ components:  # @schema additionalProperties: true
     # 2.0.0 flattened the chart: upstream keys moved from `agentgateway.*` to the
     # chart root, so the forwarded block is no longer nested (no valuesKey) and
     # the 1.x range cannot be used with this wiring.
-    versionRange: "2.x"
+    #
+    # Floor 2.1.2: the agentgateway values below forward
+    # controller.podDisruptionBudget, controller.verticalPodAutoscaler and
+    # topologySpreadConstraints for the controller, and the packaging chart's
+    # strict schema accepts the keys inside them only from 2.1.2
+    # (giantswarm/agentgateway#51; 2.1.1 declares the three as empty objects
+    # and rejects `maxUnavailable` and the rest). With the floor here the
+    # source re-resolves to a chart that accepts them before the release
+    # applies the values that need it, so the two never meet on a cluster —
+    # until 2.1.2 is published the OCIRepository reports the unresolved range,
+    # this HelmRelease is not Ready and every release that dependsOn it
+    # (connectivity, agent-platform-mcps, and everything behind connectivity)
+    # holds its next generation while the running releases keep running —
+    # release the packaging chart first. The upper bound stays at the next
+    # major so minor releases still roll forward on their own.
+    versionRange: ">=2.1.2 <3.0.0"
     valuesFrom: agentgateway
     enabled: false
     # App-owned CRDs: the wrapper chart ships the agentgateway.dev CRDs (with
@@ -774,8 +789,9 @@ gateway:
     # Every MCP call and, with llmRouting on, every model call of the platform
     # crosses this Deployment: one pod is one node reboot away from an outage
     # for every agent. The controller reconciles the Deployment from the
-    # Gateway; the three knobs below reach it through AgentgatewayParameters
-    # (deployment.spec and podDisruptionBudget, strategic merge). A pod's exit
+    # Gateway; three of the knobs below reach it through AgentgatewayParameters
+    # (deployment.spec and podDisruptionBudget, strategic merge), the fourth
+    # (verticalPodAutoscaler) is an object of its own on the Deployment. A pod's exit
     # on a drain or a rollout runs inside the data-plane shutdown window the
     # controller's chart defaults to. Both ends of it are deadlines measured
     # from SIGTERM, not phases that add up: 10 s still accepting so the
@@ -826,6 +842,25 @@ gateway:
         - kubernetes.io/hostname
       maxSkew: 1  # @schema minimum: 1
       whenUnsatisfiable: ScheduleAnyway  # @schema enum: [ScheduleAnyway, DoNotSchedule]
+    # The connectivity chart reads this block (these are its defaults); this
+    # chart resolves `enabled` once, by served API, and forwards it resolved.
+    # Vertical Pod Autoscaler for the data-plane pods (the controller sets the
+    # container's cpu/memory requests from its own defaults, sized for nothing
+    # in particular). `auto` renders the VerticalPodAutoscaler when
+    # autoscaling.k8s.io/v1 is served, detected once (under the meta chart the
+    # knob arrives resolved, and the controller's VPA follows the same answer);
+    # true / false force it. Evictions apply a new size one pod at a time behind
+    # the budget above. The floor keeps a burst of streamed LLM responses from
+    # starving a pod the recommender saw idle.
+    verticalPodAutoscaler:
+      enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+      updateMode: Auto  # @schema enum: [Off, Initial, Recreate, Auto, InPlaceOrRecreate]
+      minAllowed:
+        cpu: 50m  # @schema type: [string, number]
+        memory: 64Mi
+      maxAllowed:
+        cpu: "2"  # @schema type: [string, number]
+        memory: 2Gi
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -2147,12 +2182,62 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     # Two controller pods, with leader election (the chart's default; every
     # replica serves xDS, the leader alone writes status and reconciles the
     # data plane) so a data-plane pod that starts on a rebooted node finds its
-    # config unless both controller pods sat on that node. The packaging
-    # chart's strict values schema declares controller.podDisruptionBudget,
-    # controller.strategy and affinity as empty objects (every key inside is
-    # rejected), so a budget and a spread for the controller wait for a schema
-    # there.
+    # config unless both controller pods sat on that node. The budget below
+    # and the spread (topologySpreadConstraints) keep a drain and a scheduler
+    # from arranging exactly that; the packaging chart's strict schema accepts
+    # those keys from 2.1.2 (giantswarm/agentgateway#51), which the floor of
+    # components.agentgateway.versionRange guarantees before these values
+    # reach a release.
     replicaCount: 2
+    # PodDisruptionBudget on the controller pods (the chart adds the selector):
+    # one controller pod evictable at a time, so a drain never takes both and
+    # leaves the data plane without xDS. `maxUnavailable` rather than
+    # `minAvailable` so a lone replica (replicaCount: 1) stays evictable.
+    podDisruptionBudget:
+      maxUnavailable: 1
+    # Vertical Pod Autoscaler for the controller pods (the chart adds the
+    # targetRef; the object is the VPA spec as written). The controller uses
+    # ~185Mi against the 128Mi it requests today, and Auto mode applies a new
+    # size by eviction, one pod at a time behind the budget above. Requests
+    # only: with RequestsAndLimits the VPA scales the limits by the fixed
+    # request:limit ratio (10x cpu, 4x memory here) and maxAllowed caps only
+    # the requests, so limits would reach 20 cores / 8Gi; with RequestsOnly
+    # the recommendation is capped at the container's limits (resources.limits
+    # below, 500m/512Mi), which maxAllowed restates. Raise resources.limits to
+    # give the VPA more room. This chart
+    # EMPTIES the object (to {}, which the packaging chart renders as no VPA)
+    # when the resolved gateway.parameters.verticalPodAutoscaler.enabled is
+    # false — `auto` there follows autoscaling.k8s.io/v1 being served — so a
+    # lab without the VPA CRD installs, and the controller's VPA and the
+    # data plane's follow one answer (agent-platform.shape.apply). Removing
+    # the key (`verticalPodAutoscaler: null`) removes the VPA on every shape.
+    verticalPodAutoscaler:
+      updatePolicy:
+        updateMode: Auto
+      resourcePolicy:
+        containerPolicies:
+          - containerName: "*"
+            controlledResources: [cpu, memory]
+            controlledValues: RequestsOnly
+            minAllowed:
+              cpu: 50m
+              memory: 128Mi
+            maxAllowed:
+              cpu: 500m
+              memory: 512Mi
+  # Spread the controller pods across nodes (the chart's Deployment reads this
+  # root key): both controller pods on the node that reboots would leave the
+  # data plane without xDS until one is rescheduled. The selector is the
+  # chart's controller-only label (`agentgateway: agentgateway` is stamped on
+  # the controller pods, never on the data plane's); ScheduleAnyway so a
+  # single-node lab still schedules both.
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          agentgateway: agentgateway
   proxy:
     image:
       registry: gsoci.azurecr.io

@@ -69,7 +69,7 @@ README.
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agentgateway.versionRange | string | `"2.x"` |  |
+| components.agentgateway.versionRange | string | `">=2.1.2 <3.0.0"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
 | components.agentgateway.enabled | bool | `false` |  |
 | components.agentgateway.crds | string | `"CreateReplace"` |  |
@@ -247,6 +247,12 @@ README.
 | gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
+| gateway.parameters.verticalPodAutoscaler.enabled | string | `"auto"` |  |
+| gateway.parameters.verticalPodAutoscaler.updateMode | string | `"Auto"` |  |
+| gateway.parameters.verticalPodAutoscaler.minAllowed.cpu | string | `"50m"` |  |
+| gateway.parameters.verticalPodAutoscaler.minAllowed.memory | string | `"64Mi"` |  |
+| gateway.parameters.verticalPodAutoscaler.maxAllowed.cpu | string | `"2"` |  |
+| gateway.parameters.verticalPodAutoscaler.maxAllowed.memory | string | `"2Gi"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -625,6 +631,20 @@ README.
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
+| agentgateway.controller.podDisruptionBudget.maxUnavailable | int | `1` |  |
+| agentgateway.controller.verticalPodAutoscaler.updatePolicy.updateMode | string | `"Auto"` |  |
+| agentgateway.controller.verticalPodAutoscaler.resourcePolicy.containerPolicies[0].containerName | string | `"*"` |  |
+| agentgateway.controller.verticalPodAutoscaler.resourcePolicy.containerPolicies[0].controlledResources[0] | string | `"cpu"` |  |
+| agentgateway.controller.verticalPodAutoscaler.resourcePolicy.containerPolicies[0].controlledResources[1] | string | `"memory"` |  |
+| agentgateway.controller.verticalPodAutoscaler.resourcePolicy.containerPolicies[0].controlledValues | string | `"RequestsOnly"` |  |
+| agentgateway.controller.verticalPodAutoscaler.resourcePolicy.containerPolicies[0].minAllowed.cpu | string | `"50m"` |  |
+| agentgateway.controller.verticalPodAutoscaler.resourcePolicy.containerPolicies[0].minAllowed.memory | string | `"128Mi"` |  |
+| agentgateway.controller.verticalPodAutoscaler.resourcePolicy.containerPolicies[0].maxAllowed.cpu | string | `"500m"` |  |
+| agentgateway.controller.verticalPodAutoscaler.resourcePolicy.containerPolicies[0].maxAllowed.memory | string | `"512Mi"` |  |
+| agentgateway.topologySpreadConstraints[0].maxSkew | int | `1` |  |
+| agentgateway.topologySpreadConstraints[0].topologyKey | string | `"kubernetes.io/hostname"` |  |
+| agentgateway.topologySpreadConstraints[0].whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
+| agentgateway.topologySpreadConstraints[0].labelSelector.matchLabels.agentgateway | string | `"agentgateway"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |

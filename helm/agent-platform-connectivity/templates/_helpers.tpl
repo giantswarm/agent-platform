@@ -357,7 +357,8 @@ timeouts:
 
 The knobs that describe what the cluster can admit — Kyverno policies, the
 network-policy flavor, ServiceMonitors/PodMonitors, the agent-sandbox
-pod-security policy — accept `auto` (the default): the object renders when its
+pod-security policy, the data-plane VerticalPodAutoscaler — accept `auto` (the
+default): the object renders when its
 API group is served. `.Capabilities.APIVersions` is the live discovery under
 helm-controller, the Helm CLI and `--dry-run=server`; under `helm template` it
 is Helm's built-in set unless `--api-versions` names more, so an offline render
@@ -370,7 +371,8 @@ here and every component's own copy come from one answer. The helpers below
 are what a render of this chart on its own uses; on the same cluster they give
 the same answer. Templates read the truthy wrappers underneath
 (agent-platform.kyvernoPolicies, .networkPolicyFlavor, .serviceMonitor,
-.agentSandboxPodSecurity, .modelServingPolicies), never the raw values.
+.agentSandboxPodSecurity, .modelServingPolicies, .dataPlaneVPA), never the raw
+values.
 */}}
 
 {{/*
@@ -398,6 +400,18 @@ kyverno.io/v1 served).
 */}}
 {{- define "agent-platform.shape.kyvernoPolicies" -}}
 {{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1") -}}
+{{- end -}}
+
+{{/*
+gateway.parameters.verticalPodAutoscaler.enabled resolved: "true" when the
+data-plane VerticalPodAutoscaler renders (auto: autoscaling.k8s.io/v1 served —
+the fleet's management clusters run the VPA; a kind lab has no such CRD). Under
+the meta chart the knob arrives resolved, and the agentgateway controller's own
+VPA (agentgateway.controller.verticalPodAutoscaler, forwarded to the packaging
+chart) follows the same answer there.
+*/}}
+{{- define "agent-platform.shape.dataPlaneVPA" -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "gateway.parameters.verticalPodAutoscaler.enabled" "value" (dig "parameters" "verticalPodAutoscaler" "enabled" "auto" (.Values.gateway | default dict)) "api" "autoscaling.k8s.io/v1") -}}
 {{- end -}}
 
 {{/*
@@ -461,6 +475,17 @@ Truthy (emits "true") when the kyverno.io objects render. Gated templates use:
 */}}
 {{- define "agent-platform.kyvernoPolicies" -}}
 {{- if eq (include "agent-platform.shape.kyvernoPolicies" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy (emits "true") when the data-plane VerticalPodAutoscaler renders: the
+knob resolved true AND the data plane itself renders (an agentgateway-* mode
+with gateway.parameters.enabled; the VPA targets the Deployment the controller
+reconciles from the Gateway, which exists in no other shape). Gated templates use:
+  {{- if (include "agent-platform.dataPlaneVPA" .) }}
+*/}}
+{{- define "agent-platform.dataPlaneVPA" -}}
+{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.gateway.parameters.enabled (eq (include "agent-platform.shape.dataPlaneVPA" .) "true") -}}true{{- end -}}
 {{- end -}}
 
 {{/*

@@ -6,7 +6,11 @@ kyvernoPolicies.enabled (kyverno.io/v1), networkPolicy.flavor (cilium.io/v2 ->
 cilium, else kubernetes), global.observability.metrics.serviceMonitor.enabled
 (monitoring.coreos.com/v1), dicebear.route.enabled (gateway.envoyproxy.io/v1alpha1),
 agentSandbox.podSecurity.enabled and modelServing.policies.enabled (both follow
-the resolved kyvernoPolicies). The
+the resolved kyvernoPolicies), gateway.parameters.verticalPodAutoscaler.enabled
+(autoscaling.k8s.io/v1: the data-plane VerticalPodAutoscaler the connectivity
+chart renders, and the agentgateway controller's own VPA — the forwarded
+agentgateway.controller.verticalPodAutoscaler is emptied where the answer is
+false, so the packaging chart renders none). The
 meta chart resolves them once from .Capabilities.APIVersions and derives the
 component copies (muster's flavor and monitors, valkey's Cilium policy and
 PodMonitor, kagent's OTel exporters, oauth2-proxy monitor and OTLP header) before
@@ -36,6 +40,7 @@ FLEET_APIS = [
     "monitoring.coreos.com/v1",
     "gateway.networking.k8s.io/v1",
     "gateway.envoyproxy.io/v1alpha1",
+    "autoscaling.k8s.io/v1",
 ]
 
 # The shapes: the served groups, from the fleet down to a bare kind cluster.
@@ -45,10 +50,15 @@ SHAPES = {
     "kyverno-only": ["kyverno.io/v1"],
     "monitoring-only": ["monitoring.coreos.com/v1"],
     "envoy-only": ["gateway.envoyproxy.io/v1alpha1"],
+    "vpa-only": ["autoscaling.k8s.io/v1"],
     "vanilla": [],
 }
 
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
+# The agentgateway data plane, which the connectivity chart renders (with the
+# data-plane VerticalPodAutoscaler behind its knob) in an agentgateway-* mode only.
+AGENTGATEWAY = ["--set", "ingress.mode=agentgateway-muster", "--set", "components.agentgateway.enabled=true"]
+VPA_KNOB = ["gateway", "parameters", "verticalPodAutoscaler", "enabled"]
 # kagent, agent-sandbox and postgres on, so every gated object is reachable.
 ON = [
     "--set", "components.kagent.enabled=true",
@@ -67,6 +77,7 @@ EXPLICIT_FLEET_KNOBS = [
     "--set", "global.observability.metrics.serviceMonitor.enabled=true",
     "--set", "agentSandbox.podSecurity.enabled=true",
     "--set", "modelServing.policies.enabled=true",
+    "--set", "gateway.parameters.verticalPodAutoscaler.enabled=true",
 ]
 EXPLICIT_FLEET_COPIES = [
     "--set", "dicebear.route.enabled=true",
@@ -85,6 +96,7 @@ EXPLICIT_VANILLA_KNOBS = [
     "--set", "global.observability.metrics.serviceMonitor.enabled=false",
     "--set", "agentSandbox.podSecurity.enabled=false",
     "--set", "modelServing.policies.enabled=false",
+    "--set", "gateway.parameters.verticalPodAutoscaler.enabled=false",
 ]
 OTLP_HEADER = "name: OTEL_EXPORTER_OTLP_HEADERS"
 
@@ -170,6 +182,7 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     cilium = "cilium.io/v2" in served
     monitors = "monitoring.coreos.com/v1" in served
     envoy = "gateway.envoyproxy.io/v1alpha1" in served
+    vpa = "autoscaling.k8s.io/v1" in served
     flavor = "cilium" if cilium else "kubernetes"
     where = f"[{name}]"
 
@@ -185,11 +198,25 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
         (["agentSandbox", "podSecurity", "enabled"], yes(kyverno)),
         (["modelServing", "policies", "enabled"], yes(kyverno)),
         (["dicebear", "route", "enabled"], yes(envoy)),
+        (VPA_KNOB, yes(vpa)),
         (["muster", "networkPolicy", "flavor"], flavor),
         (["valkey", "ciliumNetworkPolicy", "enabled"], yes(cilium)),
     ):
         got = leaf(conn, path)
         expect(got == want, f"{where} connectivity values {'.'.join(path)} = {got!r}, want {want!r}")
+
+    # The agentgateway controller's VPA follows the same answer: the spec is
+    # forwarded where the API is served, the object emptied ({}) where it is
+    # not — the packaging chart renders no VerticalPodAutoscaler from {}.
+    agw = hr["agentgateway"]
+    ctrl_vpa = leaf(agw, ["controller", "verticalPodAutoscaler"])
+    mode = leaf(agw, ["controller", "verticalPodAutoscaler", "updatePolicy", "updateMode"])
+    if vpa:
+        expect(ctrl_vpa == "" and mode == "Auto",
+               f"{where} agentgateway controller.verticalPodAutoscaler = {ctrl_vpa!r} (updateMode {mode!r}), want the spec with updateMode Auto")
+    else:
+        expect(ctrl_vpa == "{}",
+               f"{where} agentgateway controller.verticalPodAutoscaler = {ctrl_vpa!r}, want '{{}}' — a VPA object on a cluster without the CRD fails the release")
 
     muster = hr["muster"]
     for path, want in (
@@ -234,6 +261,14 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
         expect((objects.get(kind, 0) > 0) == kyverno, f"{where} connectivity {kind} count={objects.get(kind, 0)}, kyverno served={kyverno}")
     expect((objects.get("ServiceMonitor", 0) > 0) == monitors,
            f"{where} connectivity ServiceMonitor count={objects.get('ServiceMonitor', 0)}, monitoring served={monitors}")
+    expect(objects.get("VerticalPodAutoscaler", 0) == 0,
+           f"{where} connectivity renders a VerticalPodAutoscaler without the agentgateway data plane")
+    # The data-plane VerticalPodAutoscaler is an object of the agentgateway mode
+    # (the data plane's other objects are verify-dataplane-ha's), so the
+    # connectivity chart is rendered once more in that mode.
+    dataplane = kinds(render(connectivity, [*PARENT_REF, *ON, *AGENTGATEWAY, *apis(served)]))
+    expect(dataplane.get("VerticalPodAutoscaler", 0) == (1 if vpa else 0),
+           f"{where} connectivity (agentgateway mode) VerticalPodAutoscaler count={dataplane.get('VerticalPodAutoscaler', 0)}, autoscaling served={vpa}")
 
 
 def main(meta: str, connectivity: str) -> int:
@@ -282,6 +317,15 @@ def main(meta: str, connectivity: str) -> int:
     expect("kind: ServiceMonitor" not in rendered and "enablePodMonitor" not in rendered,
            "connectivity: serviceMonitor.enabled=false with monitoring served still renders a monitor")
 
+    m = helm_releases(render(meta, [*ci, *ON, *fleet, "--set", "gateway.parameters.verticalPodAutoscaler.enabled=false"]))
+    expect(leaf(m["agent-platform-connectivity"], VPA_KNOB) == "false"
+           and leaf(m["agentgateway"], ["controller", "verticalPodAutoscaler"]) == "{}"
+           and leaf(m["agent-platform-connectivity"], ["kyvernoPolicies", "enabled"]) == "true",
+           "gateway.parameters.verticalPodAutoscaler.enabled=false with the VPA API served did not switch both VPAs off (or touched another knob)")
+    c = kinds(render(connectivity, [*PARENT_REF, *ON, *AGENTGATEWAY, *fleet, "--set", "gateway.parameters.verticalPodAutoscaler.enabled=false"]))
+    expect(c.get("VerticalPodAutoscaler", 0) == 0,
+           "connectivity: verticalPodAutoscaler.enabled=false with the API served still renders the data-plane VPA")
+
     m = helm_releases(render(meta, [*ci, *ON, *fleet, "--set", "muster.networkPolicy.flavor=kubernetes"]))
     expect(leaf(m["muster"], ["networkPolicy", "flavor"]) == "kubernetes"
            and leaf(m["agent-platform-connectivity"], ["networkPolicy", "flavor"]) == "cilium",
@@ -306,6 +350,13 @@ def main(meta: str, connectivity: str) -> int:
     c = kinds(render(connectivity, [*PARENT_REF, *ON, "--set", "kyvernoPolicies.enabled=true", "--set", "networkPolicy.flavor=cilium"]))
     expect(c.get("ClusterPolicy", 0) > 0 and c.get("CiliumNetworkPolicy", 0) > 0 and c.get("NetworkPolicy", 0) == 0,
            "connectivity: explicit true values on a vanilla render did not render the objects")
+    m = helm_releases(render(meta, [*ci, *ON, "--set", "gateway.parameters.verticalPodAutoscaler.enabled=true"]))
+    expect(leaf(m["agent-platform-connectivity"], VPA_KNOB) == "true"
+           and leaf(m["agentgateway"], ["controller", "verticalPodAutoscaler", "updatePolicy", "updateMode"]) == "Auto",
+           "explicit verticalPodAutoscaler.enabled=true on a vanilla render did not keep both VPAs (the knob forwarded true, the controller spec intact)")
+    c = kinds(render(connectivity, [*PARENT_REF, *ON, *AGENTGATEWAY, "--set", "gateway.parameters.verticalPodAutoscaler.enabled=true"]))
+    expect(c.get("VerticalPodAutoscaler", 0) == 1,
+           "connectivity: explicit verticalPodAutoscaler.enabled=true on a vanilla render did not render the data-plane VPA")
 
     # 4. The guard on an explicit disagreement still fires.
     render_fails(connectivity, [*PARENT_REF, *ON, *fleet, "--set", "kyvernoPolicies.enabled=false", "--set", "agentSandbox.podSecurity.enabled=true"],
@@ -318,6 +369,7 @@ def main(meta: str, connectivity: str) -> int:
         render_fails(chart, [*base, "--set", "kyvernoPolicies.enabled=maybe"], "kyvernoPolicies", f"{chart}: bogus kyvernoPolicies.enabled")
         render_fails(chart, [*base, "--set-string", "kyvernoPolicies.enabled=true"], "kyvernoPolicies", f"{chart}: string 'true' for kyvernoPolicies.enabled")
         render_fails(chart, [*base, "--set", "global.observability.metrics.serviceMonitor.enabled=maybe"], "serviceMonitor", f"{chart}: bogus serviceMonitor.enabled")
+        render_fails(chart, [*base, "--set", "gateway.parameters.verticalPodAutoscaler.enabled=maybe"], "verticalPodAutoscaler", f"{chart}: bogus verticalPodAutoscaler.enabled")
     return 0
 
 
