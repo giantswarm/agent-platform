@@ -51,7 +51,9 @@ knowledge:
       by the agent-platform.componentDerivedValues helper (the per-component
       knowledge lives there, not in this loop): agent-manager's
       flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName, the
-      tenant identity the connectivity chart renders. Never written back into
+      tenant identity the connectivity chart renders, and its muster.url from
+      the muster Service (agent-platform.musterMcpUrl, the URL every agent's
+      own RemoteMCPServer targets). Never written back into
       .Values, so the whole-tree forward stays what the operator wrote.
   injectGlobal  — inject `.Values.global` into the forwarded values (default
       true). Set false for components whose strict values.schema.json

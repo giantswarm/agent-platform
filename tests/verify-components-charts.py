@@ -143,13 +143,23 @@ def registry_tags(url: str) -> list[str]:
     sys.exit(f"FAIL: the tag list of {url} did not end after 100 pages")
 
 
+# component -> a published branch build that already carries the schema of the
+# release UNRELEASED waits for, when the newest release's schema would refuse a
+# value 4.0 forwards (agent-manager 0.x: muster is additionalProperties false,
+# so the derived muster.url fails its render). The entry goes with the release.
+RENDER_AGAINST = {
+    "agent-manager": "0.4.5-dev.kagent-v2-agenttemplates.2026-09-10.23-57-22.hebd7516",
+}
+
+
 def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
     """The chart to render against while nothing the constraint admits is
     published: the kagent build the values name (kagent.tag — the chart version
-    of the same build), else the newest release tag."""
+    of the same build), the branch build RENDER_AGAINST names, else the newest
+    release tag."""
     if name not in UNRELEASED:
         sys.exit(f"FAIL: no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED)")
-    chosen = kagent_tag if name in KAGENT else fluxsemver.resolve(tags, ">=0.0.0")
+    chosen = kagent_tag if name in KAGENT else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
     if not chosen or chosen not in tags:
         sys.exit(f"FAIL: no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
     print(f"NOTE: {name}: {constraint!r} matches no published chart yet (waits for {UNRELEASED[name]}); rendering against {chosen}")
