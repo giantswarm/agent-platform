@@ -53,7 +53,7 @@ producing a silently-broken release.
   {{- end }}
 
   {{- /* An in-cluster JWKS endpoint needs jwksEgress; an external one is
-         covered by the controller policy's own rules, but only over TLS. The
+         covered by the controller policy's own rules, on the port the route names. The
          shared helper carries every JWKS guard. */ -}}
   {{- if and .Values.kagent.controllerRoute.enabled ((.Values.kagent.controllerRoute.jwtAuthentication).enabled) }}
     {{- $_ := include "agent-platform.jwks.validate" (dict "ctx" . "path" "kagent.controllerRoute.jwtAuthentication" "jwks" .Values.kagent.controllerRoute.jwtAuthentication.jwks) }}

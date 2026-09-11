@@ -85,7 +85,7 @@ callers, a route the API server rejects, or an MCPServer CR without its CRD.
         {{- $_ := include "agent-platform.issuerUrl" (dict "ctx" . "for" "agentManager.route.jwtAuthentication (or set its .issuer)") }}
       {{- end }}
       {{- /* An in-cluster JWKS endpoint needs jwksEgress; an external one is
-             covered by the controller policy's own rules, but only over TLS.
+             covered by the controller policy's own rules, on the port the route names.
              The shared helper carries every JWKS guard. */ -}}
       {{- $_ := include "agent-platform.jwks.validate" (dict "ctx" . "path" "agentManager.route.jwtAuthentication" "jwks" $am.route.jwtAuthentication.jwks) }}
     {{- end }}

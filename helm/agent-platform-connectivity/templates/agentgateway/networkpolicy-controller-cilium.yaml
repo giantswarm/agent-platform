@@ -83,9 +83,9 @@ spec:
     {{- end }}
     {{- /* gateway.jwksEgress.external.cidrs: an issuer the routes do not name,
     or one the kubernetes flavour's IPv4 wide rule cannot reach. */}}
-    {{- with $extraCidrs }}
+    {{- if $extraCidrs }}
     - toCIDR:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml $extraCidrs | nindent 8 }}
       toPorts:
         - ports:
             - port: {{ $extraPort | toString | quote }}

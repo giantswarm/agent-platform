@@ -808,12 +808,14 @@ Usage: include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerU
 {{/*
 Truthy ("true") when a JWKS host is served from inside the cluster, so
 gateway.jwksEgress covers it and no name- or address-based egress rule is
-needed: a Service name whose third dot-separated label is `svc`
-(dex.giantswarm.svc, dex.giantswarm.svc.cluster.local) or a host with fewer
-than three labels (dex, dex.giantswarm — a Service reached by its short name).
-Every other host is external, an address literal of either family included, and
-so is a public name that merely carries an `svc` label somewhere else
-(svc.example.com, keys.svc.example.com). A two-label host is ambiguous —
+needed: a Service name whose third dot-separated label is `svc` and whose
+remaining labels are empty, `cluster` or `cluster.local` (dex.giantswarm.svc,
+dex.giantswarm.svc.cluster.local — the forms the pod's search path produces), or
+a host with fewer than three labels (dex, dex.giantswarm — a Service reached by
+its short name). Every other host is external, an address literal of either
+family included, and so is a public name that carries an `svc` label somewhere
+else (svc.example.com, keys.svc.example.com, a.b.svc.example.com). A two-label
+host is ambiguous —
 dex.giantswarm and okta.com are the same shape — so the render guard refuses it
 unless its second label is gateway.jwksEgress.namespace; see
 agent-platform.jwks.ambiguousHost.
@@ -822,8 +824,13 @@ Usage: include "agent-platform.jwks.inCluster" $host
 {{- define "agent-platform.jwks.inCluster" -}}
 {{- $host := . | toString -}}
 {{- $labels := splitList "." $host -}}
+{{- $n := len $labels -}}
 {{- if not (contains ":" $host) -}}
-{{- if or (lt (len $labels) 3) (eq (index $labels 2) "svc") -}}true{{- end -}}
+{{- if lt $n 3 -}}true
+{{- else if eq (index $labels 2) "svc" -}}
+{{- $tail := join "." (slice $labels 3 $n) -}}
+{{- if or (eq $tail "") (eq $tail "cluster") (eq $tail "cluster.local") -}}true{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -839,15 +846,41 @@ Usage: include "agent-platform.jwks.addrCIDR" $host
 {{- $octet := "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])" -}}
 {{- if regexMatch (printf "^%s[.]%s[.]%s[.]%s$" $octet $octet $octet $octet) $host -}}
 {{- printf "%s/32" $host -}}
-{{- else if and (contains ":" $host) (regexMatch "^[0-9A-Fa-f:.]+$" $host) -}}
+{{- else if include "agent-platform.jwks.isIPv6" $host -}}
 {{- printf "%s/128" $host -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy ("true") for a valid IPv6 literal, brackets already stripped. A block a
+selector can carry has to survive the API server, so the shape is checked and
+not merely the alphabet: hex groups of at most four digits, exactly eight of
+them, or fewer with one `::`. A trailing dotted quad (::ffff:192.0.2.1) counts
+as two groups. Anything else — 1:2:3, a dotted quad with a port glued on — is
+not an address, and the caller reports it as one of the malformed shapes.
+Usage: include "agent-platform.jwks.isIPv6" $host
+*/}}
+{{- define "agent-platform.jwks.isIPv6" -}}
+{{- $host := . | toString -}}
+{{- $octet := "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])" -}}
+{{- $quad := regexFind (printf "[:]%s[.]%s[.]%s[.]%s$" $octet $octet $octet $octet) $host -}}
+{{- if $quad -}}
+{{- $host = printf "%s0:0" (trimSuffix (trimPrefix ":" $quad) $host) -}}
+{{- end -}}
+{{- if and (contains ":" $host) (regexMatch "^[0-9A-Fa-f:]+$" $host) (not (regexMatch "[0-9A-Fa-f]{5}" $host)) (not (contains ":::" $host)) -}}
+{{- $fields := splitList ":" $host -}}
+{{- $groups := len (without $fields "") -}}
+{{- if contains "::" $host -}}
+{{- if le $groups 7 -}}true{{- end -}}
+{{- else if and (eq (len $fields) 8) (eq $groups 8) -}}true{{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
 Truthy ("true") when a JWKS host looks like an address literal but is not a
 valid one: four all-digit labels with an octet above 255 (1.2.3.999), or a host
-carrying a colon that is not hex-and-colons. No selector of either flavour
+carrying a colon that is not a valid IPv6 literal (1:2:3). No selector of either
+flavour
 reaches such a host — a name selector never resolves it and the API server
 rejects the block it would render — and the AgentgatewayBackend it renders
 fetches nothing, so the render guards fail on it. The route subtrees are open
@@ -863,14 +896,16 @@ Usage: include "agent-platform.jwks.malformedAddr" $host
 {{- end -}}
 
 {{/*
-Truthy ("true") when a JWKS host carries a port (dex.example.com:5556), the one
-malformed shape with an obvious repair: the port belongs in jwks.port. Reported
-on its own so the guard names that instead of "not a valid IP address".
+Truthy ("true") when a JWKS host carries a port (dex.example.com:5556,
+10.0.0.1:5556, [2001:db8::1]:443), the one malformed shape with an obvious
+repair: the port belongs in jwks.port. Reported on its own so the guard names
+that instead of "not a valid IP address".
 Usage: include "agent-platform.jwks.hostCarriesPort" $host
 */}}
 {{- define "agent-platform.jwks.hostCarriesPort" -}}
 {{- $host := . | toString -}}
-{{- if regexMatch "^[^:]+:[0-9]+$" $host -}}
+{{- if regexMatch "^\\[[0-9A-Fa-f:.]+\\]:[0-9]+$" $host -}}true
+{{- else if regexMatch "^[^:]+:[0-9]+$" $host -}}
 {{- if not (include "agent-platform.jwks.addrCIDR" $host) -}}true{{- end -}}
 {{- end -}}
 {{- end -}}
@@ -897,7 +932,9 @@ Usage: include "agent-platform.jwks.ambiguousHost" $host
 Truthy ("true") when the controller must originate TLS to fetch a route's JWKS:
 jwks.tls.enabled, or port 443, which serves no plain HTTP. Without it the fetch
 speaks plain HTTP to a TLS endpoint and the controller holds no keys, which
-reaches every caller as `401 token uses the unknown key`.
+reaches every caller as `401 token uses the unknown key`. The port wins:
+jwks.tls.enabled false on 443 still originates TLS. A plain-HTTP issuer belongs
+on a plain-HTTP port.
 Usage: include "agent-platform.jwks.tlsEnabled" $jwks
 */}}
 {{- define "agent-platform.jwks.tlsEnabled" -}}
@@ -961,13 +998,13 @@ literal, which renders as a block instead of a name selector.
 {{- $out := list -}}
 {{- $seen := dict -}}
 {{- $sources := list -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.controllerRoute.enabled (.Values.kagent.controllerRoute.jwtAuthentication).enabled -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (.Values.kagent.controllerRoute).enabled (.Values.kagent.controllerRoute.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.kagent.controllerRoute.jwtAuthentication.jwks -}}
 {{- end -}}
-{{- if and (include "agent-platform.modelManager.enabled" .) .Values.modelManager.route.enabled (.Values.modelManager.route.jwtAuthentication).enabled -}}
+{{- if and (include "agent-platform.modelManager.enabled" .) (.Values.modelManager.route).enabled (.Values.modelManager.route.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.modelManager.route.jwtAuthentication.jwks -}}
 {{- end -}}
-{{- if and (include "agent-platform.agentManager.enabled" .) .Values.agentManager.route.enabled (.Values.agentManager.route.jwtAuthentication).enabled -}}
+{{- if and (include "agent-platform.agentManager.enabled" .) (.Values.agentManager.route).enabled (.Values.agentManager.route.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.agentManager.route.jwtAuthentication.jwks -}}
 {{- end -}}
 {{- range $sources -}}

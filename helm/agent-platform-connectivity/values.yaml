@@ -191,7 +191,8 @@ gateway:
     # toFQDNs matchName in the cilium flavour, an address block on that port in
     # the kubernetes flavour. A host counts as in-cluster — covered by the rule
     # above, absent from the controller's external rules — when its third
-    # dot-separated label is `svc` or it is a single label. A literal IP
+    # dot-separated label is `svc` and the labels after it are empty, `cluster`
+    # or `cluster.local`, or when it is a single label. A literal IP
     # address renders as a single-address block in both flavours (/32 for
     # IPv4, /128 for IPv6), because no FQDN selector matches an address. A
     # two-label host outside `namespace` above (okta.com) fails the render: a
@@ -211,7 +212,7 @@ gateway:
       cidrs: []  # @schema item: string; itemPattern: ^(?:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(?:3[0-2]|[12]?[0-9])|(?:[0-9A-Fa-f]{0,4}:)[0-9A-Fa-f:.]*/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9]))$
       # The port cidrs is opened on. The hosts the routes name are opened on
       # their own jwks.port instead.
-      port: 443
+      port: 443  # @schema minimum: 1; maximum: 65535
   parameters:
     enabled: true
     name: ""
