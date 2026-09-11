@@ -916,16 +916,32 @@ Usage: include "agent-platform.kagent.userIdClaim" .
 {{- end -}}
 
 {{/*
-The gRPC service matches of the kagent controller route (a GRPCRoute rule's
-`matches:` list): the kagent API v2 services the platform's clients call and the
-A2A v1 service the agents are reached through. Exact service matches, every
-method; a service absent here is unreachable through the gateway by design.
-Usage: include "agent-platform.kagent.grpcServiceMatches" . | nindent 8
+The rules of the kagent controller GRPCRoute (a `rules:` list), from
+kagent.controllerRoute.grpc.services: one rule per service, one exact
+service/method match per RPC, every rule forwarding to the backend given as
+`.backendRefs` (a YAML string). Exact service/method matches are the one shape
+the agentgateway controller translates into a path that requests have (a
+service-only match becomes the exact path "/<service>/", `type:
+RegularExpression` is ignored), and they outrank the MCP catch-all's PathPrefix.
+Usage: include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" $refs) | nindent 4
 */}}
-{{- define "agent-platform.kagent.grpcServiceMatches" -}}
-{{- range list "kagent.api.v1alpha1.AgentInstanceService" "kagent.api.v1alpha1.AgentTemplateService" "kagent.api.v1alpha1.ModelService" "kagent.api.v1alpha1.SystemService" "lf.a2a.v1.A2AService" }}
-- method:
-    type: Exact
-    service: {{ . }}
+{{- define "agent-platform.kagent.grpcRules" -}}
+{{- $services := dig "controllerRoute" "grpc" "services" (dict) .ctx.Values.kagent }}
+{{- if not $services }}
+{{- fail "kagent.controllerRoute.grpc.services is empty: the controller GRPCRoute needs at least one service with its methods" }}
+{{- end }}
+{{- range $svc, $methods := $services }}
+{{- if not $methods }}
+{{- fail (printf "kagent.controllerRoute.grpc.services[%s] lists no methods: the agentgateway controller cannot route a service-only match" $svc) }}
+{{- end }}
+- matches:
+{{- range $methods }}
+    - method:
+        type: Exact
+        service: {{ $svc }}
+        method: {{ . }}
+{{- end }}
+  backendRefs:
+{{ $.backendRefs | indent 4 }}
 {{- end }}
 {{- end -}}

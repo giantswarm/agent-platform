@@ -673,7 +673,7 @@ define kagent_route_doc
 endef
 
 .PHONY: verify-kagent-route
-verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services on both hops, h2c to the controller, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, and the guards.
+verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by every RPC of the kagent API v2 + A2A v1 services (exact service/method, one rule per service) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, and the guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> the default shape: GRPCRoutes on both hops, no REST route, no path prefix"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true >/tmp/vkr.out 2>&1 || { cat /tmp/vkr.out; exit 1; }
@@ -683,20 +683,25 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@if grep -qE 'value: /kagent$$|pathPrefix|replacePrefixMatch: /$$' /tmp/vkr.out; then echo "FAIL: the render still carries a /kagent path prefix"; grep -nE 'value: /kagent$$|pathPrefix' /tmp/vkr.out | head; exit 1; fi
 	@for svc in kagent.api.v1alpha1.AgentInstanceService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService; do \
 		for f in /tmp/vkr-inner.out /tmp/vkr-public.out; do \
-			grep -B2 "^            service: $$svc$$" $$f | grep -q 'type: Exact' || { echo "FAIL: $$f has no exact service match for $$svc"; exit 1; }; \
+			grep -B1 "^            service: $$svc$$" $$f | grep -q 'type: Exact' || { echo "FAIL: $$f has no exact match for $$svc"; exit 1; }; \
 		done; \
 	done
-	@[ "$$(grep -c '^            service: ' /tmp/vkr-inner.out)" = "5" ] || { echo "FAIL: the inner GRPCRoute matches a service outside the contract"; grep -n 'service:' /tmp/vkr-inner.out; exit 1; }
+	@for f in /tmp/vkr-inner.out /tmp/vkr-public.out; do \
+		[ "$$(grep -c '^    - matches:' $$f)" = "5" ] || { echo "FAIL: $$f does not carry one rule per service (5)"; grep -c '^    - matches:' $$f; exit 1; }; \
+		[ "$$(grep -c '^            service: ' $$f)" = "39" ] || { echo "FAIL: $$f does not match the 39 RPCs of the line's five services"; grep -c '^            service: ' $$f; exit 1; }; \
+		[ "$$(grep -c '^            method: ' $$f)" = "39" ] || { echo "FAIL: $$f has a service-only match — the agentgateway controller translates it into an exact path no request has"; exit 1; }; \
+		grep -A1 '^            service: lf.a2a.v1.A2AService$$' $$f | grep -q 'method: SendStreamingMessage' || { echo "FAIL: $$f does not route A2AService/SendStreamingMessage"; exit 1; }; \
+	done
 	@if grep -q '^  hostnames:' /tmp/vkr-inner.out; then echo "FAIL: the inner GRPCRoute is hostname-scoped (the in-cluster authority agentgateway.<ns>.svc.cluster.local:8080 would not match)"; exit 1; fi
 	@grep -q 'kind: AgentgatewayBackend' /tmp/vkr-inner.out || { echo "FAIL: the inner GRPCRoute does not target the kagent AgentgatewayBackend"; exit 1; }
 	@grep -q '"agentgateway.ci.example.com"' /tmp/vkr-public.out || { echo "FAIL: the public GRPCRoute does not derive its hostname from global.domain"; exit 1; }
 	@grep -A2 'backendRefs:' /tmp/vkr-public.out | grep -q 'name: agentgateway' || { echo "FAIL: the public GRPCRoute does not forward to the agentgateway Service"; exit 1; }
 	@grep -A2 'backendRefs:' /tmp/vkr-public.out | grep -q 'port: 8080' || { echo "FAIL: the public GRPCRoute does not forward to port 8080"; exit 1; }
 	@echo "ok: GRPCRoutes"
-	@echo "--> the controller backend: passthrough of the bearer, HTTP/2 to the controller"
+	@echo "--> the controller backend: passthrough of the bearer, no protocol pin (h2c inferred for gRPC, HTTP/1.1 kept for gRPC-Web)"
 	$(call kagent_route_doc,AgentgatewayBackend,kagent,/tmp/vkr.out,/tmp/vkr-backend.out)
 	@grep -q 'passthrough: {}' /tmp/vkr-backend.out || { echo "FAIL: the kagent backend no longer passes the bearer through"; exit 1; }
-	@grep -q 'version: HTTP2' /tmp/vkr-backend.out || { echo "FAIL: the kagent backend does not pin HTTP/2 (the controller Service carries no appProtocol)"; exit 1; }
+	@if grep -qE '^ +version: HTTP' /tmp/vkr-backend.out; then echo "FAIL: the kagent backend pins a protocol version — pinned HTTP/2 sends gRPC-Web to the controller's native gRPC server (415); agentgateway infers h2c for gRPC and keeps HTTP/1.1 for gRPC-Web"; exit 1; fi
 	@grep -q 'host: kagent-controller.kagent.svc.cluster.local' /tmp/vkr-backend.out || { echo "FAIL: the kagent backend does not target the controller Service in the kagent namespace"; exit 1; }
 	@echo "ok: backend"
 	@echo "--> the JWT policy: on by default, Strict, on the GRPCRoute, the identity transformation and the claim requirement"
@@ -759,6 +764,14 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	$(call managers_must_fail,the JWT policy needs jwksEgress,$(KAGENT_ROUTE) --set gateway.jwksEgress.enabled=false,gateway.jwksEgress.enabled is false)
 	$(call managers_must_fail,the JWT policy needs an issuer,$(KAGENT_ROUTE) --set global.identity.issuerUrl=,needs the login issuer)
 	$(call managers_must_fail,the identity claim is a plain claim name,$(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=x-claim,is not a plain claim name)
+	$(call managers_must_fail,a service without methods fails (a service-only match never routes),$(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"svc.Only":[]}',lists no methods)
+	$(call managers_must_fail,an empty service map fails,$(KAGENT_ROUTE) --set kagent.controllerRoute.grpc.services=null,grpc.services is empty)
+	@echo "--> an extra RPC in kagent.controllerRoute.grpc.services reaches both GRPCRoutes"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"kagent.api.v1alpha1.SystemService":["GetVersion","NewRpc"]}' >/tmp/vkr-extra.out 2>&1 || { cat /tmp/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c 'method: NewRpc' /tmp/vkr-extra.out)" = "2" ] || { echo "FAIL: an added RPC does not reach both GRPCRoutes"; exit 1; }
+	@[ "$$(grep -c '^            service: kagent.api.v1alpha1.SystemService$$' /tmp/vkr-extra.out)" = "4" ] || { echo "FAIL: a service's method list is not replaced by the override (Helm merges the map per service, replaces the list)"; grep -c '^            service: kagent.api.v1alpha1.SystemService$$' /tmp/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c '^            service: ' /tmp/vkr-extra.out)" = "74" ] || { echo "FAIL: the other services' lists did not survive a one-service override"; grep -c '^            service: ' /tmp/vkr-extra.out; exit 1; }
+	@echo "ok: the RPC list is a value (a service's list replaces, the map merges)"
 	@echo "--> every connectivity CI values file renders"
 	@for f in $(CONNECTIVITY_DIR)/ci/*.yaml; do \
 		helm template t $(CONNECTIVITY_DIR) --namespace agent-platform -f $$f >/tmp/vkr-ci.out 2>&1 || { echo "FAIL: $$f does not render"; cat /tmp/vkr-ci.out | tail -5; exit 1; }; \

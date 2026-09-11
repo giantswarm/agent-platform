@@ -989,8 +989,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
   # (h2c to the controller) and a GRPCRoute in the release namespace, matched by
-  # gRPC service — kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService,
-  # ModelService, SystemService} and lf.a2a.v1.A2AService — never by path (the
+  # gRPC service and method (controllerRoute.grpc.services) —
+  # kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService, ModelService,
+  # SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
   # controller has no REST). Native gRPC over HTTP/2 from the public hostname
   # and from the in-cluster agentgateway Service
   # (grpc://agentgateway.<release namespace>.svc.cluster.local:8080, h2c), and
@@ -1009,6 +1010,61 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     parentRef:
       name: giantswarm-default
       namespace: envoy-gateway-system
+    grpc:
+      # The gRPC services and methods the route carries, one GRPCRoute rule per
+      # service with an exact service/method match per RPC. Every RPC is listed
+      # because the agentgateway controller (v1.5.x) translates a service-only
+      # match into an exact path "/<service>/" that no request has, and ignores
+      # `type: RegularExpression` — a service-only match would fall through to
+      # the MCP catch-all route; exact service/method matches outrank it. The
+      # list is the kagent line's proto/ at its pin (v0.11.0-gs.1); an RPC the
+      # line adds is reachable only once it is listed here. An RPC absent here
+      # fails loudly (the catch-all answers 406), never silently.
+      services:
+        kagent.api.v1alpha1.AgentInstanceService:
+          - CreateAgentInstance
+          - CreateAgentInstanceShare
+          - DeleteAgentInstance
+          - GetAgentInstance
+          - ListAgentInstanceShares
+          - ListAgentInstances
+          - ResumeAgentInstance
+          - RevokeAgentInstanceShare
+          - SuspendAgentInstance
+          - UpdateAgentInstanceName
+        kagent.api.v1alpha1.AgentTemplateService:
+          - CreateAgentTemplate
+          - DeleteAgentTemplate
+          - GetAgentTemplate
+          - ListAgentTemplates
+          - UpdateAgentTemplate
+        kagent.api.v1alpha1.ModelService:
+          - CreateModelConfig
+          - DeleteModelConfig
+          - GetModelConfig
+          - ListConfiguredProviders
+          - ListModelConfigs
+          - ListProviderModels
+          - ListSupportedModelProviders
+          - ListSupportedModels
+          - UpdateModelConfig
+        kagent.api.v1alpha1.SystemService:
+          - GetCurrentUser
+          - GetSubstrateStatus
+          - GetVersion
+          - ListNamespaces
+        lf.a2a.v1.A2AService:
+          - CancelTask
+          - CreateTaskPushNotificationConfig
+          - DeleteTaskPushNotificationConfig
+          - GetExtendedAgentCard
+          - GetTask
+          - GetTaskPushNotificationConfig
+          - ListTaskPushNotificationConfigs
+          - ListTasks
+          - SendMessage
+          - SendStreamingMessage
+          - SubscribeToTask
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for

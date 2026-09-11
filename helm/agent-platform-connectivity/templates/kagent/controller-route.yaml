@@ -21,27 +21,29 @@ spec:
       # forwards it to the actor unchanged (KAGENT_PROPAGATE_TOKEN — the person
       # at muster).
       passthrough: {}
-    http:
-      # The controller serves native gRPC, gRPC-Web and A2A on :8083 with
-      # unencrypted HTTP/2; its Service declares no appProtocol, so the
-      # protocol is pinned here instead of inferred per request. Every hop to
-      # the controller is then h2c — gRPC-Web arriving over HTTP/1.1 included.
-      version: HTTP2
+    # No policies.http.version: agentgateway infers the backend protocol per
+    # request — HTTP/2 (h2c) for gRPC, the original HTTP/1.1 for gRPC-Web —
+    # and the controller needs exactly that split: it serves both on one port
+    # and hands every HTTP/2 request whose content-type starts with
+    # application/grpc to its native gRPC server, so gRPC-Web pinned onto HTTP/2
+    # is answered 415 (invalid gRPC request content-type). Verified in the lab.
   static:
     host: {{ printf "%s-controller.%s.svc.cluster.local" $kagentFullname $ns }}
     port: 8083
 ---
 # GRPCRoute — the kagent controller API on the agentgateway Gateway, matched by
-# gRPC service (the kagent API v2 services and A2A v1), never by path prefix:
-# there is no REST on the controller and no prefix to strip. The same route
-# carries gRPC-Web (application/grpc-web+proto over HTTP/1.1 POST at the same
-# /<service>/<method> paths) for browsers.
+# gRPC service and method (kagent.controllerRoute.grpc.services: the kagent API
+# v2 services and A2A v1, one rule per service, one exact match per RPC), never
+# by path prefix: there is no REST on the controller and no prefix to strip.
+# The same route carries gRPC-Web (application/grpc-web+proto over HTTP/1.1
+# POST at the same /<service>/<method> paths) for browsers.
 #
 # This is the internal data-plane hop. It is deliberately NOT hostname-scoped:
 # the in-cluster callers (klaus-gateway's a2a.url, the Dev Portal backend) dial
 # the agentgateway Service by its cluster-DNS name, so their :authority is
-# agentgateway.<ns>.svc.cluster.local:8080, which no public hostname matches. A
-# gRPC service match is exact, so a hostname-less route captures nothing else.
+# agentgateway.<ns>.svc.cluster.local:8080, which no public hostname matches. The
+# matches are exact service/method paths, so a hostname-less route captures
+# nothing else and outranks the MCP catch-all's PathPrefix.
 apiVersion: gateway.networking.k8s.io/v1
 kind: GRPCRoute
 metadata:
@@ -56,12 +58,7 @@ spec:
       group: gateway.networking.k8s.io
       kind: Gateway
   rules:
-    - matches:
-        {{- include "agent-platform.kagent.grpcServiceMatches" . | trim | nindent 8 }}
-      backendRefs:
-        - name: kagent
-          kind: AgentgatewayBackend
-          group: agentgateway.dev
+    {{- include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" "- name: kagent\n  kind: AgentgatewayBackend\n  group: agentgateway.dev") | trim | nindent 4 }}
 {{- if not (include "agent-platform.edgeIsDataPlane" .) }}
 ---
 # GRPCRoute — the same services on the outer public Gateway (TLS-terminating),
@@ -87,10 +84,6 @@ spec:
   hostnames:
     - {{ include "agent-platform.kagent.controllerHostname" . | quote }}
   rules:
-    - matches:
-        {{- include "agent-platform.kagent.grpcServiceMatches" . | trim | nindent 8 }}
-      backendRefs:
-        - name: {{ .Values.gateway.name }}
-          port: 8080
+    {{- include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" (printf "- name: %s\n  port: 8080" .Values.gateway.name)) | trim | nindent 4 }}
 {{- end }}
 {{- end }}
