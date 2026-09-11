@@ -199,6 +199,26 @@ owned by the muster release now (not merged into this chart's values), so
 {{- end -}}
 
 {{/*
+The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
+RemoteMCPServer targets: http://<muster Service>.<release namespace>.svc.cluster.local:<port>/mcp
+while the muster component is on, "" otherwise. ONE helper, two consumers, one
+name in both charts: the meta chart derives agent-manager's chart value
+muster.url from its copy (componentDerivedValues, next to
+flux.helmReleaseServiceAccount), this chart renders it into the portal's
+app-config as agentPlatform.musterMcpUrl (templates/backstage/app-config.yaml).
+Both composers hand it to the Generic agent chart 1.x as muster.url, whose own
+default is the same URL on a default install (muster.fullnameOverride "muster",
+release namespace agent-platform, port 8090) — the value exists so an
+installation whose muster answers elsewhere changes it in one place.
+Usage: include "agent-platform.musterMcpUrl" .
+*/}}
+{{- define "agent-platform.musterMcpUrl" -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Merged HTTPRoute labels for a named route. The shared base
 (ingress.httpRoute.labels) applies to every route; optional per-route overrides
 (ingress.httpRoute.<route>.labels) win on key collision, letting a downstream

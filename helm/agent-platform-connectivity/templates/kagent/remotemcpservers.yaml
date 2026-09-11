@@ -1,48 +1,29 @@
-{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.remoteMcpServers }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
-{{- $musterUrl := printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) }}
-{{- if .Values.muster.enabled }}
-{{/* Shared platform gateway: created in the release namespace (not $ns) and
-referenced cross-namespace by tenant agents — the generic `agent` chart defaults
-its serverRef to muster/agent-platform; that name/namespace pair is the
-platform contract, so it is fixed here. Rendered whenever kagent + muster are
-enabled: the CR is inert until an agent references it. allowedNamespaces
-from: All admits every namespace; muster still authenticates each call.
-No headersFrom, so the caller token forwarded by kagent (KAGENT_PROPAGATE_TOKEN)
-is the only Authorization reaching muster — a static header here would be
-copied into every agent's config and applied LAST by the kagent runtime,
-overriding the propagated caller token, so every agent would act as that
-static identity (docs/authentication.md, "Tool discovery by the kagent
-controller"). For the same reason the kagent controller has no credential
-muster accepts when it lists the server's tools for its status (muster is an
-OAuth resource server, the request carries no bearer, muster answers 401):
-while muster runs with OAuth on, the server opts out of controller-side tool
-discovery with kagent.dev/discovery=disabled — the controller Accepts it
-without a tool listing (kagent controller with kagent-dev/kagent#2752; an
-older controller ignores the label and keeps reporting Accepted=False,
-ReconcileFailed … Unauthorized). Agents resolve the tool list at run time as
-the caller. With muster's OAuth off (dev installs) the controller can list
-tools anonymously, so the label is not rendered. */}}
----
-apiVersion: kagent.dev/v1alpha2
-kind: RemoteMCPServer
-metadata:
-  name: muster
-  namespace: {{ .Release.Namespace }}
-  {{- if dig "muster" "oauth" "server" "enabled" true .Values.muster }}
-  labels:
-    kagent.dev/discovery: disabled
-  {{- end }}
-spec:
-  description: "Shared muster MCP gateway for platform agents"
-  url: {{ $musterUrl | quote }}
-  protocol: STREAMABLE_HTTP
-  allowedNamespaces:
-    from: All
-{{- end }}
+{{/* Operator-owned RemoteMCPServers (kagent.remoteMcpServers[]), kagent API v2
+(kagent.dev/v1alpha3), in the kagent namespace: an AgentTemplate binds a
+RemoteMCPServer of its own namespace only (tools[].mcp.server is a local
+reference), so every server an agent can use lives where the templates do.
+
+There is NO shared muster server here any more. The Generic agent chart 1.x
+renders one RemoteMCPServer per agent — named after the agent, in the agent's
+namespace, muster's in-cluster URL (chart value muster.url, composed by
+agent-manager and the portal from the agent-platform.musterMcpUrl helper),
+STREAMABLE_HTTP, the toolset header X-Muster-Toolset in headersFrom and the
+discovery opt-out label kagent.dev/discovery=disabled while muster's OAuth is
+on — and binds it (docs/authentication.md, "Tool discovery by the kagent
+controller"). Nothing the platform renders for muster carries a static header:
+the caller token propagated by the Harness (KAGENT_PROPAGATE_TOKEN) is the only
+Authorization that reaches muster.
+
+tokenSecret renders a static Authorization header for servers that need a
+credential of their own. The runtime applies static headersFrom values LAST, so
+on such a server every agent acts as that credential, not as the caller — fine
+for a server that has no notion of the caller, wrong for one that should see
+the person (docs/authentication.md explains). */}}
 {{- range .Values.kagent.remoteMcpServers }}
 ---
-apiVersion: kagent.dev/v1alpha2
+apiVersion: kagent.dev/v1alpha3
 kind: RemoteMCPServer
 metadata:
   name: {{ required "kagent.remoteMcpServers[].name is required" .name | quote }}

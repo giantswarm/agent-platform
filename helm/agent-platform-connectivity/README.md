@@ -4,9 +4,10 @@ Giant Swarm Agent Platform — connectivity / integration layer. Renders the
 consumer-side wiring that turns the platform components into a working whole on
 a cluster: the public muster route and the agentgateway data-plane Gateway +
 AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
-the kagent and klaus-gateway routes, the kagent declarative-agent wiring, the
-CloudNativePG Cluster, and — gated on the component toggles — the Backstage
-app-config and route, the mcp-kubernetes MCPServer registration with muster and
+the kagent and klaus-gateway routes, the kagent catalog (ModelConfigs and
+RemoteMCPServers at kagent.dev/v1alpha3) and tenant identity, the CloudNativePG
+Cluster, and — gated on the component toggles — the Backstage app-config and
+route, the mcp-kubernetes MCPServer registration with muster and
 the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO
 workloads of its own — those are separate releases rendered by the agent-platform
 meta-chart. The CRDs these CRs consume are app-owned: each component
