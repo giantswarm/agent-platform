@@ -181,6 +181,42 @@ gateway:
     port: 5556
     # Optional extra pod label selectors to narrow the target beyond namespace.
     podSelector: {}
+    # The agentgateway controller fetches the JWKS of every jwtAuthentication
+    # policy this chart renders and pushes the keys to the data plane over xDS,
+    # so the controller's egress must reach each issuer. The routes already
+    # name host and port (kagent.controllerRoute.jwtAuthentication.jwks,
+    # modelManager.route.jwtAuthentication.jwks,
+    # agentManager.route.jwtAuthentication.jwks) and the controller policy
+    # opens each host that is not in-cluster on its own port: a Cilium toFQDNs
+    # matchName in the cilium flavour, an address block on that port in the
+    # kubernetes flavour. A host counts as in-cluster — covered by the rule
+    # above, absent from the controller's external rules — when its third
+    # dot-separated label is `svc` and the labels after it are empty, `cluster`
+    # or `cluster.local`. The host is read in its normalized form (lower case,
+    # root dot removed). A jwks.host is always a name: an address literal, and
+    # a host of fewer than three labels, fail the render.
+    #
+    # This block is for issuers the routes do NOT name, for an issuer reached by
+    # address, and for the one the kubernetes flavour cannot reach by name: a
+    # private identity provider inside networkPolicy.kubernetes.worldExcludedCIDRs,
+    # or an issuer the cluster resolves over IPv6, because the wide rule that
+    # flavour renders for a name is 0.0.0.0/0 and reaches public IPv4 only. It
+    # applies whether or not gateway.jwksEgress.enabled is set: `enabled`
+    # governs the in-cluster rule above and nothing here.
+    external:
+      # cilium flavour: Cilium FQDN selectors (matchName, matchPattern),
+      # opened on `port` below and resolved through the DNS proxy rule the
+      # policy renders. The kubernetes flavour selects addresses and never
+      # names, so it ignores them: name that issuer's blocks in `cidrs`.
+      # An item is a selector object, never a bare string: the Cilium CRD
+      # refuses a string and the API server rejects the whole policy.
+      fqdns: []  # @schema item: object; itemProperties: {"matchName": {"type": "string"}, "matchPattern": {"type": "string"}}
+      # IP blocks of either family, opened on `port` below in both flavours, as
+      # their own rule.
+      cidrs: []  # @schema item: string; itemPattern: ^(?:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(?:3[0-2]|[12]?[0-9])|(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?:(?::[0-9A-Fa-f]{1,4}){1,7}|:)|::(?:[Ff]{4}(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|(?:[0-9A-Fa-f]{1,4}:){1,4}:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9]))$
+      # The port cidrs is opened on. The hosts the routes name are opened on
+      # their own jwks.port instead.
+      port: 443  # @schema minimum: 1; maximum: 65535
   parameters:
     enabled: true
     name: ""
@@ -1139,12 +1175,20 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # In-cluster JWKS source for the issuer, rendered as a static
       # AgentgatewayBackend in the release namespace.
       jwks:
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
-        # An issuer serving its JWKS over TLS: originate TLS from the data
-        # plane and verify against caSecretName (a Secret with ca.crt), else
-        # global.identity.ca.secretName, else the system trust.
+        # Originate TLS to the issuer and verify against caSecretName (a
+        # Secret with ca.crt), else the system trust. Implied by `port: 443`,
+        # which serves no plain HTTP. `enabled: true` names the platform's own
+        # identity provider, so it falls back to global.identity.ca.secretName
+        # as well; TLS implied by the port does not, because that CA signed no
+        # public issuer's certificate and the fetch would fail closed.
         tls:
           enabled: false
           caSecretName: ""
@@ -1762,13 +1806,20 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       mode: Strict
       issuer: ""
       jwks:
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
-        # The issuer serves its JWKS over TLS: originate TLS to it, verifying
-        # against the CA Secret (key ca.crt); empty caSecretName uses
-        # global.identity.ca.secretName, and with both empty the data plane's
-        # system trust. Off: plain HTTP, the in-cluster Dex default.
+        # Originate TLS to the issuer and verify against caSecretName (a
+        # Secret with ca.crt), else the system trust. Implied by `port: 443`,
+        # which serves no plain HTTP. `enabled: true` names the platform's own
+        # identity provider, so it falls back to global.identity.ca.secretName
+        # as well; TLS implied by the port does not, because that CA signed no
+        # public issuer's certificate and the fetch would fail closed.
         tls:
           enabled: false
           caSecretName: ""
@@ -1911,9 +1962,20 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       mode: Strict
       issuer: ""
       jwks:
+        # The issuer's hostname, qualified: three labels or more, and for an
+        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
+        # The egress rule the agentgateway controller's network policy renders
+        # is built from this and `port` below, so the port never belongs here,
+        # and an address belongs in gateway.jwksEgress.external.cidrs.
         host: dex.giantswarm.svc.cluster.local
         port: 5556
         path: /keys
+        # Originate TLS to the issuer and verify against caSecretName (a
+        # Secret with ca.crt), else the system trust. Implied by `port: 443`,
+        # which serves no plain HTTP. `enabled: true` names the platform's own
+        # identity provider, so it falls back to global.identity.ca.secretName
+        # as well; TLS implied by the port does not, because that CA signed no
+        # public issuer's certificate and the fetch would fail closed.
         tls:
           enabled: false
           caSecretName: ""

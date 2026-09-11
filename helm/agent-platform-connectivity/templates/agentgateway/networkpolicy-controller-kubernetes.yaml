@@ -1,4 +1,8 @@
 {{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
+{{- $externalPorts := include "agent-platform.jwks.externalPorts" . | fromJsonArray }}
+{{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
+{{- $extraCidrs := $extra.cidrs | default list }}
+{{- $extraPort := $extra.port | default 443 | int }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -53,6 +57,35 @@ spec:
         - port: {{ .port }}
           protocol: TCP
     {{- end }}
+    {{- end }}
+    {{- /* Vanilla NetworkPolicy selects addresses, never names: an external
+    issuer the routes name reaches the controller as every public destination on
+    its JWKS port, minus networkPolicy.kubernetes.worldExcludedCIDRs — the
+    pattern the manager policies use. */}}
+    {{- if $externalPorts }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+      ports:
+        {{- range $externalPorts }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- /* gateway.jwksEgress.external.cidrs: an issuer the routes do not name,
+    or one this flavour's IPv4 wide rule cannot reach. Its sibling
+    external.fqdns is a name selector and this flavour has none, so an issuer
+    reached by name belongs in the blocks here. */}}
+    {{- if $extraCidrs }}
+    - to:
+        {{- range $extraCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: {{ $extraPort | int }}
+          protocol: TCP
     {{- end }}
     - to:
         - namespaceSelector:
