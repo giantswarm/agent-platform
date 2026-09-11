@@ -40,10 +40,14 @@ kagent:
       # match gateway.name, the release namespace and llmRouting.listener.port.
       config:
         baseUrl: http://agentgateway.default.svc:8081
-  # Two extra, chart-owned ModelConfigs, one per routing path. The first names no
-  # baseUrl, so the chart fills in the listener: a new entry is metered unless
-  # somebody names another upstream. The second names its own, which wins — that
-  # is how a model reaches a different upstream, the provider's own URL included.
+  # Three extra, chart-owned ModelConfigs. The first names no baseUrl, so the
+  # chart fills in the listener: a new entry is metered unless somebody names
+  # another upstream. The second names its own, which wins — that is how a model
+  # reaches a different upstream, the provider's own URL included. The third is
+  # another provider with its own URL: the block that carries it is the CRD's
+  # key for the provider (openAI), not the lower-cased provider name, which the
+  # API server would prune — verify-kagent-crds validates this render against
+  # the kagent line's CRD, verify-llm-routing asserts the key.
   modelConfigs:
     - name: anthropic-sonnet
       displayName: Anthropic Sonnet 4.6
@@ -56,6 +60,13 @@ kagent:
       model: claude-opus-5
       apiKeySecret: kagent-anthropic
       baseUrl: https://api.anthropic.com
+    - name: openai-gpt-direct
+      displayName: OpenAI GPT-5 (direct)
+      provider: OpenAI
+      model: gpt-5
+      apiKeySecret: kagent-openai
+      apiKeySecretKey: OPENAI_API_KEY
+      baseUrl: https://api.openai.com/v1
 
 muster:
   muster:

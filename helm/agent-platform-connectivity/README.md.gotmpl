@@ -103,8 +103,14 @@ On the installation, after the cutover:
 - Only one metrics policy may target a Gateway: custom labels replace rather
   than merge, and when two policies target the same Gateway the one with the
   lexicographically lowest policy key wins while the other is silently dropped.
-- An extra `kagent.modelConfigs[]` entry calls the provider directly unless it
-  sets its own `baseUrl`.
+- An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
+  own `baseUrl` or names a provider other than `llmRouting.backend.provider`.
+  The `baseUrl` lands under the CRD's block for the entry's provider —
+  `anthropic`, `openAI`, `sapAICore`, the three `ModelConfigSpec` gives one —
+  never the lower-cased provider name, which the API server would prune; the
+  render refuses a `baseUrl` on any other provider and a `provider` outside the
+  CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
+  of the enum against the kagent line's CRD.
 - The data-plane `PodMonitor` is gated on the agentgateway component, not on
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.

@@ -600,6 +600,18 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 		echo "FAIL: a baseUrl rendered under a provider block the CRD prunes; the model would stay direct in silence"; exit 1; \
 	else grep -q 'anthropic-opus-direct' /tmp/vl-nourl.out || { cat /tmp/vl-nourl.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
 	@echo "ok: provider without a baseUrl"
+	@echo "--> a non-Anthropic entry's baseUrl goes under the CRD's block key (openAI), never the lower-cased provider"
+	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' /tmp/vl-ci.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "https://api.openai.com/v1"' || { echo "FAIL: the OpenAI entry's baseUrl is not under spec.openAI; the API server would prune it and the model would stay direct in silence"; exit 1; }
+	@if grep -qE '^  (openai|sapaicore):$$' /tmp/vl-ci.out; then echo "FAIL: a lower-cased provider block rendered; the CRD knows openAI and sapAICore only"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set llmRouting.backend.provider=openai --set 'kagent.modelConfigs[0].provider=OpenAI' >/tmp/vl-openai-routed.out 2>&1 || { cat /tmp/vl-openai-routed.out; exit 1; }
+	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vl-openai-routed.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: the routed default for an OpenAI listener is not under spec.openAI; every routed OpenAI model would be pruned to the direct path"; exit 1; }
+	@echo "ok: openAI block key, explicit and routed"
+	@echo "--> guard: a provider outside the CRD's enum fails the render, naming the entry and the enum"
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=openai' >/tmp/vl-enum.out 2>&1; then \
+		echo "FAIL: provider 'openai' rendered; the API server refuses it at admission (the enum is case-sensitive) after the chart said nothing"; exit 1; \
+	elif ! grep -q 'anthropic-sonnet' /tmp/vl-enum.out || ! grep -q 'Anthropic, OpenAI, AzureOpenAI, Ollama, Gemini, GeminiVertexAI, AnthropicVertexAI, Bedrock, SAPAICore, Foundry' /tmp/vl-enum.out; then \
+		cat /tmp/vl-enum.out; echo "FAIL: the enum guard does not name the entry and the CRD's enum"; exit 1; \
+	else echo "ok: enum guard"; fi
 	@echo "--> the MutatingAdmissionPolicy writes the provider's own block name"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.backend.provider=openai >/tmp/vl-openai.out 2>&1 || { cat /tmp/vl-openai.out; exit 1; }
 	@grep -q 'object.spec.openAI.baseUrl' /tmp/vl-openai.out || { echo "FAIL: the policy reads the lower-cased provider name, not the ModelConfigSpec block; every CEL evaluation would error"; exit 1; }
@@ -922,7 +934,7 @@ verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for m
 	@echo "kagent tool-discovery invariants verified."
 
 .PHONY: verify-kagent-crds
-verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — and no render of the chart carries kagent.dev/v1alpha2 (tests/verify-kagent-crds.py; needs PyYAML).
+verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), and no render of the chart carries kagent.dev/v1alpha2 (tests/verify-kagent-crds.py; needs PyYAML).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)

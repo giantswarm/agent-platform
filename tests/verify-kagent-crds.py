@@ -23,9 +23,16 @@ directory holding them for an offline run.
 
 Shapes rendered: every helm/agent-platform-connectivity/ci/*.yaml as-is, and a
 catalog shape with kagent on, one ModelConfig routed through the LLM listener
-and two operator RemoteMCPServers (one with tokenSecret). The last section is a
-self-test: a deliberately wrong ModelConfig and RemoteMCPServer must fail, so a
-validator that accepts everything cannot pass.
+and two operator RemoteMCPServers (one with tokenSecret). Then one ModelConfig
+per provider of the CRD's `spec.provider` enum, with and without a baseUrl: the
+chart must accept every provider, a baseUrl must land under the block the CRD
+gives one to (`anthropic`, `openAI`, `sapAICore` — camel-cased, not the
+lower-cased provider), the render must refuse a baseUrl where the CRD's block
+has none, and a provider outside the enum must fail the render naming the enum.
+All of it is read from the CRD at KAGENT_LINE_REF, so a re-pin that moves the
+enum or a block's fields fails here, naming the helper to move with it. The
+last section is a self-test: a deliberately wrong ModelConfig and
+RemoteMCPServer must fail, so a validator that accepts everything cannot pass.
 
 Usage: verify-kagent-crds.py <connectivity chart dir>
 """
@@ -88,11 +95,9 @@ def fail(msg: str) -> None:
     sys.exit(f"FAIL: {msg}")
 
 
-def run(args: list[str]) -> str:
-    r = subprocess.run(args, capture_output=True, text=True)
-    if r.returncode != 0:
-        fail(f"{' '.join(args)}\n{r.stderr}")
-    return r.stdout
+def template(chart: str, args: list[str]) -> subprocess.CompletedProcess:
+    """`helm template` of the chart with args, success or failure returned as-is."""
+    return subprocess.run(["helm", "template", "t", chart, *args], capture_output=True, text=True)
 
 
 def load_crds() -> dict[str, dict]:
@@ -235,8 +240,69 @@ def validate(doc: dict, crds: dict[str, dict], where: str) -> list[str]:
 
 
 def render(chart: str, args: list[str]) -> list[dict]:
-    out = run(["helm", "template", "t", chart, *args])
-    return [d for d in yaml.safe_load_all(out) if isinstance(d, dict)]
+    r = template(chart, args)
+    if r.returncode != 0:
+        fail(f"helm template {' '.join(args)}\n{r.stderr}")
+    return [d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict)]
+
+
+PROBE_URL = "http://probe.example:8081"
+
+
+def provider_shape(provider: str, base_url: str | None) -> list[str]:
+    """kagent on with one ModelConfig `probe` of the provider, with or without a baseUrl."""
+    entry = {"name": "probe", "provider": provider, "model": "m", "apiKeySecret": "s", "apiKeySecretKey": "k"}
+    if base_url:
+        entry["baseUrl"] = base_url
+    return ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true",
+            "--set", "kagent.namespaceOverride=kagent", "--set-json", f"kagent.modelConfigs={json.dumps([entry])}"]
+
+
+def check_providers(chart: str, crds: dict[str, dict]) -> None:
+    """Every provider of the CRD's enum, read from the CRD: the chart accepts it,
+    a baseUrl lands under the block the CRD gives one to and nowhere else, the
+    render refuses a baseUrl where the CRD's block has none, and a provider
+    outside the enum fails the render naming the enum."""
+    spec = crds["ModelConfig"]["properties"]["spec"]
+    enum = spec["properties"]["provider"]["enum"]
+    blocks = {k.lower(): k for k, p in spec["properties"].items() if p.get("type") == "object" and "properties" in p}
+    with_url, without = [], []
+    for provider in enum:
+        key = blocks.get(provider.lower())
+        if key is None:
+            fail(f"the CRD at {KAGENT_LINE_REF} has no provider block named after {provider}; PROVIDER_BLOCKS and the chart's helpers assume one per provider")
+        has_url = "baseUrl" in spec["properties"][key]["properties"]
+        mcs = [d for d in kagent_docs(render(chart, provider_shape(provider, None))) if d["kind"] == "ModelConfig"]
+        if len(mcs) != 1 or mcs[0]["spec"].get("provider") != provider:
+            fail(f"a {provider} ModelConfig without a baseUrl did not render as one object of that provider (the chart must accept every provider of the CRD's enum)")
+        if errors := validate(mcs[0], crds, f"provider {provider}"):
+            fail("\n  ".join([f"a {provider} ModelConfig the CRDs would refuse or prune:", *errors]))
+        r = template(chart, provider_shape(provider, PROBE_URL))
+        if has_url:
+            if r.returncode != 0:
+                fail(f"the render refused a baseUrl on a {provider} ModelConfig, but the CRD at {KAGENT_LINE_REF} gives spec.{key} a baseUrl — extend agent-platform.modelConfigBaseUrlKey:\n{r.stderr}")
+            mc = [d for d in kagent_docs([d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict)]) if d["kind"] == "ModelConfig"][0]
+            if errors := validate(mc, crds, f"provider {provider} with baseUrl"):
+                fail("\n  ".join([f"a {provider} ModelConfig with a baseUrl the CRDs would refuse or prune:", *errors]))
+            if (mc["spec"].get(key) or {}).get("baseUrl") != PROBE_URL:
+                fail(f"a {provider} ModelConfig's baseUrl is not under spec.{key} (the CRD's block): {json.dumps(mc['spec'])}")
+            if others := sorted(k for k in mc["spec"] if k in blocks.values() and k != key):
+                fail(f"a {provider} ModelConfig carries another provider's block {others}; the CRD refuses it")
+            with_url.append(f"{provider} → {key}.baseUrl")
+        else:
+            if r.returncode == 0:
+                fail(f"a baseUrl on a {provider} ModelConfig rendered, but the CRD at {KAGENT_LINE_REF} gives spec.{key} no baseUrl — the API server would prune the block and the model would stay direct in silence; the render must refuse it")
+            if "probe" not in r.stderr or provider not in r.stderr:
+                fail(f"the render refused a baseUrl on a {provider} ModelConfig without naming the entry and the provider:\n{r.stderr}")
+            without.append(provider)
+    print(f"ok: every provider of the CRD's enum renders; baseUrl under the CRD's block for {', '.join(with_url)}; refused for {', '.join(without)}")
+    for unknown in ("openai", "anthropic", "Foo"):
+        r = template(chart, provider_shape(unknown, None))
+        if r.returncode == 0:
+            fail(f"provider {unknown!r} rendered; the CRD's enum is {enum} (case-sensitive) and the API server refuses it at admission after the chart said nothing")
+        if "probe" not in r.stderr or any(p not in r.stderr for p in enum):
+            fail(f"the render refused provider {unknown!r} without naming the entry and every value of the CRD's enum:\n{r.stderr}")
+    print("ok: a provider outside the enum (a lower-cased spelling included) fails the render naming the entry and the enum")
 
 
 def kagent_docs(docs: list[dict]) -> list[dict]:
@@ -273,6 +339,8 @@ def main(chart: str) -> int:
     if "headersFrom" in by_name[("RemoteMCPServer", "open")]["spec"]:
         fail("an operator RemoteMCPServer without tokenSecret carries headersFrom")
     print("ok: catalog objects in the kagent namespace, no muster RemoteMCPServer, tokenSecret → headersFrom valueFrom Secret")
+
+    check_providers(chart, crds)
 
     # Self-test: the validator must bite.
     bad_mc = {"apiVersion": API_VERSION, "kind": "ModelConfig", "metadata": {"name": "bad", "namespace": "kagent"},
