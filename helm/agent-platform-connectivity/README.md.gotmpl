@@ -182,19 +182,24 @@ Only a rendered policy contributes: the component, its route and its
 
 | The host | cilium flavour | kubernetes flavour |
 |---|---|---|
-| In-cluster (`svc` as the third dot-separated label, or a single label) | the `gateway.jwksEgress` rule: that namespace on that port | the same, as a namespace selector |
+| In-cluster (`svc` as the third dot-separated label, or fewer than three labels) | the `gateway.jwksEgress` rule: that namespace on that port | the same, as a namespace selector |
 | An external name (`www.googleapis.com`) | a `toFQDNs` `matchName` on the JWKS port, behind the policy's DNS proxy rule | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs`, on the JWKS port |
 | A literal IP address | a `toCIDR` on the JWKS port: `/32` for IPv4, `/128` for IPv6 | the same, as an `ipBlock` |
+
+Every host is classified and selected in its normalized form: lower case, with
+the root label's trailing dot removed. `dex.giantswarm.svc.cluster.local.` is
+therefore the Service it names, not an external host.
 
 `gateway.jwksEgress.enabled` is required only for an in-cluster host. An
 external host needs it not at all, and leaving it on changes nothing else.
 
-Two render guards refuse a host that reaches no issuer in any flavour. Each one
+Three render guards refuse a host that reaches no issuer in any flavour. Each one
 is a green render and a runtime `401` without it, and the route subtrees are
 open objects in `values.schema.json`, so no schema pattern can hold them:
 
 | The shape | Why no rule reaches it |
 |---|---|
+| An empty host | the JWKS backend renders no host and resolves nothing |
 | A host that carries a port (`dex.example.com:5556`) | the port belongs in `jwks.port`; both the JWKS backend and the egress rule are built from the two keys |
 | A host that looks like an address literal but is not one (`1.2.3.999`) | a name selector never resolves it, and the API server rejects the block it would render |
 
@@ -211,8 +216,13 @@ anything.
 All three routes originate TLS to the issuer when `jwks.port` is 443, which
 serves no plain HTTP, or when `jwks.tls.enabled` is set for another port. The
 route's `AgentgatewayBackend` then verifies against `jwks.tls.caSecretName`,
-else `global.identity.ca.secretName`, else the controller's system trust. An
-in-cluster Dex on 5556 keeps its plain-HTTP fetch.
+else the controller's system trust. `jwks.tls.enabled` adds one fallback the
+port alone does not: `global.identity.ca.secretName`, the CA of the platform's
+own identity provider. The key names one provider, so it is the right default
+only for a route pointed at that provider deliberately; a public issuer on 443
+verified against a private CA would fail the fetch and answer every caller
+`401 token uses the unknown key`. An in-cluster Dex on 5556 keeps its
+plain-HTTP fetch.
 
 `gateway.jwksEgress.external.cidrs` covers an issuer the routes do not name,
 and the one the kubernetes flavour cannot reach by name: the wide rule it
@@ -225,6 +235,6 @@ the cluster resolves over IPv6, belong there. The list opens `external.port`
 The cilium controller policy renders the DNS proxy clause only while a name is
 selected. With in-cluster hosts alone the whole render is what it was before
 this section existed, in both flavours; `make verify-wiring` asserts that
-against `origin/main`.
+against `origin/main`, the controller policies first and then the whole render.
 
 {{ template "chart.valuesSection" . }}

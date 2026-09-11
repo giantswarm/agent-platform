@@ -77,7 +77,7 @@ spec:
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
-            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+            except:{{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
       ports:
         {{- range $namedPorts }}
         - port: {{ . | int }}

@@ -875,7 +875,7 @@ gateway:
       # their own rule. An issuer the cluster resolves over IPv6 belongs here:
       # the kubernetes flavour's wide rule for a name is 0.0.0.0/0 and reaches
       # IPv4 only.
-      cidrs: []  # @schema item: string; itemPattern: ^(?:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(?:3[0-2]|[12]?[0-9])|(?:[0-9A-Fa-f]{0,4}:)[0-9A-Fa-f:.]*/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9]))$
+      cidrs: []  # @schema item: string; itemPattern: ^(?:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(?:3[0-2]|[12]?[0-9])|(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?:(?::[0-9A-Fa-f]{1,4}){1,7}|:)|::(?:[Ff]{4}(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|(?:[0-9A-Fa-f]{1,4}:){1,4}:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9]))$
       # The port cidrs is opened on. The hosts the routes name are opened on
       # their own jwks.port instead.
       port: 443  # @schema minimum: 1; maximum: 65535
@@ -1933,8 +1933,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         port: 5556
         path: /keys
         # Originate TLS to the issuer and verify against caSecretName (a
-        # Secret with ca.crt), else global.identity.ca.secretName, else the
-        # system trust. Implied by `port: 443`, which serves no plain HTTP.
+        # Secret with ca.crt), else the system trust. Implied by `port: 443`,
+        # which serves no plain HTTP. `enabled: true` names the platform's own
+        # identity provider, so it falls back to global.identity.ca.secretName
+        # as well; TLS implied by the port does not, because that CA signed no
+        # public issuer's certificate and the fetch would fail closed.
         tls:
           enabled: false
           caSecretName: ""
@@ -2573,8 +2576,11 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
         port: 5556
         path: /keys
         # Originate TLS to the issuer and verify against caSecretName (a
-        # Secret with ca.crt), else global.identity.ca.secretName, else the
-        # system trust. Implied by `port: 443`, which serves no plain HTTP.
+        # Secret with ca.crt), else the system trust. Implied by `port: 443`,
+        # which serves no plain HTTP. `enabled: true` names the platform's own
+        # identity provider, so it falls back to global.identity.ca.secretName
+        # as well; TLS implied by the port does not, because that CA signed no
+        # public issuer's certificate and the fetch would fail closed.
         tls:
           enabled: false
           caSecretName: ""
@@ -2725,8 +2731,11 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
         port: 5556
         path: /keys
         # Originate TLS to the issuer and verify against caSecretName (a
-        # Secret with ca.crt), else global.identity.ca.secretName, else the
-        # system trust. Implied by `port: 443`, which serves no plain HTTP.
+        # Secret with ca.crt), else the system trust. Implied by `port: 443`,
+        # which serves no plain HTTP. `enabled: true` names the platform's own
+        # identity provider, so it falls back to global.identity.ca.secretName
+        # as well; TLS implied by the port does not, because that CA signed no
+        # public issuer's certificate and the fetch would fail closed.
         tls:
           enabled: false
           caSecretName: ""

@@ -806,6 +806,20 @@ Usage: include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerU
 {{- end -}}
 
 {{/*
+A JWKS host in the one form every classifier and every selector reads: lower
+case, with the root label's trailing dot removed. DNS names are
+case-insensitive and `dex.giantswarm.svc.cluster.local.` names the same Service
+as `dex.giantswarm.svc.cluster.local`, so both forms must classify alike;
+without this, either one renders an external rule for an in-cluster Service —
+in the kubernetes flavour a wide block on the JWKS port. A Cilium toFQDNs
+matchName is matched lower case and without the root dot too.
+Usage: include "agent-platform.jwks.normalizeHost" $host
+*/}}
+{{- define "agent-platform.jwks.normalizeHost" -}}
+{{- . | toString | lower | trimSuffix "." -}}
+{{- end -}}
+
+{{/*
 Truthy ("true") when a JWKS host is served from inside the cluster, so
 gateway.jwksEgress covers it and no name- or address-based egress rule is
 needed: a Service name whose third dot-separated label is `svc` and whose
@@ -814,15 +828,17 @@ dex.giantswarm.svc.cluster.local — the forms the pod's search path produces), 
 a host with fewer than three labels (dex, dex.giantswarm — a Service reached by
 its short name). Every other host is external, an address literal of either
 family included, and so is a public name that carries an `svc` label somewhere
-else (svc.example.com, keys.svc.example.com, a.b.svc.example.com). A two-label
-host is ambiguous —
+else (svc.example.com, keys.svc.example.com, a.b.svc.example.com). The host is
+read in its normalized form (lower case, no root dot), so
+dex.giantswarm.svc.cluster.local. classifies as the Service it names. A
+two-label host is ambiguous —
 dex.giantswarm and okta.com are the same shape — so the render guard refuses it
 unless its second label is gateway.jwksEgress.namespace; see
 agent-platform.jwks.ambiguousHost.
 Usage: include "agent-platform.jwks.inCluster" $host
 */}}
 {{- define "agent-platform.jwks.inCluster" -}}
-{{- $host := . | toString -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" . -}}
 {{- $labels := splitList "." $host -}}
 {{- $n := len $labels -}}
 {{- if not (contains ":" $host) -}}
@@ -842,7 +858,7 @@ are stripped, because neither a Cilium toCIDR nor an ipBlock accepts them.
 Usage: include "agent-platform.jwks.addrCIDR" $host
 */}}
 {{- define "agent-platform.jwks.addrCIDR" -}}
-{{- $host := . | toString | trimPrefix "[" | trimSuffix "]" -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" . | trimPrefix "[" | trimSuffix "]" -}}
 {{- $octet := "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])" -}}
 {{- if regexMatch (printf "^%s[.]%s[.]%s[.]%s$" $octet $octet $octet $octet) $host -}}
 {{- printf "%s/32" $host -}}
@@ -889,7 +905,7 @@ no schema to refuse it.
 Usage: include "agent-platform.jwks.malformedAddr" $host
 */}}
 {{- define "agent-platform.jwks.malformedAddr" -}}
-{{- $host := . | toString | trimPrefix "[" | trimSuffix "]" -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" . | trimPrefix "[" | trimSuffix "]" -}}
 {{- if not (include "agent-platform.jwks.addrCIDR" $host) -}}
 {{- if or (regexMatch "^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$" $host) (contains ":" $host) -}}true{{- end -}}
 {{- end -}}
@@ -903,7 +919,7 @@ that instead of "not a valid IP address".
 Usage: include "agent-platform.jwks.hostCarriesPort" $host
 */}}
 {{- define "agent-platform.jwks.hostCarriesPort" -}}
-{{- $host := . | toString -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" . -}}
 {{- if regexMatch "^\\[[0-9A-Fa-f:.]+\\]:[0-9]+$" $host -}}true
 {{- else if regexMatch "^[^:]+:[0-9]+$" $host -}}
 {{- if not (include "agent-platform.jwks.addrCIDR" $host) -}}true{{- end -}}
@@ -922,7 +938,7 @@ is never ambiguous and is excluded.
 Usage: include "agent-platform.jwks.ambiguousHost" $host
 */}}
 {{- define "agent-platform.jwks.ambiguousHost" -}}
-{{- $host := . | toString -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" . -}}
 {{- if and (not (contains ":" $host)) (not (include "agent-platform.jwks.addrCIDR" $host)) -}}
 {{- if eq (len (splitList "." $host)) 2 -}}true{{- end -}}
 {{- end -}}
@@ -943,12 +959,35 @@ Usage: include "agent-platform.jwks.tlsEnabled" $jwks
 {{- end -}}
 
 {{/*
+The CA Secret the JWKS backend verifies the issuer's certificate against, empty
+for the data plane's system trust. jwks.tls.caSecretName when set; otherwise
+global.identity.ca.secretName, but only while jwks.tls.enabled asks for TLS.
+The global key is the CA of ONE identity provider — the platform's, a lab Dex
+with a private certificate — and it is the right default only for a route that
+was pointed at that provider deliberately. TLS implied by port 443 carries no
+such statement: a public issuer on 443 verified against a private CA fails the
+fetch, and every caller reads `401 token uses the unknown key`, which is the
+failure the implied-TLS rule removes. An installation that wants the platform CA
+on such a route names it in jwks.tls.caSecretName, or sets jwks.tls.enabled.
+Usage: include "agent-platform.jwks.caSecretName" (dict "ctx" . "jwks" $jwks)
+*/}}
+{{- define "agent-platform.jwks.caSecretName" -}}
+{{- $jwks := .jwks | default dict -}}
+{{- $ca := ($jwks.tls).caSecretName -}}
+{{- if and (not $ca) ($jwks.tls).enabled -}}
+{{- $ca = dig "identity" "ca" "secretName" "" .ctx.Values.global -}}
+{{- end -}}
+{{- $ca -}}
+{{- end -}}
+
+{{/*
 The render guards on one route's jwtAuthentication.jwks. Each failure they catch
 otherwise surfaces at runtime as `401 token uses the unknown key` on every
 request, because the controller fetches no keys.
 
 Always, because a host of the wrong shape reaches nothing with or without a
 network policy:
+  - an empty host, which renders a backend that resolves nothing;
   - a host that carries a port, which belongs in jwks.port;
   - a host that looks like an address literal but is not one.
 
@@ -966,6 +1005,9 @@ Usage: include "agent-platform.jwks.validate" (dict "ctx" . "path" "kagent.contr
 {{- define "agent-platform.jwks.validate" -}}
 {{- $ctx := .ctx -}}
 {{- $host := (.jwks | default dict).host | default "" -}}
+{{- if not $host -}}
+{{- fail (printf "%s.enabled is true but %s.jwks.host is empty. The JWKS backend renders no host, the controller fetches no keys and signature validation fails closed. Set %s.jwks.host to the issuer's JWKS host (a name, or an address literal of either family)." .path .path .path) -}}
+{{- end -}}
 {{- if include "agent-platform.jwks.hostCarriesPort" $host -}}
 {{- fail (printf "%s.jwks.host is %q, which carries a port. The host and the port are separate keys, and both the JWKS backend and the controller's egress rule are built from the two. Set %s.jwks.host to the name alone and %s.jwks.port to the port." .path $host .path .path) -}}
 {{- end -}}
@@ -974,7 +1016,7 @@ Usage: include "agent-platform.jwks.validate" (dict "ctx" . "path" "kagent.contr
 {{- end -}}
 {{- if $ctx.Values.networkPolicy.enabled -}}
 {{- $egress := $ctx.Values.gateway.jwksEgress -}}
-{{- if and (include "agent-platform.jwks.ambiguousHost" $host) (ne (index (splitList "." $host) 1) ($egress.namespace | toString)) -}}
+{{- if and (include "agent-platform.jwks.ambiguousHost" $host) (ne (index (splitList "." (include "agent-platform.jwks.normalizeHost" $host)) 1) ($egress.namespace | toString)) -}}
 {{- fail (printf "%s.jwks.host is %q, a two-label host this chart cannot classify: dex.giantswarm is a Service reached by its short name and okta.com is a public issuer, and the two are the same shape. Its second label is not gateway.jwksEgress.namespace (%q), so reading it as in-cluster would leave the agentgateway controller with no egress rule and no keys, and signature validation would fail closed. For an in-cluster Service write its qualified name (<service>.<namespace>.svc.cluster.local) or set gateway.jwksEgress.namespace to its namespace; for a public issuer write a host with three or more labels, or name its address blocks in gateway.jwksEgress.external.cidrs." .path $host ($egress.namespace | toString)) -}}
 {{- end -}}
 {{- if and (include "agent-platform.jwks.inCluster" $host) (not $egress.enabled) -}}
@@ -992,7 +1034,9 @@ over xDS, so its egress needs each of them; the routes already name host and
 port, and no second knob restates them. Only a rendered policy contributes: the
 component, its route and its jwtAuthentication are all on. In-cluster hosts are
 absent — gateway.jwksEgress covers those. A non-empty cidr marks an address
-literal, which renders as a block instead of a name selector.
+literal, which renders as a block instead of a name selector. Each host is
+normalized (lower case, no root dot), the form a Cilium toFQDNs matchName is
+matched in.
 */}}
 {{- define "agent-platform.jwks.externalTargets" -}}
 {{- $out := list -}}
@@ -1008,7 +1052,7 @@ literal, which renders as a block instead of a name selector.
 {{- $sources = append $sources .Values.agentManager.route.jwtAuthentication.jwks -}}
 {{- end -}}
 {{- range $sources -}}
-{{- $host := .host | default "" -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" (.host | default "") -}}
 {{- $port := .port | default 443 | int -}}
 {{- $key := printf "%s:%d" $host $port -}}
 {{- if and $host (not (include "agent-platform.jwks.inCluster" $host)) (not (hasKey $seen $key)) -}}

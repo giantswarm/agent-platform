@@ -1593,13 +1593,16 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 			done; \
 		done; \
 	done
-	@echo "--> the same values against $(GOLDEN_REF): the whole render is byte-identical"
+	@echo "--> the same values against $(GOLDEN_REF): the controller policies first, then the whole render"
 	@if [ -n "$(GOLDEN_REF)" ] && git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
 		rm -rf /tmp/vw-jwks-ref && git worktree add -q --detach /tmp/vw-jwks-ref $(GOLDEN_REF) && \
 		for flavor in cilium kubernetes; do \
 			helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-jwks-new-$$flavor.out; \
 			helm template t /tmp/vw-jwks-ref/$(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-jwks-old-$$flavor.out; \
-			diff -u /tmp/vw-jwks-old-$$flavor.out /tmp/vw-jwks-new-$$flavor.out || { echo "FAIL: the $$flavor render changed for an in-cluster JWKS host"; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
+			$(CTRL_POLICY) /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-pol-$$flavor.out; \
+			$(CTRL_POLICY) /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-pol-$$flavor.out; \
+			diff -u /tmp/vw-jwks-old-pol-$$flavor.out /tmp/vw-jwks-new-pol-$$flavor.out || { echo "FAIL: the $$flavor CONTROLLER POLICY changed for an in-cluster JWKS host - a regression in this slice"; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
+			diff -u /tmp/vw-jwks-old-$$flavor.out /tmp/vw-jwks-new-$$flavor.out || { echo "FAIL: the $$flavor render changed for an in-cluster JWKS host, outside the controller policy. The policies above match, so the branch is most likely behind $(GOLDEN_REF): merge it and run again."; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
 		done; \
 		git worktree remove --force /tmp/vw-jwks-ref; \
 		echo "ok: byte-identical against $(GOLDEN_REF)"; \
@@ -1628,11 +1631,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@echo "--> gateway.jwksEgress.external: null renders, and the schema types cidrs"
 	@printf 'gateway:\n  jwksEgress:\n    enabled: true\n    external: null\n' >/tmp/vw-jwks-null-external.yaml
 	$(call managers_must_pass,an explicitly null external block,$(JWKS_INCLUSTER) -f /tmp/vw-jwks-null-external.yaml)
-	@for bad in 999.1.1.1/40 10.0.0.0/40 nonsense/24; do \
+	@for bad in 999.1.1.1/40 10.0.0.0/40 nonsense/24 ::::/64 2001:db8::/129 12345::/64 1:2:3:4:5:6:7:8:9/64 2001:db8::1; do \
 		if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set "gateway.jwksEgress.external.cidrs[0]=$$bad" >/dev/null 2>&1; then \
 			echo "FAIL: gateway.jwksEgress.external.cidrs accepted $$bad"; exit 1; fi; \
 	done
-	@for good in 10.20.30.0/24 2001:db8::/64 ::/0; do \
+	@for good in 10.20.30.0/24 2001:db8::/64 ::/0 ::1/128 fe80::1/64 2001:0db8:85a3:0000:0000:8a2e:0370:7334/128 ::ffff:192.0.2.1/128; do \
 		helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set "gateway.jwksEgress.external.cidrs[0]=$$good" >/dev/null 2>&1 || { \
 			echo "FAIL: gateway.jwksEgress.external.cidrs refused the valid block $$good"; exit 1; }; \
 	done
@@ -1642,20 +1645,24 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) >/dev/null 2>&1 || { echo "FAIL: an external JWKS host is refused without gateway.jwksEgress"; exit 1; }
 	@if helm template t $(CONNECTIVITY_DIR) $(JWKS_BASE) --set global.identity.issuerUrl=https://dex.ci.example.com >/dev/null 2>&1; then \
 		echo "FAIL: an in-cluster JWKS host was accepted without gateway.jwksEgress"; exit 1; fi
-	@echo "--> port 443 implies TLS: the backend of all three routes originates it without jwks.tls.enabled"
+	@echo "--> port 443 implies TLS on all three routes, against the system trust: the platform CA is for an issuer jwks.tls.enabled names"
 	@for route in kagent-controller model-manager agent-manager; do \
 		case $$route in \
-			kagent-controller) flags="$(JWKS_EXTERNAL)";; \
-			model-manager) flags="$(MANAGERS_ON) --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set modelManager.route.jwtAuthentication.jwks.host=www.googleapis.com --set modelManager.route.jwtAuthentication.jwks.port=443";; \
-			agent-manager) flags="$(MANAGERS_ON) --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true --set agentManager.route.jwtAuthentication.jwks.host=www.googleapis.com --set agentManager.route.jwtAuthentication.jwks.port=443";; \
+			kagent-controller) flags="$(JWKS_EXTERNAL)"; key=kagent.controllerRoute.jwtAuthentication;; \
+			model-manager) flags="$(MANAGERS_ON) --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set modelManager.route.jwtAuthentication.jwks.host=www.googleapis.com --set modelManager.route.jwtAuthentication.jwks.port=443"; key=modelManager.route.jwtAuthentication;; \
+			agent-manager) flags="$(MANAGERS_ON) --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true --set agentManager.route.jwtAuthentication.jwks.host=www.googleapis.com --set agentManager.route.jwtAuthentication.jwks.port=443"; key=agentManager.route.jwtAuthentication;; \
 		esac; \
 		helm template t $(CONNECTIVITY_DIR) $$flags --set global.identity.ca.secretName=platform-ca 2>/dev/null | awk "/^  name: $$route-jwks\$$/{f=1} f&&/^---\$$/{exit} f" >/tmp/vw-jwks-tls-$$route.out; \
 		[ -s /tmp/vw-jwks-tls-$$route.out ] || { echo "FAIL: no $$route-jwks backend rendered"; exit 1; }; \
-		grep -q 'name: platform-ca' /tmp/vw-jwks-tls-$$route.out || { echo "FAIL: $$route-jwks does not originate TLS on port 443, so the fetch stays plain HTTP"; cat /tmp/vw-jwks-tls-$$route.out; exit 1; }; \
+		grep -q 'tls:' /tmp/vw-jwks-tls-$$route.out || { echo "FAIL: $$route-jwks does not originate TLS on port 443, so the fetch stays plain HTTP"; cat /tmp/vw-jwks-tls-$$route.out; exit 1; }; \
+		if grep -q 'name: platform-ca' /tmp/vw-jwks-tls-$$route.out; then echo "FAIL: $$route-jwks on implied TLS pins the platform identity CA, which never issued a public certificate"; cat /tmp/vw-jwks-tls-$$route.out; exit 1; fi; \
+		helm template t $(CONNECTIVITY_DIR) $$flags --set global.identity.ca.secretName=platform-ca --set $$key.jwks.tls.enabled=true 2>/dev/null | awk "/^  name: $$route-jwks\$$/{f=1} f&&/^---\$$/{exit} f" | grep -q 'name: platform-ca' || { echo "FAIL: $$route-jwks with jwks.tls.enabled does not fall back to global.identity.ca.secretName"; exit 1; }; \
+		helm template t $(CONNECTIVITY_DIR) $$flags --set global.identity.ca.secretName=platform-ca --set $$key.jwks.tls.caSecretName=route-ca 2>/dev/null | awk "/^  name: $$route-jwks\$$/{f=1} f&&/^---\$$/{exit} f" | grep -q 'name: route-ca' || { echo "FAIL: $$route-jwks ignores jwks.tls.caSecretName on implied TLS"; exit 1; }; \
 	done
 	@echo "--> an in-cluster plain-HTTP port keeps its plain fetch"
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set global.identity.ca.secretName=platform-ca 2>/dev/null | awk '/^  name: kagent-controller-jwks$$/{f=1} f&&/^---$$/{exit} f' | grep -q 'policies:' && { echo "FAIL: the in-cluster Dex fetch on 5556 originates TLS"; exit 1; } || true
 	@echo "--> a host of the wrong shape fails the render, on every route, with or without a policy"
+	$(call managers_must_fail,an empty host,$(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=,jwks.host is empty)
 	$(call managers_must_fail,a host with the port glued on,$(JWKS_INCLUSTER) --set 'kagent.controllerRoute.jwtAuthentication.jwks.host=dex.example.com:5556',which carries a port)
 	$(call managers_must_fail,an out-of-range dotted quad,$(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=1.2.3.999 --set kagent.controllerRoute.jwtAuthentication.jwks.port=8443,neither a name nor a valid IP address)
 	$(call managers_must_fail,a malformed host with the policies off,$(JWKS_INCLUSTER) --set networkPolicy.enabled=false --set 'kagent.controllerRoute.jwtAuthentication.jwks.host=dex.example.com:5556',which carries a port)
@@ -1665,10 +1672,14 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@echo "--> an svc label the search path never produces is a public host, not an in-cluster one"
 	$(call managers_must_pass,a public host carrying an svc label,$(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=a.b.svc.example.com)
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=a.b.svc.example.com --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q 'matchName: "a.b.svc.example.com"' || { echo "FAIL: a public host with an svc label was read as in-cluster and got no egress rule"; exit 1; }
-	@for form in dex.giantswarm.svc dex.giantswarm.svc.cluster dex.giantswarm.svc.cluster.local; do \
+	@for form in dex.giantswarm.svc dex.giantswarm.svc.cluster dex.giantswarm.svc.cluster.local dex.giantswarm.svc.cluster.local. DEX.Giantswarm.SVC.Cluster.Local; do \
 		if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=$$form --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q 'matchName'; then \
 			echo "FAIL: the in-cluster form $$form rendered an external name selector"; exit 1; fi; \
+		if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=$$form --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'cidr: 0.0.0.0/0'; then \
+			echo "FAIL: the in-cluster form $$form opened every public destination on the JWKS port"; exit 1; fi; \
 	done
+	@echo "--> an external host is selected in its normalized form: lower case, no root dot"
+	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=WWW.GoogleAPIs.com. --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q 'matchName: "www.googleapis.com"' || { echo "FAIL: the external JWKS host is not selected in its normalized form"; exit 1; }
 	$(call managers_must_fail,the model-manager route rejects the same shape,$(MANAGERS_ON) --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set 'modelManager.route.jwtAuthentication.jwks.host=keys.example.com:443',which carries a port)
 	$(call managers_must_fail,the agent-manager route rejects the same shape,$(MANAGERS_ON) --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true --set 'agentManager.route.jwtAuthentication.jwks.host=keys.example.com:443',which carries a port)
 	@echo "--> a two-label host: the short Service name renders, a public issuer fails"
