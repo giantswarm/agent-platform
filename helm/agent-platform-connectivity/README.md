@@ -612,7 +612,7 @@ On the installation, after the cutover:
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
-| agent-manager.agentChart.semver | string | `"x.x.x"` |  |
+| agent-manager.agentChart.semver | string | `">=0.2.1 <1.0.0"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |

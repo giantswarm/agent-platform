@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `agent-manager.agentChart.semver` is `>=0.2.1 <1.0.0` (was `x.x.x`) in both charts. Generic `agent` chart 1.0.0 (published 2026-09-11) renders the kagent API v2 shape (`kagent.dev/v1alpha3 AgentTemplate`), which no 3.x installation can install; agent-manager composes this range into the per-namespace `agent` `OCIRepository` it writes on every `create_agent`, and the meta chart's explicit forward wins over agent-manager 0.4.5's own bounded default — so an open range here pulled 1.0.0 into every new managed namespace (the ATS round trip on this branch reproduced it: `HelmRelease ats-managed-agent` InstallFailed `no matches for kind AgentTemplate`). The three pre-existing per-namespace `OCIRepository` objects were bounded by hand already; this makes every future one bounded too. **Every installation with agent-manager on rolls the agent-manager pod once** (`--agent-chart-semver` changes); nothing else in the render differs. The 4.0 line moves the range to `1.x`.
+
 ### Changed
 
 - `components.agent-platform-connectivity.versionRange` is `>=1.0.0 <4.0.0` (was `>=1.0.0`, open upwards). The connectivity chart is released off the same tag as this chart and every installation's Flux re-resolves the range on each reconcile of the connectivity `OCIRepository`, so the first `v4.0.0` tag of this repository -- the kagent API v2 line (giantswarm/giantswarm#37705), whose connectivity templates render `kagent.dev/v1alpha3` objects -- would have upgraded the wiring of every 3.x installation within minutes, ahead of its cut-over (#348). The 3.x line now stays on its own wiring chart; 4.0 resets the range to its line. **No installation needs to act**: the connectivity `OCIRepository`'s `spec.ref.semver` changes (a Flux spec update; the current 3.x release stays resolved) and nothing else in the render differs. `make verify-components` asserts the bound.
