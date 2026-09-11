@@ -183,7 +183,7 @@ WorkerPool".
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.backstage.versionRange | string | `"1.x"` |  |
+| components.backstage.versionRange | string | `">=1.0.0 <3.0.0"` |  |
 | components.backstage.valuesFrom | string | `"backstage"` |  |
 | components.backstage.omitKeys[0] | string | `"hostname"` |  |
 | components.backstage.omitKeys[1] | string | `"parentRefs"` |  |

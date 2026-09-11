@@ -575,11 +575,14 @@ components:  # @schema additionalProperties: true
     # Agent Platform pages. Needs global.domain and global.identity set (the
     # values below mount the platform credentials Secret by that name).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The Dev Portal 1.x is the kagent API v2 line (AgentTemplates through the
-    # kagent controller's gRPC API); 0.244.x is the portal of kagent 0.10 and
-    # never meets this chart. Until 1.0.0 is published the range resolves
-    # nothing (the component is off by default).
-    versionRange: "1.x"
+    # The Dev Portal from 1.0.0 is the kagent API v2 line (AgentTemplates
+    # through the kagent controller's gRPC API); 0.244.x is the portal of
+    # kagent 0.10 and never meets this chart. The complete v2 portal is 2.0.0
+    # (the gRPC backend, giantswarm/backstage#2344, shipped as a major): the
+    # range spans both majors so the component resolves the complete portal,
+    # not the 1.2.0 without the backend. Bounded below 3.0.0: the next major
+    # is the next cut-over.
+    versionRange: ">=1.0.0 <3.0.0"
     valuesFrom: backstage
     # The backstage chart validates its values with additionalProperties: false,
     # and these keys are not its own: the connectivity chart reads them for the
