@@ -468,9 +468,9 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # model-manager stays on its 0.x line through the kagent API v2 change: it
     # renders its ModelConfigs at the kagent.dev version the cluster serves,
-    # v1alpha3 here, from the release that carries giantswarm/model-manager#74
-    # — that release is this range's floor once it is published.
-    versionRange: "0.x"
+    # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74) — the floor. The
+    # ceiling stays the next major, so minor releases roll on their own.
+    versionRange: ">=0.20.0 <1.0.0"
     valuesFrom: model-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -489,7 +489,7 @@ components:  # @schema additionalProperties: true
     # default: it needs the kagent component and Flux on the cluster.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # agent-manager 1.x is the kagent API v2 line (kagent.dev/v1alpha3
-    # AgentTemplates, the Generic agent chart 1.x as the agent unit); 0.x
+    # AgentTemplates through the Generic agent chart 1.x, the agent unit); 0.x
     # composes agents for kagent 0.10 (v1alpha2) and never meets this chart.
     # Until 1.0.0 is published the range resolves nothing (the component is
     # off by default; a lab follows a branch build through semverFilter).
@@ -2428,10 +2428,11 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
   agentChart:
     ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
     # The Generic agent chart line agent-manager composes into every agent's
-    # OCIRepository: 1.x renders kagent.dev/v1alpha3 AgentTemplates for this
-    # release's kagent, 0.x the v1alpha2 Agent of kagent 0.10. A range, so
-    # patch and minor releases of the line reach the agents on their own; the
-    # major is the API boundary and moves only with this chart.
+    # OCIRepository: 1.x (giantswarm/agent 1.0.0 and up) renders
+    # kagent.dev/v1alpha3 AgentTemplates for this release's kagent, 0.x the
+    # v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases of
+    # the line reach the agents on their own; the major is the API boundary
+    # and moves only with this chart.
     semver: 1.x
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.

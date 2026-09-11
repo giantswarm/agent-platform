@@ -38,7 +38,7 @@ components:
   klaus-gateway:                 { versionRange: "0.39.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
-  model-manager:                 { versionRange: "0.19.9" }
+  model-manager:                 { versionRange: "0.20.0" }
   agent-manager:                 { versionRange: "1.0.0" }
   agent-platform-connectivity: { versionRange: "4.0.0" }
   # The standalone chart's extras (off by default; the pins apply when an

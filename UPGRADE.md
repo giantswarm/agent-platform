@@ -10,7 +10,7 @@ Operator action required between releases. CHANGELOG.md captures the diff; UPGRA
 
 - `components.kagent`: `oci://ghcr.io/giantswarm/kagent/helm`, range `>=0.11.0-gs.1 <0.11.1-0`, `dependsOn: [kagent-crds]`, no `crds:` policy. New `components.kagent-crds` (same source and range; the CRDs as templates with `helm.sh/resource-policy: keep`; follows `components.kagent` unless switched explicitly — an explicit `enabled: false` with kagent on fails the render). The connectivity release `dependsOn` both.
 - `kagent:`: `registry: ghcr.io`, `tag` (one build of the line; upstream's chart falls back to `.Chart.Version`, invalid under helm-controller), the image names `giantswarm/kagent/{controller,golang-adk,ui}`, `controller.substrate.*`, `substrateWorkerPool`, `controller.metrics.enabled: false`, pgvector on the bundled Postgres, the new `kagent.harness.image` (the Go ADK image by digest). Removed: the ten `kagent.<example-agent>` blocks, `kagent.controller.skillsInitImage`, the `METRICS_BIND_ADDRESS` / `METRICS_SECURE` env entries. `kagent.serviceMonitor.enabled` defaults to `false` in both charts.
-- Sibling ranges: `agent-platform-connectivity` `>=4.0.0 <5.0.0`, `agent-manager` `1.x`, `backstage` `1.x`, `model-manager` `0.x`; `agent-manager.agentChart.semver` `1.x`; no `semverFilter` by default.
+- Sibling ranges: `agent-platform-connectivity` `>=4.0.0 <5.0.0`, `agent-manager` `1.x`, `backstage` `1.x`, `model-manager` `>=0.20.0 <1.0.0`; `agent-manager.agentChart.semver` `1.x`; no `semverFilter` by default.
 
 ### Operator action
 

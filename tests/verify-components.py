@@ -73,7 +73,7 @@ CONNECTIVITY_RANGE = ">=4.0.0 <5.0.0"
 # repository, versionRange, dependsOn with every component on): the kagent line's
 # two charts on the line's release range (one build, kagent after its CRDs), the
 # managers on the lines that speak v1alpha3 (agent-manager 1.x; model-manager
-# stays 0.x, dual-version). kagent-crds follows components.kagent and takes no
+# 0.x from 0.20.0, dual-version). kagent-crds follows components.kagent and takes no
 # `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://ghcr.io/giantswarm/kagent/helm"
 KAGENT_RANGE = ">=0.11.0-gs.1 <0.11.1-0"
@@ -81,7 +81,7 @@ LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds"]),
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
-    "model-manager": (GSOCI, "0.x", ["muster", "kagent", "kserve-resources"]),
+    "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
 }
 
 # CR consumers that come after the operator / control plane when those are on.
