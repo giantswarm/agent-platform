@@ -426,7 +426,7 @@ components:  # @schema additionalProperties: true
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
     # disabled. kagent's only by default — turning it on for another release
     # is a decision per release (tests/verify-kagent-wiring.py asserts both).
-    driftDetection:
+    driftDetection:  # @schema additionalProperties: true
       mode: enabled
     # These keys are the connectivity chart's, not kagent's: it reads them for
     # the wiring it renders around kagent (routes, the ServiceMonitor, the
