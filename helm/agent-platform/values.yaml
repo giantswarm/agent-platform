@@ -503,21 +503,24 @@ components:  # @schema additionalProperties: true
     # render — agent-platform.validateSubstrate). Both releases land in
     # ate-system (targetNamespace; the chart's Roles name that namespace), and
     # both carry ONE version pin: the same range in the two versionRanges
-    # (>=0.0.27-gs.7 <0.0.28-0, the kagent entry's shape — the line's releases
-    # of upstream 0.0.27 from gs.5 on: the egress gateway's frontend policy for
-    # its agentgateway dataplane, the connection string from a Secret, atelet
-    # scheduling, helm.sh/resource-policy: keep on the three CRD templates so a
+    # (>=0.0.27-gs.8 <0.0.28-0, the kagent entry's shape — the line's releases
+    # of upstream 0.0.27 from gs.8 on: the ServiceAccount annotations of atelet
+    # and ate-api-server (the snapshot store's IRSA role,
+    # kagent.harness.snapshotStore) and ateApiServer.extraEnv, on top of gs.5's
+    # egress gateway frontend policy for its agentgateway dataplane, the
+    # connection string from a Secret, atelet scheduling,
+    # helm.sh/resource-policy: keep on the three CRD templates so a
     # concurrent uninstall never fails on a vanished kind, and a golden boot
     # whose image the registry refuses failing with the reason, and the kept
     # podcertificate-controller namespace so a reinstall keeps its trust chain),
     # whose floor is
     # also the Substrate version
     # the kagent chart's stamped substrateWorkerPool.workerImage names (the gs.6
-    # kagent chart was built against 0.0.27-gs.7) — a re-pin of Substrate moves
+    # kagent chart was built against 0.0.27-gs.8) — a re-pin of Substrate moves
     # the three together with the kagent pin (README "Agent Substrate"). A
     # mirror sets `repository` here and substrate.image.registry below.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.27-gs.7 <0.0.28-0"
+    versionRange: ">=0.0.27-gs.8 <0.0.28-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -539,7 +542,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.27-gs.7 <0.0.28-0"
+    versionRange: ">=0.0.27-gs.8 <0.0.28-0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
