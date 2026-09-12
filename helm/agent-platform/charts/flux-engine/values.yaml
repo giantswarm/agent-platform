@@ -9,7 +9,7 @@ operator:
   image:
     registry: ghcr.io
     repository: controlplaneio-fluxcd/flux-operator
-    tag: v0.59.0
+    tag: v0.60.0
     pullPolicy: IfNotPresent
   # -- Pull secrets for the operator image, in the release namespace
   # (`global.imagePullSecrets` of the meta chart apply as well).
