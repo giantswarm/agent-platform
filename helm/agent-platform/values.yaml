@@ -2542,6 +2542,10 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     agentHost: ""
   kagent:
     namespace: kagent
+    # The 4.x line serves kagent.dev/v1alpha3 only, so the version is pinned, not
+    # discovered (`auto`, once at start-up): the pin rolls the managers on the
+    # cut-over, after kagent-crds, instead of leaving them on kagent 0.10's v1alpha2.
+    apiVersion: v1alpha3
     disableWiring: false
   mcp:
     enabled: true
@@ -2697,6 +2701,9 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: agent-manager
   kagent:
     namespace: kagent
+    # Pinned as model-manager's: the one version the 4.x line serves, and the
+    # values change that rolls agent-manager on the cut-over.
+    apiVersion: v1alpha3
   agentChart:
     ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
     # The Generic agent chart line agent-manager composes into every agent's

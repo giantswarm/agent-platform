@@ -99,6 +99,15 @@ LINE = {
     "klaus-gateway": (GSOCI, "1.x", []),
 }
 
+# The kagent.dev API version the 4.x line serves, pinned into both managers'
+# release values (`kagent.apiVersion`; their charts render it as the container's
+# `--kagent-api-version`). `auto` discovers it once at start-up, and a pod that
+# started under kagent 0.10 keeps v1alpha2 across the in-place upgrade because
+# nothing in its values changes (giantswarm/agent-platform#401); the pin is that
+# change, and it rolls both Deployments after kagent-crds.
+KAGENT_API_VERSION = "v1alpha3"
+MANAGERS = ["model-manager", "agent-manager"]
+
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
     "agent-platform-connectivity": ["muster", "cloudnative-pg", "kserve-resources", "substrate-crds", "kagent-crds"],
@@ -334,7 +343,11 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"{name} OCIRepository does not carry versionRange {rng!r} (the kagent API v2 line's range)")
         if sorted(depends_on(hr)) != sorted(deps):
             fail(f"{name} dependsOn {depends_on(hr)}, expected {deps}")
-    print("ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges")
+    for name in MANAGERS:
+        vals = hr_values(on[("HelmRelease", name)]) + "\n"
+        if not re.search(rf"^kagent:\n(?:  .*\n)*?  apiVersion: {KAGENT_API_VERSION}$", vals, re.M):
+            fail(f"{name} release values do not pin kagent.apiVersion: {KAGENT_API_VERSION} — left to `auto`, a pod that started under kagent 0.10 keeps v1alpha2 across the upgrade (giantswarm/agent-platform#401)")
+    print(f"ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges, the managers pinned to kagent.dev/{KAGENT_API_VERSION}")
 
     # --- the dev channel: semverFilter ----------------------------------------------
     check_semver_filters(meta, ci)
