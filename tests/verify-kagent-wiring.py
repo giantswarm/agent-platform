@@ -33,7 +33,11 @@ time, in the child HelmRelease or in the running controller:
     upstream versions of the line;
   * the retired 0.10 keys: the ten bundled example agents (dead keys on the
     line — the chart ships none), the `METRICS_*` controller env and a metrics
-    Service to a port the line's controller never serves.
+    Service to a port the line's controller never serves;
+  * a kagent release without install/upgrade takeOwnership (or another release
+    with it): the 4.8.0 upgrade adopts the platform Harness the connectivity
+    chart leaves in place through helm.sh/resource-policy: keep
+    (giantswarm/agent-platform#406 step 2).
 
 Reads a rendered meta-package manifest (the CI values: kagent on). Deliberately
 stdlib-only: the CI image has no PyYAML.
@@ -277,6 +281,24 @@ def check_retired_keys(values: dict[str, list[str]], conn_kagent: str) -> None:
     print("ok: no example agent, no METRICS_* env, controller metrics and the ServiceMonitor off")
 
 
+def check_take_ownership(docs) -> None:
+    """install.takeOwnership and upgrade.takeOwnership on the kagent release, on no other
+    (giantswarm/agent-platform#406 step 2): from 4.8.0 the kagent chart renders the platform
+    Harness the connectivity chart renders today; the object stays through connectivity's
+    helm.sh/resource-policy: keep (verify-kagent-harness) and the kagent release adopts it."""
+    text = "\n".join(docs[("HelmRelease", "kagent")]) + "\n"
+    for phase in ("install", "upgrade"):
+        m = re.search(rf"^  {phase}:\n((?:    .*\n)+)", text, re.M)
+        if not m or not re.search(r"^    takeOwnership: true$", m.group(1), re.M):
+            fail(f"the kagent release's {phase} lacks takeOwnership: true (components.kagent.takeOwnership; "
+                 f"the 4.8.0 upgrade must adopt the Harness the connectivity release leaves behind)")
+    others = sorted(name for (kind, name), lines in docs.items()
+                    if kind == "HelmRelease" and name != "kagent" and "    takeOwnership: true" in lines)
+    if others:
+        fail(f"takeOwnership: true rendered on releases that adopt nothing: {others} (only the kagent release meets a foreign object)")
+    print("ok: the kagent release carries install.takeOwnership and upgrade.takeOwnership; no other release does")
+
+
 def main(path: str) -> int:
     docs = documents(open(path, encoding="utf-8").read())
     for kind, name in (("HelmRelease", "kagent"), ("HelmRelease", "kagent-crds"), ("OCIRepository", "kagent"),
@@ -291,6 +313,7 @@ def main(path: str) -> int:
     check_sources(docs, kagent_range)
     check_one_build(values, kagent_range, conn_kagent)
     check_retired_keys(values, conn_kagent)
+    check_take_ownership(docs)
     return 0
 
 

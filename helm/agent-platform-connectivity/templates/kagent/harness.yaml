@@ -37,6 +37,14 @@ kind: Harness
 metadata:
   name: {{ $harness }}
   namespace: {{ $ns }}
+  annotations:
+    {{- /* Step 2 of the migration to 4.8.0 (giantswarm/agent-platform#406): from
+    4.8.0 the kagent chart renders this Harness itself and this template goes.
+    `keep` makes Helm leave the object in place when the connectivity release
+    drops it, and the kagent HelmRelease's takeOwnership (the meta chart's
+    components.kagent.takeOwnership) adopts it on its next upgrade — the same
+    object, no delete/recreate, no agent under it loses its Harness. */}}
+    helm.sh/resource-policy: keep
 spec:
   {{/* Exactly one of kagent|codex|claude|byo; the Go ADK runtime adapter. */}}
   kagent: {}

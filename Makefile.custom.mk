@@ -937,7 +937,7 @@ verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart ren
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-harness
-verify-kagent-harness: ## Assert the connectivity chart renders exactly one platform Harness per managed namespace with the shape the platform owns (kagent runtime, the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the meta chart's WorkerPool, the snapshot location, the admission label agent-platform.giantswarm.io/harness: kagent), the workerPoolRef follows kagent.substrateWorkerPool.name, a tag image fails the render, and kagent off renders none (tests/verify-kagent-harness.py; needs PyYAML).
+verify-kagent-harness: ## Assert the connectivity chart renders exactly one platform Harness per managed namespace with the shape the platform owns (kagent runtime, the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the meta chart's WorkerPool, the snapshot location, the admission label agent-platform.giantswarm.io/harness: kagent, helm.sh/resource-policy: keep so the 4.8.0 hand-over to the kagent release keeps the object), the workerPoolRef follows kagent.substrateWorkerPool.name, a tag image fails the render, and kagent off renders none (tests/verify-kagent-harness.py; needs PyYAML).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR)

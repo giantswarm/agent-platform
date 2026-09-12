@@ -320,6 +320,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "takeOwnership": {
+                            "type": "boolean"
+                        },
                         "valuesFrom": {
                             "type": "string"
                         },
