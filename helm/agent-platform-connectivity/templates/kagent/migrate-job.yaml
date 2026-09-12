@@ -27,8 +27,12 @@ on Jobs (components.agent-platform-connectivity.disableWaitForJobs). The Job's
 name carries an 8-hex hash of its image, args and environment: an upgrade that
 changes any of them renders a new Job (Helm creates it and removes the
 old-named one) instead of hitting Job.spec.template's immutability; an upgrade
-that changes none leaves the completed Job in place, so the command's expand
-phase runs when connectivity 4.0 first renders the Job, and the contract phase
+that changes none re-applies the completed Job unchanged and leaves it in
+place — the pod template carries the stable labels only (never helm.sh/chart
+or app.kubernetes.io/version, which stay on the Job's own metadata): a chart
+release that changed the immutable spec.template was refused by the apiserver
+and stalled the connectivity release (giantswarm/agent-platform#399) — so the
+command's expand phase runs when connectivity 4.0 first renders the Job, and the contract phase
 — once the templates are Ready — is a re-run: by hand, a clone of the Job
 under a new name (`kubectl create job --from` takes CronJob sources only;
 UPGRADE.md carries the command), or the next upgrade after
@@ -102,7 +106,10 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "agent-platform.kagent.migration.labels" . | nindent 8 }}
+        {{- /* The stable subset (no chart version): Job.spec.template is
+        immutable and a chart release re-applies the completed Job under the
+        same name — see _migrate.tpl. */ -}}
+        {{- include "agent-platform.kagent.migration.podLabels" . | nindent 8 }}
     spec:
       restartPolicy: Never
       serviceAccountName: {{ $sa }}

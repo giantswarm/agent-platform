@@ -32,6 +32,23 @@ app.kubernetes.io/component: agent-manager-migrate
 {{- end -}}
 
 {{/*
+The labels of the Job's pod template: the stable subset only — never
+helm.sh/chart or app.kubernetes.io/version, which change on every chart
+release while the Job's name (a hash of its image, args and environment) does
+not. Job.spec.template is immutable: a chart release that re-applied the
+completed Job with the new chart version in its pod template was refused by
+the apiserver (`spec.template: Invalid value: … field is immutable`), and the
+connectivity upgrade stalled until the Job's TTL removed it
+(giantswarm/agent-platform#399). The component label keeps the pods under the
+migration's network policy.
+*/}}
+{{- define "agent-platform.kagent.migration.podLabels" -}}
+{{ include "labels.selector" . }}
+app.kubernetes.io/component: agent-manager-migrate
+application.giantswarm.io/team: {{ index .Chart.Annotations "io.giantswarm.application.team" | quote }}
+{{- end -}}
+
+{{/*
 agent-manager's image for the Job (agentManager.migration.image; the tag is the
 meta chart's BOM pin for the agent-manager component).
 */}}

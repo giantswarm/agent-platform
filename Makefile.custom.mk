@@ -1858,7 +1858,7 @@ verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the c
 	@echo "ok: $@"
 
 .PHONY: verify-migration
-verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; a PLAIN Job named with the hash of its spec (no hook: a migrate failure never fails the release, and the meta chart stops the connectivity HelmRelease from waiting on Jobs), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), GITHUB_TOKEN optional from the value-named Secret, its inputs as environment; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
+verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; a PLAIN Job named with the hash of its spec (no hook: a migrate failure never fails the release, and the meta chart stops the connectivity HelmRelease from waiting on Jobs), its pod template byte-identical across chart versions while its own labels follow them (Job.spec.template is immutable, #399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), GITHUB_TOKEN optional from the value-named Secret, its inputs as environment; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — its kagent is fresh, there is no 0.10 agent to migrate (agentlab#143 rehearses the migration)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vmig-off.out 2>&1 || { cat /tmp/vmig-off.out; exit 1; }
@@ -1891,6 +1891,24 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'optional: true' || { echo "FAIL: the token Secret is not optional"; exit 1; }
 	@if grep -q 'AGENT_MANAGER_MANAGED_NAMESPACES' /tmp/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MANAGED_NAMESPACES renders without additional namespaces"; exit 1; fi
 	@echo "ok: the Job"
+	@echo "--> stable across chart releases (#399): the chart packaged at two versions renders the same-named Job with a byte-identical spec.template — the chart version (helm.sh/chart, app.kubernetes.io/version) stays on the Job's own labels, never on the pod's; the pod keeps the selector labels, the component label the network policy selects on, the team label"
+	@rm -rf /tmp/vmig-pkg && mkdir -p /tmp/vmig-pkg
+	@for v in 4.0.0 4.0.1; do \
+		helm package $(CONNECTIVITY_DIR) --version $$v --app-version $$v -d /tmp/vmig-pkg >/tmp/vmig-pkg/package-$$v.log 2>&1 || { cat /tmp/vmig-pkg/package-$$v.log; exit 1; }; \
+		helm template t /tmp/vmig-pkg/agent-platform-connectivity-$$v.tgz $(MIGRATION_ON) >/tmp/vmig-pkg/render-$$v.out 2>&1 || { cat /tmp/vmig-pkg/render-$$v.out; exit 1; }; \
+		$(PICK) /tmp/vmig-pkg/render-$$v.out Job '$(MIGRATION_JOB)-*' kagent >/tmp/vmig-pkg/job-$$v.out || { echo "FAIL: no Job at chart version $$v"; exit 1; }; \
+		sed -n '/^  template:$$/,$$p' /tmp/vmig-pkg/job-$$v.out >/tmp/vmig-pkg/template-$$v.out; \
+		sed -n '/^metadata:$$/,/^spec:$$/p' /tmp/vmig-pkg/job-$$v.out >/tmp/vmig-pkg/meta-$$v.out; \
+	done
+	@[ -s /tmp/vmig-pkg/template-4.0.0.out ] || { echo "FAIL: no spec.template picked from the Job"; exit 1; }
+	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-pkg/job-4.0.0.out)" = "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' /tmp/vmig-pkg/job-4.0.1.out)" ] || { echo "FAIL: the Job's name changed with the chart version alone (it hashes image, args and environment only)"; exit 1; }
+	@cmp -s /tmp/vmig-pkg/template-4.0.0.out /tmp/vmig-pkg/template-4.0.1.out || { echo "FAIL: the Job's spec.template differs between chart versions 4.0.0 and 4.0.1 — a chart release re-applies the same-named Job with a changed immutable template and the connectivity upgrade stalls (#399)"; diff /tmp/vmig-pkg/template-4.0.0.out /tmp/vmig-pkg/template-4.0.1.out; exit 1; }
+	@if grep -qE 'helm.sh/chart|app.kubernetes.io/version' /tmp/vmig-pkg/template-4.0.0.out; then echo "FAIL: the pod template carries a chart-version label"; grep -E 'helm.sh/chart|app.kubernetes.io/version' /tmp/vmig-pkg/template-4.0.0.out; exit 1; fi
+	@for l in 'app.kubernetes.io/name: "agent-platform-connectivity"' 'app.kubernetes.io/instance: "t"' 'app.kubernetes.io/component: agent-manager-migrate' 'application.giantswarm.io/team: "'; do grep -qF "$$l" /tmp/vmig-pkg/template-4.0.0.out || { echo "FAIL: the pod template lacks the stable label $$l"; exit 1; }; done
+	@grep -q 'helm.sh/chart: "agent-platform-connectivity-4.0.0"' /tmp/vmig-pkg/meta-4.0.0.out || { echo "FAIL: the Job's own labels lost helm.sh/chart"; grep 'helm.sh/chart' /tmp/vmig-pkg/meta-4.0.0.out; exit 1; }
+	@grep -q 'app.kubernetes.io/version: "4.0.0"' /tmp/vmig-pkg/meta-4.0.0.out || { echo "FAIL: the Job's own labels lost app.kubernetes.io/version"; exit 1; }
+	@if cmp -s /tmp/vmig-pkg/meta-4.0.0.out /tmp/vmig-pkg/meta-4.0.1.out; then echo "FAIL: the Job's own labels do not follow the chart version"; exit 1; fi
+	@echo "ok: stable pod template"
 	@echo "--> the values: the tag follows agentManager.migration.image.tag, dryRun renders --dry-run, an empty secretName drops the token, additional namespaces reach the Job, a renamed identity follows"
 	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=1.2.3 --set agentManager.migration.dryRun=true --set agentManager.migration.githubToken.secretName= --set 'agent-manager.kagent.additionalNamespaces[0]=team-a' --set 'agent-manager.kagent.additionalNamespaces[1]=team-b' --set kagent.fluxServiceAccountName=tenant-x >/tmp/vmig-vals.out 2>&1 || { cat /tmp/vmig-vals.out; exit 1; }
 	@$(PICK) /tmp/vmig-vals.out Job '$(MIGRATION_JOB)-*' kagent >/tmp/vmig-vals-job.out || { echo "FAIL: no Job with the values set"; exit 1; }
