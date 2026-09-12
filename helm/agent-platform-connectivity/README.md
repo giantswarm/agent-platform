@@ -522,8 +522,6 @@ clause, in either flavour; `make verify-wiring` asserts that against
 | kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
-| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:6e510b241e2d000b7d10879c9fde3dd34a37879854278f0a5d386426049a88bf"` |  |
-| kagent.harness.snapshotLocation | string | `"s3://ate-snapshots/kagent"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |
 | kagent.podSecurityContext.runAsNonRoot | bool | `true` |  |

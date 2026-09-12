@@ -311,6 +311,21 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "nullKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "omitKeys": {
                             "type": "array",
                             "items": {
@@ -566,6 +581,12 @@
                         "injectGlobal": {
                             "type": "boolean"
                         },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -574,6 +595,27 @@
                         },
                         "valuesFrom": {
                             "type": "string"
+                        },
+                        "valuesFromRefs": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "optional": {
+                                        "type": "boolean"
+                                    },
+                                    "valuesKey": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
                         },
                         "versionRange": {
                             "type": "string"

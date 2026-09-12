@@ -379,12 +379,15 @@ components:  # @schema additionalProperties: true
     # one ever appeared at this OCI path — upstream publishes to
     # ghcr.io/kagent-dev and the line's tag workflow refuses bare vX.Y.Z tags,
     # so none is expected; by design (D2) the later switch to an upstream
-    # release is a range change here, not a rename. Re-pinning the line onto a
-    # new upstream version is one values change: this range, kagent-crds'
-    # range, kagent.tag and kagent.harness.image move together (README
-    # "Re-pinning the kagent line"). No semverFilter: a dev build is selected
-    # only by a consumer that sets one (README "Dev channel").
-    versionRange: ">=0.11.0-gs.1 <0.11.1-0"
+    # release is a range change here, not a rename. Re-pinning the line is one
+    # values change: this range and kagent-crds' range move together (README
+    # "Re-pinning the kagent line"); the build's image tag and Go ADK digest
+    # travel inside the chart (stamped at publish), not here. The floor is
+    # 0.11.0-gs.6, the first release whose chart carries the stamps this chart
+    # relies on (controller.agentImage.digest, harness.create, the kagent-images
+    # ConfigMap). No semverFilter: a dev build is selected only by a consumer
+    # that sets one (README "Dev channel").
+    versionRange: ">=0.11.0-gs.6 <0.11.1-0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -401,28 +404,43 @@ components:  # @schema additionalProperties: true
     # install.disableTakeOwnership / upgrade.disableTakeOwnership (the
     # HelmRelease v2 fields, false by default — an object another release owns
     # gets its release-name/namespace annotations rewritten instead of refused;
-    # there is no opt-in field). Step 2 of the migration to 4.8.0 (#406): today
-    # the connectivity chart renders the platform Harness `kagent`; from 4.8.0
-    # the kagent chart renders it itself, so on that upgrade the object — kept
-    # in place by connectivity's helm.sh/resource-policy: keep — changes owner
-    # without a delete/recreate and no agent under it sees a gap
+    # there is no opt-in field). Since 4.8.0 (#406) the kagent chart renders the
+    # platform Harness `kagent` itself (kagent.harness.create); through 4.7.19
+    # the connectivity chart rendered it and left it in place on its own
+    # upgrade (helm.sh/resource-policy: keep), so the 4.8.0 upgrade changed the
+    # object's owner without a delete/recreate and no agent under it saw a gap
     # (tests/verify-kagent-wiring.py asserts the fields stay unset).
     # These keys are the connectivity chart's, not kagent's: it reads them for
     # the wiring it renders around kagent (routes, the ServiceMonitor, the
-    # platform Harness, the ModelConfig/RemoteMCPServer CRs, the tenant
-    # identity), so they stay in the top-level block and are dropped on the way
-    # out — the kagent chart has no schema and would carry them on silently.
-    # fullnameOverride and namespaceOverride are upstream keys the connectivity
-    # chart also reads, so they are forwarded.
+    # ModelConfig/RemoteMCPServer CRs, the tenant identity), so they stay in
+    # the top-level block and are dropped on the way out — the kagent chart has
+    # no schema and would carry them on silently. fullnameOverride and
+    # namespaceOverride are upstream keys the connectivity chart also reads, so
+    # they are forwarded.
     omitKeys:
       - controllerRoute
       - fluxServiceAccountName
-      - harness
       - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
       - serviceMonitor
       - uiRoute
+    # The kagent chart stamps its own image references at publish (the build's
+    # controller/UI tag, the Go ADK digest the Harness runs, the gVisor worker
+    # of the Substrate version it was built against). An installation may
+    # override them, but an EMPTY value must not reach the chart — it would
+    # replace the stamp (substrate-workerpool.yaml refuses an empty
+    # workerImage; the Harness helper falls back to the stamp only when
+    # harness.image is absent or empty). So the two keys travel only when set.
+    omitEmptyKeys:
+      - substrateWorkerPool.workerImage
+      - harness.image
+    # The chart's own admission label, deleted from the platform Harness's
+    # selector (kagent.harness.allowedAgentTemplates): a null in the release's
+    # values removes a chart default on coalesce; nothing in values.yaml can
+    # carry one, so it is set on the way out.
+    nullKeys:
+      - [harness, allowedAgentTemplates, selector, matchLabels, kagent.dev/harness]
     enabled: false
   kagent-crds:  # @schema additionalProperties: true
     chart: kagent-crds
@@ -441,7 +459,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://ghcr.io/giantswarm/kagent/helm
-    versionRange: ">=0.11.0-gs.1 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.6 <0.11.1-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -464,7 +482,7 @@ components:  # @schema additionalProperties: true
     # render — agent-platform.validateSubstrate). Both releases land in
     # ate-system (targetNamespace; the chart's Roles name that namespace), and
     # both carry ONE version pin: the same range in the two versionRanges
-    # (>=0.0.27-gs.6 <0.0.28-0, the kagent entry's shape — the line's releases
+    # (>=0.0.27-gs.7 <0.0.28-0, the kagent entry's shape — the line's releases
     # of upstream 0.0.27 from gs.5 on: the egress gateway's frontend policy for
     # its agentgateway dataplane, the connection string from a Secret, atelet
     # scheduling, helm.sh/resource-policy: keep on the three CRD templates so a
@@ -473,11 +491,12 @@ components:  # @schema additionalProperties: true
     # podcertificate-controller namespace so a reinstall keeps its trust chain),
     # whose floor is
     # also the Substrate version
-    # kagent.substrateWorkerPool.workerImage names — a re-pin of Substrate moves
+    # the kagent chart's stamped substrateWorkerPool.workerImage names (the gs.6
+    # kagent chart was built against 0.0.27-gs.7) — a re-pin of Substrate moves
     # the three together with the kagent pin (README "Agent Substrate"). A
     # mirror sets `repository` here and substrate.image.registry below.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.27-gs.6 <0.0.28-0"
+    versionRange: ">=0.0.27-gs.7 <0.0.28-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -499,11 +518,30 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.27-gs.6 <0.0.28-0"
+    versionRange: ">=0.0.27-gs.7 <0.0.28-0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
     dependsOn: [substrate-crds, agent-platform-connectivity]
+    # atelet's pinned image set comes from the kagent release: its chart
+    # renders a ConfigMap `kagent-images` (fullnameOverride kagent, in this
+    # release's namespace) whose key substrate-values.yaml carries
+    # atelet.imageCache.pinnedImages = the platform Harness's Go ADK image and
+    # the claude-harness image at the digests the chart was published with. A
+    # re-pin of the kagent line moves the pinned set by itself; no copy of a
+    # digest lives in this chart (supersedes the derivation 4.7.x made from
+    # kagent.harness.image). optional: the substrate release installs before
+    # kagent renders the ConfigMap; helm-controller reads it on the next
+    # reconcile. spec.values wins over valuesFrom in Flux, so an installation's
+    # own substrate.atelet.imageCache.pinnedImages travels only when set
+    # (omitEmptyKeys) — an empty list would erase the ConfigMap's.
+    valuesFromRefs:
+      - kind: ConfigMap
+        name: kagent-images
+        valuesKey: substrate-values.yaml
+        optional: true
+    omitEmptyKeys:
+      - atelet.imageCache.pinnedImages
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm
@@ -1542,17 +1580,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # {controller,ui,golang-adk}, multi-arch, published by the line's tag
   # workflow with the upstream repository hierarchy.
   registry: ghcr.io
-  # ONE build of the line. `tag` is the image tag of the controller and the UI
-  # and equals the chart version of the same build; upstream's chart falls back
-  # to .Chart.Version when it is empty, and under helm-controller that is
-  # `<version>+<oci digest>` — an invalid image tag, a silent ImagePullBackOff.
-  # kagent.harness.image below pins the Go ADK image of the SAME build by
-  # digest (the platform Harness accepts nothing else). A re-pin moves `tag`,
-  # that digest and the two versionRanges (components.kagent, kagent-crds)
-  # together, from the line's ledger: builds.md on the fork's `ledger` branch
-  # has one row per published build with every image's index digest (README
-  # "Re-pinning the kagent line").
-  tag: "0.11.0-gs.4"
+  # ONE build of the line, named by the chart: the line's tag workflow stamps
+  # `tag` (the controller and UI image tag = the chart version) and
+  # controller.agentImage.digest (the Go ADK image the platform Harness runs)
+  # into the chart it publishes, so neither is set here — a re-pin is the two
+  # versionRanges (components.kagent, kagent-crds) alone (README "Re-pinning the
+  # kagent line"). Setting `tag` here would override the stamp for every
+  # release the range admits.
   # controller is upstream kagent chart config forwarded verbatim (e.g. the
   # CNPG DSN volume/volumeMounts pattern documented above), so unknown keys
   # must stay allowed.
@@ -1618,18 +1652,20 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # workerImage is the gVisor worker of the Substrate version the cluster runs:
   # the Giant Swarm Substrate line (giantswarm/substrate, published as
   # ghcr.io/giantswarm/substrate/*, tagged with the bare version; its FORK.md
-  # is the ledger) at the version the kagent pin requires — the worker image
-  # and the control plane are one Substrate version, so a Substrate re-pin
-  # moves this with it. The chart requires it while create is true;
-  # sandboxClass gvisor is what kagent's generated ActorTemplates select. The
-  # connectivity chart reads `name` for the Harness's workerPoolRef; replicas
-  # and template (resources, node placement, the architecture pin) are the
-  # capacity knobs.
+  # is the ledger). The kagent chart stamps it at publish with the Substrate
+  # version it was built against, which components.substrate.versionRange's
+  # floor must equal (the worker image and the control plane are one Substrate
+  # version; tests/verify-components.py asserts the floor) — so it stays EMPTY
+  # here and travels only when an installation sets it (components.kagent
+  # .omitEmptyKeys; the chart refuses an empty value). sandboxClass gvisor is
+  # what kagent's generated ActorTemplates select. The Harness's workerPoolRef
+  # follows `name`; replicas and template (resources, node placement, the
+  # architecture pin) are the capacity knobs.
   substrateWorkerPool:
     create: true
     name: kagent-default
     replicas: 4
-    workerImage: ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.6
+    workerImage: ""
     sandboxClass: gvisor
     # The worker pods' template (WorkerPool.spec.template: nodeSelector,
     # tolerations, priorityClassName, nodeAffinity, resources). One pool runs
@@ -1865,20 +1901,24 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # callers an empty name.
   fluxServiceAccountName: kagent-flux
 
-  # --- The platform Harness (read by the connectivity chart, not passed to the kagent chart) ---
+  # --- The platform Harness (the kagent chart's harness.* keys; GS policy only) ---
   # On kagent API v2 how an agent runs is a Harness: a digest-pinned runtime
   # image plus the Substrate policy (the WorkerPool above, a snapshot
-  # location). The connectivity chart renders ONE platform Harness, `kagent`,
-  # per managed namespace from this block; the Generic agent chart 1.x labels
-  # every AgentTemplate agent-platform.giantswarm.io/harness: kagent to be
-  # admitted by it.
+  # location). The kagent chart renders ONE platform Harness, `kagent`, in the
+  # kagent namespace from this block (harness.create) with its own Go ADK
+  # image at the digest it was published with (controller.agentImage.digest);
+  # the Generic agent chart 1.x labels every AgentTemplate
+  # agent-platform.giantswarm.io/harness: kagent to be admitted by it. Through
+  # 4.7.19 the connectivity chart rendered this object; 4.8.0 handed it to the
+  # kagent release in place (UPGRADE.md).
   harness:
-    # The line's Go ADK image BY DIGEST — the Harness CRD accepts no tag. The
-    # image index digest of the golang-adk image of the build `tag` above
-    # names (builds.md on the fork's `ledger` branch, column golang-adk; `crane
-    # digest ghcr.io/giantswarm/kagent/golang-adk:<tag>` says the same); a
-    # re-pin moves it with `tag`.
-    image: ghcr.io/giantswarm/kagent/golang-adk@sha256:6e510b241e2d000b7d10879c9fde3dd34a37879854278f0a5d386426049a88bf
+    create: true
+    # An OVERRIDE of the runtime image, BY DIGEST (<repository>@sha256:<64 hex>;
+    # the Harness CRD accepts no tag). Empty (the default): the chart's own Go
+    # ADK image at the stamped digest — the platform never pins a digest here.
+    # Set by a dev loop that runs the platform on a locally built image; it
+    # travels only when set (components.kagent.omitEmptyKeys).
+    image: ""
     # Where Substrate keeps the actors' snapshots for this Harness — the
     # Harness's snapshotPolicy.location: an object-store URL, s3://<bucket>/<prefix>
     # (the prefix keeps one bucket's Harnesses apart). REQUIRED whenever
@@ -1890,6 +1930,23 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # its endpoint and credentials in substrate.atelet.extraEnv; a lab's
     # in-cluster store (substrate.rustfs.enabled: true, s3://ate-snapshots/<prefix>).
     snapshotLocation: ""
+    # The Harness's environment: KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
+    # the caller's bearer on its MCP calls, so muster sees the person, not the
+    # platform. Nothing else today (a per-namespace skills credential is a
+    # later, separate decision).
+    env:
+      - name: KAGENT_PROPAGATE_TOKEN
+        value: "true"
+    # The admission contract: a template is admitted by the ONE label the
+    # Generic agent chart 1.x stamps (the value is the Harness's name). Helm
+    # merges maps on coalesce, so the kagent chart's own default key
+    # (kagent.dev/harness: kagent) would join this one and a template would
+    # need both labels — components.kagent.nullKeys forwards a null for it,
+    # which deletes it (a null here would not survive this chart's own render).
+    allowedAgentTemplates:
+      selector:
+        matchLabels:
+          agent-platform.giantswarm.io/harness: kagent
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
@@ -3112,12 +3169,16 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # (ate-api-server, which also reads and writes snapshots, has no such knob
     # in the chart yet — an S3-compatible store outside AWS waits for it.)
     extraEnv: []
-    # atelet's image cache (Substrate 0.0.27-gs.6): gcPeriod, highPercent,
+    # atelet's image cache (Substrate 0.0.27-gs.6+): gcPeriod, highPercent,
     # lowPercent, minAge, maxBytes tune the GC pass — unset, the chart leaves
     # atelet's defaults. pinnedImages are pulled at every pass and never
-    # evicted; the meta chart adds the platform Harness's image
-    # (kagent.harness.image) to whatever is listed here, so the first turn
-    # after an idle spell on a node above the watermark pays no cold pull.
+    # evicted. The platform's runtime images (the Harness's Go ADK image, the
+    # claude-harness) are pinned by the kagent release's ConfigMap
+    # kagent-images through the substrate release's valuesFrom
+    # (components.substrate) — list here only an installation's OWN extra
+    # images: Flux lets spec.values win over valuesFrom, so a non-empty list
+    # here REPLACES the ConfigMap's set (repeat the runtime images in it if you
+    # need both); empty, nothing is forwarded and the ConfigMap's set applies.
     imageCache:
       pinnedImages: []
 # The substrate-crds chart takes no values.

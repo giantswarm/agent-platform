@@ -28,8 +28,9 @@ time, in the child HelmRelease or in the running controller:
     not come after its CRDs, a `crds:` policy on a chart whose CRDs are
     templates, `global` injected into a chart that reads none;
   * an image tag the chart would fall back to (`.Chart.Version`, which under
-    helm-controller is `<version>+<digest>`), a Harness image given as a tag
-    (the CRD accepts a digest only), or a tag and a range that name different
+    helm-controller is `<version>+<digest>`) — since 4.8.0 nothing here names a
+    build: the chart stamps its tag and digests, a forwarded tag, workerImage or
+    Harness digest is the fault; a range whose floor predates the stamps, or
     upstream versions of the line;
   * the retired 0.10 keys: the ten bundled example agents (dead keys on the
     line — the chart ships none), the `METRICS_*` controller env and a metrics
@@ -37,7 +38,7 @@ time, in the child HelmRelease or in the running controller:
   * a kagent release that opts out of helm-controller's take-ownership default
     (install/upgrade disableTakeOwnership) or carries a `takeOwnership` key the
     HelmRelease CRD does not know: the 4.8.0 upgrade adopts the platform Harness
-    the connectivity chart leaves in place through helm.sh/resource-policy: keep
+    the connectivity chart (through 4.7.19) left in place through helm.sh/resource-policy: keep
     (giantswarm/agent-platform#406 step 2).
 
 Reads a rendered meta-package manifest (the CI values: kagent on). Deliberately
@@ -59,21 +60,21 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 # `controller` is read for controller.auth.userIdClaim: the claim the kagent
 # controller derives the caller from (AUTH_USER_ID_CLAIM) is also the claim the
 # gateway's identity transformation copies into x-user-id (ONE value).
-# substrateWorkerPool is shared: the kagent chart renders the WorkerPool from it and
-# the connectivity chart reads .name for the platform Harness workerPoolRef, so it stays forwarded.
-UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool"}
+# substrateWorkerPool and harness are the kagent chart's: it renders the WorkerPool and,
+# since 4.8.0, the platform Harness (harness.create) from them.
+UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
 LINE_REPOSITORY = "oci://ghcr.io/giantswarm/kagent/helm"
 LINE_IMAGES = "giantswarm/kagent"
-HARNESS_IMAGE = re.compile(r"^ghcr\.io/giantswarm/kagent/golang-adk@sha256:[a-f0-9]{64}$")
+HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 # What the release range must admit and refuse, by shape: the line's releases
 # of the pinned upstream version and nothing else — not its dev builds (`dev` <
 # `gs` identifier-wise), not a later upstream base (the ceiling holds the patch;
 # Masterminds confines a prerelease to no patch tuple, so `<0.12.0-0` would let
 # 0.11.1-dev.… through), not the next minor.
-ADMITTED = ["{base}-gs.1", "{base}-gs.2", "{base}-gs.10", "{base}"]
-REFUSED = ["{base}-dev.giantswarm.2026-09-10.22-06-46.h0ac5240", "{next_patch}-dev.giantswarm.2026-09-11.00-00-00.h0000000",
+ADMITTED = ["{floor}", "{floor_next}", "{base}-gs.10", "{base}"]
+REFUSED = ["{below_floor}", "{base}-dev.giantswarm.2026-09-10.22-06-46.h0ac5240", "{next_patch}-dev.giantswarm.2026-09-11.00-00-00.h0000000",
            "{next_patch}-gs.1", "{next_patch}", "{next_minor}-gs.1", "{next_minor}"]
 EXAMPLE_AGENTS = ["k8s-agent", "kgateway-agent", "istio-agent", "promql-agent", "observability-agent",
                   "argo-rollouts-agent", "helm-agent", "cilium-policy-agent", "cilium-manager-agent", "cilium-debug-agent"]
@@ -194,7 +195,7 @@ def check_forwarded_block(values: dict[str, list[str]], omitted: set[str]) -> No
     print("ok: forwarded kagent values are flat, carry no umbrella-only key, keep the shared keys")
 
 
-def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent: str) -> str:
+def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent: str) -> None:
     if scalar(values.get("registry", []), "registry") != "ghcr.io":
         fail("kagent.registry is not ghcr.io (the line's images live under ghcr.io/giantswarm/kagent)")
     controller = values.get("controller", [])
@@ -203,28 +204,31 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
             fail(f"kagent.controller.{key}.repository is not {LINE_IMAGES}/{repo} (the line's image)")
     if f"repository: {LINE_IMAGES}/ui" not in values.get("ui", []):
         fail(f"kagent.ui.image.repository is not {LINE_IMAGES}/ui (the line's image)")
-    tag = scalar(values.get("tag", []), "tag")
-    if not tag or fluxsemver.parse(tag) is None:
-        fail("kagent.tag is not an explicit image tag; upstream's chart falls back to .Chart.Version, "
-             "which under helm-controller is <version>+<digest> — an invalid image tag")
-    if fluxsemver.base(tag) != fluxsemver.base(kagent_range.split()[0].lstrip(">=")):
-        fail(f"kagent.tag {tag} and components.kagent.versionRange {kagent_range!r} name different upstream versions of the line; "
-             "one build of the line: tag, Harness digest and the two ranges move together")
-    m = re.search(r"^  harness:\n(?:    .*\n)*?    image: (\S+)$", conn_kagent, re.M)
-    harness = m.group(1) if m else ""
-    if not HARNESS_IMAGE.match(harness):
-        fail(f"kagent.harness.image is not the line's Go ADK image by digest (got {harness!r}); the Harness CRD accepts nothing else "
-             "and the connectivity chart renders the platform Harness from it")
-    if "harness" in values:
-        fail("kagent.harness forwarded to the kagent chart; it is the connectivity chart's key")
+    if "tag" in values:
+        fail("kagent.tag forwarded to the kagent chart; the line stamps the build's image tag into the chart at publish "
+             "(0.11.0-gs.6+), an override here would pin every release the range admits to one build")
+    if fluxsemver.parse(kagent_range.split()[0].lstrip(">=")) < fluxsemver.parse("0.11.0-gs.6"):
+        fail(f"components.kagent.versionRange {kagent_range!r} admits a chart without the stamps (tag, controller.agentImage.digest, "
+             "harness.create, the kagent-images ConfigMap); the floor is 0.11.0-gs.6")
+    if re.search(r"^workerImage:", "\n".join(values.get("substrateWorkerPool", [])), re.M):
+        fail("kagent.substrateWorkerPool.workerImage forwarded by default; the chart stamps the gVisor worker of the Substrate "
+             "version it was built against — the key travels only when an installation sets it (components.kagent.omitEmptyKeys)")
+    harness = "\n".join(values.get("harness", []))
+    if not re.search(r"^create: true$", harness, re.M):
+        fail("kagent.harness.create is not true; since 4.8.0 the kagent chart renders the platform Harness")
+    if re.search(r"^image:", harness, re.M):
+        fail("kagent.harness.image forwarded by default; the chart's own Go ADK digest is the Harness image — an override travels only when set")
+    for needle, what in (("snapshotLocation: ", "the snapshot location"), ("- name: KAGENT_PROPAGATE_TOKEN", "KAGENT_PROPAGATE_TOKEN in env"),
+                         (f"{HARNESS_LABEL}: kagent", "the platform admission label"), ("kagent.dev/harness: null", "the null that deletes the chart's own admission label")):
+        if needle not in harness:
+            fail(f"kagent.harness forwarded without {what}: the meta chart owns the GS policy of the platform Harness\n{harness}")
     pool = scalar(values.get("substrateWorkerPool", []), "name")
     if not pool or f"name: {pool}" not in controller:
         fail("kagent.substrateWorkerPool.name and kagent.controller.substrate.defaultWorkerPool.name differ; "
              "the Harness's workerPoolRef and the controller's default name one pool")
     if "enabled: true" not in controller or "ateApiEndpoint:" not in "\n".join(controller):
         fail("kagent.controller.substrate is not on with its ate-api endpoint; the line has no runtime without Substrate")
-    print(f"ok: one build of the line — tag {tag}, Harness digest {harness.rsplit(':', 1)[1][:12]}…, WorkerPool {pool}")
-    return tag
+    print(f"ok: one build of the line, named by the chart — no tag, no workerImage, no Harness digest forwarded; the Harness policy forwarded; WorkerPool {pool}")
 
 
 def check_sources(docs, kagent_range: str) -> None:
@@ -236,9 +240,12 @@ def check_sources(docs, kagent_range: str) -> None:
             fail(f"{name} OCIRepository range is {semver!r}; kagent and kagent-crds are one build of the line and share {kagent_range!r}")
         if filtered:
             fail(f"{name} OCIRepository carries a semverFilter by default; the release range selects releases, a filter is a consumer's dev-channel knob")
-    base = fluxsemver.base(kagent_range.split()[0].lstrip(">="))
+    floor = kagent_range.split()[0].lstrip(">=")
+    base = fluxsemver.base(floor)
     major, minor, patch = (int(x) for x in base.split("."))
-    shapes = {"base": base, "next_patch": f"{major}.{minor}.{patch + 1}", "next_minor": f"{major}.{minor + 1}.0"}
+    n = int(re.search(r"-gs\.(\d+)$", floor).group(1))  # the line's counter at the floor
+    shapes = {"base": base, "floor": floor, "floor_next": f"{base}-gs.{n + 1}", "below_floor": f"{base}-gs.{n - 1}",
+              "next_patch": f"{major}.{minor}.{patch + 1}", "next_minor": f"{major}.{minor + 1}.0"}
     for template in ADMITTED:
         v = template.format(**shapes)
         if not fluxsemver.satisfies(v, kagent_range):
@@ -282,11 +289,23 @@ def check_retired_keys(values: dict[str, list[str]], conn_kagent: str) -> None:
     print("ok: no example agent, no METRICS_* env, controller metrics and the ServiceMonitor off")
 
 
+def check_substrate_pins(docs) -> None:
+    """The substrate release takes atelet's pinned runtime images from the kagent release's
+    ConfigMap (valuesFrom, optional — it installs before kagent renders it) and carries no
+    pinnedImages of its own by default: Flux lets spec.values win over valuesFrom."""
+    hr = "\n".join(docs[("HelmRelease", "substrate")])
+    if not re.search(r"^  valuesFrom:\n\s+- kind: ConfigMap\n\s+name: kagent-images\n\s+optional: true\n\s+valuesKey: substrate-values\.yaml$", hr, re.M):
+        fail("the substrate release does not read the kagent release's ConfigMap kagent-images (key substrate-values.yaml, optional) through valuesFrom")
+    if "pinnedImages:" in hr:
+        fail("the substrate release carries atelet.imageCache.pinnedImages in spec.values by default; it would shadow the ConfigMap's set")
+    print("ok: the substrate release pins atelet's runtime images from the kagent release's ConfigMap kagent-images, nothing of its own by default")
+
+
 def check_take_ownership(docs) -> None:
     """The kagent release keeps helm-controller's take-ownership default: neither install nor
     upgrade sets disableTakeOwnership (giantswarm/agent-platform#406 step 2): from 4.8.0 the
     kagent chart renders the platform Harness the connectivity chart renders today; the object
-    stays through connectivity's helm.sh/resource-policy: keep (verify-kagent-harness) and the
+    stayed through connectivity's helm.sh/resource-policy: keep (4.7.19) and the
     kagent release adopts it. HelmRelease v2 has no opt-in field — a `takeOwnership` key is not
     in the CRD schema and fails the server-side apply — so the assertion is on the opt-out."""
     text = "\n".join(docs[("HelmRelease", "kagent")]) + "\n"
@@ -303,7 +322,7 @@ def check_take_ownership(docs) -> None:
 def main(path: str) -> int:
     docs = documents(open(path, encoding="utf-8").read())
     for kind, name in (("HelmRelease", "kagent"), ("HelmRelease", "kagent-crds"), ("OCIRepository", "kagent"),
-                       ("OCIRepository", "kagent-crds"), ("HelmRelease", "agent-platform-connectivity")):
+                       ("OCIRepository", "kagent-crds"), ("HelmRelease", "agent-platform-connectivity"), ("HelmRelease", "substrate")):
         if (kind, name) not in docs:
             fail(f"no {name} {kind} in the render")
     values = forwarded_values(docs[("HelmRelease", "kagent")])
@@ -314,6 +333,7 @@ def main(path: str) -> int:
     check_sources(docs, kagent_range)
     check_one_build(values, kagent_range, conn_kagent)
     check_retired_keys(values, conn_kagent)
+    check_substrate_pins(docs)
     check_take_ownership(docs)
     return 0
 

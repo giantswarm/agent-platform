@@ -120,7 +120,7 @@ WorkerPool".
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=0.11.0-gs.1 <0.11.1-0"` |  |
+| components.kagent.versionRange | string | `">=0.11.0-gs.6 <0.11.1-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -128,32 +128,43 @@ WorkerPool".
 | components.kagent.dependsOn[3] | string | `"agent-platform-connectivity"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
-| components.kagent.omitKeys[2] | string | `"harness"` |  |
-| components.kagent.omitKeys[3] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[4] | string | `"oauth2ProxyIngress"` |  |
-| components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
-| components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[2] | string | `"modelConfigs"` |  |
+| components.kagent.omitKeys[3] | string | `"oauth2ProxyIngress"` |  |
+| components.kagent.omitKeys[4] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[5] | string | `"serviceMonitor"` |  |
+| components.kagent.omitKeys[6] | string | `"uiRoute"` |  |
+| components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
+| components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
+| components.kagent.nullKeys[0][0] | string | `"harness"` |  |
+| components.kagent.nullKeys[0][1] | string | `"allowedAgentTemplates"` |  |
+| components.kagent.nullKeys[0][2] | string | `"selector"` |  |
+| components.kagent.nullKeys[0][3] | string | `"matchLabels"` |  |
+| components.kagent.nullKeys[0][4] | string | `"kagent.dev/harness"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=0.11.0-gs.1 <0.11.1-0"` |  |
+| components.kagent-crds.versionRange | string | `">=0.11.0-gs.6 <0.11.1-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.27-gs.6 <0.0.28-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.27-gs.7 <0.0.28-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.27-gs.6 <0.0.28-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.27-gs.7 <0.0.28-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.dependsOn[0] | string | `"substrate-crds"` |  |
 | components.substrate.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
+| components.substrate.valuesFromRefs[0].kind | string | `"ConfigMap"` |  |
+| components.substrate.valuesFromRefs[0].name | string | `"kagent-images"` |  |
+| components.substrate.valuesFromRefs[0].valuesKey | string | `"substrate-values.yaml"` |  |
+| components.substrate.valuesFromRefs[0].optional | bool | `true` |  |
+| components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.klaus-gateway.versionRange | string | `"1.x"` |  |
@@ -453,7 +464,6 @@ WorkerPool".
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"ghcr.io"` |  |
-| kagent.tag | string | `"0.11.0-gs.4"` |  |
 | kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
 | kagent.controller.agentImage.repository | string | `"giantswarm/kagent/golang-adk"` |  |
 | kagent.controller.substrate.enabled | bool | `true` |  |
@@ -469,7 +479,7 @@ WorkerPool".
 | kagent.substrateWorkerPool.create | bool | `true` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.substrateWorkerPool.replicas | int | `4` |  |
-| kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.6"` |  |
+| kagent.substrateWorkerPool.workerImage | string | `""` |  |
 | kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
 | kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.cpu | string | `"250m"` |  |
@@ -550,8 +560,12 @@ WorkerPool".
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
-| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:6e510b241e2d000b7d10879c9fde3dd34a37879854278f0a5d386426049a88bf"` |  |
+| kagent.harness.create | bool | `true` |  |
+| kagent.harness.image | string | `""` |  |
 | kagent.harness.snapshotLocation | string | `""` |  |
+| kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
+| kagent.harness.env[0].value | string | `"true"` |  |
+| kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |

@@ -41,6 +41,25 @@ knowledge:
       connectivity release re-resolves its chart on its own OCIRepository
       interval — a block the live chart does not declare would fail that
       release until the chart catches up, on every installation.
+  omitEmptyKeys — dotted paths dropped from the forwarded block when their value
+      is empty (agent-platform.omitEmpty). For a chart that stamps a default at
+      publish and would take an empty override as the value (kagent's
+      substrateWorkerPool.workerImage, harness.image), and for a release whose
+      spec.values must not shadow its valuesFromRefs (Flux lets spec.values
+      win: substrate's atelet.imageCache.pinnedImages). Applied after omitKeys,
+      before valuesKey.
+  valuesFromRefs — Flux HelmRelease spec.valuesFrom entries (ConfigMap/Secret
+      references, resolved in this chart's namespace) rendered verbatim: values
+      another release publishes for this one, e.g. the kagent release's
+      ConfigMap kagent-images (key substrate-values.yaml, atelet's pinned
+      runtime images) for the substrate release. optional: true lets the
+      release install before the source exists.
+  nullKeys — paths (lists of segments, so a key may contain dots) set to null in
+      the forwarded values, after everything else. A null in HelmRelease
+      spec.values deletes the component chart's default for that key on
+      coalesce — the only way to remove a default from a map the chart also
+      fills (kagent's own admission label in the Harness selector). A null in
+      this chart's values.yaml would not survive its own render.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
       a single block. Used by agent-platform-connectivity, which reads many
       blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …). Like
@@ -184,6 +203,8 @@ values and every component the same one flavor. */ -}}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
 {{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- /* An empty override must not reach a chart that stamps the default (see omitEmptyKeys above). */ -}}
+{{- with $c.omitEmptyKeys }}{{- $vals = include "agent-platform.omitEmpty" (dict "vals" $vals "paths" .) | fromJson }}{{- end }}
 {{- /* GS wrapper charts vendor the upstream chart as a subchart of the same name;
 nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- with $c.valuesKey }}{{- $vals = dict . $vals }}{{- end }}
@@ -191,6 +212,8 @@ nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- /* Derived values win over the block's own copy (the helper fails the
 render when the two disagree). */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
+{{- /* A chart default that must GO: a null in the release values deletes it on coalesce (nullKeys above). */ -}}
+{{- range $c.nullKeys }}{{- include "agent-platform.setNull" (dict "vals" $vals "segs" .) }}{{- end }}
 {{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an
 always-on consumer (e.g. connectivity) does not block on a HelmRelease that was
@@ -274,6 +297,10 @@ spec:
   {{- end }}
   {{- with $c.postRenderers }}
   postRenderers:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $c.valuesFromRefs }}
+  valuesFrom:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   values:
