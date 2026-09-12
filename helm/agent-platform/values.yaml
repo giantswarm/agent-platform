@@ -513,11 +513,12 @@ components:  # @schema additionalProperties: true
     # concurrent uninstall never fails on a vanished kind, and a golden boot
     # whose image the registry refuses failing with the reason, and the kept
     # podcertificate-controller namespace so a reinstall keeps its trust chain),
-    # whose floor is
-    # also the Substrate version
-    # the kagent chart's stamped substrateWorkerPool.workerImage names (the gs.6
-    # kagent chart was built against 0.0.27-gs.8) — a re-pin of Substrate moves
-    # the three together with the kagent pin (README "Agent Substrate"). A
+    # whose floor is the chart
+    # release the platform's wiring needs (gs.8 is chart-only). The Substrate
+    # version the kagent chart's stamped substrateWorkerPool.workerImage names
+    # (0.0.27-gs.7 for the gs.6+ kagent charts) is the same upstream 0.0.27 —
+    # a Substrate re-pin that changes the runtime moves the three together
+    # with the kagent pin (README "Agent Substrate"). A
     # mirror sets `repository` here and substrate.image.registry below.
     repository: oci://ghcr.io/giantswarm/substrate/helm
     versionRange: ">=0.0.27-gs.8 <0.0.28-0"

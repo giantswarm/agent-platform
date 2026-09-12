@@ -84,7 +84,7 @@ KAGENT_RANGE = ">=0.11.0-gs.6 <0.11.1-0"
 # kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
 SUBSTRATE_RANGE = ">=0.0.27-gs.8 <0.0.28-0"
-SUBSTRATE_PIN = "0.0.27-gs.8"  # the range's floor: the BOM pin; the worker image the kagent chart stamps names it too
+SUBSTRATE_PIN = "0.0.27-gs.8"  # the range's floor: the BOM pin (gs.8 is chart-only; the worker image the kagent chart stamps names the same upstream 0.0.27 at gs.7)
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
