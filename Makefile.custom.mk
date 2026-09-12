@@ -1627,7 +1627,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 			done; \
 		done; \
 	done
-	@echo "--> the same values against $(GOLDEN_REF): the controller policies first, then the whole render"
+	@echo "--> the same values against $(GOLDEN_REF): the controller policies first, then the whole render (image references aside: a re-pin moves them by design)"
 	@if [ -n "$(GOLDEN_REF)" ] && git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
 		rm -rf /tmp/vw-jwks-ref && git worktree add -q --detach /tmp/vw-jwks-ref $(GOLDEN_REF) && \
 		for flavor in cilium kubernetes; do \
@@ -1636,7 +1636,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 			$(CTRL_POLICY) /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-pol-$$flavor.out; \
 			$(CTRL_POLICY) /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-pol-$$flavor.out; \
 			diff -u /tmp/vw-jwks-old-pol-$$flavor.out /tmp/vw-jwks-new-pol-$$flavor.out || { echo "FAIL: the $$flavor CONTROLLER POLICY changed for an in-cluster JWKS host - a regression in this slice"; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
-			diff -u /tmp/vw-jwks-old-$$flavor.out /tmp/vw-jwks-new-$$flavor.out || { echo "FAIL: the $$flavor render changed for an in-cluster JWKS host, outside the controller policy. The policies above match, so the branch is most likely behind $(GOLDEN_REF): merge it and run again."; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
+			grep -vE '^ *image:' /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-noimg-$$flavor.out; grep -vE '^ *image:' /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-noimg-$$flavor.out; diff -u /tmp/vw-jwks-old-noimg-$$flavor.out /tmp/vw-jwks-new-noimg-$$flavor.out || { echo "FAIL: the $$flavor render changed for an in-cluster JWKS host, outside the controller policy and the image references (a re-pin moves those by design). The policies above match, so the branch is most likely behind $(GOLDEN_REF): merge it and run again."; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
 		done; \
 		git worktree remove --force /tmp/vw-jwks-ref; \
 		echo "ok: byte-identical against $(GOLDEN_REF)"; \
