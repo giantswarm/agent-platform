@@ -102,7 +102,12 @@ derived one, otherwise the render fails naming the single key to set — a silen
 overwrite would hide a values file that still spells the old key.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  muster.url from the muster Service (agent-platform.musterMcpUrl).
-  substrate: postgres.connectionStringSecretRef, on the platform Cluster —
+  kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
+    store block renders the bucket (agent-platform.kagent.snapshotLocation).
+  substrate: atelet.serviceAccount.annotations and
+    ateApiServer.serviceAccount.annotations gain eks.amazonaws.com/role-arn,
+    the IRSA role the store block renders, while it does (a differing explicit
+    role fails the render); postgres.connectionStringSecretRef, on the platform Cluster —
     the derived CNPG connection Secret <postgres.clusterName>-substrate-app
     (key uri) the connectivity release's hook writes into ate-system for
     postgres.databases.substrate (agent-platform.substrate.postgresMode; the
@@ -128,6 +133,19 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
 {{- end -}}
 {{- $_ := set $derived "muster" (dict "url" $url) -}}
+{{- end -}}
+{{- if and (eq .name "kagent") (eq (include "agent-platform.substrateStore.crossplane" .root) "aws") -}}
+{{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
+{{- end -}}
+{{- if and (eq .name "substrate") (eq (include "agent-platform.substrateStore.crossplane" .root) "aws") -}}
+{{- $arn := include "agent-platform.substrateStore.awsRoleArn" .root -}}
+{{- range $key := list "atelet" "ateApiServer" -}}
+{{- $own := dig $key "serviceAccount" "annotations" "eks.amazonaws.com/role-arn" "" ($.root.Values.substrate | default dict) -}}
+{{- if and $own (ne $own $arn) -}}
+{{- fail (printf "substrate.%s.serviceAccount.annotations[eks.amazonaws.com/role-arn] (%s) differs from the IRSA role kagent.harness.snapshotStore renders (%s): the store block names the role (crossplane.aws.roleName, else the bucket name) — leave the annotation unset" $key $own $arn) -}}
+{{- end -}}
+{{- $_ := set $derived $key (dict "serviceAccount" (dict "annotations" (dict "eks.amazonaws.com/role-arn" $arn))) -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "substrate") (eq (include "agent-platform.substrate.postgresMode" .root) "cnpg") -}}
 {{- $ref := dict "name" (include "agent-platform.substrate.databaseSecretName" .root) "key" "uri" -}}
@@ -173,6 +191,24 @@ Usage: include "agent-platform.setNull" (dict "vals" $vals "segs" (list "a" "b")
 {{- $m = index $m . -}}
 {{- end -}}
 {{- $_ := set $m (last .segs) nil -}}
+{{- end -}}
+
+{{/*
+Drop the key at a dotted path from `vals` (components.yaml omitKeys): a
+top-level key, or a nested one — `harness.snapshotStore` — whose parent then
+stays only while it still holds other keys. Emits the JSON of the result.
+Usage: include "agent-platform.omitPath" (dict "vals" $vals "path" "a.b")
+*/}}
+{{- define "agent-platform.omitPath" -}}
+{{- $segs := splitList "." .path -}}
+{{- $vals := .vals -}}
+{{- if eq (len $segs) 1 -}}
+{{- $vals = omit $vals (first $segs) -}}
+{{- else if kindIs "map" (index $vals (first $segs)) -}}
+{{- $child := include "agent-platform.omitPath" (dict "vals" (index $vals (first $segs)) "path" (join "." (rest $segs))) | fromJson -}}
+{{- if empty $child }}{{- $vals = omit $vals (first $segs) }}{{- else }}{{- $_ := set $vals (first $segs) $child }}{{- end -}}
+{{- end -}}
+{{- $vals | toJson -}}
 {{- end -}}
 
 {{- define "agent-platform.omitEmptyPath" -}}
@@ -223,16 +259,76 @@ connectivity release names it: <postgres.clusterName>-substrate-app.
 {{- end -}}
 
 {{/*
+Agent Substrate's snapshot store, kagent.harness.snapshotStore: the connectivity
+chart renders the S3 bucket and the IRSA role (its templates/substrate/
+crossplane-aws.yaml, the same helpers there); this chart derives what the two
+consumers read from it — kagent.harness.snapshotLocation for the kagent release,
+the role annotation of the substrate release's atelet and ate-api-server
+ServiceAccounts (componentDerivedValues).
+*/}}
+
+{{/* "aws" while the block renders the store (kagent on, crossplane on), else "". */}}
+{{- define "agent-platform.substrateStore.crossplane" -}}
+{{- $xp := dig "harness" "snapshotStore" "crossplane" dict (.Values.kagent | default dict) -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) $xp.enabled -}}
+{{- $xp.provider -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.substrateStore.block" -}}
+{{- dig "harness" "snapshotStore" dict (.Values.kagent | default dict) | toJson -}}
+{{- end -}}
+
+{{/* The snapshot location the store implies: s3://<bucket>/<prefix> (no prefix: s3://<bucket>). */}}
+{{- define "agent-platform.substrateStore.location" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- $prefix := $store.prefix | default "" | trimAll "/" -}}
+{{- printf "s3://%s" $store.crossplane.aws.bucketName -}}{{- with $prefix }}/{{ . }}{{- end -}}
+{{- end -}}
+
+{{/* The role's ARN: arn:aws (arn:aws-cn in the China partition), the account, aws.roleName or the bucket name. */}}
+{{- define "agent-platform.substrateStore.awsRoleArn" -}}
+{{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
+{{- if not (regexMatch "^[0-9]{12}$" (toString $xp.aws.accountId)) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.accountId (%v) must be the 12-digit AWS account id, quoted as a string" $xp.aws.accountId) -}}
+{{- end -}}
+{{- $partition := "arn:aws" -}}{{- if hasPrefix "cn-" $xp.region }}{{- $partition = "arn:aws-cn" }}{{- end -}}
+{{- printf "%s:iam::%s:role/%s" $partition $xp.aws.accountId ($xp.aws.roleName | default $xp.aws.bucketName) -}}
+{{- end -}}
+
+{{/*
+The platform Harness's snapshot location: kagent.harness.snapshotLocation when
+set, else the one kagent.harness.snapshotStore renders; "" with neither
+(validateSubstrate refuses that with kagent on). An explicit value that
+disagrees with the store's fails the render naming both keys — the store block
+names the bucket and the prefix, the location follows.
+*/}}
+{{- define "agent-platform.kagent.snapshotLocation" -}}
+{{- $explicit := dig "harness" "snapshotLocation" "" (.Values.kagent | default dict) -}}
+{{- if eq (include "agent-platform.substrateStore.crossplane" .) "aws" -}}
+{{- $derived := include "agent-platform.substrateStore.location" . -}}
+{{- if and $explicit (ne $explicit $derived) -}}
+{{- fail (printf "kagent.harness.snapshotLocation (%s) differs from the location kagent.harness.snapshotStore renders (%s): the store block names the bucket and the prefix — leave kagent.harness.snapshotLocation unset, or turn kagent.harness.snapshotStore.crossplane.enabled off and name an existing store" $explicit $derived) -}}
+{{- end -}}
+{{- $derived -}}
+{{- else -}}
+{{- $explicit -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Agent Substrate is kagent API v2's runtime: refuse the shapes that install a
 kagent with nothing to run agents on, or a Substrate with nothing to start
 against, at render time — and, where the render is live, a cluster that cannot
 run it.
   * kagent on with substrate or substrate-crds switched off (both follow kagent
     unless switched explicitly).
-  * kagent on without kagent.harness.snapshotLocation: the platform Harness's
+  * kagent on without a snapshot location — neither kagent.harness.snapshotLocation
+    nor kagent.harness.snapshotStore.crossplane: the platform Harness's
     snapshotPolicy.location is the installation's snapshot store — an S3 bucket
-    on CAPA with IRSA, an S3-compatible store with its endpoint in
-    substrate.atelet.extraEnv, a lab's in-cluster store — and has no default.
+    on CAPA with IRSA (the store block provisions it), an S3-compatible store
+    with its endpoint in substrate.atelet.extraEnv, a lab's in-cluster store —
+    and has no default.
   * Substrate on with no control-plane database: neither the bundled
     StatefulSet, nor an explicit connectionString, nor the platform's CNPG
     Cluster with postgres.databases.substrate.
@@ -257,8 +353,8 @@ run it.
 {{- if and $substrate (not $crds) -}}
 {{- fail "components.substrate.enabled is true but components.substrate-crds.enabled is not: the substrate chart's WorkerPool, SandboxConfig and CSIDriverConfig objects need the ate.dev CRDs the substrate-crds chart renders; turn both on" -}}
 {{- end -}}
-{{- if and $kagent (not (dig "harness" "snapshotLocation" "" (.Values.kagent | default dict))) -}}
-{{- fail "kagent.harness.snapshotLocation is required when components.kagent is on: the Substrate snapshot location the platform Harness writes the actors' snapshots to (snapshotPolicy.location), an object-store URL such as s3://<bucket>/<prefix> — the installation's S3 bucket (IRSA on CAPA), an S3-compatible store with its endpoint and credentials in substrate.atelet.extraEnv, or a lab's in-cluster store (substrate.rustfs.enabled: true, s3://ate-snapshots/<prefix>)" -}}
+{{- if and $kagent (not (include "agent-platform.kagent.snapshotLocation" .)) -}}
+{{- fail "kagent.harness.snapshotLocation is required when components.kagent is on: the Substrate snapshot location the platform Harness writes the actors' snapshots to (snapshotPolicy.location), an object-store URL such as s3://<bucket>/<prefix> — the installation's S3 bucket (IRSA on CAPA; kagent.harness.snapshotStore.crossplane provisions it and derives the location), an S3-compatible store with its endpoint and credentials in substrate.atelet.extraEnv, or a lab's in-cluster store (substrate.rustfs.enabled: true, s3://ate-snapshots/<prefix>)" -}}
 {{- end -}}
 {{- if and $substrate (not (include "agent-platform.substrate.postgresMode" .)) -}}
 {{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; postgres.databases.substrate renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionString" -}}

@@ -55,6 +55,6 @@ Substrate is an early project; its own [threat model](https://github.com/kagent-
 ## What an installation owner does
 
 1. Kubernetes 1.35 and the three gates on all three components, ahead of the cut-over (UPGRADE.md).
-2. The snapshot store: an S3 bucket and an IRSA role for `atelet` and `ate-api-server` (CAPA), or an S3-compatible store with its credentials in a Secret; `kagent.harness.snapshotLocation` names it.
+2. The snapshot store: an S3 bucket and an IRSA role for `atelet` and `ate-api-server` (CAPA — `kagent.harness.snapshotStore.crossplane` renders both through Crossplane and derives the location), or an S3-compatible store with its credentials in a Secret; otherwise `kagent.harness.snapshotLocation` names it.
 3. Node placement, when the installation dedicates a node pool to the sandboxes: `substrate.atelet.nodeSelector` / `tolerations` and `kagent.substrateWorkerPool.template`.
 4. Nothing else: the bootstrap, the database on the platform's CNPG Cluster, the exceptions and the policies come with the chart.

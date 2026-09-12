@@ -438,6 +438,9 @@ components:  # @schema additionalProperties: true
     omitKeys:
       - controllerRoute
       - fluxServiceAccountName
+      # The store block is this chart's and the connectivity chart's: the kagent
+      # chart gets the derived harness.snapshotLocation, never the block.
+      - harness.snapshotStore
       - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
@@ -1943,11 +1946,51 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # components.kagent is on; the render fails without it. Per installation:
     # an S3 bucket the installation provisions — on CAPA with IRSA, the
     # standard AWS credential chain of atelet and ate-api-server (README "Agent
-    # Substrate: the snapshot store"), the bucket itself is the installation's
-    # infrastructure, not rendered here; an S3-compatible store elsewhere with
+    # Substrate: the snapshot store") — provisioned by snapshotStore below or
+    # brought by the installation; an S3-compatible store elsewhere with
     # its endpoint and credentials in substrate.atelet.extraEnv; a lab's
     # in-cluster store (substrate.rustfs.enabled: true, s3://ate-snapshots/<prefix>).
     snapshotLocation: ""
+    # Or let the chart PROVISION the store on CAPA: the block below renders the
+    # S3 bucket and the IRSA role through Crossplane (upbound provider-aws) the
+    # way postgres.backup.crossplane renders the kagent-pg backup bucket, and
+    # derives snapshotLocation as s3://<aws.bucketName>/<prefix> — an explicit
+    # snapshotLocation that disagrees fails the render. The role's ARN reaches
+    # the substrate release as the eks.amazonaws.com/role-arn annotation of its
+    # atelet and ate-api-server ServiceAccounts (substrate.atelet.serviceAccount
+    # .annotations, substrate.ateApiServer.serviceAccount.annotations —
+    # Substrate 0.0.27-gs.8+). Meta-chart-owned: never forwarded to the kagent
+    # chart (components.kagent.omitKeys). Off by default; nothing changes for
+    # an installation that names its store by hand.
+    snapshotStore:
+      # The key prefix inside the bucket (keeps one bucket's Harnesses apart).
+      prefix: kagent
+      crossplane:
+        enabled: false
+        # aws — the only provider: S3 Bucket with a lifecycle rule, a
+        #       public-access block and a TLS-only bucket policy, plus an IAM
+        #       Role with an inline S3 policy trusted by Substrate's atelet and
+        #       ate-api-server ServiceAccounts through the cluster's IRSA OIDC
+        #       provider. Bucket objects are created but never deleted by
+        #       Crossplane and carry helm.sh/resource-policy: keep.
+        provider: aws
+        providerConfigRef: ""
+        region: ""
+        # Adopt existing cloud resources without changing them.
+        observeOnly: false
+        tags: {}
+        aws:
+          bucketName: ""
+          # The AWS account that holds the OIDC provider and the role.
+          accountId: ""
+          # IRSA OIDC provider host, e.g. irsa.<cluster>.<base-domain>.
+          oidcProvider: ""
+          # IAM role name. Defaults to bucketName.
+          roleName: ""
+          # Snapshots expire after this many days: an actor whose snapshot is
+          # gone boots cold from the golden image again — one slower start,
+          # nothing lost. 30 days keeps a month of idle actors warm.
+          lifecycleDays: 30
     # The Harness's environment: KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
     # the caller's bearer on its MCP calls, so muster sees the person, not the
     # platform. Nothing else today (a per-namespace skills credential is a

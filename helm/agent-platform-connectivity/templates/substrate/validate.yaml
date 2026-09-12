@@ -15,6 +15,40 @@ render of this chart on its own says the same.
     {{- end }}
   {{- end }}
 {{- end }}
+{{- /*
+Agent Substrate's snapshot store (kagent.harness.snapshotStore): the Crossplane
+block renders the S3 bucket and the IRSA role on AWS only; its inputs are
+required when it is on, and an explicit kagent.harness.snapshotLocation must
+agree with the location the bucket implies (the meta chart derives it).
+*/ -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson }}
+{{- with $store.crossplane }}
+  {{- if .enabled }}
+    {{- if ne .provider "aws" }}
+      {{- fail (printf "kagent.harness.snapshotStore.crossplane.provider=%s is not supported; the chart provisions the snapshot store on aws only (S3 + IRSA) — elsewhere name the store in kagent.harness.snapshotLocation and its access in substrate.atelet.extraEnv / substrate.ateApiServer.extraEnv" .provider) }}
+    {{- end }}
+    {{- range $k := list "providerConfigRef" "region" }}
+      {{- if not (index $store.crossplane $k) }}
+        {{- fail (printf "kagent.harness.snapshotStore.crossplane.%s is required when kagent.harness.snapshotStore.crossplane.enabled" $k) }}
+      {{- end }}
+    {{- end }}
+    {{- range $k := list "bucketName" "accountId" "oidcProvider" }}
+      {{- if not (index $store.crossplane.aws $k) }}
+        {{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.%s is required for provider aws" $k) }}
+      {{- end }}
+    {{- end }}
+    {{- if not (regexMatch "^[0-9]{12}$" (toString .aws.accountId)) }}
+      {{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.accountId (%v) must be the 12-digit AWS account id, quoted as a string" .aws.accountId) }}
+    {{- end }}
+    {{- if include "agent-platform.substrateStore.crossplane" $ }}
+      {{- $explicit := dig "harness" "snapshotLocation" "" ($.Values.kagent | default dict) }}
+      {{- $derived := include "agent-platform.substrateStore.location" $ }}
+      {{- if and $explicit (ne $explicit $derived) }}
+        {{- fail (printf "kagent.harness.snapshotLocation (%s) differs from the location kagent.harness.snapshotStore renders (%s): the store block names the bucket and the prefix — leave kagent.harness.snapshotLocation unset, or turn kagent.harness.snapshotStore.crossplane.enabled off and name an existing store" $explicit $derived) }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
 {{- range include "agent-platform.postgres.databases" . | fromJsonArray }}
   {{- if not (regexMatch "^[a-z_][a-z0-9_]*$" .name) }}
     {{- fail (printf "postgres.databases.%s.name %q is not a plain PostgreSQL identifier (lowercase letters, digits, underscore)" .key .name) }}

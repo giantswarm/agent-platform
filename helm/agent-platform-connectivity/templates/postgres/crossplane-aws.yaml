@@ -4,121 +4,10 @@
 {{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
 {{- $clusterName := .Values.postgres.clusterName }}
 {{- $bucket := $aws.bucketName }}
-{{- $partition := include "agent-platform.postgres.awsPartition" . }}
 {{- $tags := include "agent-platform.postgres.crossplaneTags" . | fromYaml }}
----
-# The S3 bucket for WAL and base backups. Never deleted by Crossplane (no Delete
-# management policy) and kept by Helm: the backups outlive the release.
-apiVersion: s3.aws.upbound.io/v1beta2
-kind: Bucket
-metadata:
-  name: {{ $bucket }}
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-    app.kubernetes.io/component: storage
-  annotations:
-    crossplane.io/external-name: {{ $bucket }}
-    helm.sh/resource-policy: keep
-spec:
-  managementPolicies:
-    {{- include "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" . | nindent 4 }}
-  forProvider:
-    forceDestroy: false
-    objectLockEnabled: false
-    region: {{ $xp.region }}
-    tags:
-      {{- toYaml $tags | nindent 6 }}
-  providerConfigRef:
-    name: {{ $xp.providerConfigRef }}
----
-# Objects expire after lifecycleDays, a safety net above the plugin's retention.
-apiVersion: s3.aws.upbound.io/v1beta1
-kind: BucketLifecycleConfiguration
-metadata:
-  name: {{ $bucket }}
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-    app.kubernetes.io/component: storage
-  annotations:
-    crossplane.io/external-name: {{ $bucket }}
-spec:
-  managementPolicies:
-    {{- include "agent-platform.postgres.crossplaneManagementPolicies" . | nindent 4 }}
-  forProvider:
-    bucketRef:
-      name: {{ $bucket }}
-    region: {{ $xp.region }}
-    rule:
-      - id: Expiration
-        status: Enabled
-        expiration:
-          - days: {{ $aws.lifecycleDays | int }}
-  providerConfigRef:
-    name: {{ $xp.providerConfigRef }}
----
-apiVersion: s3.aws.upbound.io/v1beta1
-kind: BucketPublicAccessBlock
-metadata:
-  name: {{ $bucket }}
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-    app.kubernetes.io/component: storage
-  annotations:
-    crossplane.io/external-name: {{ $bucket }}
-spec:
-  managementPolicies:
-    {{- include "agent-platform.postgres.crossplaneManagementPolicies" . | nindent 4 }}
-  forProvider:
-    bucketRef:
-      name: {{ $bucket }}
-    region: {{ $xp.region }}
-    blockPublicAcls: true
-    blockPublicPolicy: true
-    ignorePublicAcls: true
-    restrictPublicBuckets: true
-  providerConfigRef:
-    name: {{ $xp.providerConfigRef }}
----
-# TLS only.
-apiVersion: s3.aws.upbound.io/v1beta1
-kind: BucketPolicy
-metadata:
-  name: {{ $bucket }}
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-    app.kubernetes.io/component: storage
-  annotations:
-    crossplane.io/external-name: {{ $bucket }}
-spec:
-  managementPolicies:
-    {{- include "agent-platform.postgres.crossplaneManagementPolicies" . | nindent 4 }}
-  forProvider:
-    bucketRef:
-      name: {{ $bucket }}
-    region: {{ $xp.region }}
-    policy: |
-      {
-        "Version": "2012-10-17",
-        "Statement": [
-          {
-            "Sid": "EnforceSSLOnly",
-            "Effect": "Deny",
-            "Principal": "*",
-            "Action": ["s3:*"],
-            "Resource": [
-              "{{ $partition }}:s3:::{{ $bucket }}",
-              "{{ $partition }}:s3:::{{ $bucket }}/*"
-            ],
-            "Condition": {
-              "Bool": {
-                "aws:SecureTransport": "false"
-              }
-            }
-          }
-        ]
-      }
-  providerConfigRef:
-    name: {{ $xp.providerConfigRef }}
+{{- include "agent-platform.crossplane.aws.bucket" (dict "root" . "xp" $xp "bucket" $bucket "lifecycleDays" $aws.lifecycleDays "tags" $tags
+      "bucketComment" (list "The S3 bucket for WAL and base backups. Never deleted by Crossplane (no Delete" "management policy) and kept by Helm: the backups outlive the release.")
+      "lifecycleComment" (list "Objects expire after lifecycleDays, a safety net above the plugin's retention.")) }}
 ---
 # The IAM role the plugin sidecar assumes through IRSA: trusted for the Cluster's
 # own ServiceAccount (<clusterName>, created by the CNPG operator) and for
@@ -142,64 +31,14 @@ spec:
       {
         "Version": "2012-10-17",
         "Statement": [
-          {
-            "Effect": "Allow",
-            "Principal": {
-              "Federated": "{{ $partition }}:iam::{{ $aws.accountId }}:oidc-provider/{{ $aws.oidcProvider }}"
-            },
-            "Action": "sts:AssumeRoleWithWebIdentity",
-            "Condition": {
-              "StringEquals": {
-                "{{ $aws.oidcProvider }}:sub": "system:serviceaccount:{{ $ns }}:{{ $clusterName }}",
-                "{{ $aws.oidcProvider }}:aud": "sts.amazonaws.com{{- if eq $partition "arn:aws-cn" }}.cn{{- end }}"
-              }
-            }
-          },
-          {
-            "Effect": "Allow",
-            "Principal": {
-              "Federated": "{{ $partition }}:iam::{{ $aws.accountId }}:oidc-provider/{{ $aws.oidcProvider }}"
-            },
-            "Action": "sts:AssumeRoleWithWebIdentity",
-            "Condition": {
-              "StringLike": {
-                "{{ $aws.oidcProvider }}:sub": "system:serviceaccount:{{ $ns }}:{{ $clusterName }}-restore*",
-                "{{ $aws.oidcProvider }}:aud": "sts.amazonaws.com{{- if eq $partition "arn:aws-cn" }}.cn{{- end }}"
-              }
-            }
-          }
+          {{- include "agent-platform.crossplane.aws.trustStatement" (dict "xp" $xp "sub" (printf "system:serviceaccount:%s:%s" $ns $clusterName)) | nindent 10 }},
+          {{- include "agent-platform.crossplane.aws.trustStatement" (dict "xp" $xp "sub" (printf "system:serviceaccount:%s:%s-restore*" $ns $clusterName) "op" "StringLike") | nindent 10 }}
         ]
       }
     inlinePolicy:
       - name: {{ include "agent-platform.postgres.awsRoleName" . }}
         policy: |
-          {
-            "Version": "2012-10-17",
-            "Statement": [
-              {
-                "Effect": "Allow",
-                "Action": [
-                  "s3:ListBucket",
-                  "s3:PutObject",
-                  "s3:GetObject",
-                  "s3:DeleteObject"
-                ],
-                "Resource": [
-                  "{{ $partition }}:s3:::{{ $bucket }}",
-                  "{{ $partition }}:s3:::{{ $bucket }}/*"
-                ]
-              },
-              {
-                "Effect": "Allow",
-                "Action": [
-                  "s3:GetAccessPoint",
-                  "s3:GetAccountPublicAccessBlock",
-                  "s3:ListAccessPoints"
-                ],
-                "Resource": "*"
-              }
-            ]
-          }
+          {{- include "agent-platform.crossplane.aws.s3Policy" (dict "xp" $xp "bucket" $bucket) | nindent 10 }}
     tags:
       {{- toYaml $tags | nindent 6 }}
   providerConfigRef:
