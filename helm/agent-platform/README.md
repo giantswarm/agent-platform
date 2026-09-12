@@ -142,13 +142,13 @@ WorkerPool".
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.27-gs.5 <0.0.28-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.27-gs.6 <0.0.28-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.27-gs.5 <0.0.28-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.27-gs.6 <0.0.28-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -469,7 +469,7 @@ WorkerPool".
 | kagent.substrateWorkerPool.create | bool | `true` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.substrateWorkerPool.replicas | int | `4` |  |
-| kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.5"` |  |
+| kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.6"` |  |
 | kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
 | kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.cpu | string | `"250m"` |  |
@@ -875,6 +875,7 @@ WorkerPool".
 | substrate.atelet.tolerations | list | `[]` |  |
 | substrate.atelet.affinity | object | `{}` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
+| substrate.atelet.imageCache.pinnedImages | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
 | hooks.kubectlImage.registry | string | `"docker.io"` |  |
 | hooks.kubectlImage.repository | string | `"alpine/k8s"` |  |

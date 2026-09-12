@@ -38,8 +38,8 @@ components:
   agent-platform-mcps:         { versionRange: "0.9.0" }
   kagent:                        { versionRange: "0.11.0-gs.4" }
   kagent-crds:                   { versionRange: "0.11.0-gs.4" }
-  substrate:                     { versionRange: "0.0.27-gs.5" }
-  substrate-crds:                { versionRange: "0.0.27-gs.5" }
+  substrate:                     { versionRange: "0.0.27-gs.6" }
+  substrate-crds:                { versionRange: "0.0.27-gs.6" }
   klaus-gateway:                 { versionRange: "1.0.2" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }

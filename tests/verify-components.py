@@ -83,8 +83,8 @@ KAGENT_RANGE = ">=0.11.0-gs.1 <0.11.1-0"
 # both following components.kagent. The pin is the line's release range, the
 # kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.27-gs.5 <0.0.28-0"
-SUBSTRATE_PIN = "0.0.27-gs.5"  # the range's floor: the BOM pin and the worker image tag
+SUBSTRATE_RANGE = ">=0.0.27-gs.6 <0.0.28-0"
+SUBSTRATE_PIN = "0.0.27-gs.6"  # the range's floor: the BOM pin and the worker image tag
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
@@ -276,6 +276,24 @@ def main(meta: str, connectivity: str) -> int:
     render_fails(meta, [*ci, "--set", "kagent.harness.snapshotLocation="], "kagent.harness.snapshotLocation is required",
                  "kagent on without a snapshot location")
     print("ok: kagent-crds, substrate and substrate-crds follow components.kagent — on with it, off without it, the roster says which; the Substrate releases land in ate-system; the guards refuse kagent without its runtime or a snapshot location")
+
+    # --- the substrate release pins the platform Harness's image in atelet's image cache ---
+    def pinned_images(flags: list[str]) -> list[str]:
+        values = hr_values(docs(render(meta, [*ci, *flags]))[("HelmRelease", "substrate")])
+        m = re.search(r"^    pinnedImages:\n((?:    - .*\n)+)", values, re.M)
+        return re.findall(r"^    - (\S+)$", m.group(1), re.M) if m else []
+    with open(f"{meta}/values.yaml") as f:
+        harness = re.search(r"^    image: (\S+@sha256:[0-9a-f]{64})$", f.read(), re.M).group(1)
+    if pinned_images([]) != [harness]:
+        fail(f"the substrate release does not pin kagent.harness.image ({harness}) in atelet.imageCache.pinnedImages (got {pinned_images([])}); atelet evicts an unpinned Harness image on every GC pass above the watermark")
+    other = "ghcr.io/example/harness@sha256:" + "a" * 64
+    if pinned_images(["--set", f"kagent.harness.image={other}"]) != [other]:
+        fail("a re-pinned kagent.harness.image does not move atelet.imageCache.pinnedImages with it")
+    extra = "docker.io/example/tool:1"
+    got = pinned_images(["--set", f"substrate.atelet.imageCache.pinnedImages[0]={extra}", "--set", f"substrate.atelet.imageCache.pinnedImages[1]={harness}"])
+    if got != [extra, harness]:
+        fail(f"an installation's own substrate.atelet.imageCache.pinnedImages are not kept in front of the Harness image, once each (got {got})")
+    print(f"ok: the substrate release pins the platform Harness's image in atelet's image cache — kagent.harness.image, after the installation's own pins, once")
 
     # --- the wiring chart's range is bounded below the next major ------------------
     conn_oci = off.get(("OCIRepository", "agent-platform-connectivity"))
