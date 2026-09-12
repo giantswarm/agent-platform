@@ -34,6 +34,11 @@ module top to bottom; each one builds on the state the previous left):
      agent chart 1.x into the kagent namespace, the HelmRelease runs as
      kagent-flux and reaches Ready, the AgentTemplate reaches Ready on the
      Harness and the agent's RemoteMCPServer (the toolset carrier) is Accepted;
+     and the drift correction: the platform Harness deleted by hand (what the
+     4.8.0 upgrade does to a consumer whose pinned connectivity chart skipped
+     4.7.19's keep) is back on the kagent release's next reconcile — a
+     requested reconcile stands in for the 10-minute interval; no forceAt, no
+     Helm revision — and both templates return to Ready on it;
   7. the fixpoint: two self-management intervals after the adoption `helm
      history` is unchanged and the values Secret equals the values used;
   8. the Helm CLI is day-0 only: `helm upgrade` is refused by the admission
@@ -44,9 +49,10 @@ module top to bottom; each one builds on the state the previous left):
      the kagent CRDs survive it, with the agents' AgentTemplates and
      RemoteMCPServer (the line's keep policy), the substrate-crds release is
      uninstalled and the three ate.dev CRDs survive it (the Substrate line's
-     keep policy) — and nothing else does: no Harness, ModelConfig, WorkerPool,
-     worker or controller in the kept kagent namespace, no SandboxConfig,
-     Substrate's control plane gone.
+     keep policy), the platform Harness (the kagent release's keep policy) —
+     and nothing else does: no ModelConfig, WorkerPool, worker or controller
+     in the kept kagent namespace, no SandboxConfig, Substrate's control plane
+     gone.
 
 The lab shape (`gitops.self.enabled: false`, what agentlab installs) renders
 none of the self-management objects; that shape is asserted offline by
@@ -507,6 +513,61 @@ def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, must
         raise
     TIMINGS.record(f"agent-manager create_agent -> HelmRelease Ready -> AgentTemplate Ready on Harness {HARNESS} + RemoteMCPServer Accepted", time.monotonic() - started)
     logger.info("agent-manager wrote %s (as %s, requested by %s); status verdict %s: %s", MANAGED_AGENT, KAGENT_FLUX_SA, result.get("requestedBy"), status.get("verdict"), status.get("summary"))
+
+
+# ---------------------------------------------------------------------------
+# 6b. the drift correction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.smoke
+def test_deleted_platform_harness_comes_back_on_the_next_reconcile(kube: Kube, kagent_controller: None, substrate: Dict[str, Any]) -> None:
+    """The kagent release detects and corrects drift (spec.driftDetection.mode:
+    enabled, giantswarm/agent-platform#409): the platform Harness deleted by
+    hand — what the 4.8.0 upgrade does to a consumer whose exactly pinned
+    connectivity chart skipped 4.7.19's keep — is back on the release's next
+    reconcile, as a server-side apply of the release manifest: no Helm revision,
+    no `reconcile.fluxcd.io/forceAt`; both templates it admits return to Ready.
+    `reconcile.fluxcd.io/requestedAt` stands in for the interval (10 minutes,
+    the chart's default) — a plain reconcile, the code path the interval takes,
+    which without drift detection logs "release in-sync with desired state" and
+    recreates nothing (600 s observed in the lab)."""
+    before = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+    assert before, f"no Harness {HARNESS} in {KAGENT_NAMESPACE} to delete"
+    hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", "kagent", namespace=NAMESPACE)
+    assert (hr["spec"].get("driftDetection") or {}).get("mode") == "enabled", f"the kagent HelmRelease carries no spec.driftDetection.mode: enabled: {hr['spec'].get('driftDetection')}"
+    revision = hr["status"]["history"][0]["version"]
+    started = time.monotonic()
+    kube.delete("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+    assert kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE) is None, "the Harness survived its delete"
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    kube.cmd(["-n", NAMESPACE, "annotate", "helmreleases.helm.toolkit.fluxcd.io", "kagent", f"reconcile.fluxcd.io/requestedAt={stamp}", "--overwrite"])
+
+    def recreated() -> Any:
+        harness = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+        return harness if harness and harness["metadata"]["uid"] != before["metadata"]["uid"] else False
+
+    try:
+        harness = wait_for(f"Harness {HARNESS} recreated by the kagent release's reconcile", recreated, 180)
+        TIMINGS.record(f"deleted Harness {HARNESS} back (drift correction on a requested reconcile, no forceAt)", time.monotonic() - started)
+        annotations = harness["metadata"].get("annotations") or {}
+        assert annotations.get("meta.helm.sh/release-name") == "kagent", f"the recreated Harness is not the kagent release's: {annotations}"
+        assert annotations.get("helm.sh/resource-policy") == "keep", annotations
+        assert harness["spec"] == before["spec"], f"the recreated Harness differs from the deleted one:\n{harness['spec']}\n{before['spec']}"
+        for name in (DECLARATIVE_AGENT, MANAGED_AGENT):
+            wait_for_template_ready(kube, name, timeout=300)
+        TIMINGS.record(f"deleted Harness {HARNESS} back and both AgentTemplates Ready on it again", time.monotonic() - started)
+    except AssertionError:
+        dump_agents(kube)
+        kube.dump([f"-n {NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io kagent -o yaml",
+                   f"-n {NAMESPACE} get events --field-selector involvedObject.name=kagent --sort-by=.lastTimestamp",
+                   f"-n {NAMESPACE} logs deployment/helm-controller --tail=80"])
+        raise
+    hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", "kagent", namespace=NAMESPACE)
+    assert is_ready(hr), f"the kagent HelmRelease is not Ready after the correction: {condition(hr)}"
+    assert hr["status"]["history"][0]["version"] == revision, f"the correction wrote a Helm revision ({revision} -> {hr['status']['history'][0]['version']}); a drift correction is a server-side apply, not an upgrade"
+    logger.info("Harness %s deleted and back (uid %s -> %s) on a plain reconcile of the kagent release, Helm revision %s unchanged; templates %s Ready again",
+                HARNESS, before["metadata"]["uid"], harness["metadata"]["uid"], revision, (DECLARATIVE_AGENT, MANAGED_AGENT))
 
 
 # ---------------------------------------------------------------------------

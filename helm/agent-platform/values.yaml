@@ -410,6 +410,24 @@ components:  # @schema additionalProperties: true
     # upgrade (helm.sh/resource-policy: keep), so the 4.8.0 upgrade changed the
     # object's owner without a delete/recreate and no agent under it saw a gap
     # (tests/verify-kagent-wiring.py asserts the fields stay unset).
+    # Drift detection on this release (HelmRelease v2 spec.driftDetection): on
+    # every reconcile — gitops.interval — helm-controller compares the
+    # release's manifest with the cluster and re-applies what differs or is
+    # missing, as a server-side apply, without a Helm revision. Because of the
+    # platform Harness: a consumer whose exactly pinned connectivity chart
+    # skipped 4.7.19 lost it on the 4.8.0 upgrade (no `keep` in the previous
+    # manifest), and without drift detection a plain reconcile of the
+    # unchanged kagent release reports "in-sync" and never recreates it —
+    # every template stays unadmitted until a values change or a forced
+    # reconcile (#409; 600 s observed). With it the Harness is back within
+    # one interval and the templates are re-admitted. No ignore rule: nothing
+    # of the platform edits this release's objects in place (no HPA on its
+    # Deployments, no webhook-injected field, no hook). An object of the
+    # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
+    # disabled. kagent's only by default — turning it on for another release
+    # is a decision per release (tests/verify-kagent-wiring.py asserts both).
+    driftDetection:  # @schema additionalProperties: true
+      mode: enabled
     # These keys are the connectivity chart's, not kagent's: it reads them for
     # the wiring it renders around kagent (routes, the ServiceMonitor, the
     # ModelConfig/RemoteMCPServer CRs, the tenant identity), so they stay in

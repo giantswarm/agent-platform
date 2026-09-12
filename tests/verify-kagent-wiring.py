@@ -39,7 +39,13 @@ time, in the child HelmRelease or in the running controller:
     (install/upgrade disableTakeOwnership) or carries a `takeOwnership` key the
     HelmRelease CRD does not know: the 4.8.0 upgrade adopts the platform Harness
     the connectivity chart (through 4.7.19) left in place through helm.sh/resource-policy: keep
-    (giantswarm/agent-platform#406 step 2).
+    (giantswarm/agent-platform#406 step 2);
+  * a kagent release without drift detection (spec.driftDetection.mode: enabled):
+    a plain reconcile of an unchanged release reports "in-sync", so the platform
+    Harness a consumer skipping 4.7.19 loses on the 4.8.0 upgrade would stay
+    deleted until a values change or a forced reconcile
+    (giantswarm/agent-platform#409); or drift detection on another release by
+    default — a decision per release, its objects must tolerate the re-apply.
 
 Reads a rendered meta-package manifest (the CI values: kagent on). Deliberately
 stdlib-only: the CI image has no PyYAML.
@@ -319,6 +325,31 @@ def check_take_ownership(docs) -> None:
     print("ok: the kagent release keeps helm-controller's take-ownership default (no disableTakeOwnership, no invented takeOwnership) on install and upgrade")
 
 
+def check_drift_detection(docs) -> None:
+    """The kagent release detects and corrects drift (giantswarm/agent-platform#409): with
+    spec.driftDetection.mode: enabled helm-controller re-applies, on every reconcile, what
+    differs from the release manifest or is missing — the platform Harness a skipped 4.7.19
+    loses on the 4.8.0 upgrade is back within one interval, as a server-side apply, with no
+    forced reconcile and no Helm revision. Off (helm-controller's default) a plain reconcile
+    of the unchanged release reports in-sync and recreates nothing. Per release, not
+    fleet-wide: every other component keeps the default until its objects are known to
+    tolerate the re-apply, so a driftDetection block on another release is a deliberate
+    values change, never a side effect of this one."""
+    for (kind, name), lines in docs.items():
+        if kind != "HelmRelease":
+            continue
+        text = "\n".join(lines) + "\n"
+        m = re.search(r"^  driftDetection:\n((?:    .*\n)+)", text, re.M)
+        if name == "kagent":
+            if not m or not re.search(r"^    mode: enabled$", m.group(1), re.M):
+                fail("the kagent release does not carry spec.driftDetection.mode: enabled — a platform Harness deleted on the 4.8.0 skip path "
+                     "would stay deleted until a values change or a forced reconcile (giantswarm/agent-platform#409)")
+        elif m:
+            fail(f"the {name} release carries spec.driftDetection by default; drift detection is decided per release "
+                 "(components.<name>.driftDetection), today kagent's only")
+    print("ok: the kagent release detects and corrects drift (spec.driftDetection.mode: enabled); no other release does by default")
+
+
 def main(path: str) -> int:
     docs = documents(open(path, encoding="utf-8").read())
     for kind, name in (("HelmRelease", "kagent"), ("HelmRelease", "kagent-crds"), ("OCIRepository", "kagent"),
@@ -335,6 +366,7 @@ def main(path: str) -> int:
     check_retired_keys(values, conn_kagent)
     check_substrate_pins(docs)
     check_take_ownership(docs)
+    check_drift_detection(docs)
     return 0
 
 

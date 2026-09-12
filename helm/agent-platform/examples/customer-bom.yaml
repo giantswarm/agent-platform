@@ -22,7 +22,10 @@
 # them; the line's releases are prereleases by scheme, vX.Y.Z-gs.N, so the pin
 # carries the suffix).
 # agent-manager and backstage pin the first releases of their kagent API v2
-# lines; the connectivity chart the release of this chart is published with.
+# lines; the connectivity chart the release of this chart is published with —
+# it moves with this chart: a connectivity pin behind 4.7.19 renders a second
+# owner of the platform Harness next to the kagent release (UPGRADE.md
+# "4.7.x → 4.8.0").
 # substrate and substrate-crds pin the SAME release of the Substrate line — the
 # version the kagent chart's stamped worker image names (vX.Y.Z-gs.N like
 # kagent's; the floor of components.substrate.versionRange).
@@ -46,7 +49,7 @@ components:
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.20.0" }
   agent-manager:                 { versionRange: "1.0.0" }
-  agent-platform-connectivity: { versionRange: "4.0.0" }
+  agent-platform-connectivity: { versionRange: "4.8.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the three kserve charts and the two
