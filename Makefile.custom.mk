@@ -1641,7 +1641,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 				else echo "FAIL: the $$flavor render changed for an in-cluster JWKS host, outside the controller policy and the image references (a re-pin moves those by design). The policies above match and $(GOLDEN_REF) is not an ancestor of HEAD, so the branch is behind $(GOLDEN_REF): merge it and run again."; git worktree remove --force /tmp/vw-jwks-ref; exit 1; fi; }; \
 		done; \
 		git worktree remove --force /tmp/vw-jwks-ref; \
-		echo "ok: byte-identical against $(GOLDEN_REF)"; \
+		echo "ok: against $(GOLDEN_REF) — the controller policies identical, the render otherwise identical or the branch's own change"; \
 	else echo "skipped: no GOLDEN_REF"; fi
 	@echo "--> an external JWKS host (Google-shaped): the cilium controller policy names it on its port, behind the DNS proxy rule"
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-ext-cilium.out
