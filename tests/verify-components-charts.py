@@ -53,6 +53,11 @@ EXTRAS = [
     "kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources",
 ]
 MANAGERS = ["model-manager", "agent-manager"]
+# The kagent.dev API version the meta chart pins into both managers
+# (`kagent.apiVersion`, giantswarm/agent-platform#401); their charts must render
+# it as the container's `--kagent-api-version`, the pod-template change that
+# rolls the Deployments on the cut-over.
+KAGENT_API_VERSION = "v1alpha3"
 KAGENT = ["kagent-crds", "kagent"]
 # The Substrate line's two charts: rendered with the substrate: block the meta
 # chart forwards (the derived postgres.enabled boolean, the CNPG connection
@@ -213,6 +218,11 @@ def main(meta: str) -> int:
                     sys.exit(
                         f"FAIL: {name} {resolved} (the {label} {constraint!r}) rejects the values the meta chart "
                         f"forwards to it\n{r.stderr}"
+                    )
+                if name in MANAGERS and f"--kagent-api-version={KAGENT_API_VERSION}" not in r.stdout:
+                    sys.exit(
+                        f"FAIL: {name} {resolved} (the {label} {constraint!r}) does not render the forwarded "
+                        f"kagent.apiVersion as its --kagent-api-version={KAGENT_API_VERSION} argument"
                     )
                 kinds = len(re.findall(r"^kind: ", r.stdout, re.M))
                 print(f"ok: {name} {resolved} ({label} {constraint!r}) renders the forwarded values ({kinds} objects)")
