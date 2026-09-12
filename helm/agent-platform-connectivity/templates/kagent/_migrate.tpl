@@ -49,6 +49,58 @@ application.giantswarm.io/team: {{ index .Chart.Annotations "io.giantswarm.appli
 {{- end -}}
 
 {{/*
+The Job's pod template, rendered once: migrate-job.yaml hashes it into the
+Job's name (the name follows everything Job.spec.template makes immutable, so
+a changed template renders a new Job and an unchanged one is re-applied as is)
+and emits it under spec.template. Takes a dict: root (the chart context),
+serviceAccountName (the tenant identity), image, args (list), env (list).
+*/}}
+{{- define "agent-platform.kagent.migration.podTemplate" -}}
+metadata:
+  labels:
+    {{- include "agent-platform.kagent.migration.podLabels" .root | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ .serviceAccountName }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  {{- with .root.Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- range . }}
+    - name: {{ if kindIs "map" . }}{{ .name }}{{ else }}{{ . }}{{ end }}
+    {{- end }}
+  {{- end }}
+  containers:
+    - name: migrate
+      image: {{ .image | quote }}
+      args:
+        {{- toYaml .args | nindent 8 }}
+      env:
+        {{- toYaml .env | nindent 8 }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end -}}
+
+{{/*
 agent-manager's image for the Job (agentManager.migration.image; the tag is the
 meta chart's BOM pin for the agent-manager component).
 */}}

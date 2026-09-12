@@ -24,15 +24,18 @@ the report not writable — the command's non-zero exits) must never fail the
 upgrade that carries it and let helm-controller remediate the platform's wiring.
 The meta chart therefore also stops the connectivity HelmRelease from waiting
 on Jobs (components.agent-platform-connectivity.disableWaitForJobs). The Job's
-name carries an 8-hex hash of its image, args and environment: an upgrade that
-changes any of them renders a new Job (Helm creates it and removes the
-old-named one) instead of hitting Job.spec.template's immutability; an upgrade
+name carries an 8-hex hash of its rendered pod template — image, args,
+environment, identity, labels, everything Job.spec.template makes immutable:
+an upgrade that changes any of it renders a new Job (Helm creates it and
+removes the old-named one) instead of hitting the immutability; an upgrade
 that changes none re-applies the completed Job unchanged and leaves it in
-place — the pod template carries the stable labels only (never helm.sh/chart
-or app.kubernetes.io/version, which stay on the Job's own metadata): a chart
-release that changed the immutable spec.template was refused by the apiserver
-and stalled the connectivity release (giantswarm/agent-platform#399) — so the
-command's expand phase runs when connectivity 4.0 first renders the Job, and the contract phase
+place. The pod template therefore carries the stable labels only (never
+helm.sh/chart or app.kubernetes.io/version, which stay on the Job's own
+metadata): while it carried them, every chart release re-applied the
+same-named Job with a changed template, the apiserver refused it and the
+connectivity release stalled until the Job's TTL removed it
+(giantswarm/agent-platform#399). So the command's expand phase runs when
+connectivity 4.0 first renders the Job, and the contract phase
 — once the templates are Ready — is a re-run: by hand, a clone of the Job
 under a new name (`kubectl create job --from` takes CronJob sources only;
 UPGRADE.md carries the command), or the next upgrade after
@@ -84,7 +87,8 @@ not read from kagent.harness. */ -}}
 {{- /* The chart's schema and the skill resolver cache under $HOME; the root
 filesystem is read-only. */ -}}
 {{- $env = append $env (dict "name" "HOME" "value" "/tmp") }}
-{{- $hash := printf "%s|%s|%s" $image (toJson $args) (toJson $env) | sha256sum | trunc 8 }}
+{{- $template := include "agent-platform.kagent.migration.podTemplate" (dict "root" . "serviceAccountName" $sa "image" $image "args" $args "env" $env) }}
+{{- $hash := $template | sha256sum | trunc 8 }}
 {{- $name := printf "%s-%s" (include "agent-platform.kagent.migration.name" .) $hash }}
 ---
 apiVersion: batch/v1
@@ -104,49 +108,5 @@ spec:
   # an upgrade after that re-creates and re-runs it (idempotent).
   ttlSecondsAfterFinished: 86400
   template:
-    metadata:
-      labels:
-        {{- /* The stable subset (no chart version): Job.spec.template is
-        immutable and a chart release re-applies the completed Job under the
-        same name — see _migrate.tpl. */ -}}
-        {{- include "agent-platform.kagent.migration.podLabels" . | nindent 8 }}
-    spec:
-      restartPolicy: Never
-      serviceAccountName: {{ $sa }}
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
-        seccompProfile:
-          type: RuntimeDefault
-      {{- with .Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- range . }}
-        - name: {{ if kindIs "map" . }}{{ .name }}{{ else }}{{ . }}{{ end }}
-        {{- end }}
-      {{- end }}
-      containers:
-        - name: migrate
-          image: {{ $image | quote }}
-          args:
-            {{- toYaml $args | nindent 12 }}
-          env:
-            {{- toYaml $env | nindent 12 }}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              memory: 256Mi
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-      volumes:
-        - name: tmp
-          emptyDir: {}
+    {{- $template | nindent 4 }}
 {{- end }}
