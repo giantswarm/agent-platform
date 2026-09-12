@@ -454,7 +454,7 @@ components:  # @schema additionalProperties: true
     # render — agent-platform.validateSubstrate). Both releases land in
     # ate-system (targetNamespace; the chart's Roles name that namespace), and
     # both carry ONE version pin: the same range in the two versionRanges
-    # (>=0.0.27-gs.5 <0.0.28-0, the kagent entry's shape — the line's releases
+    # (>=0.0.27-gs.6 <0.0.28-0, the kagent entry's shape — the line's releases
     # of upstream 0.0.27 from gs.5 on: the egress gateway's frontend policy for
     # its agentgateway dataplane, the connection string from a Secret, atelet
     # scheduling, helm.sh/resource-policy: keep on the three CRD templates so a
@@ -467,7 +467,7 @@ components:  # @schema additionalProperties: true
     # the three together with the kagent pin (README "Agent Substrate"). A
     # mirror sets `repository` here and substrate.image.registry below.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.27-gs.5 <0.0.28-0"
+    versionRange: ">=0.0.27-gs.6 <0.0.28-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -489,7 +489,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.27-gs.5 <0.0.28-0"
+    versionRange: ">=0.0.27-gs.6 <0.0.28-0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -1619,7 +1619,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     create: true
     name: kagent-default
     replicas: 4
-    workerImage: ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.5
+    workerImage: ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.6
     sandboxClass: gvisor
     # The worker pods' template (WorkerPool.spec.template: nodeSelector,
     # tolerations, priorityClassName, nodeAffinity, resources). One pool runs
@@ -3102,6 +3102,14 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # (ate-api-server, which also reads and writes snapshots, has no such knob
     # in the chart yet — an S3-compatible store outside AWS waits for it.)
     extraEnv: []
+    # atelet's image cache (Substrate 0.0.27-gs.6): gcPeriod, highPercent,
+    # lowPercent, minAge, maxBytes tune the GC pass — unset, the chart leaves
+    # atelet's defaults. pinnedImages are pulled at every pass and never
+    # evicted; the meta chart adds the platform Harness's image
+    # (kagent.harness.image) to whatever is listed here, so the first turn
+    # after an idle spell on a node above the watermark pays no cold pull.
+    imageCache:
+      pinnedImages: []
 # The substrate-crds chart takes no values.
 substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
 

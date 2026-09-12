@@ -107,7 +107,14 @@ overwrite would hide a values file that still spells the old key.
     (key uri) the connectivity release's hook writes into ate-system for
     postgres.databases.substrate (agent-platform.substrate.postgresMode; the
     `auto` of substrate.postgres.enabled itself is resolved by
-    agent-platform.shape.apply, with the other cluster-shape knobs).
+    agent-platform.shape.apply, with the other cluster-shape knobs);
+    atelet.imageCache.pinnedImages from kagent.harness.image — the platform
+    Harness's image joins the set atelet pulls at every image-cache GC pass and
+    never evicts (Substrate 0.0.27-gs.6, `--image-cache-pinned-images`), so a
+    node whose cache volume sits above the watermark does not pay a cold pull
+    and unpack on the first turn after an idle spell; an installation's own
+    substrate.atelet.imageCache.pinnedImages are kept in front of it, once
+    each, and a Harness re-pin moves the pinned set with it.
 Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
@@ -135,6 +142,17 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "substrate.postgres.connectionStringSecretRef (%s/%s) differs from the Secret the connectivity release derives for postgres.databases.substrate (%s/%s): leave it unset — it follows postgres.clusterName — or name an external database in substrate.postgres.connectionString" $ownName $ownKey $ref.name $ref.key) -}}
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
+{{- end -}}
+{{- if eq .name "substrate" -}}
+{{- $harness := dig "harness" "image" "" (.root.Values.kagent | default dict) -}}
+{{- if $harness -}}
+{{- $pinned := list -}}
+{{- range (dig "atelet" "imageCache" "pinnedImages" list (.root.Values.substrate | default dict) | default list) -}}
+{{- if not (has . $pinned) }}{{- $pinned = append $pinned . }}{{- end -}}
+{{- end -}}
+{{- if not (has $harness $pinned) }}{{- $pinned = append $pinned $harness }}{{- end -}}
+{{- $_ := set $derived "atelet" (dict "imageCache" (dict "pinnedImages" $pinned)) -}}
+{{- end -}}
 {{- end -}}
 {{- $derived | toJson -}}
 {{- end -}}
