@@ -129,6 +129,21 @@ knowledge:
       connectivity chart's agent-manager migrate Job, the per-installation
       cut-over of the agents next to the platform Harness the same release
       renders.
+  driftDetection — optional Flux drift detection for the child HelmRelease
+      (HelmRelease v2 spec.driftDetection, passed through verbatim: mode
+      enabled|warn|disabled, ignore rules). Enabled, helm-controller compares
+      the manifest in the Helm storage with the cluster on every reconcile of
+      the release (a server-side dry-run apply) and re-applies what differs or
+      is missing — a deleted object is back within one interval, as a
+      server-side apply, without a Helm revision. Unset (helm-controller's
+      default, disabled) a plain reconcile of a release whose chart and values
+      are unchanged reports "in-sync" and touches nothing, so a deleted object
+      stays deleted until the next values or chart change or a forced
+      reconcile (reconcile.fluxcd.io/forceAt). Set per release, not fleet-wide:
+      its objects must tolerate the re-apply (a field another controller owns
+      needs an ignore rule; an object opts out with the annotation
+      helm.toolkit.fluxcd.io/driftDetection: disabled). kagent carries it for
+      the platform Harness, the runtime of every agent (#409).
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
       HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
@@ -289,6 +304,10 @@ spec:
     {{- end }}
     remediation:
       retries: {{ $g.retries }}
+  {{- with $c.driftDetection }}
+  driftDetection:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- with $deps }}
   dependsOn:
     {{- range . }}
