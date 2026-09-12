@@ -36,8 +36,8 @@ components:
   agentgateway:                  { versionRange: "2.0.7" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "0.11.0-gs.3" }
-  kagent-crds:                   { versionRange: "0.11.0-gs.3" }
+  kagent:                        { versionRange: "0.11.0-gs.4" }
+  kagent-crds:                   { versionRange: "0.11.0-gs.4" }
   substrate:                     { versionRange: "0.0.27-gs.5" }
   substrate-crds:                { versionRange: "0.0.27-gs.5" }
   klaus-gateway:                 { versionRange: "1.0.2" }

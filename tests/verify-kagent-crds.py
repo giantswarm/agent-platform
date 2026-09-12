@@ -49,7 +49,7 @@ import yaml
 
 # The kagent line's release the platform pins (meta chart: components.kagent /
 # components.kagent-crds range, kagent.tag). Move it with the pin.
-KAGENT_LINE_REF = "v0.11.0-gs.3"
+KAGENT_LINE_REF = "v0.11.0-gs.4"
 CRD_URL = "https://raw.githubusercontent.com/giantswarm/kagent-upstream/{ref}/helm/kagent-crds/templates/{file}"
 CRD_FILES = {
     "ModelConfig": "kagent.dev_modelconfigs.yaml",
