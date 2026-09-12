@@ -397,6 +397,16 @@ components:  # @schema additionalProperties: true
     # is CRDs → connectivity → substrate → kagent → managers, and no release
     # waits on a pod that waits on a later release (UPGRADE.md "3.x → 4.0").
     dependsOn: [kagent-crds, substrate-crds, substrate, agent-platform-connectivity]
+    # This release must keep helm-controller's take-ownership default: no
+    # install.disableTakeOwnership / upgrade.disableTakeOwnership (the
+    # HelmRelease v2 fields, false by default — an object another release owns
+    # gets its release-name/namespace annotations rewritten instead of refused;
+    # there is no opt-in field). Step 2 of the migration to 4.8.0 (#406): today
+    # the connectivity chart renders the platform Harness `kagent`; from 4.8.0
+    # the kagent chart renders it itself, so on that upgrade the object — kept
+    # in place by connectivity's helm.sh/resource-policy: keep — changes owner
+    # without a delete/recreate and no agent under it sees a gap
+    # (tests/verify-kagent-wiring.py asserts the fields stay unset).
     # These keys are the connectivity chart's, not kagent's: it reads them for
     # the wiring it renders around kagent (routes, the ServiceMonitor, the
     # platform Harness, the ModelConfig/RemoteMCPServer CRs, the tenant

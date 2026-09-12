@@ -33,7 +33,12 @@ time, in the child HelmRelease or in the running controller:
     upstream versions of the line;
   * the retired 0.10 keys: the ten bundled example agents (dead keys on the
     line — the chart ships none), the `METRICS_*` controller env and a metrics
-    Service to a port the line's controller never serves.
+    Service to a port the line's controller never serves;
+  * a kagent release that opts out of helm-controller's take-ownership default
+    (install/upgrade disableTakeOwnership) or carries a `takeOwnership` key the
+    HelmRelease CRD does not know: the 4.8.0 upgrade adopts the platform Harness
+    the connectivity chart leaves in place through helm.sh/resource-policy: keep
+    (giantswarm/agent-platform#406 step 2).
 
 Reads a rendered meta-package manifest (the CI values: kagent on). Deliberately
 stdlib-only: the CI image has no PyYAML.
@@ -277,6 +282,24 @@ def check_retired_keys(values: dict[str, list[str]], conn_kagent: str) -> None:
     print("ok: no example agent, no METRICS_* env, controller metrics and the ServiceMonitor off")
 
 
+def check_take_ownership(docs) -> None:
+    """The kagent release keeps helm-controller's take-ownership default: neither install nor
+    upgrade sets disableTakeOwnership (giantswarm/agent-platform#406 step 2): from 4.8.0 the
+    kagent chart renders the platform Harness the connectivity chart renders today; the object
+    stays through connectivity's helm.sh/resource-policy: keep (verify-kagent-harness) and the
+    kagent release adopts it. HelmRelease v2 has no opt-in field — a `takeOwnership` key is not
+    in the CRD schema and fails the server-side apply — so the assertion is on the opt-out."""
+    text = "\n".join(docs[("HelmRelease", "kagent")]) + "\n"
+    for phase in ("install", "upgrade"):
+        m = re.search(rf"^  {phase}:\n((?:    .*\n)+)", text, re.M)
+        block = m.group(1) if m else ""
+        if re.search(r"^    disableTakeOwnership: true$", block, re.M):
+            fail(f"the kagent release's {phase} sets disableTakeOwnership: true — the 4.8.0 upgrade must adopt the Harness the connectivity release leaves behind")
+        if re.search(r"^    takeOwnership:", block, re.M):
+            fail(f"the kagent release's {phase} carries takeOwnership — not a HelmRelease v2 field (the CRD knows disableTakeOwnership only); the apply fails on it")
+    print("ok: the kagent release keeps helm-controller's take-ownership default (no disableTakeOwnership, no invented takeOwnership) on install and upgrade")
+
+
 def main(path: str) -> int:
     docs = documents(open(path, encoding="utf-8").read())
     for kind, name in (("HelmRelease", "kagent"), ("HelmRelease", "kagent-crds"), ("OCIRepository", "kagent"),
@@ -291,6 +314,7 @@ def main(path: str) -> int:
     check_sources(docs, kagent_range)
     check_one_build(values, kagent_range, conn_kagent)
     check_retired_keys(values, conn_kagent)
+    check_take_ownership(docs)
     return 0
 
 

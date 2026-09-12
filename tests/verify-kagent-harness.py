@@ -12,7 +12,11 @@ kagent, and that one label is the whole admission contract.
 
 4.0 renders one `kagent` Harness, kagent type only — no free list of arbitrary
 Harness types. This test renders the chart in a kagent-on shape and asserts:
-  - exactly one Harness, named `kagent`, in the kagent namespace;
+  - exactly one Harness, named `kagent`, in the kagent namespace, annotated
+    helm.sh/resource-policy: keep (giantswarm/agent-platform#406 step 2: the
+    object survives this chart dropping the template in 4.8.0, and helm-controller
+    adopts it for the kagent release — its take-ownership default, which
+    verify-kagent-wiring asserts the meta chart leaves on);
   - spec.kagent is the only runtime block (not codex/claude/byo);
   - workload.image is the configured digest; env carries only
     KAGENT_PROPAGATE_TOKEN=true;
@@ -34,6 +38,7 @@ import yaml
 
 HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 HARNESS_NAME = "kagent"
+KEEP_ANNOTATION = "helm.sh/resource-policy"
 DIGEST = "ghcr.io/giantswarm/kagent/golang-adk@sha256:" + "a" * 64
 BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true"]
 
@@ -74,6 +79,10 @@ def main(chart: str) -> int:
         fail(f"Harness name is {h['metadata'].get('name')!r}, expected {HARNESS_NAME!r} (the label value = the Harness name)")
     if h["metadata"].get("namespace") != "kagent":
         fail(f"Harness namespace is {h['metadata'].get('namespace')!r}, expected the kagent namespace")
+    if h["metadata"].get("annotations", {}).get(KEEP_ANNOTATION) != "keep":
+        fail(f"the Harness lacks {KEEP_ANNOTATION}: keep — without it the 4.8.0 upgrade deletes the Harness "
+             f"when this chart drops the template, before the kagent release adopts it (giantswarm/agent-platform#406 step 2); "
+             f"got annotations {h['metadata'].get('annotations')!r}")
 
     runtimes = [r for r in ("kagent", "codex", "claude", "byo") if r in spec]
     if runtimes != ["kagent"]:
@@ -93,7 +102,7 @@ def main(chart: str) -> int:
     selector = spec.get("allowedAgentTemplates", {}).get("selector", {}).get("matchLabels")
     if selector != {HARNESS_LABEL: HARNESS_NAME}:
         fail(f"allowedAgentTemplates.selector.matchLabels is {selector!r}, expected {{{HARNESS_LABEL!r}: {HARNESS_NAME!r}}}")
-    print(f"ok: one platform Harness {HARNESS_NAME!r} in the kagent namespace — kagent runtime, digest image, KAGENT_PROPAGATE_TOKEN, workerPoolRef kagent-default, the selector label")
+    print(f"ok: one platform Harness {HARNESS_NAME!r} in the kagent namespace — kagent runtime, digest image, KAGENT_PROPAGATE_TOKEN, workerPoolRef kagent-default, the selector label, {KEEP_ANNOTATION}: keep")
 
     # The workerPoolRef follows the WorkerPool the meta chart names.
     docs = render(chart, [*BASE, "--set", f"kagent.harness.image={DIGEST}",

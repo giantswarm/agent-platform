@@ -937,7 +937,7 @@ verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart ren
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-harness
-verify-kagent-harness: ## Assert the connectivity chart renders exactly one platform Harness per managed namespace with the shape the platform owns (kagent runtime, the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the meta chart's WorkerPool, the snapshot location, the admission label agent-platform.giantswarm.io/harness: kagent), the workerPoolRef follows kagent.substrateWorkerPool.name, a tag image fails the render, and kagent off renders none (tests/verify-kagent-harness.py; needs PyYAML).
+verify-kagent-harness: ## Assert the connectivity chart renders exactly one platform Harness per managed namespace with the shape the platform owns (kagent runtime, the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the meta chart's WorkerPool, the snapshot location, the admission label agent-platform.giantswarm.io/harness: kagent, helm.sh/resource-policy: keep so the 4.8.0 hand-over to the kagent release keeps the object), the workerPoolRef follows kagent.substrateWorkerPool.name, a tag image fails the render, and kagent off renders none (tests/verify-kagent-harness.py; needs PyYAML).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR)
@@ -1627,7 +1627,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 			done; \
 		done; \
 	done
-	@echo "--> the same values against $(GOLDEN_REF): the controller policies first, then the whole render (image references aside: a re-pin moves them by design)"
+	@echo "--> the same values against $(GOLDEN_REF): the controller policies first (a difference is a regression), then the whole render (image references aside: a re-pin moves them by design; a difference on a branch that contains $(GOLDEN_REF) is its own change, on one that does not it is staleness)"
 	@if [ -n "$(GOLDEN_REF)" ] && git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
 		rm -rf /tmp/vw-jwks-ref && git worktree add -q --detach /tmp/vw-jwks-ref $(GOLDEN_REF) && \
 		for flavor in cilium kubernetes; do \
@@ -1636,10 +1636,12 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 			$(CTRL_POLICY) /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-pol-$$flavor.out; \
 			$(CTRL_POLICY) /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-pol-$$flavor.out; \
 			diff -u /tmp/vw-jwks-old-pol-$$flavor.out /tmp/vw-jwks-new-pol-$$flavor.out || { echo "FAIL: the $$flavor CONTROLLER POLICY changed for an in-cluster JWKS host - a regression in this slice"; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
-			grep -vE '^ *image:' /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-noimg-$$flavor.out; grep -vE '^ *image:' /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-noimg-$$flavor.out; diff -u /tmp/vw-jwks-old-noimg-$$flavor.out /tmp/vw-jwks-new-noimg-$$flavor.out || { echo "FAIL: the $$flavor render changed for an in-cluster JWKS host, outside the controller policy and the image references (a re-pin moves those by design). The policies above match, so the branch is most likely behind $(GOLDEN_REF): merge it and run again."; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
+			grep -vE '^ *image:' /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-noimg-$$flavor.out; grep -vE '^ *image:' /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-noimg-$$flavor.out; diff -u /tmp/vw-jwks-old-noimg-$$flavor.out /tmp/vw-jwks-new-noimg-$$flavor.out || { \
+				if git merge-base --is-ancestor $(GOLDEN_REF) HEAD; then echo "note: the $$flavor render differs from $(GOLDEN_REF) outside the controller policy and the image references — this branch's own change ($(GOLDEN_REF) is an ancestor of HEAD; the policies above match)"; \
+				else echo "FAIL: the $$flavor render changed for an in-cluster JWKS host, outside the controller policy and the image references (a re-pin moves those by design). The policies above match and $(GOLDEN_REF) is not an ancestor of HEAD, so the branch is behind $(GOLDEN_REF): merge it and run again."; git worktree remove --force /tmp/vw-jwks-ref; exit 1; fi; }; \
 		done; \
 		git worktree remove --force /tmp/vw-jwks-ref; \
-		echo "ok: byte-identical against $(GOLDEN_REF)"; \
+		echo "ok: against $(GOLDEN_REF) — the controller policies identical, the render otherwise identical or the branch's own change"; \
 	else echo "skipped: no GOLDEN_REF"; fi
 	@echo "--> an external JWKS host (Google-shaped): the cilium controller policy names it on its port, behind the DNS proxy rule"
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-ext-cilium.out
