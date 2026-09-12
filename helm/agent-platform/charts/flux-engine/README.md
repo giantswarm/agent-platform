@@ -23,7 +23,7 @@ Not published on its own.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| operator.image | object | `{"pullPolicy":"IfNotPresent","registry":"ghcr.io","repository":"controlplaneio-fluxcd/flux-operator","tag":"v0.59.0"}` | The Flux Operator image. The tag is the operator release (appVersion in Chart.yaml); Renovate tracks it as a docker image pin. |
+| operator.image | object | `{"pullPolicy":"IfNotPresent","registry":"ghcr.io","repository":"controlplaneio-fluxcd/flux-operator","tag":"v0.60.0"}` | The Flux Operator image. The tag is the operator release (appVersion in Chart.yaml); Renovate tracks it as a docker image pin. |
 | operator.imagePullSecrets | list | `[]` | Pull secrets for the operator image, in the release namespace (`global.imagePullSecrets` of the meta chart apply as well). |
 | operator.logLevel | string | `"info"` | Operator log level: debug, info or error. |
 | operator.reportingInterval | string | `"5m"` | How often the operator refreshes the FluxReport. |
