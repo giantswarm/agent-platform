@@ -129,11 +129,12 @@ WorkerPool".
 | components.kagent.driftDetection.mode | string | `"enabled"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
-| components.kagent.omitKeys[2] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[3] | string | `"oauth2ProxyIngress"` |  |
-| components.kagent.omitKeys[4] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[5] | string | `"serviceMonitor"` |  |
-| components.kagent.omitKeys[6] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[2] | string | `"harness.snapshotStore"` |  |
+| components.kagent.omitKeys[3] | string | `"modelConfigs"` |  |
+| components.kagent.omitKeys[4] | string | `"oauth2ProxyIngress"` |  |
+| components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
+| components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.nullKeys[0][0] | string | `"harness"` |  |
@@ -149,13 +150,13 @@ WorkerPool".
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.27-gs.7 <0.0.28-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.27-gs.8 <0.0.28-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.27-gs.7 <0.0.28-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.27-gs.8 <0.0.28-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -564,6 +565,18 @@ WorkerPool".
 | kagent.harness.create | bool | `true` |  |
 | kagent.harness.image | string | `""` |  |
 | kagent.harness.snapshotLocation | string | `""` |  |
+| kagent.harness.snapshotStore.prefix | string | `"kagent"` |  |
+| kagent.harness.snapshotStore.crossplane.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.provider | string | `"aws"` |  |
+| kagent.harness.snapshotStore.crossplane.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.region | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.observeOnly | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.tags | object | `{}` |  |
+| kagent.harness.snapshotStore.crossplane.aws.bucketName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.accountId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.oidcProvider | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.roleName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.lifecycleDays | int | `30` |  |
 | kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
 | kagent.harness.env[0].value | string | `"true"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |

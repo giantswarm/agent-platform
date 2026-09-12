@@ -1768,6 +1768,84 @@ MIGRATION_PIN = python3 -c "import yaml; print(yaml.safe_load(open('$(CHART_DIR)
 MIGRATION_PIN_CONNECTIVITY = python3 -c "import yaml; print(yaml.safe_load(open('$(CONNECTIVITY_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
 MIGRATION_JOB := agent-platform-connectivity-agent-manager-migrate
 
+.PHONY: verify-substrate-store
+SUBSTRATE_STORE_CI := $(CONNECTIVITY_DIR)/ci/test-substrate-store-aws-values.yaml
+# The account id apart: Helm applies --set-string after --set, so the numeric-id guard below builds on the base.
+SUBSTRATE_STORE_META_BASE := helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set kagent.harness.snapshotLocation= --set kagent.harness.snapshotStore.crossplane.enabled=true --set kagent.harness.snapshotStore.crossplane.providerConfigRef=ci --set kagent.harness.snapshotStore.crossplane.region=eu-central-1 --set kagent.harness.snapshotStore.crossplane.aws.bucketName=giantswarm-ci-substrate --set kagent.harness.snapshotStore.crossplane.aws.oidcProvider=irsa.ci.example.com
+SUBSTRATE_STORE_META := $(SUBSTRATE_STORE_META_BASE) --set-string kagent.harness.snapshotStore.crossplane.aws.accountId=123456789012
+verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harness.snapshotStore, #411): off by default nothing renders; on, the connectivity chart renders the Crossplane Bucket (+ lifecycle, public-access block, TLS-only policy, never deleted, kept) and the IAM Role trusted by the atelet and ate-api-server ServiceAccounts in ate-system with the S3 policy on the bucket; the meta chart derives kagent.harness.snapshotLocation (s3://<bucket>/<prefix>) for the kagent release and holds the block back from it, forwards the role annotation to both ServiceAccounts of the substrate release next to an installation's own annotations; the guards (a disagreeing explicit location or role, a non-aws provider, missing inputs, a numeric account id).
+	@echo "====> $@"
+	@echo "--> off by default: no Crossplane object of the store in the substrate render, nothing derived"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml >/tmp/vss-off.out 2>&1 || { cat /tmp/vss-off.out; exit 1; }
+	@if grep -qE '^  name: giantswarm-ci-substrate$$|agent-platform-substrate' /tmp/vss-off.out; then echo "FAIL: the snapshot store renders with the block off"; exit 1; fi
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) >/tmp/vss-meta-off.out 2>&1 || { cat /tmp/vss-meta-off.out; exit 1; }
+	@grep -q 'snapshotLocation: s3://ci-agent-snapshots/agents' /tmp/vss-meta-off.out || { echo "FAIL: the explicit snapshotLocation does not reach the kagent release with the store off"; exit 1; }
+	@if grep -q 'eks.amazonaws.com/role-arn' /tmp/vss-meta-off.out; then echo "FAIL: a role annotation is derived with the store off"; exit 1; fi
+	@echo "ok: off by default"
+	@echo "--> connectivity, block on: bucket quartet + role"
+	@helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) >/tmp/vss-on.out 2>&1 || { cat /tmp/vss-on.out; exit 1; }
+	@for kind in Bucket BucketLifecycleConfiguration BucketPublicAccessBlock BucketPolicy Role; do \
+		grep -A3 "^kind: $$kind$$" /tmp/vss-on.out | grep -q '^  name: giantswarm-ci-substrate$$' || { echo "FAIL: $$kind giantswarm-ci-substrate missing from the store render"; exit 1; }; \
+	done
+	@awk '/^kind: Bucket$$/,/^---/' /tmp/vss-on.out >/tmp/vss-bucket.out
+	@grep -q 'helm.sh/resource-policy: keep' /tmp/vss-bucket.out || { echo "FAIL: the bucket is not kept on uninstall"; exit 1; }
+	@if grep -q '"\*"' /tmp/vss-bucket.out; then echo "FAIL: the bucket carries the full management policy (it must never be deleted by Crossplane)"; exit 1; fi
+	@grep -q 'app: agent-platform-substrate' /tmp/vss-bucket.out || { echo "FAIL: the bucket does not carry the substrate app tag"; exit 1; }
+	@grep -q 'installation: ci' /tmp/vss-bucket.out || { echo "FAIL: the installation's own tag is missing"; exit 1; }
+	@awk '/^kind: BucketLifecycleConfiguration$$/,/^---/' /tmp/vss-on.out | grep -q 'days: 30' || { echo "FAIL: the default lifecycle is not 30 days"; exit 1; }
+	@awk '/^kind: BucketPolicy$$/,/^---/' /tmp/vss-on.out | grep -q '"aws:SecureTransport": "false"' || { echo "FAIL: no TLS-only bucket policy"; exit 1; }
+	@awk '/^kind: BucketPublicAccessBlock$$/,/^---/' /tmp/vss-on.out | grep -q 'restrictPublicBuckets: true' || { echo "FAIL: no public-access block"; exit 1; }
+	@awk '/^kind: Role$$/,/^---/' /tmp/vss-on.out >/tmp/vss-role.out
+	@grep -q '"irsa.ci.example.com:sub": "system:serviceaccount:ate-system:atelet"' /tmp/vss-role.out || { echo "FAIL: the role does not trust atelet"; exit 1; }
+	@grep -q '"irsa.ci.example.com:sub": "system:serviceaccount:ate-system:ate-api-server"' /tmp/vss-role.out || { echo "FAIL: the role does not trust ate-api-server"; exit 1; }
+	@[ "$$(grep -c 'sts:AssumeRoleWithWebIdentity' /tmp/vss-role.out)" = "2" ] || { echo "FAIL: the trust policy has not exactly two statements"; exit 1; }
+	@grep -q '"arn:aws:s3:::giantswarm-ci-substrate/\*"' /tmp/vss-role.out || { echo "FAIL: the inline policy does not cover the bucket's objects"; exit 1; }
+	@grep -q 'Federated": "arn:aws:iam::123456789012:oidc-provider/irsa.ci.example.com' /tmp/vss-role.out || { echo "FAIL: the trust policy does not name the OIDC provider"; exit 1; }
+	@if grep -q 'kagent-pg' /tmp/vss-role.out /tmp/vss-bucket.out; then echo "FAIL: the store render leaks the postgres store's names"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotStore.crossplane.aws.roleName=substrate-snapshots --set kagent.harness.snapshotStore.crossplane.region=cn-north-1 --set kagent.harness.snapshotStore.crossplane.observeOnly=true >/tmp/vss-cn.out 2>&1 || { cat /tmp/vss-cn.out; exit 1; }
+	@grep -A3 '^kind: Role$$' /tmp/vss-cn.out | grep -q '^  name: substrate-snapshots$$' || { echo "FAIL: aws.roleName does not name the role"; exit 1; }
+	@grep -q '"arn:aws-cn:s3:::giantswarm-ci-substrate"' /tmp/vss-cn.out || { echo "FAIL: the China partition is not derived from the region"; exit 1; }
+	@grep -q 'sts.amazonaws.com.cn' /tmp/vss-cn.out || { echo "FAIL: the China STS audience is missing"; exit 1; }
+	@if awk '/^kind: Bucket$$/,/^---/' /tmp/vss-cn.out | grep -q '\- Create'; then echo "FAIL: observeOnly still creates"; exit 1; fi
+	@echo "ok: connectivity renders the store"
+	@echo "--> meta chart, block on: the derived location for kagent, the block held back, the role annotation on both substrate ServiceAccounts"
+	@$(SUBSTRATE_STORE_META) >/tmp/vss-meta.out 2>&1 || { cat /tmp/vss-meta.out; exit 1; }
+	@awk '/^  name: kagent$$/,/^---/' /tmp/vss-meta.out >/tmp/vss-meta-kagent.out
+	@grep -q 'snapshotLocation: s3://giantswarm-ci-substrate/kagent' /tmp/vss-meta-kagent.out || { echo "FAIL: kagent.harness.snapshotLocation is not derived from the bucket and prefix"; exit 1; }
+	@if grep -q 'snapshotStore' /tmp/vss-meta-kagent.out; then echo "FAIL: the store block is forwarded to the kagent chart (components.kagent.omitKeys harness.snapshotStore)"; exit 1; fi
+	@awk '/^  name: substrate$$/,/^---/' /tmp/vss-meta.out >/tmp/vss-meta-substrate.out
+	@[ "$$(grep -c 'eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/giantswarm-ci-substrate' /tmp/vss-meta-substrate.out)" = "2" ] || { echo "FAIL: the role annotation does not reach both substrate ServiceAccounts"; cat /tmp/vss-meta-substrate.out; exit 1; }
+	@for k in atelet ateApiServer; do sed -n "/^    $$k:/,/^    [a-zA-Z]*:/p" /tmp/vss-meta-substrate.out | grep -q 'eks.amazonaws.com/role-arn' || { echo "FAIL: substrate.$$k.serviceAccount.annotations lacks the role"; exit 1; }; done
+	@awk '/^  name: agent-platform-connectivity$$/,/^---/' /tmp/vss-meta.out | grep -q 'bucketName: giantswarm-ci-substrate' || { echo "FAIL: the store block does not reach the connectivity release"; exit 1; }
+	@$(SUBSTRATE_STORE_META) --set kagent.harness.snapshotStore.prefix= 2>&1 | grep -q 'snapshotLocation: s3://giantswarm-ci-substrate$$' || { echo "FAIL: an empty prefix does not derive s3://<bucket>"; exit 1; }
+	@$(SUBSTRATE_STORE_META) --set kagent.harness.snapshotLocation=s3://giantswarm-ci-substrate/kagent >/dev/null 2>&1 || { echo "FAIL: an explicit location that agrees with the store is refused"; exit 1; }
+	@$(SUBSTRATE_STORE_META) --set 'substrate.atelet.serviceAccount.annotations.foo=bar' >/tmp/vss-meta-own.out 2>&1 || { cat /tmp/vss-meta-own.out; exit 1; }
+	@sed -n '/^    atelet:/,/^    [a-zA-Z]*:/p' /tmp/vss-meta-own.out | grep -q 'foo: bar' || { echo "FAIL: an installation's own atelet ServiceAccount annotation is dropped by the derivation"; exit 1; }
+	@echo "ok: the meta chart derives the location and the annotations"
+	@echo "--> guards"
+	@if $(SUBSTRATE_STORE_META) --set kagent.harness.snapshotLocation=s3://other/agents >/tmp/vss-g1.out 2>&1; then echo "FAIL: a disagreeing explicit snapshotLocation rendered"; exit 1; fi
+	@grep -q 'kagent.harness.snapshotLocation (s3://other/agents) differs from the location kagent.harness.snapshotStore renders (s3://giantswarm-ci-substrate/kagent)' /tmp/vss-g1.out || { echo "FAIL: the location guard does not name both"; cat /tmp/vss-g1.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotLocation=s3://other/agents >/tmp/vss-g1c.out 2>&1; then echo "FAIL: connectivity rendered a disagreeing explicit snapshotLocation"; exit 1; fi
+	@grep -q 'differs from the location kagent.harness.snapshotStore renders' /tmp/vss-g1c.out || { echo "FAIL: the connectivity location guard is silent"; exit 1; }
+	@if $(SUBSTRATE_STORE_META) --set 'substrate.ateApiServer.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::123456789012:role/other' >/tmp/vss-g2.out 2>&1; then echo "FAIL: a disagreeing explicit role annotation rendered"; exit 1; fi
+	@grep -q 'substrate.ateApiServer.serviceAccount.annotations\[eks.amazonaws.com/role-arn\] (arn:aws:iam::123456789012:role/other) differs from the IRSA role' /tmp/vss-g2.out || { echo "FAIL: the role guard does not name the key"; cat /tmp/vss-g2.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotStore.crossplane.provider=azure >/tmp/vss-g3.out 2>&1; then echo "FAIL: provider azure rendered"; exit 1; fi
+	@grep -q 'provider=azure is not supported' /tmp/vss-g3.out || { echo "FAIL: the provider guard is silent"; exit 1; }
+	@for k in providerConfigRef region; do \
+		if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotStore.crossplane.$$k= >/tmp/vss-g4.out 2>&1; then echo "FAIL: crossplane.$$k empty rendered"; exit 1; fi; \
+		grep -q "kagent.harness.snapshotStore.crossplane.$$k is required" /tmp/vss-g4.out || { echo "FAIL: the guard for crossplane.$$k is silent"; exit 1; }; \
+	done
+	@for k in bucketName accountId oidcProvider; do \
+		if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotStore.crossplane.aws.$$k= >/tmp/vss-g5.out 2>&1; then echo "FAIL: crossplane.aws.$$k empty rendered"; exit 1; fi; \
+		grep -q "kagent.harness.snapshotStore.crossplane.aws.$$k is required" /tmp/vss-g5.out || { echo "FAIL: the guard for crossplane.aws.$$k is silent"; exit 1; }; \
+	done
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotStore.crossplane.aws.accountId=123456789012 >/tmp/vss-g6.out 2>&1; then echo "FAIL: a numeric accountId rendered (it would print as a float in the ARN)"; exit 1; fi
+	@grep -q 'must be the 12-digit AWS account id, quoted as a string' /tmp/vss-g6.out || { echo "FAIL: the accountId guard is silent"; cat /tmp/vss-g6.out; exit 1; }
+	@if $(SUBSTRATE_STORE_META_BASE) --set kagent.harness.snapshotStore.crossplane.aws.accountId=123456789012 >/tmp/vss-g7.out 2>&1; then echo "FAIL: the meta chart rendered a numeric accountId"; exit 1; fi
+	@grep -q 'must be the 12-digit AWS account id, quoted as a string' /tmp/vss-g7.out || { echo "FAIL: the meta accountId guard is silent"; cat /tmp/vss-g7.out; exit 1; }
+	@echo "ok: guards"
+	@echo "====> $@ passed"
+
 .PHONY: verify-postgres-kagent-v2
 verify-postgres: verify-postgres-kagent-v2
 verify-postgres-kagent-v2: ## Assert the kagent_v2 database entry (#346): the CNPG Database (name, owner, vector, retain) on the platform Cluster, the 30-day drop of the 0.10 database (applicationDatabase.ensure), the entry reaching the connectivity databases hook (its mechanism is verify-postgres' own, #342) to feed the derived Secret kagent-pg-kagent-v2-app, the controller mount example, the meta chart's forwarding, and the entry's component/postgres gating.

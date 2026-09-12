@@ -164,6 +164,8 @@ def omit_keys() -> set[str]:
         if collecting:
             if line.startswith("      - "):
                 keys.add(line.strip()[2:])
+            elif line.strip().startswith("#"):
+                continue  # a comment between entries
             else:
                 collecting = False
     return keys

@@ -1070,7 +1070,7 @@ the Cluster renders AND postgres.backup.enabled is set.
 
 {{/* arn:aws, or arn:aws-cn in the China partition. */}}
 {{- define "agent-platform.postgres.awsPartition" -}}
-{{- if hasPrefix "cn-" .Values.postgres.backup.crossplane.region -}}arn:aws-cn{{- else -}}arn:aws{{- end -}}
+{{- include "agent-platform.crossplane.awsPartition" (dict "xp" .Values.postgres.backup.crossplane) -}}
 {{- end -}}
 
 {{/* The IAM role the Crossplane AWS block renders. */}}
@@ -1111,9 +1111,16 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- if $ann -}}{{- toYaml $ann -}}{{- end -}}
 {{- end -}}
 
+{{/*
+Crossplane helpers shared by every store this chart provisions (the kagent-pg
+backup bucket, postgres.backup.crossplane; Agent Substrate's snapshot store,
+kagent.harness.snapshotStore.crossplane). Each takes the store's crossplane
+block as `xp`; the postgres.* and substrateStore.* wrappers below bind it.
+*/}}
+
 {{/* Crossplane managementPolicies: everything, or Observe only. */}}
-{{- define "agent-platform.postgres.crossplaneManagementPolicies" -}}
-{{- if .Values.postgres.backup.crossplane.observeOnly -}}
+{{- define "agent-platform.crossplane.managementPolicies" -}}
+{{- if .xp.observeOnly -}}
 - Observe
 {{- else -}}
 - "*"
@@ -1121,8 +1128,8 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- end -}}
 
 {{/* Same, for data-bearing objects: never Delete, so an uninstall keeps the data. */}}
-{{- define "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" -}}
-{{- if .Values.postgres.backup.crossplane.observeOnly -}}
+{{- define "agent-platform.crossplane.managementPoliciesNoDelete" -}}
+{{- if .xp.observeOnly -}}
 - Observe
 {{- else -}}
 - Create
@@ -1132,11 +1139,20 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- end -}}
 {{- end -}}
 
-{{/* Tags on the cloud resources: chart defaults under the installation's own. */}}
-{{- define "agent-platform.postgres.crossplaneTags" -}}
-{{- $tags := dict "app" "agent-platform-postgres" "managed-by" "crossplane" "name" (include "agent-platform.postgres.crossplaneStoreName" .) -}}
-{{- $tags = merge (deepCopy (.Values.postgres.backup.crossplane.tags | default dict)) $tags -}}
-{{- if eq .Values.postgres.backup.crossplane.provider "azure" -}}
+{{/* arn:aws, or arn:aws-cn in the China partition. */}}
+{{- define "agent-platform.crossplane.awsPartition" -}}
+{{- if hasPrefix "cn-" .xp.region -}}arn:aws-cn{{- else -}}arn:aws{{- end -}}
+{{- end -}}
+
+{{/*
+Tags on the cloud resources: the chart's (app, managed-by, name) under the
+installation's own. Azure tag keys take no dash.
+Usage: include "agent-platform.crossplane.tags" (dict "xp" $xp "app" "agent-platform-postgres" "name" $bucket)
+*/}}
+{{- define "agent-platform.crossplane.tags" -}}
+{{- $tags := dict "app" .app "managed-by" "crossplane" "name" .name -}}
+{{- $tags = merge (deepCopy (.xp.tags | default dict)) $tags -}}
+{{- if eq .xp.provider "azure" -}}
 {{- $clean := dict -}}
 {{- range $k, $v := $tags -}}{{- $_ := set $clean ($k | replace "-" "_") $v -}}{{- end -}}
 {{- $tags = $clean -}}
@@ -1144,10 +1160,71 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- toYaml $tags -}}
 {{- end -}}
 
+{{- define "agent-platform.postgres.crossplaneManagementPolicies" -}}
+{{- include "agent-platform.crossplane.managementPolicies" (dict "xp" .Values.postgres.backup.crossplane) -}}
+{{- end -}}
+
+{{- define "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" -}}
+{{- include "agent-platform.crossplane.managementPoliciesNoDelete" (dict "xp" .Values.postgres.backup.crossplane) -}}
+{{- end -}}
+
+{{- define "agent-platform.postgres.crossplaneTags" -}}
+{{- include "agent-platform.crossplane.tags" (dict "xp" .Values.postgres.backup.crossplane "app" "agent-platform-postgres" "name" (include "agent-platform.postgres.crossplaneStoreName" .)) -}}
+{{- end -}}
+
 {{/* The bucket (aws) or container (azure) name. */}}
 {{- define "agent-platform.postgres.crossplaneStoreName" -}}
 {{- $xp := .Values.postgres.backup.crossplane -}}
 {{- if eq $xp.provider "azure" -}}{{- $xp.azure.containerName -}}{{- else -}}{{- $xp.aws.bucketName -}}{{- end -}}
+{{- end -}}
+
+{{/*
+Agent Substrate's snapshot store (templates/substrate/crossplane-aws.yaml):
+kagent.harness.snapshotStore renders the S3 bucket and the IRSA role the
+Harness's snapshotPolicy.location points at, the postgres.backup.crossplane
+shape. The meta chart carries the same helpers: it derives
+kagent.harness.snapshotLocation for the kagent release and the role annotation
+for the substrate release's two ServiceAccounts from them.
+*/}}
+
+{{/* "aws" while the block renders the store (kagent on, crossplane on), else "". */}}
+{{- define "agent-platform.substrateStore.crossplane" -}}
+{{- $xp := dig "harness" "snapshotStore" "crossplane" dict (.Values.kagent | default dict) -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) $xp.enabled -}}
+{{- $xp.provider -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.substrateStore.block" -}}
+{{- dig "harness" "snapshotStore" dict (.Values.kagent | default dict) | toJson -}}
+{{- end -}}
+
+{{/* The snapshot location the store implies: s3://<bucket>/<prefix> (no prefix: s3://<bucket>). */}}
+{{- define "agent-platform.substrateStore.location" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- $prefix := $store.prefix | default "" | trimAll "/" -}}
+{{- printf "s3://%s" $store.crossplane.aws.bucketName -}}{{- with $prefix }}/{{ . }}{{- end -}}
+{{- end -}}
+
+{{/* The IAM role the block renders: aws.roleName, else the bucket name. */}}
+{{- define "agent-platform.substrateStore.awsRoleName" -}}
+{{- $aws := (include "agent-platform.substrateStore.block" . | fromJson).crossplane.aws -}}
+{{- $aws.roleName | default $aws.bucketName -}}
+{{- end -}}
+
+{{- define "agent-platform.substrateStore.awsRoleArn" -}}
+{{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
+{{- printf "%s:iam::%s:role/%s" (include "agent-platform.crossplane.awsPartition" (dict "xp" $xp)) $xp.aws.accountId (include "agent-platform.substrateStore.awsRoleName" .) -}}
+{{- end -}}
+
+{{/*
+The two Substrate ServiceAccounts that read and write snapshots, as the
+substrate chart names them under the release the meta chart creates
+(releaseName `substrate`, which the chart's fullname helper leaves unprefixed):
+atelet (the node agent) and ate-api-server.
+*/}}
+{{- define "agent-platform.substrateStore.serviceAccounts" -}}
+{{- list "atelet" "ate-api-server" | toJson -}}
 {{- end -}}
 
 {{/*

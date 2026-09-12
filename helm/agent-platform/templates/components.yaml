@@ -29,11 +29,14 @@ knowledge:
       wrapped. global is injected at the wrapped top level so the subchart still
       inherits it. No component uses it today: muster, agentgateway, kagent and
       the GS-owned connectivity/crds charts all take their values at top level.
-  omitKeys      — keys dropped from the forwarded block. For a component whose
-      top-level block holds a key that belongs to THIS umbrella rather than to
-      the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs, which only
-      the connectivity chart reads), and whose chart validates values with
-      additionalProperties: false and would reject it. Applied after valuesKey,
+  omitKeys      — keys dropped from the forwarded block, top-level or dotted
+      paths (agent-platform.omitPath; a parent emptied by the drop goes too).
+      For a component whose block holds a key that belongs to THIS umbrella
+      rather than to the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs
+      and harness.snapshotStore, which only the connectivity chart reads), and
+      whose chart validates values with additionalProperties: false and would
+      reject it — or, without a schema, would carry a block it never reads
+      (the kagent chart). Applied after valuesKey,
       so it always addresses the block's own keys. With forwardAllValues it
       drops top-level blocks from the forwarded tree instead: a block the
       connectivity chart does not read yet is held back until it does, because
@@ -208,7 +211,7 @@ values and every component the same one flavor. */ -}}
 {{- if $c.forwardAllValues }}
 {{- $vals = mergeOverwrite (deepCopy $shaped) (dict "components" $roster) }}
 {{- /* Hold back the top-level blocks the chart does not read yet (see omitKeys above). */ -}}
-{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- range $c.omitKeys }}{{- $vals = include "agent-platform.omitPath" (dict "vals" $vals "path" .) | fromJson }}{{- end }}
 {{- /* A switch's values block travels only while the switch is on (see feature switch above). */ -}}
 {{- range $switch, $sw := $root.Values.components }}
 {{- if and (not (hasKey $sw "chart")) (not (index $roster $switch).enabled) (hasKey $vals $switch) }}{{- $vals = omit $vals $switch }}{{- end }}
@@ -217,7 +220,7 @@ values and every component the same one flavor. */ -}}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
-{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- range $c.omitKeys }}{{- $vals = include "agent-platform.omitPath" (dict "vals" $vals "path" .) | fromJson }}{{- end }}
 {{- /* An empty override must not reach a chart that stamps the default (see omitEmptyKeys above). */ -}}
 {{- with $c.omitEmptyKeys }}{{- $vals = include "agent-platform.omitEmpty" (dict "vals" $vals "paths" .) | fromJson }}{{- end }}
 {{- /* GS wrapper charts vendor the upstream chart as a subchart of the same name;

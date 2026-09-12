@@ -762,6 +762,45 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Pin the release-independent name so the controller Service is always
   # `kagent-controller` regardless of the umbrella release name.
   fullnameOverride: kagent
+  # The platform Harness's snapshot store. The kagent chart renders the Harness
+  # from harness.* (the meta chart forwards that block); THIS chart renders the
+  # store when harness.snapshotStore.crossplane is on: the S3 bucket and the
+  # IRSA role for Substrate's atelet and ate-api-server (templates/substrate/
+  # crossplane-aws.yaml), the postgres.backup.crossplane shape. The meta chart
+  # derives harness.snapshotLocation (s3://<aws.bucketName>/<prefix>) and the
+  # two ServiceAccounts' eks.amazonaws.com/role-arn annotation from it.
+  harness:
+    # An explicit location must agree with the one the store block implies.
+    snapshotLocation: ""
+    snapshotStore:
+      # The key prefix inside the bucket (keeps one bucket's Harnesses apart).
+      prefix: kagent
+      crossplane:
+        enabled: false
+        # aws — the only provider: S3 Bucket with a lifecycle rule, a
+        #       public-access block and a TLS-only bucket policy, plus an IAM
+        #       Role with an inline S3 policy trusted by Substrate's atelet and
+        #       ate-api-server ServiceAccounts through the cluster's IRSA OIDC
+        #       provider. Bucket objects are created but never deleted by
+        #       Crossplane and carry helm.sh/resource-policy: keep.
+        provider: aws
+        providerConfigRef: ""
+        region: ""
+        # Adopt existing cloud resources without changing them.
+        observeOnly: false
+        tags: {}
+        aws:
+          bucketName: ""
+          # The AWS account that holds the OIDC provider and the role.
+          accountId: ""
+          # IRSA OIDC provider host, e.g. irsa.<cluster>.<base-domain>.
+          oidcProvider: ""
+          # IAM role name. Defaults to bucketName.
+          roleName: ""
+          # Snapshots expire after this many days: an actor whose snapshot is
+          # gone boots cold from the golden image again — one slower start,
+          # nothing lost.
+          lifecycleDays: 30
   # Pull kagent images from the GS-retagged registry (retagger uses override_repo_name
   # so the repository paths are flat, not the upstream kagent-dev/kagent/* hierarchy).
   registry: gsoci.azurecr.io/giantswarm

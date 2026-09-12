@@ -26,9 +26,11 @@
 # it moves with this chart: a connectivity pin behind 4.7.19 renders a second
 # owner of the platform Harness next to the kagent release (UPGRADE.md
 # "4.7.x → 4.8.0").
-# substrate and substrate-crds pin the SAME release of the Substrate line — the
-# version the kagent chart's stamped worker image names (vX.Y.Z-gs.N like
-# kagent's; the floor of components.substrate.versionRange).
+# substrate and substrate-crds pin the SAME release of the Substrate line
+# (vX.Y.Z-gs.N like kagent's; the floor of components.substrate.versionRange —
+# 0.0.27-gs.8 is chart-only: the ServiceAccount annotations the snapshot store's
+# IRSA role needs; the kagent chart's stamped worker image names the same
+# upstream 0.0.27 at gs.7).
 # =============================================================================
 
 gitops:
@@ -42,8 +44,8 @@ components:
   agent-platform-mcps:         { versionRange: "0.9.0" }
   kagent:                        { versionRange: "0.11.0-gs.6" }
   kagent-crds:                   { versionRange: "0.11.0-gs.6" }
-  substrate:                     { versionRange: "0.0.27-gs.7" }
-  substrate-crds:                { versionRange: "0.0.27-gs.7" }
+  substrate:                     { versionRange: "0.0.27-gs.8" }
+  substrate-crds:                { versionRange: "0.0.27-gs.8" }
   klaus-gateway:                 { versionRange: "1.0.2" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }

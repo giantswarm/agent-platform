@@ -1,0 +1,50 @@
+{{- if eq (include "agent-platform.substrateStore.crossplane" .) "aws" }}
+{{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane }}
+{{- $aws := $xp.aws }}
+{{- $ns := include "agent-platform.substrate.namespace" . }}
+{{- $bucket := $aws.bucketName }}
+{{- $roleName := include "agent-platform.substrateStore.awsRoleName" . }}
+{{- $tags := include "agent-platform.crossplane.tags" (dict "xp" $xp "app" "agent-platform-substrate" "name" $bucket) | fromYaml }}
+{{- include "agent-platform.crossplane.aws.bucket" (dict "root" . "xp" $xp "bucket" $bucket "lifecycleDays" $aws.lifecycleDays "tags" $tags
+      "bucketComment" (list "The S3 bucket Agent Substrate keeps the actors' snapshots in — the platform" "Harness's snapshotPolicy.location (kagent.harness.snapshotLocation is derived" "from it). Never deleted by Crossplane (no Delete management policy) and kept by" "Helm: the snapshots outlive the release.")
+      "lifecycleComment" (list "Snapshots expire after lifecycleDays: an actor whose snapshot is gone boots" "cold from the golden image again, nothing is lost but one start.")) }}
+---
+# The IAM role Substrate's snapshot clients assume through IRSA: atelet (the
+# node agent that writes and restores the actors' snapshots) and ate-api-server
+# (which reads and writes them too), by their ServiceAccounts in the substrate
+# release's namespace. The meta chart forwards this role's ARN as the
+# eks.amazonaws.com/role-arn annotation of both ServiceAccounts.
+apiVersion: iam.aws.upbound.io/v1beta1
+kind: Role
+metadata:
+  name: {{ $roleName }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: iam
+  annotations:
+    crossplane.io/external-name: {{ $roleName }}
+spec:
+  managementPolicies:
+    {{- include "agent-platform.crossplane.managementPolicies" (dict "xp" $xp) | nindent 4 }}
+  forProvider:
+    description: {{ printf "Agent Substrate's snapshot store %s (agent-platform)" $bucket | quote }}
+    assumeRolePolicy: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {{- $subjects := list }}
+          {{- range include "agent-platform.substrateStore.serviceAccounts" . | fromJsonArray }}
+          {{- $subjects = append $subjects (include "agent-platform.crossplane.aws.trustStatement" (dict "xp" $xp "sub" (printf "system:serviceaccount:%s:%s" $ns .))) }}
+          {{- end }}
+          {{- join ",\n" $subjects | nindent 10 }}
+        ]
+      }
+    inlinePolicy:
+      - name: {{ $roleName }}
+        policy: |
+          {{- include "agent-platform.crossplane.aws.s3Policy" (dict "xp" $xp "bucket" $bucket) | nindent 10 }}
+    tags:
+      {{- toYaml $tags | nindent 6 }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+{{- end }}
