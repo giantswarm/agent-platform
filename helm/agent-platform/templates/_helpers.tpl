@@ -107,14 +107,10 @@ overwrite would hide a values file that still spells the old key.
     (key uri) the connectivity release's hook writes into ate-system for
     postgres.databases.substrate (agent-platform.substrate.postgresMode; the
     `auto` of substrate.postgres.enabled itself is resolved by
-    agent-platform.shape.apply, with the other cluster-shape knobs);
-    atelet.imageCache.pinnedImages from kagent.harness.image — the platform
-    Harness's image joins the set atelet pulls at every image-cache GC pass and
-    never evicts (Substrate 0.0.27-gs.6, `--image-cache-pinned-images`), so a
-    node whose cache volume sits above the watermark does not pay a cold pull
-    and unpack on the first turn after an idle spell; an installation's own
-    substrate.atelet.imageCache.pinnedImages are kept in front of it, once
-    each, and a Harness re-pin moves the pinned set with it.
+    agent-platform.shape.apply, with the other cluster-shape knobs). Its
+    atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
+    ConfigMap kagent-images feeds it through the HelmRelease's valuesFrom
+    (components.substrate.valuesFromRefs), so no copy of a digest lives here.
 Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
@@ -143,18 +139,54 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
 {{- end -}}
-{{- if eq .name "substrate" -}}
-{{- $harness := dig "harness" "image" "" (.root.Values.kagent | default dict) -}}
-{{- if $harness -}}
-{{- $pinned := list -}}
-{{- range (dig "atelet" "imageCache" "pinnedImages" list (.root.Values.substrate | default dict) | default list) -}}
-{{- if not (has . $pinned) }}{{- $pinned = append $pinned . }}{{- end -}}
-{{- end -}}
-{{- if not (has $harness $pinned) }}{{- $pinned = append $pinned $harness }}{{- end -}}
-{{- $_ := set $derived "atelet" (dict "imageCache" (dict "pinnedImages" $pinned)) -}}
-{{- end -}}
-{{- end -}}
 {{- $derived | toJson -}}
+{{- end -}}
+
+{{/*
+Drop the keys named by dotted `paths` from `vals` when their value is empty (an
+empty string, list or map), at any depth; a parent left empty goes with it. For a component chart that stamps a
+default at publish and would take an empty override as THE value (the kagent
+chart's substrateWorkerPool.workerImage, harness.image), or for a HelmRelease
+whose spec.values must not shadow what its valuesFrom supplies (Flux lets
+spec.values win: the substrate release's atelet.imageCache.pinnedImages).
+Emits JSON. Usage: include "agent-platform.omitEmpty" (dict "vals" $vals "paths" $c.omitEmptyKeys) | fromJson
+*/}}
+{{- define "agent-platform.omitEmpty" -}}
+{{- $vals := .vals -}}
+{{- range .paths -}}
+{{- $vals = include "agent-platform.omitEmptyPath" (dict "vals" $vals "segs" (splitList "." .)) | fromJson -}}
+{{- end -}}
+{{- $vals | toJson -}}
+{{- end -}}
+
+{{/*
+Set the key at `segs` (a list of map keys) in `vals` to null, creating the maps
+on the way; mutates `vals` in place and emits nothing. A null in a HelmRelease's
+values deletes the component chart's default for that key when helm-controller
+coalesces them (components.yaml nullKeys).
+Usage: include "agent-platform.setNull" (dict "vals" $vals "segs" (list "a" "b"))
+*/}}
+{{- define "agent-platform.setNull" -}}
+{{- $m := .vals -}}
+{{- range (initial .segs) -}}
+{{- if not (kindIs "map" (index $m .)) }}{{- $_ := set $m . dict }}{{- end -}}
+{{- $m = index $m . -}}
+{{- end -}}
+{{- $_ := set $m (last .segs) nil -}}
+{{- end -}}
+
+{{- define "agent-platform.omitEmptyPath" -}}
+{{- $vals := .vals -}}
+{{- $key := first .segs -}}
+{{- if hasKey $vals $key -}}
+{{- if eq (len .segs) 1 -}}
+{{- if empty (index $vals $key) }}{{- $vals = omit $vals $key }}{{- end -}}
+{{- else if kindIs "map" (index $vals $key) -}}
+{{- $child := include "agent-platform.omitEmptyPath" (dict "vals" (index $vals $key) "segs" (rest .segs)) | fromJson -}}
+{{- if empty $child }}{{- $vals = omit $vals $key }}{{- else }}{{- $_ := set $vals $key $child }}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $vals | toJson -}}
 {{- end -}}
 
 {{/*

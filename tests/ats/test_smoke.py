@@ -590,10 +590,11 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # helm.sh/resource-policy: keep — survived it, so every AgentTemplate and
     # RemoteMCPServer is still there in the kept kagent namespace (the agents'
     # HelmRelease objects went with the Flux CRDs; the declarative template was
-    # never Helm's). The connectivity release's Harness stays too — it carries
-    # helm.sh/resource-policy: keep so the kagent release can adopt it on the
-    # 4.8.0 upgrade (helm-controller takes ownership of existing objects by
-    # default; giantswarm/agent-platform#406). Nothing else of the agent
+    # never Helm's). The platform Harness stays too — since 4.8.0 the kagent
+    # release renders it (harness.create) with helm.sh/resource-policy: keep,
+    # the runtime of every template admitted under it (through 4.7.19 the
+    # connectivity release rendered it with the same keep, and the 4.8.0
+    # upgrade adopted it in place; giantswarm/agent-platform#406). Nothing else of the agent
     # runtime survives: the ModelConfig, the WorkerPool and its workers, the
     # controller and its Postgres (the kagent release's), the
     # substrate release's SandboxConfig and Substrate's control plane go. The
@@ -617,10 +618,10 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     servers = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert servers == servers_before, f"RemoteMCPServers after the uninstall {servers} != before {servers_before}"
     harness = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
-    assert harness, f"the platform Harness {HARNESS} went with the uninstall of the connectivity release; it must be kept (helm.sh/resource-policy: keep, giantswarm/agent-platform#406)"
+    assert harness, f"the platform Harness {HARNESS} went with the uninstall of the kagent release; it must be kept (helm.sh/resource-policy: keep, giantswarm/agent-platform#406)"
     harness_annotations = harness["metadata"].get("annotations") or {}
     assert harness_annotations.get("helm.sh/resource-policy") == "keep", harness_annotations
-    assert harness_annotations.get("meta.helm.sh/release-name") == CONNECTIVITY, f"the kept Harness is not the connectivity release's: {harness_annotations}"
+    assert harness_annotations.get("meta.helm.sh/release-name") == "kagent", f"the kept Harness is not the kagent release's (components.kagent.chart = the releaseName): {harness_annotations}"
     assert not kube.items("modelconfigs.kagent.dev", namespace=KAGENT_NAMESPACE), "ModelConfigs survived the uninstall of the kagent release"
     assert kube.get("sandboxconfigs.ate.dev", SANDBOX_CONFIG) is None, "the substrate release's SandboxConfig survived its uninstall"
     assert not kube.items("workerpools.ate.dev", all_namespaces=True), "a WorkerPool survived the kagent release's uninstall"

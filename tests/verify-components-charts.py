@@ -29,7 +29,7 @@ constraint with its own semver and, for the kagent line's prerelease releases,
 differently. While a range or a BOM pin names a release that is not published
 yet (UNRELEASED below: a sibling's 1.0 or the kagent line's tag), the block is
 rendered against the newest chart the line has instead — the kagent build the
-values name (`kagent.tag`) or the newest 0.x of a manager — and the fallback is
+values name (the floor of the kagent range) or the newest 0.x of a manager — and the fallback is
 printed; an entry leaves UNRELEASED with the release it waits for.
 
 Network: pulls from gsoci.azurecr.io and ghcr.io (three attempts each); the tag
@@ -170,7 +170,7 @@ RENDER_AGAINST = {
 
 def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
     """The chart to render against while nothing the constraint admits is
-    published: the kagent build the values name (kagent.tag — the chart version
+    published: the kagent build the values name (the kagent range's floor — the chart version
     of the same build), the branch build RENDER_AGAINST names, else the newest
     release tag."""
     if name not in UNRELEASED:
@@ -200,8 +200,7 @@ def main(meta: str) -> int:
     on = [f"--set=components.{n}.enabled=true" for n in COMPONENTS if n not in follow_kagent]
     wide = docs(render_meta(meta, [*QUICKSTART, *on]))
     pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *on]))
-    m = re.search(r"^tag: \"?([^\"\n]+)\"?$", hr_values(wide[("HelmRelease", "kagent")]), re.M)
-    kagent_tag = m.group(1) if m else ""
+    kagent_tag = source(wide[("OCIRepository", "kagent")])[1].split()[0].lstrip(">=")  # the range's floor = the build the values name
     for name in COMPONENTS:
         url, rng = source(wide[("OCIRepository", name)])
         _, pin = source(pinned[("OCIRepository", name)])

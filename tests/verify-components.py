@@ -76,15 +76,15 @@ CONNECTIVITY_RANGE = ">=4.0.0 <5.0.0"
 # 0.x from 0.20.0, dual-version), klaus-gateway 1.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://ghcr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=0.11.0-gs.1 <0.11.1-0"
+KAGENT_RANGE = ">=0.11.0-gs.6 <0.11.1-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin
 # (the build the WorkerPool's worker image names), both landing in ate-system,
 # both following components.kagent. The pin is the line's release range, the
 # kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.27-gs.6 <0.0.28-0"
-SUBSTRATE_PIN = "0.0.27-gs.6"  # the range's floor: the BOM pin and the worker image tag
+SUBSTRATE_RANGE = ">=0.0.27-gs.7 <0.0.28-0"
+SUBSTRATE_PIN = "0.0.27-gs.7"  # the range's floor: the BOM pin; the worker image the kagent chart stamps names it too
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
@@ -277,23 +277,22 @@ def main(meta: str, connectivity: str) -> int:
                  "kagent on without a snapshot location")
     print("ok: kagent-crds, substrate and substrate-crds follow components.kagent — on with it, off without it, the roster says which; the Substrate releases land in ate-system; the guards refuse kagent without its runtime or a snapshot location")
 
-    # --- the substrate release pins the platform Harness's image in atelet's image cache ---
+    # --- atelet's pinned images come from the kagent release's ConfigMap; an own list travels only when set ---
     def pinned_images(flags: list[str]) -> list[str]:
         values = hr_values(docs(render(meta, [*ci, *flags]))[("HelmRelease", "substrate")])
         m = re.search(r"^    pinnedImages:\n((?:    - .*\n)+)", values, re.M)
         return re.findall(r"^    - (\S+)$", m.group(1), re.M) if m else []
-    with open(f"{meta}/values.yaml") as f:
-        harness = re.search(r"^    image: (\S+@sha256:[0-9a-f]{64})$", f.read(), re.M).group(1)
-    if pinned_images([]) != [harness]:
-        fail(f"the substrate release does not pin kagent.harness.image ({harness}) in atelet.imageCache.pinnedImages (got {pinned_images([])}); atelet evicts an unpinned Harness image on every GC pass above the watermark")
-    other = "ghcr.io/example/harness@sha256:" + "a" * 64
-    if pinned_images(["--set", f"kagent.harness.image={other}"]) != [other]:
-        fail("a re-pinned kagent.harness.image does not move atelet.imageCache.pinnedImages with it")
+    substrate_hr = docs(render(meta, ci))[("HelmRelease", "substrate")]
+    if "\n  valuesFrom:\n    - kind: ConfigMap\n      name: kagent-images\n      optional: true\n      valuesKey: substrate-values.yaml\n" not in substrate_hr:
+        fail("the substrate release does not read atelet.imageCache.pinnedImages from the kagent release's ConfigMap kagent-images (valuesFrom, key substrate-values.yaml, optional)")
+    if pinned_images([]):
+        fail(f"the substrate release carries pinnedImages in spec.values by default ({pinned_images([])}); Flux lets spec.values win, so they would shadow the ConfigMap's set")
+    if "imageCache" in hr_values(substrate_hr):
+        fail("an empty atelet.imageCache is forwarded to the substrate release; omitEmptyKeys must prune the parent too")
     extra = "docker.io/example/tool:1"
-    got = pinned_images(["--set", f"substrate.atelet.imageCache.pinnedImages[0]={extra}", "--set", f"substrate.atelet.imageCache.pinnedImages[1]={harness}"])
-    if got != [extra, harness]:
-        fail(f"an installation's own substrate.atelet.imageCache.pinnedImages are not kept in front of the Harness image, once each (got {got})")
-    print(f"ok: the substrate release pins the platform Harness's image in atelet's image cache — kagent.harness.image, after the installation's own pins, once")
+    if pinned_images(["--set", f"substrate.atelet.imageCache.pinnedImages[0]={extra}"]) != [extra]:
+        fail("an installation's own substrate.atelet.imageCache.pinnedImages is not forwarded verbatim")
+    print("ok: the substrate release pins atelet's runtime images from the kagent release's ConfigMap, an installation's own list only when set")
 
     # --- the wiring chart's range is bounded below the next major ------------------
     conn_oci = off.get(("OCIRepository", "agent-platform-connectivity"))
@@ -391,11 +390,12 @@ def main(meta: str, connectivity: str) -> int:
     substrate_pins = {re.search(rf"^\s*{n}:\s*\{{\s*versionRange:\s*\"([^\"]+)\"", bom_file, re.M).group(1) for n in ("substrate", "substrate-crds")}
     if len(substrate_pins) != 1:
         fail(f"the BOM pins substrate and substrate-crds to different builds {sorted(substrate_pins)}; the two charts are one build of the Substrate line")
-    worker_image = re.search(r"^\s*workerImage:\s*(\S+)$", open(f"{meta}/values.yaml").read(), re.M).group(1)
+    if re.search(r"^\s*workerImage:\s*(?!\"\"$|''$)\S+$", open(f"{meta}/values.yaml").read(), re.M):
+        fail("kagent.substrateWorkerPool.workerImage is set in values.yaml; the kagent chart stamps the worker of the Substrate version it was built against, the key stays empty here")
     if not SUBSTRATE_RANGE.startswith(f">={SUBSTRATE_PIN} "):
         fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
-    if not worker_image.endswith(":" + SUBSTRATE_PIN) or substrate_pins != {SUBSTRATE_PIN}:
-        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)}, kagent.substrateWorkerPool.workerImage {worker_image!r} — the control plane and the workers are one Substrate version")
+    if substrate_pins != {SUBSTRATE_PIN}:
+        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the control plane and the workers (the kagent chart's stamped workerImage) are one Substrate version")
     print("ok: the customer BOM pins the seven, the kagent line, the managers and the wiring chart exactly")
 
     # --- the forwarded tree validates against the connectivity chart --------------
