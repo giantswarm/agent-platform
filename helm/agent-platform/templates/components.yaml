@@ -255,9 +255,6 @@ spec:
     {{- if $c.disableWaitForJobs }}
     disableWaitForJobs: true
     {{- end }}
-    {{- if $c.takeOwnership }}
-    takeOwnership: true
-    {{- end }}
     remediation:
       retries: {{ $g.retries }}
   upgrade:
@@ -266,9 +263,6 @@ spec:
     {{- end }}
     {{- if $c.disableWaitForJobs }}
     disableWaitForJobs: true
-    {{- end }}
-    {{- if $c.takeOwnership }}
-    takeOwnership: true
     {{- end }}
     remediation:
       retries: {{ $g.retries }}

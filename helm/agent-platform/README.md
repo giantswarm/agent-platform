@@ -126,7 +126,6 @@ WorkerPool".
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
 | components.kagent.dependsOn[2] | string | `"substrate"` |  |
 | components.kagent.dependsOn[3] | string | `"agent-platform-connectivity"` |  |
-| components.kagent.takeOwnership | bool | `true` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
 | components.kagent.omitKeys[2] | string | `"harness"` |  |

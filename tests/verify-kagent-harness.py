@@ -14,8 +14,9 @@ kagent, and that one label is the whole admission contract.
 Harness types. This test renders the chart in a kagent-on shape and asserts:
   - exactly one Harness, named `kagent`, in the kagent namespace, annotated
     helm.sh/resource-policy: keep (giantswarm/agent-platform#406 step 2: the
-    object survives this chart dropping the template in 4.8.0, and the kagent
-    release adopts it through takeOwnership — verify-kagent-wiring);
+    object survives this chart dropping the template in 4.8.0, and helm-controller
+    adopts it for the kagent release — its take-ownership default, which
+    verify-kagent-wiring asserts the meta chart leaves on);
   - spec.kagent is the only runtime block (not codex/claude/byo);
   - workload.image is the configured digest; env carries only
     KAGENT_PROPAGATE_TOKEN=true;
