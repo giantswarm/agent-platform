@@ -398,8 +398,9 @@ components:  # @schema additionalProperties: true
     # waits on a pod that waits on a later release (UPGRADE.md "3.x → 4.0").
     dependsOn: [kagent-crds, substrate-crds, substrate, agent-platform-connectivity]
     # The kagent release adopts objects another release already owns (Helm's
-    # --take-ownership: the release-name/namespace annotations are rewritten
-    # instead of refused). Step 2 of the migration to 4.8.0 (#406): today the
+    # take-ownership flag: the release-name/namespace annotations are rewritten
+    # instead of refused; a double dash in this comment would read as a
+    # helm-docs description marker). Step 2 of the migration to 4.8.0 (#406): today the
     # connectivity chart renders the platform Harness `kagent`; from 4.8.0 the
     # kagent chart renders it itself, so on that upgrade the object — kept in
     # place by connectivity's helm.sh/resource-policy: keep — changes owner
