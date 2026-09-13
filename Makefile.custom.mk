@@ -1840,6 +1840,11 @@ MIGRATION_ON := $(MANAGERS_MIN) --set components.agent-manager.enabled=true
 MIGRATION_PIN = python3 -c "import yaml; print(yaml.safe_load(open('$(CHART_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
 MIGRATION_PIN_CONNECTIVITY = python3 -c "import yaml; print(yaml.safe_load(open('$(CONNECTIVITY_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
 MIGRATION_JOB := agent-platform-connectivity-agent-manager-migrate
+# The destinations an egress policy names, normalized for a diff between two
+# policies: cilium — FQDN selectors and CIDR blocks; kubernetes — ipBlock CIDRs;
+# quotes dropped, sorted (verify-migration, #433).
+EGRESS_NAMES := grep -E '^ *-? ?(matchName|matchPattern): |^ *- [0-9]+(\.[0-9]+){3}/[0-9]+$$' | sed -E "s/^ *-? ?//; s/['\"]//g" | sort
+EGRESS_BLOCKS := grep -E '^ *cidr: ' | sed -E "s/^ *//; s/['\"]//g" | sort
 
 .PHONY: verify-substrate-store
 SUBSTRATE_STORE_CI := $(CONNECTIVITY_DIR)/ci/test-substrate-store-aws-values.yaml
@@ -2177,11 +2182,12 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@$(PICK) /tmp/vmig-gitops.out Job '$(MIGRATION_JOB)-*' kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' /tmp/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
 	@echo "ok: RBAC"
-	@echo "--> network policy: cilium (DNS with the proxy clause, kube-apiserver, api.github.com and the agent chart registry by name on 443) and kubernetes (DNS, the API server CIDR, world on 443), selecting the Job's pods; none with networkPolicy off"
+	@echo "--> network policy: cilium (DNS with the proxy clause, kube-apiserver, api.github.com, the agent chart registry and its blob-storage front by name on 443) and kubernetes (DNS, the API server CIDR, world on 443), selecting the Job's pods; none with networkPolicy off"
 	@$(PICK) /tmp/vmig-on.out CiliumNetworkPolicy $(MIGRATION_JOB) kagent >/tmp/vmig-cnp.out || { echo "FAIL: no CiliumNetworkPolicy for the Job"; exit 1; }
 	@grep -q 'app.kubernetes.io/component: agent-manager-migrate' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy does not select the Job's pods"; exit 1; }
 	@grep -q 'matchName: api.github.com' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no GitHub API egress"; exit 1; }
 	@grep -q 'matchName: gsoci.azurecr.io' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no agent chart registry egress"; exit 1; }
+	@grep -qE "matchPattern: ['\"]\*\.blob\.core\.windows\.net['\"]" /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no egress to the registry's blob-storage front (*.blob.core.windows.net) — ACR redirects chart blob downloads there and the Job rewrites nothing (#433)"; exit 1; }
 	@grep -q -- '- kube-apiserver' /tmp/vmig-cnp.out || { echo "FAIL: the cilium policy has no API server egress"; exit 1; }
 	@grep -B2 -A2 'matchPattern: "\*"' /tmp/vmig-cnp.out | grep -q 'dns:' || { echo "FAIL: the cilium policy has no DNS proxy clause for the FQDN selectors"; exit 1; }
 	@if grep -q 'ingress:' /tmp/vmig-cnp.out; then echo "FAIL: the Job serves nothing; no ingress rule expected"; exit 1; fi
@@ -2196,6 +2202,23 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if grep -qE 'kind: (CiliumNetworkPolicy|NetworkPolicy)' /tmp/vmig-nonp.out; then echo "FAIL: a network policy renders with networkPolicy off"; exit 1; fi
 	@$(PICK) /tmp/vmig-nonp.out Job '$(MIGRATION_JOB)-*' kagent >/dev/null || { echo "FAIL: the Job is gone with networkPolicy off"; exit 1; }
 	@echo "ok: network policy"
+	@echo "--> the Job's egress is agent-manager's chart egress (#433): with agent-manager's oauth off (its IdP rule aside) and every knob set — agentManager.networkPolicy.egress.fqdns/.cidrs, networkPolicy.additionalEgressFQDNs/.additionalEgressCIDRs — the Job's policy and agent-manager's egress name exactly the same FQDN selectors and CIDR blocks (cilium) and ipBlocks (kubernetes, where .cidrs narrows the Job's world egress the way it narrows agent-manager's); neither template names a destination of its own"
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agent-manager.oauth.enabled=false --set 'agentManager.networkPolicy.egress.fqdns[0].matchPattern=*.mirror.example.internal' --set 'agentManager.networkPolicy.egress.fqdns[1].matchName=api.github.com' --set 'agentManager.networkPolicy.egress.cidrs[0]=198.51.100.0/24' --set 'networkPolicy.additionalEgressFQDNs[0].matchName=extra.example.internal' --set 'networkPolicy.additionalEgressCIDRs[0]=203.0.113.0/24' >/tmp/vmig-par.out 2>&1 || { cat /tmp/vmig-par.out; exit 1; }
+	@$(PICK) /tmp/vmig-par.out CiliumNetworkPolicy $(MIGRATION_JOB) kagent | $(EGRESS_NAMES) >/tmp/vmig-par-job.txt
+	@$(PICK) /tmp/vmig-par.out CiliumNetworkPolicy agent-platform-connectivity-agent-manager-egress | $(EGRESS_NAMES) >/tmp/vmig-par-am.txt
+	@[ -s /tmp/vmig-par-job.txt ] || { echo "FAIL: no destinations picked from the Job's cilium policy"; exit 1; }
+	@cmp -s /tmp/vmig-par-job.txt /tmp/vmig-par-am.txt || { echo "FAIL: the Job's cilium egress and agent-manager's name different destinations (< the Job, > agent-manager)"; diff /tmp/vmig-par-job.txt /tmp/vmig-par-am.txt; exit 1; }
+	@for d in 'matchName: gsoci.azurecr.io' 'matchPattern: *.mirror.example.internal' 'matchName: api.github.com' '198.51.100.0/24' 'matchName: extra.example.internal' '203.0.113.0/24'; do grep -qxF -- "$$d" /tmp/vmig-par-job.txt || { echo "FAIL: the Job's cilium egress lacks $$d"; cat /tmp/vmig-par-job.txt; exit 1; }; done
+	@if grep -q 'dex.ci.example.com' /tmp/vmig-par-job.txt; then echo "FAIL: the Job's egress names the identity provider; the Job validates no token"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.flavor=kubernetes --set agent-manager.oauth.enabled=false --set 'agentManager.networkPolicy.egress.cidrs[0]=198.51.100.0/24' --set 'networkPolicy.additionalEgressCIDRs[0]=203.0.113.0/24' >/tmp/vmig-par-k8s.out 2>&1 || { cat /tmp/vmig-par-k8s.out; exit 1; }
+	@$(PICK) /tmp/vmig-par-k8s.out NetworkPolicy $(MIGRATION_JOB) kagent | $(EGRESS_BLOCKS) >/tmp/vmig-par-k8s-job.txt
+	@$(PICK) /tmp/vmig-par-k8s.out NetworkPolicy agent-platform-connectivity-agent-manager-egress | $(EGRESS_BLOCKS) >/tmp/vmig-par-k8s-am.txt
+	@[ -s /tmp/vmig-par-k8s-job.txt ] || { echo "FAIL: no ipBlocks picked from the Job's kubernetes policy"; exit 1; }
+	@cmp -s /tmp/vmig-par-k8s-job.txt /tmp/vmig-par-k8s-am.txt || { echo "FAIL: the Job's kubernetes egress and agent-manager's select different ipBlocks (< the Job, > agent-manager)"; diff /tmp/vmig-par-k8s-job.txt /tmp/vmig-par-k8s-am.txt; exit 1; }
+	@for d in 'cidr: 198.51.100.0/24' 'cidr: 203.0.113.0/24'; do grep -qxF -- "$$d" /tmp/vmig-par-k8s-job.txt || { echo "FAIL: the Job's kubernetes egress lacks $$d"; cat /tmp/vmig-par-k8s-job.txt; exit 1; }; done
+	@if $(PICK) /tmp/vmig-par-k8s.out NetworkPolicy $(MIGRATION_JOB) kagent | grep -q 'except:'; then echo "FAIL: agentManager.networkPolicy.egress.cidrs did not narrow the Job's kubernetes egress; it still opens every public destination"; exit 1; fi
+	@if grep -qE 'api\.github\.com|azurecr|blob\.core' $(CONNECTIVITY_DIR)/templates/kagent/migrate-networkpolicy-cilium.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-networkpolicy-kubernetes.yaml $(CONNECTIVITY_DIR)/templates/agent-manager/netpol.yaml; then echo "FAIL: a policy template names a chart destination of its own; the set comes from agent-platform.agentManager.chartSourcesEgress.<flavor> and agentManager.networkPolicy.egress"; exit 1; fi
+	@echo "ok: one chart egress for agent-manager and the Job"
 	@echo "--> guards: an empty tenant identity fails naming kagent.fluxServiceAccountName; an empty GitOps namespace fails"
 	@if helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName= >/tmp/vmig-g1.out 2>&1; then echo "FAIL: the migration rendered without a tenant identity"; exit 1; \
 	elif ! grep -q 'kagent.fluxServiceAccountName is empty' /tmp/vmig-g1.out; then echo "FAIL: the identity guard failed for the wrong reason"; cat /tmp/vmig-g1.out; exit 1; else echo "ok: identity guard"; fi

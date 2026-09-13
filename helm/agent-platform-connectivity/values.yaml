@@ -2139,7 +2139,10 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
   # provider (oauth on: the Dex issuer by name, or for
   # agent-manager.oauth.provider google its discovery, JWKS/userinfo and token
   # hosts), and 443 to the agent chart's registry (derived from
-  # agent-manager.agentChart.ociUrl) plus the names below.
+  # agent-manager.agentChart.ociUrl) plus the names below. The egress block is
+  # read by the cut-over Job's policy too (migration below,
+  # templates/kagent/migrate-networkpolicy-*.yaml): every pod that reads the
+  # agent chart admits the same destinations.
   networkPolicy:
     ingress:
       # Callers admitted on the Service port next to the platform's own (the
@@ -2158,9 +2161,10 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) next to
       # the registry host, resolved through the DNS proxy rule the policy
       # renders. The defaults cover the registry's blob storage front
-      # (gsoci.azurecr.io redirects downloads to *.blob.core.windows.net) and
-      # the GitHub API skill discovery reads SKILL.md files from. Ignored by
-      # the kubernetes flavor (see cidrs).
+      # (gsoci.azurecr.io answers a chart blob GET with a redirect to
+      # *.blob.core.windows.net; a policy naming the registry alone drops it)
+      # and the GitHub API skill discovery reads SKILL.md files from. Ignored
+      # by the kubernetes flavor (see cidrs).
       fqdns:
         - matchPattern: "*.blob.core.windows.net"
         - matchName: api.github.com
@@ -2168,8 +2172,9 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       # NetworkPolicy selects addresses, never names, so an empty list (the
       # default) opens 443 to every public destination — 0.0.0.0/0 minus
       # networkPolicy.kubernetes.worldExcludedCIDRs. A list here narrows the
-      # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
-      # adds them next to the names.
+      # egress to exactly these blocks (a mirror, a proxy) — for agent-manager
+      # and the cut-over Job alike. The cilium flavor adds them next to the
+      # names.
       cidrs: []
   # The per-installation cut-over of the agents to the kagent API v2 line
   # (giantswarm/agent-platform#346; bumblebee-plans#51 D11): a plain Job,
