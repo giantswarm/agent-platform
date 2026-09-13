@@ -15,7 +15,6 @@ rendered as one more ingress peer in the flavor's own dialect. */ -}}
 {{- end }}
 {{- end }}
 {{- $egress := $am.networkPolicy.egress }}
-{{- $registryHost := include "agent-platform.agentManager.registryHost" . }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
@@ -74,10 +73,11 @@ spec:
 # selectors below resolve), the Kubernetes API (HelmReleases, OCIRepositories,
 # Agents, ModelConfigs, workloads — as the caller), the identity provider
 # (agent-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
-# Dex issuer by name, or the three Google hosts for the google provider), the
-# agent chart's OCI registry (versions, values schema; blob downloads redirect
-# to the registry's storage front) and GitHub (skill discovery) — by name, on
-# 443.
+# Dex issuer by name, or the three Google hosts for the google provider) and
+# the agent chart's sources — its OCI registry (versions, values schema), the
+# storage front blob downloads redirect to, and GitHub (skill discovery) — by
+# name, on 443 (agent-platform.agentManager.chartSourcesEgress.cilium, shared
+# with the cut-over Job's policy).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -96,23 +96,7 @@ spec:
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.agentManager.oauthProvider" .) "issuerUrl" (include "agent-platform.agentManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
-    - toFQDNs:
-        - matchName: {{ $registryHost }}
-        {{- range $egress.fqdns }}
-        - {{ toYaml . | nindent 10 | trim }}
-        {{- end }}
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-    {{- with $egress.cidrs }}
-    - toCIDR:
-        {{- toYaml . | nindent 8 }}
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-    {{- end }}
+    {{- include "agent-platform.agentManager.chartSourcesEgress.cilium" . | nindent 4 }}
     {{- with .Values.networkPolicy.additionalEgressCIDRs }}
     - toCIDR:
         {{- toYaml . | nindent 8 }}
@@ -226,9 +210,10 @@ spec:
 ---
 # Egress from agent-manager: DNS, the Kubernetes API, and — vanilla
 # NetworkPolicy has no FQDN selector — every public destination on 443 for the
-# identity provider (Dex or Google), the chart registry and GitHub
-# (agentManager.networkPolicy.egress.cidrs narrows it; a private identity
-# provider needs its address in networkPolicy.additionalEgressCIDRs).
+# identity provider (Dex or Google), the chart registry, its storage front and
+# GitHub (agentManager.networkPolicy.egress.cidrs narrows the chart egress,
+# shared with the cut-over Job's policy; a private identity provider needs its
+# address in networkPolicy.additionalEgressCIDRs).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -268,18 +253,10 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    {{- if $egress.cidrs }}
-    # The chart registry and GitHub by address (networkPolicy.egress.cidrs).
-    - to:
-        {{- range $egress.cidrs }}
-        - ipBlock:
-            cidr: {{ . | quote }}
-        {{- end }}
-      ports:
-        - port: 443
-          protocol: TCP
-    {{- end }}
-    {{- if or $oauthOn (not $egress.cidrs) }}
+    {{- include "agent-platform.agentManager.chartSourcesEgress.kubernetes" . | nindent 4 }}
+    {{- if and $oauthOn $egress.cidrs }}
+    # The identity provider: a narrowed chart egress still leaves the public
+    # IdP reachable.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
