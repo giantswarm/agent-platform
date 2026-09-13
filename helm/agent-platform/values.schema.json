@@ -866,6 +866,15 @@
                         "name": {
                             "type": "string"
                         },
+                        "podAnnotations": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "karpenter.sh/do-not-disrupt": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "podSecurityContext": {
                             "type": "object",
                             "additionalProperties": false,

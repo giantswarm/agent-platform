@@ -320,6 +320,7 @@ WorkerPool".
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
+| gateway.parameters.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -415,6 +416,9 @@ WorkerPool".
 | muster.networkPolicy.flavor | string | `"auto"` |  |
 | muster.networkPolicy.cilium.allowClusterIngress | bool | `true` |  |
 | muster.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
+| muster.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| muster.podDisruptionBudget.enabled | bool | `true` |  |
+| muster.podDisruptionBudget.minAvailable | int | `1` |  |
 | muster.gatewayAPI.enabled | bool | `false` |  |
 | muster.muster.oauth.server.enabled | bool | `true` |  |
 | muster.muster.oauth.server.baseUrl | string | `""` |  |
@@ -481,6 +485,11 @@ WorkerPool".
 | kagent.controller.substrate.defaultWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
+| kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| kagent.controller.pdb.enabled | bool | `true` |  |
+| kagent.controller.pdb.minAvailable | int | `1` |  |
+| kagent.controller.pdb.maxUnavailable | string | `""` |  |
+| kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.controller.metrics.enabled | bool | `false` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
@@ -723,6 +732,10 @@ WorkerPool".
 | postgres.backup.crossplane.azure.subnetName | string | `"node-subnet"` |  |
 | postgres.backup.crossplane.azure.privateDnsZoneRef | string | `""` |  |
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
+| klausGateway.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| klausGateway.podDisruptionBudget.enabled | bool | `true` |  |
+| klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
+| klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.agentgateway.enabled | bool | `false` |  |
 | klausGateway.crd.install | bool | `true` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
@@ -856,6 +869,10 @@ WorkerPool".
 | agentManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| agentManager.podDisruptionBudget.enabled | bool | `true` |  |
+| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |

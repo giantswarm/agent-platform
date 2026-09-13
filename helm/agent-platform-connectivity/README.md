@@ -373,6 +373,7 @@ clause, in either flavour; `make verify-wiring` asserts that against
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
+| gateway.parameters.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -888,6 +889,10 @@ clause, in either flavour; `make verify-wiring` asserts that against
 | agentManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| agentManager.podDisruptionBudget.enabled | bool | `true` |  |
+| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |

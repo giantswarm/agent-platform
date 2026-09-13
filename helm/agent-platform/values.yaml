@@ -1007,6 +1007,19 @@ gateway:
         ephemeral-storage: 50Mi
       limits:
         ephemeral-storage: 512Mi
+    # === Voluntary disruption (giantswarm/agent-platform#431) ===
+    # Annotations on the data-plane pods, merged onto the generated Deployment's
+    # pod template through AgentgatewayParameters (deployment.spec.template.metadata,
+    # strategic merge). Every MCP call, every A2A stream and — with llmRouting on —
+    # every model stream crosses these pods, and a voluntary eviction cuts the
+    # streams that are open: the default asks Karpenter to work around the node
+    # instead (`karpenter.sh/do-not-disrupt`; consolidation, drift and expiry
+    # honour it until the NodePool's terminationGracePeriod, an involuntary
+    # disruption — spot interruption, node failure — is not affected). Set the
+    # value to "false", or the map to {}, to opt out. The budget on these pods is
+    # gateway.parameters.podDisruptionBudget. The connectivity chart reads this.
+    podAnnotations:  # @schema additionalProperties: true
+      karpenter.sh/do-not-disrupt: "true"
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -1309,6 +1322,20 @@ muster:  # @schema skipProperties: true; additionalProperties: true
       allowClusterIngress: true
   podAnnotations:
     application.giantswarm.io/team: bumblebee
+    # Voluntary disruption (giantswarm/agent-platform#431): muster is one
+    # replica (hostNetwork, maxSurge 0) and every MCP session of every agent
+    # and person runs through it. Karpenter's consolidation works around the
+    # node instead of evicting the pod mid-session; set "false" to opt out.
+    karpenter.sh/do-not-disrupt: "true"
+  # The muster chart's PodDisruptionBudget: with one replica, minAvailable: 1
+  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
+  # node drain waits for its drain timeout — 30 min terminationGracePeriod on
+  # the fleet's Karpenter NodePools, the MachineDeployment's nodeDrainTimeout
+  # elsewhere) — the interim guard until the component runs two replicas.
+  # `enabled: false` removes the budget.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
   # Disabled: the umbrella owns muster's public route now (see ingress.*). Gates
   # only muster's HTTPRoute + its BackendTrafficPolicy; Service/Deployment untouched.
   gatewayAPI:
@@ -1646,6 +1673,26 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # stable human identity and matches muster's trusted-issuer subjectClaim,
       # so UI (oauth2-proxy) and A2A sessions key identically.
       userIdClaim: email
+    # Voluntary disruption (giantswarm/agent-platform#431): the controller pod
+    # holds every streaming turn (A2A SendStreamingMessage, the portal's SSE)
+    # and the actor sessions behind them; an eviction mid-turn leaves the task
+    # `working` with no end of stream reaching the person. The annotation keeps
+    # Karpenter's consolidation away from the node (set "false" to opt out);
+    # the chart's budget refuses voluntary evictions of the single replica
+    # (Karpenter: DisruptionBlocked; a node drain waits for its drain timeout)
+    # and AlwaysAllow keeps a pod that is not Ready evictable, so a
+    # crash-looping controller never wedges a drain. The chart defaults to
+    # maxUnavailable: 1 and refuses both fields; a null set here is consumed by
+    # Helm before the value reaches the chart (the default would come back
+    # next to minAvailable), the empty string travels and the chart reads it
+    # as unset. `pdb.enabled: false` removes the budget.
+    podAnnotations:
+      karpenter.sh/do-not-disrupt: "true"
+    pdb:
+      enabled: true
+      minAvailable: 1
+      maxUnavailable: ""
+      unhealthyPodEvictionPolicy: AlwaysAllow
     # The kagent line serves no Prometheus /metrics: the controller binds its
     # metrics server to "0", and the upstream chart's controller.metrics knob
     # renders a Service and the METRICS_* env to that dead port. Explicitly
@@ -2527,6 +2574,22 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   image:
     registry: gsoci.azurecr.io
 
+  # Voluntary disruption (giantswarm/agent-platform#431): the gateway pod
+  # carries the Slack/CLI/web turns in flight and the OBO link store. The
+  # annotation keeps Karpenter's consolidation away from its node (set "false"
+  # to opt out); the chart's budget refuses voluntary evictions of the single
+  # replica (Karpenter: DisruptionBlocked; a node drain waits for its drain
+  # timeout), AlwaysAllow keeps a pod that is not Ready evictable. Both knobs
+  # need klaus-gateway chart 1.0.4 or later (giantswarm/klaus-gateway#241);
+  # the 1.x range above resolves it. `podDisruptionBudget.enabled: false`
+  # removes the budget.
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    unhealthyPodEvictionPolicy: AlwaysAllow
+
   # Do not deploy a second agentgateway; reuse the umbrella's.
   agentgateway:
     enabled: false
@@ -3029,6 +3092,20 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
         tls:
           enabled: false
           caSecretName: ""
+  # PodDisruptionBudget on the agent-manager pods, rendered by the connectivity
+  # chart in the release namespace (the component chart has no knob of its
+  # own; giantswarm/agent-platform#431). With one replica, minAvailable: 1
+  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
+  # node drain waits for its drain timeout); AlwaysAllow keeps a pod that is
+  # not Ready evictable. Exactly one of minAvailable / maxUnavailable (int or
+  # percentage); the render refuses both, neither, and a policy outside the
+  # API's enum. `enabled: false` removes the budget. Inert while
+  # components.agent-manager.enabled is false.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    maxUnavailable: null
+    unhealthyPodEvictionPolicy: AlwaysAllow
   flux:
     # Fail the render when the Flux APIs agent-manager writes
     # (helm.toolkit.fluxcd.io/v2 HelmRelease, source.toolkit.fluxcd.io/v1

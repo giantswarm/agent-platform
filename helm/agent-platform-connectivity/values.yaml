@@ -256,6 +256,18 @@ gateway:
         ephemeral-storage: 50Mi
       limits:
         ephemeral-storage: 512Mi
+    # === Voluntary disruption (giantswarm/agent-platform#431) ===
+    # Annotations on the data-plane pods, merged onto the generated Deployment's
+    # pod template through AgentgatewayParameters (deployment.spec.template.metadata,
+    # strategic merge). Every MCP call, every A2A stream and — with llmRouting on —
+    # every model stream crosses these pods, and a voluntary eviction cuts the
+    # streams that are open: the default asks Karpenter to work around the node
+    # instead (`karpenter.sh/do-not-disrupt`; consolidation, drift and expiry
+    # honour it until the NodePool's terminationGracePeriod, an involuntary
+    # disruption — spot interruption, node failure — is not affected). Set the
+    # value to "false", or the map to {}, to opt out.
+    podAnnotations:  # @schema additionalProperties: true
+      karpenter.sh/do-not-disrupt: "true"
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -2099,6 +2111,20 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
         tls:
           enabled: false
           caSecretName: ""
+  # PodDisruptionBudget on the agent-manager pods, rendered by the connectivity
+  # chart in the release namespace (the component chart has no knob of its
+  # own; giantswarm/agent-platform#431). With one replica, minAvailable: 1
+  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
+  # node drain waits for its drain timeout); AlwaysAllow keeps a pod that is
+  # not Ready evictable. Exactly one of minAvailable / maxUnavailable (int or
+  # percentage); the render refuses both, neither, and a policy outside the
+  # API's enum. `enabled: false` removes the budget. Inert while
+  # components.agent-manager.enabled is false.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    maxUnavailable: null
+    unhealthyPodEvictionPolicy: AlwaysAllow
   flux:
     # Fail the render when the Flux APIs agent-manager writes
     # (helm.toolkit.fluxcd.io/v2 HelmRelease, source.toolkit.fluxcd.io/v1
