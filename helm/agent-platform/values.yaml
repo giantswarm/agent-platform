@@ -2580,7 +2580,7 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # to opt out); the chart's budget refuses voluntary evictions of the single
   # replica (Karpenter: DisruptionBlocked; a node drain waits for its drain
   # timeout), AlwaysAllow keeps a pod that is not Ready evictable. Both knobs
-  # need klaus-gateway chart 1.0.4 or later (giantswarm/klaus-gateway#241);
+  # need klaus-gateway chart 1.1.0 or later (giantswarm/klaus-gateway#241);
   # the 1.x range above resolves it. `podDisruptionBudget.enabled: false`
   # removes the budget.
   podAnnotations:

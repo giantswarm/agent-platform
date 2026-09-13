@@ -6,7 +6,7 @@ podAnnotations, and each chart's PodDisruptionBudget knob on — muster's
 podDisruptionBudget, kagent's controller.pdb (minAvailable with maxUnavailable
 emptied, because the chart defaults to maxUnavailable: 1 and refuses both, and a
 null set at this layer is consumed by Helm before it reaches the chart), the
-klaus-gateway chart's podDisruptionBudget (1.0.4+).
+klaus-gateway chart's podDisruptionBudget (1.1.0+).
 
 Reads a rendered meta-package manifest; with --off, the render with every knob
 switched off, and asserts the switches travelled. Deliberately stdlib-only: the
