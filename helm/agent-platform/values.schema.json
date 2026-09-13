@@ -320,15 +320,6 @@
                         "enabled": {
                             "type": "boolean"
                         },
-                        "nullKeys": {
-                            "type": "array",
-                            "items": {
-                                "type": "array",
-                                "items": {
-                                    "type": "string"
-                                }
-                            }
-                        },
                         "omitEmptyKeys": {
                             "type": "array",
                             "items": {

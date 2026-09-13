@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the platform Harness's selector survives the patch of a pre-existing kagent release; the kagent line re-pins to `v0.11.0-gs.9`)
+
+The platform Harness `kagent` admits templates by `agent-platform.giantswarm.io/harness: kagent` alone. Through 4.9.3 the meta chart removed the kagent chart's own default selector key `kagent.dev/harness` with a null in the kagent `HelmRelease`'s values; a null deletes the key on coalesce, but an installation upgraded from 3.x has that `HelmRelease` already and the upgrade patches it, and a JSON merge patch removes a null key instead of storing it — the chart default came back and the Harness required both labels, so no `AgentTemplate` rendered by the Generic agent chart 1.x was admitted (giantswarm/agent-platform#418). The meta chart now forwards `kagent.dev/harness: ""`, and the line's Harness template (`0.11.0-gs.9`+) drops a selector label whose value is empty. `components.kagent`/`kagent-crds` move to `>=0.11.0-gs.9 <0.11.1-0`.
+
+### Operator action
+
+- Nothing for the upgrade itself: the kagent release's values change, helm-controller upgrades the release and the Harness's selector becomes the platform label alone within one reconcile — on a fresh 4.x installation and on one upgraded from 3.x alike. `kubectl -n kagent get harness kagent -o jsonpath='{.spec.allowedAgentTemplates}'` shows one `matchLabels` key.
+- An agent release that carried the interim workaround — `labels: {kagent.dev/harness: kagent}` in the Generic agent chart's values, stamping the second label on the template — can drop it; it is harmless while it stays.
+- A BOM pins `kagent`/`kagent-crds` to `0.11.0-gs.9` or later (`examples/customer-bom.yaml`).
+
 ## \<current\> → \<next\> (kagent's built-in tool server lives in the kagent namespace; the egress rules to it follow the kagent chart)
 
 `kagent.kagent-tools.namespaceOverride` defaults to `kagent` (giantswarm/agent-platform#421): the kagent chart renders the kagent-tools subchart into that key, else the kagent release's namespace (`agent-platform` on the fleet), and composes the `kagent-tool-server` RemoteMCPServer URL from it; the connectivity chart's egress rules to the server (the controller's discovery, the actors' calls through Substrate's egress gateway) now derive their namespace the same way instead of assuming the kagent namespace.
