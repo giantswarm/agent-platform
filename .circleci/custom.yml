@@ -89,8 +89,10 @@ jobs:
         # identity and the admission policy that makes the Helm CLI day-0
         # only; self off the hand-back hooks only; the guards), verify-postgres
         # (the postgres.backup wiring and guards), verify-substrate-store (Agent
-        # Substrate's snapshot store: the Crossplane bucket + IRSA role, the
-        # derived snapshot location and role annotations, the guards) and verify-secrets
+        # Substrate's snapshot store: the Crossplane bucket + IRSA role on aws, the
+        # Azure account + Workload Identity behind the s3proxy façade on capz, the
+        # derived snapshot location, role annotations and S3 environment, the
+        # guards) and verify-secrets
         # (gitops.forbidInlineSecrets: off by default, names only the inline
         # credential paths, passes on referenced Secrets), verify-components
         # (the standalone chart's extras as components: off by default, sources

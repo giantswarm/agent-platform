@@ -63,3 +63,14 @@ components:
   kserve-resources:              { versionRange: "0.2.2" }
   kserve-llmisvc-crd:            { versionRange: "0.2.2" }
   kserve-llmisvc-resources:      { versionRange: "0.2.2" }
+
+# The s3proxy façade in front of Azure Blob (kagent.harness.snapshotStore.s3proxy,
+# the CAPZ snapshot store): an image, not a chart — pinned here like the
+# components; the gsoci mirror of gaul/s3proxy (giantswarm/retagger), the same
+# default in the chart. It applies where the façade is on.
+kagent:
+  harness:
+    snapshotStore:
+      s3proxy:
+        image:
+          tag: s3proxy-4.1.1

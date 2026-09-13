@@ -19,7 +19,8 @@ what (the substrate chart's arguments and Service definitions):
         drives the node agent; the egress rule upstream lacks), atenet-egress
         :443 (the egress gateway address), Postgres (the platform's CNPG
         Cluster, the bundled StatefulSet or an external one), the snapshot
-        store (world:443, or the bundled in-cluster store :9000), the apiserver.
+        store (world:443, the bundled in-cluster store :9000, or the s3proxy façade
+        :8080 in the release namespace), the apiserver.
   atelet ──▶ ate-api :443, the apiserver, world:443 (the actor images it pulls,
         the gVisor asset from storage.googleapis.com, the S3 snapshot store; a
         registry mirror behind a private address is cluster:443), the bundled
@@ -46,6 +47,7 @@ the render.
 {{- $controllerPort := "8083" }}
 {{- $pgMode := include "agent-platform.substrate.postgresMode" . }}
 {{- $rustfs := dig "rustfs" "enabled" false (.Values.substrate | default dict) }}
+{{- $s3proxy := include "agent-platform.substrateStore.s3proxy" . }}
 {{- $toolsValues := index .Values.kagent "kagent-tools" | default dict }}
 {{- $toolsNs := $toolsValues.namespaceOverride | default $kagentNs }}
 {{- $toolsPort := dig "service" "ports" "tools" "targetPort" "8084" $toolsValues | toString }}
@@ -177,6 +179,18 @@ spec:
             - port: "9000"
               protocol: TCP
     {{- end }}
+    {{- if $s3proxy }}
+    # The s3proxy façade in front of Azure Blob (kagent.harness.snapshotStore).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: s3proxy
+            app.kubernetes.io/component: snapshot-store
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- end }}
 ---
 # ate-controller: reconciles WorkerPools into worker Deployments through the
 # apiserver and registers the workers with ate-api.
@@ -263,6 +277,18 @@ spec:
       toPorts:
         - ports:
             - port: "9000"
+              protocol: TCP
+    {{- end }}
+    {{- if $s3proxy }}
+    # The s3proxy façade in front of Azure Blob (kagent.harness.snapshotStore).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: s3proxy
+            app.kubernetes.io/component: snapshot-store
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8080"
               protocol: TCP
     {{- end }}
 ---

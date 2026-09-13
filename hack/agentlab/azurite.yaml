@@ -1,0 +1,93 @@
+# agentlab fixture for the CAPZ snapshot store: Azurite (Azure Blob's local
+# stand-in) behind the chart's s3proxy façade — the lab has no Azure. Applied
+# into the lab's release namespace next to the chart; not part of the chart.
+# The values overlay is snapshot-store-azurite-values.yaml in this directory
+# (platform.valuesFiles in agentlab.yaml). The Job creates the container through
+# the façade with the chart's generated key pair once the façade answers.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: azurite
+  namespace: agent-platform
+type: Opaque
+stringData:
+  # Azurite's well-known development account key (devstoreaccount1).
+  key: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azurite
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: azurite
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: azurite
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: azurite
+    spec:
+      containers:
+        - name: azurite
+          image: mcr.microsoft.com/azure-storage/azurite:3.35.0
+          args: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--location", "/data", "--skipApiVersionCheck", "--loose"]
+          ports:
+            - name: blob
+              containerPort: 10000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: azurite
+  namespace: agent-platform
+spec:
+  selector:
+    app.kubernetes.io/name: azurite
+  ports:
+    - name: blob
+      port: 10000
+      targetPort: blob
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: azurite-create-container
+  namespace: agent-platform
+spec:
+  backoffLimit: 30
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create
+          image: amazon/aws-cli:2.17.0
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: substrate-s3proxy, key: accessKeyId } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: substrate-s3proxy, key: secretAccessKey } }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              E=http://substrate-s3proxy.agent-platform.svc:80
+              aws --endpoint-url "$E" s3api head-bucket --bucket ate-snapshots 2>/dev/null && exit 0
+              aws --endpoint-url "$E" s3api create-bucket --bucket ate-snapshots

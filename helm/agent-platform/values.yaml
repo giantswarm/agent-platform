@@ -1971,12 +1971,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       prefix: kagent
       crossplane:
         enabled: false
-        # aws — the only provider: S3 Bucket with a lifecycle rule, a
-        #       public-access block and a TLS-only bucket policy, plus an IAM
-        #       Role with an inline S3 policy trusted by Substrate's atelet and
-        #       ate-api-server ServiceAccounts through the cluster's IRSA OIDC
-        #       provider. Bucket objects are created but never deleted by
-        #       Crossplane and carry helm.sh/resource-policy: keep.
+        # aws  — S3 Bucket with a lifecycle rule, a public-access block and a
+        #        TLS-only bucket policy, plus an IAM Role with an inline S3
+        #        policy trusted by Substrate's atelet and ate-api-server
+        #        ServiceAccounts through the cluster's IRSA OIDC provider.
+        # capz — Azure storage Account (TLS only, no public blob access) and
+        #        Container with a lifecycle ManagementPolicy, a
+        #        UserAssignedIdentity federated for the s3proxy ServiceAccount
+        #        and assigned Storage Blob Data Contributor on the container;
+        #        the s3proxy façade below is on with it.
+        # Bucket, account and container are created but never deleted by
+        # Crossplane and carry helm.sh/resource-policy: keep.
         provider: aws
         providerConfigRef: ""
         region: ""
@@ -1995,6 +2000,76 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           # gone boots cold from the golden image again — one slower start,
           # nothing lost. 30 days keeps a month of idle actors warm.
           lifecycleDays: 30
+        capz:
+          # 3 to 24 lowercase letters and digits, globally unique: the storage
+          # account the snapshots live in (https://<name>.blob.core.windows.net).
+          storageAccountName: ""
+          containerName: ""
+          resourceGroup: ""
+          # The subscription that holds the resource group: the RoleAssignment's
+          # scope (the container's resource id) is spelled from it.
+          subscriptionId: ""
+          replicationType: LRS
+          # Blobs are deleted this many days after their last modification: an
+          # actor whose snapshot is gone boots cold from the golden image again.
+          lifecycleDays: 30
+          # The UserAssignedIdentity s3proxy runs as: federated against the
+          # cluster's OIDC issuer for the s3proxy ServiceAccount, assigned
+          # Storage Blob Data Contributor on the container.
+          workloadIdentity:
+            # The cluster's service-account issuer, as the CAPZ cluster's
+            # apiserver spells it (--service-account-issuer).
+            oidcIssuerUrl: ""
+            # Defaults to <containerName>-identity.
+            identityName: ""
+            # provider-kubernetes bridges the identity's generated ids
+            # (clientId/tenantId into the Secret the pods read, principalId
+            # into the RoleAssignment): the ProviderConfig it runs under, and
+            # its ServiceAccount when this chart is to grant it the rights over
+            # RoleAssignments and identities (empty name: the provider has them).
+            providerKubernetes:
+              providerConfigRef: ""
+              serviceAccount:
+                name: ""
+                namespace: crossplane
+      # The S3 façade Substrate talks to when the store is Azure Blob (s3proxy,
+      # jclouds azureblob): on with crossplane.provider capz, where the account,
+      # container and endpoint are the Crossplane block's and the pods run as
+      # the identity above (Workload Identity); or on by itself for an account
+      # provisioned by hand (or a lab's Azurite), named in azure.* and reached
+      # with an account key. Substrate's atelet and ate-api-server get
+      # AWS_ENDPOINT_URL http://substrate-s3proxy.<release namespace>.svc,
+      # path-style, and the generated key pair (the Secret substrate-s3proxy in
+      # the release namespace and in ate-system, kept, stable across upgrades);
+      # snapshotLocation is derived as s3://<container>/<prefix>. The bundled
+      # store (substrate.rustfs) must be off.
+      s3proxy:
+        enabled: false
+        image:
+          repository: gsoci.azurecr.io/giantswarm/s3proxy
+          tag: s3proxy-4.1.1
+        replicas: 2
+        # The JVM sizes its heap from the memory limit: always set one.
+        resources:
+          requests:
+            cpu: 250m
+            memory: 1Gi
+          limits:
+            memory: 1Gi
+        azure:
+          # https://<account>.blob.core.windows.net (a lab's Azurite:
+          # http://azurite:10000/devstoreaccount1). Derived with provider capz;
+          # an explicit value that disagrees fails the render.
+          endpoint: ""
+          # The storage account name (the jclouds identity). Derived with capz.
+          account: ""
+          # The blob container. Derived with capz.
+          container: ""
+          # An account key, a key of a Secret in the release namespace. Empty:
+          # DefaultAzureCredential — the Workload Identity the capz block renders.
+          accountKeySecretRef:
+            name: ""
+            key: ""
     # The Harness's environment: KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
     # the caller's bearer on its MCP calls, so muster sees the person, not the
     # platform. Nothing else today (a per-namespace skills credential is a
