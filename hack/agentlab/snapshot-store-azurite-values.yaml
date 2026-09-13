@@ -7,9 +7,6 @@ kagent:
     snapshotStore:
       s3proxy:
         enabled: true
-        image:
-          # The gsoci mirror lands with giantswarm/retagger; until then the upstream image.
-          repository: docker.io/andrewgaul/s3proxy
         azure:
           endpoint: http://azurite.agent-platform.svc:10000/devstoreaccount1
           account: devstoreaccount1

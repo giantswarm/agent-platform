@@ -851,9 +851,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # store (substrate.rustfs) must be off.
       s3proxy:
         enabled: false
+        # gaul/s3proxy, mirrored by giantswarm/retagger (amd64 and arm64).
         image:
           repository: gsoci.azurecr.io/giantswarm/s3proxy
-          tag: s3proxy-4.1.1
+          tag: 4.1.1
         replicas: 2
         # The JVM sizes its heap from the memory limit: always set one.
         resources:
