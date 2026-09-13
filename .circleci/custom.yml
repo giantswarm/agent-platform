@@ -121,8 +121,10 @@ jobs:
         # and verify-identity carry the kagent_v2 database and the one
         # ClusterRoleBinding as prerequisites) and verify-kagent-storage-version (the
         # kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over: the backup
-        # at pre-upgrade records the v1alpha2 catalog and removes the three CRDs,
-        # the restore at post-upgrade brings the hand-created ModelConfigs back at
+        # at pre-upgrade records the v1alpha2 catalog, stops the HelmRelease that
+        # applied the three CRDs from re-applying them (crds: Skip, #416), removes
+        # them and watches they stay gone; the restore at post-upgrade brings the
+        # hand-created ModelConfigs back at
         # v1alpha3; with the engine off too, nothing with kagent off) are the
         # single source of truth, also run locally. The meta chart's one dependency is the flux-engine
         # subchart, a directory in its charts/, which needs no `helm dependency build`.
