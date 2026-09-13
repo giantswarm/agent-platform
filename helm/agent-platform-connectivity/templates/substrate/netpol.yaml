@@ -48,9 +48,11 @@ the render.
 {{- $controllerPort := "8083" }}
 {{- $pgMode := include "agent-platform.substrate.postgresMode" . }}
 {{- $rustfs := dig "rustfs" "enabled" false (.Values.substrate | default dict) }}
-{{- $toolsValues := index .Values.kagent "kagent-tools" | default dict }}
-{{- $toolsNs := $toolsValues.namespaceOverride | default $kagentNs }}
-{{- $toolsPort := dig "service" "ports" "tools" "targetPort" "8084" $toolsValues | toString }}
+{{- /* kagent's built-in tool server, where the kagent chart renders it (the
+agent-platform.kagentTools.* helpers, _helpers.tpl). */}}
+{{- $toolsEnabled := include "agent-platform.kagentTools.enabled" . }}
+{{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
+{{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
@@ -416,7 +418,9 @@ spec:
             - port: {{ .Values.llmRouting.listener.port | quote }}
               protocol: TCP
     {{- end }}
-    {{- if $toolsValues.enabled }}
+    {{- if $toolsEnabled }}
+    # The actors' calls to the built-in tool server, where the kagent chart
+    # renders it (the controller's discovery of it is templates/kagent/netpol.yaml).
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: kagent-tools
