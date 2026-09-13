@@ -2,6 +2,15 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (kagent's built-in tool server lives in the kagent namespace; the egress rules to it follow the kagent chart)
+
+`kagent.kagent-tools.namespaceOverride` defaults to `kagent` (giantswarm/agent-platform#421): the kagent chart renders the kagent-tools subchart into that key, else the kagent release's namespace (`agent-platform` on the fleet), and composes the `kagent-tool-server` RemoteMCPServer URL from it; the connectivity chart's egress rules to the server (the controller's discovery, the actors' calls through Substrate's egress gateway) now derive their namespace the same way instead of assuming the kagent namespace.
+
+### Operator action
+
+- None with the tool server off (the default; every installation but graveler).
+- With `kagent.kagent-tools.enabled: true`: the tools Deployment, both Services, the ServiceAccount and the ClusterRoleBinding subject move from the release namespace to `kagent` on the kagent release's next reconcile (Helm delete + create; the RemoteMCPServer's URL follows and the connectivity rules match it). No agent of the platform binds this server, so nothing else rolls. An installation that wants the server elsewhere sets `kagent.kagent-tools.namespaceOverride` to that namespace — never `kagent.namespaceOverride`, which moves the controller only.
+
 ## \<current\> → \<next\> (the chart provisions Agent Substrate's snapshot store on CAPA: Crossplane S3 bucket + IRSA role, the location derived)
 
 `kagent.harness.snapshotStore.crossplane` renders the Substrate snapshot store the way `postgres.backup.crossplane` renders the kagent-pg backup bucket: the connectivity chart renders the S3 `Bucket` (lifecycle expiration `aws.lifecycleDays`, 30 days by default — an expired snapshot costs one cold start from the golden image, nothing else; public-access block; TLS-only policy; never deleted by Crossplane, kept by Helm) and the IAM `Role` trusted by Substrate's `atelet` and `ate-api-server` ServiceAccounts in `ate-system` through the installation's IRSA OIDC provider, with a list/get/put/delete policy on the bucket. The meta chart derives `kagent.harness.snapshotLocation` = `s3://<aws.bucketName>/<prefix>` for the kagent release and forwards the role's ARN as `eks.amazonaws.com/role-arn` on the substrate release's `atelet.serviceAccount.annotations` and `ateApiServer.serviceAccount.annotations` (README "Agent Substrate: the snapshot store"). `components.substrate` / `components.substrate-crds` move to `>=0.0.27-gs.8 <0.0.28-0`, the Substrate release that carries the two annotation keys and `ateApiServer.extraEnv`.
