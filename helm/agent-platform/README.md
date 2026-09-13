@@ -45,11 +45,23 @@ or `tolerations`.
   worker holds ~16Mi and a golden-booted actor ~20Mi; a Go ADK turn's working set
   (the model client, tool calls and gVisor overhead) stays well under `2Gi`.
   Raise the limits for heavier agents.
-- **One architecture per pool.** An actor's golden snapshot is
-  architecture-specific, so a mixed-architecture pool wedges the actors that land
-  on the other one. `kagent.substrateWorkerPool.template.nodeSelector` pins the
-  pool to the installation's architecture (`kubernetes.io/arch: amd64` by default;
-  an arm64 installation sets `arm64`).
+- **One CPU feature set per pool — one vendor and generation, not just one
+  architecture.** An actor's golden snapshot is a gVisor checkpoint, and gVisor
+  restores it only on a host whose CPU offers every feature the checkpoint
+  recorded; a worker on a CPU that lacks one fails every restore placed on it
+  (`incompatible FeatureSet: missing features: …` in its log every 30 s, the
+  turn `request timed out`) and the actor never recovers.
+  `kagent.substrateWorkerPool.template.nodeSelector` pins the pool as precisely
+  as the provider's node labels allow: the architecture (`kubernetes.io/arch:
+  amd64` by default; an arm64 installation sets `arm64`), and on CAPA — where
+  Karpenter consolidation may replace a node with another vendor's at any time —
+  the vendor, `karpenter.k8s.aws/instance-cpu-manufacturer: amd` (the fleet
+  template carries it), or the family (`karpenter.k8s.aws/instance-family`)
+  where a generation change must be ruled out too; on CAPZ and the other
+  providers the node pool (`giantswarm.io/machine-pool`) or
+  `node.kubernetes.io/instance-type`. Recognise a mixed pool by `kubectl get
+  nodes -L <the label>` showing two values under it
+  (giantswarm/agent-platform#429).
 
 `kagent.substrateWorkerPool.template` also accepts `tolerations`, `nodeAffinity`
 and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
