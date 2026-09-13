@@ -58,6 +58,9 @@ MANAGERS = ["model-manager", "agent-manager"]
 # it as the container's `--kagent-api-version`, the pod-template change that
 # rolls the Deployments on the cut-over.
 KAGENT_API_VERSION = "v1alpha3"
+# The platform Harness's admission label (the Generic agent chart stamps it);
+# the rendered kagent chart must select by it alone.
+HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 KAGENT = ["kagent-crds", "kagent"]
 # The Substrate line's two charts: rendered with the substrate: block the meta
 # chart forwards (the derived postgres.enabled boolean, the CNPG connection
@@ -195,6 +198,26 @@ def pull(url: str, version: str, dest: str) -> str:
     sys.exit(f"FAIL: could not pull {url} --version {version!r}\n{err}")
 
 
+def check_harness_selector(manifest: str, what: str) -> None:
+    """The platform Harness the kagent chart renders admits templates by the ONE
+    label the Generic agent chart stamps. The meta chart blanks the chart's own
+    default key (kagent.dev/harness: "") and the line's template drops the empty
+    value — this is where that contract is proven against the chart the range
+    resolves to, on the rendered object (giantswarm/agent-platform#418)."""
+    harness = [d for d in manifest.split("\n---") if re.search(r"^kind: Harness$", d, re.M)]
+    if len(harness) != 1:
+        sys.exit(f"FAIL: {what} renders {len(harness)} Harness objects, expected the one platform Harness")
+    m = re.search(r"^ {6}matchLabels:\n((?: {8}\S.*\n)+)", harness[0] + "\n", re.M)
+    labels = dict(line.strip().split(": ", 1) for line in m.group(1).splitlines()) if m else {}
+    if labels != {HARNESS_LABEL: "kagent"}:
+        sys.exit(
+            f"FAIL: {what} renders the platform Harness selecting by {labels or 'nothing'}; the admission contract is "
+            f"{HARNESS_LABEL}=kagent alone — the chart's own kagent.dev/harness must be dropped (the meta chart forwards it "
+            "empty; the line's Harness template drops an empty-valued selector label from 0.11.0-gs.9, giantswarm/agent-platform#418)"
+        )
+    print(f"ok: {what} renders the platform Harness selecting by {HARNESS_LABEL}=kagent alone")
+
+
 def main(meta: str) -> int:
     follow_kagent = {"kagent-crds", *SUBSTRATE}  # no switch of their own: on with kagent
     on = [f"--set=components.{n}.enabled=true" for n in COMPONENTS if n not in follow_kagent]
@@ -223,6 +246,8 @@ def main(meta: str) -> int:
                         f"FAIL: {name} {resolved} (the {label} {constraint!r}) does not render the forwarded "
                         f"kagent.apiVersion as its --kagent-api-version={KAGENT_API_VERSION} argument"
                     )
+                if name == "kagent":
+                    check_harness_selector(r.stdout, f"{name} {resolved} (the {label} {constraint!r})")
                 kinds = len(re.findall(r"^kind: ", r.stdout, re.M))
                 print(f"ok: {name} {resolved} ({label} {constraint!r}) renders the forwarded values ({kinds} objects)")
     return 0

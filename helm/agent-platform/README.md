@@ -120,7 +120,7 @@ WorkerPool".
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=0.11.0-gs.6 <0.11.1-0"` |  |
+| components.kagent.versionRange | string | `">=0.11.0-gs.9 <0.11.1-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -137,15 +137,10 @@ WorkerPool".
 | components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
-| components.kagent.nullKeys[0][0] | string | `"harness"` |  |
-| components.kagent.nullKeys[0][1] | string | `"allowedAgentTemplates"` |  |
-| components.kagent.nullKeys[0][2] | string | `"selector"` |  |
-| components.kagent.nullKeys[0][3] | string | `"matchLabels"` |  |
-| components.kagent.nullKeys[0][4] | string | `"kagent.dev/harness"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=0.11.0-gs.6 <0.11.1-0"` |  |
+| components.kagent-crds.versionRange | string | `">=0.11.0-gs.9 <0.11.1-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
@@ -581,6 +576,7 @@ WorkerPool".
 | kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
 | kagent.harness.env[0].value | string | `"true"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |
+| kagent.harness.allowedAgentTemplates.selector.matchLabels."kagent.dev/harness" | string | `""` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
