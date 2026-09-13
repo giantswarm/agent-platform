@@ -68,6 +68,15 @@ and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
 "the Generic chart's per-agent placement values are gone, capacity is the
 WorkerPool".
 
+## Voluntary disruption
+
+The platform's core runs as single replicas — the agentgateway data plane, muster, the kagent controller, klaus-gateway, agent-manager — and each carries long-lived streams (MCP sessions, A2A and portal SSE turns, the LLM listener). A voluntary eviction (Karpenter consolidation, a node drain) cuts them mid-turn (giantswarm/agent-platform#431). Two guards, both on by default:
+
+- **`karpenter.sh/do-not-disrupt: "true"`** on the pods that carry live streams — the agentgateway data plane (`gateway.parameters.podAnnotations`, rendered by the connectivity chart through `AgentgatewayParameters`), muster (`muster.podAnnotations`), the kagent controller (`kagent.controller.podAnnotations`) and klaus-gateway (`klausGateway.podAnnotations`). Karpenter's consolidation, drift and expiry work around the node until the NodePool's `terminationGracePeriod`; an involuntary disruption (spot interruption, node failure) is not affected. Set the value to `"false"` (or drop the key) to opt out per component.
+- **`PodDisruptionBudget minAvailable: 1`** on muster (`muster.podDisruptionBudget`, the muster chart's knob), the kagent controller (`kagent.controller.pdb`, the kagent chart's knob), klaus-gateway (`klausGateway.podDisruptionBudget`, the klaus-gateway chart's knob, 1.1.0+) and agent-manager (`agentManager.podDisruptionBudget`, rendered by the connectivity chart). With one replica the budget refuses every voluntary eviction: Karpenter reports `DisruptionBlocked … pdb`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`; a MachineDeployment after its `nodeDrainTimeout`). `unhealthyPodEvictionPolicy: AlwaysAllow` where the chart supports it keeps a pod that is not Ready evictable, so a crash-looping component never wedges a drain. `enabled: false` on a knob removes that budget. The data plane's budget is `gateway.parameters.podDisruptionBudget` (with two replicas, so a drain can still proceed one pod at a time).
+
+Two replicas are the long-term answer for the stateless components; the budgets on one replica are the interim guard. Backstage's budget is the backstage chart's (`maxUnavailable: 1` today, which protects nothing with one replica) — a change there, not here.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -320,6 +329,7 @@ WorkerPool".
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
+| gateway.parameters.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -415,6 +425,9 @@ WorkerPool".
 | muster.networkPolicy.flavor | string | `"auto"` |  |
 | muster.networkPolicy.cilium.allowClusterIngress | bool | `true` |  |
 | muster.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
+| muster.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| muster.podDisruptionBudget.enabled | bool | `true` |  |
+| muster.podDisruptionBudget.minAvailable | int | `1` |  |
 | muster.gatewayAPI.enabled | bool | `false` |  |
 | muster.muster.oauth.server.enabled | bool | `true` |  |
 | muster.muster.oauth.server.baseUrl | string | `""` |  |
@@ -481,6 +494,11 @@ WorkerPool".
 | kagent.controller.substrate.defaultWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
+| kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| kagent.controller.pdb.enabled | bool | `true` |  |
+| kagent.controller.pdb.minAvailable | int | `1` |  |
+| kagent.controller.pdb.maxUnavailable | string | `""` |  |
+| kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.controller.metrics.enabled | bool | `false` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
@@ -723,6 +741,10 @@ WorkerPool".
 | postgres.backup.crossplane.azure.subnetName | string | `"node-subnet"` |  |
 | postgres.backup.crossplane.azure.privateDnsZoneRef | string | `""` |  |
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
+| klausGateway.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| klausGateway.podDisruptionBudget.enabled | bool | `true` |  |
+| klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
+| klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.agentgateway.enabled | bool | `false` |  |
 | klausGateway.crd.install | bool | `true` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
@@ -856,6 +878,10 @@ WorkerPool".
 | agentManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| agentManager.podDisruptionBudget.enabled | bool | `true` |  |
+| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
