@@ -1926,7 +1926,8 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@grep -q 'image: gsoci.azurecr.io/giantswarm/s3proxy:' /tmp/vss-capz-deploy.out || { echo "FAIL: the s3proxy image is not pulled from gsoci"; exit 1; }
 	@grep -q 'azure.workload.identity/use: "true"' /tmp/vss-capz-deploy.out || { echo "FAIL: the s3proxy pods do not use Workload Identity"; exit 1; }
 	@grep -q 'value: "https://giantswarmcisubstrate.blob.core.windows.net"' /tmp/vss-capz-deploy.out || { echo "FAIL: JCLOUDS_ENDPOINT is not the account's blob endpoint"; exit 1; }
-	@if grep -q 'JCLOUDS_CREDENTIAL' /tmp/vss-capz-deploy.out; then echo "FAIL: capz hands s3proxy an account key (DefaultAzureCredential expected)"; exit 1; fi
+	@grep -A1 'name: JCLOUDS_CREDENTIAL$$' /tmp/vss-capz-deploy.out | grep -q 'value: ""' || { echo "FAIL: capz does not set JCLOUDS_CREDENTIAL to the empty string (the image's default remote-credential would make s3proxy sign with a shared key instead of DefaultAzureCredential, #436)"; exit 1; }
+	@if grep -A3 'name: JCLOUDS_CREDENTIAL$$' /tmp/vss-capz-deploy.out | grep -q 'secretKeyRef'; then echo "FAIL: capz hands s3proxy an account key (DefaultAzureCredential expected)"; exit 1; fi
 	@grep -q 'name: AZURE_CLIENT_ID' /tmp/vss-capz-deploy.out || { echo "FAIL: AZURE_CLIENT_ID is not read from the bridged Secret"; exit 1; }
 	@[ "$$(grep -c '^kind: Secret$$' /tmp/vss-capz.out)" = "2" ] || { echo "FAIL: the key pair is not rendered in both the release namespace and ate-system"; exit 1; }
 	@[ "$$(awk '/^kind: Secret$$/,/^---/' /tmp/vss-capz.out | grep -c 'helm.sh/resource-policy: keep')" = "2" ] || { echo "FAIL: a key-pair Secret is not kept on uninstall"; exit 1; }
@@ -1950,7 +1951,7 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@echo "--> the façade alone (an account provisioned by hand, a lab's Azurite): no Crossplane object, an account key"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) >/tmp/vss-s3p.out 2>&1 || { cat /tmp/vss-s3p.out; exit 1; }
 	@if grep -q -E '^kind: (Account|Container|UserAssignedIdentity|FederatedIdentityCredential|Object)$$' /tmp/vss-s3p.out; then echo "FAIL: the façade alone renders Crossplane objects"; exit 1; fi
-	@awk '/^kind: Deployment$$/,/^---/' /tmp/vss-s3p.out | grep -q 'JCLOUDS_CREDENTIAL' || { echo "FAIL: the façade alone does not read the account key"; exit 1; }
+	@awk '/^kind: Deployment$$/,/^---/' /tmp/vss-s3p.out | grep -A3 'name: JCLOUDS_CREDENTIAL$$' | grep -q 'secretKeyRef' || { echo "FAIL: the façade alone does not read the account key from the Secret"; exit 1; }
 	@if awk '/^kind: Deployment$$/,/^---/' /tmp/vss-s3p.out | grep -q 'azure.workload.identity'; then echo "FAIL: the façade alone claims Workload Identity"; exit 1; fi
 	@echo "ok: the façade alone"
 	@echo "--> meta chart, capz: the derived location, the façade's S3 environment on both substrate components"

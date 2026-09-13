@@ -135,12 +135,20 @@ spec:
             - name: JCLOUDS_IDENTITY
               value: {{ $az.account | quote }}
             {{- if $capz }}
-            # No jclouds credential: the azureblob backend defers to
-            # DefaultAzureCredential, which takes the Workload Identity path from
-            # these two and what the azure-workload-identity webhook injects for
-            # the azure.workload.identity/use label (AZURE_FEDERATED_TOKEN_FILE,
+            # An empty jclouds credential, set explicitly: the azureblob backend
+            # defers to DefaultAzureCredential only while the credential is
+            # empty, and the image's Dockerfile carries
+            # JCLOUDS_CREDENTIAL="remote-credential" as its default — left unset
+            # here, the façade would sign as the account with that literal as
+            # the shared key and every request would fail on its base64 decode
+            # (giantswarm/agent-platform#436, glean 2026-09-13).
+            # DefaultAzureCredential takes the Workload Identity path from the
+            # two ids below and what the azure-workload-identity webhook injects
+            # for the azure.workload.identity/use label (AZURE_FEDERATED_TOKEN_FILE,
             # AZURE_AUTHORITY_HOST, the projected token) — a hard prerequisite
             # of provider capz (UPGRADE.md).
+            - name: JCLOUDS_CREDENTIAL
+              value: ""
             - name: AZURE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
