@@ -726,6 +726,9 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@awk "/^  name: agent-platform-connectivity-kagent-controller-egress$$/,/^---/" /tmp/vkn-sub.out >/tmp/vkn-sub-ctl.out
 	@grep -A4 'app: ate-api-server' /tmp/vkn-sub-ctl.out | grep -q 'port: "443"' || { echo "FAIL: the kagent controller has no egress to ate-api"; exit 1; }
 	@grep -A4 'app: atenet-router' /tmp/vkn-sub-ctl.out | grep -q 'port: "8080"' || { echo "FAIL: the kagent controller has no egress to the atenet router"; exit 1; }
+	@awk "/^  name: substrate-atenet-router$$/,/^---/" /tmp/vkn-sub.out | awk "/ate.dev\/worker-pool/,/^    - |^---/" >/tmp/vkn-sub-router-workers.out
+	@grep -q 'port: "443"' /tmp/vkn-sub-router-workers.out || { echo "FAIL: the atenet router has no egress to the worker pods' tunnel (443)"; exit 1; }
+	@grep -q 'port: "8443"' /tmp/vkn-sub-router-workers.out || { echo "FAIL: the atenet router has no egress to the worker pods' mTLS CONNECT listener (8443) — every turn fails with 'Connect: deadline has elapsed' (#383)"; exit 1; }
 	@for n in substrate-ate-api-server substrate-ate-controller substrate-atelet substrate-atenet-router substrate-dns substrate-podcertificate-controller; do grep -q "^  name: $$n$$" /tmp/vkn-sub.out || { echo "FAIL: no policy $$n"; exit 1; }; done
 	@awk "/^  name: substrate-ate-api-server$$/,/^---/" /tmp/vkn-sub.out | grep -q 'port: "8085"' || { echo "FAIL: ate-api-server has no egress to atelet's hostPort 8085 (the bootstrap API → node agent rule upstream lacks)"; exit 1; }
 	@if grep -q 'kagent-agent-muster-egress' /tmp/vkn-sub.out; then echo "FAIL: the v1alpha2 agent pods' egress policy is back; the actors' egress is the egress gateway's"; exit 1; fi
