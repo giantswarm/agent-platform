@@ -155,8 +155,10 @@ def main(chart: str) -> int:
                   [*ci, *ENGINE_OFF, "--set", "gitops.namespace=flux-giantswarm", "--set", "gitops.targetNamespace=agent-platform", *FLEET_APIS]):
         manifest = helm(chart, flags)
         off = docs(manifest)
-        if {k for k in off if k[0] not in ("OCIRepository", "HelmRelease")} != STORAGE_FAMILY:
-            fail(f"engine off renders a non-Flux object beyond the storage-version hooks (ci-values turn kagent on): {sorted(k for k in off if k[0] not in ('OCIRepository', 'HelmRelease'))}")
+        # + the hook identity's network policy (#413): a CiliumNetworkPolicy where cilium.io/v2 is served, else a NetworkPolicy
+        policy = ("CiliumNetworkPolicy" if "cilium.io/v2" in flags else "NetworkPolicy", NAMESPACE, f"{RELEASE}-hooks")
+        if {k for k in off if k[0] not in ("OCIRepository", "HelmRelease")} != STORAGE_FAMILY | {policy}:
+            fail(f"engine off renders a non-Flux object beyond the storage-version hooks and the hook identity's policy (ci-values turn kagent on): {sorted(k for k in off if k[0] not in ('OCIRepository', 'HelmRelease'))}")
         if any("pre-delete" in hook_meta(d)[0] for d in off.values()):
             fail("engine off renders a pre-delete hook (the ordered teardown is the engine's)")
         if any(n == RELEASE for k, _, n in off):
@@ -196,7 +198,7 @@ def main(chart: str) -> int:
     hooks = {(k, n): hook_meta(d) for (k, _, n), d in on.items() if "helm.sh/hook:" in d}
     expected_hooks = {
         # ci-values turn kagent on: the kagent namespace hook and the storage-version hooks (verify-engine.py) and the hook identity at their events
-        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10),
+        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10), ("NetworkPolicy", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10),
         ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
         **{("Job", n): ev for n, ev in STORAGE_HOOKS.items()},
         ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-delete", -5),
@@ -258,6 +260,8 @@ def main(chart: str) -> int:
                 del expected_off[("Job", n)]
             expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-delete", -10)
             expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-delete", -10)
+            # and networkPolicy.enabled: false — no policy for the identity (#413)
+            del expected_off[("NetworkPolicy", f"{RELEASE}-hooks")]
         if hooks_off != expected_off:
             fail(f"{label}: hooks differ:\n  got      {hooks_off}\n  expected {expected_off}")
         if label == "self off":

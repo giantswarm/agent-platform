@@ -12,7 +12,10 @@ storage-version pair renders only with the bundled engine. Hook weights in use:
   -10  the hook ServiceAccount + ClusterRoleBinding (rbac.yaml, pre-delete; and
        pre-install + pre-upgrade while the kagent namespace hook or the
        storage-version backup hook renders, post-install + post-upgrade while
-       the storage-version restore hook renders)
+       the storage-version restore hook renders) and the hook identity's
+       network policy (netpol.yaml: egress to the apiserver for every pod
+       labelled component: hooks, at every event a hook of this chart runs —
+       a default-deny cluster admits nothing else, #413)
    -8  create the namespace the kagent component installs into if it is
        missing (hooks/kagent-namespace.yaml; pre-install, pre-upgrade)
    -7  record the objects of the kagent CRDs still stored at v1alpha2 and

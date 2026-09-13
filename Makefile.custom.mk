@@ -2058,6 +2058,42 @@ STORAGE_BACKUP := t-kagent-storage-version-backup
 STORAGE_RESTORE := t-kagent-storage-version-restore
 STORAGE_CM := kagent-storage-version-migration
 
+.PHONY: verify-hooks-netpol
+verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with networkPolicy on, ONE policy selecting app.kubernetes.io/instance=<release> + component=hooks with egress to the apiserver only — a CiliumNetworkPolicy (kube-apiserver entity) when the flavour resolves to cilium, a NetworkPolicy (networkPolicy.kubernetes.apiServerCIDR, Egress only) otherwise — as a hook object at weight -10 with the identity's delete policy, at all five events with the engine on, at the storage-version hooks' four with the engine off; none with networkPolicy off, none when no hook renders (engine off, kagent off); every hook Job's pod carries the selected labels.
+	@echo "====> $@ ($(CHART_DIR))"
+	@echo "--> engine on, cilium served: a CiliumNetworkPolicy hook at -10, all five events"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 >/tmp/vhn-cil.out 2>&1 || { cat /tmp/vhn-cil.out; exit 1; }
+	@$(PICK) /tmp/vhn-cil.out CiliumNetworkPolicy t-hooks >/tmp/vhn-cnp.out || { echo "FAIL: no CiliumNetworkPolicy t-hooks"; exit 1; }
+	@if $(PICK) /tmp/vhn-cil.out NetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the kubernetes-flavour policy renders next to the cilium one"; exit 1; fi
+	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' /tmp/vhn-cnp.out || { echo "FAIL: engine on: the policy is not at all five hook events"; grep helm.sh/hook /tmp/vhn-cnp.out; exit 1; }
+	@grep -q 'helm.sh/hook-weight: "-10"' /tmp/vhn-cnp.out || { echo "FAIL: the policy is not at weight -10 (with the identity, ahead of every hook Job)"; exit 1; }
+	@grep -q 'helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded' /tmp/vhn-cnp.out || { echo "FAIL: the policy does not carry the hook identity's delete policy"; exit 1; }
+	@grep -q 'app.kubernetes.io/instance: "t"' /tmp/vhn-cnp.out || { echo "FAIL: the policy does not select the release's instance label"; exit 1; }
+	@grep -q 'app.kubernetes.io/component: hooks' /tmp/vhn-cnp.out || { echo "FAIL: the policy does not select component=hooks"; exit 1; }
+	@grep -q 'toEntities: \["kube-apiserver"\]' /tmp/vhn-cnp.out || { echo "FAIL: the cilium policy does not admit egress to the kube-apiserver entity"; exit 1; }
+	@if grep -q 'ingress:\|toFQDNs\|toCIDR\|toEndpoints\|world' /tmp/vhn-cnp.out; then echo "FAIL: the cilium policy admits more than apiserver egress"; exit 1; fi
+	@echo "--> every hook Job's pod carries the selected labels"
+	@python3 -c 'import sys,yaml; docs=[d for d in yaml.safe_load_all(open("/tmp/vhn-cil.out")) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; assert docs, "no hook Job rendered"; bad=[d["metadata"]["name"] for d in docs if d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/component")!="hooks" or d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/instance")!="t"]; assert not bad, "hook Jobs the policy does not select: %s" % bad; print("ok: %d hook Jobs selected: %s" % (len(docs), sorted(d["metadata"]["name"] for d in docs)))'
+	@echo "--> engine on, no cilium: a NetworkPolicy hook, Egress only, to networkPolicy.kubernetes.apiServerCIDR"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vhn-k8s.out 2>&1 || { cat /tmp/vhn-k8s.out; exit 1; }
+	@$(PICK) /tmp/vhn-k8s.out NetworkPolicy t-hooks >/tmp/vhn-np.out || { echo "FAIL: no NetworkPolicy t-hooks in the kubernetes flavour"; exit 1; }
+	@if $(PICK) /tmp/vhn-k8s.out CiliumNetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the cilium policy renders without cilium.io/v2"; exit 1; fi
+	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' /tmp/vhn-np.out || { echo "FAIL: kubernetes flavour: the policy is not at all five hook events"; exit 1; }
+	@grep -q 'policyTypes: \[Egress\]' /tmp/vhn-np.out || { echo "FAIL: the NetworkPolicy is not Egress only"; exit 1; }
+	@grep -q 'cidr: "10.9.0.1/32"' /tmp/vhn-np.out || { echo "FAIL: the NetworkPolicy does not use networkPolicy.kubernetes.apiServerCIDR"; grep cidr /tmp/vhn-np.out; exit 1; }
+	@echo "--> flavour forced: networkPolicy.flavor=cilium without the API renders the CiliumNetworkPolicy"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --set networkPolicy.flavor=cilium >/tmp/vhn-forced.out 2>&1 || { cat /tmp/vhn-forced.out; exit 1; }
+	@$(PICK) /tmp/vhn-forced.out CiliumNetworkPolicy t-hooks >/dev/null || { echo "FAIL: networkPolicy.flavor=cilium does not force the CiliumNetworkPolicy"; exit 1; }
+	@echo "--> engine off (the fleet): the policy at the storage-version hooks' four events"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 --set components.flux.enabled=false >/tmp/vhn-off.out 2>&1 || { cat /tmp/vhn-off.out; exit 1; }
+	@$(PICK) /tmp/vhn-off.out CiliumNetworkPolicy t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade$$' || { echo "FAIL: engine off: the policy is not at pre-install,pre-upgrade,post-install,post-upgrade (the storage-version hooks' events, no pre-delete)"; $(PICK) /tmp/vhn-off.out CiliumNetworkPolicy t-hooks | grep helm.sh/hook; exit 1; }
+	@echo "--> networkPolicy off: none; engine off + kagent off (no hook): none"
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 --set networkPolicy.enabled=false >/tmp/vhn-npoff.out 2>&1 || { cat /tmp/vhn-npoff.out; exit 1; }
+	@if $(PICK) /tmp/vhn-npoff.out CiliumNetworkPolicy t-hooks >/dev/null 2>&1 || $(PICK) /tmp/vhn-npoff.out NetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the hook policy renders with networkPolicy.enabled=false"; exit 1; fi
+	@helm template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 --set components.flux.enabled=false --set components.kagent.enabled=false >/tmp/vhn-none.out 2>&1 || { cat /tmp/vhn-none.out; exit 1; }
+	@if grep -q 't-hooks' /tmp/vhn-none.out; then echo "FAIL: engine off, kagent off: the hook policy (or identity) renders with no hook to police"; exit 1; fi
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-storage-version
 verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over (#396): with kagent on, the backup Job (pre-install,pre-upgrade, -7: records the objects of modelconfigs/modelproviderconfigs/remotemcpservers.kagent.dev still stored at v1alpha2 into the migration ConfigMap, then deletes those CRDs) and the restore Job (post-install,post-upgrade, 0: waits for modelconfigs.kagent.dev to serve v1alpha3, re-creates the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3, tolerates AlreadyExists, marks restored-at) as the hook identity in the helm image, the identity at their events; with the engine off (the fleet) the same pair and nothing else; with kagent off none of it; the kagent namespace follows kagent.namespaceOverride; helm lint.
 	@echo "====> $@ ($(CHART_DIR))"
@@ -2089,7 +2125,10 @@ verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks 
 	@[ "$$(grep -n 'kubectl create -f /tmp/cm.json' /tmp/vsv-backup.out | cut -d: -f1)" -lt "$$(grep -n 'kubectl delete customresourcedefinitions' /tmp/vsv-backup.out | cut -d: -f1)" ] || { echo "FAIL: the backup deletes a CRD before the record is written"; exit 1; }
 	@grep -q 'nothing to migrate' /tmp/vsv-backup.out || { echo "FAIL: the backup has no no-op branch (a fresh install, a second run)"; exit 1; }
 	@echo "--> the backup re-points the three kinds to v1alpha3 in every Helm release manifest that still names them at v1alpha2 (Helm reads a manifest back through a served version), on every run, one Secret at a time, the patch through a file"
-	@grep -q 'kubectl get secrets -A -l owner=helm --field-selector type=helm.sh/release.v1' /tmp/vsv-backup.out || { echo "FAIL: the backup does not scan the Helm release Secrets"; exit 1; }
+	@grep -q "kubectl get secrets -A -l owner=helm --field-selector type=helm.sh/release.v1 --no-headers --chunk-size=100 | awk '{print \$$1, \$$2}' > /tmp/releases.txt" /tmp/vsv-backup.out || { echo "FAIL: the backup does not list the Helm release Secrets through the server-side Table (names only; a client-side printer collects every payload first and is OOM-killed at 128Mi, #414)"; grep -n 'kubectl get secrets' /tmp/vsv-backup.out; exit 1; }
+	@if grep -q 'kubectl get secrets.*-o jsonpath\|kubectl get secrets.*-o custom-columns\|kubectl get secrets.*-o name' /tmp/vsv-backup.out; then echo "FAIL: the release listing uses a client-side printer (collects every Secret whole, #414)"; exit 1; fi
+	@grep -q "grep -q 'kagent.dev/v1alpha2' /tmp/release.json || continue" /tmp/vsv-backup.out || { echo "FAIL: jq parses every release manifest; a manifest without kagent.dev/v1alpha2 must be skipped before jq (#414)"; exit 1; }
+	@[ "$$(grep -n "grep -q 'kagent.dev/v1alpha2' /tmp/release.json" /tmp/vsv-backup.out | cut -d: -f1)" -lt "$$(grep -n 'n="$$(jq -r --arg k "$$kinds"' /tmp/vsv-backup.out | cut -d: -f1)" ] || { echo "FAIL: the grep pre-filter must run before jq"; exit 1; }
 	@grep -qF "kinds='(^|\n)kind: (ModelConfig|ModelProviderConfig|RemoteMCPServer)\n'" /tmp/vsv-backup.out || { echo "FAIL: the re-point is not confined to documents of the three kinds"; grep -n "kinds=" /tmp/vsv-backup.out; exit 1; }
 	@grep -qF 'gsub("apiVersion: kagent.dev/v1alpha2\n"; "apiVersion: kagent.dev/v1alpha3\n")' /tmp/vsv-backup.out || { echo "FAIL: the re-point does not swap kagent.dev/v1alpha2 for v1alpha3"; exit 1; }
 	@grep -q 'base64 -d < /tmp/release.b64 | base64 -d | gzip -dc' /tmp/vsv-backup.out || { echo "FAIL: the re-point does not decode Helm storage (base64 twice, gzip)"; exit 1; }
@@ -2119,7 +2158,7 @@ verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks 
 	@helm template t $(CHART_DIR) $(STORAGE_ON) --set components.flux.enabled=false >/tmp/vsv-off.out 2>&1 || { cat /tmp/vsv-off.out; exit 1; }
 	@$(PICK) /tmp/vsv-off.out Job $(STORAGE_BACKUP) >/dev/null || { echo "FAIL: the backup hook is gone with the engine off (every installation that ran kagent 0.10 needs it)"; exit 1; }
 	@$(PICK) /tmp/vsv-off.out Job $(STORAGE_RESTORE) >/dev/null || { echo "FAIL: the restore hook is gone with the engine off"; exit 1; }
-	@[ "$$(grep -c '^    helm.sh/hook: ' /tmp/vsv-off.out)" = "4" ] || { echo "FAIL: engine off must hook exactly the two Jobs and the identity (SA + CRB)"; grep -n 'helm.sh/hook: ' /tmp/vsv-off.out; exit 1; }
+	@[ "$$(grep -c '^    helm.sh/hook: ' /tmp/vsv-off.out)" = "5" ] || { echo "FAIL: engine off must hook exactly the two Jobs, the identity (SA + CRB) and its network policy (#413)"; grep -n 'helm.sh/hook: ' /tmp/vsv-off.out; exit 1; }
 	@for kind in ServiceAccount ClusterRoleBinding; do \
 		$(PICK) /tmp/vsv-off.out $$kind t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade$$' || { echo "FAIL: engine off: the hook $$kind t-hooks is not at pre-install,pre-upgrade,post-install,post-upgrade (no pre-delete without the engine)"; exit 1; }; \
 	done

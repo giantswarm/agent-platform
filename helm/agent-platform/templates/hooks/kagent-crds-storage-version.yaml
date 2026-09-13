@@ -108,17 +108,26 @@ fi
 release manifest that still names them — Helm cannot read a manifest back through
 a version the cluster no longer serves. Runs on every backup, so a re-run after a
 failed first attempt still finishes the job; a fresh install scans and changes
-nothing. One Secret at a time (a release manifest can be large, the pod has 128Mi);
-the patch goes through a file (a release's storage exceeds the length of one
-command argument). */ -}}
+nothing. The pod has 128Mi, so nothing here scales with the cluster's Helm
+history (giantswarm/agent-platform#414: the first 4.x installation's 351 release
+Secrets, 61 MB of payload, OOM-killed a listing that carried it): the listing is
+the apiserver's Table — kubectl's default printer asks for `as=Table` and gets
+names, no `data`; a client-side printer (jsonpath, custom-columns, -o name)
+would collect every Secret whole first — then one Secret at a time, decoded onto
+the emptyDir, and jq parses only a manifest that names kagent.dev/v1alpha2 at
+all (grep first; jq on a multi-megabyte manifest is the other allocation that
+does not fit). The patch goes through a file (a release's storage exceeds the
+length of one command argument). */ -}}
 {{- define "agent-platform.kagent.storageVersionManifestScript" -}}
 kinds='(^|\n)kind: (ModelConfig|ModelProviderConfig|RemoteMCPServer)\n'
 rewritten=0
-kubectl get secrets -A -l owner=helm --field-selector type=helm.sh/release.v1 -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' > /tmp/releases.txt
+# the server-side Table (NAMESPACE NAME TYPE DATA AGE): names only, no payload
+kubectl get secrets -A -l owner=helm --field-selector type=helm.sh/release.v1 --no-headers --chunk-size=100 | awk '{print $1, $2}' > /tmp/releases.txt
 while read -r sns sname; do
   [ -n "$sname" ] || continue
   kubectl get secret -n "$sns" "$sname" -o jsonpath='{.data.release}' > /tmp/release.b64
   base64 -d < /tmp/release.b64 | base64 -d | gzip -dc > /tmp/release.json
+  grep -q 'kagent.dev/v1alpha2' /tmp/release.json || continue
   n="$(jq -r --arg k "$kinds" '[.manifest | split("\n---\n")[] | select(test($k) and test("apiVersion: kagent.dev/v1alpha2\n"))] | length' /tmp/release.json)"
   [ "$n" -gt 0 ] || continue
   jq --arg k "$kinds" '.manifest |= (split("\n---\n") | map(if test($k) then gsub("apiVersion: kagent.dev/v1alpha2\n"; "apiVersion: kagent.dev/v1alpha3\n") else . end) | join("\n---\n"))' /tmp/release.json > /tmp/release-new.json

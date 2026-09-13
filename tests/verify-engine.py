@@ -70,6 +70,14 @@ NAMESPACE = "agent-platform"
 # installation that ran kagent 0.10 needs the step. With kagent (ci-values) on.
 STORAGE_JOBS = {f"{RELEASE}-kagent-storage-version-backup": ("pre-install,pre-upgrade", -7), f"{RELEASE}-kagent-storage-version-restore": ("post-install,post-upgrade", 0)}
 STORAGE_FAMILY = {("Job", NAMESPACE, n) for n in STORAGE_JOBS} | {("ServiceAccount", NAMESPACE, f"{RELEASE}-hooks"), ("ClusterRoleBinding", "", f"{RELEASE}-hooks")}
+
+
+def hook_policy(cilium: bool) -> tuple[str, str, str]:
+    """The hook identity's network policy (giantswarm/agent-platform#413): a hook object at the identity's
+    events, a CiliumNetworkPolicy where cilium.io/v2 is served (the fleet shape), a NetworkPolicy otherwise."""
+    return ("CiliumNetworkPolicy" if cilium else "NetworkPolicy", NAMESPACE, f"{RELEASE}-hooks")
+
+
 IDENTITY_EVENTS_OFF = "pre-install,pre-upgrade,post-install,post-upgrade"
 IDENTITY_EVENTS_ON = IDENTITY_EVENTS_OFF + ",pre-delete"
 TENANT_SA = "agent-platform-flux"
@@ -218,10 +226,11 @@ def main(chart: str) -> int:
     # --- engine OFF: the pure app-of-apps render
     off = docs(helm(chart, [*ci, *OFF, "--include-crds"]))
     extra = {(k, ns, n) for k, ns, n, _ in off if k not in ("OCIRepository", "HelmRelease")}
-    if extra != STORAGE_FAMILY:
-        fail(f"engine off renders more or less than the storage-version hook family: missing {sorted(STORAGE_FAMILY - extra)}, extra {sorted(extra - STORAGE_FAMILY)}")
+    off_family = STORAGE_FAMILY | {hook_policy(cilium=False)}
+    if extra != off_family:
+        fail(f"engine off renders more or less than the storage-version hook family (+ the hook identity's policy): missing {sorted(off_family - extra)}, extra {sorted(extra - off_family)}")
     off_events = {(k, n): (hook_meta(d)[0], int(hook_meta(d)[1])) for k, _, n, d in off if "helm.sh/hook:" in d}
-    expected_off_events = {("Job", n): ev for n, ev in STORAGE_JOBS.items()} | {("ServiceAccount", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_OFF, -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_OFF, -10)}
+    expected_off_events = {("Job", n): ev for n, ev in STORAGE_JOBS.items()} | {("ServiceAccount", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_OFF, -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_OFF, -10), ("NetworkPolicy", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_OFF, -10)}
     if off_events != expected_off_events:
         fail(f"engine off: hook events/weights differ (no pre-delete without the engine):\n  got      {off_events}\n  expected {expected_off_events}")
     off_text = "\n---\n".join(d for *_, d in off)
@@ -240,7 +249,7 @@ def main(chart: str) -> int:
     if not all("\n  serviceAccountName: custom-sa\n" in d for k, _, _, d in off_sa if k == "HelmRelease"):
         fail("engine off: gitops.serviceAccountName is not stamped on every HelmRelease")
     fleet = docs(helm(chart, [*ci, *OFF, "--set", "gitops.namespace=flux-giantswarm", "--set", "gitops.targetNamespace=agent-platform", *FLEET_APIS]))
-    if {(k, ns, n) for k, ns, n, _ in fleet if k not in ("OCIRepository", "HelmRelease")} != STORAGE_FAMILY or any(ns != "flux-giantswarm" for k, ns, _, _ in fleet if k in ("OCIRepository", "HelmRelease")):
+    if {(k, ns, n) for k, ns, n, _ in fleet if k not in ("OCIRepository", "HelmRelease")} != STORAGE_FAMILY | {hook_policy(cilium=True)} or any(ns != "flux-giantswarm" for k, ns, _, _ in fleet if k in ("OCIRepository", "HelmRelease")):
         fail("fleet shape (engine off, exempt namespace): a non-Flux object beyond the storage-version hooks, or a wrong namespace, rendered")
     print(f"ok: engine off — {len(off) - len(STORAGE_FAMILY)} Flux objects + the storage-version hooks (as {RELEASE}-hooks at {IDENTITY_EVENTS_OFF}; nothing with kagent off), no CRD/operator/FluxInstance/tenant identity/teardown, no serviceAccountName, roster flux: false, fleet shape clean")
 
@@ -259,7 +268,7 @@ def main(chart: str) -> int:
         ("ServiceAccount", NAMESPACE, f"{RELEASE}-self"), ("Role", NAMESPACE, f"{RELEASE}-self"), ("RoleBinding", NAMESPACE, f"{RELEASE}-self"),
         ("Job", NAMESPACE, f"{RELEASE}-self-stop-resumer"), ("Job", NAMESPACE, f"{RELEASE}-self-suspend"),
         ("Job", NAMESPACE, f"{RELEASE}-kagent-namespace"),  # ci-values turn kagent on
-        *STORAGE_FAMILY,
+        *STORAGE_FAMILY, hook_policy(cilium=False),
     }
     engine = {(k, ns, n) for k, ns, n, _ in on if k not in ("OCIRepository", "HelmRelease", "CustomResourceDefinition")}
     if engine != expected:
@@ -309,6 +318,8 @@ def main(chart: str) -> int:
     # post-install,post-upgrade while the storage-version restore hook renders (ci-values turn kagent on)
     expected_events = {
         ("ServiceAccount", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_ON, -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_ON, -10),
+        # the identity's network policy: at every event a hook runs — with the engine on all five (#413)
+        ("NetworkPolicy", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_ON, -10),
         ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
         **{("Job", n): ev for n, ev in STORAGE_JOBS.items()},
         # the self-management hooks (verify-self.py): pre-upgrade too while self-management is off (the hand-back)
@@ -356,7 +367,7 @@ def main(chart: str) -> int:
                 fail(f"hook Job {job} lacks {needle!r}")
         if scripted != ('command: ["/bin/sh", "-eu", "-c"]' in d):
             fail(f"hook Job {job}: {'a script in the helm image' if scripted else 'one kubectl command, no entrypoint override'} expected")
-    print(f"ok: hooks — SA/CRB at -10, kagent namespace hook at -8, storage-version backup at -7 and restore at 0, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases in {len(waves)} waves, reverse of {len(edges)} dependsOn edges: {' > '.join(','.join(w) for w in waves)}), teardown-engine at 5, restricted pods running {image} / {helm_ref}")
+    print(f"ok: hooks — SA/CRB and the identity's network policy at -10, kagent namespace hook at -8, storage-version backup at -7 and restore at 0, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases in {len(waves)} waves, reverse of {len(edges)} dependsOn edges: {' > '.join(','.join(w) for w in waves)}), teardown-engine at 5, restricted pods running {image} / {helm_ref}")
 
     # --- the kagent namespace hook (giantswarm/agent-platform#306)
     ns_job = one(on, "Job", f"{RELEASE}-kagent-namespace")
