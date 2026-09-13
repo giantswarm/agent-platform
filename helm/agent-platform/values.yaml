@@ -383,11 +383,13 @@ components:  # @schema additionalProperties: true
     # values change: this range and kagent-crds' range move together (README
     # "Re-pinning the kagent line"); the build's image tag and Go ADK digest
     # travel inside the chart (stamped at publish), not here. The floor is
-    # 0.11.0-gs.6, the first release whose chart carries the stamps this chart
-    # relies on (controller.agentImage.digest, harness.create, the kagent-images
+    # 0.11.0-gs.9, the first release whose Harness template drops a selector
+    # label with an empty value (kagent.harness.allowedAgentTemplates below);
+    # 0.11.0-gs.6 brought the stamps this chart relies on
+    # (controller.agentImage.digest, harness.create, the kagent-images
     # ConfigMap). No semverFilter: a dev build is selected only by a consumer
     # that sets one (README "Dev channel").
-    versionRange: ">=0.11.0-gs.6 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.9 <0.11.1-0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -456,12 +458,6 @@ components:  # @schema additionalProperties: true
     omitEmptyKeys:
       - substrateWorkerPool.workerImage
       - harness.image
-    # The chart's own admission label, deleted from the platform Harness's
-    # selector (kagent.harness.allowedAgentTemplates): a null in the release's
-    # values removes a chart default on coalesce; nothing in values.yaml can
-    # carry one, so it is set on the way out.
-    nullKeys:
-      - [harness, allowedAgentTemplates, selector, matchLabels, kagent.dev/harness]
     enabled: false
   kagent-crds:  # @schema additionalProperties: true
     chart: kagent-crds
@@ -480,7 +476,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://ghcr.io/giantswarm/kagent/helm
-    versionRange: ">=0.11.0-gs.6 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.9 <0.11.1-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -1903,9 +1899,16 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # kagent's built-in MCP tool server: kubectl-style k8s ops, Helm releases,
   # Argo Rollouts tools. Disabled: muster-registered MCP servers cover these
-  # surfaces.
+  # surfaces. On, it lives in the kagent namespace with the rest of kagent: the
+  # subchart renders its Deployment, Services and ServiceAccount into its own
+  # namespaceOverride (the release namespace without it — see the note on
+  # namespaceOverride above), the kagent chart composes the kagent-tool-server
+  # RemoteMCPServer URL from the same key, and the connectivity chart derives
+  # the controller's and the actors' egress to it the same way, so the three
+  # always name one namespace.
   kagent-tools:
     enabled: false
+    namespaceOverride: kagent
 
   # kagent's own MCP server controller (reconciles MCPServer CRDs).
   # Disabled: muster fills this role in the GS platform.
@@ -2090,12 +2093,19 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # Generic agent chart 1.x stamps (the value is the Harness's name). Helm
     # merges maps on coalesce, so the kagent chart's own default key
     # (kagent.dev/harness: kagent) would join this one and a template would
-    # need both labels — components.kagent.nullKeys forwards a null for it,
-    # which deletes it (a null here would not survive this chart's own render).
+    # need both labels. The empty value removes it: the line's Harness
+    # template (0.11.0-gs.9+) drops every selector label whose value is empty.
+    # Not a null — a null deletes the key on coalesce only while it reaches
+    # the chart, and the JSON merge patch that updates a kagent HelmRelease
+    # which pre-existed the cut-over removes a null key instead of storing it,
+    # so the chart default came back and the Harness admitted no template
+    # (giantswarm/agent-platform#418). An empty string survives create and
+    # patch alike. Keep the key: without it the selector requires both labels.
     allowedAgentTemplates:
       selector:
         matchLabels:
           agent-platform.giantswarm.io/harness: kagent
+          kagent.dev/harness: ""
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend

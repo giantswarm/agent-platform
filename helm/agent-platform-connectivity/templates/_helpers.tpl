@@ -1475,6 +1475,34 @@ Truthy when the platform runs Agent Substrate: the substrate component is on
 {{- end -}}
 
 {{/*
+kagent's built-in tool server: the kagent-tools subchart of the kagent chart
+(kagent.kagent-tools). The subchart renders its Deployment and Services into its
+own namespaceOverride, else its release namespace, and the kagent chart composes
+the kagent-tool-server RemoteMCPServer URL from the same two inputs
+(http://<tools fullname>.<that namespace>:<port>/mcp). The egress rules this
+chart opens to the server — the kagent controller's tool discovery
+(templates/kagent/netpol.yaml) and the actors' calls through Substrate's egress
+gateway (templates/substrate/netpol.yaml) — derive the namespace the same way,
+from the same values block and the same release namespace (every platform
+HelmRelease installs into gitops.targetNamespace), so a rule names the namespace
+the server is rendered into whether or not an installation pins the override.
+Never the kagent namespace by assumption: kagent.namespaceOverride moves the
+controller, not the subchart (#421). The port is the tools Service's targetPort.
+*/}}
+{{- define "agent-platform.kagentTools.enabled" -}}
+{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
+{{- if $tools.enabled }}true{{- end -}}
+{{- end -}}
+{{- define "agent-platform.kagentTools.namespace" -}}
+{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
+{{- $tools.namespaceOverride | default .Release.Namespace -}}
+{{- end -}}
+{{- define "agent-platform.kagentTools.port" -}}
+{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
+{{- dig "service" "ports" "tools" "targetPort" "8084" $tools | toString -}}
+{{- end -}}
+
+{{/*
 Where Substrate's control-plane database lives: "bundled" (the substrate chart's
 StatefulSet — substrate.postgres.enabled true, or `auto` while neither of the
 other two applies), "external" (an explicit substrate.postgres.connectionString),

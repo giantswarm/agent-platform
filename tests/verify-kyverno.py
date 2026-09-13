@@ -40,6 +40,7 @@ exceptions are hand-written; this check computes them.
 Needs PyYAML (the CI job installs it) and network to ghcr.io for the chart.
 """
 
+import fnmatch
 import importlib.util
 import pathlib
 import re
@@ -83,6 +84,8 @@ WORKER_POD = {
     "name": "kagent-default (the WorkerPool's worker pods, rendered by ate-controller)",
     "kind": "Deployment",
     "namespace": KAGENT_NAMESPACE,
+    "resourceName": "kagent-default",
+    # ate-controller labels the Deployment and its pod template alike.
     "labels": {"ate.dev/worker-pool": "kagent-default"},
     "spec": {
         "securityContext": {"runAsUser": 0, "runAsGroup": 0},
@@ -203,12 +206,25 @@ def selector_matches(selector: dict, labels: dict) -> bool:
 
 
 def exception_matches(pe: dict, workload: dict) -> bool:
+    """Whether the exception matches the workload at its controller's admission.
+
+    Kyverno evaluates a Deployment or DaemonSet through the autogen rule against
+    the controller object itself, so a selector is matched against the
+    controller's OWN metadata.labels (not its pod template's) and `names`
+    against the controller's name — a Deployment without metadata labels is
+    matched only by name (#419).
+    """
     for entry in pe["spec"]["match"].get("any", []):
         res = entry.get("resources", {})
         kinds = set(res.get("kinds", []))
         if "Pod" not in kinds or workload["kind"] not in kinds:
             continue
         if workload["namespace"] not in res.get("namespaces", []):
+            continue
+        names = res.get("names") or []
+        if names and not any(fnmatch.fnmatchcase(workload["resourceName"], n) for n in names):
+            continue
+        if not names and not res.get("selector"):
             continue
         if selector_matches(res.get("selector") or {}, workload["labels"]):
             return True
@@ -260,7 +276,11 @@ def substrate_workloads(url: str, constraint: str, values: str) -> list[dict]:
             "name": f"{doc['kind']} {doc['metadata'].get('namespace', SUBSTRATE_NAMESPACE)}/{doc['metadata']['name']} (substrate {version})",
             "kind": doc["kind"],
             "namespace": doc["metadata"].get("namespace", SUBSTRATE_NAMESPACE),
-            "labels": tmpl["metadata"].get("labels", {}),
+            "resourceName": doc["metadata"]["name"],
+            # The controller's own labels — what Kyverno's autogen rule sees at
+            # its admission. The substrate chart labels some Deployments only in
+            # the pod template; those are matched by name.
+            "labels": doc["metadata"].get("labels") or {},
             "spec": tmpl["spec"],
         })
     print(f"ok: substrate {version} rendered with the forwarded values — {len(workloads)} workloads")

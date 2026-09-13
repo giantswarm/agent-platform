@@ -703,13 +703,20 @@ endef
 # default-deny egress lists above, so the chart has to open the path or the
 # kagent-tool-server RemoteMCPServer never becomes Accepted (SYN dropped, "Policy
 # denied") and the agents that reference it run without tools. Off by default
-# and off in the golden render, so the default render is unchanged.
+# and off in the golden render, so the default render is unchanged. The rules
+# name the namespace the kagent chart renders the server into — the subchart's
+# namespaceOverride, else the release namespace, never the kagent namespace by
+# assumption (#421: the rule said kagent, the server sat in the release
+# namespace, discovery timed out) — and tests/verify-kagent-tools-namespace.py
+# ties them to the rendered Deployment and RemoteMCPServer URL of the kagent
+# chart the range resolves to, through the values the meta chart forwards
+# (network: ghcr.io, like verify-components-charts).
 KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent
 # The two files of the v1alpha2 agent templates giantswarm/agent-platform#299
 # deletes; until then they are the only place `app: kagent` may still appear.
 KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
 .PHONY: verify-kagent-netpol
-verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the tools namespace and port; Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
+verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: ghcr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> Agent Substrate on, cilium: the worker pods' egress is the egress gateway, the dns and the cluster DNS — nothing else"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-sub.out 2>&1 || { cat /tmp/vkn-sub.out; exit 1; }
@@ -726,6 +733,9 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@awk "/^  name: agent-platform-connectivity-kagent-controller-egress$$/,/^---/" /tmp/vkn-sub.out >/tmp/vkn-sub-ctl.out
 	@grep -A4 'app: ate-api-server' /tmp/vkn-sub-ctl.out | grep -q 'port: "443"' || { echo "FAIL: the kagent controller has no egress to ate-api"; exit 1; }
 	@grep -A4 'app: atenet-router' /tmp/vkn-sub-ctl.out | grep -q 'port: "8080"' || { echo "FAIL: the kagent controller has no egress to the atenet router"; exit 1; }
+	@awk "/^  name: substrate-atenet-router$$/,/^---/" /tmp/vkn-sub.out | awk "/ate.dev\/worker-pool/,/^    - |^---/" >/tmp/vkn-sub-router-workers.out
+	@grep -q 'port: "443"' /tmp/vkn-sub-router-workers.out || { echo "FAIL: the atenet router has no egress to the worker pods' tunnel (443)"; exit 1; }
+	@grep -q 'port: "8443"' /tmp/vkn-sub-router-workers.out || { echo "FAIL: the atenet router has no egress to the worker pods' mTLS CONNECT listener (8443) — every turn fails with 'Connect: deadline has elapsed' (#383)"; exit 1; }
 	@for n in substrate-ate-api-server substrate-ate-controller substrate-atelet substrate-atenet-router substrate-dns substrate-podcertificate-controller; do grep -q "^  name: $$n$$" /tmp/vkn-sub.out || { echo "FAIL: no policy $$n"; exit 1; }; done
 	@awk "/^  name: substrate-ate-api-server$$/,/^---/" /tmp/vkn-sub.out | grep -q 'port: "8085"' || { echo "FAIL: ate-api-server has no egress to atelet's hostPort 8085 (the bootstrap API → node agent rule upstream lacks)"; exit 1; }
 	@if grep -q 'kagent-agent-muster-egress' /tmp/vkn-sub.out; then echo "FAIL: the v1alpha2 agent pods' egress policy is back; the actors' egress is the egress gateway's"; exit 1; fi
@@ -744,15 +754,21 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@echo "--> kagent-tools off (the default): no tool-server egress"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-off.out 2>&1 || { cat /tmp/vkn-off.out; exit 1; }
 	@if grep -q 'kagent-tools' /tmp/vkn-off.out; then echo "FAIL: tool-server egress renders while kagent-tools is off"; grep -n 'kagent-tools' /tmp/vkn-off.out | head; exit 1; else echo "ok: inert while off"; fi
-	@echo "--> kagent-tools on: the controller's and the actors' egress (Substrate's egress gateway) to the kagent-tools pods on 8084 in the kagent namespace"
-	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true >/tmp/vkn-on.out 2>&1 || { cat /tmp/vkn-on.out; exit 1; }
+	@echo "--> kagent-tools on with the meta chart's default kagent.kagent-tools.namespaceOverride=kagent: the controller's and the actors' egress (Substrate's egress gateway) to the kagent-tools pods on 8084 in the kagent namespace"
+	@helm template t $(CONNECTIVITY_DIR) --namespace agent-platform $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true --set kagent.kagent-tools.namespaceOverride=kagent >/tmp/vkn-on.out 2>&1 || { cat /tmp/vkn-on.out; exit 1; }
 	@for n in agent-platform-connectivity-kagent-controller-egress substrate-atenet-egress; do \
 		awk "/^  name: $$n$$/,/^---/" /tmp/vkn-on.out >/tmp/vkn-on-$$n.out; \
 		grep -q 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out || { echo "FAIL: $$n has no egress to the kagent-tools pods"; exit 1; }; \
-		grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out | grep -q 'io.kubernetes.pod.namespace: kagent$$' || { echo "FAIL: $$n tool-server egress is not pinned to the kagent namespace"; exit 1; }; \
+		grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out | grep -q 'io.kubernetes.pod.namespace: kagent$$' || { echo "FAIL: $$n tool-server egress does not follow kagent.kagent-tools.namespaceOverride (kagent)"; exit 1; }; \
 		grep -A4 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-on-$$n.out | grep -q 'port: "8084"' || { echo "FAIL: $$n tool-server egress does not open port 8084"; exit 1; }; \
 	done
 	@echo "ok: both policies open the tool server"
+	@echo "--> kagent-tools on without kagent.kagent-tools.namespaceOverride (this chart carries no default of its own): the rules name the RELEASE namespace, where the subchart renders without the override — not the kagent namespace kagent.namespaceOverride moves the controller to (#421)"
+	@helm template t $(CONNECTIVITY_DIR) --namespace agent-platform $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true >/tmp/vkn-release-ns.out 2>&1 || { cat /tmp/vkn-release-ns.out; exit 1; }
+	@[ "$$(grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-release-ns.out | grep -c 'io.kubernetes.pod.namespace: agent-platform$$')" = "2" ] || { echo "FAIL: without kagent.kagent-tools.namespaceOverride the tool-server egress does not name the release namespace (where the kagent chart renders the server)"; grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-release-ns.out; exit 1; }
+	@echo "ok: the rules follow the subchart's fallback, the release namespace"
+	@echo "--> the rules' namespace and port are the kagent chart's: its rendered kagent-tools Deployment and RemoteMCPServer URL, with the values the meta chart forwards (network: ghcr.io)"
+	@python3 tests/verify-kagent-tools-namespace.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "--> an explicit kagent.kagent-tools.namespaceOverride / service.ports.tools.targetPort follows into the rules"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true --set kagent.kagent-tools.namespaceOverride=tools-ns --set kagent.kagent-tools.service.ports.tools.targetPort=9084 >/tmp/vkn-override.out 2>&1 || { cat /tmp/vkn-override.out; exit 1; }
 	@[ "$$(grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-override.out | grep -c 'io.kubernetes.pod.namespace: tools-ns$$')" = "2" ] || { echo "FAIL: the tool-server egress does not follow kagent.kagent-tools.namespaceOverride"; exit 1; }
@@ -1465,6 +1481,8 @@ WIRING_BACKSTAGE := $(VM) --namespace agent-platform $(WIRING_QUICKSTART) --set 
 WIRING_SERVING := $(VM) --namespace agent-platform --set components.modelServing.enabled=true --set components.kserve-crd.enabled=true --set components.kserve-resources.enabled=true
 # The fleet-shape render with every toggle of this slice off: byte-identical to origin/main's.
 WIRING_OFF := $(VM) --namespace agent-platform --set components.kagent.enabled=true
+# Every wired component on: the render the app-config assertions read.
+WIRING_BACKSTAGE_FULL := $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true
 # The controller's JWKS egress: an agentgateway-* mode with the kagent controller
 # route and its JWT policy on. JWKS_INCLUSTER keeps values.yaml's in-cluster host
 # (dex.giantswarm.svc.cluster.local), which gateway.jwksEgress covers alone;
@@ -1487,7 +1505,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	done
 	@echo "ok: inert while off"
 	@echo "--> Backstage on: the app-config ConfigMap the backstage: block mounts, derived from the platform's values"
-	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' /tmp/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >/tmp/vw-bs-cm.out
 	@[ -s /tmp/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
 	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
@@ -1515,6 +1533,18 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@grep -q 'helm.sh/hook: post-install,post-upgrade' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job is not a post-install/post-upgrade hook"; exit 1; }
 	@grep -q -- '--selector=app=backstage' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job does not select the Backstage Deployment by label (a missing Deployment must be a no-op)"; exit 1; }
 	@grep -qE 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]{64}' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job carries no app-config checksum"; exit 1; }
+	@echo "--> the checksum covers the app-config data only: a chart-version bump keeps it, an app-config change moves it (#424)"
+	@rm -rf /tmp/vw-bs-vbump && cp -r $(CONNECTIVITY_DIR) /tmp/vw-bs-vbump && sed -i 's/^version: .*/version: 0.0.0-verify/' /tmp/vw-bs-vbump/Chart.yaml
+	@helm template t /tmp/vw-bs-vbump $(WIRING_BACKSTAGE_FULL) >/tmp/vw-bs-vbump.out 2>&1 || { cat /tmp/vw-bs-vbump.out; exit 1; }
+	@grep -q 'helm.sh/chart: "agent-platform-connectivity-0.0.0-verify"' /tmp/vw-bs-vbump.out || { echo "FAIL: the version bump did not reach the rendered labels (the assertion below would pass vacuously)"; exit 1; }
+	@base=$$(grep -o 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]*' /tmp/vw-bs-job.out); \
+	bump=$$(grep -o 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]*' /tmp/vw-bs-vbump.out); \
+	[ "$$base" = "$$bump" ] || { echo "FAIL: the app-config checksum moved on a chart-version bump alone ($$base vs $$bump): every release would roll the portal"; exit 1; }; \
+	for change in 'backstage.installationName=other' 'kagent.fluxServiceAccountName=tenant-x' 'global.identity.issuerUrl=https://idp.example.org'; do \
+		moved=$$(helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) --set "$$change" 2>/dev/null | grep -o 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]*'); \
+		[ -n "$$moved" ] && [ "$$moved" != "$$base" ] || { echo "FAIL: the app-config checksum did not move on --set $$change"; exit 1; }; \
+	done
+	@echo "ok: checksum follows the app-config data only"
 	@grep -q 'kind: CiliumNetworkPolicy' /tmp/vw-bs.out && grep -q 'agent-platform-connectivity-backstage-config-reload' /tmp/vw-bs.out || { echo "FAIL: no cilium policy for the config-reload Job"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^kind: NetworkPolicy$$/,/^---/' | grep -q 'agent-platform-connectivity-backstage-config-reload' || { echo "FAIL: no kubernetes policy for the config-reload Job"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set backstage.configReload.enabled=false >/tmp/vw-bs-noreload.out 2>&1 || { cat /tmp/vw-bs-noreload.out; exit 1; }

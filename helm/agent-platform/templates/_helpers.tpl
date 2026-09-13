@@ -194,22 +194,6 @@ Emits JSON. Usage: include "agent-platform.omitEmpty" (dict "vals" $vals "paths"
 {{- end -}}
 
 {{/*
-Set the key at `segs` (a list of map keys) in `vals` to null, creating the maps
-on the way; mutates `vals` in place and emits nothing. A null in a HelmRelease's
-values deletes the component chart's default for that key when helm-controller
-coalesces them (components.yaml nullKeys).
-Usage: include "agent-platform.setNull" (dict "vals" $vals "segs" (list "a" "b"))
-*/}}
-{{- define "agent-platform.setNull" -}}
-{{- $m := .vals -}}
-{{- range (initial .segs) -}}
-{{- if not (kindIs "map" (index $m .)) }}{{- $_ := set $m . dict }}{{- end -}}
-{{- $m = index $m . -}}
-{{- end -}}
-{{- $_ := set $m (last .segs) nil -}}
-{{- end -}}
-
-{{/*
 Drop the key at a dotted path from `vals` (components.yaml omitKeys): a
 top-level key, or a nested one — `harness.snapshotStore` — whose parent then
 stays only while it still holds other keys. Emits the JSON of the result.

@@ -57,12 +57,6 @@ knowledge:
       ConfigMap kagent-images (key substrate-values.yaml, atelet's pinned
       runtime images) for the substrate release. optional: true lets the
       release install before the source exists.
-  nullKeys — paths (lists of segments, so a key may contain dots) set to null in
-      the forwarded values, after everything else. A null in HelmRelease
-      spec.values deletes the component chart's default for that key on
-      coalesce — the only way to remove a default from a map the chart also
-      fills (kagent's own admission label in the Harness selector). A null in
-      this chart's values.yaml would not survive its own render.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
       a single block. Used by agent-platform-connectivity, which reads many
       blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …). Like
@@ -230,8 +224,6 @@ nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- /* Derived values win over the block's own copy (the helper fails the
 render when the two disagree). */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
-{{- /* A chart default that must GO: a null in the release values deletes it on coalesce (nullKeys above). */ -}}
-{{- range $c.nullKeys }}{{- include "agent-platform.setNull" (dict "vals" $vals "segs" .) }}{{- end }}
 {{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an
 always-on consumer (e.g. connectivity) does not block on a HelmRelease that was

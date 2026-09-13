@@ -169,7 +169,8 @@ platform needs:
 - **Kyverno** (`templates/substrate/policy-exceptions.yaml`): one
   `PolicyException` per Substrate workload — `substrate-atelet`,
   `substrate-workers` (every WorkerPool's pods, label `ate.dev/worker-pool`),
-  `substrate-control-plane`, `substrate-podcertificate-controller` — naming
+  `substrate-control-plane` (matched by workload name),
+  `substrate-podcertificate-controller` — naming
   exactly the restricted-PSS rules the workload violates, each with its
   `autogen-` copy, looked up in `kyvernoPolicies.rules` (rule → ClusterPolicy).
   `make verify-kyverno` computes the violations and holds the lists.

@@ -215,9 +215,11 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
     if "tag" in values:
         fail("kagent.tag forwarded to the kagent chart; the line stamps the build's image tag into the chart at publish "
              "(0.11.0-gs.6+), an override here would pin every release the range admits to one build")
-    if fluxsemver.parse(kagent_range.split()[0].lstrip(">=")) < fluxsemver.parse("0.11.0-gs.6"):
-        fail(f"components.kagent.versionRange {kagent_range!r} admits a chart without the stamps (tag, controller.agentImage.digest, "
-             "harness.create, the kagent-images ConfigMap); the floor is 0.11.0-gs.6")
+    if fluxsemver.parse(kagent_range.split()[0].lstrip(">=")) < fluxsemver.parse("0.11.0-gs.9"):
+        fail(f"components.kagent.versionRange {kagent_range!r} admits a chart whose Harness template keeps an empty-valued selector "
+             "label (the stamps — tag, controller.agentImage.digest, harness.create, the kagent-images ConfigMap — came with "
+             "0.11.0-gs.6; the empty-value drop that removes kagent.dev/harness from the platform Harness's selector with 0.11.0-gs.9, "
+             "giantswarm/agent-platform#418); the floor is 0.11.0-gs.9")
     if re.search(r"^workerImage:", "\n".join(values.get("substrateWorkerPool", [])), re.M):
         fail("kagent.substrateWorkerPool.workerImage forwarded by default; the chart stamps the gVisor worker of the Substrate "
              "version it was built against — the key travels only when an installation sets it (components.kagent.omitEmptyKeys)")
@@ -227,7 +229,9 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
     if re.search(r"^image:", harness, re.M):
         fail("kagent.harness.image forwarded by default; the chart's own Go ADK digest is the Harness image — an override travels only when set")
     for needle, what in (("snapshotLocation: ", "the snapshot location"), ("- name: KAGENT_PROPAGATE_TOKEN", "KAGENT_PROPAGATE_TOKEN in env"),
-                         (f"{HARNESS_LABEL}: kagent", "the platform admission label"), ("kagent.dev/harness: null", "the null that deletes the chart's own admission label")):
+                         (f"{HARNESS_LABEL}: kagent", "the platform admission label"),
+                         ('kagent.dev/harness: ""', "the chart's own admission label blanked (an empty value, which the line's Harness "
+                                                    "template drops — never a null, which the patch of a pre-existing HelmRelease loses, #418)")):
         if needle not in harness:
             fail(f"kagent.harness forwarded without {what}: the meta chart owns the GS policy of the platform Harness\n{harness}")
     pool = scalar(values.get("substrateWorkerPool", []), "name")
