@@ -20,7 +20,24 @@ needs the step (agent-platform.kagent.storageVersionHooks).
       that is absent, or does not store v1alpha2 (a fresh 4.x install, a second
       run), is left alone, and so is the record: a re-run after a failed first
       upgrade keeps what the first run recorded for the restore. Nothing is
-      deleted before the record is written. Then, on
+      deleted before the record is written. Before a CRD goes, whoever applies
+      it is stopped from applying it again (giantswarm/agent-platform#416): a
+      CRD helm-controller installed through a HelmRelease's crds policy carries
+      that release's helm.toolkit.fluxcd.io/name + namespace labels — on an
+      installation upgrading from 3.x the 0.x kagent wrapper release, `crds:
+      CreateReplace`, which the fleet's flag PR (the 4.x values, landed before
+      the bound lift) keeps in an upgrade-retry loop, and every retry re-applies
+      the 0.x chart's crds/ before its render fails (graveler re-created the
+      three CRDs one second after this hook deleted them; kagent-crds stalled
+      on storedVersions). The hook patches every such release's
+      spec.install.crds and spec.upgrade.crds to Skip; the meta upgrade's
+      manifest carries no crds policy for the kagent release any more (the 3.x
+      one did), so Helm's three-way merge drops the patched fields on apply and
+      nothing lingers. After the deletes the hook watches the CRDs stay absent
+      for 60 s — a re-run in flight when the patch landed may still apply once
+      — deletes a re-created one again and fails, naming the owner from the
+      labels: the upgrade is retried by Flux, and the next backup finds the
+      CRDs gone. Then, on
       every run: Helm reads a release's stored manifest back through the
       cluster's REST mappings on each upgrade and uninstall, so once v1alpha2
       is gone every release that rendered one of the three kinds at v1alpha2
@@ -55,7 +72,7 @@ needs the step (agent-platform.kagent.storageVersionHooks).
 {{- if include "agent-platform.kagent.storageVersionHooks" . }}
 {{ include "agent-platform.hooks.job" (dict "root" . "name" "kagent-storage-version-backup" "hook" "pre-install,pre-upgrade" "weight" -7
       "image" (include "agent-platform.hooks.helmImage" .)
-      "about" "record the objects of the kagent CRDs still stored at v1alpha2 (modelconfigs, modelproviderconfigs, remotemcpservers) into the migration ConfigMap and delete those CRDs, so kagent-crds installs them at v1alpha3"
+      "about" "record the objects of the kagent CRDs still stored at v1alpha2 (modelconfigs, modelproviderconfigs, remotemcpservers) into the migration ConfigMap, stop the HelmRelease that applied them from applying them again (crds: Skip) and delete those CRDs, so kagent-crds installs them at v1alpha3"
       "script" (include "agent-platform.kagent.storageVersionBackupScript" .)) }}
 ---
 {{ include "agent-platform.hooks.job" (dict "root" . "name" "kagent-storage-version-restore" "hook" "post-install,post-upgrade" "weight" 0
@@ -94,11 +111,52 @@ else
   kubectl delete configmap "$cm" -n "$ns" --ignore-not-found
   kubectl create -f /tmp/cm.json
   echo "recorded into ConfigMap $ns/$cm ($(wc -c < /tmp/cm.json | tr -d ' ') bytes)"
+  # the owners first (giantswarm/agent-platform#416): the HelmRelease a CRD's
+  # helm.toolkit.fluxcd.io labels name applied it through its crds policy and
+  # re-applies its chart's crds/ on every retry — Skip on both events, before
+  # the CRD goes; the meta upgrade's manifest carries no crds policy for the
+  # kagent release, so Helm's three-way merge drops the patch again on apply
+  : > /tmp/owners.txt
+  for f in /tmp/record/*.json; do
+    crd="$(basename "$f" .json).kagent.dev"
+    kubectl get customresourcedefinitions.apiextensions.k8s.io "$crd" -o jsonpath='{.metadata.labels.helm\.toolkit\.fluxcd\.io/namespace}|{.metadata.labels.helm\.toolkit\.fluxcd\.io/name}{"\n"}' >> /tmp/owners.txt
+  done
+  sort -u /tmp/owners.txt | while IFS='|' read -r ons oname; do
+    [ -n "$oname" ] || continue
+    if [ -z "$ons" ]; then echo "HelmRelease $oname (no helm.toolkit.fluxcd.io/namespace label): cannot be reached; the watch below catches a re-creation"; continue; fi
+    policy="$(kubectl get helmreleases.helm.toolkit.fluxcd.io -n "$ons" "$oname" -o jsonpath='{.spec.install.crds}/{.spec.upgrade.crds}' --ignore-not-found)"
+    if [ -z "$policy" ]; then echo "HelmRelease $ons/$oname (named by the CRDs' labels) is gone; nothing to stop"; continue; fi
+    kubectl patch helmreleases.helm.toolkit.fluxcd.io -n "$ons" "$oname" --type merge -p '{"spec":{"install":{"crds":"Skip"},"upgrade":{"crds":"Skip"}}}' >/dev/null
+    echo "HelmRelease $ons/$oname applied the CRDs (install/upgrade crds policy $policy): set to Skip/Skip so it cannot re-apply them; this upgrade's manifest drops the patch again"
+  done
   for f in /tmp/record/*.json; do
     crd="$(basename "$f" .json).kagent.dev"
     kubectl delete customresourcedefinitions.apiextensions.k8s.io "$crd" --wait --timeout=3m
     echo "$crd deleted, its objects with it; kagent-crds installs it at v1alpha3"
   done
+  # they stay gone: 60 s of checks (a reconcile of the owner in flight when
+  # the patch landed applies its crds/ once more); one that comes back is
+  # deleted again and fails the hook naming the owner — Flux retries the
+  # upgrade, the next backup finds the CRDs absent
+  deadline=$(( $(date +%s) + 60 ))
+  while :; do
+    back=""
+    for f in /tmp/record/*.json; do
+      crd="$(basename "$f" .json).kagent.dev"
+      state="$(kubectl get customresourcedefinitions.apiextensions.k8s.io "$crd" -o jsonpath='{.metadata.creationTimestamp} by HelmRelease {.metadata.labels.helm\.toolkit\.fluxcd\.io/namespace}/{.metadata.labels.helm\.toolkit\.fluxcd\.io/name} (labels {.metadata.labels})' --ignore-not-found)"
+      [ -n "$state" ] || continue
+      back="$back $crd"
+      echo "$crd re-created at $state" >&2
+      kubectl delete customresourcedefinitions.apiextensions.k8s.io "$crd" --wait --timeout=3m
+    done
+    if [ -n "$back" ]; then
+      echo "re-created after the backup deleted them:$back — deleted again; something still applies the 0.x kagent CRDs (the HelmRelease named above: suspend it or fix its values), then reconcile this release again — the record $ns/$cm is kept and the next backup finds the CRDs absent" >&2
+      exit 1
+    fi
+    [ "$(date +%s)" -lt "$deadline" ] || break
+    sleep 5
+  done
+  echo "the deleted CRDs stayed absent for 60 s"
 fi
 # on every run: the Helm release manifests that still name the three kinds at v1alpha2
 {{ include "agent-platform.kagent.storageVersionManifestScript" . }}
