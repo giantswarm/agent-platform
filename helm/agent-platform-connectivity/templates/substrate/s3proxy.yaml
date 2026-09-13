@@ -1,0 +1,309 @@
+{{- /*
+The S3 façade in front of Azure Blob (gaul/s3proxy, jclouds azureblob): what
+Agent Substrate's atelet and ate-api-server talk S3 to when the snapshot store
+is an Azure storage account — on with kagent.harness.snapshotStore.crossplane
+provider capz (the account, container and Workload Identity rendered next to
+it, templates/substrate/crossplane-capz.yaml), or alone
+(kagent.harness.snapshotStore.s3proxy.enabled) in front of an account
+provisioned by hand, or a lab's Azurite, reached with an account key. Stateless
+(a cloud backend), so it scales by replicas; aws-v4 signatures on the S3 side
+with a key pair generated once and kept — the Secret substrate-s3proxy in the
+release namespace (mounted here) and in ate-system (the substrate release's
+env, which the meta chart derives); Substrate's S3 surface — GetObject and
+multipart Upload from atelet, ListObjectsV2, DeleteObject, CopyObject and
+HeadObject from ate-api-server — is what the azureblob backend translates.
+Non-root on 8080 (the Service listens on 80); the JVM sizes its heap from the
+memory limit, so the limit is not optional. Substrate's egress to it lives in
+netpol.yaml next to the bundled store's.
+*/ -}}
+{{- if include "agent-platform.substrateStore.s3proxy" . }}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson }}
+{{- $p := $store.s3proxy }}
+{{- $capz := eq (include "agent-platform.substrateStore.mode" .) "capz" }}
+{{- $name := include "agent-platform.substrateStore.s3proxyName" . }}
+{{- $az := include "agent-platform.substrateStore.azure" . | fromJson }}
+{{- $ns := .Release.Namespace }}
+{{- $substrateNs := include "agent-platform.substrate.namespace" . }}
+{{- $selector := dict "app.kubernetes.io/name" "s3proxy" "app.kubernetes.io/component" "snapshot-store" }}
+{{- $existing := lookup "v1" "Secret" $ns $name }}
+{{- $accessKey := randAlphaNum 20 | upper }}
+{{- $secretKey := randAlphaNum 40 }}
+{{- if and $existing $existing.data (index $existing.data "accessKeyId") }}
+{{- $accessKey = index $existing.data "accessKeyId" | b64dec }}
+{{- $secretKey = index $existing.data "secretAccessKey" | b64dec }}
+{{- end }}
+{{- $endpoint := urlParse $az.endpoint }}
+{{- $backendPort := $endpoint.host | splitList ":" | last }}
+{{- if eq $backendPort $endpoint.host }}{{- $backendPort = ternary "443" "80" (eq $endpoint.scheme "https") }}{{- end }}
+{{- range $secretNs := list $ns $substrateNs | uniq }}
+---
+# The S3 key pair the façade accepts and Substrate presents. Generated on the
+# first render, read back from the release namespace's copy on every later one
+# (stable across upgrades), kept on uninstall.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ $secretNs }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+    app.kubernetes.io/component: snapshot-store
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  accessKeyId: {{ $accessKey | b64enc }}
+  secretAccessKey: {{ $secretKey | b64enc }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: snapshot-store
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: snapshot-store
+spec:
+  replicas: {{ $p.replicas | int }}
+  selector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- /* The selector's name wins over the chart's common name label. */}}
+        {{- merge (deepCopy $selector) (include "labels.common" . | fromYaml) | toYaml | nindent 8 }}
+        {{- if $capz }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      # Never the default token: the Workload Identity webhook projects its own
+      # azure-identity-token volume; the account-key path needs none.
+      automountServiceAccountToken: false
+      # preStop (5 s) plus the proxy's 30 s request drain, with margin.
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- toYaml $selector | nindent 20 }}
+      containers:
+        - name: s3proxy
+          image: {{ $p.image.repository }}:{{ $p.image.tag }}
+          ports:
+            - name: s3
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: S3PROXY_ENDPOINT
+              value: http://0.0.0.0:8080
+            - name: S3PROXY_JAVA_OPTS
+              value: {{ $p.javaOpts | quote }}
+            - name: S3PROXY_AUTHORIZATION
+              value: aws-v4
+            - name: S3PROXY_IDENTITY_FILE
+              value: /run/secrets/s3proxy/accessKeyId
+            - name: S3PROXY_CREDENTIAL_FILE
+              value: /run/secrets/s3proxy/secretAccessKey
+            - name: JCLOUDS_PROVIDER
+              value: azureblob
+            - name: JCLOUDS_ENDPOINT
+              value: {{ $az.endpoint | quote }}
+            - name: JCLOUDS_IDENTITY
+              value: {{ $az.account | quote }}
+            {{- if $capz }}
+            # No jclouds credential: the azureblob backend defers to
+            # DefaultAzureCredential, which takes the Workload Identity path from
+            # these two and what the azure-workload-identity webhook injects for
+            # the azure.workload.identity/use label (AZURE_FEDERATED_TOKEN_FILE,
+            # AZURE_AUTHORITY_HOST, the projected token) — a hard prerequisite
+            # of provider capz (UPGRADE.md).
+            - name: AZURE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-platform.substrateStore.capzIdentitySecret" . }}
+                  key: AZURE_CLIENT_ID
+            - name: AZURE_TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-platform.substrateStore.capzIdentitySecret" . }}
+                  key: AZURE_TENANT_ID
+            {{- else }}
+            - name: JCLOUDS_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.azure.accountKeySecretRef.name }}
+                  key: {{ $p.azure.accountKeySecretRef.key }}
+            {{- end }}
+          # /healthz answers without authentication and 503 while draining, so
+          # readiness takes a terminating pod out of the Service.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: s3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            {{- toYaml $p.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: credentials
+              mountPath: /run/secrets/s3proxy
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            # The image's start script creates /data for the filesystem
+            # backend even when another is configured.
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: credentials
+          secret:
+            secretName: {{ $name }}
+            defaultMode: 0440
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: snapshot-store
+spec:
+  selector:
+    {{- toYaml $selector | nindent 4 }}
+  ports:
+    - name: s3
+      port: 80
+      targetPort: s3
+      protocol: TCP
+{{- if gt ($p.replicas | int) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: snapshot-store
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# Only Substrate's two snapshot clients reach the façade; it reaches DNS and
+# the blob endpoint on the endpoint's port — world (the account and, for the
+# identity's token exchange, login.microsoftonline.com) with provider capz;
+# world and the cluster for the façade alone (a lab's Azurite, a private
+# endpoint). Never the cluster with capz: the port is 443 and that would admit
+# the apiserver.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: atelet
+            io.kubernetes.pod.namespace: {{ $substrateNs }}
+        - matchLabels:
+            app: ate-api-server
+            io.kubernetes.pod.namespace: {{ $substrateNs }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - world
+        {{- if not $capz }}
+        - cluster
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ $backendPort | quote }}
+              protocol: TCP
+{{- else }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $substrateNs }}
+          podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [atelet, ate-api-server]
+      ports:
+        - port: 8080
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

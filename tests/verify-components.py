@@ -47,6 +47,8 @@ import subprocess
 import sys
 import tempfile
 
+import yaml
+
 GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 
 # component -> (repository, versionRange, dependsOn, a line only the standalone's
@@ -368,6 +370,23 @@ def main(meta: str, connectivity: str) -> int:
 
     # --- the dev channel: semverFilter ----------------------------------------------
     check_semver_filters(meta, ci)
+
+    # --- the s3proxy façade's image (kagent.harness.snapshotStore.s3proxy) --------
+    # An image, not a chart: the gsoci mirror of gaul/s3proxy, the same default in
+    # both charts (the connectivity chart runs it, the meta chart forwards the
+    # block), pinned by the BOM like a component.
+    s3proxy_meta = yaml.safe_load(open(f"{meta}/values.yaml"))["kagent"]["harness"]["snapshotStore"]["s3proxy"]["image"]
+    s3proxy_conn = yaml.safe_load(open(f"{connectivity}/values.yaml"))["kagent"]["harness"]["snapshotStore"]["s3proxy"]["image"]
+    if s3proxy_meta != s3proxy_conn:
+        fail(f"kagent.harness.snapshotStore.s3proxy.image differs between the charts: meta {s3proxy_meta}, connectivity {s3proxy_conn}")
+    if not s3proxy_meta["repository"].startswith("gsoci.azurecr.io/giantswarm/"):
+        fail(f"kagent.harness.snapshotStore.s3proxy.image.repository {s3proxy_meta['repository']!r} is not the gsoci mirror (gsoci.azurecr.io/giantswarm/s3proxy, giantswarm/retagger)")
+    bom_s3proxy = yaml.safe_load(open(f"{meta}/examples/customer-bom.yaml"))
+    for k in ("kagent", "harness", "snapshotStore", "s3proxy", "image", "tag"):
+        bom_s3proxy = (bom_s3proxy or {}).get(k)
+    if bom_s3proxy != s3proxy_meta["tag"]:
+        fail(f"examples/customer-bom.yaml pins kagent.harness.snapshotStore.s3proxy.image.tag {bom_s3proxy!r}; the chart's default is {s3proxy_meta['tag']!r} — the BOM pins the façade's image like a component")
+    print("ok: the s3proxy façade's image is the gsoci mirror, the same default in both charts, pinned by the BOM")
 
     # --- the BOM pins every one exactly ------------------------------------------
     bom_file = open(f"{meta}/examples/customer-bom.yaml").read()

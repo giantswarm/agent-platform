@@ -1803,7 +1803,12 @@ SUBSTRATE_STORE_CI := $(CONNECTIVITY_DIR)/ci/test-substrate-store-aws-values.yam
 # The account id apart: Helm applies --set-string after --set, so the numeric-id guard below builds on the base.
 SUBSTRATE_STORE_META_BASE := helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set kagent.harness.snapshotLocation= --set kagent.harness.snapshotStore.crossplane.enabled=true --set kagent.harness.snapshotStore.crossplane.providerConfigRef=ci --set kagent.harness.snapshotStore.crossplane.region=eu-central-1 --set kagent.harness.snapshotStore.crossplane.aws.bucketName=giantswarm-ci-substrate --set kagent.harness.snapshotStore.crossplane.aws.oidcProvider=irsa.ci.example.com
 SUBSTRATE_STORE_META := $(SUBSTRATE_STORE_META_BASE) --set-string kagent.harness.snapshotStore.crossplane.aws.accountId=123456789012
-verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harness.snapshotStore, #411): off by default nothing renders; on, the connectivity chart renders the Crossplane Bucket (+ lifecycle, public-access block, TLS-only policy, never deleted, kept) and the IAM Role trusted by the atelet and ate-api-server ServiceAccounts in ate-system with the S3 policy on the bucket; the meta chart derives kagent.harness.snapshotLocation (s3://<bucket>/<prefix>) for the kagent release and holds the block back from it, forwards the role annotation to both ServiceAccounts of the substrate release next to an installation's own annotations; the guards (a disagreeing explicit location or role, a non-aws provider, missing inputs, a numeric account id).
+SUBSTRATE_STORE_CAPZ_CI := $(CONNECTIVITY_DIR)/ci/test-substrate-store-capz-values.yaml
+SUBSTRATE_STORE_CAPZ_SET := --set kagent.harness.snapshotStore.crossplane.provider=capz --set kagent.harness.snapshotStore.crossplane.region=westeurope --set kagent.harness.snapshotStore.crossplane.capz.storageAccountName=giantswarmcisubstrate --set kagent.harness.snapshotStore.crossplane.capz.containerName=giantswarm-ci-substrate --set kagent.harness.snapshotStore.crossplane.capz.resourceGroup=ci --set kagent.harness.snapshotStore.crossplane.capz.subscriptionId=00000000-0000-0000-0000-000000000000 --set kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl=https://oidc.ci.example.com/ --set kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef=ci-kubernetes
+SUBSTRATE_STORE_META_CAPZ := helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set kagent.harness.snapshotLocation= --set kagent.harness.snapshotStore.crossplane.enabled=true --set kagent.harness.snapshotStore.crossplane.providerConfigRef=ci $(SUBSTRATE_STORE_CAPZ_SET)
+# The façade alone: no Crossplane block, an account provisioned by hand (or a lab's Azurite) named in s3proxy.azure.*.
+SUBSTRATE_STORE_S3PROXY := --set kagent.harness.snapshotLocation= --set kagent.harness.snapshotStore.s3proxy.enabled=true --set kagent.harness.snapshotStore.s3proxy.azure.endpoint=http://azurite.agent-platform.svc:10000/devstoreaccount1 --set kagent.harness.snapshotStore.s3proxy.azure.account=devstoreaccount1 --set kagent.harness.snapshotStore.s3proxy.azure.container=ate-snapshots --set kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name=azurite --set kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key=key
+verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harness.snapshotStore, #411): off by default nothing renders; on, the connectivity chart renders the Crossplane Bucket (+ lifecycle, public-access block, TLS-only policy, never deleted, kept) and the IAM Role trusted by the atelet and ate-api-server ServiceAccounts in ate-system with the S3 policy on the bucket; the meta chart derives kagent.harness.snapshotLocation (s3://<bucket>/<prefix>) for the kagent release and holds the block back from it, forwards the role annotation to both ServiceAccounts of the substrate release next to an installation's own annotations; provider capz (#417) renders the Azure Account (TLS-only, private, soft delete, never deleted, kept), Container, lifecycle ManagementPolicy, the UserAssignedIdentity + FederatedIdentityCredential for the s3proxy ServiceAccount, the bridged RoleAssignment and client-id Secret, and the s3proxy façade (Deployment from gsoci, Service, the key pair in both namespaces, PDB, network policies, Substrate's egress to it); the façade alone renders no Crossplane object and reads an account key; the meta chart derives s3://<container>/<prefix> and the façade's S3 environment on both substrate components next to an installation's own; the guards (a disagreeing explicit location, role or s3proxy.azure.*, an unknown provider, missing inputs, a numeric account id, a bad account name, the bundled store on, an own S3 variable). Off and aws render as before.
 	@echo "====> $@"
 	@echo "--> off by default: no Crossplane object of the store in the substrate render, nothing derived"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml >/tmp/vss-off.out 2>&1 || { cat /tmp/vss-off.out; exit 1; }
@@ -1852,6 +1857,65 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@$(SUBSTRATE_STORE_META) --set 'substrate.atelet.serviceAccount.annotations.foo=bar' >/tmp/vss-meta-own.out 2>&1 || { cat /tmp/vss-meta-own.out; exit 1; }
 	@sed -n '/^    atelet:/,/^    [a-zA-Z]*:/p' /tmp/vss-meta-own.out | grep -q 'foo: bar' || { echo "FAIL: an installation's own atelet ServiceAccount annotation is dropped by the derivation"; exit 1; }
 	@echo "ok: the meta chart derives the location and the annotations"
+	@echo "--> connectivity, capz: account, container, lifecycle, identity, federated credential, the bridging Objects, the façade"
+	@helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) >/tmp/vss-capz.out 2>&1 || { cat /tmp/vss-capz.out; exit 1; }
+	@for kind in Account ManagementPolicy; do grep -A3 "^kind: $$kind$$" /tmp/vss-capz.out | grep -q '^  name: giantswarmcisubstrate$$' || { echo "FAIL: $$kind giantswarmcisubstrate missing from the capz render"; exit 1; }; done
+	@grep -A3 '^kind: Container$$' /tmp/vss-capz.out | grep -q '^  name: giantswarm-ci-substrate$$' || { echo "FAIL: the Container is missing"; exit 1; }
+	@for kind in UserAssignedIdentity FederatedIdentityCredential; do grep -A3 "^kind: $$kind$$" /tmp/vss-capz.out | grep -q '^  name: giantswarm-ci-substrate-identity$$' || { echo "FAIL: $$kind giantswarm-ci-substrate-identity missing (workloadIdentity.identityName defaults to <containerName>-identity)"; exit 1; }; done
+	@awk '/^kind: Account$$/,/^---/' /tmp/vss-capz.out >/tmp/vss-capz-account.out
+	@grep -q 'helm.sh/resource-policy: keep' /tmp/vss-capz-account.out || { echo "FAIL: the account is not kept on uninstall"; exit 1; }
+	@if grep -q '"\*"' /tmp/vss-capz-account.out; then echo "FAIL: the account carries the full management policy (it must never be deleted by Crossplane)"; exit 1; fi
+	@grep -q 'enableHttpsTrafficOnly: true' /tmp/vss-capz-account.out || { echo "FAIL: the account is not TLS-only"; exit 1; }
+	@grep -q 'allowNestedItemsToBePublic: false' /tmp/vss-capz-account.out || { echo "FAIL: the account allows public blobs"; exit 1; }
+	@grep -q 'app: agent-platform-substrate' /tmp/vss-capz-account.out || { echo "FAIL: the account does not carry the substrate app tag"; exit 1; }
+	@awk '/^kind: ManagementPolicy$$/,/^---/' /tmp/vss-capz.out | grep -q 'deleteAfterDaysSinceModificationGreaterThan: 30' || { echo "FAIL: the default capz lifecycle is not 30 days"; exit 1; }
+	@awk '/^kind: FederatedIdentityCredential$$/,/^---/' /tmp/vss-capz.out | grep -q 'subject: "system:serviceaccount:default:substrate-s3proxy"' || { echo "FAIL: the federated credential does not name the s3proxy ServiceAccount"; exit 1; }
+	@grep -q 'roleDefinitionName: Storage Blob Data Contributor' /tmp/vss-capz.out || { echo "FAIL: no Storage Blob Data Contributor assignment"; exit 1; }
+	@grep -q 'scope: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ci/providers/Microsoft.Storage/storageAccounts/giantswarmcisubstrate/blobServices/default/containers/giantswarm-ci-substrate"' /tmp/vss-capz.out || { echo "FAIL: the assignment is not scoped to the container"; exit 1; }
+	@grep -q 'toFieldPath: stringData.AZURE_CLIENT_ID' /tmp/vss-capz.out || { echo "FAIL: the identity's client id is not bridged into the pods' Secret"; exit 1; }
+	@grep -q 'name: provider-kubernetes-ci' /tmp/vss-capz.out || { echo "FAIL: the provider-kubernetes RBAC does not name the ServiceAccount"; exit 1; }
+	@awk '/^kind: Deployment$$/,/^---/' /tmp/vss-capz.out >/tmp/vss-capz-deploy.out
+	@grep -q 'image: gsoci.azurecr.io/giantswarm/s3proxy:' /tmp/vss-capz-deploy.out || { echo "FAIL: the s3proxy image is not pulled from gsoci"; exit 1; }
+	@grep -q 'azure.workload.identity/use: "true"' /tmp/vss-capz-deploy.out || { echo "FAIL: the s3proxy pods do not use Workload Identity"; exit 1; }
+	@grep -q 'value: "https://giantswarmcisubstrate.blob.core.windows.net"' /tmp/vss-capz-deploy.out || { echo "FAIL: JCLOUDS_ENDPOINT is not the account's blob endpoint"; exit 1; }
+	@if grep -q 'JCLOUDS_CREDENTIAL' /tmp/vss-capz-deploy.out; then echo "FAIL: capz hands s3proxy an account key (DefaultAzureCredential expected)"; exit 1; fi
+	@grep -q 'name: AZURE_CLIENT_ID' /tmp/vss-capz-deploy.out || { echo "FAIL: AZURE_CLIENT_ID is not read from the bridged Secret"; exit 1; }
+	@[ "$$(grep -c '^kind: Secret$$' /tmp/vss-capz.out)" = "2" ] || { echo "FAIL: the key pair is not rendered in both the release namespace and ate-system"; exit 1; }
+	@[ "$$(awk '/^kind: Secret$$/,/^---/' /tmp/vss-capz.out | grep -c 'helm.sh/resource-policy: keep')" = "2" ] || { echo "FAIL: a key-pair Secret is not kept on uninstall"; exit 1; }
+	@grep -q 'readOnlyRootFilesystem: true' /tmp/vss-capz-deploy.out || { echo "FAIL: the façade's root filesystem is writable"; exit 1; }
+	@grep -q 'runAsNonRoot: true' /tmp/vss-capz-deploy.out || { echo "FAIL: the façade runs as root"; exit 1; }
+	@grep -q 'automountServiceAccountToken: false' /tmp/vss-capz-deploy.out || { echo "FAIL: the façade mounts the default ServiceAccount token"; exit 1; }
+	@grep -q 'name: S3PROXY_JAVA_OPTS' /tmp/vss-capz-deploy.out || { echo "FAIL: the façade's JVM options are not set"; exit 1; }
+	@grep -A3 '^kind: Service$$' /tmp/vss-capz.out | grep -q '^  name: substrate-s3proxy$$' || { echo "FAIL: the s3proxy Service is missing"; exit 1; }
+	@grep -q '^kind: PodDisruptionBudget$$' /tmp/vss-capz.out || { echo "FAIL: the façade has no PodDisruptionBudget"; exit 1; }
+	@awk '/^  name: substrate-s3proxy-ingress$$/,/^---/' /tmp/vss-capz.out >/tmp/vss-capz-ingress.out
+	@grep -q 'values: \[atelet, ate-api-server\]' /tmp/vss-capz-ingress.out || { echo "FAIL: the façade's ingress policy does not select exactly atelet and ate-api-server"; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: ate-system' /tmp/vss-capz-ingress.out || { echo "FAIL: the façade's ingress policy is not scoped to ate-system"; exit 1; }
+	@[ "$$(grep -c 'podSelector' /tmp/vss-capz-ingress.out)" = "2" ] || { echo "FAIL: the façade's ingress policy admits more than the two Substrate clients"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set networkPolicy.flavor=cilium >/tmp/vss-capz-cilium.out 2>&1 || { cat /tmp/vss-capz-cilium.out; exit 1; }
+	@for c in substrate-atelet substrate-ate-api-server; do awk "/^  name: $$c$$/,/^---/" /tmp/vss-capz-cilium.out | grep -q 'app.kubernetes.io/name: s3proxy' || { echo "FAIL: $$c has no egress to the façade"; exit 1; }; done
+	@awk '/^  name: substrate-s3proxy$$/,/^---/' /tmp/vss-capz-cilium.out | grep -q 'port: "443"' || { echo "FAIL: the façade has no egress to the blob endpoint"; exit 1; }
+	@if awk '/^  name: substrate-s3proxy$$/,/^---/' /tmp/vss-capz-cilium.out | grep -A3 'toEntities' | grep -q -- '- cluster'; then echo "FAIL: with capz the façade's egress admits the cluster entity on 443 (the apiserver)"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) --set networkPolicy.flavor=cilium 2>&1 | awk '/^  name: substrate-s3proxy$$/,/^---/' | grep -A3 'toEntities' | grep -q -- '- cluster' || { echo "FAIL: the façade alone has no egress to an in-cluster store"; exit 1; }
+	@python3 tests/yaml-no-duplicate-keys.py /tmp/vss-capz.out || { echo "FAIL: the capz render repeats a mapping key (helm template tolerates it, the install does not)"; exit 1; }
+	@echo "ok: connectivity renders the capz store and the façade"
+	@echo "--> the façade alone (an account provisioned by hand, a lab's Azurite): no Crossplane object, an account key"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) >/tmp/vss-s3p.out 2>&1 || { cat /tmp/vss-s3p.out; exit 1; }
+	@if grep -q -E '^kind: (Account|Container|UserAssignedIdentity|FederatedIdentityCredential|Object)$$' /tmp/vss-s3p.out; then echo "FAIL: the façade alone renders Crossplane objects"; exit 1; fi
+	@awk '/^kind: Deployment$$/,/^---/' /tmp/vss-s3p.out | grep -q 'JCLOUDS_CREDENTIAL' || { echo "FAIL: the façade alone does not read the account key"; exit 1; }
+	@if awk '/^kind: Deployment$$/,/^---/' /tmp/vss-s3p.out | grep -q 'azure.workload.identity'; then echo "FAIL: the façade alone claims Workload Identity"; exit 1; fi
+	@echo "ok: the façade alone"
+	@echo "--> meta chart, capz: the derived location, the façade's S3 environment on both substrate components"
+	@$(SUBSTRATE_STORE_META_CAPZ) >/tmp/vss-meta-capz.out 2>&1 || { cat /tmp/vss-meta-capz.out; exit 1; }
+	@awk '/^  name: kagent$$/,/^---/' /tmp/vss-meta-capz.out | grep -q 'snapshotLocation: s3://giantswarm-ci-substrate/kagent' || { echo "FAIL: the location is not derived from the container and the prefix"; exit 1; }
+	@if awk '/^  name: kagent$$/,/^---/' /tmp/vss-meta-capz.out | grep -q 's3proxy'; then echo "FAIL: the façade block is forwarded to the kagent chart"; exit 1; fi
+	@awk '/^  name: substrate$$/,/^---/' /tmp/vss-meta-capz.out >/tmp/vss-meta-capz-substrate.out
+	@[ "$$(grep -c 'value: http://substrate-s3proxy.default.svc:80' /tmp/vss-meta-capz-substrate.out)" = "2" ] || { echo "FAIL: AWS_ENDPOINT_URL does not reach both substrate components"; cat /tmp/vss-meta-capz-substrate.out; exit 1; }
+	@[ "$$(grep -c 'name: substrate-s3proxy' /tmp/vss-meta-capz-substrate.out)" = "4" ] || { echo "FAIL: the key pair Secret is not read by both components"; exit 1; }
+	@if grep -q 'eks.amazonaws.com/role-arn' /tmp/vss-meta-capz-substrate.out; then echo "FAIL: capz derives an IRSA annotation"; exit 1; fi
+	@$(SUBSTRATE_STORE_META_CAPZ) --set 'substrate.atelet.extraEnv[0].name=FOO' --set 'substrate.atelet.extraEnv[0].value=bar' 2>&1 | awk '/^  name: substrate$$/,/^---/' | grep -q 'name: FOO' || { echo "FAIL: an installation's own atelet extraEnv entry is dropped by the derivation"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) $(SUBSTRATE_STORE_S3PROXY) 2>&1 | awk '/^  name: kagent$$/,/^---/' | grep -q 'snapshotLocation: s3://ate-snapshots/kagent' || { echo "FAIL: the façade alone does not derive the location at the meta chart"; exit 1; }
+	@echo "ok: the meta chart wires the façade"
 	@echo "--> guards"
 	@if $(SUBSTRATE_STORE_META) --set kagent.harness.snapshotLocation=s3://other/agents >/tmp/vss-g1.out 2>&1; then echo "FAIL: a disagreeing explicit snapshotLocation rendered"; exit 1; fi
 	@grep -q 'kagent.harness.snapshotLocation (s3://other/agents) differs from the location kagent.harness.snapshotStore renders (s3://giantswarm-ci-substrate/kagent)' /tmp/vss-g1.out || { echo "FAIL: the location guard does not name both"; cat /tmp/vss-g1.out; exit 1; }
@@ -1873,6 +1937,32 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@grep -q 'must be the 12-digit AWS account id, quoted as a string' /tmp/vss-g6.out || { echo "FAIL: the accountId guard is silent"; cat /tmp/vss-g6.out; exit 1; }
 	@if $(SUBSTRATE_STORE_META_BASE) --set kagent.harness.snapshotStore.crossplane.aws.accountId=123456789012 >/tmp/vss-g7.out 2>&1; then echo "FAIL: the meta chart rendered a numeric accountId"; exit 1; fi
 	@grep -q 'must be the 12-digit AWS account id, quoted as a string' /tmp/vss-g7.out || { echo "FAIL: the meta accountId guard is silent"; cat /tmp/vss-g7.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set kagent.harness.snapshotStore.crossplane.capz.storageAccountName=Bad-Name >/tmp/vss-g8.out 2>&1; then echo "FAIL: a bad storage account name rendered"; exit 1; fi
+	@grep -q 'must be 3 to 24 lowercase letters and digits' /tmp/vss-g8.out || { echo "FAIL: the account-name guard is silent"; cat /tmp/vss-g8.out; exit 1; }
+	@for k in storageAccountName containerName resourceGroup subscriptionId; do \
+		if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set kagent.harness.snapshotStore.crossplane.capz.$$k= >/tmp/vss-g9.out 2>&1; then echo "FAIL: crossplane.capz.$$k empty rendered"; exit 1; fi; \
+		grep -q "kagent.harness.snapshotStore.crossplane.capz.$$k is required" /tmp/vss-g9.out || { echo "FAIL: the guard for crossplane.capz.$$k is silent"; exit 1; }; \
+	done
+	@for k in oidcIssuerUrl providerKubernetes.providerConfigRef; do \
+		if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.$$k= >/tmp/vss-g10.out 2>&1; then echo "FAIL: capz.workloadIdentity.$$k empty rendered"; exit 1; fi; \
+		grep -q "workloadIdentity.$$k is required" /tmp/vss-g10.out || { echo "FAIL: the guard for capz.workloadIdentity.$$k is silent"; exit 1; }; \
+	done
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set kagent.harness.snapshotStore.s3proxy.azure.account=other >/tmp/vss-g11.out 2>&1; then echo "FAIL: a disagreeing s3proxy.azure.account rendered"; exit 1; fi
+	@grep -q 'differs from what kagent.harness.snapshotStore.crossplane.capz renders' /tmp/vss-g11.out || { echo "FAIL: the s3proxy.azure guard is silent"; exit 1; }
+	@if $(SUBSTRATE_STORE_META_CAPZ) --set substrate.rustfs.enabled=true >/tmp/vss-g12.out 2>&1; then echo "FAIL: the bundled store rendered next to the façade"; exit 1; fi
+	@grep -q 'substrate.rustfs.enabled is on while' /tmp/vss-g12.out || { echo "FAIL: the rustfs guard is silent"; exit 1; }
+	@if $(SUBSTRATE_STORE_META_CAPZ) --set 'substrate.ateApiServer.extraEnv[0].name=AWS_ENDPOINT_URL' --set 'substrate.ateApiServer.extraEnv[0].value=http://other' >/tmp/vss-g13.out 2>&1; then echo "FAIL: an own AWS_ENDPOINT_URL rendered next to the derived one"; exit 1; fi
+	@grep -q 'substrate.ateApiServer.extraEnv names AWS_ENDPOINT_URL' /tmp/vss-g13.out || { echo "FAIL: the extraEnv guard is silent"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml --set kagent.harness.snapshotLocation= --set kagent.harness.snapshotStore.s3proxy.enabled=true >/tmp/vss-g14.out 2>&1; then echo "FAIL: the façade alone rendered without an account"; exit 1; fi
+	@grep -q 's3proxy.azure.endpoint is required' /tmp/vss-g14.out || { echo "FAIL: the façade's account guard is silent"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) --set kagent.harness.snapshotStore.s3proxy.azure.endpoint=azurite:10000 >/tmp/vss-g15.out 2>&1; then echo "FAIL: an endpoint without a scheme rendered"; exit 1; fi
+	@grep -q 'must be an http(s) URL' /tmp/vss-g15.out || { echo "FAIL: the endpoint guard is silent"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) --set kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name= >/tmp/vss-g16.out 2>&1; then echo "FAIL: the façade alone rendered without an account key"; exit 1; fi
+	@grep -q 'accountKeySecretRef.name and .key are required' /tmp/vss-g16.out || { echo "FAIL: the account-key guard is silent"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name=x --set kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key=k >/tmp/vss-g17.out 2>&1; then echo "FAIL: capz rendered with an account key"; exit 1; fi
+	@grep -q 'accountKeySecretRef is set next to crossplane.provider capz' /tmp/vss-g17.out || { echo "FAIL: the capz account-key guard is silent"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotStore.s3proxy.enabled=true >/tmp/vss-g18.out 2>&1; then echo "FAIL: the façade rendered next to an aws bucket"; exit 1; fi
+	@grep -q 's3proxy.enabled is on next to crossplane.provider aws' /tmp/vss-g18.out || { echo "FAIL: the aws+façade guard is silent"; exit 1; }
 	@echo "ok: guards"
 	@echo "====> $@ passed"
 
