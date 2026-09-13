@@ -1468,6 +1468,8 @@ WIRING_BACKSTAGE := $(VM) --namespace agent-platform $(WIRING_QUICKSTART) --set 
 WIRING_SERVING := $(VM) --namespace agent-platform --set components.modelServing.enabled=true --set components.kserve-crd.enabled=true --set components.kserve-resources.enabled=true
 # The fleet-shape render with every toggle of this slice off: byte-identical to origin/main's.
 WIRING_OFF := $(VM) --namespace agent-platform --set components.kagent.enabled=true
+# Every wired component on: the render the app-config assertions read.
+WIRING_BACKSTAGE_FULL := $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true
 # The controller's JWKS egress: an agentgateway-* mode with the kagent controller
 # route and its JWT policy on. JWKS_INCLUSTER keeps values.yaml's in-cluster host
 # (dex.giantswarm.svc.cluster.local), which gateway.jwksEgress covers alone;
@@ -1490,7 +1492,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	done
 	@echo "ok: inert while off"
 	@echo "--> Backstage on: the app-config ConfigMap the backstage: block mounts, derived from the platform's values"
-	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' /tmp/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >/tmp/vw-bs-cm.out
 	@[ -s /tmp/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
 	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
@@ -1518,6 +1520,18 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@grep -q 'helm.sh/hook: post-install,post-upgrade' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job is not a post-install/post-upgrade hook"; exit 1; }
 	@grep -q -- '--selector=app=backstage' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job does not select the Backstage Deployment by label (a missing Deployment must be a no-op)"; exit 1; }
 	@grep -qE 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]{64}' /tmp/vw-bs-job.out || { echo "FAIL: the config-reload Job carries no app-config checksum"; exit 1; }
+	@echo "--> the checksum covers the app-config data only: a chart-version bump keeps it, an app-config change moves it (#424)"
+	@rm -rf /tmp/vw-bs-vbump && cp -r $(CONNECTIVITY_DIR) /tmp/vw-bs-vbump && sed -i 's/^version: .*/version: 0.0.0-verify/' /tmp/vw-bs-vbump/Chart.yaml
+	@helm template t /tmp/vw-bs-vbump $(WIRING_BACKSTAGE_FULL) >/tmp/vw-bs-vbump.out 2>&1 || { cat /tmp/vw-bs-vbump.out; exit 1; }
+	@grep -q 'helm.sh/chart: "agent-platform-connectivity-0.0.0-verify"' /tmp/vw-bs-vbump.out || { echo "FAIL: the version bump did not reach the rendered labels (the assertion below would pass vacuously)"; exit 1; }
+	@base=$$(grep -o 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]*' /tmp/vw-bs-job.out); \
+	bump=$$(grep -o 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]*' /tmp/vw-bs-vbump.out); \
+	[ "$$base" = "$$bump" ] || { echo "FAIL: the app-config checksum moved on a chart-version bump alone ($$base vs $$bump): every release would roll the portal"; exit 1; }; \
+	for change in 'backstage.installationName=other' 'kagent.fluxServiceAccountName=tenant-x' 'global.identity.issuerUrl=https://idp.example.org'; do \
+		moved=$$(helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) --set "$$change" 2>/dev/null | grep -o 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]*'); \
+		[ -n "$$moved" ] && [ "$$moved" != "$$base" ] || { echo "FAIL: the app-config checksum did not move on --set $$change"; exit 1; }; \
+	done
+	@echo "ok: checksum follows the app-config data only"
 	@grep -q 'kind: CiliumNetworkPolicy' /tmp/vw-bs.out && grep -q 'agent-platform-connectivity-backstage-config-reload' /tmp/vw-bs.out || { echo "FAIL: no cilium policy for the config-reload Job"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^kind: NetworkPolicy$$/,/^---/' | grep -q 'agent-platform-connectivity-backstage-config-reload' || { echo "FAIL: no kubernetes policy for the config-reload Job"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set backstage.configReload.enabled=false >/tmp/vw-bs-noreload.out 2>&1 || { cat /tmp/vw-bs-noreload.out; exit 1; }
