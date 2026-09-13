@@ -2,6 +2,24 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the Substrate line re-pins to `v0.0.27-gs.9`, the kagent line to `v0.11.0-gs.12`: a superseded template's crashed golden actor is collected and frees its worker)
+
+`components.kagent` / `components.kagent-crds` move to `>=0.11.0-gs.12 <0.11.1-0` and `components.substrate` / `components.substrate-crds` to `>=0.0.27-gs.9 <0.0.28-0`. `v0.11.0-gs.12` stamps the Substrate worker image `0.0.27-gs.9` into the kagent chart's `substrateWorkerPool.workerImage`; `v0.0.27-gs.9` = `gs.8` + giantswarm/substrate#30 (the gVisor worker's terminate collects a workload whose runsc containers are already gone). Before it, an `AgentTemplate` changed while its previous revision's golden boot was crash-looping (a skill that fails to load, an image the registry refuses after the first pull) left the superseded revision uncollectable: the kagent controller logged `failed to collect runtime revision … delete unreferenced ActorTemplate kagent/<agent>-kagent-<rev>: … while running `runsc state`: exit status 128` every minute per template, the golden actor stayed `ACTOR_STATE_DELETING` with its worker assignment intact, and **one worker of the pool was pinned per such template** (gazelle 2026-09-13: two of four workers; giantswarm/giantswarm#37773). The new revision itself was Ready and unaffected.
+
+### Operator action
+
+- **None to install.** The Substrate control plane moves within its range on its own; the `WorkerPool` rolls its pods once when the kagent release lands (`kagent.substrateWorkerPool.workerImage` follows the chart's stamp) — a worker roll suspends nothing that is not already suspended, but an actor mid-turn on a rolled worker loses that turn.
+- **A pinned worker is freed by the roll itself**: Substrate's delete workflow treats an actor whose worker pod is gone as terminated, so the stuck templates of an installation on 4.10.x are collected within a minute of the roll without any hand-work. A BOM pins `kagent`/`kagent-crds` to `0.11.0-gs.12` and `substrate`/`substrate-crds` to `0.0.27-gs.9` or later (`examples/customer-bom.yaml`).
+- **Recognising the condition on an installation that has not rolled yet** (or on any Substrate release, for a golden actor stuck for another reason): the controller log above, and through ate-api-server with `kubectl-ate` (`go install ./cmd/kubectl-ate` from giantswarm/substrate; it port-forwards to `ate-api-server` in `ate-system` and authenticates with a ServiceAccount token; `--context <installation>`):
+
+  ```sh
+  kubectl ate get actors -a ate-golden      # STATE ACTOR_STATE_DELETING (or CRASHED) with an ATEOM POD set = a golden pinning a worker
+  kubectl ate get workers -n kagent         # ASSIGNED(1/1) on the pool's workers that host them
+  ```
+
+  A healthy superseded golden is `ACTOR_STATE_SUSPENDED` with no worker; the kagent controller collects it on its next sweep.
+- **Removing a stuck template by hand** (`v0.0.27-gs.8` and earlier): the delete cannot succeed while the worker pod that hosted the crashed golden is alive — the same `runsc state` failure answers `kubectl ate delete actor <name> -a ate-golden`. Delete that worker pod (`kubectl -n kagent delete pod <ATEOM POD>`; the `WorkerPool` replaces it): the next controller sweep, within a minute, deletes the golden actor (worker gone = terminated), the `ActorTemplate` and the runtime revision, the log line stops and the replacement worker registers `FREE`. Nothing is edited in Substrate's store. With `0.0.27-gs.9` workers the sweep succeeds on the live worker and this recipe is not needed.
+
 ## \<current\> → \<next\> (the chart provisions Agent Substrate's snapshot store on CAPZ: Crossplane storage account + Workload Identity behind an s3proxy façade)
 
 `kagent.harness.snapshotStore.crossplane.provider: capz` renders the Azure half of the store the CAPA one got in the previous entry: the connectivity chart renders the storage `Account` (TLS-only, no public blobs, soft delete; never deleted by Crossplane, kept by Helm), the blob `Container` with a lifecycle `ManagementPolicy` (`capz.lifecycleDays`, 30), a `UserAssignedIdentity` federated for the s3proxy ServiceAccount with Storage Blob Data Contributor on the container (provider-kubernetes bridges the generated ids), and the **s3proxy façade** — Substrate speaks S3 only, so a stateless `substrate-s3proxy` Deployment in the release namespace translates to Azure Blob as that identity. The meta chart derives `kagent.harness.snapshotLocation` = `s3://<capz.containerName>/<prefix>` and hands the substrate release the façade's S3 environment on `atelet.extraEnv` and `ateApiServer.extraEnv` (README "Agent Substrate: the snapshot store").

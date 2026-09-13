@@ -79,7 +79,7 @@ HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 # `gs` identifier-wise), not a later upstream base (the ceiling holds the patch;
 # Masterminds confines a prerelease to no patch tuple, so `<0.12.0-0` would let
 # 0.11.1-dev.… through), not the next minor.
-ADMITTED = ["{floor}", "{floor_next}", "{base}-gs.10", "{base}"]
+ADMITTED = ["{floor}", "{floor_next}", "{floor_tenfold}", "{base}"]
 REFUSED = ["{below_floor}", "{base}-dev.giantswarm.2026-09-10.22-06-46.h0ac5240", "{next_patch}-dev.giantswarm.2026-09-11.00-00-00.h0000000",
            "{next_patch}-gs.1", "{next_patch}", "{next_minor}-gs.1", "{next_minor}"]
 EXAMPLE_AGENTS = ["k8s-agent", "kgateway-agent", "istio-agent", "promql-agent", "observability-agent",
@@ -256,7 +256,7 @@ def check_sources(docs, kagent_range: str) -> None:
     base = fluxsemver.base(floor)
     major, minor, patch = (int(x) for x in base.split("."))
     n = int(re.search(r"-gs\.(\d+)$", floor).group(1))  # the line's counter at the floor
-    shapes = {"base": base, "floor": floor, "floor_next": f"{base}-gs.{n + 1}", "below_floor": f"{base}-gs.{n - 1}",
+    shapes = {"base": base, "floor": floor, "floor_next": f"{base}-gs.{n + 1}", "floor_tenfold": f"{base}-gs.{n * 10}", "below_floor": f"{base}-gs.{n - 1}",
               "next_patch": f"{major}.{minor}.{patch + 1}", "next_minor": f"{major}.{minor + 1}.0"}
     for template in ADMITTED:
         v = template.format(**shapes)

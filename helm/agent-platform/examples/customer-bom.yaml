@@ -28,9 +28,8 @@
 # "4.7.x → 4.8.0").
 # substrate and substrate-crds pin the SAME release of the Substrate line
 # (vX.Y.Z-gs.N like kagent's; the floor of components.substrate.versionRange —
-# 0.0.27-gs.8 is chart-only: the ServiceAccount annotations the snapshot store's
-# IRSA role needs; the kagent chart's stamped worker image names the same
-# upstream 0.0.27 at gs.7).
+# 0.0.27-gs.9 is the worker image the kagent chart stamps from 0.11.0-gs.12:
+# its terminate collects a crashed golden actor, giantswarm/giantswarm#37773).
 # =============================================================================
 
 gitops:
@@ -42,10 +41,10 @@ components:
   agentgateway:                  { versionRange: "2.0.7" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "0.11.0-gs.9" }
-  kagent-crds:                   { versionRange: "0.11.0-gs.9" }
-  substrate:                     { versionRange: "0.0.27-gs.8" }
-  substrate-crds:                { versionRange: "0.0.27-gs.8" }
+  kagent:                        { versionRange: "0.11.0-gs.12" }
+  kagent-crds:                   { versionRange: "0.11.0-gs.12" }
+  substrate:                     { versionRange: "0.0.27-gs.9" }
+  substrate-crds:                { versionRange: "0.0.27-gs.9" }
   klaus-gateway:                 { versionRange: "1.0.2" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
