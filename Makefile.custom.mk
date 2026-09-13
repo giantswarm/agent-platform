@@ -716,6 +716,49 @@ KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --se
 # deletes; until then they are the only place `app: kagent` may still appear.
 KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
 .PHONY: verify-kagent-netpol
+verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on the agentgateway data plane (AgentgatewayParameters overlay), muster, kagent-controller and klaus-gateway (their charts' podAnnotations); PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager; every knob off = nothing; the agent-manager budget's guards.
+	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
+	@echo "--> connectivity, agent-manager on: the data-plane pod annotation and the agent-manager budget render"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) >/tmp/vd-on.out 2>&1 || { cat /tmp/vd-on.out; exit 1; }
+	@awk '/^kind: AgentgatewayParameters/,/^---/' /tmp/vd-on.out >/tmp/vd-params.out
+	@grep -q '^      template:$$' /tmp/vd-params.out || { echo "FAIL: AgentgatewayParameters deployment overlay lost its pod template"; exit 1; }
+	@grep -A2 '^        metadata:$$' /tmp/vd-params.out | grep -q 'karpenter.sh/do-not-disrupt: "true"' || { echo "FAIL: the data-plane pod template carries no karpenter.sh/do-not-disrupt annotation"; cat /tmp/vd-params.out; exit 1; }
+	@echo "ok: data-plane pods annotated through deployment.spec.template.metadata"
+	@awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-on.out >/tmp/vd-pdb.out
+	@grep -q '^  name: agent-manager$$' /tmp/vd-pdb.out || { echo "FAIL: no PodDisruptionBudget agent-manager in the render"; exit 1; }
+	@grep -q '^  minAvailable: 1$$' /tmp/vd-pdb.out || { echo "FAIL: the agent-manager budget is not minAvailable: 1"; cat /tmp/vd-pdb.out; exit 1; }
+	@if grep -q 'maxUnavailable' /tmp/vd-pdb.out; then echo "FAIL: the agent-manager budget carries maxUnavailable next to minAvailable"; exit 1; fi
+	@grep -q '^  unhealthyPodEvictionPolicy: AlwaysAllow$$' /tmp/vd-pdb.out || { echo "FAIL: the agent-manager budget does not keep unhealthy pods evictable (AlwaysAllow)"; exit 1; }
+	@grep -A2 '^    matchLabels:$$' /tmp/vd-pdb.out | grep -q 'app.kubernetes.io/name: agent-manager' || { echo "FAIL: the agent-manager budget does not select the agent-manager pods by name"; exit 1; }
+	@[ "$$(grep -c '^kind: PodDisruptionBudget' /tmp/vd-on.out)" = "1" ] || { echo "FAIL: expected exactly one PodDisruptionBudget from the connectivity chart (agent-manager), got $$(grep -c '^kind: PodDisruptionBudget' /tmp/vd-on.out)"; exit 1; }
+	@echo "ok: agent-manager budget minAvailable: 1, AlwaysAllow, selects the pods by name"
+	@echo "--> knobs off: no annotation, no budget"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set gateway.parameters.podAnnotations=null --set agentManager.podDisruptionBudget.enabled=false >/tmp/vd-off.out 2>&1 || { cat /tmp/vd-off.out; exit 1; }
+	@if grep -q 'do-not-disrupt' /tmp/vd-off.out; then echo "FAIL: karpenter.sh/do-not-disrupt renders with gateway.parameters.podAnnotations cleared"; exit 1; fi
+	@if grep -q '^kind: PodDisruptionBudget' /tmp/vd-off.out; then echo "FAIL: a PodDisruptionBudget renders with agentManager.podDisruptionBudget.enabled=false"; exit 1; fi
+	@echo "ok: knobs off render nothing"
+	@echo "--> agent-manager off: its budget is inert"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vd-am-off.out 2>&1 || { cat /tmp/vd-am-off.out; exit 1; }
+	@if grep -q '^kind: PodDisruptionBudget' /tmp/vd-am-off.out; then echo "FAIL: a PodDisruptionBudget renders while agent-manager is off"; exit 1; fi
+	@echo "ok: inert while the component is off"
+	@echo "--> the agent-manager budget's guards"
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.maxUnavailable=1 >/tmp/vd-both.out 2>&1; then echo "FAIL: both minAvailable and maxUnavailable accepted"; exit 1; fi
+	@grep -q 'sets both minAvailable and maxUnavailable' /tmp/vd-both.out || { echo "FAIL: wrong error for both fields set"; tail -3 /tmp/vd-both.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.minAvailable=null >/tmp/vd-none.out 2>&1; then echo "FAIL: a budget with neither field accepted"; exit 1; fi
+	@grep -q 'neither minAvailable nor maxUnavailable' /tmp/vd-none.out || { echo "FAIL: wrong error for neither field set"; tail -3 /tmp/vd-none.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy=Sometimes >/tmp/vd-enum.out 2>&1; then echo "FAIL: an unknown unhealthyPodEvictionPolicy accepted"; exit 1; fi
+	@grep -q 'is not a PodDisruptionBudget eviction policy' /tmp/vd-enum.out || { echo "FAIL: wrong error for the eviction policy enum"; tail -3 /tmp/vd-enum.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.minAvailable=null --set agentManager.podDisruptionBudget.maxUnavailable=50% >/tmp/vd-max.out 2>&1 || { cat /tmp/vd-max.out; exit 1; }
+	@awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-max.out | grep -q '^  maxUnavailable: 50%$$' || { echo "FAIL: maxUnavailable alone does not pass through"; exit 1; }
+	@echo "ok: guards fire, maxUnavailable alone passes through"
+	@echo "--> meta chart: the component charts' own knobs travel on their HelmReleases"
+	@helm template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true >/tmp/vd-meta.out 2>&1 || { cat /tmp/vd-meta.out; exit 1; }
+	@python3 tests/verify-disruption.py /tmp/vd-meta.out
+	@echo "--> meta chart: a component's knob off leaves its HelmRelease without it"
+	@helm template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true --set muster.podDisruptionBudget.enabled=false --set kagent.controller.pdb.enabled=false --set klausGateway.podDisruptionBudget.enabled=false --set 'muster.podAnnotations.karpenter\.sh/do-not-disrupt=null' >/tmp/vd-meta-off.out 2>&1 || { cat /tmp/vd-meta-off.out; exit 1; }
+	@python3 tests/verify-disruption.py --off /tmp/vd-meta-off.out
+	@echo "$@: all passed"
+
 verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: ghcr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> Agent Substrate on, cilium: the worker pods' egress is the egress gateway, the dns and the cluster DNS — nothing else"
