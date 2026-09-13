@@ -45,7 +45,11 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          args: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--location", "/data", "--skipApiVersionCheck", "--loose"]
+          # --disableProductStyleUrl: reached by a Service name, Azurite would read the
+          # account from the hostname (production-style URLs) and parse
+          # /devstoreaccount1/<container> as container/blob — every request 400s
+          # with "doesn't match any swagger defined request patterns".
+          args: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--location", "/data", "--skipApiVersionCheck", "--loose", "--disableProductStyleUrl"]
           ports:
             - name: blob
               containerPort: 10000
