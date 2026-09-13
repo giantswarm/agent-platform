@@ -82,8 +82,8 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "labels.common" . | nindent 8 }}
-        {{- toYaml $selector | nindent 8 }}
+        {{- /* The selector's name wins over the chart's common name label. */}}
+        {{- merge (deepCopy $selector) (include "labels.common" . | fromYaml) | toYaml | nindent 8 }}
         {{- if $capz }}
         azure.workload.identity/use: "true"
         {{- end }}

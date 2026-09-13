@@ -1857,6 +1857,7 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set networkPolicy.flavor=cilium >/tmp/vss-capz-cilium.out 2>&1 || { cat /tmp/vss-capz-cilium.out; exit 1; }
 	@for c in substrate-atelet substrate-ate-api-server; do awk "/^  name: $$c$$/,/^---/" /tmp/vss-capz-cilium.out | grep -q 'app.kubernetes.io/name: s3proxy' || { echo "FAIL: $$c has no egress to the façade"; exit 1; }; done
 	@awk '/^  name: substrate-s3proxy$$/,/^---/' /tmp/vss-capz-cilium.out | grep -q 'port: "443"' || { echo "FAIL: the façade has no egress to the blob endpoint"; exit 1; }
+	@python3 tests/yaml-no-duplicate-keys.py /tmp/vss-capz.out || { echo "FAIL: the capz render repeats a mapping key (helm template tolerates it, the install does not)"; exit 1; }
 	@echo "ok: connectivity renders the capz store and the façade"
 	@echo "--> the façade alone (an account provisioned by hand, a lab's Azurite): no Crossplane object, an account key"
 	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) >/tmp/vss-s3p.out 2>&1 || { cat /tmp/vss-s3p.out; exit 1; }

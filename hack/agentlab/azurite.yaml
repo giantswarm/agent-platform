@@ -31,9 +31,20 @@ spec:
       labels:
         app.kubernetes.io/name: azurite
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: azurite
           image: mcr.microsoft.com/azure-storage/azurite:3.35.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           args: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--location", "/data", "--skipApiVersionCheck", "--loose"]
           ports:
             - name: blob
@@ -77,6 +88,14 @@ spec:
       containers:
         - name: create
           image: amazon/aws-cli:2.17.0
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: AWS_REGION
               value: us-east-1
