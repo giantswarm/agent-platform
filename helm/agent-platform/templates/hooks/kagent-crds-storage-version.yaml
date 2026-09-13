@@ -30,10 +30,13 @@ needs the step (agent-platform.kagent.storageVersionHooks).
       the 0.x chart's crds/ before its render fails (graveler re-created the
       three CRDs one second after this hook deleted them; kagent-crds stalled
       on storedVersions). The hook patches every such release's
-      spec.install.crds and spec.upgrade.crds to Skip; the meta upgrade's
+      spec.install.crds and spec.upgrade.crds to Skip. The meta upgrade's
       manifest carries no crds policy for the kagent release any more (the 3.x
-      one did), so Helm's three-way merge drops the patched fields on apply and
-      nothing lingers. After the deletes the hook watches the CRDs stay absent
+      one did): helm-controller's client-side three-way merge drops the patched
+      fields on apply; a server-side apply (Helm 4, the lab) leaves them to
+      their field manager on the 4.x kagent release, whose chart ships no
+      crds/ — inert, and a component that declares a crds policy renders it
+      and takes the fields over. After the deletes the hook watches the CRDs stay absent
       for 60 s — a re-run in flight when the patch landed may still apply once
       — deletes a re-created one again and fails, naming the owner from the
       labels: the upgrade is retried by Flux, and the next backup finds the
@@ -115,7 +118,8 @@ else
   # helm.toolkit.fluxcd.io labels name applied it through its crds policy and
   # re-applies its chart's crds/ on every retry — Skip on both events, before
   # the CRD goes; the meta upgrade's manifest carries no crds policy for the
-  # kagent release, so Helm's three-way merge drops the patch again on apply
+  # kagent release: a client-side apply (helm-controller) drops the patch, a
+  # server-side one leaves it on a release whose 4.x chart has no crds/
   : > /tmp/owners.txt
   for f in /tmp/record/*.json; do
     crd="$(basename "$f" .json).kagent.dev"
@@ -127,7 +131,7 @@ else
     policy="$(kubectl get helmreleases.helm.toolkit.fluxcd.io -n "$ons" "$oname" -o jsonpath='{.spec.install.crds}/{.spec.upgrade.crds}' --ignore-not-found)"
     if [ -z "$policy" ]; then echo "HelmRelease $ons/$oname (named by the CRDs' labels) is gone; nothing to stop"; continue; fi
     kubectl patch helmreleases.helm.toolkit.fluxcd.io -n "$ons" "$oname" --type merge -p '{"spec":{"install":{"crds":"Skip"},"upgrade":{"crds":"Skip"}}}' >/dev/null
-    echo "HelmRelease $ons/$oname applied the CRDs (install/upgrade crds policy $policy): set to Skip/Skip so it cannot re-apply them; this upgrade's manifest drops the patch again"
+    echo "HelmRelease $ons/$oname applied the CRDs (install/upgrade crds policy $policy): set to Skip/Skip so it cannot re-apply them; this upgrade's manifest carries no crds policy for it (inert on the 4.x chart if the apply keeps the patch)"
   done
   for f in /tmp/record/*.json; do
     crd="$(basename "$f" .json).kagent.dev"
