@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `substrate-control-plane` PolicyException matches Substrate's control plane by resource name** (giantswarm/agent-platform#419): the substrate chart's `ate-api-server` and `ate-controller` Deployments carry no `metadata.labels` (only their pod templates do), and Kyverno evaluates the autogen rules at Deployment admission against the Deployment's own labels, so the `app In [...]` selector never matched them and a cluster enforcing the restricted Pod Security Standard through Kyverno (every Giant Swarm management cluster) denied the `substrate` install — graveler's cut-over (giantswarm/giantswarm#37745) needed a hand-applied bridge exception. The exception now matches `ate-api-server*`, `ate-controller*`, `atenet-router*`, `atenet-egress*`, `dns*` in the Substrate namespace. `make verify-kyverno` now evaluates every exception against the controller's own labels and name, so a label-less Deployment fails the check instead of the install. **Installations act**: none — the release rolls through the connectivity range; graveler's bridge exception `substrate-control-plane-cutover-bridge` is removed once it is live.
+
 ### Removed
 
 - **The portal's app-config carries no `agentPlatform.musterMcpUrl`** (giantswarm/agent-platform#299): the connectivity chart rendered the platform's muster MCP URL into the Backstage app-config next to `fluxServiceAccountName`, but the Dev Portal reads no such key — it creates agents through agent-manager's tools, and `create_agent` takes no muster argument. Where muster is reaches agent-manager alone: the meta chart derives its chart value `muster.url` from the `agent-platform.musterMcpUrl` helper (unchanged), agent-manager composes it into every agent's `RemoteMCPServer` and reports it in `get_info`. `make verify-wiring` asserts the key stays gone; `verify-identity` keeps asserting the agent-manager leg. **No installation acts** — nothing read the key.

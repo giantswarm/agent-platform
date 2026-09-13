@@ -29,7 +29,7 @@ A Giant Swarm cluster enforces the restricted standard through Kyverno. The conn
 | the control plane (`ate-api-server`, `ate-controller`, `atenet-router`, `atenet-egress`, `dns`) | `require-drop-all`, `run-as-non-root`, `privilege-escalation`, `check-seccomp-strict` — the Deployments declare no securityContext; the images are distroless and run as non-root users, the fields are what the standard checks |
 | `podcertificate-controller` | `run-as-non-root`, `check-seccomp-strict` |
 
-Nothing else is excepted: no `app: kagent` selector remains (the v1alpha2 agent Deployments' exception is gone with them), the exceptions are scoped to the two Substrate namespaces and the WorkerPool label in the kagent namespace, and the hook Jobs of the connectivity release run under the restricted profile themselves.
+Nothing else is excepted: no `app: kagent` selector remains (the v1alpha2 agent Deployments' exception is gone with them), the exceptions are scoped to the two Substrate namespaces (the control plane matched by workload name — its Deployments carry no labels of their own) and the WorkerPool label in the kagent namespace, and the hook Jobs of the connectivity release run under the restricted profile themselves.
 
 ## Compensating controls
 
