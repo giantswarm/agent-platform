@@ -809,6 +809,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         capz:
           # 3 to 24 lowercase letters and digits, globally unique: the storage
           # account the snapshots live in (https://<name>.blob.core.windows.net).
+          # The account is network-reachable (no network rules, no private
+          # endpoint): access is Entra ID / RBAC only — anonymous blob access is
+          # off, but the endpoint answers the internet.
           storageAccountName: ""
           containerName: ""
           resourceGroup: ""
@@ -856,7 +859,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           repository: gsoci.azurecr.io/giantswarm/s3proxy
           tag: 4.1.1
         replicas: 2
-        # The JVM sizes its heap from the memory limit: always set one.
+        # The JVM's options: its heap as a share of the memory limit (the
+        # image's own default leaves most of the limit unused); always set a limit.
+        javaOpts: -XX:MaxRAMPercentage=70
         resources:
           requests:
             cpu: 250m
@@ -872,8 +877,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           account: ""
           # The blob container. Derived with capz.
           container: ""
-          # An account key, a key of a Secret in the release namespace. Empty:
-          # DefaultAzureCredential — the Workload Identity the capz block renders.
+          # An account key, a key of a Secret in the release namespace: required
+          # for the façade alone, refused with provider capz, where the pods run
+          # as the Workload Identity the capz block renders (DefaultAzureCredential
+          # — needs the azure-workload-identity mutating webhook on the cluster,
+          # which injects the token file for the azure.workload.identity/use label).
           accountKeySecretRef:
             name: ""
             key: ""

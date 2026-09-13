@@ -1851,12 +1851,22 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@if grep -q 'JCLOUDS_CREDENTIAL' /tmp/vss-capz-deploy.out; then echo "FAIL: capz hands s3proxy an account key (DefaultAzureCredential expected)"; exit 1; fi
 	@grep -q 'name: AZURE_CLIENT_ID' /tmp/vss-capz-deploy.out || { echo "FAIL: AZURE_CLIENT_ID is not read from the bridged Secret"; exit 1; }
 	@[ "$$(grep -c '^kind: Secret$$' /tmp/vss-capz.out)" = "2" ] || { echo "FAIL: the key pair is not rendered in both the release namespace and ate-system"; exit 1; }
+	@[ "$$(awk '/^kind: Secret$$/,/^---/' /tmp/vss-capz.out | grep -c 'helm.sh/resource-policy: keep')" = "2" ] || { echo "FAIL: a key-pair Secret is not kept on uninstall"; exit 1; }
+	@grep -q 'readOnlyRootFilesystem: true' /tmp/vss-capz-deploy.out || { echo "FAIL: the façade's root filesystem is writable"; exit 1; }
+	@grep -q 'runAsNonRoot: true' /tmp/vss-capz-deploy.out || { echo "FAIL: the façade runs as root"; exit 1; }
+	@grep -q 'automountServiceAccountToken: false' /tmp/vss-capz-deploy.out || { echo "FAIL: the façade mounts the default ServiceAccount token"; exit 1; }
+	@grep -q 'name: S3PROXY_JAVA_OPTS' /tmp/vss-capz-deploy.out || { echo "FAIL: the façade's JVM options are not set"; exit 1; }
 	@grep -A3 '^kind: Service$$' /tmp/vss-capz.out | grep -q '^  name: substrate-s3proxy$$' || { echo "FAIL: the s3proxy Service is missing"; exit 1; }
 	@grep -q '^kind: PodDisruptionBudget$$' /tmp/vss-capz.out || { echo "FAIL: the façade has no PodDisruptionBudget"; exit 1; }
-	@grep -q 'name: substrate-s3proxy-ingress' /tmp/vss-capz.out || { echo "FAIL: the façade has no network policy (kubernetes flavour)"; exit 1; }
+	@awk '/^  name: substrate-s3proxy-ingress$$/,/^---/' /tmp/vss-capz.out >/tmp/vss-capz-ingress.out
+	@grep -q 'values: \[atelet, ate-api-server\]' /tmp/vss-capz-ingress.out || { echo "FAIL: the façade's ingress policy does not select exactly atelet and ate-api-server"; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: ate-system' /tmp/vss-capz-ingress.out || { echo "FAIL: the façade's ingress policy is not scoped to ate-system"; exit 1; }
+	@[ "$$(grep -c 'podSelector' /tmp/vss-capz-ingress.out)" = "2" ] || { echo "FAIL: the façade's ingress policy admits more than the two Substrate clients"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set networkPolicy.flavor=cilium >/tmp/vss-capz-cilium.out 2>&1 || { cat /tmp/vss-capz-cilium.out; exit 1; }
 	@for c in substrate-atelet substrate-ate-api-server; do awk "/^  name: $$c$$/,/^---/" /tmp/vss-capz-cilium.out | grep -q 'app.kubernetes.io/name: s3proxy' || { echo "FAIL: $$c has no egress to the façade"; exit 1; }; done
 	@awk '/^  name: substrate-s3proxy$$/,/^---/' /tmp/vss-capz-cilium.out | grep -q 'port: "443"' || { echo "FAIL: the façade has no egress to the blob endpoint"; exit 1; }
+	@if awk '/^  name: substrate-s3proxy$$/,/^---/' /tmp/vss-capz-cilium.out | grep -A3 'toEntities' | grep -q -- '- cluster'; then echo "FAIL: with capz the façade's egress admits the cluster entity on 443 (the apiserver)"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) --set networkPolicy.flavor=cilium 2>&1 | awk '/^  name: substrate-s3proxy$$/,/^---/' | grep -A3 'toEntities' | grep -q -- '- cluster' || { echo "FAIL: the façade alone has no egress to an in-cluster store"; exit 1; }
 	@python3 tests/yaml-no-duplicate-keys.py /tmp/vss-capz.out || { echo "FAIL: the capz render repeats a mapping key (helm template tolerates it, the install does not)"; exit 1; }
 	@echo "ok: connectivity renders the capz store and the façade"
 	@echo "--> the façade alone (an account provisioned by hand, a lab's Azurite): no Crossplane object, an account key"
@@ -1917,6 +1927,12 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@grep -q 's3proxy.azure.endpoint is required' /tmp/vss-g14.out || { echo "FAIL: the façade's account guard is silent"; exit 1; }
 	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) --set kagent.harness.snapshotStore.s3proxy.azure.endpoint=azurite:10000 >/tmp/vss-g15.out 2>&1; then echo "FAIL: an endpoint without a scheme rendered"; exit 1; fi
 	@grep -q 'must be an http(s) URL' /tmp/vss-g15.out || { echo "FAIL: the endpoint guard is silent"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml $(SUBSTRATE_STORE_S3PROXY) --set kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name= >/tmp/vss-g16.out 2>&1; then echo "FAIL: the façade alone rendered without an account key"; exit 1; fi
+	@grep -q 'accountKeySecretRef.name and .key are required' /tmp/vss-g16.out || { echo "FAIL: the account-key guard is silent"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name=x --set kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key=k >/tmp/vss-g17.out 2>&1; then echo "FAIL: capz rendered with an account key"; exit 1; fi
+	@grep -q 'accountKeySecretRef is set next to crossplane.provider capz' /tmp/vss-g17.out || { echo "FAIL: the capz account-key guard is silent"; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotStore.s3proxy.enabled=true >/tmp/vss-g18.out 2>&1; then echo "FAIL: the façade rendered next to an aws bucket"; exit 1; fi
+	@grep -q 's3proxy.enabled is on next to crossplane.provider aws' /tmp/vss-g18.out || { echo "FAIL: the aws+façade guard is silent"; exit 1; }
 	@echo "ok: guards"
 	@echo "====> $@ passed"
 

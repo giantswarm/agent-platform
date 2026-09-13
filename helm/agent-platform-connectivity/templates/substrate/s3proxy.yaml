@@ -35,7 +35,7 @@ netpol.yaml next to the bundled store's.
 {{- $endpoint := urlParse $az.endpoint }}
 {{- $backendPort := $endpoint.host | splitList ":" | last }}
 {{- if eq $backendPort $endpoint.host }}{{- $backendPort = ternary "443" "80" (eq $endpoint.scheme "https") }}{{- end }}
-{{- range $secretNs := list $ns $substrateNs }}
+{{- range $secretNs := list $ns $substrateNs | uniq }}
 ---
 # The S3 key pair the façade accepts and Substrate presents. Generated on the
 # first render, read back from the release namespace's copy on every later one
@@ -89,7 +89,9 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ $name }}
-      automountServiceAccountToken: {{ $capz }}
+      # Never the default token: the Workload Identity webhook projects its own
+      # azure-identity-token volume; the account-key path needs none.
+      automountServiceAccountToken: false
       # preStop (5 s) plus the proxy's 30 s request drain, with margin.
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -118,6 +120,8 @@ spec:
           env:
             - name: S3PROXY_ENDPOINT
               value: http://0.0.0.0:8080
+            - name: S3PROXY_JAVA_OPTS
+              value: {{ $p.javaOpts | quote }}
             - name: S3PROXY_AUTHORIZATION
               value: aws-v4
             - name: S3PROXY_IDENTITY_FILE
@@ -133,7 +137,10 @@ spec:
             {{- if $capz }}
             # No jclouds credential: the azureblob backend defers to
             # DefaultAzureCredential, which takes the Workload Identity path from
-            # these two and the token the webhook projects.
+            # these two and what the azure-workload-identity webhook injects for
+            # the azure.workload.identity/use label (AZURE_FEDERATED_TOKEN_FILE,
+            # AZURE_AUTHORITY_HOST, the projected token) — a hard prerequisite
+            # of provider capz (UPGRADE.md).
             - name: AZURE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -231,8 +238,11 @@ spec:
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Only Substrate's two snapshot clients reach the façade; it reaches DNS and
-# the blob endpoint (world, or the cluster for a private endpoint or a lab's
-# Azurite) on the endpoint's port.
+# the blob endpoint on the endpoint's port — world (the account and, for the
+# identity's token exchange, login.microsoftonline.com) with provider capz;
+# world and the cluster for the façade alone (a lab's Azurite, a private
+# endpoint). Never the cluster with capz: the port is 443 and that would admit
+# the apiserver.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -260,7 +270,9 @@ spec:
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
     - toEntities:
         - world
+        {{- if not $capz }}
         - cluster
+        {{- end }}
       toPorts:
         - ports:
             - port: {{ $backendPort | quote }}

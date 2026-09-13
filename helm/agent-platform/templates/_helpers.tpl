@@ -399,6 +399,7 @@ snapshotLocation agreeing with the derived one.
 {{- define "agent-platform.substrateStore.validate" -}}
 {{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
 {{- $xp := $store.crossplane | default dict -}}
+{{- $mode := include "agent-platform.substrateStore.mode" . -}}
 {{- if $xp.enabled -}}
 {{- if not (has $xp.provider (list "aws" "capz")) -}}
 {{- fail (printf "kagent.harness.snapshotStore.crossplane.provider=%s is not supported; the chart provisions the snapshot store on aws (S3 + IRSA) and capz (Azure Blob behind the s3proxy façade, Workload Identity) — elsewhere name the store in kagent.harness.snapshotLocation and its access in substrate.atelet.extraEnv / substrate.ateApiServer.extraEnv, or front an Azure Blob account provisioned by hand with kagent.harness.snapshotStore.s3proxy" $xp.provider) -}}
@@ -436,11 +437,24 @@ snapshotLocation agreeing with the derived one.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if and $xp.enabled (eq $xp.provider "aws") (dig "s3proxy" "enabled" false $store) -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.enabled is on next to crossplane.provider aws: the façade fronts Azure Blob and has no place in front of an S3 bucket — turn it off (it is on by itself with provider capz)" -}}
+{{- end -}}
 {{- if include "agent-platform.substrateStore.s3proxy" . -}}
 {{- $az := include "agent-platform.substrateStore.azure" . | fromJson -}}
+{{- $keyRef := dig "s3proxy" "azure" "accountKeySecretRef" dict $store -}}
 {{- range $k := list "endpoint" "account" "container" -}}
 {{- if not (index $az $k) -}}
 {{- fail (printf "kagent.harness.snapshotStore.s3proxy.azure.%s is required while kagent.harness.snapshotStore.s3proxy is on without the capz Crossplane block: the façade needs the Azure Blob account it fronts" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $mode "capz" -}}
+{{- if or $keyRef.name $keyRef.key -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef is set next to crossplane.provider capz: the façade runs as the Workload Identity the capz block renders and never reads an account key — leave accountKeySecretRef unset" -}}
+{{- end -}}
+{{- else -}}
+{{- if not (and $keyRef.name $keyRef.key) -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name and .key are required while the façade runs without the capz Crossplane block: it reaches the account with an account key from that Secret (release namespace)" -}}
 {{- end -}}
 {{- end -}}
 {{- if not (regexMatch "^https?://" $az.endpoint) -}}
@@ -450,7 +464,7 @@ snapshotLocation agreeing with the derived one.
 {{- fail "substrate.rustfs.enabled is on while kagent.harness.snapshotStore.s3proxy renders the façade: the substrate chart sets the S3 environment for its bundled store and the derived one for the façade would repeat the variables — turn substrate.rustfs.enabled off" -}}
 {{- end -}}
 {{- end -}}
-{{- if include "agent-platform.substrateStore.mode" . -}}
+{{- if $mode -}}
 {{- $explicit := dig "harness" "snapshotLocation" "" (.Values.kagent | default dict) -}}
 {{- $derived := include "agent-platform.substrateStore.location" . -}}
 {{- if and $explicit (ne $explicit $derived) -}}

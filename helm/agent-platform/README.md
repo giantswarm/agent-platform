@@ -592,6 +592,7 @@ WorkerPool".
 | kagent.harness.snapshotStore.s3proxy.image.repository | string | `"gsoci.azurecr.io/giantswarm/s3proxy"` |  |
 | kagent.harness.snapshotStore.s3proxy.image.tag | string | `"4.1.1"` |  |
 | kagent.harness.snapshotStore.s3proxy.replicas | int | `2` |  |
+| kagent.harness.snapshotStore.s3proxy.javaOpts | string | `"-XX:MaxRAMPercentage=70"` |  |
 | kagent.harness.snapshotStore.s3proxy.resources.requests.cpu | string | `"250m"` |  |
 | kagent.harness.snapshotStore.s3proxy.resources.requests.memory | string | `"1Gi"` |  |
 | kagent.harness.snapshotStore.s3proxy.resources.limits.memory | string | `"1Gi"` |  |
