@@ -1681,7 +1681,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # .omitEmptyKeys; the chart refuses an empty value). sandboxClass gvisor is
   # what kagent's generated ActorTemplates select. The Harness's workerPoolRef
   # follows `name`; replicas and template (resources, node placement, the
-  # architecture pin) are the capacity knobs.
+  # CPU feature-set pin) are the capacity knobs.
   substrateWorkerPool:
     create: true
     name: kagent-default
@@ -1690,10 +1690,36 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     sandboxClass: gvisor
     # The worker pods' template (WorkerPool.spec.template: nodeSelector,
     # tolerations, priorityClassName, nodeAffinity, resources). One pool runs
-    # one CPU architecture: an actor's golden snapshot is architecture-specific
-    # and a mixed pool wedges the actors that land on the other one, so the
-    # pool is pinned to the installation's — amd64 on every Giant Swarm
-    # management cluster; an arm64 installation sets arm64.
+    # one CPU FEATURE SET — one vendor and one generation, not just one
+    # architecture: an actor's golden snapshot is a gVisor checkpoint, and
+    # gVisor restores a checkpoint only on a host whose CPU offers every
+    # feature the checkpoint recorded; two amd64 nodes of different vendors
+    # are not compatible. A worker on a CPU that lacks a feature fails every
+    # restore of the actors placed on it — `FATAL ERROR: … failed to load
+    # kernel: incompatible FeatureSet: missing features: …` in the worker's
+    # log every 30 s, the turn `actor "ai-…" request timed out` — and the
+    # actor never recovers, because it stays placed there (a Karpenter pool
+    # mixing AMD c5a and Intel r6i nodes under an amd64-only pin, 2026-09-13;
+    # giantswarm/agent-platform#429). So nodeSelector names the feature set as
+    # precisely as the provider's node labels allow:
+    #   - kubernetes.io/arch is the coarse case: amd64 on every Giant Swarm
+    #     management cluster; an arm64 installation sets arm64, never both;
+    #   - on CAPA, where Karpenter provisions the workers and its consolidation
+    #     may replace a node with another vendor's at any time, the vendor —
+    #     karpenter.k8s.aws/instance-cpu-manufacturer: amd (or intel; the
+    #     fleet template carries amd, the vendor the fleet's golden snapshots
+    #     were taken on) — and, where a generation change must be ruled out
+    #     too, the family (karpenter.k8s.aws/instance-family: c5a): a snapshot
+    #     taken on a newer generation of one vendor does not restore on an
+    #     older one either;
+    #   - on CAPZ and the other providers a node pool is one VM size, so the
+    #     pool label (giantswarm.io/machine-pool: <pool>) or
+    #     node.kubernetes.io/instance-type pins it.
+    # Recognise a mixed pool by `kubectl get nodes -L <the label>` showing two
+    # values under it. Substrate placing a restore only on a worker whose CPU
+    # covers the snapshot's feature set is the durable fix
+    # (giantswarm/giantswarm#37742 row 12); until then the pin is the
+    # installation's to keep exact.
     #
     # resources is the platform's capacity knob (giantswarm/agent-platform#344,
     # bumblebee-plans#51 D5). One worker hosts one actor at a time, so a
