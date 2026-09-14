@@ -385,6 +385,10 @@ verify-login-connector: ## Assert gitops.forbidPinnedLoginConnector: off by defa
 # the engine's own objects (operator, FluxInstance, identities, hooks, CRDs)
 # are asserted by verify-engine in both shapes.
 ENGINE_OFF := --set components.flux.enabled=false
+# Every component the customer BOM pins, turned on: tests/verify-bom-charts.py
+# renders each pinned chart against the values its HelmRelease carries, and a
+# component left off renders neither, so it would drop out of the check unseen.
+BOM_ALL_COMPONENTS := $(shell sed -n 's/^  \([a-z0-9][a-z0-9-]*\): *{ versionRange: "[0-9][0-9.]*[^"]*".*/--set components.\1.enabled=true/p' helm/agent-platform/examples/customer-bom.yaml)
 .PHONY: verify-meta
 verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with the engine off, ranges as values, Flux the only engine, pinned BOM).
 	@echo "====> $@ ($(CHART_DIR))"
@@ -466,6 +470,9 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@grep -q 'semver: "5.12.0"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to 5.12.0"; exit 1; }
 	@if grep -qE 'semver: "[0-9]+\.x"' /tmp/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
+	@echo "--> every chart the BOM pins accepts the values the meta chart forwards to it"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml $(ENGINE_OFF) $(BOM_ALL_COMPONENTS) >/tmp/ap-bom-all.out 2>&1 || { cat /tmp/ap-bom-all.out; exit 1; }
+	@python3 tests/verify-bom-charts.py /tmp/ap-bom-all.out $(CHART_DIR)/examples/customer-bom.yaml
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agent-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
 	@python3 -c 'import re,sys; docs=open("/tmp/ap-ns.out").read().split("\n---\n"); bad=[(re.search(r"^kind: (\S+)$$", d, re.M).group(1), re.search(r"^  namespace: (\S+)$$", d, re.M).group(1)) for d in docs if re.search(r"^kind: (OCIRepository|HelmRelease)$$", d, re.M) and re.search(r"^  namespace: (\S+)$$", d, re.M) and re.search(r"^  namespace: (\S+)$$", d, re.M).group(1) != "flux-giantswarm"]; sys.exit("FAIL: a rendered CR is not in the gitops.namespace: " + str(bad)) if bad else print("ok: all CRs in flux-giantswarm (the hook Jobs stay in the release namespace, where Helm runs them)")'
@@ -717,10 +724,24 @@ endef
 # chart the range resolves to, through the values the meta chart forwards
 # (network: ghcr.io, like verify-components-charts).
 KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent
+# An actor whose ModelConfig points at a host model server dials it through the
+# egress gateway, on a port the gateway's allow-list does not otherwise open:
+# the same on-state plus a model-manager in front of one.
+KAGENT_MM := $(KAGENT_NETPOL) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth
 # The two files of the v1alpha2 agent templates giantswarm/agent-platform#299
 # deletes; until then they are the only place `app: kagent` may still appear.
 KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
 .PHONY: verify-kagent-netpol
+verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim.
+	@echo "====> $@ ($(CHART_DIR))"
+	@echo "--> default render: the fragment, the bound, the policy"
+	@helm template t $(CHART_DIR) $(VM) >/tmp/vv-meta.out 2>&1 || { cat /tmp/vv-meta.out; exit 1; }
+	@python3 tests/verify-valkey.py /tmp/vv-meta.out
+	@echo "--> an installation's own valkeyConfig replaces the fragment whole"
+	@helm template t $(CHART_DIR) $(VM) -f $(CHART_DIR)/ci/test-valkey-override-values.yaml >/tmp/vv-meta-override.out 2>&1 || { cat /tmp/vv-meta-override.out; exit 1; }
+	@python3 tests/verify-valkey.py --override /tmp/vv-meta-override.out
+	@echo "$@: all passed"
+
 verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on the agentgateway data plane (AgentgatewayParameters overlay), muster, kagent-controller, klaus-gateway and muster-valkey (their charts' podAnnotations); PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager and muster-valkey (#439); every knob off = nothing; the budgets' guards. And the placement of the stateful singletons (#439): scheduling.singletons.nodeSelector / tolerations reach muster, muster-valkey, the kagent controller and klaus-gateway as their charts' knobs (a component's own keys win), never the connectivity release; empty = nothing forwarded.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, agent-manager on: the data-plane pod annotation and the agent-manager budget render"
@@ -795,7 +816,7 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@echo "ok: a stray key under scheduling.singletons is refused by the schema"
 	@echo "$@: all passed"
 
-verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: ghcr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
+verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: ghcr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); that the egress gateway opens every host model server model-manager fronts, at its agentHost, with the DNS proxy on where one is named by hostname; and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> Agent Substrate on, cilium: the worker pods' egress is the egress gateway, the dns and the cluster DNS — nothing else"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-sub.out 2>&1 || { cat /tmp/vkn-sub.out; exit 1; }
@@ -853,6 +874,46 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@[ "$$(grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-override.out | grep -c 'io.kubernetes.pod.namespace: tools-ns$$')" = "2" ] || { echo "FAIL: the tool-server egress does not follow kagent.kagent-tools.namespaceOverride"; exit 1; }
 	@[ "$$(grep -A4 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-override.out | grep -c 'port: "9084"')" = "2" ] || { echo "FAIL: the tool-server egress does not follow the tools targetPort"; exit 1; }
 	@echo "ok: namespace and port overrides"
+	@echo "--> a host model server among model-manager's backends: the egress gateway opens the address the ModelConfigs carry"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >/tmp/vkn-mm-off.out 2>&1 || { cat /tmp/vkn-mm-off.out; exit 1; }
+	@if grep -q 'host model server the actors dial' /tmp/vkn-mm-off.out; then echo "FAIL: host model server egress renders while model-manager is off"; exit 1; else echo "ok: inert while model-manager is off"; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=lmstudio' --set model-manager.lmstudio.endpoint=http://10.0.0.3:1234 >/tmp/vkn-mm-two.out 2>&1 || { cat /tmp/vkn-mm-two.out; exit 1; }
+	@awk "/^  name: substrate-atenet-egress$$/,/^---/" /tmp/vkn-mm-two.out >/tmp/vkn-mm-two-pol.out
+	@for pair in 10.0.0.1/32:11434 10.0.0.3/32:1234; do \
+		addr=$${pair%%:*}; port=$${pair##*:}; \
+		grep -A3 -e "- $$addr$$" /tmp/vkn-mm-two-pol.out | grep -q "port: \"$$port\"" || { echo "FAIL: the egress gateway does not open $$addr on $$port"; cat /tmp/vkn-mm-two-pol.out; exit 1; }; \
+	done
+	@echo "ok: every host backend opened for the actors"
+	@echo "--> kserve alone among the backends: nothing to open on the host"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set 'model-manager.backends[0]=kserve' --set modelManager.kserve.requireApi=false >/tmp/vkn-mm-kserve.out 2>&1 || { cat /tmp/vkn-mm-kserve.out; exit 1; }
+	@if grep -q 'host model server the actors dial' /tmp/vkn-mm-kserve.out; then echo "FAIL: a host-model rule renders for a kserve-only backend list"; exit 1; else echo "ok: kserve alone renders no host-model rule"; fi
+	@echo "--> the inference path follows agentHost, not the endpoint model-manager itself dials"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set model-manager.ollama.agentHost=http://172.21.0.1:11434 >/tmp/vkn-mm-agenthost.out 2>&1 || { cat /tmp/vkn-mm-agenthost.out; exit 1; }
+	@awk "/^  name: substrate-atenet-egress$$/,/^---/" /tmp/vkn-mm-agenthost.out >/tmp/vkn-mm-agenthost-pol.out
+	@grep -q -- '- 172.21.0.1/32' /tmp/vkn-mm-agenthost-pol.out || { echo "FAIL: the egress gateway ignores model-manager.ollama.agentHost"; cat /tmp/vkn-mm-agenthost-pol.out; exit 1; }
+	@if grep -q -- '- 10.0.0.1/32' /tmp/vkn-mm-agenthost-pol.out; then echo "FAIL: the egress gateway opens the management endpoint next to agentHost"; cat /tmp/vkn-mm-agenthost-pol.out; exit 1; fi
+	@grep -q -- '- 10.0.0.1/32' /tmp/vkn-mm-agenthost.out || { echo "FAIL: model-manager's own policy lost the management endpoint"; exit 1; }
+	@echo "ok: agentHost wins for the actors, the endpoint stays model-manager's"
+	@echo "--> an agentHost without a scheme is refused by the chart, not parsed into an empty host"
+	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set model-manager.ollama.agentHost=ollama.lan >/tmp/vkn-mm-noscheme.out 2>&1; then echo "FAIL: a scheme-less model-manager.ollama.agentHost rendered"; grep -n 'matchName' /tmp/vkn-mm-noscheme.out; exit 1; fi
+	@grep -q 'model-manager.ollama.agentHost' /tmp/vkn-mm-noscheme.out || { echo "FAIL: wrong error for a scheme-less agentHost"; tail -3 /tmp/vkn-mm-noscheme.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set model-manager.ollama.agentHost=172.21.0.1:11434 >/tmp/vkn-mm-hostport.out 2>&1; then echo "FAIL: a host:port model-manager.ollama.agentHost rendered"; exit 1; fi
+	@grep -q 'model-manager.ollama.agentHost' /tmp/vkn-mm-hostport.out || { echo "FAIL: wrong error for a host:port agentHost"; tail -3 /tmp/vkn-mm-hostport.out; exit 1; }
+	@echo "ok: the agentHost guard matches the endpoint's"
+	@echo "--> a host model server named by hostname takes the FQDN arm, and turns the DNS proxy on so the FQDN cache fills"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set model-manager.ollama.endpoint=http://ollama.lan:11434 >/tmp/vkn-mm-fqdn.out 2>&1 || { cat /tmp/vkn-mm-fqdn.out; exit 1; }
+	@awk "/^  name: substrate-atenet-egress$$/,/^---/" /tmp/vkn-mm-fqdn.out >/tmp/vkn-mm-fqdn-pol.out
+	@grep -q 'matchName: ollama.lan$$' /tmp/vkn-mm-fqdn-pol.out || { echo "FAIL: no FQDN rule for a hostname endpoint"; cat /tmp/vkn-mm-fqdn-pol.out; exit 1; }
+	@grep -A4 'matchName: ollama.lan$$' /tmp/vkn-mm-fqdn-pol.out | grep -q 'port: "11434"' || { echo "FAIL: the FQDN rule does not open the server's port"; cat /tmp/vkn-mm-fqdn-pol.out; exit 1; }
+	@grep -q 'matchPattern: "\*"' /tmp/vkn-mm-fqdn-pol.out || { echo "FAIL: the FQDN arm renders without the DNS proxy rule that fills Cilium's FQDN cache — the name stays blocked"; cat /tmp/vkn-mm-fqdn-pol.out; exit 1; }
+	@echo "ok: hostname endpoints, with the DNS proxy on"
+	@echo "--> an IP-only backend list leaves the DNS rule plain: no L7 proxy on every actor lookup"
+	@awk "/^  name: substrate-atenet-egress$$/,/^---/" /tmp/vkn-mm-two.out >/tmp/vkn-mm-two-dns.out
+	@if grep -q 'matchPattern' /tmp/vkn-mm-two-dns.out; then echo "FAIL: the DNS proxy renders for IP-only host model servers"; cat /tmp/vkn-mm-two-dns.out; exit 1; fi
+	@echo "ok: the DNS proxy renders only where a name needs it"
+	@echo "--> kubernetes flavor: no egress gateway policy to extend, so no host-model rule either"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set networkPolicy.flavor=kubernetes >/tmp/vkn-mm-k8s.out 2>&1 || { cat /tmp/vkn-mm-k8s.out; exit 1; }
+	@if grep -q 'host model server the actors dial' /tmp/vkn-mm-k8s.out; then echo "FAIL: the kubernetes flavor renders a host-model rule it has no egress gateway policy for"; exit 1; else echo "ok: kubernetes flavor has no host-model rule"; fi
 	@echo "--> kubernetes flavor: renders, and has no kagent egress policy to extend"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes --set kagent.kagent-tools.enabled=true >/tmp/vkn-k8s.out 2>&1 || { cat /tmp/vkn-k8s.out; exit 1; }
 	@if grep -q 'kagent-tools' /tmp/vkn-k8s.out; then echo "FAIL: kubernetes flavor renders a tool-server rule it has no egress policy for"; exit 1; else echo "ok: kubernetes flavor untouched"; fi

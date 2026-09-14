@@ -1,0 +1,8 @@
+# make verify-valkey: an installation's own valkeyConfig replaces the chart's
+# fragment whole (a string value is not merged) and reaches the valkey release
+# verbatim — tests/verify-valkey.py --override expects exactly this text.
+valkey:
+  valkey:
+    valkeyConfig: |
+      maxmemory 100mb
+      maxmemory-policy allkeys-lru

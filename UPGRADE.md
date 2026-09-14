@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (muster-valkey gets a memory bound of its own: `maxmemory 640mb`, `volatile-lru`)
+
+giantswarm/agent-platform#446: the valkey release ran Valkey without a `maxmemory`, so the kernel — not Valkey — bounded the store, and a store grown past the container limit crash-looped (gazelle 2026-09-14: 19 OOM kills in 90 minutes, the muster connector down meanwhile; the 1Gi limit below is the other half). `valkey.valkey.valkeyConfig` now sets `maxmemory 640mb` and `maxmemory-policy volatile-lru`.
+
+### Operator action
+
+- **None.** The valkey release re-renders the Deployment (the config checksum changes the pod template) and `muster-valkey` rolls once under its `Recreate` strategy: a few seconds without the store, during which muster's token refreshes wait; the RDB on the PVC carries every record across.
+- **Watch after the roll**: `redis_memory_used_bytes / redis_memory_max_bytes` for the `muster-valkey` pod. Above 90 % Valkey evicts the least recently used TTL-carrying keys (a person's refresh token → one re-sign-in; a session's capability cache → one re-list on the next connect) instead of dying. A store that sits near the bound on a fresh muster is worth a look at what fills it (`valkey-cli --scan | cut -d: -f1,2 | sort | uniq -c`) before the limit is raised; on 2026-09-14 the filler was muster's per-session capability cache (giantswarm/muster#1217).
+- **Own fragment**: an installation that sets `valkey.valkey.valkeyConfig` itself replaces the chart's fragment whole (a string is not merged) — carry `maxmemory` and the policy in it, and keep `maxmemory` at or under two thirds of `resources.limits.memory`. Never add `appendonly yes` to it (the persistence note in values.yaml: it wipes the live store on the enabling deploy).
+
 ## \<current\> → \<next\> (`components.vm-manager`: the platform's VM provisioner as a pod of a KVM node)
 
 A new component, off by default: [vm-manager](https://github.com/giantswarm/vm-manager) — KVM virtual machines with an instance metadata service, a vTPM with measured boot, an immutable image and attestation, as REST and MCP (`x_vm-manager_<tool>` through its own `MCPServer` CR in the `agent-platform` tool group, next to agent-manager and model-manager). The chart comes from `oci://ghcr.io/giantswarm/vm-manager/helm` (the repository publishes from GitHub Actions to ghcr.io, like the kagent and Substrate lines), `>=0.19.0 <1.0.0`; the values block `vm-manager:` is forwarded to the release and `vmManager:` (a PodDisruptionBudget, network policy inputs) is read by the connectivity chart, which renders the pod's ingress (muster, the probes), egress (DNS, the identity provider, the guests' destinations — the VMs' traffic is userspace NAT out of the pod) and muster's egress to it. The `agent-platform` toolset preset's description names it.
