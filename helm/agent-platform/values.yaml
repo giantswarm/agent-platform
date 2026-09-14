@@ -2765,10 +2765,13 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # (components.valkey): with store: valkey the url, the Secret and the
   # password key below default to the valkey release's Service and the Secret
   # its default user authenticates from (the same one muster reads), so the
-  # switch is this one line; set them only for an out-of-band Valkey. On a
-  # Cilium installation the connectivity chart must also let the gateway pod
-  # reach the Valkey pods on 6379 (giantswarm/agent-platform#443). "crd" +
-  # controller.enabled: true is the store for a platform without Valkey.
+  # switch is this one line; set them only for an out-of-band Valkey. "crd" +
+  # controller.enabled: true is the store for a platform without Valkey. The
+  # connectivity chart renders the gateway pod's egress to its stores from
+  # these keys (templates/klausgateway/netpol.yaml, -klausgateway-store-egress):
+  # the platform's Valkey pods on 6379 with store: valkey; the kube-apiserver
+  # for configmap / crd, the controller and the Secret link store (obo.store:
+  # secret).
   routing:
     store: memory
     defaultTTL: "24h"

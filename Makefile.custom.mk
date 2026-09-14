@@ -2535,6 +2535,83 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 	@if grep -q 't-hooks' /tmp/vhn-none.out; then echo "FAIL: engine off, kagent off: the hook policy (or identity) renders with no hook to police"; exit 1; fi
 	@echo "ok: $@"
 
+# klaus-gateway on with the two egress policies that select its pod (a2a, OBO) in
+# an agentgateway-* mode; the store knobs are the klaus-gateway chart's, forwarded
+# by the meta chart, so the connectivity chart reads them at their defaults here.
+KG_NETPOL := $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set ingress.mode=agentgateway-muster --set klausGateway.a2a.enabled=true --set klausGateway.obo.enabled=true
+KG_STORE_POLICY := agent-platform-connectivity-klausgateway-store-egress
+
+.PHONY: verify-klausgateway-netpol
+verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443): the -klausgateway-store-egress policy renders exactly while a store or the controller reaches beyond the pod — the platform's Valkey pods on their Service port with klausGateway.routing.store valkey (and the valkey component on; off = an out-of-band Valkey, no rule), the kube-apiserver with klausGateway.obo.store secret and OBO on, routing.store configmap or crd, or controller.enabled — as DNS + the rules in the cilium flavour and DNS + the pod selector / networkPolicy.kubernetes.apiServerCIDR (Egress only) in the kubernetes one, each rule only with its store, selecting the pod by klausGateway.fullnameOverride; the default shape (memory routing, the bolt link store, no controller) renders none of it next to the unchanged a2a and OBO policies; none with the Secret store but OBO off, with networkPolicy off, or with the component off.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> default stores (memory routing, bolt links, no controller): the a2a and OBO policies, no store policy"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) >/tmp/vkg-default.out 2>&1 || { cat /tmp/vkg-default.out; exit 1; }
+	@$(PICK) /tmp/vkg-default.out CiliumNetworkPolicy agent-platform-connectivity-klausgateway-a2a-egress >/dev/null || { echo "FAIL: the a2a egress policy is gone"; exit 1; }
+	@$(PICK) /tmp/vkg-default.out CiliumNetworkPolicy agent-platform-connectivity-klausgateway-obo-egress >/dev/null || { echo "FAIL: the OBO egress policy is gone"; exit 1; }
+	@if grep -q '$(KG_STORE_POLICY)' /tmp/vkg-default.out; then echo "FAIL: the store egress policy renders on the default shape, which never reaches the API"; exit 1; fi
+	@for pol in a2a obo; do \
+		$(PICK) /tmp/vkg-default.out CiliumNetworkPolicy agent-platform-connectivity-klausgateway-$$pol-egress >/tmp/vkg-default-$$pol.out; \
+		if grep -q 'kube-apiserver' /tmp/vkg-default-$$pol.out; then echo "FAIL: the $$pol egress policy names the kube-apiserver entity (the store policy owns that rule)"; exit 1; fi; \
+	done
+	@echo "--> cilium, the Secret link store: DNS + the kube-apiserver entity, nothing else, one policy"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret >/tmp/vkg-secret.out 2>&1 || { cat /tmp/vkg-secret.out; exit 1; }
+	@$(PICK) /tmp/vkg-secret.out CiliumNetworkPolicy $(KG_STORE_POLICY) >/tmp/vkg-secret-cnp.out || { echo "FAIL: no CiliumNetworkPolicy $(KG_STORE_POLICY) with klausGateway.obo.store=secret"; exit 1; }
+	@if $(PICK) /tmp/vkg-secret.out NetworkPolicy $(KG_STORE_POLICY) >/dev/null 2>&1; then echo "FAIL: the kubernetes-flavour policy renders next to the cilium one"; exit 1; fi
+	@[ "$$(grep -c '^  name: $(KG_STORE_POLICY)$$' /tmp/vkg-secret.out)" = "1" ] || { echo "FAIL: expected exactly one store egress policy"; grep -c '^  name: $(KG_STORE_POLICY)$$' /tmp/vkg-secret.out; exit 1; }
+	@grep -q 'app.kubernetes.io/name: "klaus-gateway"' /tmp/vkg-secret-cnp.out || { echo "FAIL: the policy does not select the klaus-gateway pod"; exit 1; }
+	@grep -q 'toEntities: \["kube-apiserver"\]' /tmp/vkg-secret-cnp.out || { echo "FAIL: the cilium policy does not admit egress to the kube-apiserver entity"; exit 1; }
+	@grep -q 'k8s-app: kube-dns' /tmp/vkg-secret-cnp.out || { echo "FAIL: the cilium policy carries no DNS rule (the siblings do; alone it would leave the pod without names)"; exit 1; }
+	@if grep -q 'ingress:\|toFQDNs\|toCIDR\|world\|toServices' /tmp/vkg-secret-cnp.out; then echo "FAIL: the cilium policy admits more than DNS and the apiserver"; exit 1; fi
+	@echo "--> the Secret store with OBO off: none (the gateway builds no linker, reads no Secret)"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set klausGateway.obo.enabled=false >/tmp/vkg-obooff.out 2>&1 || { cat /tmp/vkg-obooff.out; exit 1; }
+	@if grep -q '$(KG_STORE_POLICY)' /tmp/vkg-obooff.out; then echo "FAIL: the store egress policy renders for obo.store=secret while OBO is off"; exit 1; fi
+	@echo "--> the configmap and crd routing stores and the controller each render the policy; the bolt routing store does not"
+	@for knob in klausGateway.routing.store=configmap klausGateway.routing.store=crd klausGateway.controller.enabled=true; do \
+		helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set $$knob >/tmp/vkg-knob.out 2>&1 || { cat /tmp/vkg-knob.out; exit 1; }; \
+		$(PICK) /tmp/vkg-knob.out CiliumNetworkPolicy $(KG_STORE_POLICY) | grep -q 'toEntities: \["kube-apiserver"\]' || { echo "FAIL: $$knob renders no store egress policy to the kube-apiserver"; exit 1; }; \
+		echo "ok: $$knob"; \
+	done
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.routing.store=bolt >/tmp/vkg-bolt.out 2>&1 || { cat /tmp/vkg-bolt.out; exit 1; }
+	@if grep -q '$(KG_STORE_POLICY)' /tmp/vkg-bolt.out; then echo "FAIL: the store egress policy renders for the bolt routing store, which is a file"; exit 1; fi
+	@echo "--> cilium, the Valkey routing store: the platform's Valkey pods on 6379 in the release namespace, no kube-apiserver"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.routing.store=valkey >/tmp/vkg-valkey.out 2>&1 || { cat /tmp/vkg-valkey.out; exit 1; }
+	@$(PICK) /tmp/vkg-valkey.out CiliumNetworkPolicy $(KG_STORE_POLICY) >/tmp/vkg-valkey-cnp.out || { echo "FAIL: no CiliumNetworkPolicy $(KG_STORE_POLICY) with klausGateway.routing.store=valkey"; exit 1; }
+	@grep -q 'app.kubernetes.io/name: valkey' /tmp/vkg-valkey-cnp.out && grep -q 'app.kubernetes.io/instance: valkey' /tmp/vkg-valkey-cnp.out || { echo "FAIL: the Valkey rule does not select the muster-valkey pods (the valkey subchart's selector labels)"; cat /tmp/vkg-valkey-cnp.out; exit 1; }
+	@grep -q 'io.kubernetes.pod.namespace: default' /tmp/vkg-valkey-cnp.out || { echo "FAIL: the Valkey rule is not pinned to the release namespace"; exit 1; }
+	@grep -q 'port: "6379"' /tmp/vkg-valkey-cnp.out || { echo "FAIL: the Valkey rule is not on 6379"; exit 1; }
+	@if grep -q 'toEntities: \["kube-apiserver"\]' /tmp/vkg-valkey-cnp.out; then echo "FAIL: the Valkey store alone must not open the kube-apiserver"; exit 1; fi
+	@echo "--> the Service port follows valkey.valkey.service.port; both stores on = both rules"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.routing.store=valkey --set klausGateway.obo.store=secret --set valkey.valkey.service.port=6380 >/tmp/vkg-both.out 2>&1 || { cat /tmp/vkg-both.out; exit 1; }
+	@$(PICK) /tmp/vkg-both.out CiliumNetworkPolicy $(KG_STORE_POLICY) >/tmp/vkg-both-cnp.out || { echo "FAIL: no store policy with both stores on"; exit 1; }
+	@grep -q 'port: "6380"' /tmp/vkg-both-cnp.out || { echo "FAIL: the Valkey rule does not follow valkey.valkey.service.port"; grep port: /tmp/vkg-both-cnp.out; exit 1; }
+	@grep -q 'toEntities: \["kube-apiserver"\]' /tmp/vkg-both-cnp.out || { echo "FAIL: the Secret store's kube-apiserver rule is missing next to the Valkey rule"; exit 1; }
+	@[ "$$(grep -c '^  name: $(KG_STORE_POLICY)$$' /tmp/vkg-both.out)" = "1" ] || { echo "FAIL: expected exactly one store egress policy with both stores on"; exit 1; }
+	@echo "--> the Valkey store with the valkey component off (an out-of-band Valkey): no rule, no policy"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.routing.store=valkey --set components.valkey.enabled=false >/tmp/vkg-valkey-off.out 2>&1 || { cat /tmp/vkg-valkey-off.out; exit 1; }
+	@if grep -q '$(KG_STORE_POLICY)' /tmp/vkg-valkey-off.out; then echo "FAIL: the store egress policy renders for an out-of-band Valkey (the component off) — nothing in this namespace to select"; exit 1; fi
+	@echo "--> kubernetes flavour, the Valkey store: a pod selector on the valkey labels, 6379, no CIDR"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.routing.store=valkey --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vkg-k8s-valkey.out 2>&1 || { cat /tmp/vkg-k8s-valkey.out; exit 1; }
+	@$(PICK) /tmp/vkg-k8s-valkey.out NetworkPolicy $(KG_STORE_POLICY) >/tmp/vkg-k8s-valkey-np.out || { echo "FAIL: no NetworkPolicy $(KG_STORE_POLICY) for the Valkey store in the kubernetes flavour"; exit 1; }
+	@grep -q 'app.kubernetes.io/instance: valkey' /tmp/vkg-k8s-valkey-np.out && grep -q 'port: 6379' /tmp/vkg-k8s-valkey-np.out || { echo "FAIL: the kubernetes-flavour Valkey rule does not select the valkey pods on 6379"; cat /tmp/vkg-k8s-valkey-np.out; exit 1; }
+	@if grep -q 'cidr:' /tmp/vkg-k8s-valkey-np.out; then echo "FAIL: the Valkey store alone must not open the apiserver CIDR"; exit 1; fi
+	@echo "--> kubernetes flavour: a NetworkPolicy, Egress only, networkPolicy.kubernetes.apiServerCIDR + DNS"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vkg-k8s.out 2>&1 || { cat /tmp/vkg-k8s.out; exit 1; }
+	@$(PICK) /tmp/vkg-k8s.out NetworkPolicy $(KG_STORE_POLICY) >/tmp/vkg-k8s-np.out || { echo "FAIL: no NetworkPolicy $(KG_STORE_POLICY) in the kubernetes flavour"; exit 1; }
+	@if $(PICK) /tmp/vkg-k8s.out CiliumNetworkPolicy $(KG_STORE_POLICY) >/dev/null 2>&1; then echo "FAIL: the cilium policy renders in the kubernetes flavour"; exit 1; fi
+	@grep -q 'policyTypes: \[Egress\]' /tmp/vkg-k8s-np.out || { echo "FAIL: the NetworkPolicy is not Egress only"; exit 1; }
+	@grep -q 'cidr: "10.9.0.1/32"' /tmp/vkg-k8s-np.out || { echo "FAIL: the NetworkPolicy does not use networkPolicy.kubernetes.apiServerCIDR"; grep cidr /tmp/vkg-k8s-np.out; exit 1; }
+	@grep -q 'values: \[kube-dns, coredns, k8s-dns-node-cache\]' /tmp/vkg-k8s-np.out || { echo "FAIL: the NetworkPolicy carries no DNS rule"; exit 1; }
+	@echo "--> the selector follows klausGateway.fullnameOverride"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set klausGateway.fullnameOverride=kg-renamed >/tmp/vkg-renamed.out 2>&1 || { cat /tmp/vkg-renamed.out; exit 1; }
+	@$(PICK) /tmp/vkg-renamed.out CiliumNetworkPolicy $(KG_STORE_POLICY) | grep -q 'app.kubernetes.io/name: "kg-renamed"' || { echo "FAIL: the store egress policy does not select the renamed pod"; exit 1; }
+	@if grep -q 'app.kubernetes.io/name: "klaus-gateway"' /tmp/vkg-renamed.out; then echo "FAIL: a klaus-gateway policy still selects the default name after fullnameOverride"; grep -n 'app.kubernetes.io/name: "klaus-gateway"' /tmp/vkg-renamed.out; exit 1; fi
+	@echo "--> networkPolicy off: none; component off: none"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set networkPolicy.enabled=false >/tmp/vkg-npoff.out 2>&1 || { cat /tmp/vkg-npoff.out; exit 1; }
+	@if grep -q 'klausgateway-.*-egress' /tmp/vkg-npoff.out; then echo "FAIL: a klaus-gateway egress policy renders with networkPolicy.enabled=false"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set components.klaus-gateway.enabled=false >/tmp/vkg-off.out 2>&1 || { cat /tmp/vkg-off.out; exit 1; }
+	@if grep -q 'klausgateway' /tmp/vkg-off.out; then echo "FAIL: klaus-gateway wiring renders with the component off"; grep -n klausgateway /tmp/vkg-off.out | head; exit 1; fi
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-storage-version
 verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over (#396): with kagent on, the backup Job (pre-install,pre-upgrade, -7: records the objects of modelconfigs/modelproviderconfigs/remotemcpservers.kagent.dev still stored at v1alpha2 into the migration ConfigMap, sets the crds policy of the HelmRelease the CRDs' Flux labels name to Skip (#416), deletes those CRDs and watches them stay absent for 60 s — a re-created one is deleted again and fails the hook naming the owner) and the restore Job (post-install,post-upgrade, 0: waits for modelconfigs.kagent.dev to serve v1alpha3, re-creates the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3, tolerates AlreadyExists, marks restored-at) as the hook identity in the helm image, the identity at their events; with the engine off (the fleet) the same pair and nothing else; with kagent off none of it; the kagent namespace follows kagent.namespaceOverride; helm lint.
 	@echo "====> $@ ($(CHART_DIR))"
