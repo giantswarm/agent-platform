@@ -683,6 +683,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "gatedValues": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },

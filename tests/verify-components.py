@@ -112,6 +112,8 @@ LINE = {
 # change, and it rolls both Deployments after kagent-crds.
 KAGENT_API_VERSION = "v1alpha3"
 MANAGERS = ["model-manager", "agent-manager"]
+# Blocks a component gates behind its own switch (components.<name>.gatedValues).
+GATED = {"vm-manager": ["vm-manager", "vmManager"]}
 
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
@@ -250,6 +252,16 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"the roster forwarded to connectivity lacks the switch {name}: enabled: false (got {ro.get(name)!r})")
         if re.search(rf"^{re.escape(name)}:", conn_off, re.M):
             fail(f"the {name} block reached the connectivity release while the switch is off (a live chart that predates the block would reject it)")
+    # --- gated blocks: a component's blocks travel only while it is on ---------------
+    # (components.<name>.gatedValues; vm-manager's two blocks — a connectivity
+    # chart before 4.11 refuses them, and nothing reads them while it is off.)
+    without = docs(render(meta, [*ci, "--set=components.vm-manager.enabled=false"]))
+    conn_without = hr_values(without[("HelmRelease", "agent-platform-connectivity")])
+    for name in GATED["vm-manager"]:
+        if re.search(rf"^{re.escape(name)}:", conn_without, re.M):
+            fail(f"the {name} block reached the connectivity release while components.vm-manager is off (gatedValues)")
+        if not re.search(rf"^{re.escape(name)}:", conn_off, re.M):
+            fail(f"the {name} block did not reach the connectivity release with components.vm-manager on; its wiring reads it")
     for (kind, name), d in off.items():
         if kind == "HelmRelease":
             dangling = [x for x in depends_on(d) if x in NEW]

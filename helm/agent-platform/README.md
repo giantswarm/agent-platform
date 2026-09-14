@@ -216,6 +216,8 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
+| components.vm-manager.gatedValues[0] | string | `"vm-manager"` |  |
+| components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.backstage.versionRange | string | `">=1.0.0 <3.0.0"` |  |

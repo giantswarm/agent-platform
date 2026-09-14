@@ -659,6 +659,11 @@ components:  # @schema additionalProperties: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
     # app); the reference is dropped at render time when the component is off.
     dependsOn: [muster]
+    # The component's two blocks reach the connectivity release only while the
+    # component is on: a live connectivity chart that predates them (4.10.x)
+    # refuses unknown top-level keys, and it reads them for nothing while the
+    # component is off (see components.yaml, gatedValues).
+    gatedValues: [vm-manager, vmManager]
   # --- The standalone chart's extras -------------------------------------------
   # The components the agent-platform-standalone umbrella carried as Helm
   # dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the
