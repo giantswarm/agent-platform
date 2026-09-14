@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
-"""Pull the component charts whose values the meta chart composes — the seven
-extras of the standalone chart, the two managers and the kagent line's two charts
-— and render each with the values the meta chart forwards to it.
+"""Pull EVERY component chart the customer BOM pins and render each with the
+values the meta chart forwards to it.
+
+The set of components comes from the BOM, never from a list kept in this file.
+A hand-kept list is what let agent-platform#278's three breaks through: the
+meta chart forwarded gateway.parameters.podAnnotations (#431) and
+vm-manager/vmManager (#441) to agent-platform-connectivity, and
+podDisruptionBudget/podAnnotations to klaus-gateway, against pins whose
+schemas declare none of them — and neither chart was on the list, so neither
+was ever rendered. The BOM is the roster of what an installation actually
+gets, so a component is covered the day it is pinned rather than the day
+someone remembers to add it, and a pin the meta chart renders no
+OCIRepository for fails rather than passing unnoticed.
 
 The meta chart cannot know whether a component chart accepts the block it
 forwards: the block is inlined into a HelmRelease and validated by helm-controller
@@ -12,15 +22,18 @@ examples/customer-bom.yaml (what a BOM installation gets). The render uses the
 quick-start inputs Backstage and mcp-kubernetes require (global.domain and
 global.identity) and the API groups the charts' optional objects need.
 
-The two managers matter most: their charts validate values with a CLOSED schema
-(additionalProperties: false at the root), so one key the meta chart forwards —
-from the `agent-manager:` / `model-manager:` block or derived by
-agent-platform.componentDerivedValues — that the chart the range resolves to
-does not declare fails the HelmRelease on every installation that turns the
-component on. agent-manager needs the kagent component on, so the render turns
-kagent on too. The kagent charts have no schema; rendering them proves the
-forwarded block templates (the WorkerPool's required image, the Substrate
-wiring, the bundled Postgres image) against the chart the values name.
+A chart that validates values with a CLOSED schema (additionalProperties:
+false at the root) is the sharp case: one key the meta chart forwards that the
+chart does not declare fails the HelmRelease on every installation that turns
+the component on, and nothing short of rendering the pair sees it. A chart
+with no schema is still worth rendering: that proves the forwarded block
+templates (the WorkerPool's required image, the Substrate wiring, the bundled
+Postgres image) against the chart the values name.
+
+QUICKSTART carries the inputs an installation supplies and the meta chart's
+values leave empty — the identity block, the resource servers' OAuth clients,
+a public Gateway for the routes. Without them the charts refuse to render at
+all, and the point here is a full render, not merely an accepted schema.
 
 A range is resolved the way Flux does — the registry's tag list, the highest
 semver the constraint admits (tests/fluxsemver.py: Masterminds semantics, a
@@ -38,6 +51,7 @@ Deliberately stdlib-only: the CI image has no PyYAML.
 """
 
 import json
+import pathlib
 import re
 import subprocess
 import sys
@@ -48,10 +62,22 @@ import urllib.request
 
 import fluxsemver
 
-EXTRAS = [
-    "backstage", "mcp-kubernetes", "cloudnative-pg",
-    "kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources",
-]
+# The components this check covers come from the customer BOM, never from a
+# list kept here: a hand-kept list is what let agent-platform#278's three
+# breaks through — agent-platform-connectivity and klaus-gateway forwarded keys
+# their pinned charts refuse, and neither chart was on it, so nothing rendered
+# them. The BOM is the roster of what an installation actually gets, so a
+# component is covered the day it is pinned rather than the day someone
+# remembers to add it. bom_components() reads it; COMPONENT_PIN_RE is its
+# one-line pin form.
+COMPONENT_PIN_RE = re.compile(r'^\s{2}([a-z0-9][a-z0-9-]*):\s*\{\s*versionRange:\s*"([^"]+)"')
+# Components whose chart lives in this repo and is released off the same tag as
+# the meta chart: the pair an installation gets is always the pair in this
+# commit, so the working tree is the chart to render, not a published version
+# the range or the example BOM happens to name. Rendering a published one
+# instead would fail every change that adds a key to both charts at once — the
+# key exists nowhere but here until the tag is cut (giantswarm/agent-platform#339).
+LOCAL_CHARTS = {"agent-platform-connectivity": "helm/agent-platform-connectivity"}
 MANAGERS = ["model-manager", "agent-manager"]
 # The kagent.dev API version the meta chart pins into both managers
 # (`kagent.apiVersion`, giantswarm/agent-platform#401); their charts must render
@@ -68,7 +94,6 @@ KAGENT = ["kagent-crds", "kagent"]
 # the forwarded keys (postgres.connectionStringSecretRef, atelet.nodeSelector /
 # tolerations / affinity) exist in the pinned build.
 SUBSTRATE = ["substrate-crds", "substrate"]
-COMPONENTS = [*EXTRAS, *MANAGERS, *KAGENT, *SUBSTRATE]
 # component -> the release its range / BOM pin waits for. While nothing the
 # range admits is published, the forwarded block is rendered against the newest
 # chart the line has (see fallback()); the entry goes when the release exists.
@@ -92,6 +117,30 @@ QUICKSTART = [
     # (the derived connection Secret reference) rather than the bundled one.
     "--set", "postgres.enabled=true",
 ]
+# The inputs that only matter once EVERY component the BOM pins is turned on,
+# kept out of QUICKSTART because tests/verify-kagent-tools-namespace.py imports
+# that list for renders with a much smaller component set: ingress.mode and its
+# companion are tied to which components are enabled, and a mode that disagrees
+# with them fails the connectivity chart's guard.
+ALL_ON_INPUTS = [
+    # Every route the connectivity chart renders needs a public Gateway to
+    # hang off (the chart's own guard); set once for all of them, the name is
+    # immaterial to a render.
+    "--set", "global.gatewayApi.parentRefs[0].name=x",
+    # agentgateway is among the components here, so the ingress mode must be
+    # the one that admits it (the connectivity chart's guard ties them).
+    "--set", "ingress.mode=agentgateway-muster",
+    "--set", "agent-platform-mcps.agentgateway.viaMuster=true",
+    # The OAuth clients each resource server needs. An installation supplies
+    # these; they are not in the meta chart's values, and without them the
+    # charts refuse to render at all.
+    "--set", "muster.muster.oauth.server.dex.clientSecret=x",
+    "--set", "muster.muster.oauth.server.registrationToken=x",
+    # valkey's ACL users need their passwords from somewhere (its own guard).
+    "--set", "valkey.valkey.auth.usersExistingSecret=x",
+    "--set", "mcp-kubernetes.mcpKubernetes.oauth.dex.clientSecret=x",
+]
+
 API_VERSIONS = [
     "--api-versions", "cilium.io/v2",
     "--api-versions", "monitoring.coreos.com/v1",
@@ -104,8 +153,13 @@ def run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
+# The release name every render here uses. It also names the chart's own
+# self-management OCIRepository, which is not a component.
+RELEASE = "t"
+
+
 def render_meta(meta: str, flags: list[str]) -> str:
-    r = run(["helm", "template", "t", meta, *flags])
+    r = run(["helm", "template", RELEASE, meta, *flags])
     if r.returncode != 0:
         sys.exit(f"FAIL: meta render failed\n{r.stderr}")
     return r.stdout
@@ -185,6 +239,28 @@ def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> st
     return chosen
 
 
+def bom_components(meta: str) -> dict[str, str]:
+    """The components the customer BOM pins, name -> pinned version, in the
+    order the BOM lists them. Only exact pins: a range is not a version this
+    check can render against, and the BOM carries none by design
+    (verify-meta asserts that)."""
+    out: dict[str, str] = {}
+    in_components = False
+    for line in open(f"{meta}/examples/customer-bom.yaml", encoding="utf-8"):
+        line = line.rstrip("\n")
+        if line.startswith("components:"):
+            in_components = True
+            continue
+        if in_components and line and not line.startswith((" ", "#")):
+            break
+        m = COMPONENT_PIN_RE.match(line) if in_components else None
+        if m:
+            out[m.group(1)] = m.group(2)
+    if not out:
+        sys.exit(f"FAIL: {meta}/examples/customer-bom.yaml pins no components")
+    return out
+
+
 def pull(url: str, version: str, dest: str) -> str:
     """helm pull of one exact version; returns the chart version it unpacked."""
     err = ""
@@ -219,23 +295,49 @@ def check_harness_selector(manifest: str, what: str) -> None:
 
 
 def main(meta: str) -> int:
-    follow_kagent = {"kagent-crds", *SUBSTRATE}  # no switch of their own: on with kagent
-    on = [f"--set=components.{n}.enabled=true" for n in COMPONENTS if n not in follow_kagent]
-    wide = docs(render_meta(meta, [*QUICKSTART, *on]))
-    pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *on]))
+    pins = bom_components(meta)
+    on = [f"--set=components.{n}.enabled=true" for n in pins]
+    wide = docs(render_meta(meta, [*QUICKSTART, *ALL_ON_INPUTS, *on]))
+    pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *ALL_ON_INPUTS, *on]))
+    # What the render actually produced, which is the authority on what a
+    # component is: every OCIRepository except the chart's own self-management
+    # source, which is named after the release and is not a component.
+    components = sorted(n for kind, n in wide if kind == "OCIRepository" and n != RELEASE)
+    missing = sorted(set(pins) - set(components))
+    if missing:
+        sys.exit(
+            f"FAIL: the BOM pins {', '.join(missing)} but the meta chart renders no OCIRepository for it — "
+            "the BOM and the components have drifted apart, and these pins go unchecked"
+        )
     kagent_tag = source(wide[("OCIRepository", "kagent")])[1].split()[0].lstrip(">=")  # the range's floor = the build the values name
-    for name in COMPONENTS:
+    print(f"--> {len(components)} components, from the BOM's pins")
+    for name in components:
         url, rng = source(wide[("OCIRepository", name)])
         _, pin = source(pinned[("OCIRepository", name)])
         values = hr_values(wide[("HelmRelease", name)])
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write(values)
-        tags = registry_tags(url)
-        for label, constraint in (("range", rng), ("BOM pin", pin)):
-            version = fluxsemver.resolve(tags, constraint) or fallback(name, constraint, tags, kagent_tag)
+        # A chart of this repo has one version that matters — the working tree —
+        # so both axes collapse to that single render.
+        local = LOCAL_CHARTS.get(name)
+        if local:
+            chart = str(pathlib.Path(__file__).resolve().parent.parent / local)
+            if not pathlib.Path(chart, "Chart.yaml").is_file():
+                sys.exit(f"FAIL: {name}: no chart at {chart} — LOCAL_CHARTS names a path this repo does not have")
+            axes = [("working tree", f"{rng} (range), {pin} (BOM pin)")]
+        else:
+            axes = [("range", rng), ("BOM pin", pin)]
+        tags = [] if local else registry_tags(url)
+        for label, constraint in axes:
+            if local:
+                resolved_chart, version = chart, "working tree"
+            else:
+                version = fluxsemver.resolve(tags, constraint) or fallback(name, constraint, tags, kagent_tag)
             with tempfile.TemporaryDirectory() as d:
-                resolved = pull(url, version, d)
-                r = run(["helm", "template", name, f"{d}/{name}", "-n", "agent-platform", "-f", f.name, *API_VERSIONS])
+                resolved = version if local else pull(url, version, d)
+                if not local:
+                    resolved_chart = f"{d}/{name}"
+                r = run(["helm", "template", name, resolved_chart, "-n", "agent-platform", "-f", f.name, *API_VERSIONS])
                 if r.returncode != 0:
                     sys.exit(
                         f"FAIL: {name} {resolved} (the {label} {constraint!r}) rejects the values the meta chart "
