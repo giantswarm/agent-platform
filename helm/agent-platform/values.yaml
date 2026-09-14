@@ -1613,13 +1613,21 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     dataStorage:
       enabled: true
       requestedSize: 1Gi
+    # The store holds every OAuth token, session and cached capability of every
+    # person and agent, encrypted at rest, and Valkey loads the whole RDB into
+    # memory on every start: gazelle's held 247 MB after three weeks (5237
+    # keys) and every restart under a 256Mi limit was OOM-killed — the token
+    # store stayed down until the limit was raised by hand (2026-09-14). The
+    # request reserves what a grown store needs, the limit leaves it room to
+    # grow; size it above the installation's `RDB memory usage when created`
+    # line in the container log.
     resources:
       requests:
         cpu: 50m
-        memory: 64Mi
+        memory: 256Mi
       limits:
         cpu: 200m
-        memory: 256Mi
+        memory: 1Gi
     # Restricted-PSS compliant. The inner valkey chart's defaults omit
     # seccompProfile and allowPrivilegeEscalation, which Kyverno's restricted
     # policies reject (the init container reuses this same securityContext).
