@@ -493,9 +493,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.valkey.dataStorage.enabled | bool | `true` |  |
 | valkey.valkey.dataStorage.requestedSize | string | `"1Gi"` |  |
 | valkey.valkey.resources.requests.cpu | string | `"50m"` |  |
-| valkey.valkey.resources.requests.memory | string | `"64Mi"` |  |
+| valkey.valkey.resources.requests.memory | string | `"256Mi"` |  |
 | valkey.valkey.resources.limits.cpu | string | `"200m"` |  |
-| valkey.valkey.resources.limits.memory | string | `"256Mi"` |  |
+| valkey.valkey.resources.limits.memory | string | `"1Gi"` |  |
 | valkey.valkey.podSecurityContext.fsGroup | int | `1000` |  |
 | valkey.valkey.podSecurityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.podSecurityContext.runAsGroup | int | `1000` |  |
