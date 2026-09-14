@@ -647,18 +647,16 @@ components:  # @schema additionalProperties: true
     # virtual machines with an instance metadata service, a vTPM with measured
     # boot, an immutable image and attestation, as REST and MCP — the write
     # surface for VMs next to agent-manager (agents) and model-manager
-    # (models). A pod of a KVM node: privileged, /dev/kvm and /dev/vhost-vsock
-    # from the node, QEMU and swtpm as its children. Off by default: KVM nodes
-    # are not universal, and the pod needs an image directory an operator
-    # provides (vm-manager.images below).
-    # The repository publishes from GitHub Actions to ghcr.io (its image build
-    # and KVM e2e run there; it has no CircleCI project): the image
-    # ghcr.io/giantswarm/vm-manager and the chart at this OCI path, version and
-    # appVersion stamped from the release tag.
-    repository: oci://ghcr.io/giantswarm/vm-manager/helm
-    # 0.19.0 is the first release that ships the chart; the ceiling stays the
-    # next major, so minor releases roll on their own.
-    versionRange: ">=0.19.0 <1.0.0"
+    # (models). A pod of a KVM node: privileged (the runtime hands it the node's
+    # /dev/kvm and /dev/vhost-vsock), QEMU and swtpm as its children, the guest
+    # image fetched from a published artifact at pod start. Off by default: KVM
+    # nodes are not universal.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # 0.20.0 is the first release the generated CircleCI pipeline publishes to
+    # gsoci and the giantswarm catalog (0.19.x were on ghcr.io, with the guest
+    # image as a node path); the ceiling stays the next major, so minor
+    # releases roll on their own.
+    versionRange: ">=0.20.0 <1.0.0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -3150,19 +3148,23 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
 # name is what the wiring below (network policies) targets, like
 # model-manager.fullnameOverride.
 #
-# The pod is a KVM node's: the chart runs it privileged with /dev/kvm and
-# /dev/vhost-vsock mounted from the node (host.devices) — a hostPath device in
-# an unprivileged container is denied by the device cgroup — and schedules it
-# with `nodeSelector` on the nodes that have them. QEMU and swtpm are children
-# of the process (no service manager in a pod): a pod restart ends the VMs;
-# their records and disks survive on a state claim (persistence.existingClaim
-# or persistence.create). The image directory (`make -C images` in a
-# vm-manager checkout: the base image, its UKI, the Kubernetes sysext layers
-# and policy.json with the golden PCR values) is an installation input: a claim
-# an operator fills (images.existingClaim) or a node path (images.hostPath — a
-# lab); with neither the pod has no bootable image. The guests' traffic leaves
-# through the pod's own network (userspace NAT), which the network policies
-# below admit (vmManager.networkPolicy.guestEgress).
+# The pod is a KVM node's: the chart runs it privileged — the container
+# runtime hands a privileged container the node's /dev/kvm and
+# /dev/vhost-vsock, nothing is mounted from the node, the chart has no
+# hostPath — and schedules it with `nodeSelector` on the nodes that have them.
+# QEMU and swtpm are children of the process (no service manager in a pod): a
+# pod restart ends the VMs; their records and disks survive on a state claim
+# (persistence.existingClaim or persistence.create). The guest image (the base
+# image, its UKI, the Kubernetes sysext layers and policy.json) is a published
+# artifact, not an installation input: every vm-manager release ships it as
+# gsoci.azurecr.io/giantswarm/vm-manager-guest-image:<version> and the chart's
+# init container fetches it into the state volume at pod start
+# (vm-manager.guestImage: the tag defaults to the chart appVersion; digest,
+# plainHTTP and pullSecret serve a lab registry or a mirror). The golden PCR
+# values are recorded inside the pod (`vm-manager image golden` over kubectl
+# exec) and survive restarts on the claim. The guests' traffic leaves through
+# the pod's own network (userspace NAT), which the network policies below
+# admit (vmManager.networkPolicy.guestEgress).
 #
 # The user's identity, not a ServiceAccount: oauth.enabled makes vm-manager an
 # OAuth 2.1 resource server in front of its MCP endpoint and REST API, the
@@ -3174,13 +3176,6 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
 # the connectivity chart renders the policies (vmManager below).
 vm-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: vm-manager
-  host:
-    devices:
-      enabled: true
-  # The image directory: exactly one of a claim or a node path, or neither.
-  images:
-    existingClaim: ""
-    hostPath: ""
   persistence:
     existingClaim: ""
     create: false

@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (`components.vm-manager` from gsoci and the giantswarm catalog; the guest image is a fetched artifact, no node paths)
+
+vm-manager releases through the generated CircleCI pipeline from 0.20.0 (giantswarm/vm-manager#49): the chart from `oci://gsoci.azurecr.io/charts/giantswarm` like model-manager's, the image from gsoci. `components.vm-manager.repository` moves off ghcr.io and the range's floor to `0.20.0`. The chart takes no image directory from a claim or a node path any more (`vm-manager.images.*` is gone) and mounts no device hostPaths (`vm-manager.host.devices` is gone): the guest image is the OCI artifact `gsoci.azurecr.io/giantswarm/vm-manager-guest-image:<version>` every release publishes, fetched into the state volume by an init container at pod start (`vm-manager.guestImage`, the tag defaulting to the chart appVersion), and a privileged container has the node's devices from the runtime.
+
+### Operator action
+
+- **None** while the component is off (the fleet): the roster forwarded to the connectivity release is unchanged.
+- **Component on** (a lab; an installation that turned it on with 4.11.x): the `vm-manager.images` and `vm-manager.host` keys are no longer in the chart's closed schema — an installation that set `images.hostPath`, `images.existingClaim` or `host.devices.*` removes them, or the release fails validation naming them. The OCIRepository re-resolves against gsoci and the pod rolls once; its init container fetches the guest image (about 1.4 GB) before the server starts, so the first start after the upgrade takes the pull. Turn on a state claim (`vm-manager.persistence.create: true` or `existingClaim`) with the component: it carries VM records and disks across restarts and keeps the fetched image and the golden PCR values `image golden` records into its `policy.json`; on an emptyDir every pod start fetches again and forgets the golden values. Golden values recorded into a checkout's `policy.json` before are recorded once more inside the pod after a learn-mode boot (`vm-manager.vm.learnGolden: true`): `kubectl -n <namespace> exec deploy/vm-manager -- vm-manager image golden <id>_<version> --from-vm <id> --token <id_token>`.
+- The 0.19.x releases on ghcr.io stay where they are; nothing pins them after this release.
+
 ## \<current\> → \<next\> (muster-valkey gets a memory bound of its own: `maxmemory 640mb`, `volatile-lru`)
 
 giantswarm/agent-platform#446: the valkey release ran Valkey without a `maxmemory`, so the kernel — not Valkey — bounded the store, and a store grown past the container limit crash-looped (gazelle 2026-09-14: 19 OOM kills in 90 minutes, the muster connector down meanwhile; the 1Gi limit below is the other half). `valkey.valkey.valkeyConfig` now sets `maxmemory 640mb` and `maxmemory-policy volatile-lru`.
