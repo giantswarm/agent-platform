@@ -13,12 +13,23 @@ env, which the meta chart derives); Substrate's S3 surface — GetObject and
 multipart Upload from atelet, ListObjectsV2, DeleteObject, CopyObject and
 HeadObject from ate-api-server — is what the azureblob backend translates.
 Non-root on 8080 (the Service listens on 80); the JVM sizes its heap from the
-memory limit, so the limit is not optional. Substrate's egress to it lives in
+memory limit, so the limit is not optional — nor are the ephemeral-storage
+requests and limit: the container mounts two emptyDirs (/tmp for the JVM, the
+image's /data) whose sizeLimit follows the limit, and Kyverno's
+require-emptydir-requests-and-limits reports a container mounting an emptyDir
+without both (giantswarm/agent-platform#438). Substrate's egress to it lives in
 netpol.yaml next to the bundled store's.
 */ -}}
 {{- if include "agent-platform.substrateStore.s3proxy" . }}
 {{- $store := include "agent-platform.substrateStore.block" . | fromJson }}
 {{- $p := $store.s3proxy }}
+{{- $resources := $p.resources | default dict }}
+{{- range $kind := list "requests" "limits" }}
+{{- if not (hasKey (dig $kind dict $resources) "ephemeral-storage") }}
+{{- fail (printf "kagent.harness.snapshotStore.s3proxy.resources.%s.ephemeral-storage is required: the façade mounts emptyDirs (/tmp, /data) whose sizeLimit follows the limit, and Kyverno's require-emptydir-requests-and-limits refuses a container mounting an emptyDir without ephemeral-storage requests and limits" $kind) }}
+{{- end }}
+{{- end }}
+{{- $ephemeral := index $resources.limits "ephemeral-storage" }}
 {{- $capz := eq (include "agent-platform.substrateStore.mode" .) "capz" }}
 {{- $name := include "agent-platform.substrateStore.s3proxyName" . }}
 {{- $az := include "agent-platform.substrateStore.azure" . | fromJson }}
@@ -184,7 +195,7 @@ spec:
               exec:
                 command: ["sleep", "5"]
           resources:
-            {{- toYaml $p.resources | nindent 12 }}
+            {{- toYaml $resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -205,10 +216,15 @@ spec:
           secret:
             secretName: {{ $name }}
             defaultMode: 0440
+        # Both take the container's ephemeral-storage limit as their sizeLimit:
+        # the kubelet evicts the pod above either bound, so one number rules
+        # the disk the façade may use.
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ $ephemeral | quote }}
         - name: data
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ $ephemeral | quote }}
 ---
 apiVersion: v1
 kind: Service

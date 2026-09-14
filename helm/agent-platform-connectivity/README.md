@@ -563,7 +563,9 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | kagent.harness.snapshotStore.s3proxy.javaOpts | string | `"-XX:MaxRAMPercentage=70"` |  |
 | kagent.harness.snapshotStore.s3proxy.resources.requests.cpu | string | `"250m"` |  |
 | kagent.harness.snapshotStore.s3proxy.resources.requests.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.ephemeral-storage | string | `"256Mi"` |  |
 | kagent.harness.snapshotStore.s3proxy.resources.limits.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.limits.ephemeral-storage | string | `"1Gi"` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.endpoint | string | `""` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.account | string | `""` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.container | string | `""` |  |
