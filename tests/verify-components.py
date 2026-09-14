@@ -78,15 +78,15 @@ CONNECTIVITY_RANGE = ">=4.0.0 <5.0.0"
 # 0.x from 0.20.0, dual-version), klaus-gateway 1.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://ghcr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=0.11.0-gs.12 <0.11.1-0"
+KAGENT_RANGE = ">=0.11.0-gs.14 <0.11.1-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin
 # (the build the WorkerPool's worker image names), both landing in ate-system,
 # both following components.kagent. The pin is the line's release range, the
 # kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.27-gs.9 <0.0.28-0"
-SUBSTRATE_PIN = "0.0.27-gs.9"  # the range's floor: the BOM pin and the worker image the kagent chart (0.11.0-gs.12) stamps
+SUBSTRATE_RANGE = ">=0.0.30-gs.1 <0.0.31-0"
+SUBSTRATE_PIN = "0.0.30-gs.1"  # the range's floor: the BOM pin and the worker image the kagent chart (0.11.0-gs.14) stamps
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),

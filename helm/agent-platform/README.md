@@ -158,7 +158,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=0.11.0-gs.12 <0.11.1-0"` |  |
+| components.kagent.versionRange | string | `">=0.11.0-gs.14 <0.11.1-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -178,18 +178,18 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=0.11.0-gs.12 <0.11.1-0"` |  |
+| components.kagent-crds.versionRange | string | `">=0.11.0-gs.14 <0.11.1-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.27-gs.9 <0.0.28-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.27-gs.9 <0.0.28-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
