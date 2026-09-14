@@ -18,7 +18,7 @@ This repo publishes **two** charts:
 
 ## Meta-package release flow
 
-> Implements [giantswarm/giantswarm#36875](https://github.com/giantswarm/giantswarm/issues/36875). Concept write-up: klaus-lab `architecture/agent-platform-meta-package.md`.
+> Implements [giantswarm/giantswarm#36875](https://github.com/giantswarm/giantswarm/issues/36875).
 
 The `agent-platform` chart no longer bundles its components as pinned Helm subcharts. It is an **app-of-apps meta-package**: `templates/components.yaml` renders, per entry in `.Values.components`, a Flux `OCIRepository` + `HelmRelease`. Flux is the only render engine (`gitops.engine` accepts `flux` only). It emits **only** those objects (a *pure* renderer — no raw CRs of its own) — plus, where a cluster has no Flux, the engine that reconciles them: the `flux-engine` subchart, on by default, off on a cluster that runs its own Flux (see [Installing](#installing)).
 
