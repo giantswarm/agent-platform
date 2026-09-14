@@ -25,6 +25,13 @@ with the meta chart's defaults (the server in the kagent namespace with the rest
 of kagent) and with `kagent.kagent-tools.namespaceOverride` unset, where both
 charts fall back to the release namespace — the shape that broke.
 
+The same render pair ties the connectivity chart's VerticalPodAutoscaler on the
+kagent controller (templates/kagent/controller-vpa.yaml) to the kagent chart: the
+network policies select pods by the labels the kagent chart sets, but the VPA
+names the Deployment and the container. A rename in the kagent line would leave
+the render green and the VPA targeting nothing, so the VPA's targetRef name,
+namespace and containerName must be the rendered controller Deployment's.
+
 Network: ghcr.io (the kagent line's chart). Deliberately stdlib-only: the CI
 image has no PyYAML.
 """
@@ -91,6 +98,40 @@ def rendered_server(manifest: str) -> tuple[str, str, str]:
     return deployment_ns, m.group(1), m.group(2)
 
 
+def rendered_controller(manifest: str) -> tuple[str, str, str]:
+    """The kagent chart's side: the controller Deployment's name, namespace and
+    its one container's name."""
+    objects = cc.docs(manifest)
+    deployments = [(name, d) for (kind, name), d in objects.items()
+                   if kind == "Deployment" and re.search(r"^    app\.kubernetes\.io/component: controller$", d, re.M)]
+    if len(deployments) != 1:
+        fail(f"the kagent chart renders {len(deployments)} Deployments labelled app.kubernetes.io/component: controller, not one")
+    name, doc = deployments[0]
+    namespace = re.search(r"^  namespace: (\S+)", doc, re.M).group(1)
+    spec = doc[doc.index("\n      containers:\n"):]
+    containers = re.findall(r"^        - name: (\S+)$", spec, re.M)
+    if len(containers) != 1:
+        fail(f"the kagent controller Deployment {name} has {len(containers)} containers ({containers}), the VPA's container policy names one")
+    return name, namespace, containers[0]
+
+
+def vpa_target(manifest: str) -> tuple[str, str, str]:
+    """The connectivity chart's side: the one VerticalPodAutoscaler's targetRef
+    name, namespace and containerName."""
+    vpas = [d for (kind, _), d in cc.docs(manifest).items() if kind == "VerticalPodAutoscaler"]
+    if len(vpas) != 1:
+        fail(f"the connectivity chart renders {len(vpas)} VerticalPodAutoscalers, not one")
+    doc = vpas[0]
+    namespace = re.search(r"^  namespace: (\S+)", doc, re.M).group(1)
+    m = re.search(r"^  targetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: (\S+)$", doc, re.M)
+    if not m:
+        fail(f"the VerticalPodAutoscaler does not target an apps/v1 Deployment by name:\n{doc}")
+    containers = re.findall(r"^      - containerName: (\S+)$", doc, re.M)
+    if len(containers) != 1:
+        fail(f"the VerticalPodAutoscaler carries {len(containers)} container policies, not one:\n{doc}")
+    return m.group(1), namespace, containers[0]
+
+
 def rule_target(manifest: str, policy: str) -> tuple[str, str]:
     """The connectivity chart's side: the namespace and port the policy's
     kagent-tools rule names."""
@@ -118,6 +159,7 @@ def check(meta: str, connectivity: str, kagent_chart: str, label: str, flags: li
         if r.returncode != 0:
             fail(f"the kagent chart rejects the values the meta chart forwards ({label})\n{r.stderr}")
         deployment_ns, url_ns, url_port = rendered_server(r.stdout)
+        controller = rendered_controller(r.stdout)
         r = cc.run(["helm", "template", "agent-platform-connectivity", connectivity, "-n", target_namespace(connectivity_hr),
                     "-f", write(d, "connectivity.yaml", cc.hr_values(connectivity_hr)), *cc.API_VERSIONS])
         if r.returncode != 0:
@@ -134,6 +176,11 @@ def check(meta: str, connectivity: str, kagent_chart: str, label: str, flags: li
                  f"{deployment_ns} and the RemoteMCPServer dials port {url_port} — the controller's discovery would time out (#421)")
     print(f"ok ({label}): kagent-tools Deployment and RemoteMCPServer URL in {deployment_ns}:{url_port}; "
           f"{' and '.join(POLICIES)} open exactly that")
+    target = vpa_target(connectivity_render)
+    if target != controller:
+        fail(f"{label}: the VerticalPodAutoscaler targets Deployment {target[0]} in {target[1]}, container {target[2]}, "
+             f"but the kagent chart renders the controller as Deployment {controller[0]} in {controller[1]}, container {controller[2]} — the VPA would target nothing")
+    print(f"ok ({label}): the controller VPA targets Deployment {controller[0]} in {controller[1]}, container {controller[2]} — the kagent chart's")
 
 
 def main(meta: str, connectivity: str) -> int:

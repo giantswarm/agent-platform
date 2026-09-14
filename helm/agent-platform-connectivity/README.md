@@ -698,8 +698,8 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | kagent.controller.vpa.controlledValues | string | `"RequestsOnly"` |  |
 | kagent.controller.vpa.minAllowed.cpu | string | `"100m"` |  |
 | kagent.controller.vpa.minAllowed.memory | string | `"128Mi"` |  |
-| kagent.controller.vpa.maxAllowed.cpu | string | `"2"` |  |
-| kagent.controller.vpa.maxAllowed.memory | string | `"512Mi"` |  |
+| kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
+| kagent.controller.vpa.maxAllowed.memory | string | `"480Mi"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |

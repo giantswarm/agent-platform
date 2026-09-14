@@ -840,11 +840,9 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 # the `auto` knob resolves off.
 VPA_ON := $(VM) --set components.kagent.enabled=true
 VPA_VANILLA := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --set components.kagent.enabled=true
-# One HelmRelease of a meta render (by metadata.name), as its document.
-HR_DOC := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n---\n"); print([x for x in d if "kind: HelmRelease" in x and "\n  name: "+sys.argv[2]+"\n" in x][0])'
 
 .PHONY: verify-kagent-vpa
-verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with autoscaling.k8s.io/v1 served the connectivity chart renders it on Deployment kagent-controller in the kagent namespace (InPlaceOrRecreate, RequestsOnly, the chart's requests and limits as the bounds, minReplicas 1); a vanilla render none; an explicit true / false wins both ways; inert with kagent off; the enum guards fire in both charts; the meta chart forwards the knob resolved to the connectivity release and never to the kagent release.
+verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with autoscaling.k8s.io/v1 served the connectivity chart renders it on Deployment kagent-controller in the kagent namespace (InPlaceOrRecreate, RequestsOnly, minAllowed the chart's requests, maxAllowed a step under its limits, minReplicas 1); a vanilla render none; an explicit true / false wins both ways; inert with kagent off; the enum guards fire in both charts; the meta chart forwards the knob resolved to the connectivity release and never to the kagent release.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, autoscaling.k8s.io/v1 served (the fleet): the VPA renders"
 	@helm template t $(CONNECTIVITY_DIR) $(VPA_ON) >/tmp/vk-on.out 2>&1 || { cat /tmp/vk-on.out; exit 1; }
@@ -860,9 +858,9 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@grep -q '^        controlledValues: RequestsOnly$$' /tmp/vk-vpa.out || { echo "FAIL: controlledValues is not RequestsOnly"; cat /tmp/vk-vpa.out; exit 1; }
 	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 100m' || { echo "FAIL: minAllowed.cpu is not the chart's request (100m)"; cat /tmp/vk-vpa.out; exit 1; }
 	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 128Mi' || { echo "FAIL: minAllowed.memory is not the chart's request (128Mi)"; cat /tmp/vk-vpa.out; exit 1; }
-	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: "2"' || { echo "FAIL: maxAllowed.cpu is not the chart's limit (2)"; cat /tmp/vk-vpa.out; exit 1; }
-	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 512Mi' || { echo "FAIL: maxAllowed.memory is not the chart's limit (512Mi)"; cat /tmp/vk-vpa.out; exit 1; }
-	@echo "ok: VerticalPodAutoscaler kagent-controller on Deployment kagent-controller — InPlaceOrRecreate, RequestsOnly, 100m/128Mi to 2/512Mi"
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 1900m' || { echo "FAIL: maxAllowed.cpu is not a step under the chart's limit (1900m)"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 480Mi' || { echo "FAIL: maxAllowed.memory is not a step under the chart's limit (480Mi)"; cat /tmp/vk-vpa.out; exit 1; }
+	@echo "ok: VerticalPodAutoscaler kagent-controller on Deployment kagent-controller — InPlaceOrRecreate, RequestsOnly, 100m/128Mi to 1900m/480Mi"
 	@echo "--> vanilla (no autoscaling.k8s.io/v1): auto resolves off"
 	@helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) >/tmp/vk-vanilla.out 2>&1 || { cat /tmp/vk-vanilla.out; exit 1; }
 	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-vanilla.out; then echo "FAIL: a VerticalPodAutoscaler renders without autoscaling.k8s.io/v1 served"; exit 1; fi
@@ -889,13 +887,13 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@echo "ok: the enum guards fire in both charts"
 	@echo "--> meta chart: the resolved knob reaches the connectivity release, never the kagent release"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_ON) >/tmp/vk-meta.out 2>&1 || { cat /tmp/vk-meta.out; exit 1; }
-	@$(HR_DOC) /tmp/vk-meta.out kagent >/tmp/vk-meta-kagent.out
+	@$(PICK) /tmp/vk-meta.out HelmRelease kagent >/tmp/vk-meta-kagent.out || { echo "FAIL: no kagent HelmRelease in the meta render"; exit 1; }
 	@if grep -q 'vpa:' /tmp/vk-meta-kagent.out; then echo "FAIL: kagent.controller.vpa travels on the kagent HelmRelease (components.kagent.omitKeys)"; exit 1; fi
 	@grep -q '^      pdb:$$' /tmp/vk-meta-kagent.out || { echo "FAIL: the rest of kagent.controller vanished from the kagent HelmRelease with the vpa hold-back"; exit 1; }
-	@$(HR_DOC) /tmp/vk-meta.out agent-platform-connectivity >/tmp/vk-meta-conn.out
+	@$(PICK) /tmp/vk-meta.out HelmRelease agent-platform-connectivity >/tmp/vk-meta-conn.out || { echo "FAIL: no agent-platform-connectivity HelmRelease in the meta render"; exit 1; }
 	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn.out | grep -q '^          enabled: true$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to true with the API served"; exit 1; }
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_VANILLA) >/tmp/vk-meta-vanilla.out 2>&1 || { cat /tmp/vk-meta-vanilla.out; exit 1; }
-	@$(HR_DOC) /tmp/vk-meta-vanilla.out agent-platform-connectivity >/tmp/vk-meta-conn-vanilla.out
+	@$(PICK) /tmp/vk-meta-vanilla.out HelmRelease agent-platform-connectivity >/tmp/vk-meta-conn-vanilla.out || { echo "FAIL: no agent-platform-connectivity HelmRelease in the vanilla meta render"; exit 1; }
 	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn-vanilla.out | grep -q '^          enabled: false$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to false without the API"; exit 1; }
 	@if grep -q 'enabled: auto' /tmp/vk-meta.out /tmp/vk-meta-vanilla.out; then echo "FAIL: an unresolved auto reached a HelmRelease"; exit 1; fi
 	@echo "ok: resolved once, forwarded to connectivity only"
@@ -952,7 +950,7 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@helm template t $(CONNECTIVITY_DIR) --namespace agent-platform $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true >/tmp/vkn-release-ns.out 2>&1 || { cat /tmp/vkn-release-ns.out; exit 1; }
 	@[ "$$(grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-release-ns.out | grep -c 'io.kubernetes.pod.namespace: agent-platform$$')" = "2" ] || { echo "FAIL: without kagent.kagent-tools.namespaceOverride the tool-server egress does not name the release namespace (where the kagent chart renders the server)"; grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-release-ns.out; exit 1; }
 	@echo "ok: the rules follow the subchart's fallback, the release namespace"
-	@echo "--> the rules' namespace and port are the kagent chart's: its rendered kagent-tools Deployment and RemoteMCPServer URL, with the values the meta chart forwards (network: ghcr.io)"
+	@echo "--> the rules' namespace and port are the kagent chart's: its rendered kagent-tools Deployment and RemoteMCPServer URL, with the values the meta chart forwards (network: ghcr.io); the controller VPA's targetRef and containerName are its rendered controller Deployment's"
 	@python3 tests/verify-kagent-tools-namespace.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "--> an explicit kagent.kagent-tools.namespaceOverride / service.ports.tools.targetPort follows into the rules"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true --set kagent.kagent-tools.namespaceOverride=tools-ns --set kagent.kagent-tools.service.ports.tools.targetPort=9084 >/tmp/vkn-override.out 2>&1 || { cat /tmp/vkn-override.out; exit 1; }

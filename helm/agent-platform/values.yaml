@@ -1850,9 +1850,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # requests without an eviction, and a resize that cannot apply in place
     # falls back to an eviction the budget refuses — the pod keeps its
     # requests until its next roll. RequestsOnly leaves the chart's limits
-    # alone; minAllowed / maxAllowed hold the recommendation between the
-    # chart's requests (100m / 128Mi) and its limits (2 / 512Mi). Never
-    # forwarded to the kagent release (components.kagent.omitKeys).
+    # alone; minAllowed is the chart's requests (100m / 128Mi) and maxAllowed
+    # stays a step under its limits (2 / 512Mi): a Burstable pod whose
+    # requests reach its limits on both resources would become Guaranteed,
+    # and Kubernetes refuses a resize that changes the QoS class — so
+    # maxAllowed must never equal the limits. Never forwarded to the kagent
+    # release (components.kagent.omitKeys).
     vpa:
       enabled: auto  # auto | true | false
       updateMode: InPlaceOrRecreate  # Off | Initial | Recreate | InPlaceOrRecreate | Auto
@@ -1861,8 +1864,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         cpu: 100m
         memory: 128Mi
       maxAllowed:
-        cpu: "2"
-        memory: 512Mi
+        cpu: 1900m
+        memory: 480Mi
     # The kagent line serves no Prometheus /metrics: the controller binds its
     # metrics server to "0", and the upstream chart's controller.metrics knob
     # renders a Service and the METRICS_* env to that dead port. Explicitly

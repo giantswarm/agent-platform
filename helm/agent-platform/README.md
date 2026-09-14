@@ -538,8 +538,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.vpa.controlledValues | string | `"RequestsOnly"` |  |
 | kagent.controller.vpa.minAllowed.cpu | string | `"100m"` |  |
 | kagent.controller.vpa.minAllowed.memory | string | `"128Mi"` |  |
-| kagent.controller.vpa.maxAllowed.cpu | string | `"2"` |  |
-| kagent.controller.vpa.maxAllowed.memory | string | `"512Mi"` |  |
+| kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
+| kagent.controller.vpa.maxAllowed.memory | string | `"480Mi"` |  |
 | kagent.controller.metrics.enabled | bool | `false` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |

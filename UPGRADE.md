@@ -4,14 +4,14 @@ Operator action required between releases. CHANGELOG.md captures the diff; UPGRA
 
 ## \<current\> → \<next\> (the kagent controller gets a VerticalPodAutoscaler: `kagent.controller.vpa`, `InPlaceOrRecreate`)
 
-giantswarm/agent-platform#455: the connectivity chart renders a `VerticalPodAutoscaler kagent-controller` in the kagent namespace on the controller Deployment wherever the cluster serves `autoscaling.k8s.io/v1` (`kagent.controller.vpa.enabled: auto`). Its update mode is `InPlaceOrRecreate`: the running pod's CPU and memory requests are resized in place, no eviction and no roll. The chart's limits stay (`controlledValues: RequestsOnly`), and the recommendation is held between the chart's requests (100m / 128Mi) and its limits (2 / 512Mi).
+giantswarm/agent-platform#455: the connectivity chart renders a `VerticalPodAutoscaler kagent-controller` in the kagent namespace on the controller Deployment wherever the cluster serves `autoscaling.k8s.io/v1` (`kagent.controller.vpa.enabled: auto`). Its update mode is `InPlaceOrRecreate`: the running pod's CPU and memory requests are resized in place, no eviction and no roll. The chart's limits stay (`controlledValues: RequestsOnly`); the recommendation is held between the chart's requests (100m / 128Mi) and a step under its limits (1900m / 480Mi). Requests equal to the limits on both resources would turn the Burstable pod Guaranteed, and Kubernetes refuses a resize that changes the QoS class — so `maxAllowed` must stay under the limits.
 
 ### Operator action
 
 - **None** on a Giant Swarm management cluster (VPA 1.5.1 from vertical-pod-autoscaler-app 6.1.2 on Kubernetes 1.35; graveler verified): the connectivity release adds the one object, and the recommender applies its first recommendation in place after it has gathered history. The controller pod is not rolled.
 - **A cluster whose VPA is older than 1.5.0**: the `InPlaceOrRecreate` mode is behind a feature gate in 1.4 and unknown to the 1.3 CRD, so the connectivity release would fail on the object. Set `kagent.controller.vpa.updateMode: Initial` (applied on the pod's next roll) or `Off` (recommendations only), or upgrade the VPA first.
 - **A cluster without the VPA CRD** (`auto` resolves off): nothing renders. `kagent.controller.vpa.enabled: false` opts out on a cluster that has it.
-- A resize the kubelet cannot apply in place (a memory decrease, the node out of room) makes the VPA fall back to an eviction, which the controller's `PodDisruptionBudget minAvailable: 1` refuses. The pod then keeps its requests until its next roll; nothing is stuck.
+- A resize the cluster cannot apply in place (the node out of room; a `maxAllowed` raised to the limits, which would change the QoS class) makes the VPA fall back to an eviction, which the controller's `PodDisruptionBudget minAvailable: 1` refuses. The pod then keeps its requests until its next roll; nothing is stuck. Only requests move, and a request decrease applies in place.
 
 ## \<current\> → \<next\> (`components.vm-manager` from gsoci and the giantswarm catalog; the guest image is a fetched artifact, no node paths)
 

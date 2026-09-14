@@ -11,7 +11,9 @@ Kubernetes 1.33+ with in-place pod resize) resizes the running pod's requests
 without an eviction, and a resize that cannot apply in place falls back to an
 eviction the budget refuses — the pod keeps its requests until its next roll.
 minReplicas: 1 makes the single replica eligible whatever the updater's
---min-replicas flag says. RequestsOnly leaves the chart's limits alone. */ -}}
+--min-replicas flag says. RequestsOnly leaves the chart's limits alone, and
+maxAllowed stays under them: requests equal to limits on both resources would
+turn the Burstable pod Guaranteed, a QoS change no resize may make. */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 {{- $vpa := .Values.kagent.controller.vpa | default dict }}
 {{- if (include "agent-platform.kagentControllerVpa" .) }}
