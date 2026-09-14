@@ -95,6 +95,9 @@ LINE = {
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
     "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+    # vm-manager publishes from GitHub Actions to ghcr.io (no CircleCI project);
+    # 0.19.0 is the first release with the chart. muster alone: the MCPServer CR.
+    "vm-manager": ("oci://ghcr.io/giantswarm/vm-manager/helm", ">=0.19.0 <1.0.0", ["muster"]),
     # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
     # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
     # REST client and belongs to the 3.x meta chart.
@@ -109,6 +112,8 @@ LINE = {
 # change, and it rolls both Deployments after kagent-crds.
 KAGENT_API_VERSION = "v1alpha3"
 MANAGERS = ["model-manager", "agent-manager"]
+# Blocks a component gates behind its own switch (components.<name>.gatedValues).
+GATED = {"vm-manager": ["vm-manager", "vmManager"]}
 
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
@@ -247,6 +252,16 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"the roster forwarded to connectivity lacks the switch {name}: enabled: false (got {ro.get(name)!r})")
         if re.search(rf"^{re.escape(name)}:", conn_off, re.M):
             fail(f"the {name} block reached the connectivity release while the switch is off (a live chart that predates the block would reject it)")
+    # --- gated blocks: a component's blocks travel only while it is on ---------------
+    # (components.<name>.gatedValues; vm-manager's two blocks — a connectivity
+    # chart before 4.11 refuses them, and nothing reads them while it is off.)
+    without = docs(render(meta, [*ci, "--set=components.vm-manager.enabled=false"]))
+    conn_without = hr_values(without[("HelmRelease", "agent-platform-connectivity")])
+    for name in GATED["vm-manager"]:
+        if re.search(rf"^{re.escape(name)}:", conn_without, re.M):
+            fail(f"the {name} block reached the connectivity release while components.vm-manager is off (gatedValues)")
+        if not re.search(rf"^{re.escape(name)}:", conn_off, re.M):
+            fail(f"the {name} block did not reach the connectivity release with components.vm-manager on; its wiring reads it")
     for (kind, name), d in off.items():
         if kind == "HelmRelease":
             dangling = [x for x in depends_on(d) if x in NEW]

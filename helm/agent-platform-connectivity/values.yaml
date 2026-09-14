@@ -90,6 +90,8 @@ components:  # @schema additionalProperties: true
     enabled: false
   agent-manager:  # @schema additionalProperties: true
     enabled: false
+  vm-manager:  # @schema additionalProperties: true
+    enabled: false
   # The components the agent-platform-standalone umbrella carried on top of the
   # fleet's roster, forwarded by the meta chart like the rest so the wiring this
   # chart renders for them gates on the same answer: the Backstage app-config and
@@ -2030,6 +2032,101 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # this is where a private address (one of
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
+
+# === VM manager (vm-manager) ===
+# Values forwarded verbatim to the vm-manager component release
+# (giantswarm/vm-manager: KVM virtual machines with an instance metadata
+# service, a vTPM with measured boot, an immutable image and attestation, as
+# REST and MCP; tools appear as x_vm-manager_<tool> through the chart's own
+# MCPServer CR, labelled for the agent-platform tool group). The pinned Service
+# name is what the wiring below (network policies) targets, like
+# model-manager.fullnameOverride.
+#
+# The pod is a KVM node's: the chart runs it privileged with /dev/kvm and
+# /dev/vhost-vsock mounted from the node (host.devices) — a hostPath device in
+# an unprivileged container is denied by the device cgroup — and schedules it
+# with `nodeSelector` on the nodes that have them. QEMU and swtpm are children
+# of the process (no service manager in a pod): a pod restart ends the VMs;
+# their records and disks survive on a state claim (persistence.existingClaim
+# or persistence.create). The image directory (`make -C images` in a
+# vm-manager checkout: the base image, its UKI, the Kubernetes sysext layers
+# and policy.json with the golden PCR values) is an installation input: a claim
+# an operator fills (images.existingClaim) or a node path (images.hostPath — a
+# lab); with neither the pod has no bootable image. The guests' traffic leaves
+# through the pod's own network (userspace NAT), which the network policies
+# below admit (vmManager.networkPolicy.guestEgress).
+#
+# The user's identity, not a ServiceAccount: oauth.enabled makes vm-manager an
+# OAuth 2.1 resource server in front of its MCP endpoint and REST API, the
+# issuer, client, secret and CA from global.identity and the OAuth base URL from
+# global.domain inside the chart (an installation that sets no global.* names
+# them here, as for model-manager above); muster forwards the session's
+# id_token (the MCPServer CR's auth block). vm-manager calls no Kubernetes API,
+# so no downstream OAuth and no RBAC. The chart's own NetworkPolicy stays off;
+# this chart renders the policies (vmManager below).
+vm-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: vm-manager
+  host:
+    devices:
+      enabled: true
+  # The image directory: exactly one of a claim or a node path, or neither.
+  images:
+    existingClaim: ""
+    hostPath: ""
+  persistence:
+    existingClaim: ""
+    create: false
+  oauth:
+    enabled: true
+    provider: dex
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+        requiredAudiences: []
+  networkPolicy:
+    enabled: false
+
+# The wiring this chart renders for the vm-manager component (it reads this
+# block, not the chart's). Inert while components.vm-manager.enabled is false. No route: the portal has no VM pages yet, and the MCP tools reach
+# muster in-cluster without one.
+vmManager:  # @schema skipProperties: true; additionalProperties: true
+  # PodDisruptionBudget on the vm-manager pod, rendered by the connectivity
+  # chart in the release namespace (the same shape as agentManager's;
+  # giantswarm/agent-platform#431): with one replica whose children are the
+  # running VMs, minAvailable: 1 refuses every voluntary eviction — an
+  # eviction would end every VM on the node; AlwaysAllow keeps a pod that is
+  # not Ready evictable. Exactly one of minAvailable / maxUnavailable.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    maxUnavailable: null
+    unhealthyPodEvictionPolicy: AlwaysAllow
+  # Network policy inputs; the policies render under networkPolicy (enabled +
+  # flavor). Ingress: muster (MCPServer on) and the kubelet's probes. Egress:
+  # DNS, the identity provider (oauth on: the Dex issuer by name, or for
+  # vm-manager.oauth.provider google its hosts) and the guests' destinations.
+  networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to muster: a list of pod
+      # label maps (matchLabels), every one a workload in the release
+      # namespace — a portal that calls the REST API. Empty, the default,
+      # admits no one else.
+      additionalPeers: []
+    # The guests' egress. A VM reaches whatever the pod reaches — the networks
+    # are userspace NAT out of this pod, on every port and protocol — so the
+    # policy admits these blocks for the pod without a port list; `except`
+    # carves out what the guests must not reach (the node network, the pod
+    # CIDR). Empty `cidrs` leaves the guests with no network beyond their own.
+    guestEgress:
+      cidrs:
+        - 0.0.0.0/0
+      except: []
 
 # === Agent manager (agent-manager) ===
 # Values forwarded verbatim to the agent-manager component release

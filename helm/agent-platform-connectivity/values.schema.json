@@ -200,6 +200,15 @@
                             "type": "boolean"
                         }
                     }
+                },
+                "vm-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
                 }
             }
         },
@@ -1571,6 +1580,14 @@
             "additionalProperties": true
         },
         "valkey": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "vm-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "vmManager": {
             "type": "object",
             "additionalProperties": true
         }
