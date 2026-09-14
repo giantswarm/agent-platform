@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (`components.vm-manager`: the platform's VM provisioner as a pod of a KVM node)
+
+A new component, off by default: [vm-manager](https://github.com/giantswarm/vm-manager) — KVM virtual machines with an instance metadata service, a vTPM with measured boot, an immutable image and attestation, as REST and MCP (`x_vm-manager_<tool>` through its own `MCPServer` CR in the `agent-platform` tool group, next to agent-manager and model-manager). The chart comes from `oci://ghcr.io/giantswarm/vm-manager/helm` (the repository publishes from GitHub Actions to ghcr.io, like the kagent and Substrate lines), `>=0.19.0 <1.0.0`; the values block `vm-manager:` is forwarded to the release and `vmManager:` (a PodDisruptionBudget, network policy inputs) is read by the connectivity chart, which renders the pod's ingress (muster, the probes), egress (DNS, the identity provider, the guests' destinations — the VMs' traffic is userspace NAT out of the pod) and muster's egress to it. The `agent-platform` toolset preset's description names it.
+
+### Operator action
+
+- **None** unless the installation turns the component on. Everything renders inert while `components.vm-manager.enabled` is false; the roster forwarded to the connectivity release carries the new key (`components.vm-manager.enabled: false`), which a connectivity chart of this release accepts.
+- **To turn it on**: a node with `/dev/kvm` and `/dev/vhost-vsock` (`vm-manager.nodeSelector` pins the pod there), the pod runs **privileged** (a hostPath device in an unprivileged container is denied by the device cgroup — a cluster whose admission forbids privileged pods in the platform namespace needs an exception for this Deployment), and an image directory: a claim filled with the output of `make -C images` in a vm-manager checkout (`vm-manager.images.existingClaim`) — without one `list_images` is empty and `create_vm` has nothing to boot. `vm-manager.persistence.create: true` (or `existingClaim`) keeps VM records and disks across pod restarts; the VMs themselves end with the pod (no service manager in it).
+- **Network policies on**: the pod's egress admits `vmManager.networkPolicy.guestEgress.cidrs` (default `0.0.0.0/0`) on every port — the guests reach whatever the pod reaches; `except` carves out the node and pod networks where the guests must not reach them.
+
 ## \<current\> → \<next\> (the s3proxy façade declares its ephemeral storage and bounds its emptyDirs)
 
 The `substrate-s3proxy` container (`kagent.harness.snapshotStore.s3proxy`, on with provider `capz` or `s3proxy.enabled`) carries `resources.requests.ephemeral-storage` (256Mi) and `resources.limits.ephemeral-storage` (1Gi), and its two emptyDirs (`/tmp`, `/data`) a `sizeLimit` equal to the limit (giantswarm/agent-platform#438). Kyverno's `require-emptydir-requests-and-limits` stops reporting the Deployment on every rollout, and a cluster that enforces the policy admits the façade.

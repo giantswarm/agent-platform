@@ -95,6 +95,9 @@ LINE = {
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
     "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+    # vm-manager publishes from GitHub Actions to ghcr.io (no CircleCI project);
+    # 0.19.0 is the first release with the chart. muster alone: the MCPServer CR.
+    "vm-manager": ("oci://ghcr.io/giantswarm/vm-manager/helm", ">=0.19.0 <1.0.0", ["muster"]),
     # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
     # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
     # REST client and belongs to the 3.x meta chart.

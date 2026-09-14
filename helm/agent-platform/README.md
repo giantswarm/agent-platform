@@ -210,6 +210,12 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
+| components.vm-manager.chart | string | `"vm-manager"` |  |
+| components.vm-manager.repository | string | `"oci://ghcr.io/giantswarm/vm-manager/helm"` |  |
+| components.vm-manager.versionRange | string | `">=0.19.0 <1.0.0"` |  |
+| components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
+| components.vm-manager.enabled | bool | `false` |  |
+| components.vm-manager.dependsOn[0] | string | `"muster"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.backstage.versionRange | string | `">=1.0.0 <3.0.0"` |  |
@@ -439,7 +445,7 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 | muster.muster.oauth.server.storage.valkey.secretKeyPassword | string | `"valkey-password"` |  |
 | muster.muster.toolsetPresets.infrastructure.description | string | `"The servers for the infrastructure underneath the platform (Giant Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus."` |  |
 | muster.muster.toolsetPresets.infrastructure.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=infrastructure"` |  |
-| muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, cluster-manager and muster's core tools."` |  |
+| muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, vm-manager, cluster-manager and muster's core tools."` |  |
 | muster.muster.toolsetPresets.agent-platform.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=agent-platform"` |  |
 | muster.muster.toolsetPresets.agent-platform.include[1].pattern | string | `"core_*"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | string | `"auto"` |  |
@@ -851,6 +857,27 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| vm-manager.fullnameOverride | string | `"vm-manager"` |  |
+| vm-manager.host.devices.enabled | bool | `true` |  |
+| vm-manager.images.existingClaim | string | `""` |  |
+| vm-manager.images.hostPath | string | `""` |  |
+| vm-manager.persistence.existingClaim | string | `""` |  |
+| vm-manager.persistence.create | bool | `false` |  |
+| vm-manager.oauth.enabled | bool | `true` |  |
+| vm-manager.oauth.provider | string | `"dex"` |  |
+| vm-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| vm-manager.muster.mcpServer.enabled | bool | `true` |  |
+| vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
+| vm-manager.networkPolicy.enabled | bool | `false` |  |
+| vmManager.podDisruptionBudget.enabled | bool | `true` |  |
+| vmManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| vmManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| vmManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
+| vmManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| vmManager.networkPolicy.guestEgress.cidrs[0] | string | `"0.0.0.0/0"` |  |
+| vmManager.networkPolicy.guestEgress.except | list | `[]` |  |
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |

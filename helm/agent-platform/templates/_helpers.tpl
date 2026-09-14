@@ -588,7 +588,7 @@ A component's credentials belong in a pre-created Secret the component chart
 references (kagent providers.<name>.apiKeySecretRef / oauth2-proxy
 config.existingSecret, muster oauth.server.existingSecret /
 storage.valkey.existingSecret, valkey auth.usersExistingSecret, klaus-gateway
-slack.secretName / obo.existingSecret, model-manager and agent-manager
+slack.secretName / obo.existingSecret, model-manager, agent-manager and vm-manager
 oauth.existingSecret). Set inline, they are forwarded verbatim into that
 component's HelmRelease spec.values and into Helm's release storage, readable
 by anyone allowed to get HelmReleases there.
@@ -611,7 +611,8 @@ by anyone allowed to get HelmReleases there.
       (list "klausGateway" (list "obo" "stateKey"))
       (list "klausGateway" (list "obo" "storeKey"))
       (list "model-manager" (list "oauth" "dex" "clientSecret"))
-      (list "agent-manager" (list "oauth" "dex" "clientSecret")) -}}
+      (list "agent-manager" (list "oauth" "dex" "clientSecret"))
+      (list "vm-manager" (list "oauth" "dex" "clientSecret")) -}}
 {{- range $paths -}}
 {{- $cur := index $v (first .) | default dict -}}
 {{- $ok := kindIs "map" $cur -}}
@@ -648,7 +649,7 @@ The message names the key paths only.
 {{- define "agent-platform.validateInlineSecrets" -}}
 {{- if .Values.gitops.forbidInlineSecrets -}}
 {{- with (include "agent-platform.inlineSecretPaths" .) -}}
-{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent providers.<name>.apiKeySecretRef with an empty apiKey, kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
+{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent providers.<name>.apiKeySecretRef with an empty apiKey, kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager/vm-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

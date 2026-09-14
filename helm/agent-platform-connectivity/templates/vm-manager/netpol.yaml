@@ -1,0 +1,275 @@
+{{- if and (include "agent-platform.vmManager.enabled" .) .Values.networkPolicy.enabled }}
+{{- $vm := .Values.vmManager }}
+{{- $chart := include "agent-platform.vmManager.chartValues" . | fromJson }}
+{{- $port := include "agent-platform.vmManager.servicePort" . }}
+{{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
+{{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
+{{- $oauthOn := include "agent-platform.vmManager.oauthEnabled" . }}
+{{- /* Extra same-namespace callers admitted on the Service port
+(vmManager.networkPolicy.ingress.additionalPeers): pod label maps, each
+rendered as one more ingress peer in the flavor's own dialect. */ -}}
+{{- $peers := $vm.networkPolicy.ingress.additionalPeers }}
+{{- range $peers }}
+{{- if or (not (kindIs "map" .)) (not .) }}
+{{- fail (printf "vmManager.networkPolicy.ingress.additionalPeers: every item is a non-empty pod label map (matchLabels), e.g. {app.kubernetes.io/name: backstage}; got %v" .) }}
+{{- end }}
+{{- end }}
+{{- /* The guests' destinations: userspace NAT out of this pod, every port and
+protocol, so the rule carries no port list. */ -}}
+{{- $guests := $vm.networkPolicy.guestEgress }}
+
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# Ingress to vm-manager: muster (the MCP endpoint) in the release namespace, on
+# the Service port only — plus the kubelet's probes (host entity), which a
+# policy that selects the pod would otherwise deny.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-vm-manager-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.vmManager.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "agent-platform.vmManager.podSelector" . | nindent 6 }}
+  ingress:
+    - fromEndpoints:
+        {{- if $mcpOn }}
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+        {{- end }}
+        {{- range $peers }}
+        - matchLabels:
+            {{- toYaml . | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ $.Release.Namespace }}
+        {{- end }}
+        {{- if not (or $mcpOn $peers) }}
+        # No platform caller is on: nothing reaches the API but the probes.
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+            app.kubernetes.io/component: none
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    # The kubelet's liveness and readiness probes arrive from the host entity.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+---
+# Egress from vm-manager: DNS (with Cilium's proxy clause so the FQDN
+# selectors resolve — the guests' DNS forwards through the pod's resolver too),
+# the identity provider (vm-manager.oauth: the discovery, JWKS, userinfo and
+# token endpoints — the Dex issuer by name, or the three Google hosts for the
+# google provider), and the guests' destinations
+# (vmManager.networkPolicy.guestEgress): the VMs' traffic is NAT out of this
+# pod on every port. No Kubernetes API: vm-manager calls none.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-vm-manager-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.vmManager.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "agent-platform.vmManager.podSelector" . | nindent 6 }}
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- if $oauthOn }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.vmManager.oauthProvider" .) "issuerUrl" (include "agent-platform.vmManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- end }}
+    {{- with $guests.cidrs }}
+    # The guests' destinations, every port and protocol.
+    - toCIDRSet:
+        {{- range . }}
+        - cidr: {{ . }}
+          {{- with $guests.except }}
+          except:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressFQDNs }}
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+{{- if $mcpOn }}
+---
+# Egress from muster to the vm-manager MCP endpoint. muster's own policy admits
+# cluster egress on 80/443 (plus networkPolicy.musterInClusterMcpPorts); this
+# names the exact pod and port, independent of that list.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-muster-to-vm-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.vmManager.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            {{- include "agent-platform.vmManager.podSelector" . | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+{{- end }}
+
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+# Ingress to vm-manager: muster (the MCP endpoint), on the Service port only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-vm-manager-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.vmManager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agent-platform.vmManager.podSelector" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- if $mcpOn }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+        {{- end }}
+        {{- range $peers }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
+        {{- if not (or $mcpOn $peers) }}
+        # No platform caller is on: nothing reaches the API but the probes.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: none
+        {{- end }}
+      ports:
+        - port: {{ $port | int }}
+          protocol: TCP
+---
+# Egress from vm-manager: DNS, and — vanilla NetworkPolicy has no FQDN
+# selector — every public destination on 443 for the identity provider (Dex or
+# Google; a private identity provider needs its address in
+# networkPolicy.additionalEgressCIDRs), plus the guests' destinations
+# (vmManager.networkPolicy.guestEgress) on every port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-vm-manager-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.vmManager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agent-platform.vmManager.podSelector" . | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - key: k8s-app
+                operator: In
+                values: [kube-dns, coredns, k8s-dns-node-cache]
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+        - port: 1053
+          protocol: UDP
+        - port: 1053
+          protocol: TCP
+    {{- if $oauthOn }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+    {{- with $guests.cidrs }}
+    # The guests' destinations, every port and protocol.
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+            {{- with $guests.except }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+{{- if $mcpOn }}
+---
+# Egress from muster to the vm-manager MCP endpoint (additive to muster's own
+# policy when it is on).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-muster-to-vm-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.vmManager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agent-platform.vmManager.podSelector" . | nindent 14 }}
+      ports:
+        - port: {{ $port | int }}
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}
