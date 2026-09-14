@@ -201,15 +201,16 @@ owned by the muster release now (not merged into this chart's values), so
 {{/*
 The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
 RemoteMCPServer targets: http://<muster Service>.<release namespace>.svc.cluster.local:<port>/mcp
-while the muster component is on, "" otherwise. ONE helper, two consumers, one
+while the muster component is on, "" otherwise. ONE helper, one consumer, one
 name in both charts: the meta chart derives agent-manager's chart value
 muster.url from its copy (componentDerivedValues, next to
-flux.helmReleaseServiceAccount), this chart renders it into the portal's
-app-config as agentPlatform.musterMcpUrl (templates/backstage/app-config.yaml).
-Both composers hand it to the Generic agent chart 1.x as muster.url, whose own
-default is the same URL on a default install (muster.fullnameOverride "muster",
-release namespace agent-platform, port 8090) — the value exists so an
-installation whose muster answers elsewhere changes it in one place.
+flux.helmReleaseServiceAccount); agent-manager hands it to the Generic agent
+chart 1.x as muster.url on every agent it composes and reports it in get_info.
+The portal sends none (create_agent takes no muster argument), so the app-config
+this chart renders carries no muster URL. The agent chart's own default is the
+same URL on a default install (muster.fullnameOverride "muster", release
+namespace agent-platform, port 8090) — the value exists so an installation
+whose muster answers elsewhere changes it in one place.
 Usage: include "agent-platform.musterMcpUrl" .
 */}}
 {{- define "agent-platform.musterMcpUrl" -}}
@@ -634,10 +635,29 @@ under the Gateway's own name.
 {{- end -}}
 
 {{/*
+The spec.provider of a kagent.modelConfigs[] entry, checked against the
+ModelConfig CRD's enum (kagent.dev/v1alpha3). The enum is case-sensitive and
+the API server refuses any other value at admission, after the render has said
+nothing; failing here names the entry and the ten values instead. Takes the
+entry.
+*/}}
+{{- define "agent-platform.modelConfigProvider" -}}
+{{- $enum := list "Anthropic" "OpenAI" "AzureOpenAI" "Ollama" "Gemini" "GeminiVertexAI" "AnthropicVertexAI" "Bedrock" "SAPAICore" "Foundry" -}}
+{{- $provider := required "kagent.modelConfigs[].provider is required" .provider -}}
+{{- if not (has $provider $enum) -}}
+{{- fail (printf "kagent.modelConfigs[].provider %q on %q is not a ModelConfig provider; the CRD's enum is %s (case-sensitive)" $provider .name (join ", " $enum)) -}}
+{{- end -}}
+{{- $provider -}}
+{{- end -}}
+
+{{/*
 Key of the ModelConfigSpec provider block that carries baseUrl, for a
-spec.provider value. The key is not the lower-cased provider name, and only
-three of the ten providers have a baseUrl at all: a block the CRD does not know
-is pruned at admission and the model would keep the direct path in silence.
+spec.provider value in any case (the CRD's spelling from a catalog entry, the
+lower-cased agentgateway name from llmRouting.backend.provider). The key is not
+the lower-cased provider name (openAI, sapAICore), and only three of the ten
+providers have a baseUrl at all — Ollama names its host, AzureOpenAI and Foundry
+an endpoint, the rest a region or a project: a block the CRD does not know is
+pruned at admission and the model would keep the direct path in silence.
 Emits nothing for every other provider (empty string = falsy).
 */}}
 {{- define "agent-platform.modelConfigBaseUrlKey" -}}
@@ -1065,7 +1085,7 @@ the Cluster renders AND postgres.backup.enabled is set.
 
 {{/* arn:aws, or arn:aws-cn in the China partition. */}}
 {{- define "agent-platform.postgres.awsPartition" -}}
-{{- if hasPrefix "cn-" .Values.postgres.backup.crossplane.region -}}arn:aws-cn{{- else -}}arn:aws{{- end -}}
+{{- include "agent-platform.crossplane.awsPartition" (dict "xp" .Values.postgres.backup.crossplane) -}}
 {{- end -}}
 
 {{/* The IAM role the Crossplane AWS block renders. */}}
@@ -1106,9 +1126,16 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- if $ann -}}{{- toYaml $ann -}}{{- end -}}
 {{- end -}}
 
+{{/*
+Crossplane helpers shared by every store this chart provisions (the kagent-pg
+backup bucket, postgres.backup.crossplane; Agent Substrate's snapshot store,
+kagent.harness.snapshotStore.crossplane). Each takes the store's crossplane
+block as `xp`; the postgres.* and substrateStore.* wrappers below bind it.
+*/}}
+
 {{/* Crossplane managementPolicies: everything, or Observe only. */}}
-{{- define "agent-platform.postgres.crossplaneManagementPolicies" -}}
-{{- if .Values.postgres.backup.crossplane.observeOnly -}}
+{{- define "agent-platform.crossplane.managementPolicies" -}}
+{{- if .xp.observeOnly -}}
 - Observe
 {{- else -}}
 - "*"
@@ -1116,8 +1143,8 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- end -}}
 
 {{/* Same, for data-bearing objects: never Delete, so an uninstall keeps the data. */}}
-{{- define "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" -}}
-{{- if .Values.postgres.backup.crossplane.observeOnly -}}
+{{- define "agent-platform.crossplane.managementPoliciesNoDelete" -}}
+{{- if .xp.observeOnly -}}
 - Observe
 {{- else -}}
 - Create
@@ -1127,11 +1154,20 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- end -}}
 {{- end -}}
 
-{{/* Tags on the cloud resources: chart defaults under the installation's own. */}}
-{{- define "agent-platform.postgres.crossplaneTags" -}}
-{{- $tags := dict "app" "agent-platform-postgres" "managed-by" "crossplane" "name" (include "agent-platform.postgres.crossplaneStoreName" .) -}}
-{{- $tags = merge (deepCopy (.Values.postgres.backup.crossplane.tags | default dict)) $tags -}}
-{{- if eq .Values.postgres.backup.crossplane.provider "azure" -}}
+{{/* arn:aws, or arn:aws-cn in the China partition. */}}
+{{- define "agent-platform.crossplane.awsPartition" -}}
+{{- if hasPrefix "cn-" .xp.region -}}arn:aws-cn{{- else -}}arn:aws{{- end -}}
+{{- end -}}
+
+{{/*
+Tags on the cloud resources: the chart's (app, managed-by, name) under the
+installation's own. Azure tag keys take no dash.
+Usage: include "agent-platform.crossplane.tags" (dict "xp" $xp "app" "agent-platform-postgres" "name" $bucket)
+*/}}
+{{- define "agent-platform.crossplane.tags" -}}
+{{- $tags := dict "app" .app "managed-by" "crossplane" "name" .name -}}
+{{- $tags = merge (deepCopy (.xp.tags | default dict)) $tags -}}
+{{- if has .xp.provider (list "azure" "capz") -}}
 {{- $clean := dict -}}
 {{- range $k, $v := $tags -}}{{- $_ := set $clean ($k | replace "-" "_") $v -}}{{- end -}}
 {{- $tags = $clean -}}
@@ -1139,10 +1175,241 @@ annotation when the Crossplane AWS block renders the role. YAML map or "".
 {{- toYaml $tags -}}
 {{- end -}}
 
+{{- define "agent-platform.postgres.crossplaneManagementPolicies" -}}
+{{- include "agent-platform.crossplane.managementPolicies" (dict "xp" .Values.postgres.backup.crossplane) -}}
+{{- end -}}
+
+{{- define "agent-platform.postgres.crossplaneManagementPoliciesNoDelete" -}}
+{{- include "agent-platform.crossplane.managementPoliciesNoDelete" (dict "xp" .Values.postgres.backup.crossplane) -}}
+{{- end -}}
+
+{{- define "agent-platform.postgres.crossplaneTags" -}}
+{{- include "agent-platform.crossplane.tags" (dict "xp" .Values.postgres.backup.crossplane "app" "agent-platform-postgres" "name" (include "agent-platform.postgres.crossplaneStoreName" .)) -}}
+{{- end -}}
+
 {{/* The bucket (aws) or container (azure) name. */}}
 {{- define "agent-platform.postgres.crossplaneStoreName" -}}
 {{- $xp := .Values.postgres.backup.crossplane -}}
 {{- if eq $xp.provider "azure" -}}{{- $xp.azure.containerName -}}{{- else -}}{{- $xp.aws.bucketName -}}{{- end -}}
+{{- end -}}
+
+{{/*
+Agent Substrate's snapshot store (templates/substrate/crossplane-aws.yaml):
+kagent.harness.snapshotStore renders the S3 bucket and the IRSA role the
+Harness's snapshotPolicy.location points at, the postgres.backup.crossplane
+shape. The meta chart carries the same helpers: it derives
+kagent.harness.snapshotLocation for the kagent release and the role annotation
+for the substrate release's two ServiceAccounts from them.
+*/}}
+
+{{/* The provider while the Crossplane block renders the store (kagent on, crossplane on): aws or capz; else "". */}}
+{{- define "agent-platform.substrateStore.crossplane" -}}
+{{- $xp := dig "harness" "snapshotStore" "crossplane" dict (.Values.kagent | default dict) -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) $xp.enabled -}}
+{{- $xp.provider -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.substrateStore.block" -}}
+{{- dig "harness" "snapshotStore" dict (.Values.kagent | default dict) | toJson -}}
+{{- end -}}
+
+{{/*
+How the platform reaches the snapshot store while kagent is on: "aws" (the
+Crossplane S3 bucket, IRSA), "capz" (the Crossplane Azure account behind the
+s3proxy façade, Workload Identity), "s3proxy" (the façade alone, in front of an
+account provisioned by hand or a lab's Azurite, an account key); "" when the
+installation names its own store.
+*/}}
+{{- define "agent-platform.substrateStore.mode" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
+{{- if dig "crossplane" "enabled" false $store -}}{{- $store.crossplane.provider -}}
+{{- else if dig "s3proxy" "enabled" false $store -}}s3proxy{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Truthy while the s3proxy façade renders: mode capz or s3proxy. */}}
+{{- define "agent-platform.substrateStore.s3proxy" -}}
+{{- $mode := include "agent-platform.substrateStore.mode" . -}}
+{{- if or (eq $mode "capz") (eq $mode "s3proxy") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The Azure Blob store behind the façade, as JSON {endpoint, account, container}:
+with provider capz the Crossplane block's account and container
+(https://<account>.blob.core.windows.net) — an explicit s3proxy.azure.* that
+disagrees fails the render; with the façade alone, s3proxy.azure.* verbatim.
+*/}}
+{{- define "agent-platform.substrateStore.azure" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- $own := dig "s3proxy" "azure" dict $store -}}
+{{- $az := dict "endpoint" ($own.endpoint | default "") "account" ($own.account | default "") "container" ($own.container | default "") -}}
+{{- if eq (include "agent-platform.substrateStore.mode" .) "capz" -}}
+{{- $capz := $store.crossplane.capz -}}
+{{- $derived := dict "endpoint" (printf "https://%s.blob.core.windows.net" $capz.storageAccountName) "account" $capz.storageAccountName "container" $capz.containerName -}}
+{{- range $k, $v := $derived -}}
+{{- $o := index $az $k -}}
+{{- if and $o (ne $o $v) -}}
+{{- fail (printf "kagent.harness.snapshotStore.s3proxy.azure.%s (%s) differs from what kagent.harness.snapshotStore.crossplane.capz renders (%s): the capz block names the account and the container — leave s3proxy.azure.%s unset" $k $o $v $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $az = $derived -}}
+{{- end -}}
+{{- $az | toJson -}}
+{{- end -}}
+
+{{/* The snapshot location the store implies: s3://<bucket, or the container behind the façade>/<prefix> (no prefix: s3://<name>). */}}
+{{- define "agent-platform.substrateStore.location" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- $prefix := $store.prefix | default "" | trimAll "/" -}}
+{{- $name := "" -}}
+{{- if include "agent-platform.substrateStore.s3proxy" . -}}
+{{- $name = (include "agent-platform.substrateStore.azure" . | fromJson).container -}}
+{{- else -}}
+{{- $name = $store.crossplane.aws.bucketName -}}
+{{- end -}}
+{{- printf "s3://%s" $name -}}{{- with $prefix }}/{{ . }}{{- end -}}
+{{- end -}}
+
+{{/* The façade's one name: its Deployment, Service, ServiceAccount, PodDisruptionBudget and the key-pair Secret (in the release namespace and in ate-system). */}}
+{{- define "agent-platform.substrateStore.s3proxyName" -}}substrate-s3proxy{{- end -}}
+
+{{/* The URL Substrate reaches the façade at: its Service in the release namespace, port 80. */}}
+{{- define "agent-platform.substrateStore.s3proxyUrl" -}}
+{{- printf "http://%s.%s.svc:80" (include "agent-platform.substrateStore.s3proxyName" .) .Release.Namespace -}}
+{{- end -}}
+
+{{/*
+The S3 environment Substrate's atelet and ate-api-server get for the façade —
+the shape the substrate chart gives them for its bundled store (AWS_REGION
+names the SigV4 scope only; s3proxy reads it from the request), the key pair
+from the Secret in ate-system. A JSON list of EnvVars.
+*/}}
+{{- define "agent-platform.substrateStore.s3proxyEnv" -}}
+{{- $secret := include "agent-platform.substrateStore.s3proxyName" . -}}
+{{- list
+  (dict "name" "AWS_REGION" "value" "us-east-1")
+  (dict "name" "AWS_ENDPOINT_URL" "value" (include "agent-platform.substrateStore.s3proxyUrl" .))
+  (dict "name" "AWS_S3_USE_PATH_STYLE" "value" "true")
+  (dict "name" "AWS_ACCESS_KEY_ID" "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" "accessKeyId")))
+  (dict "name" "AWS_SECRET_ACCESS_KEY" "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" "secretAccessKey")))
+  | toJson -}}
+{{- end -}}
+
+{{/* The capz identity's name: workloadIdentity.identityName, else <containerName>-identity. */}}
+{{- define "agent-platform.substrateStore.capzIdentityName" -}}
+{{- $capz := (include "agent-platform.substrateStore.block" . | fromJson).crossplane.capz -}}
+{{- $capz.workloadIdentity.identityName | default (printf "%s-identity" $capz.containerName) -}}
+{{- end -}}
+
+{{/* The Secret provider-kubernetes writes the identity's clientId and tenantId into; the s3proxy pods read it. */}}
+{{- define "agent-platform.substrateStore.capzIdentitySecret" -}}
+{{- printf "%s-azure-identity" (include "agent-platform.substrateStore.s3proxyName" .) -}}
+{{- end -}}
+
+{{/*
+The store block's guards, the same in both charts: the provider, the inputs
+each provider and the façade require, the account name's shape, the endpoint's
+scheme, the bundled store off while the façade is on, an explicit
+snapshotLocation agreeing with the derived one.
+*/}}
+{{- define "agent-platform.substrateStore.validate" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- $xp := $store.crossplane | default dict -}}
+{{- $mode := include "agent-platform.substrateStore.mode" . -}}
+{{- if $xp.enabled -}}
+{{- if not (has $xp.provider (list "aws" "capz")) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.provider=%s is not supported; the chart provisions the snapshot store on aws (S3 + IRSA) and capz (Azure Blob behind the s3proxy façade, Workload Identity) — elsewhere name the store in kagent.harness.snapshotLocation and its access in substrate.atelet.extraEnv / substrate.ateApiServer.extraEnv, or front an Azure Blob account provisioned by hand with kagent.harness.snapshotStore.s3proxy" $xp.provider) -}}
+{{- end -}}
+{{- range $k := list "providerConfigRef" "region" -}}
+{{- if not (index $xp $k) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.%s is required when kagent.harness.snapshotStore.crossplane.enabled" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $xp.provider "aws" -}}
+{{- range $k := list "bucketName" "accountId" "oidcProvider" -}}
+{{- if not (index $xp.aws $k) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.%s is required for provider aws" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (regexMatch "^[0-9]{12}$" (toString $xp.aws.accountId)) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.accountId (%v) must be the 12-digit AWS account id, quoted as a string" $xp.aws.accountId) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $xp.provider "capz" -}}
+{{- $capz := $xp.capz | default dict -}}
+{{- range $k := list "storageAccountName" "containerName" "resourceGroup" "subscriptionId" -}}
+{{- if not (index $capz $k) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.capz.%s is required for provider capz" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]{3,24}$" $capz.storageAccountName) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.capz.storageAccountName (%s) must be 3 to 24 lowercase letters and digits (an Azure storage account name)" $capz.storageAccountName) -}}
+{{- end -}}
+{{- if not (dig "workloadIdentity" "oidcIssuerUrl" "" $capz) -}}
+{{- fail "kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl is required for provider capz: the cluster's service-account issuer the FederatedIdentityCredential trusts (the apiserver's --service-account-issuer)" -}}
+{{- end -}}
+{{- if not (dig "workloadIdentity" "providerKubernetes" "providerConfigRef" "" $capz) -}}
+{{- fail "kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef is required for provider capz: provider-kubernetes bridges the identity's generated ids into the RoleAssignment and into the s3proxy pods' Secret" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and $xp.enabled (eq $xp.provider "aws") (dig "s3proxy" "enabled" false $store) -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.enabled is on next to crossplane.provider aws: the façade fronts Azure Blob and has no place in front of an S3 bucket — turn it off (it is on by itself with provider capz)" -}}
+{{- end -}}
+{{- if include "agent-platform.substrateStore.s3proxy" . -}}
+{{- $az := include "agent-platform.substrateStore.azure" . | fromJson -}}
+{{- $keyRef := dig "s3proxy" "azure" "accountKeySecretRef" dict $store -}}
+{{- range $k := list "endpoint" "account" "container" -}}
+{{- if not (index $az $k) -}}
+{{- fail (printf "kagent.harness.snapshotStore.s3proxy.azure.%s is required while kagent.harness.snapshotStore.s3proxy is on without the capz Crossplane block: the façade needs the Azure Blob account it fronts" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $mode "capz" -}}
+{{- if or $keyRef.name $keyRef.key -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef is set next to crossplane.provider capz: the façade runs as the Workload Identity the capz block renders and never reads an account key — leave accountKeySecretRef unset" -}}
+{{- end -}}
+{{- else -}}
+{{- if not (and $keyRef.name $keyRef.key) -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name and .key are required while the façade runs without the capz Crossplane block: it reaches the account with an account key from that Secret (release namespace)" -}}
+{{- end -}}
+{{- end -}}
+{{- if not (regexMatch "^https?://" $az.endpoint) -}}
+{{- fail (printf "kagent.harness.snapshotStore.s3proxy.azure.endpoint (%s) must be an http(s) URL (https://<account>.blob.core.windows.net)" $az.endpoint) -}}
+{{- end -}}
+{{- if dig "rustfs" "enabled" false (.Values.substrate | default dict) -}}
+{{- fail "substrate.rustfs.enabled is on while kagent.harness.snapshotStore.s3proxy renders the façade: the substrate chart sets the S3 environment for its bundled store and the derived one for the façade would repeat the variables — turn substrate.rustfs.enabled off" -}}
+{{- end -}}
+{{- end -}}
+{{- if $mode -}}
+{{- $explicit := dig "harness" "snapshotLocation" "" (.Values.kagent | default dict) -}}
+{{- $derived := include "agent-platform.substrateStore.location" . -}}
+{{- if and $explicit (ne $explicit $derived) -}}
+{{- fail (printf "kagent.harness.snapshotLocation (%s) differs from the location kagent.harness.snapshotStore renders (%s): the store block names the bucket and the prefix — leave kagent.harness.snapshotLocation unset, or turn kagent.harness.snapshotStore.crossplane.enabled off and name an existing store" $explicit $derived) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The IAM role the block renders: aws.roleName, else the bucket name. */}}
+{{- define "agent-platform.substrateStore.awsRoleName" -}}
+{{- $aws := (include "agent-platform.substrateStore.block" . | fromJson).crossplane.aws -}}
+{{- $aws.roleName | default $aws.bucketName -}}
+{{- end -}}
+
+{{- define "agent-platform.substrateStore.awsRoleArn" -}}
+{{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
+{{- printf "%s:iam::%s:role/%s" (include "agent-platform.crossplane.awsPartition" (dict "xp" $xp)) $xp.aws.accountId (include "agent-platform.substrateStore.awsRoleName" .) -}}
+{{- end -}}
+
+{{/*
+The two Substrate ServiceAccounts that read and write snapshots, as the
+substrate chart names them under the release the meta chart creates
+(releaseName `substrate`, which the chart's fullname helper leaves unprefixed):
+atelet (the node agent) and ate-api-server.
+*/}}
+{{- define "agent-platform.substrateStore.serviceAccounts" -}}
+{{- list "atelet" "ate-api-server" | toJson -}}
 {{- end -}}
 
 {{/*
@@ -1220,6 +1487,34 @@ Truthy when the platform runs Agent Substrate: the substrate component is on
 */}}
 {{- define "agent-platform.substrate.enabled" -}}
 {{- include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "substrate") -}}
+{{- end -}}
+
+{{/*
+kagent's built-in tool server: the kagent-tools subchart of the kagent chart
+(kagent.kagent-tools). The subchart renders its Deployment and Services into its
+own namespaceOverride, else its release namespace, and the kagent chart composes
+the kagent-tool-server RemoteMCPServer URL from the same two inputs
+(http://<tools fullname>.<that namespace>:<port>/mcp). The egress rules this
+chart opens to the server — the kagent controller's tool discovery
+(templates/kagent/netpol.yaml) and the actors' calls through Substrate's egress
+gateway (templates/substrate/netpol.yaml) — derive the namespace the same way,
+from the same values block and the same release namespace (every platform
+HelmRelease installs into gitops.targetNamespace), so a rule names the namespace
+the server is rendered into whether or not an installation pins the override.
+Never the kagent namespace by assumption: kagent.namespaceOverride moves the
+controller, not the subchart (#421). The port is the tools Service's targetPort.
+*/}}
+{{- define "agent-platform.kagentTools.enabled" -}}
+{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
+{{- if $tools.enabled }}true{{- end -}}
+{{- end -}}
+{{- define "agent-platform.kagentTools.namespace" -}}
+{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
+{{- $tools.namespaceOverride | default .Release.Namespace -}}
+{{- end -}}
+{{- define "agent-platform.kagentTools.port" -}}
+{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
+{{- dig "service" "ports" "tools" "targetPort" "8084" $tools | toString -}}
 {{- end -}}
 
 {{/*

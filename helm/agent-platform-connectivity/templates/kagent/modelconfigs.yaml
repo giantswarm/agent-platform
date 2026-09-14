@@ -3,9 +3,12 @@
 {{- $routed := include "agent-platform.llmRouting" $ }}
 {{- $listener := include "agent-platform.llmBaseUrl" $ }}
 {{- range .Values.kagent.modelConfigs }}
-{{- $provider := required "kagent.modelConfigs[].provider is required" .provider }}
-{{- /* The block that carries baseUrl is named by the provider, and three
-providers have one. */}}
+{{- $name := required "kagent.modelConfigs[].name is required" .name }}
+{{- /* The CRD's enum, checked at render time: the API server refuses any other
+spelling at admission, after the render has said nothing. */}}
+{{- $provider := include "agent-platform.modelConfigProvider" . }}
+{{- /* The block that carries baseUrl is the CRD's key for the provider (openAI,
+not openai), and three providers have one. */}}
 {{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" $provider }}
 {{- if and .baseUrl (not $urlKey) }}
 {{- fail (printf "kagent.modelConfigs[].baseUrl is set on %q, whose provider %s has no baseUrl in ModelConfigSpec (Anthropic, OpenAI and SAPAICore have one; every other provider names its upstream through its own fields)" .name $provider) }}
@@ -22,7 +25,7 @@ direct path even with routing on. */}}
 apiVersion: kagent.dev/v1alpha3
 kind: ModelConfig
 metadata:
-  name: {{ required "kagent.modelConfigs[].name is required" .name | quote }}
+  name: {{ $name | quote }}
   namespace: {{ $ns }}
   {{- with .displayName }}
   annotations:

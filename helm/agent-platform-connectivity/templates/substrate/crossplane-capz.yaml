@@ -1,0 +1,267 @@
+{{- if eq (include "agent-platform.substrateStore.crossplane" .) "capz" }}
+{{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane }}
+{{- $capz := $xp.capz }}
+{{- $account := $capz.storageAccountName }}
+{{- $container := $capz.containerName }}
+{{- $identity := include "agent-platform.substrateStore.capzIdentityName" . }}
+{{- $pk := $capz.workloadIdentity.providerKubernetes }}
+{{- $tags := include "agent-platform.crossplane.tags" (dict "xp" $xp "app" "agent-platform-substrate" "name" $container) | fromYaml }}
+{{- $containerId := printf "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Storage/storageAccounts/%s/blobServices/default/containers/%s" $capz.subscriptionId $capz.resourceGroup $account $container }}
+---
+# The storage account Agent Substrate keeps the actors' snapshots in, behind
+# the s3proxy façade (templates/substrate/s3proxy.yaml): TLS only, no public
+# blob access, blobs soft-deleted for seven days. Never deleted by Crossplane
+# (no Delete management policy) and kept by Helm: the snapshots outlive the
+# release. The postgres.backup.crossplane azure shape.
+apiVersion: storage.azure.upbound.io/v1beta2
+kind: Account
+metadata:
+  name: {{ $account }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+  annotations:
+    crossplane.io/external-name: {{ $account }}
+    helm.sh/resource-policy: keep
+spec:
+  managementPolicies:
+    {{- include "agent-platform.crossplane.managementPoliciesNoDelete" (dict "xp" $xp) | nindent 4 }}
+  forProvider:
+    accountKind: StorageV2
+    accountReplicationType: {{ $capz.replicationType }}
+    accountTier: Standard
+    allowNestedItemsToBePublic: false
+    blobProperties:
+      deleteRetentionPolicy:
+        days: 7
+    enableHttpsTrafficOnly: true
+    location: {{ $xp.region }}
+    minTlsVersion: TLS1_2
+    publicNetworkAccessEnabled: true
+    resourceGroupName: {{ $capz.resourceGroup }}
+    tags:
+      {{- toYaml $tags | nindent 6 }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+---
+apiVersion: storage.azure.upbound.io/v1beta1
+kind: Container
+metadata:
+  name: {{ $container }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+  annotations:
+    crossplane.io/external-name: {{ $container }}
+    helm.sh/resource-policy: keep
+spec:
+  managementPolicies:
+    {{- include "agent-platform.crossplane.managementPoliciesNoDelete" (dict "xp" $xp) | nindent 4 }}
+  forProvider:
+    containerAccessType: private
+    metadata:
+      {{- toYaml $tags | nindent 6 }}
+    storageAccountNameRef:
+      name: {{ $account }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+---
+# Snapshots are deleted lifecycleDays after their last modification: an actor
+# whose snapshot is gone boots cold from the golden image again, nothing is
+# lost but one start.
+apiVersion: storage.azure.upbound.io/v1beta2
+kind: ManagementPolicy
+metadata:
+  name: {{ $account }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+spec:
+  managementPolicies:
+    {{- include "agent-platform.crossplane.managementPolicies" (dict "xp" $xp) | nindent 4 }}
+  forProvider:
+    rule:
+      - name: DeleteOldBlobs
+        enabled: true
+        filters:
+          blobTypes:
+            - blockBlob
+        actions:
+          baseBlob:
+            deleteAfterDaysSinceModificationGreaterThan: {{ $capz.lifecycleDays | int }}
+    storageAccountIdRef:
+      name: {{ $account }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+---
+# The identity the s3proxy pods run as (Workload Identity): fully managed,
+# Delete included — an access resource that holds no data and is recreated
+# whole; observeOnly does not apply to it. Its generated clientId, tenantId and
+# principalId are read from status.atProvider by the two Objects below.
+apiVersion: managedidentity.azure.upbound.io/v1beta1
+kind: UserAssignedIdentity
+metadata:
+  name: {{ $identity }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: identity
+spec:
+  managementPolicies:
+    - "*"
+  forProvider:
+    name: {{ $identity }}
+    location: {{ $xp.region }}
+    resourceGroupName: {{ $capz.resourceGroup }}
+    tags:
+      {{- toYaml $tags | nindent 6 }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+---
+# The cluster's OIDC issuer may present the s3proxy ServiceAccount as this
+# identity (the pods carry azure.workload.identity/use and the webhook projects
+# the token DefaultAzureCredential exchanges).
+apiVersion: managedidentity.azure.upbound.io/v1beta1
+kind: FederatedIdentityCredential
+metadata:
+  name: {{ $identity }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: identity
+spec:
+  managementPolicies:
+    - "*"
+  forProvider:
+    audience:
+      - api://AzureADTokenExchange
+    issuer: {{ $capz.workloadIdentity.oidcIssuerUrl | quote }}
+    subject: {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "agent-platform.substrateStore.s3proxyName" .) | quote }}
+    resourceGroupName: {{ $capz.resourceGroup }}
+    parentIdRef:
+      name: {{ $identity }}
+  providerConfigRef:
+    name: {{ $xp.providerConfigRef }}
+---
+# Storage Blob Data Contributor on the container only. The upbound
+# RoleAssignment takes no principalId selector and the identity's principalId
+# exists only once it has reconciled: provider-kubernetes manages the
+# RoleAssignment as a wrapped manifest and patches the id in from the identity.
+apiVersion: kubernetes.crossplane.io/v1alpha2
+kind: Object
+metadata:
+  name: {{ $identity }}-role-assignment
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: identity
+spec:
+  managementPolicies:
+    - "*"
+  providerConfigRef:
+    name: {{ $pk.providerConfigRef }}
+  references:
+    - patchesFrom:
+        apiVersion: managedidentity.azure.upbound.io/v1beta1
+        kind: UserAssignedIdentity
+        name: {{ $identity }}
+        fieldPath: status.atProvider.principalId
+      toFieldPath: spec.forProvider.principalId
+  forProvider:
+    manifest:
+      apiVersion: authorization.azure.upbound.io/v1beta1
+      kind: RoleAssignment
+      metadata:
+        name: {{ $identity }}
+        labels:
+          {{- include "labels.common" . | nindent 10 }}
+          app.kubernetes.io/component: identity
+      spec:
+        forProvider:
+          roleDefinitionName: Storage Blob Data Contributor
+          scope: {{ $containerId | quote }}
+          principalType: ServicePrincipal
+        providerConfigRef:
+          name: {{ $xp.providerConfigRef }}
+---
+# The identity's clientId and tenantId, bridged into the Secret the s3proxy
+# pods read as AZURE_CLIENT_ID / AZURE_TENANT_ID (DefaultAzureCredential's
+# Workload Identity path; the webhook adds the token file).
+apiVersion: kubernetes.crossplane.io/v1alpha2
+kind: Object
+metadata:
+  name: {{ $identity }}-client-id
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: identity
+spec:
+  managementPolicies:
+    - "*"
+  providerConfigRef:
+    name: {{ $pk.providerConfigRef }}
+  references:
+    - patchesFrom:
+        apiVersion: managedidentity.azure.upbound.io/v1beta1
+        kind: UserAssignedIdentity
+        name: {{ $identity }}
+        fieldPath: status.atProvider.clientId
+      toFieldPath: stringData.AZURE_CLIENT_ID
+    - patchesFrom:
+        apiVersion: managedidentity.azure.upbound.io/v1beta1
+        kind: UserAssignedIdentity
+        name: {{ $identity }}
+        fieldPath: status.atProvider.tenantId
+      toFieldPath: stringData.AZURE_TENANT_ID
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: {{ include "agent-platform.substrateStore.capzIdentitySecret" . }}
+        namespace: {{ .Release.Namespace }}
+        labels:
+          {{- include "labels.common" . | nindent 10 }}
+          app.kubernetes.io/component: identity
+      type: Opaque
+      stringData:
+        AZURE_CLIENT_ID: ""
+        AZURE_TENANT_ID: ""
+{{- if $pk.serviceAccount.name }}
+---
+# What provider-kubernetes needs to bridge the ids: the RoleAssignment kind and
+# the identity's status (its permission over Secrets is built in). Kept on
+# uninstall: the provider resolves the Objects' references while removing
+# their finalizers, and a binding deleted alongside them deadlocks that.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "agent-platform.substrateStore.s3proxyName" . }}-crossplane-azure-identity
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: identity
+  annotations:
+    helm.sh/resource-policy: keep
+rules:
+  - apiGroups: ["authorization.azure.upbound.io"]
+    resources: ["roleassignments", "roleassignments/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["managedidentity.azure.upbound.io"]
+    resources: ["userassignedidentities"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "agent-platform.substrateStore.s3proxyName" . }}-crossplane-azure-identity
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: identity
+  annotations:
+    helm.sh/resource-policy: keep
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "agent-platform.substrateStore.s3proxyName" . }}-crossplane-azure-identity
+subjects:
+  - kind: ServiceAccount
+    name: {{ $pk.serviceAccount.name }}
+    namespace: {{ $pk.serviceAccount.namespace }}
+{{- end }}
+{{- end }}

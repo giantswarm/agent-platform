@@ -14,13 +14,23 @@ the fleet, the kind quick start or the sibling slices rely on:
   gitops.serviceAccountName is set, the roster says `flux: enabled: false`;
 - engine ON (the default): exactly the eleven CRDs, the operator objects, the
   FluxInstance (two controllers, multitenant), the identity, the hook
-  ServiceAccount at weight -10, the two teardown Jobs at weights 0 and 5, the
+  ServiceAccount at weight -10, the two teardown Jobs at weights 0 and 5 — the
+  first a script in the helm image that deletes the platform HelmReleases in
+  waves of reverse dependency order (every rendered dependsOn edge points from
+  an earlier wave to a later one, so a CRD chart's release goes after its CR
+  consumers), the second one kubectl command deleting the FluxInstance — the
   self-management hooks at -6/-5 with their identity <release>-self (they
   render whenever the engine is on), the kagent namespace hook at -8 (ci-values
   turn kagent on) — and every platform HelmRelease naming agent-platform-flux.
   The engine-on renders here set gitops.self.enabled=false so the assertions
   stay about the engine; the self OCIRepository/HelmRelease, the values hook
   and the admission policy are tests/verify-self.py's;
+- the kagent CRDs' storage-version hooks (giantswarm/agent-platform#396): the
+  backup at -7 (pre-install, pre-upgrade) and the restore at 0 (post-install,
+  post-upgrade) as the hook identity in the helm image — the one hook family
+  that renders with the engine OFF too (a cluster's own Flux runs them, the
+  identity at their events, no pre-delete), nothing of it with kagent off;
+  their scripts are verify-kagent-storage-version's (Makefile.custom.mk)
 - the kagent namespace hook (giantswarm/agent-platform#306): with the engine on
   and kagent on, one pre-install,pre-upgrade Job <release>-kagent-namespace at
   weight -8 in the helm image, as the hook ServiceAccount — whose own hook
@@ -54,6 +64,22 @@ import sys
 HELM = os.environ.get("HELM", "helm")
 RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
+# The kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over
+# (giantswarm/agent-platform#396): the one hook family that renders with the
+# engine OFF too — a cluster's own Flux runs the chart's hooks, and every
+# installation that ran kagent 0.10 needs the step. With kagent (ci-values) on.
+STORAGE_JOBS = {f"{RELEASE}-kagent-storage-version-backup": ("pre-install,pre-upgrade", -7), f"{RELEASE}-kagent-storage-version-restore": ("post-install,post-upgrade", 0)}
+STORAGE_FAMILY = {("Job", NAMESPACE, n) for n in STORAGE_JOBS} | {("ServiceAccount", NAMESPACE, f"{RELEASE}-hooks"), ("ClusterRoleBinding", "", f"{RELEASE}-hooks")}
+
+
+def hook_policy(cilium: bool) -> tuple[str, str, str]:
+    """The hook identity's network policy (giantswarm/agent-platform#413): a hook object at the identity's
+    events, a CiliumNetworkPolicy where cilium.io/v2 is served (the fleet shape), a NetworkPolicy otherwise."""
+    return ("CiliumNetworkPolicy" if cilium else "NetworkPolicy", NAMESPACE, f"{RELEASE}-hooks")
+
+
+IDENTITY_EVENTS_OFF = "pre-install,pre-upgrade,post-install,post-upgrade"
+IDENTITY_EVENTS_ON = IDENTITY_EVENTS_OFF + ",pre-delete"
 TENANT_SA = "agent-platform-flux"
 OFF = ["--set", "components.flux.enabled=false"]
 SELF_OFF = ["--set", "gitops.self.enabled=false"]
@@ -199,13 +225,21 @@ def main(chart: str) -> int:
 
     # --- engine OFF: the pure app-of-apps render
     off = docs(helm(chart, [*ci, *OFF, "--include-crds"]))
-    extra = set(kinds(off)) - {"OCIRepository", "HelmRelease"}
-    if extra:
-        fail(f"engine off still renders {sorted(extra)}")
+    extra = {(k, ns, n) for k, ns, n, _ in off if k not in ("OCIRepository", "HelmRelease")}
+    off_family = STORAGE_FAMILY | {hook_policy(cilium=False)}
+    if extra != off_family:
+        fail(f"engine off renders more or less than the storage-version hook family (+ the hook identity's policy): missing {sorted(off_family - extra)}, extra {sorted(extra - off_family)}")
+    off_events = {(k, n): (hook_meta(d)[0], int(hook_meta(d)[1])) for k, _, n, d in off if "helm.sh/hook:" in d}
+    expected_off_events = {("Job", n): ev for n, ev in STORAGE_JOBS.items()} | {("ServiceAccount", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_OFF, -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_OFF, -10), ("NetworkPolicy", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_OFF, -10)}
+    if off_events != expected_off_events:
+        fail(f"engine off: hook events/weights differ (no pre-delete without the engine):\n  got      {off_events}\n  expected {expected_off_events}")
     off_text = "\n---\n".join(d for *_, d in off)
-    for needle in ("helm.sh/hook", TENANT_SA, "FluxInstance", "flux-operator", "CustomResourceDefinition"):
+    for needle in (TENANT_SA, "FluxInstance", "flux-operator", "CustomResourceDefinition", "teardown", "kagent-namespace", f"{RELEASE}-self"):
         if needle in off_text:
             fail(f"engine off render mentions {needle!r}")
+    off_kagent_off = helm(chart, [*ci, *OFF, "--include-crds", "--set", "components.kagent.enabled=false"])
+    if set(kinds(docs(off_kagent_off))) - {"OCIRepository", "HelmRelease"} or "helm.sh/hook" in off_kagent_off or f"{RELEASE}-hooks" in off_kagent_off:
+        fail("engine off with kagent off: the pure app-of-apps render carries a hook or the hook identity")
     hrs_off = [d for k, _, _, d in off if k == "HelmRelease"]
     if any("serviceAccountName:" in d for d in hrs_off):
         fail("engine off: a platform HelmRelease names a serviceAccountName without gitops.serviceAccountName")
@@ -215,9 +249,9 @@ def main(chart: str) -> int:
     if not all("\n  serviceAccountName: custom-sa\n" in d for k, _, _, d in off_sa if k == "HelmRelease"):
         fail("engine off: gitops.serviceAccountName is not stamped on every HelmRelease")
     fleet = docs(helm(chart, [*ci, *OFF, "--set", "gitops.namespace=flux-giantswarm", "--set", "gitops.targetNamespace=agent-platform", *FLEET_APIS]))
-    if set(kinds(fleet)) - {"OCIRepository", "HelmRelease"} or any(ns != "flux-giantswarm" for _, ns, _, _ in fleet):
-        fail("fleet shape (engine off, exempt namespace): a non-Flux object or a wrong namespace rendered")
-    print(f"ok: engine off — {len(off)} Flux objects, no CRD/hook/operator/FluxInstance/identity, no serviceAccountName, roster flux: false, fleet shape clean")
+    if {(k, ns, n) for k, ns, n, _ in fleet if k not in ("OCIRepository", "HelmRelease")} != STORAGE_FAMILY | {hook_policy(cilium=True)} or any(ns != "flux-giantswarm" for k, ns, _, _ in fleet if k in ("OCIRepository", "HelmRelease")):
+        fail("fleet shape (engine off, exempt namespace): a non-Flux object beyond the storage-version hooks, or a wrong namespace, rendered")
+    print(f"ok: engine off — {len(off) - len(STORAGE_FAMILY)} Flux objects + the storage-version hooks (as {RELEASE}-hooks at {IDENTITY_EVENTS_OFF}; nothing with kagent off), no CRD/operator/FluxInstance/tenant identity/teardown, no serviceAccountName, roster flux: false, fleet shape clean")
 
     # --- engine ON: exactly the engine besides the platform objects
     on = docs(helm(chart, [*ci, *SELF_OFF, "--include-crds"]))
@@ -234,6 +268,7 @@ def main(chart: str) -> int:
         ("ServiceAccount", NAMESPACE, f"{RELEASE}-self"), ("Role", NAMESPACE, f"{RELEASE}-self"), ("RoleBinding", NAMESPACE, f"{RELEASE}-self"),
         ("Job", NAMESPACE, f"{RELEASE}-self-stop-resumer"), ("Job", NAMESPACE, f"{RELEASE}-self-suspend"),
         ("Job", NAMESPACE, f"{RELEASE}-kagent-namespace"),  # ci-values turn kagent on
+        *STORAGE_FAMILY, hook_policy(cilium=False),
     }
     engine = {(k, ns, n) for k, ns, n, _ in on if k not in ("OCIRepository", "HelmRelease", "CustomResourceDefinition")}
     if engine != expected:
@@ -279,10 +314,14 @@ def main(chart: str) -> int:
         if policy != "before-hook-creation,hook-succeeded":
             fail(f"hook {k} {n}: policy {policy!r}")
         events[(k, n)] = (hook, int(weight))
-    # the hook identity is created for pre-install,pre-upgrade too while the kagent namespace hook renders (ci-values turn kagent on)
+    # the hook identity is created for pre-install,pre-upgrade too while the kagent namespace hook renders, and for
+    # post-install,post-upgrade while the storage-version restore hook renders (ci-values turn kagent on)
     expected_events = {
-        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,pre-delete", -10),
+        ("ServiceAccount", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_ON, -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_ON, -10),
+        # the identity's network policy: at every event a hook runs — with the engine on all five (#413)
+        ("NetworkPolicy", f"{RELEASE}-hooks"): (IDENTITY_EVENTS_ON, -10),
         ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
+        **{("Job", n): ev for n, ev in STORAGE_JOBS.items()},
         # the self-management hooks (verify-self.py): pre-upgrade too while self-management is off (the hand-back)
         ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-upgrade,pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-upgrade,pre-delete", -5),
         ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("pre-delete", 5),
@@ -290,9 +329,26 @@ def main(chart: str) -> int:
     if events != expected_events:
         fail(f"hook events/weights differ:\n  got      {events}\n  expected {expected_events}")
     hr_names = sorted(n for k, _, n, _ in on if k == "HelmRelease")
-    rel = job_args(one(on, "Job", f"{RELEASE}-teardown-releases"))
-    if rel[:7] != ["delete", "helmreleases.helm.toolkit.fluxcd.io", "--namespace", NAMESPACE, "--ignore-not-found", "--wait", "--timeout=5m"] or sorted(rel[7:]) != hr_names:
-        fail(f"teardown-releases Job does not delete exactly the rendered HelmReleases by name: {rel}")
+    # teardown-releases: a script, one `kubectl delete --wait` per wave; the waves
+    # are the reverse of the rendered dependsOn graph — a release is deleted only
+    # after every release that dependsOn it (a CRD chart after its CR consumers:
+    # Helm cannot delete an object whose kind is gone, and helm-controller would
+    # retry that uninstall until the hook times out).
+    rel_job = one(on, "Job", f"{RELEASE}-teardown-releases")
+    waves = [line.split()[8:] for line in rel_job.splitlines()
+             if line.strip().startswith(f"kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace {NAMESPACE} --ignore-not-found --wait --timeout=5m ")]
+    if not waves or sorted(n for w in waves for n in w) != hr_names or any(not w for w in waves):
+        fail(f"teardown-releases Job does not delete exactly the rendered HelmReleases by name, in waves: {waves} vs {hr_names}")
+    wave_of = {n: i for i, w in enumerate(waves) for n in w}
+    depends_on = {n: re.findall(r"^  dependsOn:\n((?:    - name: .*\n)+)", d + "\n", re.M) for k, _, n, d in on if k == "HelmRelease"}
+    edges = [(n, dep) for n, blocks in depends_on.items() for block in blocks for dep in re.findall(r"^    - name: (\S+)$", block, re.M)]
+    if not edges:
+        fail("no dependsOn edge among the rendered HelmReleases; the wave assertion has nothing to check")
+    for dependent, dependency in edges:
+        if dependency not in wave_of:
+            fail(f"HelmRelease {dependent} dependsOn {dependency}, which the teardown does not delete")
+        if wave_of[dependent] >= wave_of[dependency]:
+            fail(f"teardown order: {dependent} (wave {wave_of[dependent] + 1}) dependsOn {dependency} (wave {wave_of[dependency] + 1}); the dependent must go first")
     eng = job_args(one(on, "Job", f"{RELEASE}-teardown-engine"))
     if eng != ["delete", "fluxinstances.fluxcd.controlplane.io", "--namespace", NAMESPACE, "flux", "--ignore-not-found", "--wait", "--timeout=5m"]:
         fail(f"teardown-engine Job does not delete the FluxInstance flux and wait: {eng}")
@@ -300,20 +356,20 @@ def main(chart: str) -> int:
     if not hooks_image:
         fail("gitops.hooks.image is not a registry/repository/tag block (the Renovate regex needs the three lines)")
     image = "/".join(hooks_image.group(1, 2)) + ":" + hooks_image.group(3)
-    for job in (f"{RELEASE}-teardown-releases", f"{RELEASE}-teardown-engine"):
-        d = one(on, "Job", job)
-        for needle in (f'image: "{image}"', "restartPolicy: Never", "runAsNonRoot: true", "readOnlyRootFilesystem: true", "allowPrivilegeEscalation: false", "- ALL", "type: RuntimeDefault", f"serviceAccountName: {RELEASE}-hooks"):
-            if needle not in d:
-                fail(f"hook Job {job} lacks {needle!r}")
-        if "command:" in d:
-            fail(f"hook Job {job} overrides the image entrypoint; hooks pass kubectl arguments only")
-    print(f"ok: hooks — SA/CRB at -10, kagent namespace hook at -8, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases by name), teardown-engine at 5, restricted pods running {image}")
-
-    # --- the kagent namespace hook (giantswarm/agent-platform#306)
     helm_image = re.search(r"^    helmImage:\n      registry: (\S+)\n      repository: (\S+)\n      tag: (\S+)$", values, re.M)
     if not helm_image:
         fail("gitops.hooks.helmImage is not a registry/repository/tag block")
     helm_ref = "/".join(helm_image.group(1, 2)) + ":" + helm_image.group(3)
+    for job, ref, scripted in ((f"{RELEASE}-teardown-releases", helm_ref, True), (f"{RELEASE}-teardown-engine", image, False), *((n, helm_ref, True) for n in STORAGE_JOBS)):
+        d = one(on, "Job", job)
+        for needle in (f'image: "{ref}"', "restartPolicy: Never", "runAsNonRoot: true", "readOnlyRootFilesystem: true", "allowPrivilegeEscalation: false", "- ALL", "type: RuntimeDefault", f"serviceAccountName: {RELEASE}-hooks"):
+            if needle not in d:
+                fail(f"hook Job {job} lacks {needle!r}")
+        if scripted != ('command: ["/bin/sh", "-eu", "-c"]' in d):
+            fail(f"hook Job {job}: {'a script in the helm image' if scripted else 'one kubectl command, no entrypoint override'} expected")
+    print(f"ok: hooks — SA/CRB and the identity's network policy at -10, kagent namespace hook at -8, storage-version backup at -7 and restore at 0, self hooks at -6/-5, teardown-releases at 0 (deletes {len(hr_names)} HelmReleases in {len(waves)} waves, reverse of {len(edges)} dependsOn edges: {' > '.join(','.join(w) for w in waves)}), teardown-engine at 5, restricted pods running {image} / {helm_ref}")
+
+    # --- the kagent namespace hook (giantswarm/agent-platform#306)
     ns_job = one(on, "Job", f"{RELEASE}-kagent-namespace")
     for needle in (f'image: "{helm_ref}"', 'command: ["/bin/sh", "-eu", "-c"]', f"serviceAccountName: {RELEASE}-hooks", 'ns="kagent"',
                    'kubectl create namespace "$ns"', 'kubectl wait --for=delete "namespace/$ns"', "Terminating)", "left as it is",
@@ -322,20 +378,21 @@ def main(chart: str) -> int:
             fail(f"the kagent namespace hook lacks {needle!r}")
     if ("Namespace", "", "kagent") in {(k, ns, n) for k, ns, n, _ in on} or re.search(r"^kind: Namespace$", "\n---\n".join(d for *_, d in on), re.M):
         fail("the meta chart renders a Namespace object; the kagent namespace is the connectivity release's and must only be created by the hook")
+    # without the kagent namespace hook the identity keeps the storage-version hooks' events while kagent is on, and is pre-delete only with kagent off
     cases = {
-        "kagent off": ["--set", "components.kagent.enabled=false"],
-        "the namespace is the HelmReleases' target": ["--set", "gitops.targetNamespace=kagent"],
-        "kagent.namespaceOverride empty": ["--set", "kagent.namespaceOverride="],
+        "kagent off": (["--set", "components.kagent.enabled=false"], "pre-delete"),
+        "the namespace is the HelmReleases' target": (["--set", "gitops.targetNamespace=kagent"], IDENTITY_EVENTS_ON),
+        "kagent.namespaceOverride empty": (["--set", "kagent.namespaceOverride="], IDENTITY_EVENTS_ON),
     }
-    for label, flags in cases.items():
+    for label, (flags, identity_events) in cases.items():
         ds = docs(helm(chart, [*ci, *SELF_OFF, *flags]))
         if any(n == f"{RELEASE}-kagent-namespace" for _, _, n, _ in ds):
             fail(f"{label}: the kagent namespace hook still renders")
         for kind in ("ServiceAccount", "ClusterRoleBinding"):
-            if hook_meta(one(ds, kind, f"{RELEASE}-hooks"))[0] != "pre-delete":
-                fail(f"{label}: the hook {kind} is not back to pre-delete only")
+            if hook_meta(one(ds, kind, f"{RELEASE}-hooks"))[0] != identity_events:
+                fail(f"{label}: the hook {kind} is not at {identity_events} ({hook_meta(one(ds, kind, f'{RELEASE}-hooks'))[0]})")
     kag_off = helm(chart, [*ci, *OFF, "--set", "components.kagent.enabled=true"])
-    if "kagent-namespace" in kag_off or "helm.sh/hook" in kag_off:
+    if "kagent-namespace" in kag_off:
         fail("engine off with kagent on: the kagent namespace hook rendered (the pure render must not carry it; a cluster's own Flux gets the namespace out of band)")
     print(f"ok: kagent namespace hook — pre-install,pre-upgrade at -8 as {RELEASE}-hooks in {helm_ref}, create-if-missing / wait out Terminating / leave Active; no Namespace object; absent with kagent off, target namespace = kagent, namespaceOverride empty, engine off")
 

@@ -45,16 +45,37 @@ or `tolerations`.
   worker holds ~16Mi and a golden-booted actor ~20Mi; a Go ADK turn's working set
   (the model client, tool calls and gVisor overhead) stays well under `2Gi`.
   Raise the limits for heavier agents.
-- **One architecture per pool.** An actor's golden snapshot is
-  architecture-specific, so a mixed-architecture pool wedges the actors that land
-  on the other one. `kagent.substrateWorkerPool.template.nodeSelector` pins the
-  pool to the installation's architecture (`kubernetes.io/arch: amd64` by default;
-  an arm64 installation sets `arm64`).
+- **One CPU feature set per pool — one vendor and generation, not just one
+  architecture.** An actor's golden snapshot is a gVisor checkpoint, and gVisor
+  restores it only on a host whose CPU offers every feature the checkpoint
+  recorded; a worker on a CPU that lacks one fails every restore placed on it
+  (`incompatible FeatureSet: missing features: …` in its log every 30 s, the
+  turn `request timed out`) and the actor never recovers.
+  `kagent.substrateWorkerPool.template.nodeSelector` pins the pool as precisely
+  as the provider's node labels allow: the architecture (`kubernetes.io/arch:
+  amd64` by default; an arm64 installation sets `arm64`), and on CAPA — where
+  Karpenter consolidation may replace a node with another vendor's at any time —
+  the vendor, `karpenter.k8s.aws/instance-cpu-manufacturer: amd` (the fleet
+  template carries it), or the family (`karpenter.k8s.aws/instance-family`)
+  where a generation change must be ruled out too; on CAPZ and the other
+  providers the node pool (`giantswarm.io/machine-pool`) or
+  `node.kubernetes.io/instance-type`. Recognise a mixed pool by `kubectl get
+  nodes -L <the label>` showing two values under it
+  (giantswarm/agent-platform#429).
 
 `kagent.substrateWorkerPool.template` also accepts `tolerations`, `nodeAffinity`
 and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
 "the Generic chart's per-agent placement values are gone, capacity is the
 WorkerPool".
+
+## Voluntary disruption
+
+The platform's core runs as single replicas — the agentgateway data plane, muster, the kagent controller, klaus-gateway, agent-manager — and each carries long-lived streams (MCP sessions, A2A and portal SSE turns, the LLM listener). A voluntary eviction (Karpenter consolidation, a node drain) cuts them mid-turn (giantswarm/agent-platform#431). Two guards, both on by default:
+
+- **`karpenter.sh/do-not-disrupt: "true"`** on the pods that carry live streams — the agentgateway data plane (`gateway.parameters.podAnnotations`, rendered by the connectivity chart through `AgentgatewayParameters`), muster (`muster.podAnnotations`), the kagent controller (`kagent.controller.podAnnotations`) and klaus-gateway (`klausGateway.podAnnotations`). Karpenter's consolidation, drift and expiry work around the node until the NodePool's `terminationGracePeriod`; an involuntary disruption (spot interruption, node failure) is not affected. Set the value to `"false"` (or drop the key) to opt out per component.
+- **`PodDisruptionBudget minAvailable: 1`** on muster (`muster.podDisruptionBudget`, the muster chart's knob), the kagent controller (`kagent.controller.pdb`, the kagent chart's knob), klaus-gateway (`klausGateway.podDisruptionBudget`, the klaus-gateway chart's knob, 1.1.0+) and agent-manager (`agentManager.podDisruptionBudget`, rendered by the connectivity chart). With one replica the budget refuses every voluntary eviction: Karpenter reports `DisruptionBlocked … pdb`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`; a MachineDeployment after its `nodeDrainTimeout`). `unhealthyPodEvictionPolicy: AlwaysAllow` where the chart supports it keeps a pod that is not Ready evictable, so a crash-looping component never wedges a drain. `enabled: false` on a knob removes that budget. The data plane's budget is `gateway.parameters.podDisruptionBudget` (with two replicas, so a drain can still proceed one pod at a time).
+
+Two replicas are the long-term answer for the stateless components; the budgets on one replica are the interim guard. Backstage's budget is the backstage chart's (`maxUnavailable: 1` today, which protects nothing with one replica) — a change there, not here.
 
 ## Values
 
@@ -120,43 +141,51 @@ WorkerPool".
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=0.11.0-gs.1 <0.11.1-0"` |  |
+| components.kagent.versionRange | string | `">=0.11.0-gs.12 <0.11.1-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
 | components.kagent.dependsOn[2] | string | `"substrate"` |  |
 | components.kagent.dependsOn[3] | string | `"agent-platform-connectivity"` |  |
+| components.kagent.driftDetection.mode | string | `"enabled"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
-| components.kagent.omitKeys[2] | string | `"harness"` |  |
+| components.kagent.omitKeys[2] | string | `"harness.snapshotStore"` |  |
 | components.kagent.omitKeys[3] | string | `"modelConfigs"` |  |
 | components.kagent.omitKeys[4] | string | `"oauth2ProxyIngress"` |  |
 | components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
 | components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
 | components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
+| components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
+| components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=0.11.0-gs.1 <0.11.1-0"` |  |
+| components.kagent-crds.versionRange | string | `">=0.11.0-gs.12 <0.11.1-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.27-gs.2 <0.0.28-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.27-gs.9 <0.0.28-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.27-gs.2 <0.0.28-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.27-gs.9 <0.0.28-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.dependsOn[0] | string | `"substrate-crds"` |  |
 | components.substrate.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
+| components.substrate.valuesFromRefs[0].kind | string | `"ConfigMap"` |  |
+| components.substrate.valuesFromRefs[0].name | string | `"kagent-images"` |  |
+| components.substrate.valuesFromRefs[0].valuesKey | string | `"substrate-values.yaml"` |  |
+| components.substrate.valuesFromRefs[0].optional | bool | `true` |  |
+| components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.klaus-gateway.versionRange | string | `"0.x"` |  |
+| components.klaus-gateway.versionRange | string | `"1.x"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.chart | string | `"agent-sandbox"` |  |
@@ -300,6 +329,7 @@ WorkerPool".
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
+| gateway.parameters.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -395,6 +425,9 @@ WorkerPool".
 | muster.networkPolicy.flavor | string | `"auto"` |  |
 | muster.networkPolicy.cilium.allowClusterIngress | bool | `true` |  |
 | muster.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
+| muster.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| muster.podDisruptionBudget.enabled | bool | `true` |  |
+| muster.podDisruptionBudget.minAvailable | int | `1` |  |
 | muster.gatewayAPI.enabled | bool | `false` |  |
 | muster.muster.oauth.server.enabled | bool | `true` |  |
 | muster.muster.oauth.server.baseUrl | string | `""` |  |
@@ -453,7 +486,6 @@ WorkerPool".
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"ghcr.io"` |  |
-| kagent.tag | string | `"0.11.0-gs.3"` |  |
 | kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
 | kagent.controller.agentImage.repository | string | `"giantswarm/kagent/golang-adk"` |  |
 | kagent.controller.substrate.enabled | bool | `true` |  |
@@ -462,6 +494,11 @@ WorkerPool".
 | kagent.controller.substrate.defaultWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
+| kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| kagent.controller.pdb.enabled | bool | `true` |  |
+| kagent.controller.pdb.minAvailable | int | `1` |  |
+| kagent.controller.pdb.maxUnavailable | string | `""` |  |
+| kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.controller.metrics.enabled | bool | `false` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
@@ -469,7 +506,7 @@ WorkerPool".
 | kagent.substrateWorkerPool.create | bool | `true` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.substrateWorkerPool.replicas | int | `4` |  |
-| kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.2"` |  |
+| kagent.substrateWorkerPool.workerImage | string | `""` |  |
 | kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
 | kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.cpu | string | `"250m"` |  |
@@ -547,11 +584,53 @@ WorkerPool".
 | kagent.oauth2-proxy.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.grafana-mcp.enabled | bool | `false` |  |
 | kagent.kagent-tools.enabled | bool | `false` |  |
+| kagent.kagent-tools.namespaceOverride | string | `"kagent"` |  |
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
-| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:a2d23f5eb9c01e1903459a6e742f7d4aaa5e950d7e9aa6f07f8982761be0163a"` |  |
+| kagent.harness.create | bool | `true` |  |
+| kagent.harness.image | string | `""` |  |
 | kagent.harness.snapshotLocation | string | `""` |  |
+| kagent.harness.snapshotStore.prefix | string | `"kagent"` |  |
+| kagent.harness.snapshotStore.crossplane.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.provider | string | `"aws"` |  |
+| kagent.harness.snapshotStore.crossplane.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.region | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.observeOnly | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.tags | object | `{}` |  |
+| kagent.harness.snapshotStore.crossplane.aws.bucketName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.accountId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.oidcProvider | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.roleName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.lifecycleDays | int | `30` |  |
+| kagent.harness.snapshotStore.crossplane.capz.storageAccountName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.containerName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.resourceGroup | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.subscriptionId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.replicationType | string | `"LRS"` |  |
+| kagent.harness.snapshotStore.crossplane.capz.lifecycleDays | int | `30` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.identityName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.name | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.namespace | string | `"crossplane"` |  |
+| kagent.harness.snapshotStore.s3proxy.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.s3proxy.image.repository | string | `"gsoci.azurecr.io/giantswarm/s3proxy"` |  |
+| kagent.harness.snapshotStore.s3proxy.image.tag | string | `"4.1.1"` |  |
+| kagent.harness.snapshotStore.s3proxy.replicas | int | `2` |  |
+| kagent.harness.snapshotStore.s3proxy.javaOpts | string | `"-XX:MaxRAMPercentage=70"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.cpu | string | `"250m"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.limits.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.endpoint | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.account | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.container | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
+| kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
+| kagent.harness.env[0].value | string | `"true"` |  |
+| kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |
+| kagent.harness.allowedAgentTemplates.selector.matchLabels."kagent.dev/harness" | string | `""` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
@@ -662,6 +741,10 @@ WorkerPool".
 | postgres.backup.crossplane.azure.subnetName | string | `"node-subnet"` |  |
 | postgres.backup.crossplane.azure.privateDnsZoneRef | string | `""` |  |
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
+| klausGateway.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| klausGateway.podDisruptionBudget.enabled | bool | `true` |  |
+| klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
+| klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.agentgateway.enabled | bool | `false` |  |
 | klausGateway.crd.install | bool | `true` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
@@ -732,6 +815,7 @@ WorkerPool".
 | model-manager.lmstudio.endpoint | string | `""` |  |
 | model-manager.lmstudio.agentHost | string | `""` |  |
 | model-manager.kagent.namespace | string | `"kagent"` |  |
+| model-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | model-manager.kagent.disableWiring | bool | `false` |  |
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
@@ -767,6 +851,7 @@ WorkerPool".
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
+| agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
 | agent-manager.agentChart.semver | string | `"1.x"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
@@ -793,6 +878,10 @@ WorkerPool".
 | agentManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| agentManager.podDisruptionBudget.enabled | bool | `true` |  |
+| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
@@ -801,7 +890,7 @@ WorkerPool".
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.1.0"` |  |
+| agentManager.migration.image.tag | string | `"1.1.3"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |
@@ -873,6 +962,7 @@ WorkerPool".
 | substrate.atelet.tolerations | list | `[]` |  |
 | substrate.atelet.affinity | object | `{}` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
+| substrate.atelet.imageCache.pinnedImages | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
 | hooks.kubectlImage.registry | string | `"docker.io"` |  |
 | hooks.kubectlImage.repository | string | `"alpine/k8s"` |  |

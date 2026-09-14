@@ -47,6 +47,8 @@ import subprocess
 import sys
 import tempfile
 
+import yaml
+
 GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 
 # component -> (repository, versionRange, dependsOn, a line only the standalone's
@@ -73,18 +75,18 @@ CONNECTIVITY_RANGE = ">=4.0.0 <5.0.0"
 # repository, versionRange, dependsOn with every component on): the kagent line's
 # two charts on the line's release range (one build, kagent after its CRDs), the
 # managers on the lines that speak v1alpha3 (agent-manager 1.x; model-manager
-# 0.x from 0.20.0, dual-version). kagent-crds follows components.kagent and takes no
-# `global` (a chart of two subchart switches).
+# 0.x from 0.20.0, dual-version), klaus-gateway 1.x (A2A v1 over gRPC). kagent-crds
+# follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://ghcr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=0.11.0-gs.1 <0.11.1-0"
+KAGENT_RANGE = ">=0.11.0-gs.12 <0.11.1-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin
 # (the build the WorkerPool's worker image names), both landing in ate-system,
 # both following components.kagent. The pin is the line's release range, the
 # kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.27-gs.2 <0.0.28-0"
-SUBSTRATE_PIN = "0.0.27-gs.2"  # the range's floor: the BOM pin and the worker image tag
+SUBSTRATE_RANGE = ">=0.0.27-gs.9 <0.0.28-0"
+SUBSTRATE_PIN = "0.0.27-gs.9"  # the range's floor: the BOM pin and the worker image the kagent chart (0.11.0-gs.12) stamps
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
@@ -93,7 +95,20 @@ LINE = {
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
     "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+    # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
+    # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
+    # REST client and belongs to the 3.x meta chart.
+    "klaus-gateway": (GSOCI, "1.x", []),
 }
+
+# The kagent.dev API version the 4.x line serves, pinned into both managers'
+# release values (`kagent.apiVersion`; their charts render it as the container's
+# `--kagent-api-version`). `auto` discovers it once at start-up, and a pod that
+# started under kagent 0.10 keeps v1alpha2 across the in-place upgrade because
+# nothing in its values changes (giantswarm/agent-platform#401); the pin is that
+# change, and it rolls both Deployments after kagent-crds.
+KAGENT_API_VERSION = "v1alpha3"
+MANAGERS = ["model-manager", "agent-manager"]
 
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
@@ -131,7 +146,7 @@ DEV_CHANNEL: dict[str, str] = {}
 # the backslashes a real filter has (`\.`), so the quoting is exercised.
 PROBE_FILTER = ".*-dev\\.x\\..*"
 
-ON = [f"--set=components.{n}.enabled=true" for n in NEW]
+ON = [f"--set=components.{n}.enabled=true" for n in (*NEW, "klaus-gateway")]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
 # The bundled Flux engine (components.flux.enabled, default true) adds its own
 # objects to the render; its two shapes are tests/verify-engine.py's. The roster
@@ -264,6 +279,23 @@ def main(meta: str, connectivity: str) -> int:
                  "kagent on without a snapshot location")
     print("ok: kagent-crds, substrate and substrate-crds follow components.kagent — on with it, off without it, the roster says which; the Substrate releases land in ate-system; the guards refuse kagent without its runtime or a snapshot location")
 
+    # --- atelet's pinned images come from the kagent release's ConfigMap; an own list travels only when set ---
+    def pinned_images(flags: list[str]) -> list[str]:
+        values = hr_values(docs(render(meta, [*ci, *flags]))[("HelmRelease", "substrate")])
+        m = re.search(r"^    pinnedImages:\n((?:    - .*\n)+)", values, re.M)
+        return re.findall(r"^    - (\S+)$", m.group(1), re.M) if m else []
+    substrate_hr = docs(render(meta, ci))[("HelmRelease", "substrate")]
+    if "\n  valuesFrom:\n    - kind: ConfigMap\n      name: kagent-images\n      optional: true\n      valuesKey: substrate-values.yaml\n" not in substrate_hr:
+        fail("the substrate release does not read atelet.imageCache.pinnedImages from the kagent release's ConfigMap kagent-images (valuesFrom, key substrate-values.yaml, optional)")
+    if pinned_images([]):
+        fail(f"the substrate release carries pinnedImages in spec.values by default ({pinned_images([])}); Flux lets spec.values win, so they would shadow the ConfigMap's set")
+    if "imageCache" in hr_values(substrate_hr):
+        fail("an empty atelet.imageCache is forwarded to the substrate release; omitEmptyKeys must prune the parent too")
+    extra = "docker.io/example/tool:1"
+    if pinned_images(["--set", f"substrate.atelet.imageCache.pinnedImages[0]={extra}"]) != [extra]:
+        fail("an installation's own substrate.atelet.imageCache.pinnedImages is not forwarded verbatim")
+    print("ok: the substrate release pins atelet's runtime images from the kagent release's ConfigMap, an installation's own list only when set")
+
     # --- the wiring chart's range is bounded below the next major ------------------
     conn_oci = off.get(("OCIRepository", "agent-platform-connectivity"))
     if not conn_oci or f'semver: "{CONNECTIVITY_RANGE}"' not in conn_oci:
@@ -272,7 +304,8 @@ def main(meta: str, connectivity: str) -> int:
 
     # --- all on ---------------------------------------------------------------
     on_manifest = render(meta, [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]])
-    kinds = set(re.findall(r"^kind: (\S+)$", on_manifest, re.M))
+    # the release objects only: the kagent CRDs' storage-version hooks (#396, verify-engine.py) are Helm hooks and render with the engine off too
+    kinds = {m.group(1) for d in on_manifest.split("\n---\n") if "helm.sh/hook:" not in d for m in [re.search(r"^kind: (\S+)$", d, re.M)] if m}
     if kinds - {"OCIRepository", "HelmRelease"}:
         fail(f"the seven-on render is not a pure app-of-apps render: {sorted(kinds)}")
     on = docs(on_manifest)
@@ -329,10 +362,31 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"{name} OCIRepository does not carry versionRange {rng!r} (the kagent API v2 line's range)")
         if sorted(depends_on(hr)) != sorted(deps):
             fail(f"{name} dependsOn {depends_on(hr)}, expected {deps}")
-    print("ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges")
+    for name in MANAGERS:
+        vals = hr_values(on[("HelmRelease", name)]) + "\n"
+        if not re.search(rf"^kagent:\n(?:  .*\n)*?  apiVersion: {KAGENT_API_VERSION}$", vals, re.M):
+            fail(f"{name} release values do not pin kagent.apiVersion: {KAGENT_API_VERSION} — left to `auto`, a pod that started under kagent 0.10 keeps v1alpha2 across the upgrade (giantswarm/agent-platform#401)")
+    print(f"ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges, the managers pinned to kagent.dev/{KAGENT_API_VERSION}")
 
     # --- the dev channel: semverFilter ----------------------------------------------
     check_semver_filters(meta, ci)
+
+    # --- the s3proxy façade's image (kagent.harness.snapshotStore.s3proxy) --------
+    # An image, not a chart: the gsoci mirror of gaul/s3proxy, the same default in
+    # both charts (the connectivity chart runs it, the meta chart forwards the
+    # block), pinned by the BOM like a component.
+    s3proxy_meta = yaml.safe_load(open(f"{meta}/values.yaml"))["kagent"]["harness"]["snapshotStore"]["s3proxy"]["image"]
+    s3proxy_conn = yaml.safe_load(open(f"{connectivity}/values.yaml"))["kagent"]["harness"]["snapshotStore"]["s3proxy"]["image"]
+    if s3proxy_meta != s3proxy_conn:
+        fail(f"kagent.harness.snapshotStore.s3proxy.image differs between the charts: meta {s3proxy_meta}, connectivity {s3proxy_conn}")
+    if not s3proxy_meta["repository"].startswith("gsoci.azurecr.io/giantswarm/"):
+        fail(f"kagent.harness.snapshotStore.s3proxy.image.repository {s3proxy_meta['repository']!r} is not the gsoci mirror (gsoci.azurecr.io/giantswarm/s3proxy, giantswarm/retagger)")
+    bom_s3proxy = yaml.safe_load(open(f"{meta}/examples/customer-bom.yaml"))
+    for k in ("kagent", "harness", "snapshotStore", "s3proxy", "image", "tag"):
+        bom_s3proxy = (bom_s3proxy or {}).get(k)
+    if bom_s3proxy != s3proxy_meta["tag"]:
+        fail(f"examples/customer-bom.yaml pins kagent.harness.snapshotStore.s3proxy.image.tag {bom_s3proxy!r}; the chart's default is {s3proxy_meta['tag']!r} — the BOM pins the façade's image like a component")
+    print("ok: the s3proxy façade's image is the gsoci mirror, the same default in both charts, pinned by the BOM")
 
     # --- the BOM pins every one exactly ------------------------------------------
     bom_file = open(f"{meta}/examples/customer-bom.yaml").read()
@@ -355,11 +409,12 @@ def main(meta: str, connectivity: str) -> int:
     substrate_pins = {re.search(rf"^\s*{n}:\s*\{{\s*versionRange:\s*\"([^\"]+)\"", bom_file, re.M).group(1) for n in ("substrate", "substrate-crds")}
     if len(substrate_pins) != 1:
         fail(f"the BOM pins substrate and substrate-crds to different builds {sorted(substrate_pins)}; the two charts are one build of the Substrate line")
-    worker_image = re.search(r"^\s*workerImage:\s*(\S+)$", open(f"{meta}/values.yaml").read(), re.M).group(1)
+    if re.search(r"^\s*workerImage:\s*(?!\"\"$|''$)\S+$", open(f"{meta}/values.yaml").read(), re.M):
+        fail("kagent.substrateWorkerPool.workerImage is set in values.yaml; the kagent chart stamps the worker of the Substrate version it was built against, the key stays empty here")
     if not SUBSTRATE_RANGE.startswith(f">={SUBSTRATE_PIN} "):
         fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
-    if not worker_image.endswith(":" + SUBSTRATE_PIN) or substrate_pins != {SUBSTRATE_PIN}:
-        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)}, kagent.substrateWorkerPool.workerImage {worker_image!r} — the control plane and the workers are one Substrate version")
+    if substrate_pins != {SUBSTRATE_PIN}:
+        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the control plane and the workers (the kagent chart's stamped workerImage) are one Substrate version")
     print("ok: the customer BOM pins the seven, the kagent line, the managers and the wiring chart exactly")
 
     # --- the forwarded tree validates against the connectivity chart --------------

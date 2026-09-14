@@ -308,8 +308,23 @@
                                 "type": "string"
                             }
                         },
+                        "driftDetection": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "mode": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "omitKeys": {
                             "type": "array",
@@ -566,6 +581,12 @@
                         "injectGlobal": {
                             "type": "boolean"
                         },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -574,6 +595,27 @@
                         },
                         "valuesFrom": {
                             "type": "string"
+                        },
+                        "valuesFromRefs": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "optional": {
+                                        "type": "boolean"
+                                    },
+                                    "valuesKey": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
                         },
                         "versionRange": {
                             "type": "string"
@@ -823,6 +865,15 @@
                         },
                         "name": {
                             "type": "string"
+                        },
+                        "podAnnotations": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "karpenter.sh/do-not-disrupt": {
+                                    "type": "string"
+                                }
+                            }
                         },
                         "podSecurityContext": {
                             "type": "object",

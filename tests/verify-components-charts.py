@@ -29,7 +29,7 @@ constraint with its own semver and, for the kagent line's prerelease releases,
 differently. While a range or a BOM pin names a release that is not published
 yet (UNRELEASED below: a sibling's 1.0 or the kagent line's tag), the block is
 rendered against the newest chart the line has instead — the kagent build the
-values name (`kagent.tag`) or the newest 0.x of a manager — and the fallback is
+values name (the floor of the kagent range) or the newest 0.x of a manager — and the fallback is
 printed; an entry leaves UNRELEASED with the release it waits for.
 
 Network: pulls from gsoci.azurecr.io and ghcr.io (three attempts each); the tag
@@ -53,6 +53,14 @@ EXTRAS = [
     "kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources",
 ]
 MANAGERS = ["model-manager", "agent-manager"]
+# The kagent.dev API version the meta chart pins into both managers
+# (`kagent.apiVersion`, giantswarm/agent-platform#401); their charts must render
+# it as the container's `--kagent-api-version`, the pod-template change that
+# rolls the Deployments on the cut-over.
+KAGENT_API_VERSION = "v1alpha3"
+# The platform Harness's admission label (the Generic agent chart stamps it);
+# the rendered kagent chart must select by it alone.
+HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 KAGENT = ["kagent-crds", "kagent"]
 # The Substrate line's two charts: rendered with the substrate: block the meta
 # chart forwards (the derived postgres.enabled boolean, the CNPG connection
@@ -165,7 +173,7 @@ RENDER_AGAINST = {
 
 def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
     """The chart to render against while nothing the constraint admits is
-    published: the kagent build the values name (kagent.tag — the chart version
+    published: the kagent build the values name (the kagent range's floor — the chart version
     of the same build), the branch build RENDER_AGAINST names, else the newest
     release tag."""
     if name not in UNRELEASED:
@@ -190,13 +198,32 @@ def pull(url: str, version: str, dest: str) -> str:
     sys.exit(f"FAIL: could not pull {url} --version {version!r}\n{err}")
 
 
+def check_harness_selector(manifest: str, what: str) -> None:
+    """The platform Harness the kagent chart renders admits templates by the ONE
+    label the Generic agent chart stamps. The meta chart blanks the chart's own
+    default key (kagent.dev/harness: "") and the line's template drops the empty
+    value — this is where that contract is proven against the chart the range
+    resolves to, on the rendered object (giantswarm/agent-platform#418)."""
+    harness = [d for d in manifest.split("\n---") if re.search(r"^kind: Harness$", d, re.M)]
+    if len(harness) != 1:
+        sys.exit(f"FAIL: {what} renders {len(harness)} Harness objects, expected the one platform Harness")
+    m = re.search(r"^ {6}matchLabels:\n((?: {8}\S.*\n)+)", harness[0] + "\n", re.M)
+    labels = dict(line.strip().split(": ", 1) for line in m.group(1).splitlines()) if m else {}
+    if labels != {HARNESS_LABEL: "kagent"}:
+        sys.exit(
+            f"FAIL: {what} renders the platform Harness selecting by {labels or 'nothing'}; the admission contract is "
+            f"{HARNESS_LABEL}=kagent alone — the chart's own kagent.dev/harness must be dropped (the meta chart forwards it "
+            "empty; the line's Harness template drops an empty-valued selector label from 0.11.0-gs.9, giantswarm/agent-platform#418)"
+        )
+    print(f"ok: {what} renders the platform Harness selecting by {HARNESS_LABEL}=kagent alone")
+
+
 def main(meta: str) -> int:
     follow_kagent = {"kagent-crds", *SUBSTRATE}  # no switch of their own: on with kagent
     on = [f"--set=components.{n}.enabled=true" for n in COMPONENTS if n not in follow_kagent]
     wide = docs(render_meta(meta, [*QUICKSTART, *on]))
     pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *on]))
-    m = re.search(r"^tag: \"?([^\"\n]+)\"?$", hr_values(wide[("HelmRelease", "kagent")]), re.M)
-    kagent_tag = m.group(1) if m else ""
+    kagent_tag = source(wide[("OCIRepository", "kagent")])[1].split()[0].lstrip(">=")  # the range's floor = the build the values name
     for name in COMPONENTS:
         url, rng = source(wide[("OCIRepository", name)])
         _, pin = source(pinned[("OCIRepository", name)])
@@ -214,6 +241,13 @@ def main(meta: str) -> int:
                         f"FAIL: {name} {resolved} (the {label} {constraint!r}) rejects the values the meta chart "
                         f"forwards to it\n{r.stderr}"
                     )
+                if name in MANAGERS and f"--kagent-api-version={KAGENT_API_VERSION}" not in r.stdout:
+                    sys.exit(
+                        f"FAIL: {name} {resolved} (the {label} {constraint!r}) does not render the forwarded "
+                        f"kagent.apiVersion as its --kagent-api-version={KAGENT_API_VERSION} argument"
+                    )
+                if name == "kagent":
+                    check_harness_selector(r.stdout, f"{name} {resolved} (the {label} {constraint!r})")
                 kinds = len(re.findall(r"^kind: ", r.stdout, re.M))
                 print(f"ok: {name} {resolved} ({label} {constraint!r}) renders the forwarded values ({kinds} objects)")
     return 0

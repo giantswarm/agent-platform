@@ -102,12 +102,23 @@ derived one, otherwise the render fails naming the single key to set — a silen
 overwrite would hide a values file that still spells the old key.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  muster.url from the muster Service (agent-platform.musterMcpUrl).
-  substrate: postgres.connectionStringSecretRef, on the platform Cluster —
+  kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
+    store block renders the bucket (agent-platform.kagent.snapshotLocation).
+  substrate: atelet.serviceAccount.annotations and
+    ateApiServer.serviceAccount.annotations gain eks.amazonaws.com/role-arn,
+    the IRSA role the store block renders, while it does (a differing explicit
+    role fails the render); atelet.extraEnv and ateApiServer.extraEnv gain the
+    S3 environment of the s3proxy façade (capz, or the façade alone) next to
+    an installation's own entries (one of the derived names fails the render);
+    postgres.connectionStringSecretRef, on the platform Cluster —
     the derived CNPG connection Secret <postgres.clusterName>-substrate-app
     (key uri) the connectivity release's hook writes into ate-system for
     postgres.databases.substrate (agent-platform.substrate.postgresMode; the
     `auto` of substrate.postgres.enabled itself is resolved by
-    agent-platform.shape.apply, with the other cluster-shape knobs).
+    agent-platform.shape.apply, with the other cluster-shape knobs). Its
+    atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
+    ConfigMap kagent-images feeds it through the HelmRelease's valuesFrom
+    (components.substrate.valuesFromRefs), so no copy of a digest lives here.
 Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
@@ -126,6 +137,32 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- end -}}
 {{- $_ := set $derived "muster" (dict "url" $url) -}}
 {{- end -}}
+{{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
+{{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
+{{- end -}}
+{{- if and (eq .name "substrate") (eq (include "agent-platform.substrateStore.crossplane" .root) "aws") -}}
+{{- $arn := include "agent-platform.substrateStore.awsRoleArn" .root -}}
+{{- range $key := list "atelet" "ateApiServer" -}}
+{{- $own := dig $key "serviceAccount" "annotations" "eks.amazonaws.com/role-arn" "" ($.root.Values.substrate | default dict) -}}
+{{- if and $own (ne $own $arn) -}}
+{{- fail (printf "substrate.%s.serviceAccount.annotations[eks.amazonaws.com/role-arn] (%s) differs from the IRSA role kagent.harness.snapshotStore renders (%s): the store block names the role (crossplane.aws.roleName, else the bucket name) — leave the annotation unset" $key $own $arn) -}}
+{{- end -}}
+{{- $_ := set $derived $key (dict "serviceAccount" (dict "annotations" (dict "eks.amazonaws.com/role-arn" $arn))) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq .name "substrate") (include "agent-platform.substrateStore.s3proxy" .root) -}}
+{{- $env := include "agent-platform.substrateStore.s3proxyEnv" .root | fromJsonArray -}}
+{{- $names := list -}}{{- range $env -}}{{- $names = append $names .name -}}{{- end -}}
+{{- range $key := list "atelet" "ateApiServer" -}}
+{{- $own := dig $key "extraEnv" list ($.root.Values.substrate | default dict) -}}
+{{- range $own -}}
+{{- if has .name $names -}}
+{{- fail (printf "substrate.%s.extraEnv names %s, which kagent.harness.snapshotStore derives for the s3proxy façade (AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_USE_PATH_STYLE and the key pair from the Secret substrate-s3proxy) — leave the S3 variables to the store block" $key .name) -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $derived $key (dict "extraEnv" (concat $own $env)) -}}
+{{- end -}}
+{{- end -}}
 {{- if and (eq .name "substrate") (eq (include "agent-platform.substrate.postgresMode" .root) "cnpg") -}}
 {{- $ref := dict "name" (include "agent-platform.substrate.databaseSecretName" .root) "key" "uri" -}}
 {{- $own := dig "postgres" "connectionStringSecretRef" dict (.root.Values.substrate | default dict) -}}
@@ -137,6 +174,55 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
 {{- end -}}
 {{- $derived | toJson -}}
+{{- end -}}
+
+{{/*
+Drop the keys named by dotted `paths` from `vals` when their value is empty (an
+empty string, list or map), at any depth; a parent left empty goes with it. For a component chart that stamps a
+default at publish and would take an empty override as THE value (the kagent
+chart's substrateWorkerPool.workerImage, harness.image), or for a HelmRelease
+whose spec.values must not shadow what its valuesFrom supplies (Flux lets
+spec.values win: the substrate release's atelet.imageCache.pinnedImages).
+Emits JSON. Usage: include "agent-platform.omitEmpty" (dict "vals" $vals "paths" $c.omitEmptyKeys) | fromJson
+*/}}
+{{- define "agent-platform.omitEmpty" -}}
+{{- $vals := .vals -}}
+{{- range .paths -}}
+{{- $vals = include "agent-platform.omitEmptyPath" (dict "vals" $vals "segs" (splitList "." .)) | fromJson -}}
+{{- end -}}
+{{- $vals | toJson -}}
+{{- end -}}
+
+{{/*
+Drop the key at a dotted path from `vals` (components.yaml omitKeys): a
+top-level key, or a nested one — `harness.snapshotStore` — whose parent then
+stays only while it still holds other keys. Emits the JSON of the result.
+Usage: include "agent-platform.omitPath" (dict "vals" $vals "path" "a.b")
+*/}}
+{{- define "agent-platform.omitPath" -}}
+{{- $segs := splitList "." .path -}}
+{{- $vals := .vals -}}
+{{- if eq (len $segs) 1 -}}
+{{- $vals = omit $vals (first $segs) -}}
+{{- else if kindIs "map" (index $vals (first $segs)) -}}
+{{- $child := include "agent-platform.omitPath" (dict "vals" (index $vals (first $segs)) "path" (join "." (rest $segs))) | fromJson -}}
+{{- if empty $child }}{{- $vals = omit $vals (first $segs) }}{{- else }}{{- $_ := set $vals (first $segs) $child }}{{- end -}}
+{{- end -}}
+{{- $vals | toJson -}}
+{{- end -}}
+
+{{- define "agent-platform.omitEmptyPath" -}}
+{{- $vals := .vals -}}
+{{- $key := first .segs -}}
+{{- if hasKey $vals $key -}}
+{{- if eq (len .segs) 1 -}}
+{{- if empty (index $vals $key) }}{{- $vals = omit $vals $key }}{{- end -}}
+{{- else if kindIs "map" (index $vals $key) -}}
+{{- $child := include "agent-platform.omitEmptyPath" (dict "vals" (index $vals $key) "segs" (rest .segs)) | fromJson -}}
+{{- if empty $child }}{{- $vals = omit $vals $key }}{{- else }}{{- $_ := set $vals $key $child }}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $vals | toJson -}}
 {{- end -}}
 
 {{/*
@@ -173,16 +259,242 @@ connectivity release names it: <postgres.clusterName>-substrate-app.
 {{- end -}}
 
 {{/*
+Agent Substrate's snapshot store, kagent.harness.snapshotStore: the connectivity
+chart renders the S3 bucket and the IRSA role, or the Azure account behind the
+s3proxy façade (its templates/substrate/
+crossplane-aws.yaml, the same helpers there); this chart derives what the two
+consumers read from it — kagent.harness.snapshotLocation for the kagent release,
+the role annotation of the substrate release's atelet and ate-api-server
+ServiceAccounts (componentDerivedValues).
+*/}}
+
+{{/* The provider while the Crossplane block renders the store (kagent on, crossplane on): aws or capz; else "". */}}
+{{- define "agent-platform.substrateStore.crossplane" -}}
+{{- $xp := dig "harness" "snapshotStore" "crossplane" dict (.Values.kagent | default dict) -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) $xp.enabled -}}
+{{- $xp.provider -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.substrateStore.block" -}}
+{{- dig "harness" "snapshotStore" dict (.Values.kagent | default dict) | toJson -}}
+{{- end -}}
+
+{{/*
+How the platform reaches the snapshot store while kagent is on: "aws" (the
+Crossplane S3 bucket, IRSA), "capz" (the Crossplane Azure account behind the
+s3proxy façade, Workload Identity), "s3proxy" (the façade alone, in front of an
+account provisioned by hand or a lab's Azurite, an account key); "" when the
+installation names its own store.
+*/}}
+{{- define "agent-platform.substrateStore.mode" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
+{{- if dig "crossplane" "enabled" false $store -}}{{- $store.crossplane.provider -}}
+{{- else if dig "s3proxy" "enabled" false $store -}}s3proxy{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Truthy while the s3proxy façade renders: mode capz or s3proxy. */}}
+{{- define "agent-platform.substrateStore.s3proxy" -}}
+{{- $mode := include "agent-platform.substrateStore.mode" . -}}
+{{- if or (eq $mode "capz") (eq $mode "s3proxy") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The Azure Blob store behind the façade, as JSON {endpoint, account, container}:
+with provider capz the Crossplane block's account and container
+(https://<account>.blob.core.windows.net) — an explicit s3proxy.azure.* that
+disagrees fails the render; with the façade alone, s3proxy.azure.* verbatim.
+*/}}
+{{- define "agent-platform.substrateStore.azure" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- $own := dig "s3proxy" "azure" dict $store -}}
+{{- $az := dict "endpoint" ($own.endpoint | default "") "account" ($own.account | default "") "container" ($own.container | default "") -}}
+{{- if eq (include "agent-platform.substrateStore.mode" .) "capz" -}}
+{{- $capz := $store.crossplane.capz -}}
+{{- $derived := dict "endpoint" (printf "https://%s.blob.core.windows.net" $capz.storageAccountName) "account" $capz.storageAccountName "container" $capz.containerName -}}
+{{- range $k, $v := $derived -}}
+{{- $o := index $az $k -}}
+{{- if and $o (ne $o $v) -}}
+{{- fail (printf "kagent.harness.snapshotStore.s3proxy.azure.%s (%s) differs from what kagent.harness.snapshotStore.crossplane.capz renders (%s): the capz block names the account and the container — leave s3proxy.azure.%s unset" $k $o $v $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $az = $derived -}}
+{{- end -}}
+{{- $az | toJson -}}
+{{- end -}}
+
+{{/* The snapshot location the store implies: s3://<bucket, or the container behind the façade>/<prefix> (no prefix: s3://<name>). */}}
+{{- define "agent-platform.substrateStore.location" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- $prefix := $store.prefix | default "" | trimAll "/" -}}
+{{- $name := "" -}}
+{{- if include "agent-platform.substrateStore.s3proxy" . -}}
+{{- $name = (include "agent-platform.substrateStore.azure" . | fromJson).container -}}
+{{- else -}}
+{{- $name = $store.crossplane.aws.bucketName -}}
+{{- end -}}
+{{- printf "s3://%s" $name -}}{{- with $prefix }}/{{ . }}{{- end -}}
+{{- end -}}
+
+{{/* The façade's one name: its Deployment, Service, ServiceAccount, PodDisruptionBudget and the key-pair Secret (in the release namespace and in ate-system). */}}
+{{- define "agent-platform.substrateStore.s3proxyName" -}}substrate-s3proxy{{- end -}}
+
+{{/* The URL Substrate reaches the façade at: its Service in the release namespace, port 80. */}}
+{{- define "agent-platform.substrateStore.s3proxyUrl" -}}
+{{- printf "http://%s.%s.svc:80" (include "agent-platform.substrateStore.s3proxyName" .) .Release.Namespace -}}
+{{- end -}}
+
+{{/*
+The S3 environment Substrate's atelet and ate-api-server get for the façade —
+the shape the substrate chart gives them for its bundled store (AWS_REGION
+names the SigV4 scope only; s3proxy reads it from the request), the key pair
+from the Secret in ate-system. A JSON list of EnvVars.
+*/}}
+{{- define "agent-platform.substrateStore.s3proxyEnv" -}}
+{{- $secret := include "agent-platform.substrateStore.s3proxyName" . -}}
+{{- list
+  (dict "name" "AWS_REGION" "value" "us-east-1")
+  (dict "name" "AWS_ENDPOINT_URL" "value" (include "agent-platform.substrateStore.s3proxyUrl" .))
+  (dict "name" "AWS_S3_USE_PATH_STYLE" "value" "true")
+  (dict "name" "AWS_ACCESS_KEY_ID" "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" "accessKeyId")))
+  (dict "name" "AWS_SECRET_ACCESS_KEY" "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" "secretAccessKey")))
+  | toJson -}}
+{{- end -}}
+
+{{/* The capz identity's name: workloadIdentity.identityName, else <containerName>-identity. */}}
+{{- define "agent-platform.substrateStore.capzIdentityName" -}}
+{{- $capz := (include "agent-platform.substrateStore.block" . | fromJson).crossplane.capz -}}
+{{- $capz.workloadIdentity.identityName | default (printf "%s-identity" $capz.containerName) -}}
+{{- end -}}
+
+{{/* The Secret provider-kubernetes writes the identity's clientId and tenantId into; the s3proxy pods read it. */}}
+{{- define "agent-platform.substrateStore.capzIdentitySecret" -}}
+{{- printf "%s-azure-identity" (include "agent-platform.substrateStore.s3proxyName" .) -}}
+{{- end -}}
+
+{{/*
+The store block's guards, the same in both charts: the provider, the inputs
+each provider and the façade require, the account name's shape, the endpoint's
+scheme, the bundled store off while the façade is on, an explicit
+snapshotLocation agreeing with the derived one.
+*/}}
+{{- define "agent-platform.substrateStore.validate" -}}
+{{- $store := include "agent-platform.substrateStore.block" . | fromJson -}}
+{{- $xp := $store.crossplane | default dict -}}
+{{- $mode := include "agent-platform.substrateStore.mode" . -}}
+{{- if $xp.enabled -}}
+{{- if not (has $xp.provider (list "aws" "capz")) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.provider=%s is not supported; the chart provisions the snapshot store on aws (S3 + IRSA) and capz (Azure Blob behind the s3proxy façade, Workload Identity) — elsewhere name the store in kagent.harness.snapshotLocation and its access in substrate.atelet.extraEnv / substrate.ateApiServer.extraEnv, or front an Azure Blob account provisioned by hand with kagent.harness.snapshotStore.s3proxy" $xp.provider) -}}
+{{- end -}}
+{{- range $k := list "providerConfigRef" "region" -}}
+{{- if not (index $xp $k) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.%s is required when kagent.harness.snapshotStore.crossplane.enabled" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $xp.provider "aws" -}}
+{{- range $k := list "bucketName" "accountId" "oidcProvider" -}}
+{{- if not (index $xp.aws $k) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.%s is required for provider aws" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (regexMatch "^[0-9]{12}$" (toString $xp.aws.accountId)) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.accountId (%v) must be the 12-digit AWS account id, quoted as a string" $xp.aws.accountId) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $xp.provider "capz" -}}
+{{- $capz := $xp.capz | default dict -}}
+{{- range $k := list "storageAccountName" "containerName" "resourceGroup" "subscriptionId" -}}
+{{- if not (index $capz $k) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.capz.%s is required for provider capz" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]{3,24}$" $capz.storageAccountName) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.capz.storageAccountName (%s) must be 3 to 24 lowercase letters and digits (an Azure storage account name)" $capz.storageAccountName) -}}
+{{- end -}}
+{{- if not (dig "workloadIdentity" "oidcIssuerUrl" "" $capz) -}}
+{{- fail "kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl is required for provider capz: the cluster's service-account issuer the FederatedIdentityCredential trusts (the apiserver's --service-account-issuer)" -}}
+{{- end -}}
+{{- if not (dig "workloadIdentity" "providerKubernetes" "providerConfigRef" "" $capz) -}}
+{{- fail "kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef is required for provider capz: provider-kubernetes bridges the identity's generated ids into the RoleAssignment and into the s3proxy pods' Secret" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and $xp.enabled (eq $xp.provider "aws") (dig "s3proxy" "enabled" false $store) -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.enabled is on next to crossplane.provider aws: the façade fronts Azure Blob and has no place in front of an S3 bucket — turn it off (it is on by itself with provider capz)" -}}
+{{- end -}}
+{{- if include "agent-platform.substrateStore.s3proxy" . -}}
+{{- $az := include "agent-platform.substrateStore.azure" . | fromJson -}}
+{{- $keyRef := dig "s3proxy" "azure" "accountKeySecretRef" dict $store -}}
+{{- range $k := list "endpoint" "account" "container" -}}
+{{- if not (index $az $k) -}}
+{{- fail (printf "kagent.harness.snapshotStore.s3proxy.azure.%s is required while kagent.harness.snapshotStore.s3proxy is on without the capz Crossplane block: the façade needs the Azure Blob account it fronts" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $mode "capz" -}}
+{{- if or $keyRef.name $keyRef.key -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef is set next to crossplane.provider capz: the façade runs as the Workload Identity the capz block renders and never reads an account key — leave accountKeySecretRef unset" -}}
+{{- end -}}
+{{- else -}}
+{{- if not (and $keyRef.name $keyRef.key) -}}
+{{- fail "kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name and .key are required while the façade runs without the capz Crossplane block: it reaches the account with an account key from that Secret (release namespace)" -}}
+{{- end -}}
+{{- end -}}
+{{- if not (regexMatch "^https?://" $az.endpoint) -}}
+{{- fail (printf "kagent.harness.snapshotStore.s3proxy.azure.endpoint (%s) must be an http(s) URL (https://<account>.blob.core.windows.net)" $az.endpoint) -}}
+{{- end -}}
+{{- if dig "rustfs" "enabled" false (.Values.substrate | default dict) -}}
+{{- fail "substrate.rustfs.enabled is on while kagent.harness.snapshotStore.s3proxy renders the façade: the substrate chart sets the S3 environment for its bundled store and the derived one for the façade would repeat the variables — turn substrate.rustfs.enabled off" -}}
+{{- end -}}
+{{- end -}}
+{{- if $mode -}}
+{{- $explicit := dig "harness" "snapshotLocation" "" (.Values.kagent | default dict) -}}
+{{- $derived := include "agent-platform.substrateStore.location" . -}}
+{{- if and $explicit (ne $explicit $derived) -}}
+{{- fail (printf "kagent.harness.snapshotLocation (%s) differs from the location kagent.harness.snapshotStore renders (%s): the store block names the bucket and the prefix — leave kagent.harness.snapshotLocation unset, or turn kagent.harness.snapshotStore.crossplane.enabled off and name an existing store" $explicit $derived) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The role's ARN: arn:aws (arn:aws-cn in the China partition), the account, aws.roleName or the bucket name. */}}
+{{- define "agent-platform.substrateStore.awsRoleArn" -}}
+{{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
+{{- if not (regexMatch "^[0-9]{12}$" (toString $xp.aws.accountId)) -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.accountId (%v) must be the 12-digit AWS account id, quoted as a string" $xp.aws.accountId) -}}
+{{- end -}}
+{{- $partition := "arn:aws" -}}{{- if hasPrefix "cn-" $xp.region }}{{- $partition = "arn:aws-cn" }}{{- end -}}
+{{- printf "%s:iam::%s:role/%s" $partition $xp.aws.accountId ($xp.aws.roleName | default $xp.aws.bucketName) -}}
+{{- end -}}
+
+{{/*
+The platform Harness's snapshot location: kagent.harness.snapshotLocation when
+set, else the one kagent.harness.snapshotStore renders (the bucket on aws, the
+container behind the façade on capz or with s3proxy alone); "" with neither
+(validateSubstrate refuses that with kagent on). An explicit value that
+disagrees with the store's fails the render (agent-platform.substrateStore.validate).
+*/}}
+{{- define "agent-platform.kagent.snapshotLocation" -}}
+{{- if include "agent-platform.substrateStore.mode" . -}}
+{{- include "agent-platform.substrateStore.location" . -}}
+{{- else -}}
+{{- dig "harness" "snapshotLocation" "" (.Values.kagent | default dict) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Agent Substrate is kagent API v2's runtime: refuse the shapes that install a
 kagent with nothing to run agents on, or a Substrate with nothing to start
 against, at render time — and, where the render is live, a cluster that cannot
 run it.
   * kagent on with substrate or substrate-crds switched off (both follow kagent
     unless switched explicitly).
-  * kagent on without kagent.harness.snapshotLocation: the platform Harness's
+  * kagent on without a snapshot location — neither kagent.harness.snapshotLocation
+    nor kagent.harness.snapshotStore.crossplane: the platform Harness's
     snapshotPolicy.location is the installation's snapshot store — an S3 bucket
-    on CAPA with IRSA, an S3-compatible store with its endpoint in
-    substrate.atelet.extraEnv, a lab's in-cluster store — and has no default.
+    on CAPA with IRSA (the store block provisions it), an S3-compatible store
+    with its endpoint in substrate.atelet.extraEnv, a lab's in-cluster store —
+    and has no default.
   * Substrate on with no control-plane database: neither the bundled
     StatefulSet, nor an explicit connectionString, nor the platform's CNPG
     Cluster with postgres.databases.substrate.
@@ -198,6 +510,7 @@ run it.
     seen from the apiserver, the message says so.
 */}}
 {{- define "agent-platform.validateSubstrate" -}}
+{{- include "agent-platform.substrateStore.validate" . -}}
 {{- $kagent := eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true" -}}
 {{- $substrate := eq (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) "true" -}}
 {{- $crds := eq (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate-crds")) "true" -}}
@@ -207,8 +520,8 @@ run it.
 {{- if and $substrate (not $crds) -}}
 {{- fail "components.substrate.enabled is true but components.substrate-crds.enabled is not: the substrate chart's WorkerPool, SandboxConfig and CSIDriverConfig objects need the ate.dev CRDs the substrate-crds chart renders; turn both on" -}}
 {{- end -}}
-{{- if and $kagent (not (dig "harness" "snapshotLocation" "" (.Values.kagent | default dict))) -}}
-{{- fail "kagent.harness.snapshotLocation is required when components.kagent is on: the Substrate snapshot location the platform Harness writes the actors' snapshots to (snapshotPolicy.location), an object-store URL such as s3://<bucket>/<prefix> — the installation's S3 bucket (IRSA on CAPA), an S3-compatible store with its endpoint and credentials in substrate.atelet.extraEnv, or a lab's in-cluster store (substrate.rustfs.enabled: true, s3://ate-snapshots/<prefix>)" -}}
+{{- if and $kagent (not (include "agent-platform.kagent.snapshotLocation" .)) -}}
+{{- fail "kagent.harness.snapshotLocation is required when components.kagent is on: the Substrate snapshot location the platform Harness writes the actors' snapshots to (snapshotPolicy.location), an object-store URL such as s3://<bucket>/<prefix> — the installation's S3 bucket (IRSA on CAPA; kagent.harness.snapshotStore.crossplane provisions it and derives the location), an S3-compatible store with its endpoint and credentials in substrate.atelet.extraEnv, or a lab's in-cluster store (substrate.rustfs.enabled: true, s3://ate-snapshots/<prefix>)" -}}
 {{- end -}}
 {{- if and $substrate (not (include "agent-platform.substrate.postgresMode" .)) -}}
 {{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; postgres.databases.substrate renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionString" -}}
@@ -415,12 +728,13 @@ the muster release's own, so .Values.muster.service is normally unset here.
 {{/*
 The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
 RemoteMCPServer targets: http://<muster Service>.<release namespace>.svc.cluster.local:<port>/mcp
-while the muster component is on, "" otherwise. ONE helper, two consumers, one
+while the muster component is on, "" otherwise. ONE helper, one consumer, one
 name in both charts: this copy derives agent-manager's chart value muster.url
-(componentDerivedValues, next to flux.helmReleaseServiceAccount); the
-connectivity chart's copy renders the portal's app-config key
-agentPlatform.musterMcpUrl. Both composers hand it to the Generic agent chart
-1.x as muster.url, whose own default is the same URL on a default install.
+(componentDerivedValues, next to flux.helmReleaseServiceAccount); agent-manager
+hands it to the Generic agent chart 1.x as muster.url on every agent it
+composes and reports it in get_info. The portal sends none (create_agent takes
+no muster argument), so the connectivity chart's app-config carries no muster
+URL. The agent chart's own default is the same URL on a default install.
 Usage: include "agent-platform.musterMcpUrl" .
 */}}
 {{- define "agent-platform.musterMcpUrl" -}}
@@ -799,13 +1113,42 @@ Usage: include "agent-platform.kagent.hookNamespace" .
 {{- end -}}
 
 {{/*
+The namespace the kagent component's objects live in: kagent.namespaceOverride,
+else the namespace the platform HelmReleases target (gitops.targetNamespace,
+else the release namespace). The storage-version hooks keep their record there
+(hooks/kagent-crds-storage-version.yaml).
+Usage: include "agent-platform.kagent.namespace" .
+*/}}
+{{- define "agent-platform.kagent.namespace" -}}
+{{- dig "namespaceOverride" "" (.Values.kagent | default dict) | default (.Values.gitops.targetNamespace | default .Release.Namespace) -}}
+{{- end -}}
+
+{{/*
+Whether the kagent CRDs' storage-version hooks render
+(hooks/kagent-crds-storage-version.yaml, giantswarm/agent-platform#396): whenever
+the kagent line's CRD component is on — with or without the bundled engine. A
+cluster's own Flux runs this chart's hooks too, and every installation that ran
+kagent 0.10 needs the step; the other hooks stay the engine's. Emits "true" or "".
+*/}}
+{{- define "agent-platform.kagent.storageVersionHooks" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds") }}true{{ end -}}
+{{- end -}}
+
+{{/*
 The Helm hook events the hook ServiceAccount + ClusterRoleBinding (hooks/rbac.yaml)
-are created for: pre-delete for the ordered teardown, and pre-install,pre-upgrade
-too while the kagent namespace hook renders — it runs as that account (creating
-a namespace is cluster-scoped, the namespaced <release>-self identity cannot).
+are created for, in Helm's order: pre-install,pre-upgrade while the kagent
+namespace hook or the storage-version backup hook renders (they run as that
+account — creating a namespace or deleting a CRD is cluster-scoped, the
+namespaced <release>-self identity cannot), post-install,post-upgrade while the
+storage-version restore hook renders, and pre-delete for the ordered teardown
+(the bundled engine). Empty when none of them renders — rbac.yaml renders nothing then.
 */}}
 {{- define "agent-platform.hooks.serviceAccountEvents" -}}
-{{- if include "agent-platform.kagent.hookNamespace" . }}pre-install,pre-upgrade,pre-delete{{ else }}pre-delete{{ end -}}
+{{- $events := list -}}
+{{- if or (include "agent-platform.kagent.hookNamespace" .) (include "agent-platform.kagent.storageVersionHooks" .) }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
+{{- if include "agent-platform.kagent.storageVersionHooks" . }}{{ $events = concat $events (list "post-install" "post-upgrade") }}{{ end -}}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}{{ $events = append $events "pre-delete" }}{{ end -}}
+{{- join "," $events -}}
 {{- end -}}
 
 {{/*
@@ -892,6 +1235,72 @@ Usage: include "agent-platform.platformReleaseNames" . | fromYamlArray
 {{- end -}}
 {{- end -}}
 {{- toYaml $names -}}
+{{- end -}}
+
+{{/*
+The platform HelmReleases in teardown order: waves of release names, each wave
+the releases no release still standing dependsOn — so a release is uninstalled
+only after every release whose objects are its CRs. Helm's uninstall deletes a
+release's objects and fails ("failed to delete release: <name>") when one of
+their kinds is already gone — its CRD chart uninstalled first — and
+helm-controller then retries that uninstall until the teardown hook times out
+(measured on the ATS kind smoke: substrate's SandboxConfig racing
+substrate-crds). The releases of one wave uninstall concurrently. The graph is
+the roster's dependsOn, filtered as components.yaml filters it (a reference to a
+toggled-off component names no release); a cycle fails the render.
+Usage: include "agent-platform.teardownWaves" . | fromYamlArray  (a list of lists)
+*/}}
+{{- define "agent-platform.teardownWaves" -}}
+{{- $root := . -}}
+{{- $deps := dict -}}
+{{- range $key, $c := .Values.components -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" $key)) (hasKey $c "chart") -}}
+{{- $on := list -}}
+{{- range ($c.dependsOn | default list) -}}
+{{- if and (hasKey $root.Values.components .) (include "agent-platform.componentEnabled" (dict "root" $root "name" .)) (hasKey (index $root.Values.components .) "chart") -}}
+{{- $on = append $on (index $root.Values.components .).chart -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $deps $c.chart $on -}}
+{{- end -}}
+{{- end -}}
+{{- $waves := list -}}
+{{- $remaining := keys $deps | sortAlpha -}}
+{{- range until (len $deps) -}}
+{{- if $remaining -}}
+{{- $wave := list -}}
+{{- range $name := $remaining -}}
+{{- $needed := false -}}
+{{- range $other := $remaining -}}
+{{- if has $name (index $deps $other) -}}{{- $needed = true -}}{{- end -}}
+{{- end -}}
+{{- if not $needed -}}{{- $wave = append $wave $name -}}{{- end -}}
+{{- end -}}
+{{- if not $wave -}}{{- fail (printf "components.*.dependsOn is cyclic among %s; the ordered teardown needs an acyclic graph" (join ", " $remaining)) -}}{{- end -}}
+{{- $waves = append $waves $wave -}}
+{{- $next := list -}}
+{{- range $name := $remaining -}}{{- if not (has $name $wave) -}}{{- $next = append $next $name -}}{{- end -}}{{- end -}}
+{{- $remaining = $next -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $waves -}}
+{{- end -}}
+
+{{/*
+The teardown-releases hook's script: one `kubectl delete --wait` per wave of
+agent-platform.teardownWaves, in gitops.namespace (the release namespace with
+the engine on). Each wave's releases uninstall concurrently; the next wave
+starts when helm-controller has removed the last HelmRelease of the previous one.
+*/}}
+{{- define "agent-platform.teardownScript" -}}
+{{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
+# The platform HelmReleases in reverse dependency order (a CRD chart's release
+# only after the releases whose objects are its CRs); kubectl waits for
+# helm-controller to uninstall a wave before the next one starts.
+{{- range $i, $wave := include "agent-platform.teardownWaves" . | fromYamlArray }}
+echo "wave {{ add1 $i }}: {{ join " " $wave }}"
+kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace {{ $ns }} --ignore-not-found --wait --timeout=5m {{ join " " $wave }}
+{{- end }}
 {{- end -}}
 
 {{/*

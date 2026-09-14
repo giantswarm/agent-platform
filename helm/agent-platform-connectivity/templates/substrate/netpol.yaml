@@ -14,12 +14,15 @@ what (the substrate chart's arguments and Service definitions):
         egress gateway, the atenet dns and the cluster DNS.
   kagent controller ──▶ ate-api :443 (actor lifecycle), atenet-router :8080
         (a turn's ingress, atenetRouterURL); atenet-router ──▶ ate-api :443
-        (which worker hosts the actor), the worker's tunnel :443.
+        (which worker hosts the actor), the worker :443 (its tunnel) and :8443
+        (its mTLS CONNECT listener, through which the A2A request reaches the
+        actor).
   ate-api-server ──▶ atelet :8085 (a hostPort on every node — the bootstrap API
         drives the node agent; the egress rule upstream lacks), atenet-egress
         :443 (the egress gateway address), Postgres (the platform's CNPG
         Cluster, the bundled StatefulSet or an external one), the snapshot
-        store (world:443, or the bundled in-cluster store :9000), the apiserver.
+        store (world:443, the bundled in-cluster store :9000, or the s3proxy façade
+        :8080 in the release namespace), the apiserver.
   atelet ──▶ ate-api :443, the apiserver, world:443 (the actor images it pulls,
         the gVisor asset from storage.googleapis.com, the S3 snapshot store; a
         registry mirror behind a private address is cluster:443), the bundled
@@ -46,9 +49,12 @@ the render.
 {{- $controllerPort := "8083" }}
 {{- $pgMode := include "agent-platform.substrate.postgresMode" . }}
 {{- $rustfs := dig "rustfs" "enabled" false (.Values.substrate | default dict) }}
-{{- $toolsValues := index .Values.kagent "kagent-tools" | default dict }}
-{{- $toolsNs := $toolsValues.namespaceOverride | default $kagentNs }}
-{{- $toolsPort := dig "service" "ports" "tools" "targetPort" "8084" $toolsValues | toString }}
+{{- $s3proxy := include "agent-platform.substrateStore.s3proxy" . }}
+{{- /* kagent's built-in tool server, where the kagent chart renders it (the
+agent-platform.kagentTools.* helpers, _helpers.tpl). */}}
+{{- $toolsEnabled := include "agent-platform.kagentTools.enabled" . }}
+{{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
+{{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
@@ -177,6 +183,18 @@ spec:
             - port: "9000"
               protocol: TCP
     {{- end }}
+    {{- if $s3proxy }}
+    # The s3proxy façade in front of Azure Blob (kagent.harness.snapshotStore).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: s3proxy
+            app.kubernetes.io/component: snapshot-store
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- end }}
 ---
 # ate-controller: reconciles WorkerPools into worker Deployments through the
 # apiserver and registers the workers with ate-api.
@@ -265,10 +283,27 @@ spec:
             - port: "9000"
               protocol: TCP
     {{- end }}
+    {{- if $s3proxy }}
+    # The s3proxy façade in front of Azure Blob (kagent.harness.snapshotStore).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: s3proxy
+            app.kubernetes.io/component: snapshot-store
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- end }}
 ---
 # atenet-router: a turn's ingress. The kagent controller sends it the request
 # (atenetRouterURL, Service port 80 → 8080); it asks ate-api which worker hosts
-# the actor and connects to that worker's tunnel on 443 (mTLS).
+# the actor and reaches the actor through that worker: the A2A request is
+# tunnelled through the worker's mTLS CONNECT listener on 8443 (ateom
+# `--atunnel-connect-listen-address :8443`, the router's `connectTargetPort`),
+# the worker's tunnel itself listens on 443. Both ports, or every turn fails
+# with "upstream call failed: Connect: deadline has elapsed" under Cilium's
+# default-deny (agent-platform#383).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -322,6 +357,8 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+            - port: "8443"
               protocol: TCP
 ---
 # atenet-egress: the actors' egress gateway. The worker pods' tunnels come in
@@ -407,7 +444,9 @@ spec:
             - port: {{ .Values.llmRouting.listener.port | quote }}
               protocol: TCP
     {{- end }}
-    {{- if $toolsValues.enabled }}
+    {{- if $toolsEnabled }}
+    # The actors' calls to the built-in tool server, where the kagent chart
+    # renders it (the controller's discovery of it is templates/kagent/netpol.yaml).
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: kagent-tools
@@ -484,7 +523,8 @@ spec:
         - kube-apiserver
 ---
 # The worker pods of every WorkerPool in the kagent namespace: a turn comes in
-# from atenet-router on the tunnel (443); the actors' outbound traffic leaves
+# from atenet-router on the tunnel (443) and the mTLS CONNECT listener (8443);
+# the actors' outbound traffic leaves
 # through atenet-egress (8443) — nothing else leaves a worker: the sandbox's
 # destinations are decided at the egress gateway, not here. The node agent
 # reaches the worker through the node's filesystem (the hostPath socket), not

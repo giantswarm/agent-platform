@@ -15,6 +15,13 @@ render of this chart on its own says the same.
     {{- end }}
   {{- end }}
 {{- end }}
+{{- /*
+Agent Substrate's snapshot store (kagent.harness.snapshotStore): the provider,
+the inputs each provider and the s3proxy façade require, an explicit
+kagent.harness.snapshotLocation agreeing with the derived one — the same guards
+the meta chart runs (agent-platform.substrateStore.validate in both).
+*/ -}}
+{{- include "agent-platform.substrateStore.validate" . }}
 {{- range include "agent-platform.postgres.databases" . | fromJsonArray }}
   {{- if not (regexMatch "^[a-z_][a-z0-9_]*$" .name) }}
     {{- fail (printf "postgres.databases.%s.name %q is not a plain PostgreSQL identifier (lowercase letters, digits, underscore)" .key .name) }}

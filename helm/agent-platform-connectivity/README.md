@@ -112,8 +112,14 @@ On the installation, after the cutover:
 - Only one metrics policy may target a Gateway: custom labels replace rather
   than merge, and when two policies target the same Gateway the one with the
   lexicographically lowest policy key wins while the other is silently dropped.
-- An extra `kagent.modelConfigs[]` entry calls the provider directly unless it
-  sets its own `baseUrl`.
+- An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
+  own `baseUrl` or names a provider other than `llmRouting.backend.provider`.
+  The `baseUrl` lands under the CRD's block for the entry's provider —
+  `anthropic`, `openAI`, `sapAICore`, the three `ModelConfigSpec` gives one —
+  never the lower-cased provider name, which the API server would prune; the
+  render refuses a `baseUrl` on any other provider and a `provider` outside the
+  CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
+  of the enum against the kagent line's CRD.
 - The data-plane `PodMonitor` is gated on the agentgateway component, not on
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
@@ -133,10 +139,23 @@ platform needs:
   its OpenID discovery document. Key material comes from `openssl` in an init
   container (`hooks.opensslImage`), the objects from `kubectl`
   (`hooks.kubectlImage`); a pool that exists is never touched (a re-run says
-  `present`), the two namespaces are created bare when missing. Identity:
-  `<release>-hooks`, a ClusterRole on secrets, configmaps and namespaces for
-  the hook's lifetime (`templates/substrate/hooks-rbac.yaml`; the hook Job
-  include is `agent-platform.hooks.job` in `templates/_hooks.tpl`).
+  `present`), the two namespaces are created bare when missing. The trust
+  anchors are applied server-side as pure functions of their pools on every
+  run: `actor-id-ca-certs`, and the podcert signers' cluster-scoped
+  `ClusterTrustBundle`s (`servicedns.podcert.ate.dev:identity:primary-bundle`,
+  `podidentity.podcert.ate.dev:identity:primary-bundle` — the roots of the two
+  podcertificate pools, the objects every Substrate pod projects as its trust
+  anchor). The podcertificate-controller publishes and refreshes those bundles
+  itself, but a pod reads the bundle that exists when it starts, once; the
+  hook runs before the `substrate` release, so a bundle left by a previous
+  install never reaches a pod with roots the current pools do not have
+  (giantswarm/agent-platform#384; a re-run says `present`, `created` or
+  `republished`). Identity: `<release>-hooks`, a ClusterRole on secrets,
+  configmaps, namespaces and clustertrustbundles, with `attest` on the two
+  podcert signers (the apiserver's condition for writing a bundle that names a
+  signer), for the hook's lifetime
+  (`templates/substrate/hooks-rbac.yaml`; the hook Job include is
+  `agent-platform.hooks.job` in `templates/_hooks.tpl`).
 - **The database** (`templates/postgres/databases.yaml`, `databases-hook.yaml`):
   `postgres.databases` is a map of further CNPG `Database`s on the platform
   Cluster, one derived connection Secret `<clusterName>-<key>-app` each (the
@@ -150,7 +169,8 @@ platform needs:
 - **Kyverno** (`templates/substrate/policy-exceptions.yaml`): one
   `PolicyException` per Substrate workload — `substrate-atelet`,
   `substrate-workers` (every WorkerPool's pods, label `ate.dev/worker-pool`),
-  `substrate-control-plane`, `substrate-podcertificate-controller` — naming
+  `substrate-control-plane` (matched by workload name),
+  `substrate-podcertificate-controller` — naming
   exactly the restricted-PSS rules the workload violates, each with its
   `autogen-` copy, looked up in `kyvernoPolicies.rules` (rule → ClusterPolicy).
   `make verify-kyverno` computes the violations and holds the lists.
@@ -276,6 +296,15 @@ selected. With in-cluster hosts alone it renders no external rule and no proxy
 clause, in either flavour; `make verify-wiring` asserts that against
 `origin/main`, the controller policies first and then the whole render.
 
+## Voluntary disruption
+
+Two objects of this chart guard the platform's single-replica pods against Karpenter consolidation and node drains (giantswarm/agent-platform#431); the other components' guards travel on their own charts' knobs through the meta chart.
+
+- `gateway.parameters.podAnnotations` (default `karpenter.sh/do-not-disrupt: "true"`) is merged onto the agentgateway data-plane pod template through `AgentgatewayParameters` `deployment.spec.template.metadata` (strategic merge). Every MCP call, every A2A stream and — with `llmRouting` on — every model stream crosses those pods. Set the value to `"false"` or the map to `{}` to opt out.
+- `agentManager.podDisruptionBudget` (default `enabled: true`, `minAvailable: 1`, `unhealthyPodEvictionPolicy: AlwaysAllow`) renders a `PodDisruptionBudget agent-manager` in the release namespace, selecting the agent-manager pods by name the way the component's network policies do — the agent-manager chart has no knob of its own. Exactly one of `minAvailable` / `maxUnavailable` (int or percentage); the render refuses both, neither, and a policy outside the API's enum. Inert while `components.agent-manager.enabled` is false.
+
+With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpenter reports `DisruptionBlocked`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`) — and `AlwaysAllow` keeps a pod that is not Ready evictable. `make verify-disruption` asserts the render, the knobs off and the guards.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -355,6 +384,7 @@ clause, in either flavour; `make verify-wiring` asserts that against
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
+| gateway.parameters.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -492,6 +522,43 @@ clause, in either flavour; `make verify-wiring` asserts that against
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
+| kagent.harness.snapshotLocation | string | `""` |  |
+| kagent.harness.snapshotStore.prefix | string | `"kagent"` |  |
+| kagent.harness.snapshotStore.crossplane.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.provider | string | `"aws"` |  |
+| kagent.harness.snapshotStore.crossplane.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.region | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.observeOnly | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.tags | object | `{}` |  |
+| kagent.harness.snapshotStore.crossplane.aws.bucketName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.accountId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.oidcProvider | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.roleName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.lifecycleDays | int | `30` |  |
+| kagent.harness.snapshotStore.crossplane.capz.storageAccountName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.containerName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.resourceGroup | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.subscriptionId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.replicationType | string | `"LRS"` |  |
+| kagent.harness.snapshotStore.crossplane.capz.lifecycleDays | int | `30` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.identityName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.name | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.namespace | string | `"crossplane"` |  |
+| kagent.harness.snapshotStore.s3proxy.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.s3proxy.image.repository | string | `"gsoci.azurecr.io/giantswarm/s3proxy"` |  |
+| kagent.harness.snapshotStore.s3proxy.image.tag | string | `"4.1.1"` |  |
+| kagent.harness.snapshotStore.s3proxy.replicas | int | `2` |  |
+| kagent.harness.snapshotStore.s3proxy.javaOpts | string | `"-XX:MaxRAMPercentage=70"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.cpu | string | `"250m"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.limits.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.endpoint | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.account | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.container | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
 | kagent.registry | string | `"gsoci.azurecr.io/giantswarm"` |  |
 | kagent.controller.image.repository | string | `"kagent-controller"` |  |
 | kagent.controller.agentImage.repository | string | `"kagent-app"` |  |
@@ -505,8 +572,6 @@ clause, in either flavour; `make verify-wiring` asserts that against
 | kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
-| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:a2d23f5eb9c01e1903459a6e742f7d4aaa5e950d7e9aa6f07f8982761be0163a"` |  |
-| kagent.harness.snapshotLocation | string | `"s3://ate-snapshots/kagent"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |
 | kagent.podSecurityContext.runAsNonRoot | bool | `true` |  |
@@ -835,6 +900,10 @@ clause, in either flavour; `make verify-wiring` asserts that against
 | agentManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| agentManager.podDisruptionBudget.enabled | bool | `true` |  |
+| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
@@ -843,7 +912,7 @@ clause, in either flavour; `make verify-wiring` asserts that against
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.1.0"` |  |
+| agentManager.migration.image.tag | string | `"1.1.3"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |

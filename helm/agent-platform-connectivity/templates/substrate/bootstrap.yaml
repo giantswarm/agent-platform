@@ -4,7 +4,11 @@ render, minted once by a pre-install / pre-upgrade hook Job and kept.
 
   * the CA pools service-dns-ca-pool and pod-identity-ca-pool in
     podcertificate-controller-system — the podcertificate-controller signs the
-    Substrate pods' PodCertificateRequests from them;
+    Substrate pods' PodCertificateRequests from them — and the two signers'
+    ClusterTrustBundles servicedns.podcert.ate.dev:identity:primary-bundle and
+    podidentity.podcert.ate.dev:identity:primary-bundle, the roots of those
+    pools as PEM, which every Substrate pod projects as its trust anchor for
+    ate-api-server and its peers;
   * the JWT authority pool actor-id-jwt-pool and the CA pool actor-id-ca-pool in
     ate-system — ate-api-server mints actor identity tokens and certificates
     from them — and the trust anchor actor-id-ca-certs derived from the latter
@@ -25,20 +29,31 @@ openssl in an init container (an ED25519 CA, 365 days, IsCA + keyCertSign; an
 ECDSA P-256 ES256 authority) and written with kubectl. A pool that exists is
 never touched: a regenerated root would orphan every certificate and token
 issued from it while the pods holding them keep running — so a re-run, every
-upgrade, is a no-op that says "present". The trust anchor is a pure function
-of the pool and is applied (server-side) so it follows a pool an operator
-rotated by hand; an authentication ConfigMap that exists is kept and its issuer
-compared, the difference logged. The two namespaces are created bare when
-missing (the substrate release then adopts them — helm-controller takes
-ownership of a bare object). The kagent chart's WorkerPool and the platform
-Harness come with kagent and the kagent wiring; the pools' rotation is an
-operational procedure of Substrate, not this chart's.
+upgrade, is a no-op that says "present". The trust anchors are pure functions
+of their pools and are applied (server-side) so they follow a pool an operator
+rotated by hand: actor-id-ca-certs from actor-id-ca-pool, and the podcert
+signers' ClusterTrustBundles from the two podcertificate pools. The
+podcertificate-controller publishes those bundles itself and keeps them
+current (every few seconds) — but a pod projects the bundle that exists the
+moment it starts and reads the CA once, at dial time, so a bundle left behind
+by a previous install (the pools went with their namespace when the substrate
+release was uninstalled, the cluster-scoped bundles stayed) carried roots the
+new pools did not have, and every Substrate client failed its handshake
+against ate-api-server until restarted (giantswarm/agent-platform#384). This
+hook runs before the substrate release installs, so by the time a Substrate
+pod starts the bundles carry the roots it will be signed from. An
+authentication ConfigMap that exists is kept and its issuer compared, the
+difference logged. The two namespaces are created bare when missing (the
+substrate release then adopts them — helm-controller takes ownership of a bare
+object). The kagent chart's WorkerPool and the platform Harness come with
+kagent and the kagent wiring; the pools' rotation is an operational procedure
+of Substrate, not this chart's.
 */ -}}
 {{- if include "agent-platform.substrate.enabled" . }}
 {{- $ns := include "agent-platform.substrate.namespace" . }}
 {{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
 {{ include "agent-platform.hooks.job" (dict "root" $ "name" "substrate-bootstrap" "hook" "pre-install,pre-upgrade"
-      "about" (printf "mint the Agent Substrate CA/JWT pools, the actor-identity trust anchor and ate-api-server's authentication config in %s and %s when they are missing; keep them when they exist" $ns $pcNs)
+      "about" (printf "mint the Agent Substrate CA/JWT pools and ate-api-server's authentication config in %s and %s when they are missing, keep them when they exist; publish the trust anchors derived from the pools (actor-id-ca-certs, the podcert signers' ClusterTrustBundles)" $ns $pcNs)
       "init" (dict "name" "openssl" "image" (include "agent-platform.hooks.imageRef" .Values.hooks.opensslImage) "script" (include "agent-platform.substrate.bootstrap.mint" .))
       "script" (include "agent-platform.substrate.bootstrap.apply" (dict "root" $ "ns" $ns "pcNs" $pcNs))) }}
 {{- end }}
@@ -108,10 +123,46 @@ jwt_pool() {
   kubectl -n "$1" create secret generic "$2" --from-literal=pool="$pool" >/dev/null
   echo "JWT authority pool $1/$2: created (ECDSA P-256, ES256, id $pool_id)"
 }
+# A pool's roots as PEM (DER is already base64 in the pool; PEM is that base64
+# in 64-column lines between the markers), every CA of the pool in order — the
+# bundle a pod verifies against must carry the root of every certificate still
+# in circulation, not only the active one.
+pool_roots_pem() {
+  kubectl -n "$1" get secret "$2" -o jsonpath='{.data.pool}' | base64 -d | jq -r '.CAs[].RootCertificateDER' > /tmp/roots
+  [ -s /tmp/roots ] || { echo "CA pool $1/$2 carries no root certificate"; exit 1; }
+  : > "$3"
+  while IFS= read -r der; do
+    { echo '-----BEGIN CERTIFICATE-----'; printf '%s\n' "$der" | fold -w 64; echo '-----END CERTIFICATE-----'; } >> "$3"
+  done < /tmp/roots
+}
+# The podcert signers' trust anchors: the ClusterTrustBundle each Substrate pod
+# projects (signerName + the canarying label, the shape the substrate chart's
+# volumes select) — the roots of the pool the podcertificate-controller signs
+# from, published here before any Substrate pod starts and republished on
+# every upgrade; the controller keeps the same content current at run time.
+# The served group/version of the resource (v1beta1 up to Kubernetes 1.34, v1
+# from 1.35) — the controller and kubelet read either; the object is applied at
+# the version the apiserver prefers.
+ctb_api=$(kubectl api-resources --api-group=certificates.k8s.io --no-headers 2>/dev/null | awk '$NF == "ClusterTrustBundle" { print $(NF-2) }' | head -1)
+[ -n "$ctb_api" ] || { echo "the cluster serves no ClusterTrustBundle (certificates.k8s.io; the feature gates ClusterTrustBundle and ClusterTrustBundleProjection) — Agent Substrate cannot run here"; exit 1; }
+trust_bundle() {
+  name="$(printf '%s' "$3" | tr / :):primary-bundle"
+  pool_roots_pem "$1" "$2" /tmp/bundle.pem
+  have=$(kubectl get "clustertrustbundles.certificates.k8s.io" "$name" -o jsonpath='{.spec.trustBundle}' 2>/dev/null || true)
+  if [ -z "$have" ]; then state=created
+  elif [ "$have" = "$(cat /tmp/bundle.pem)" ]; then state=present
+  else state="republished (it carried roots that are not the pool's — a reinstall or a rotated pool)"; fi
+  jq -n --arg api "$ctb_api" --arg name "$name" --arg signer "$3" --rawfile bundle /tmp/bundle.pem \
+    '{apiVersion: $api, kind: "ClusterTrustBundle", metadata: {name: $name, labels: {"podcert.ate.dev/canarying": "live"}}, spec: {signerName: $signer, trustBundle: $bundle}}' \
+    | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
+  echo "trust bundle $name: $state (the roots of $1/$2)"
+}
 ensure_ns "$pc_ns"
 ensure_ns "$ns"
 ca_pool "$pc_ns" service-dns-ca-pool
 ca_pool "$pc_ns" pod-identity-ca-pool
+trust_bundle "$pc_ns" service-dns-ca-pool servicedns.podcert.ate.dev/identity
+trust_bundle "$pc_ns" pod-identity-ca-pool podidentity.podcert.ate.dev/identity
 jwt_pool "$ns" actor-id-jwt-pool
 ca_pool "$ns" actor-id-ca-pool
 # The trust anchor: the active root of actor-id-ca-pool as PEM (DER is already

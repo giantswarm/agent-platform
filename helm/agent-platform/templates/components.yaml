@@ -29,11 +29,14 @@ knowledge:
       wrapped. global is injected at the wrapped top level so the subchart still
       inherits it. No component uses it today: muster, agentgateway, kagent and
       the GS-owned connectivity/crds charts all take their values at top level.
-  omitKeys      — keys dropped from the forwarded block. For a component whose
-      top-level block holds a key that belongs to THIS umbrella rather than to
-      the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs, which only
-      the connectivity chart reads), and whose chart validates values with
-      additionalProperties: false and would reject it. Applied after valuesKey,
+  omitKeys      — keys dropped from the forwarded block, top-level or dotted
+      paths (agent-platform.omitPath; a parent emptied by the drop goes too).
+      For a component whose block holds a key that belongs to THIS umbrella
+      rather than to the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs
+      and harness.snapshotStore, which only the connectivity chart reads), and
+      whose chart validates values with additionalProperties: false and would
+      reject it — or, without a schema, would carry a block it never reads
+      (the kagent chart). Applied after valuesKey,
       so it always addresses the block's own keys. With forwardAllValues it
       drops top-level blocks from the forwarded tree instead: a block the
       connectivity chart does not read yet is held back until it does, because
@@ -41,6 +44,19 @@ knowledge:
       connectivity release re-resolves its chart on its own OCIRepository
       interval — a block the live chart does not declare would fail that
       release until the chart catches up, on every installation.
+  omitEmptyKeys — dotted paths dropped from the forwarded block when their value
+      is empty (agent-platform.omitEmpty). For a chart that stamps a default at
+      publish and would take an empty override as the value (kagent's
+      substrateWorkerPool.workerImage, harness.image), and for a release whose
+      spec.values must not shadow its valuesFromRefs (Flux lets spec.values
+      win: substrate's atelet.imageCache.pinnedImages). Applied after omitKeys,
+      before valuesKey.
+  valuesFromRefs — Flux HelmRelease spec.valuesFrom entries (ConfigMap/Secret
+      references, resolved in this chart's namespace) rendered verbatim: values
+      another release publishes for this one, e.g. the kagent release's
+      ConfigMap kagent-images (key substrate-values.yaml, atelet's pinned
+      runtime images) for the substrate release. optional: true lets the
+      release install before the source exists.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
       a single block. Used by agent-platform-connectivity, which reads many
       blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …). Like
@@ -110,6 +126,21 @@ knowledge:
       connectivity chart's agent-manager migrate Job, the per-installation
       cut-over of the agents next to the platform Harness the same release
       renders.
+  driftDetection — optional Flux drift detection for the child HelmRelease
+      (HelmRelease v2 spec.driftDetection, passed through verbatim: mode
+      enabled|warn|disabled, ignore rules). Enabled, helm-controller compares
+      the manifest in the Helm storage with the cluster on every reconcile of
+      the release (a server-side dry-run apply) and re-applies what differs or
+      is missing — a deleted object is back within one interval, as a
+      server-side apply, without a Helm revision. Unset (helm-controller's
+      default, disabled) a plain reconcile of a release whose chart and values
+      are unchanged reports "in-sync" and touches nothing, so a deleted object
+      stays deleted until the next values or chart change or a forced
+      reconcile (reconcile.fluxcd.io/forceAt). Set per release, not fleet-wide:
+      its objects must tolerate the re-apply (a field another controller owns
+      needs an ignore rule; an object opts out with the annotation
+      helm.toolkit.fluxcd.io/driftDetection: disabled). kagent carries it for
+      the platform Harness, the runtime of every agent (#409).
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
       HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
@@ -174,7 +205,7 @@ values and every component the same one flavor. */ -}}
 {{- if $c.forwardAllValues }}
 {{- $vals = mergeOverwrite (deepCopy $shaped) (dict "components" $roster) }}
 {{- /* Hold back the top-level blocks the chart does not read yet (see omitKeys above). */ -}}
-{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- range $c.omitKeys }}{{- $vals = include "agent-platform.omitPath" (dict "vals" $vals "path" .) | fromJson }}{{- end }}
 {{- /* A switch's values block travels only while the switch is on (see feature switch above). */ -}}
 {{- range $switch, $sw := $root.Values.components }}
 {{- if and (not (hasKey $sw "chart")) (not (index $roster $switch).enabled) (hasKey $vals $switch) }}{{- $vals = omit $vals $switch }}{{- end }}
@@ -183,7 +214,9 @@ values and every component the same one flavor. */ -}}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
-{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- range $c.omitKeys }}{{- $vals = include "agent-platform.omitPath" (dict "vals" $vals "path" .) | fromJson }}{{- end }}
+{{- /* An empty override must not reach a chart that stamps the default (see omitEmptyKeys above). */ -}}
+{{- with $c.omitEmptyKeys }}{{- $vals = include "agent-platform.omitEmpty" (dict "vals" $vals "paths" .) | fromJson }}{{- end }}
 {{- /* GS wrapper charts vendor the upstream chart as a subchart of the same name;
 nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- with $c.valuesKey }}{{- $vals = dict . $vals }}{{- end }}
@@ -266,6 +299,10 @@ spec:
     {{- end }}
     remediation:
       retries: {{ $g.retries }}
+  {{- with $c.driftDetection }}
+  driftDetection:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- with $deps }}
   dependsOn:
     {{- range . }}
@@ -274,6 +311,10 @@ spec:
   {{- end }}
   {{- with $c.postRenderers }}
   postRenderers:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $c.valuesFromRefs }}
+  valuesFrom:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   values:

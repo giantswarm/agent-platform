@@ -123,3 +123,65 @@ Rendered as YAML mapping entries; the caller provides the indentation.
 {{- $chart := include "agent-platform.agentManager.chartValues" . | fromJson -}}
 app.kubernetes.io/name: {{ dig "nameOverride" "" $chart | default "agent-manager" }}
 {{- end -}}
+
+{{/*
+The egress rules to the agent chart's sources — the OCI registry
+(agent-manager.agentChart.ociUrl's host; versions, values schema), the storage
+front the registry redirects blob downloads to (gsoci.azurecr.io answers a
+chart blob GET with a redirect to *.blob.core.windows.net, which a policy that
+names the registry alone drops) and the GitHub API skill discovery and pinning
+read from — on 443, in the flavor's own dialect. One definition for every pod
+that reads the chart: the agent-manager Deployment and the cut-over Job
+(templates/kagent/migrate-*.yaml) admit exactly the same destinations
+(giantswarm/agent-platform#433: the Job's policy named the registry and GitHub
+only, and the migration rewrote nothing on a Cilium installation).
+cilium: the registry host and agentManager.networkPolicy.egress.fqdns by name,
+agentManager.networkPolicy.egress.cidrs by address. kubernetes: vanilla
+NetworkPolicy selects addresses, never names — the cidrs when set, else every
+public destination (0.0.0.0/0 minus networkPolicy.kubernetes.worldExcludedCIDRs).
+Rendered as YAML list items; the caller provides the indentation.
+*/}}
+{{- define "agent-platform.agentManager.chartSourcesEgress.cilium" -}}
+{{- $egress := .Values.agentManager.networkPolicy.egress -}}
+- toFQDNs:
+    - matchName: {{ include "agent-platform.agentManager.registryHost" . }}
+    {{- range $egress.fqdns }}
+    - {{ toYaml . | nindent 6 | trim }}
+    {{- end }}
+  toPorts:
+    - ports:
+        - port: "443"
+          protocol: TCP
+{{- with $egress.cidrs }}
+- toCIDR:
+    {{- toYaml . | nindent 4 }}
+  toPorts:
+    - ports:
+        - port: "443"
+          protocol: TCP
+{{- end }}
+{{- end -}}
+
+{{- define "agent-platform.agentManager.chartSourcesEgress.kubernetes" -}}
+{{- $egress := .Values.agentManager.networkPolicy.egress -}}
+{{- if $egress.cidrs -}}
+# The chart registry and GitHub by address (agentManager.networkPolicy.egress.cidrs).
+- to:
+    {{- range $egress.cidrs }}
+    - ipBlock:
+        cidr: {{ . | quote }}
+    {{- end }}
+  ports:
+    - port: 443
+      protocol: TCP
+{{- else -}}
+# The chart registry, its storage front and GitHub: every public destination.
+- to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 10 }}
+  ports:
+    - port: 443
+      protocol: TCP
+{{- end }}
+{{- end -}}

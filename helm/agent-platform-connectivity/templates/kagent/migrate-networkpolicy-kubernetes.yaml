@@ -2,8 +2,9 @@
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 ---
 # Egress of the cut-over Job (migrate-job.yaml): DNS, the Kubernetes API and —
-# vanilla NetworkPolicy has no FQDN selector — every public destination on 443
-# for the agent chart's OCI registry and the GitHub API
+# vanilla NetworkPolicy has no FQDN selector — the agent chart's sources on 443
+# as agent-manager's own egress admits them, from one helper: every public
+# destination, or agentManager.networkPolicy.egress.cidrs when set
 # (networkPolicy.additionalEgressCIDRs adds private ones). The Job serves
 # nothing. A regular object, not a hook one: it selects the Job's pods by
 # label, so it also covers a hand re-run.
@@ -29,13 +30,7 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
-      ports:
-        - port: 443
-          protocol: TCP
+    {{- include "agent-platform.agentManager.chartSourcesEgress.kubernetes" . | nindent 4 }}
     {{- with .Values.networkPolicy.additionalEgressCIDRs }}
     - to:
         {{- range . }}

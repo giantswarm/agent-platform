@@ -31,15 +31,36 @@ or `tolerations`.
   worker holds ~16Mi and a golden-booted actor ~20Mi; a Go ADK turn's working set
   (the model client, tool calls and gVisor overhead) stays well under `2Gi`.
   Raise the limits for heavier agents.
-- **One architecture per pool.** An actor's golden snapshot is
-  architecture-specific, so a mixed-architecture pool wedges the actors that land
-  on the other one. `kagent.substrateWorkerPool.template.nodeSelector` pins the
-  pool to the installation's architecture (`kubernetes.io/arch: amd64` by default;
-  an arm64 installation sets `arm64`).
+- **One CPU feature set per pool — one vendor and generation, not just one
+  architecture.** An actor's golden snapshot is a gVisor checkpoint, and gVisor
+  restores it only on a host whose CPU offers every feature the checkpoint
+  recorded; a worker on a CPU that lacks one fails every restore placed on it
+  (`incompatible FeatureSet: missing features: …` in its log every 30 s, the
+  turn `request timed out`) and the actor never recovers.
+  `kagent.substrateWorkerPool.template.nodeSelector` pins the pool as precisely
+  as the provider's node labels allow: the architecture (`kubernetes.io/arch:
+  amd64` by default; an arm64 installation sets `arm64`), and on CAPA — where
+  Karpenter consolidation may replace a node with another vendor's at any time —
+  the vendor, `karpenter.k8s.aws/instance-cpu-manufacturer: amd` (the fleet
+  template carries it), or the family (`karpenter.k8s.aws/instance-family`)
+  where a generation change must be ruled out too; on CAPZ and the other
+  providers the node pool (`giantswarm.io/machine-pool`) or
+  `node.kubernetes.io/instance-type`. Recognise a mixed pool by `kubectl get
+  nodes -L <the label>` showing two values under it
+  (giantswarm/agent-platform#429).
 
 `kagent.substrateWorkerPool.template` also accepts `tolerations`, `nodeAffinity`
 and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
 "the Generic chart's per-agent placement values are gone, capacity is the
 WorkerPool".
+
+## Voluntary disruption
+
+The platform's core runs as single replicas — the agentgateway data plane, muster, the kagent controller, klaus-gateway, agent-manager — and each carries long-lived streams (MCP sessions, A2A and portal SSE turns, the LLM listener). A voluntary eviction (Karpenter consolidation, a node drain) cuts them mid-turn (giantswarm/agent-platform#431). Two guards, both on by default:
+
+- **`karpenter.sh/do-not-disrupt: "true"`** on the pods that carry live streams — the agentgateway data plane (`gateway.parameters.podAnnotations`, rendered by the connectivity chart through `AgentgatewayParameters`), muster (`muster.podAnnotations`), the kagent controller (`kagent.controller.podAnnotations`) and klaus-gateway (`klausGateway.podAnnotations`). Karpenter's consolidation, drift and expiry work around the node until the NodePool's `terminationGracePeriod`; an involuntary disruption (spot interruption, node failure) is not affected. Set the value to `"false"` (or drop the key) to opt out per component.
+- **`PodDisruptionBudget minAvailable: 1`** on muster (`muster.podDisruptionBudget`, the muster chart's knob), the kagent controller (`kagent.controller.pdb`, the kagent chart's knob), klaus-gateway (`klausGateway.podDisruptionBudget`, the klaus-gateway chart's knob, 1.1.0+) and agent-manager (`agentManager.podDisruptionBudget`, rendered by the connectivity chart). With one replica the budget refuses every voluntary eviction: Karpenter reports `DisruptionBlocked … pdb`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`; a MachineDeployment after its `nodeDrainTimeout`). `unhealthyPodEvictionPolicy: AlwaysAllow` where the chart supports it keeps a pod that is not Ready evictable, so a crash-looping component never wedges a drain. `enabled: false` on a knob removes that budget. The data plane's budget is `gateway.parameters.podDisruptionBudget` (with two replicas, so a drain can still proceed one pod at a time).
+
+Two replicas are the long-term answer for the stateless components; the budgets on one replica are the interim guard. Backstage's budget is the backstage chart's (`maxUnavailable: 1` today, which protects nothing with one replica) — a change there, not here.
 
 {{ template "chart.valuesSection" . }}
