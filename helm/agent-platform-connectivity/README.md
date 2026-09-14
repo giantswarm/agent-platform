@@ -312,8 +312,9 @@ Two objects of this chart guard the platform's single-replica pods against Karpe
 
 - `gateway.parameters.podAnnotations` (default `karpenter.sh/do-not-disrupt: "true"`) is merged onto the agentgateway data-plane pod template through `AgentgatewayParameters` `deployment.spec.template.metadata` (strategic merge). Every MCP call, every A2A stream and — with `llmRouting` on — every model stream crosses those pods. Set the value to `"false"` or the map to `{}` to opt out.
 - `agentManager.podDisruptionBudget` (default `enabled: true`, `minAvailable: 1`, `unhealthyPodEvictionPolicy: AlwaysAllow`) renders a `PodDisruptionBudget agent-manager` in the release namespace, selecting the agent-manager pods by name the way the component's network policies do — the agent-manager chart has no knob of its own. Exactly one of `minAvailable` / `maxUnavailable` (int or percentage); the render refuses both, neither, and a policy outside the API's enum. Inert while `components.agent-manager.enabled` is false.
+- `valkey.podDisruptionBudget` (same defaults and guards; giantswarm/agent-platform#439) renders a `PodDisruptionBudget muster-valkey` — named after `valkey.valkey.fullnameOverride`, which the render requires — selecting the pod the way the valkey subchart labels it (`app.kubernetes.io/name: valkey` and the component's release name, `valkey`). muster's OAuth token store is that one pod on an RWO volume; neither the wrapper nor the upstream subchart has a budget knob. Inert while `components.valkey.enabled` is false; the meta chart never forwards the key to the valkey release.
 
-With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpenter reports `DisruptionBlocked`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`) — and `AlwaysAllow` keeps a pod that is not Ready evictable. `make verify-disruption` asserts the render, the knobs off and the guards.
+With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpenter reports `DisruptionBlocked`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`) — and `AlwaysAllow` keeps a pod that is not Ready evictable. `make verify-disruption` asserts the render, the knobs off and the guards. A spot reclaim is not a voluntary eviction: the placement of the stateful singletons on on-demand capacity is the meta chart's `scheduling.singletons`, which reaches the component releases as their charts' `nodeSelector` / `tolerations` and is never forwarded here.
 
 ## Values
 
@@ -500,8 +501,13 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
+| valkey.podDisruptionBudget.enabled | bool | `true` |  |
+| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
+| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
+| valkey.valkey.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |

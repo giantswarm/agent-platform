@@ -77,6 +77,21 @@ The platform's core runs as single replicas — the agentgateway data plane, mus
 
 Two replicas are the long-term answer for the stateless components; the budgets on one replica are the interim guard. Backstage's budget is the backstage chart's (`maxUnavailable: 1` today, which protects nothing with one replica) — a change there, not here.
 
+muster-valkey — muster's OAuth token store, one replica on an RWO volume — carries the same two guards (giantswarm/agent-platform#439): `karpenter.sh/do-not-disrupt` through the valkey subchart's `valkey.valkey.podAnnotations`, and a `PodDisruptionBudget muster-valkey` (`valkey.podDisruptionBudget`, `minAvailable: 1`, `AlwaysAllow`) rendered by the connectivity chart, since neither the wrapper nor the upstream subchart has a budget knob. The budget key never reaches the valkey release (`components.valkey.omitKeys`).
+
+## Placement of the stateful singletons
+
+The guards above hold off Karpenter's *voluntary* disruption. A spot reclaim is involuntary: the instance goes two minutes after the notice whatever the budget says, and a PDB-blocked pod is then killed with its termination grace instead of being moved first — on gazelle (fifteen spot workers) one reclaim wave took muster-valkey down for two minutes (every token refresh blocked inside muster for up to 27 s) and killed klaus-gateway mid-turn, whose replacement then waited four minutes on a `Multi-Attach` error for its volume (giantswarm/agent-platform#439). On an installation whose workers are Karpenter spot capacity, pin the four single-replica stateful pods — muster, muster-valkey, the kagent controller, klaus-gateway — to on-demand capacity:
+
+```yaml
+scheduling:
+  singletons:
+    nodeSelector:
+      karpenter.sh/capacity-type: on-demand
+```
+
+The map is merged into each component's own `nodeSelector` (`muster.nodeSelector`, `valkey.valkey.nodeSelector`, `kagent.controller.nodeSelector`, `klausGateway.nodeSelector`; a key a component sets itself wins) and `scheduling.singletons.tolerations` is appended to each one's `tolerations` (for a dedicated, tainted pool). Karpenter launches one small on-demand node for them from a NodePool that admits `on-demand` in the volumes' zone — the fleet's NodePools admit both capacity types and carry no taint — and, with the guards above, leaves it alone. Cost: one `xlarge`-class on-demand instance per such installation. Empty (the default) forwards nothing and every installation renders as before; set it only where nodes carry the label (a cluster without Karpenter — CAPZ, on-prem — would leave the four pods Pending). Enabling rolls each of the four pods once; the two with a `Recreate` strategy (muster-valkey, klaus-gateway) are down until the node is up, about two minutes on AWS. klaus-gateway takes the keys from chart 1.3.3 on (giantswarm/klaus-gateway#253; earlier 1.x schemas refused every key under `nodeSelector`), which the `1.x` range resolves. The block is the meta chart's alone: it is merged before any release renders and held back from the connectivity release. `make verify-disruption` asserts the merge, the precedence and the default.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -131,6 +146,7 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 | components.valkey.versionRange | string | `"0.x"` |  |
 | components.valkey.valuesFrom | string | `"valkey"` |  |
 | components.valkey.enabled | bool | `true` |  |
+| components.valkey.omitKeys[0] | string | `"podDisruptionBudget"` |  |
 | components.agent-platform-mcps.chart | string | `"agent-platform-mcps"` |  |
 | components.agent-platform-mcps.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agent-platform-mcps.versionRange | string | `"0.x"` |  |
@@ -282,6 +298,7 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 | components.agent-platform-connectivity.forwardAllValues | bool | `true` |  |
 | components.agent-platform-connectivity.disableWaitForJobs | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
+| components.agent-platform-connectivity.omitKeys[1] | string | `"scheduling"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -412,6 +429,8 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 | kyvernoPolicies.rules.check-seccomp | string | `"restrict-seccomp"` |  |
 | kyvernoPolicies.rules.check-seccomp-strict | string | `"restrict-seccomp-strict"` |  |
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
+| scheduling.singletons.nodeSelector | object | `{}` | Node labels the four stateful singletons (muster, muster-valkey, the kagent controller, klaus-gateway) must land on, merged into each component's own nodeSelector (its keys win). On a Karpenter spot installation: `karpenter.sh/capacity-type: on-demand`. Empty = as before. |
+| scheduling.singletons.tolerations | list | `[]` | Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint. |
 | extraObjects | list | `[]` |  |
 | muster.enabled | bool | `true` |  |
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
@@ -459,9 +478,14 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 | muster.muster.observability.grafanaDashboard.giantswarm.enabled | bool | `true` |  |
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
+| valkey.podDisruptionBudget.enabled | bool | `true` |  |
+| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
+| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
 | valkey.valkey.deploymentStrategy | string | `"Recreate"` |  |
+| valkey.valkey.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |

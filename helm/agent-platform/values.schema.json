@@ -656,6 +656,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -2150,6 +2156,27 @@
         },
         "provider": {
             "type": "string"
+        },
+        "scheduling": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "singletons": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "nodeSelector": {
+                            "type": "object",
+                            "description": "Node labels the four stateful singletons (muster, muster-valkey, the kagent controller, klaus-gateway) must land on, merged into each component's own nodeSelector (its keys win). On a Karpenter spot installation: `karpenter.sh/capacity-type: on-demand`. Empty = as before.",
+                            "additionalProperties": true
+                        },
+                        "tolerations": {
+                            "type": "array",
+                            "description": "Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint."
+                        }
+                    }
+                }
+            }
         },
         "subscriptionID": {
             "type": "string"

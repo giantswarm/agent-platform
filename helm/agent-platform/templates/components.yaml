@@ -63,6 +63,11 @@ knowledge:
       every block, it is taken from the tree AFTER the cluster-shape knobs are
       resolved (see agent-platform.shape.apply in _helpers.tpl), so the child
       never sees `auto`.
+  scheduling    — scheduling.singletons.nodeSelector / tolerations, merged into
+      the scheduling knobs of muster, valkey, kagent (controller) and
+      klausGateway on the shaped tree before any release renders
+      (agent-platform.scheduling.apply) and held back from the connectivity
+      release by its omitKeys.
   derived values — a value another block owns, merged over the forwarded block
       by the agent-platform.componentDerivedValues helper (the per-component
       knowledge lives there, not in this loop): agent-manager's
@@ -206,6 +211,11 @@ here, not in the child charts: the connectivity chart receives the resolved
 values and every component the same one flavor. */ -}}
 {{- $shaped := deepCopy (omit $root.Values "gitops" "components") -}}
 {{- include "agent-platform.shape.apply" (dict "root" $root "values" $shaped) -}}
+{{- /* The placement of the stateful singletons (scheduling.singletons,
+giantswarm/agent-platform#439) is merged into the four components' own
+nodeSelector / tolerations on the same copy, so the muster, valkey, kagent and
+klaus-gateway releases carry it as their charts' knobs. */ -}}
+{{- include "agent-platform.scheduling.apply" (dict "values" $shaped) -}}
 {{- range $key, $c := .Values.components }}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}

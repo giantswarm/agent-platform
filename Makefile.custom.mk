@@ -66,7 +66,12 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # network policies off, and verify-kagent-route asserts the admission in both
 # flavors (verify-kagent-netpol, verify-managers and verify-llm-routing cover the
 # other policies).
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
+# The seventh intended change (giantswarm/agent-platform#439): the muster-valkey
+# PodDisruptionBudget this chart renders by default (templates/valkey/pdb.yaml).
+# Both sides render with valkey.podDisruptionBudget.enabled=false (a chart that
+# predates the key ignores it, the valkey block is additionalProperties: true),
+# and verify-disruption asserts the budget on, off and inert.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -716,7 +721,7 @@ KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --se
 # deletes; until then they are the only place `app: kagent` may still appear.
 KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
 .PHONY: verify-kagent-netpol
-verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on the agentgateway data plane (AgentgatewayParameters overlay), muster, kagent-controller and klaus-gateway (their charts' podAnnotations); PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager; every knob off = nothing; the agent-manager budget's guards.
+verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on the agentgateway data plane (AgentgatewayParameters overlay), muster, kagent-controller, klaus-gateway and muster-valkey (their charts' podAnnotations); PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager and muster-valkey (#439); every knob off = nothing; the budgets' guards. And the placement of the stateful singletons (#439): scheduling.singletons.nodeSelector / tolerations reach muster, muster-valkey, the kagent controller and klaus-gateway as their charts' knobs (a component's own keys win), never the connectivity release; empty = nothing forwarded.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, agent-manager on: the data-plane pod annotation and the agent-manager budget render"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) >/tmp/vd-on.out 2>&1 || { cat /tmp/vd-on.out; exit 1; }
@@ -730,17 +735,41 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@if grep -q 'maxUnavailable' /tmp/vd-pdb.out; then echo "FAIL: the agent-manager budget carries maxUnavailable next to minAvailable"; exit 1; fi
 	@grep -q '^  unhealthyPodEvictionPolicy: AlwaysAllow$$' /tmp/vd-pdb.out || { echo "FAIL: the agent-manager budget does not keep unhealthy pods evictable (AlwaysAllow)"; exit 1; }
 	@grep -A2 '^    matchLabels:$$' /tmp/vd-pdb.out | grep -q 'app.kubernetes.io/name: agent-manager' || { echo "FAIL: the agent-manager budget does not select the agent-manager pods by name"; exit 1; }
-	@[ "$$(grep -c '^kind: PodDisruptionBudget' /tmp/vd-on.out)" = "1" ] || { echo "FAIL: expected exactly one PodDisruptionBudget from the connectivity chart (agent-manager), got $$(grep -c '^kind: PodDisruptionBudget' /tmp/vd-on.out)"; exit 1; }
+	@[ "$$(grep -c '^kind: PodDisruptionBudget' /tmp/vd-on.out)" = "2" ] || { echo "FAIL: expected exactly two PodDisruptionBudgets from the connectivity chart (agent-manager, muster-valkey), got $$(grep -c '^kind: PodDisruptionBudget' /tmp/vd-on.out)"; exit 1; }
 	@echo "ok: agent-manager budget minAvailable: 1, AlwaysAllow, selects the pods by name"
+	@echo "--> connectivity: the muster-valkey budget (#439) renders from valkey.podDisruptionBudget, named after the Deployment, selecting the pod as the valkey subchart labels it"
+	@awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-on.out | awk '/^  name: muster-valkey$$/{f=1} f' >/tmp/vd-valkey-pdb.out
+	@grep -q '^  name: muster-valkey$$' /tmp/vd-valkey-pdb.out || { echo "FAIL: no PodDisruptionBudget muster-valkey in the render"; exit 1; }
+	@grep -q '^  minAvailable: 1$$' /tmp/vd-valkey-pdb.out || { echo "FAIL: the muster-valkey budget is not minAvailable: 1"; cat /tmp/vd-valkey-pdb.out; exit 1; }
+	@if grep -q 'maxUnavailable' /tmp/vd-valkey-pdb.out; then echo "FAIL: the muster-valkey budget carries maxUnavailable next to minAvailable"; exit 1; fi
+	@grep -q '^  unhealthyPodEvictionPolicy: AlwaysAllow$$' /tmp/vd-valkey-pdb.out || { echo "FAIL: the muster-valkey budget does not keep unhealthy pods evictable (AlwaysAllow)"; exit 1; }
+	@grep -A3 '^    matchLabels:$$' /tmp/vd-valkey-pdb.out | grep -q 'app.kubernetes.io/name: valkey' || { echo "FAIL: the muster-valkey budget does not select the valkey pods by name"; cat /tmp/vd-valkey-pdb.out; exit 1; }
+	@grep -A3 '^    matchLabels:$$' /tmp/vd-valkey-pdb.out | grep -q 'app.kubernetes.io/instance: valkey' || { echo "FAIL: the muster-valkey budget does not select the valkey release's pods (app.kubernetes.io/instance: valkey)"; cat /tmp/vd-valkey-pdb.out; exit 1; }
+	@echo "ok: muster-valkey budget minAvailable: 1, AlwaysAllow, selects the valkey release's pods by name and instance"
 	@echo "--> knobs off: no annotation, no budget"
-	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set gateway.parameters.podAnnotations=null --set agentManager.podDisruptionBudget.enabled=false >/tmp/vd-off.out 2>&1 || { cat /tmp/vd-off.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set gateway.parameters.podAnnotations=null --set agentManager.podDisruptionBudget.enabled=false --set valkey.podDisruptionBudget.enabled=false >/tmp/vd-off.out 2>&1 || { cat /tmp/vd-off.out; exit 1; }
 	@if grep -q 'do-not-disrupt' /tmp/vd-off.out; then echo "FAIL: karpenter.sh/do-not-disrupt renders with gateway.parameters.podAnnotations cleared"; exit 1; fi
-	@if grep -q '^kind: PodDisruptionBudget' /tmp/vd-off.out; then echo "FAIL: a PodDisruptionBudget renders with agentManager.podDisruptionBudget.enabled=false"; exit 1; fi
+	@if grep -q '^kind: PodDisruptionBudget' /tmp/vd-off.out; then echo "FAIL: a PodDisruptionBudget renders with agentManager.podDisruptionBudget.enabled=false and valkey.podDisruptionBudget.enabled=false"; exit 1; fi
 	@echo "ok: knobs off render nothing"
-	@echo "--> agent-manager off: its budget is inert"
+	@echo "--> agent-manager off: its budget is inert (the muster-valkey budget stays: valkey is on)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vd-am-off.out 2>&1 || { cat /tmp/vd-am-off.out; exit 1; }
-	@if grep -q '^kind: PodDisruptionBudget' /tmp/vd-am-off.out; then echo "FAIL: a PodDisruptionBudget renders while agent-manager is off"; exit 1; fi
+	@if awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-am-off.out | grep -q '^  name: agent-manager$$'; then echo "FAIL: the agent-manager PodDisruptionBudget renders while agent-manager is off"; exit 1; fi
+	@awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-am-off.out | grep -q '^  name: muster-valkey$$' || { echo "FAIL: the muster-valkey budget vanished with agent-manager off"; exit 1; }
 	@echo "ok: inert while the component is off"
+	@echo "--> valkey off: its budget is inert"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.valkey.enabled=false >/tmp/vd-valkey-off.out 2>&1 || { cat /tmp/vd-valkey-off.out; exit 1; }
+	@if grep -q '^kind: PodDisruptionBudget' /tmp/vd-valkey-off.out; then echo "FAIL: a PodDisruptionBudget renders while valkey and agent-manager are off"; exit 1; fi
+	@echo "ok: inert while valkey is off"
+	@echo "--> the muster-valkey budget's guards"
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.podDisruptionBudget.maxUnavailable=1 >/tmp/vd-valkey-both.out 2>&1; then echo "FAIL: both minAvailable and maxUnavailable accepted on valkey.podDisruptionBudget"; exit 1; fi
+	@grep -q 'valkey.podDisruptionBudget sets both minAvailable and maxUnavailable' /tmp/vd-valkey-both.out || { echo "FAIL: wrong error for both fields set on valkey.podDisruptionBudget"; tail -3 /tmp/vd-valkey-both.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.podDisruptionBudget.minAvailable=null >/tmp/vd-valkey-none.out 2>&1; then echo "FAIL: a valkey budget with neither field accepted"; exit 1; fi
+	@grep -q 'neither minAvailable nor maxUnavailable' /tmp/vd-valkey-none.out || { echo "FAIL: wrong error for neither field set on valkey.podDisruptionBudget"; tail -3 /tmp/vd-valkey-none.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.podDisruptionBudget.unhealthyPodEvictionPolicy=Sometimes >/tmp/vd-valkey-enum.out 2>&1; then echo "FAIL: an unknown unhealthyPodEvictionPolicy accepted on valkey.podDisruptionBudget"; exit 1; fi
+	@grep -q 'is not a PodDisruptionBudget eviction policy' /tmp/vd-valkey-enum.out || { echo "FAIL: wrong error for the valkey eviction policy enum"; tail -3 /tmp/vd-valkey-enum.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.valkey.fullnameOverride=null >/tmp/vd-valkey-name.out 2>&1; then echo "FAIL: a valkey budget without valkey.valkey.fullnameOverride accepted"; exit 1; fi
+	@grep -q 'valkey.valkey.fullnameOverride must be set' /tmp/vd-valkey-name.out || { echo "FAIL: wrong error for the missing valkey fullnameOverride"; tail -3 /tmp/vd-valkey-name.out; exit 1; }
+	@echo "ok: the muster-valkey budget's guards fire"
 	@echo "--> the agent-manager budget's guards"
 	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.maxUnavailable=1 >/tmp/vd-both.out 2>&1; then echo "FAIL: both minAvailable and maxUnavailable accepted"; exit 1; fi
 	@grep -q 'sets both minAvailable and maxUnavailable' /tmp/vd-both.out || { echo "FAIL: wrong error for both fields set"; tail -3 /tmp/vd-both.out; exit 1; }
@@ -755,8 +784,15 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@helm template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true >/tmp/vd-meta.out 2>&1 || { cat /tmp/vd-meta.out; exit 1; }
 	@python3 tests/verify-disruption.py /tmp/vd-meta.out
 	@echo "--> meta chart: a component's knob off leaves its HelmRelease without it"
-	@helm template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true --set muster.podDisruptionBudget.enabled=false --set kagent.controller.pdb.enabled=false --set klausGateway.podDisruptionBudget.enabled=false --set 'muster.podAnnotations.karpenter\.sh/do-not-disrupt=null' >/tmp/vd-meta-off.out 2>&1 || { cat /tmp/vd-meta-off.out; exit 1; }
+	@helm template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true --set muster.podDisruptionBudget.enabled=false --set kagent.controller.pdb.enabled=false --set klausGateway.podDisruptionBudget.enabled=false --set valkey.podDisruptionBudget.enabled=false --set 'muster.podAnnotations.karpenter\.sh/do-not-disrupt=null' --set 'valkey.valkey.podAnnotations.karpenter\.sh/do-not-disrupt=null' >/tmp/vd-meta-off.out 2>&1 || { cat /tmp/vd-meta-off.out; exit 1; }
 	@python3 tests/verify-disruption.py --off /tmp/vd-meta-off.out
+	@echo "--> meta chart: scheduling.singletons (#439) reaches the four singletons as their charts' nodeSelector / tolerations — merged under a component's own keys (muster keeps its spot + zone selector, the kagent controller its own toleration first) — and never the connectivity release"
+	@helm template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true --set 'scheduling.singletons.nodeSelector.karpenter\.sh/capacity-type=on-demand' --set 'scheduling.singletons.tolerations[0].key=dedicated' --set 'scheduling.singletons.tolerations[0].operator=Equal' --set 'scheduling.singletons.tolerations[0].value=singletons' --set 'scheduling.singletons.tolerations[0].effect=NoSchedule' --set 'muster.nodeSelector.karpenter\.sh/capacity-type=spot' --set 'muster.nodeSelector.topology\.kubernetes\.io/zone=eu-central-1a' --set 'kagent.controller.tolerations[0].key=own' --set 'kagent.controller.tolerations[0].operator=Exists' >/tmp/vd-meta-place.out 2>&1 || { cat /tmp/vd-meta-place.out; exit 1; }
+	@python3 tests/verify-disruption.py --placement /tmp/vd-meta-place.out
+	@echo "--> meta chart: the schema takes the knob's shape and refuses a stray key next to it"
+	@if helm template t $(CHART_DIR) $(VM) --set scheduling.singletons.nodeSelektor.x=y >/tmp/vd-meta-typo.out 2>&1; then echo "FAIL: scheduling.singletons.nodeSelektor (a typo) passed the schema"; exit 1; fi
+	@grep -q 'nodeSelektor' /tmp/vd-meta-typo.out || { echo "FAIL: the typo was refused for the wrong reason"; tail -3 /tmp/vd-meta-typo.out; exit 1; }
+	@echo "ok: a stray key under scheduling.singletons is refused by the schema"
 	@echo "$@: all passed"
 
 verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: ghcr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
