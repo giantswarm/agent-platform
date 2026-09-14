@@ -652,12 +652,13 @@ components:  # @schema additionalProperties: true
     # image fetched from a published artifact at pod start. Off by default: KVM
     # nodes are not universal.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # 0.20.1 is the first release the generated CircleCI pipeline publishes
+    # 0.20.2 is the first release the generated CircleCI pipeline publishes
     # whole — image and chart to gsoci and the giantswarm catalog, and the
-    # guest image artifact the pod fetches (0.20.0's guest-image job failed;
-    # 0.19.x were on ghcr.io, with the guest image as a node path); the
-    # ceiling stays the next major, so minor releases roll on their own.
-    versionRange: ">=0.20.1 <1.0.0"
+    # guest image artifact the pod fetches (0.20.0 and 0.20.1 have no guest
+    # image: their guest-image job failed; 0.19.x were on ghcr.io, with the
+    # guest image as a node path); the ceiling stays the next major, so minor
+    # releases roll on their own.
+    versionRange: ">=0.20.2 <1.0.0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster

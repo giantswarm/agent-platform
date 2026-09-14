@@ -95,10 +95,10 @@ LINE = {
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
     "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
-    # 0.20.1 is the first vm-manager release from the generated CircleCI
+    # 0.20.2 is the first vm-manager release from the generated CircleCI
     # pipeline with its guest image artifact (gsoci, the catalog). muster
     # alone: the MCPServer CR.
-    "vm-manager": (GSOCI, ">=0.20.1 <1.0.0", ["muster"]),
+    "vm-manager": (GSOCI, ">=0.20.2 <1.0.0", ["muster"]),
     # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
     # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
     # REST client and belongs to the 3.x meta chart.
