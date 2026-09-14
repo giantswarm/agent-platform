@@ -6,6 +6,8 @@ components:
     enabled: true
   kagent:
     enabled: true
+  klaus-gateway:
+    enabled: true
 
 ingress:
   mode: agentgateway-muster
@@ -42,3 +44,15 @@ muster:
         enabled: false
         storage:
           type: memory
+
+# Exercise the kubernetes-flavor NetworkPolicy for klaus-gateway's egress to the
+# Kubernetes API (the Secret link store, giantswarm/agent-platform#443) next to
+# its a2a and OBO egress policies.
+klausGateway:
+  a2a:
+    enabled: true
+  obo:
+    enabled: true
+    musterUrl: https://muster.ci.example.com
+    callbackBaseUrl: https://agentgateway.ci.example.com
+    store: secret

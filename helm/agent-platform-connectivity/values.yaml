@@ -1699,8 +1699,15 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   crd:
     install: true
 
-  # Routing persistence. "memory" is stateless (routes lost on restart).
-  # Switch to "crd" + controller.enabled: true for durable routes.
+  # Routing store (klaus-gateway 1.6.0): "memory" loses the thread bindings on
+  # a gateway restart; "valkey" keeps them in the platform's own Valkey
+  # (components.valkey; the meta chart fills routing.valkey from that release);
+  # "crd" + controller.enabled: true is the store for a platform without
+  # Valkey. This chart renders the gateway pod's egress to its stores from
+  # these keys (templates/klausgateway/netpol.yaml, -klausgateway-store-egress):
+  # the platform's Valkey pods on their Service port with store: valkey; the
+  # kube-apiserver for configmap / crd, the controller and the Secret link
+  # store (obo.store: secret).
   routing:
     store: memory
     defaultTTL: "24h"
