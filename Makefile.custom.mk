@@ -742,6 +742,19 @@ verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform
 	@python3 tests/verify-valkey.py --override /tmp/vv-meta-override.out
 	@echo "$@: all passed"
 
+verify-klausgateway-valkey: ## Assert the gateway's Valkey routing-store defaults (giantswarm/klaus-gateway#252): with klausGateway.routing.store: valkey the klaus-gateway release's routing.valkey url, existingSecret and passwordKey are filled from the valkey release (Service name, auth Secret, default user's key); an operator's own value wins; any other store forwards nothing about Valkey.
+	@echo "====> $@ ($(CHART_DIR))"
+	@echo "--> routing.store memory (the default): no routing.valkey forwarded"
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true >/tmp/vkv-memory.out 2>&1 || { cat /tmp/vkv-memory.out; exit 1; }
+	@python3 tests/verify-klausgateway-valkey.py --memory /tmp/vkv-memory.out
+	@echo "--> routing.store valkey: url, existingSecret, passwordKey from the valkey release"
+	@helm template t $(CHART_DIR) $(VM) -f $(CHART_DIR)/ci/test-klausgateway-valkey-values.yaml >/tmp/vkv-defaults.out 2>&1 || { cat /tmp/vkv-defaults.out; exit 1; }
+	@python3 tests/verify-klausgateway-valkey.py --defaults /tmp/vkv-defaults.out
+	@echo "--> an operator's own url and Secret win; the key is still filled"
+	@helm template t $(CHART_DIR) $(VM) -f $(CHART_DIR)/ci/test-klausgateway-valkey-values.yaml --set klausGateway.routing.valkey.url=cache.example.internal:6380 --set klausGateway.routing.valkey.existingSecret=my-valkey >/tmp/vkv-own.out 2>&1 || { cat /tmp/vkv-own.out; exit 1; }
+	@python3 tests/verify-klausgateway-valkey.py --own /tmp/vkv-own.out
+	@echo "$@: all passed"
+
 verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on the agentgateway data plane (AgentgatewayParameters overlay), muster, kagent-controller, klaus-gateway and muster-valkey (their charts' podAnnotations); PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager and muster-valkey (#439); every knob off = nothing; the budgets' guards. And the placement of the stateful singletons (#439): scheduling.singletons.nodeSelector / tolerations reach muster, muster-valkey, the kagent controller and klaus-gateway as their charts' knobs (a component's own keys win), never the connectivity release; empty = nothing forwarded.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, agent-manager on: the data-plane pod annotation and the agent-manager budget render"

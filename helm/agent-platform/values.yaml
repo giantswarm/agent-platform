@@ -2759,11 +2759,23 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   crd:
     install: true
 
-  # Routing persistence. "memory" is stateless (routes lost on restart).
-  # Switch to "crd" + controller.enabled: true for durable routes.
+  # Routing store: the binding of every thread to its agent instance and the
+  # record of the turn in flight (klaus-gateway 1.6.0). "memory" loses both on
+  # a gateway restart. "valkey" keeps them in the platform's own Valkey
+  # (components.valkey): with store: valkey the url, the Secret and the
+  # password key below default to the valkey release's Service and the Secret
+  # its default user authenticates from (the same one muster reads), so the
+  # switch is this one line; set them only for an out-of-band Valkey. On a
+  # Cilium installation the connectivity chart must also let the gateway pod
+  # reach the Valkey pods on 6379 (giantswarm/agent-platform#443). "crd" +
+  # controller.enabled: true is the store for a platform without Valkey.
   routing:
     store: memory
     defaultTTL: "24h"
+    # valkey:
+    #   url: ""             # default: <valkey.valkey.fullnameOverride>:6379
+    #   existingSecret: ""  # default: valkey.valkey.auth.usersExistingSecret
+    #   passwordKey: ""     # default: valkey.valkey.auth.aclUsers.default.passwordKey
 
   # Lifecycle driver. agent-platform bundles kagent, not klaus-operator, so
   # "static" is the correct default. Populate staticInstances with

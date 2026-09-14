@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The gateway's routing store can be the platform's Valkey with one line** (giantswarm/klaus-gateway#252, klaus-gateway 1.6.0's `routing.store: valkey`). With `klausGateway.routing.store: valkey` the klaus-gateway release's `routing.valkey.url`, `existingSecret` and `passwordKey` are filled from the valkey release — its Service (`<valkey.valkey.fullnameOverride>:6379`, the bare name muster's own `storage.valkey.url` uses), the Secret its default user authenticates from (`valkey.valkey.auth.usersExistingSecret`, else the one muster reads, else `global.identity.existingSecret`) and that user's `passwordKey` — so every thread's binding to its agent instance and the record of a turn in flight survive a gateway restart without a volume or API-server access. An operator's own `url`, Secret or key wins (an out-of-band Valkey); with any other store nothing about Valkey is forwarded, so an installation whose klaus-gateway release still resolves 1.5.x sees no new key. `make verify-klausgateway-valkey` asserts the three cases. On a Cilium installation the switch also needs the gateway pod's egress to the Valkey pods on 6379 (#443, the Valkey half) — until that rule ships, `routing.store: valkey` is for installations without the Cilium policies only.
+
 ### Fixed
 
 - `postgres.imagePullSecrets` and `postgres.affinity`, declared by both charts and rendered as `Cluster.spec.imagePullSecrets` and `Cluster.spec.affinity` on the platform Postgres `Cluster` (#311, gap 4). `affinity` is CNPG's `AffinityConfiguration`, not a core Kubernetes `Affinity`: any other key fails the render, a core `podAffinity` or `podAntiAffinity` with a message of its own. Both render no field while unset.
