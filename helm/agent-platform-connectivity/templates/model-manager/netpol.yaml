@@ -21,7 +21,7 @@ rendered as one more ingress peer in the flavor's own dialect. */ -}}
 {{- /* The host-proxying backends (ollama, lemonade, lmstudio) among the backends need
 egress to their servers: every endpoint split into host, port and whether it
 is an address — one model-manager may front several. */ -}}
-{{- $servers := include "agent-platform.modelManager.hostTargets" . | fromJsonArray }}
+{{- $servers := include "agent-platform.modelManager.hostTargets" (dict "root" . "key" "endpoint") | fromJsonArray }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---

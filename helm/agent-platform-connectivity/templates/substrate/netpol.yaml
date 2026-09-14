@@ -56,6 +56,18 @@ agent-platform.kagentTools.* helpers, _helpers.tpl). */}}
 {{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
 {{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
+{{- /* The host model servers an actor may dial for inference: the address
+model-manager writes into the ModelConfigs (agentHost, falling back to the
+endpoint it dials itself), split for the policy. Empty unless a model-manager
+fronts a host backend. A server named by a hostname needs the DNS proxy on the
+egress gateway, since Cilium fills the toFQDNs cache only from the answers its
+own proxy sees. */}}
+{{- $modelServers := list }}
+{{- if include "agent-platform.modelManager.enabled" . }}
+{{- $modelServers = include "agent-platform.modelManager.hostTargets" (dict "root" . "key" "agentHost") | fromJsonArray }}
+{{- end }}
+{{- $modelServersNeedDns := false }}
+{{- range $server := $modelServers }}{{- if not $server.isIP }}{{- $modelServersNeedDns = true }}{{- end }}{{- end }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
@@ -400,7 +412,11 @@ spec:
             - port: "15020"
               protocol: TCP
   egress:
+    {{- if $modelServersNeedDns }}
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- else }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- end }}
     - toEntities:
         - kube-apiserver
     - toEndpoints:
@@ -455,6 +471,39 @@ spec:
         - ports:
             - port: {{ $toolsPort | quote }}
               protocol: TCP
+    {{- end }}
+    {{- /* A host model server is neither on 443 nor HTTPS, so the world rule
+           below does not reach it: an actor whose ModelConfig points at an
+           Ollama, a Lemonade Server or an LM Studio on the host needs that
+           address and port opened. model-manager's own policy opens the
+           endpoint it manages models through; this is the inference path, at
+           the address the ModelConfigs carry. */ -}}
+    {{- range $server := $modelServers }}
+    {{- if $server.isIP }}
+    # The {{ $server.backend }} host model server the actors dial, an IP endpoint.
+    - toCIDR:
+        - {{ $server.host }}/32
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    {{- else }}
+    # The {{ $server.backend }} host model server the actors dial, named by hostname.
+    - toFQDNs:
+        - matchName: {{ $server.host }}
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    # The same name may resolve to an in-cluster Service, which toFQDNs alone
+    # does not admit.
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    {{- end }}
     {{- end }}
     - toEntities:
         - world
