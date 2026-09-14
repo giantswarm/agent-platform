@@ -2,6 +2,7 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+<<<<<<< HEAD
 ## \<current\> → \<next\> (the s3proxy façade declares its ephemeral storage and bounds its emptyDirs)
 
 The `substrate-s3proxy` container (`kagent.harness.snapshotStore.s3proxy`, on with provider `capz` or `s3proxy.enabled`) carries `resources.requests.ephemeral-storage` (256Mi) and `resources.limits.ephemeral-storage` (1Gi), and its two emptyDirs (`/tmp`, `/data`) a `sizeLimit` equal to the limit (giantswarm/agent-platform#438). Kyverno's `require-emptydir-requests-and-limits` stops reporting the Deployment on every rollout, and a cluster that enforces the policy admits the façade.
@@ -10,6 +11,31 @@ The `substrate-s3proxy` container (`kagent.harness.snapshotStore.s3proxy`, on wi
 
 - None: the connectivity release re-renders the Deployment and the façade's two pods roll once. The rolling update surges a new pod before it takes an old one down (two replicas, the default strategy) and a draining pod answers `/healthz` 503 for its 5 s preStop, so the Service keeps one ready replica throughout.
 - An installation's own `s3proxy.resources` entries merge over the defaults, so both `ephemeral-storage` fields stay unless set to `null` — which the render refuses, naming the key (`kagent.harness.snapshotStore.s3proxy.resources.<requests|limits>.ephemeral-storage is required`). A bigger `limits.ephemeral-storage` moves both emptyDirs' `sizeLimit` with it.
+=======
+## \<current\> → \<next\> (the stateful singletons can be pinned to on-demand capacity; muster-valkey takes the #431 guards)
+
+giantswarm/agent-platform#439: on gazelle, whose fifteen workers are Karpenter spot capacity, one spot-interruption wave (2026-09-14, three nodes in ten minutes) force-evicted `muster-valkey` — muster's OAuth token store, one replica on an RWO volume, with none of #431's guards — for two minutes, during which every token refresh blocked inside muster (a Slack turn waited 27 s before the bot reacted, another was aborted on the client's 30 s timeout); and killed `klaus-gateway` mid-turn on the same node, whose replacement then waited four minutes on a `Multi-Attach` error for its volume. The guards from #431 (`karpenter.sh/do-not-disrupt`, `PodDisruptionBudget minAvailable: 1`) address Karpenter's **voluntary** disruption — consolidation, drift, expiry. A spot reclaim is involuntary: Karpenter's `CordonAndDrain` on the interruption notice cannot evict a PDB-blocked pod, and the instance terminates two minutes after the notice regardless — for these pods the guards turn a graceful two-minute move into a hard kill with the chart's termination grace. Two changes:
+
+- **`scheduling.singletons`** — a new meta-chart block, **empty by default** (no installation changes behaviour until it is set): `nodeSelector` is merged into, and `tolerations` appended to, the scheduling knobs of the four single-replica stateful pods — muster (`muster.nodeSelector`), muster-valkey (`valkey.valkey.nodeSelector`), the kagent controller (`kagent.controller.nodeSelector`) and klaus-gateway (`klausGateway.nodeSelector`) — before their releases render; a key a component sets itself wins. The block is the meta chart's alone and is held back from the connectivity release (`components.agent-platform-connectivity.omitKeys`).
+- **muster-valkey takes the #431 guards**, on by default like the others: `karpenter.sh/do-not-disrupt: "true"` through the valkey subchart's `valkey.valkey.podAnnotations`, and a `PodDisruptionBudget muster-valkey` (`valkey.podDisruptionBudget`: `minAvailable: 1`, `unhealthyPodEvictionPolicy: AlwaysAllow`) rendered by the connectivity chart in the release namespace — neither the wrapper nor the upstream subchart has a budget knob. They still help against consolidation; they do not cover a spot reclaim either.
+
+### Operator action
+
+- **None to take the valkey guards.** The `muster-valkey` pod rolls **once** (a pod-template change; `Recreate`, so the token store is gone for the restart — every token refresh in flight blocks for those seconds, as on any rollout of it); the budget is a new object. Opt out per knob: `valkey.valkey.podAnnotations.karpenter.sh/do-not-disrupt: "false"`, `valkey.podDisruptionBudget.enabled: false`.
+- **Decide the placement on installations whose workers are Karpenter spot capacity** — and only there:
+
+  ```yaml
+  scheduling:
+    singletons:
+      nodeSelector:
+        karpenter.sh/capacity-type: on-demand
+  ```
+
+  Karpenter launches one small on-demand node for the four pods from a NodePool that admits `on-demand` in the volumes' zone (the fleet's NodePools admit `spot,on-demand` and carry no taint, so no toleration is needed; `scheduling.singletons.tolerations` is for a dedicated, tainted pool) and, with the guards, leaves it alone. **Cost: one `xlarge`-class on-demand instance per such installation** (the four pods request about one vCPU and a gigabyte together; Karpenter picks the smallest instance the NodePool admits that fits them and the daemonsets). Enabling **rolls each of the four pods once**; muster-valkey and klaus-gateway (`Recreate`) are down until the node is up — about two minutes on AWS — so pick a quiet moment; their RWO volumes move with them as long as the new node is in their zone (Karpenter honours the volumes' topology). Once the node exists the four land on it together: the do-not-disrupt annotation and the budgets keep consolidation away from it, and an on-demand instance is not reclaimed.
+- **Do not set it on a cluster without Karpenter** (CAPZ, on-prem): no node carries `karpenter.sh/capacity-type`, and the four pods would stay `Pending`. An installation whose workers are already on-demand gains nothing from it and loses nothing either (the pods are pinned to the capacity they run on).
+- **Know what remains:** a spot reclaim still restarts everything else on the node (agent workers restore from checkpoints, the edge proxy has two replicas); an on-demand node can still fail. The component-side answers — klaus-gateway surviving a restart mid-turn and moving its link store off the RWO volume, mcp-oauth's token endpoint failing fast while Valkey is down — are tracked in those repos and complement the placement rather than replace it.
+- `make verify-disruption` asserts the merge (the four releases, a component's own keys first), the default (nothing forwarded), the hold-back from the connectivity release and the valkey guards.
+>>>>>>> 0b0372a (feat(meta): the stateful singletons can be pinned to on-demand capacity (scheduling.singletons, opt-in, empty by default); muster-valkey takes the #431 guards — do-not-disrupt through the valkey subchart's podAnnotations and a connectivity-rendered PodDisruptionBudget (#439))
 
 ## \<current\> → \<next\> (the Substrate line re-pins to `v0.0.27-gs.9`, the kagent line to `v0.11.0-gs.12`: a superseded template's crashed golden actor is collected and frees its worker)
 

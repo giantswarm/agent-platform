@@ -1069,6 +1069,40 @@ connectivity release both read the resolved value. */ -}}
 {{- end -}}
 
 {{/*
+Placement of the stateful singletons (giantswarm/agent-platform#439): merge
+scheduling.singletons.nodeSelector into, and append scheduling.singletons.tolerations
+to, the scheduling knobs of the four single-replica stateful components on the
+shaped values tree — muster (the muster chart's nodeSelector / tolerations),
+muster-valkey (valkey.valkey.*, the upstream subchart's), the kagent controller
+(kagent.controller.*) and klaus-gateway (klausGateway.*). A key a component's
+own nodeSelector already holds wins (sprig merge: the destination's keys stay);
+the component's own tolerations come first. Empty knobs write nothing, so the
+default render is byte-identical to a chart without the block. Runs on the
+$shaped copy in components.yaml after agent-platform.shape.apply, so every
+component release — and the connectivity release, which sees the components'
+blocks — reads the merged copies; scheduling itself is held back from the
+connectivity release (components.agent-platform-connectivity.omitKeys).
+Usage: include "agent-platform.scheduling.apply" (dict "values" $shaped)
+*/}}
+{{- define "agent-platform.scheduling.apply" -}}
+{{- $v := .values -}}
+{{- $singletons := dig "singletons" dict (index $v "scheduling" | default dict) -}}
+{{- $selector := index $singletons "nodeSelector" | default dict -}}
+{{- $tolerations := index $singletons "tolerations" | default list -}}
+{{- if or $selector $tolerations -}}
+{{- range $path := list (list "muster") (list "valkey" "valkey") (list "kagent" "controller") (list "klausGateway") -}}
+{{- $node := $v -}}
+{{- range $key := $path -}}
+{{- if not (kindIs "map" (index $node $key)) }}{{ $_ := set $node $key dict }}{{ end -}}
+{{- $node = index $node $key -}}
+{{- end -}}
+{{- with $selector }}{{ $_ := set $node "nodeSelector" (merge (deepCopy (index $node "nodeSelector" | default dict)) .) }}{{ end -}}
+{{- with $tolerations }}{{ $_ := set $node "tolerations" (concat (index $node "tolerations" | default list) .) }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Whether the bundled Flux engine is on — components.flux.enabled, read through
 the same helper as every other roster entry (a missing entry counts as on, as
 Helm treats a dependency whose condition path is absent). Emits "true" or "".

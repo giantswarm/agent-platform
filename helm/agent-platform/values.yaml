@@ -341,6 +341,11 @@ components:  # @schema additionalProperties: true
     versionRange: "0.x"
     valuesFrom: valkey
     enabled: true
+    # valkey.podDisruptionBudget is the connectivity chart's (the wrapper and
+    # its subchart have no budget knob); the wrapper's schema would take the
+    # key silently and read nothing.
+    omitKeys:
+      - podDisruptionBudget
   agent-platform-mcps:  # @schema additionalProperties: true
     chart: agent-platform-mcps
     repository: oci://gsoci.azurecr.io/charts/giantswarm
@@ -829,6 +834,10 @@ components:  # @schema additionalProperties: true
       # The flux-engine subchart's values are the engine's, not wiring: never
       # forwarded (Helm coalesces the subchart's defaults into this block).
       - flux-engine
+      # Read by the meta chart alone (merged into the four components' own
+      # scheduling knobs before their releases render, agent-platform.scheduling.apply);
+      # the connectivity chart never sees it.
+      - scheduling
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -1251,6 +1260,50 @@ kyvernoPolicies:
     check-seccomp-strict: restrict-seccomp-strict
     app-armor: restrict-apparmor-profiles
 
+# === Placement of the stateful singletons (giantswarm/agent-platform#439) ===
+# Where the platform's single-replica stateful pods run: muster (the MCP
+# aggregator, hostNetwork), muster-valkey (muster's OAuth token store, an RWO
+# volume), the kagent controller (every streaming turn) and klaus-gateway (the
+# Slack/CLI/web turns in flight, an RWO volume). #431's guards
+# (karpenter.sh/do-not-disrupt, PodDisruptionBudget minAvailable: 1) hold off
+# Karpenter's VOLUNTARY disruption — consolidation, drift, expiry. They do
+# nothing against a spot reclaim: the instance goes two minutes after the
+# notice whatever the budget says, and a PDB-blocked pod is then killed with
+# its termination grace instead of being moved first (gazelle 2026-09-14: a
+# turn lost mid-stream, four minutes of Multi-Attach on the volume, 27 s
+# token refreshes while Valkey was gone). On an installation whose workers
+# are Karpenter spot capacity, pin the four to on-demand capacity:
+#
+#   scheduling:
+#     singletons:
+#       nodeSelector:
+#         karpenter.sh/capacity-type: on-demand
+#
+# Karpenter launches one small on-demand node for them from a NodePool that
+# admits `on-demand` in the volumes' zone (cost: one xlarge-class on-demand
+# instance per such installation) and, with the #431 guards, leaves it
+# alone. The map is merged into each component's own nodeSelector
+# (muster.nodeSelector, valkey.valkey.nodeSelector,
+# kagent.controller.nodeSelector, klausGateway.nodeSelector; a key a
+# component sets itself wins), the list is appended to each component's
+# tolerations (for a dedicated, tainted pool). Empty (the default) forwards
+# nothing — every installation renders as before. Set it only where nodes
+# carry the label: on a cluster without Karpenter (CAPZ, on-prem) the four
+# pods would stay Pending. Enabling rolls each of the four pods once, and
+# the pods with a Recreate strategy (muster-valkey, klaus-gateway) are down
+# until the node is up (about two minutes on AWS); an RWO volume moves with
+# them as long as the new node is in its zone.
+scheduling:
+  singletons:
+    # -- Node labels the four stateful singletons (muster, muster-valkey, the
+    # kagent controller, klaus-gateway) must land on, merged into each
+    # component's own nodeSelector (its keys win). On a Karpenter spot
+    # installation: `karpenter.sh/capacity-type: on-demand`. Empty = as before.
+    nodeSelector: {}  # @schema additionalProperties: true
+    # -- Tolerations appended to the four singletons' own, for a dedicated,
+    # tainted on-demand pool. The fleet's NodePools carry no taint.
+    tolerations: []
+
 # Arbitrary manifests rendered through `tpl` alongside the chart. Useful for
 # shipping the muster OAuth Secret in the same Helm release. Example:
 #   extraObjects:
@@ -1471,6 +1524,23 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     enabled: auto  # auto | true | false
   vpa:
     enabled: false
+  # PodDisruptionBudget on the muster-valkey pod, rendered by the connectivity
+  # chart in the release namespace (neither the wrapper nor the upstream valkey
+  # subchart has a knob of its own; giantswarm/agent-platform#439, the #431
+  # pattern). muster's OAuth token store lives here: while the pod is gone
+  # every token refresh blocks inside muster. With one replica, minAvailable: 1
+  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
+  # node drain waits for its drain timeout); AlwaysAllow keeps a pod that is
+  # not Ready evictable. Exactly one of minAvailable / maxUnavailable (int or
+  # percentage); the render refuses both, neither, and a policy outside the
+  # API's enum. `enabled: false` removes the budget. Inert while
+  # components.valkey.enabled is false. Never forwarded to the valkey release
+  # (components.valkey.omitKeys).
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    maxUnavailable: null
+    unhealthyPodEvictionPolicy: AlwaysAllow
   valkey:
     fullnameOverride: muster-valkey
     replicaCount: 1
@@ -1480,6 +1550,14 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     # out. Recreate stops the old pod first. The store is a cache, so the restart
     # gap costs nothing.
     deploymentStrategy: Recreate
+    # Voluntary disruption (giantswarm/agent-platform#439, the #431 pattern):
+    # the pod is muster's OAuth token store, one replica on an RWO volume;
+    # Karpenter's consolidation works around its node instead of evicting it
+    # (an involuntary disruption — a spot reclaim — is not affected; see
+    # scheduling.singletons). The upstream subchart's knob. Set "false" to
+    # opt out.
+    podAnnotations:
+      karpenter.sh/do-not-disrupt: "true"
     # Persistence is intentionally RDB-only (no valkeyConfig appendonly). The
     # muster-valkey store is a CACHE: every critical record is reconstructable
     # at startup (see the muster chart's storage "Persistence model" doc and
