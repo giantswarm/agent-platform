@@ -1,0 +1,15 @@
+# The gateway on the platform's Valkey (giantswarm/klaus-gateway#252): the
+# routing.valkey block left empty is filled from the valkey release.
+components:
+  klaus-gateway:
+    enabled: true
+klausGateway:
+  routing:
+    store: valkey
+valkey:
+  valkey:
+    auth:
+      usersExistingSecret: platform-secrets
+      aclUsers:
+        default:
+          passwordKey: valkey-password
