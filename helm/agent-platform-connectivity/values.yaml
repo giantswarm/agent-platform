@@ -984,6 +984,31 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         value: "false"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: "X-Scope-OrgID=giantswarm"
+    # VerticalPodAutoscaler on the controller Deployment (templates/kagent/
+    # controller-vpa.yaml), THIS chart's object in the kagent namespace: the
+    # kagent chart has no VPA knob (the #439 pattern of the muster-valkey
+    # budget). `auto` (the default) renders it where the cluster serves
+    # autoscaling.k8s.io/v1 — the VPA CRD is not part of Kubernetes
+    # conformance; an explicit true / false wins. The controller is one
+    # replica behind a budget with minAvailable: 1, so an evicting update mode
+    # could never apply: InPlaceOrRecreate (VPA 1.5+ on Kubernetes 1.33+ with
+    # in-place pod resize) resizes the running pod's requests without an
+    # eviction, and a resize that cannot apply in place falls back to an
+    # eviction the budget refuses — the pod keeps its requests until its next
+    # roll. RequestsOnly leaves the chart's limits alone; minAllowed /
+    # maxAllowed hold the recommendation between the chart's requests and its
+    # limits. The render refuses an updateMode or controlledValues outside the
+    # API's enum. Inert while components.kagent.enabled is false.
+    vpa:
+      enabled: auto  # auto | true | false
+      updateMode: InPlaceOrRecreate  # Off | Initial | Recreate | InPlaceOrRecreate | Auto
+      controlledValues: RequestsOnly  # RequestsOnly | RequestsAndLimits
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: "2"
+        memory: 512Mi
 
   ui:
     image:

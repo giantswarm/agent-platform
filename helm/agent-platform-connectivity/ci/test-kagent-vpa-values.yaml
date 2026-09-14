@@ -1,0 +1,15 @@
+# The kagent controller's VerticalPodAutoscaler (templates/kagent/controller-vpa.yaml)
+# switched on explicitly: the lint render serves no autoscaling.k8s.io/v1, so
+# `auto` would resolve it off and the template would never be linted.
+ingress:
+  parentRefs:
+    - name: giantswarm-default
+components:
+  kagent:
+    enabled: true
+kagent:
+  harness:
+    snapshotLocation: s3://ci-agent-snapshots/agents
+  controller:
+    vpa:
+      enabled: true

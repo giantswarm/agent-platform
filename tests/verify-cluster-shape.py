@@ -6,7 +6,9 @@ kyvernoPolicies.enabled (kyverno.io/v1), networkPolicy.flavor (cilium.io/v2 ->
 cilium, else kubernetes), global.observability.metrics.serviceMonitor.enabled
 (monitoring.coreos.com/v1), dicebear.route.enabled (gateway.envoyproxy.io/v1alpha1),
 agentSandbox.podSecurity.enabled and modelServing.policies.enabled (both follow
-the resolved kyvernoPolicies). The
+the resolved kyvernoPolicies), kagent.controller.vpa.enabled (autoscaling.k8s.io/v1;
+the connectivity chart's VerticalPodAutoscaler on the kagent controller, held
+back from the kagent release). The
 meta chart resolves them once from .Capabilities.APIVersions and derives the
 component copies (muster's flavor and monitors, valkey's Cilium policy and
 PodMonitor, kagent's OTel exporters, oauth2-proxy monitor and OTLP header) before
@@ -37,6 +39,7 @@ FLEET_APIS = [
     "monitoring.coreos.com/v1",
     "gateway.networking.k8s.io/v1",
     "gateway.envoyproxy.io/v1alpha1",
+    "autoscaling.k8s.io/v1",
 ]
 
 # The shapes: the served groups, from the fleet down to a bare kind cluster.
@@ -46,6 +49,7 @@ SHAPES = {
     "kyverno-only": ["kyverno.io/v1"],
     "monitoring-only": ["monitoring.coreos.com/v1"],
     "envoy-only": ["gateway.envoyproxy.io/v1alpha1"],
+    "vpa-only": ["autoscaling.k8s.io/v1"],
     "vanilla": [],
 }
 
@@ -74,6 +78,7 @@ EXPLICIT_FLEET_KNOBS = [
     "--set", "global.observability.metrics.serviceMonitor.enabled=true",
     "--set", "agentSandbox.podSecurity.enabled=true",
     "--set", "modelServing.policies.enabled=true",
+    "--set", "kagent.controller.vpa.enabled=true",
 ]
 EXPLICIT_FLEET_COPIES = [
     "--set", "dicebear.route.enabled=true",
@@ -92,6 +97,7 @@ EXPLICIT_VANILLA_KNOBS = [
     "--set", "global.observability.metrics.serviceMonitor.enabled=false",
     "--set", "agentSandbox.podSecurity.enabled=false",
     "--set", "modelServing.policies.enabled=false",
+    "--set", "kagent.controller.vpa.enabled=false",
 ]
 OTLP_HEADER = "name: OTEL_EXPORTER_OTLP_HEADERS"
 
@@ -177,6 +183,7 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     cilium = "cilium.io/v2" in served
     monitors = "monitoring.coreos.com/v1" in served
     envoy = "gateway.envoyproxy.io/v1alpha1" in served
+    vpa = "autoscaling.k8s.io/v1" in served
     flavor = "cilium" if cilium else "kubernetes"
     where = f"[{name}]"
 
@@ -192,6 +199,7 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
         (["agentSandbox", "podSecurity", "enabled"], yes(kyverno)),
         (["modelServing", "policies", "enabled"], yes(kyverno)),
         (["dicebear", "route", "enabled"], yes(envoy)),
+        (["kagent", "controller", "vpa", "enabled"], yes(vpa)),
         (["muster", "networkPolicy", "flavor"], flavor),
         (["valkey", "ciliumNetworkPolicy", "enabled"], yes(cilium)),
     ):
@@ -227,6 +235,11 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
            f"{where} kagent OTEL_EXPORTER_OTLP_HEADERS env entry present={OTLP_HEADER in chr(10).join(kagent)}, want {monitors}")
     expect((OTLP_HEADER in "\n".join(conn)) == monitors,
            f"{where} the kagent copy forwarded to connectivity disagrees on the OTLP header")
+    # The VPA knob is the connectivity chart's: components.kagent.omitKeys holds it back.
+    got = leaf(kagent, ["controller", "vpa", "enabled"])
+    expect(got is None, f"{where} kagent.controller.vpa reached the kagent HelmRelease ({got!r})")
+    expect(leaf(kagent, ["controller", "pdb", "enabled"]) == "true",
+           f"{where} the rest of kagent.controller vanished from the kagent HelmRelease with the vpa hold-back")
 
     got = leaf(hr["dicebear"], ["route", "enabled"])
     expect(got == yes(envoy), f"{where} dicebear route.enabled = {got!r}, want {yes(envoy)!r}")
@@ -250,6 +263,8 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
            f"{where} connectivity render carries a kagent v1alpha2 Agent mutation or object")
     expect((objects.get("ServiceMonitor", 0) > 0) == monitors,
            f"{where} connectivity ServiceMonitor count={objects.get('ServiceMonitor', 0)}, monitoring served={monitors}")
+    expect(objects.get("VerticalPodAutoscaler", 0) == (1 if vpa else 0),
+           f"{where} connectivity VerticalPodAutoscaler count={objects.get('VerticalPodAutoscaler', 0)}, autoscaling served={vpa}")
 
 
 def main(meta: str, connectivity: str) -> int:

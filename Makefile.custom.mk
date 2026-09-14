@@ -14,7 +14,7 @@ CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 # prometheus-operator, Gateway API, Envoy Gateway. `helm template` alone serves
 # Helm's built-in set, i.e. renders the vanilla shape; the assertions below that
 # expect the fleet shape pass these. verify-auto covers the resolution itself.
-FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1
+FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1 --api-versions autoscaling.k8s.io/v1
 # parentRefs[0].name satisfies the all-modes ingress guard so a single guard is
 # isolated under test, and the fleet's API groups are served so the fleet shape
 # renders. Neither chart has subcharts anymore, so no `helm dependency build`
@@ -71,7 +71,13 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # Both sides render with valkey.podDisruptionBudget.enabled=false (a chart that
 # predates the key ignores it, the valkey block is additionalProperties: true),
 # and verify-disruption asserts the budget on, off and inert.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false
+# The eighth intended change (giantswarm/agent-platform#NNN): the kagent
+# controller VerticalPodAutoscaler this chart renders by default with
+# autoscaling.k8s.io/v1 served (templates/kagent/controller-vpa.yaml). Both
+# sides render with kagent.controller.vpa.enabled=false (a chart that predates
+# the key ignores it, the kagent block is additionalProperties: true), and
+# verify-kagent-vpa asserts the object on, off and inert.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.controller.vpa.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -827,6 +833,72 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@if helm template t $(CHART_DIR) $(VM) --set scheduling.singletons.nodeSelektor.x=y >/tmp/vd-meta-typo.out 2>&1; then echo "FAIL: scheduling.singletons.nodeSelektor (a typo) passed the schema"; exit 1; fi
 	@grep -q 'nodeSelektor' /tmp/vd-meta-typo.out || { echo "FAIL: the typo was refused for the wrong reason"; tail -3 /tmp/vd-meta-typo.out; exit 1; }
 	@echo "ok: a stray key under scheduling.singletons is refused by the schema"
+	@echo "$@: all passed"
+
+# The kagent controller's VerticalPodAutoscaler (templates/kagent/controller-vpa.yaml):
+# kagent on under the fleet's API groups; VPA_VANILLA serves no group at all, so
+# the `auto` knob resolves off.
+VPA_ON := $(VM) --set components.kagent.enabled=true
+VPA_VANILLA := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --set components.kagent.enabled=true
+# One HelmRelease of a meta render (by metadata.name), as its document.
+HR_DOC := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n---\n"); print([x for x in d if "kind: HelmRelease" in x and "\n  name: "+sys.argv[2]+"\n" in x][0])'
+
+.PHONY: verify-kagent-vpa
+verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with autoscaling.k8s.io/v1 served the connectivity chart renders it on Deployment kagent-controller in the kagent namespace (InPlaceOrRecreate, RequestsOnly, the chart's requests and limits as the bounds, minReplicas 1); a vanilla render none; an explicit true / false wins both ways; inert with kagent off; the enum guards fire in both charts; the meta chart forwards the knob resolved to the connectivity release and never to the kagent release.
+	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
+	@echo "--> connectivity, autoscaling.k8s.io/v1 served (the fleet): the VPA renders"
+	@helm template t $(CONNECTIVITY_DIR) $(VPA_ON) >/tmp/vk-on.out 2>&1 || { cat /tmp/vk-on.out; exit 1; }
+	@awk '/^kind: VerticalPodAutoscaler/,/^---/' /tmp/vk-on.out >/tmp/vk-vpa.out
+	@[ "$$(grep -c '^kind: VerticalPodAutoscaler' /tmp/vk-on.out)" = "1" ] || { echo "FAIL: expected exactly one VerticalPodAutoscaler"; exit 1; }
+	@grep -q '^  name: kagent-controller$$' /tmp/vk-vpa.out || { echo "FAIL: the VPA is not named kagent-controller"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^  namespace: kagent$$' /tmp/vk-vpa.out || { echo "FAIL: the VPA is not in the kagent namespace"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A3 '^  targetRef:$$' /tmp/vk-vpa.out | grep -q '^    kind: Deployment$$' || { echo "FAIL: the VPA does not target a Deployment"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A3 '^  targetRef:$$' /tmp/vk-vpa.out | grep -q '^    name: kagent-controller$$' || { echo "FAIL: the VPA does not target kagent-controller"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^    updateMode: InPlaceOrRecreate$$' /tmp/vk-vpa.out || { echo "FAIL: updateMode is not InPlaceOrRecreate"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^    minReplicas: 1$$' /tmp/vk-vpa.out || { echo "FAIL: minReplicas: 1 missing"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^      - containerName: controller$$' /tmp/vk-vpa.out || { echo "FAIL: the container policy does not name the controller container"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^        controlledValues: RequestsOnly$$' /tmp/vk-vpa.out || { echo "FAIL: controlledValues is not RequestsOnly"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 100m' || { echo "FAIL: minAllowed.cpu is not the chart's request (100m)"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 128Mi' || { echo "FAIL: minAllowed.memory is not the chart's request (128Mi)"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: "2"' || { echo "FAIL: maxAllowed.cpu is not the chart's limit (2)"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 512Mi' || { echo "FAIL: maxAllowed.memory is not the chart's limit (512Mi)"; cat /tmp/vk-vpa.out; exit 1; }
+	@echo "ok: VerticalPodAutoscaler kagent-controller on Deployment kagent-controller — InPlaceOrRecreate, RequestsOnly, 100m/128Mi to 2/512Mi"
+	@echo "--> vanilla (no autoscaling.k8s.io/v1): auto resolves off"
+	@helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) >/tmp/vk-vanilla.out 2>&1 || { cat /tmp/vk-vanilla.out; exit 1; }
+	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-vanilla.out; then echo "FAIL: a VerticalPodAutoscaler renders without autoscaling.k8s.io/v1 served"; exit 1; fi
+	@echo "ok: nothing on a vanilla cluster"
+	@echo "--> explicit values win over detection, both ways"
+	@helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) --set kagent.controller.vpa.enabled=true >/tmp/vk-force-on.out 2>&1 || { cat /tmp/vk-force-on.out; exit 1; }
+	@grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-force-on.out || { echo "FAIL: kagent.controller.vpa.enabled=true renders nothing without the API served"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.enabled=false >/tmp/vk-force-off.out 2>&1 || { cat /tmp/vk-force-off.out; exit 1; }
+	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-force-off.out; then echo "FAIL: kagent.controller.vpa.enabled=false still renders the VPA"; exit 1; fi
+	@echo "ok: explicit true / false win"
+	@echo "--> kagent off: inert"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set kagent.controller.vpa.enabled=true >/tmp/vk-kagent-off.out 2>&1 || { cat /tmp/vk-kagent-off.out; exit 1; }
+	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-kagent-off.out; then echo "FAIL: the VPA renders while kagent is off"; exit 1; fi
+	@echo "ok: inert while kagent is off"
+	@echo "--> the guards"
+	@if helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.updateMode=Sometimes >/tmp/vk-mode.out 2>&1; then echo "FAIL: an unknown updateMode accepted"; exit 1; fi
+	@grep -q 'is not a VerticalPodAutoscaler update mode' /tmp/vk-mode.out || { echo "FAIL: wrong error for the updateMode enum"; tail -3 /tmp/vk-mode.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.controlledValues=Nothing >/tmp/vk-cv.out 2>&1; then echo "FAIL: an unknown controlledValues accepted"; exit 1; fi
+	@grep -q 'is not a VerticalPodAutoscaler controlledValues' /tmp/vk-cv.out || { echo "FAIL: wrong error for the controlledValues enum"; tail -3 /tmp/vk-cv.out; exit 1; }
+	@for chart in $(CONNECTIVITY_DIR) $(CHART_DIR); do \
+		if helm template t $$chart $(VPA_ON) --set kagent.controller.vpa.enabled=maybe >/tmp/vk-maybe.out 2>&1; then echo "FAIL: $$chart: kagent.controller.vpa.enabled=maybe accepted"; exit 1; fi; \
+		grep -q 'kagent.controller.vpa.enabled' /tmp/vk-maybe.out || { echo "FAIL: $$chart: wrong error for kagent.controller.vpa.enabled=maybe"; tail -3 /tmp/vk-maybe.out; exit 1; }; \
+	done
+	@echo "ok: the enum guards fire in both charts"
+	@echo "--> meta chart: the resolved knob reaches the connectivity release, never the kagent release"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_ON) >/tmp/vk-meta.out 2>&1 || { cat /tmp/vk-meta.out; exit 1; }
+	@$(HR_DOC) /tmp/vk-meta.out kagent >/tmp/vk-meta-kagent.out
+	@if grep -q 'vpa:' /tmp/vk-meta-kagent.out; then echo "FAIL: kagent.controller.vpa travels on the kagent HelmRelease (components.kagent.omitKeys)"; exit 1; fi
+	@grep -q '^      pdb:$$' /tmp/vk-meta-kagent.out || { echo "FAIL: the rest of kagent.controller vanished from the kagent HelmRelease with the vpa hold-back"; exit 1; }
+	@$(HR_DOC) /tmp/vk-meta.out agent-platform-connectivity >/tmp/vk-meta-conn.out
+	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn.out | grep -q '^          enabled: true$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to true with the API served"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_VANILLA) >/tmp/vk-meta-vanilla.out 2>&1 || { cat /tmp/vk-meta-vanilla.out; exit 1; }
+	@$(HR_DOC) /tmp/vk-meta-vanilla.out agent-platform-connectivity >/tmp/vk-meta-conn-vanilla.out
+	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn-vanilla.out | grep -q '^          enabled: false$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to false without the API"; exit 1; }
+	@if grep -q 'enabled: auto' /tmp/vk-meta.out /tmp/vk-meta-vanilla.out; then echo "FAIL: an unresolved auto reached a HelmRelease"; exit 1; fi
+	@echo "ok: resolved once, forwarded to connectivity only"
 	@echo "$@: all passed"
 
 verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: ghcr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); that the egress gateway opens every host model server model-manager fronts, at its agentHost, with the DNS proxy on where one is named by hostname; and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.

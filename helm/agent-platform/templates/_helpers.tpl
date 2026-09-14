@@ -1002,6 +1002,18 @@ kyvernoPolicies.enabled like the agent-sandbox pod-security policy).
 {{- end -}}
 
 {{/*
+kagent.controller.vpa.enabled resolved: "true" when the connectivity chart
+renders the kagent controller's VerticalPodAutoscaler. `auto` follows whether
+autoscaling.k8s.io/v1 is served — the VPA CRD is not part of Kubernetes
+conformance; an explicit true / false wins. The key is the connectivity
+chart's (components.kagent.omitKeys holds it back from the kagent release).
+*/}}
+{{- define "agent-platform.shape.kagentControllerVpa" -}}
+{{- $v := dig "controller" "vpa" "enabled" "auto" (.Values.kagent | default dict) -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kagent.controller.vpa.enabled" "value" $v "api" "autoscaling.k8s.io/v1") -}}
+{{- end -}}
+
+{{/*
 Write .value into .values at .path (a list of keys) when the leaf there is
 `auto`. A leaf that is absent or set explicitly is left alone — explicit
 overrides win, and a block an operator emptied is not re-created. Emits nothing.
@@ -1062,6 +1074,7 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- $dicebearRoute := eq (include "agent-platform.shape.dicebearRoute" $root) "true" -}}
 {{- $podSecurity := eq (include "agent-platform.shape.agentSandboxPodSecurity" $root) "true" -}}
 {{- $servingPolicies := eq (include "agent-platform.shape.modelServingPolicies" $root) "true" -}}
+{{- $controllerVpa := eq (include "agent-platform.shape.kagentControllerVpa" $root) "true" -}}
 {{- /* The knobs themselves: written resolved whatever they held. */ -}}
 {{- $_ := set $v.kyvernoPolicies "enabled" $kyverno -}}
 {{- $_ := set $v.networkPolicy "flavor" $flavor -}}
@@ -1074,6 +1087,9 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- end -}}
 {{- if kindIs "map" (dig "policies" nil (index $v "modelServing" | default dict)) -}}
 {{- $_ := set (index $v "modelServing" "policies") "enabled" $servingPolicies -}}
+{{- end -}}
+{{- if kindIs "map" (dig "controller" "vpa" nil (index $v "kagent" | default dict)) -}}
+{{- $_ := set (index $v "kagent" "controller" "vpa") "enabled" $controllerVpa -}}
 {{- end -}}
 {{- /* substrate.postgres.enabled: `auto` resolved to the boolean the substrate
 chart takes — bundled iff neither the platform Cluster nor a connection string

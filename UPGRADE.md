@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the kagent controller gets a VerticalPodAutoscaler: `kagent.controller.vpa`, `InPlaceOrRecreate`)
+
+giantswarm/agent-platform#NNN: the connectivity chart renders a `VerticalPodAutoscaler kagent-controller` in the kagent namespace on the controller Deployment wherever the cluster serves `autoscaling.k8s.io/v1` (`kagent.controller.vpa.enabled: auto`). Its update mode is `InPlaceOrRecreate`: the running pod's CPU and memory requests are resized in place, no eviction and no roll. The chart's limits stay (`controlledValues: RequestsOnly`), and the recommendation is held between the chart's requests (100m / 128Mi) and its limits (2 / 512Mi).
+
+### Operator action
+
+- **None** on a Giant Swarm management cluster (VPA 1.5.1 from vertical-pod-autoscaler-app 6.1.2 on Kubernetes 1.35; graveler verified): the connectivity release adds the one object, and the recommender applies its first recommendation in place after it has gathered history. The controller pod is not rolled.
+- **A cluster whose VPA is older than 1.5.0**: the `InPlaceOrRecreate` mode is behind a feature gate in 1.4 and unknown to the 1.3 CRD, so the connectivity release would fail on the object. Set `kagent.controller.vpa.updateMode: Initial` (applied on the pod's next roll) or `Off` (recommendations only), or upgrade the VPA first.
+- **A cluster without the VPA CRD** (`auto` resolves off): nothing renders. `kagent.controller.vpa.enabled: false` opts out on a cluster that has it.
+- A resize the kubelet cannot apply in place (a memory decrease, the node out of room) makes the VPA fall back to an eviction, which the controller's `PodDisruptionBudget minAvailable: 1` refuses. The pod then keeps its requests until its next roll; nothing is stuck.
+
 ## \<current\> → \<next\> (`components.vm-manager` from gsoci and the giantswarm catalog; the guest image is a fetched artifact, no node paths)
 
 vm-manager releases through the generated CircleCI pipeline from 0.20.x (giantswarm/vm-manager#49, #50, #51): the chart from `oci://gsoci.azurecr.io/charts/giantswarm` like model-manager's, the image from gsoci, the guest image as an OCI artifact. `components.vm-manager.repository` moves off ghcr.io and the range's floor to `0.20.2`, the first release whose three artifacts all exist. The chart takes no image directory from a claim or a node path any more (`vm-manager.images.*` is gone) and mounts no device hostPaths (`vm-manager.host.devices` is gone): the guest image is the OCI artifact `gsoci.azurecr.io/giantswarm/vm-manager-guest-image:<version>` every release publishes, fetched into the state volume by an init container at pod start (`vm-manager.guestImage`, the tag defaulting to the chart appVersion), and a privileged container has the node's devices from the runtime.
