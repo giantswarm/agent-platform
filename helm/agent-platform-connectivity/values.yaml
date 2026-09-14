@@ -694,10 +694,10 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     resources:
       requests:
         cpu: 50m
-        memory: 64Mi
+        memory: 256Mi
       limits:
         cpu: 200m
-        memory: 256Mi
+        memory: 1Gi
     # Restricted-PSS compliant. The inner valkey chart's defaults omit
     # seccompProfile and allowPrivilegeEscalation, which Kyverno's restricted
     # policies reject (the init container reuses this same securityContext).
