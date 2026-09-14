@@ -1,0 +1,46 @@
+{{- if and (include "agent-platform.kagent.migration" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+---
+# Egress of the cut-over Job (migrate-job.yaml): DNS (with Cilium's proxy clause
+# so the FQDN selectors resolve), the Kubernetes API (HelmReleases,
+# OCIRepositories, Agents, AgentTemplates, the report ConfigMap, the CRDs) and
+# the agent chart's sources — its OCI registry (the 1.x tag and values schema
+# the rewrite validates against), the storage front the registry redirects the
+# chart's blob downloads to, and the GitHub API (every git skill pinned to a
+# commit) — by name, on 443: the same destinations agent-manager's own egress
+# admits, from one helper (agentManager.networkPolicy.egress adds to both). The
+# Job serves nothing. A regular object, not a hook one: it selects the Job's
+# pods by label, so it also covers a hand re-run.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "agent-platform.kagent.migration.name" . }}
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent-manager-migrate
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    {{- include "agent-platform.agentManager.chartSourcesEgress.cilium" . | nindent 4 }}
+    {{- with .Values.networkPolicy.additionalEgressFQDNs }}
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+{{- end }}

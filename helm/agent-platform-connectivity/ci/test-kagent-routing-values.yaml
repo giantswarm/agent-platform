@@ -1,3 +1,7 @@
+global:
+  identity:
+    issuerUrl: https://dex.ci.example.com
+
 components:
   agentgateway:
     enabled: true
@@ -9,7 +13,6 @@ kagent:
   controllerRoute:
     enabled: true
     hostname: agentgateway.ci.example.com
-    pathPrefix: /kagent
   uiRoute:
     enabled: true
     hostname: kagent.ci.example.com
@@ -33,8 +36,10 @@ kagent:
         enabled: true
 
 # agentgateway-muster: kagent.controllerRoute registers an AgentgatewayBackend +
-# HTTPRoute on the data-plane Gateway, so the agentgateway controller must be
+# GRPCRoute on the data-plane Gateway, so the agentgateway controller must be
 # installed. The agentgateway component must match the mode (validate.yaml guard).
+# The route's JWT policy is on by default: the issuer comes from global.identity
+# and the data plane needs gateway.jwksEgress to fetch the JWKS.
 ingress:
   mode: agentgateway-muster
   parentRefs:
@@ -52,3 +57,7 @@ muster:
         enabled: false
         storage:
           type: memory
+
+gateway:
+  jwksEgress:
+    enabled: true

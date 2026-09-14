@@ -1,0 +1,33 @@
+{{- /*
+Further databases on the platform's CNPG Cluster (postgres.databases): one
+Database CR per enabled entry — <clusterName>-<key>, spec.name from `name`,
+owned by the application role (CNPG's <clusterName>-app Secret carries that
+role's credentials, which the derived Secret reuses), its extensions, the
+reclaim policy. An entry with `component` renders only while that component is
+on. The derived connection Secrets are the hook Job next door
+(databases-hook.yaml). The initdb database itself (applicationDatabase) and the
+sessions database keep their own templates above.
+*/ -}}
+{{- range include "agent-platform.postgres.databases" . | fromJsonArray }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ .crName }}
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+    agent-platform.giantswarm.io/database: {{ .key }}
+spec:
+  name: {{ .name }}
+  owner: {{ .owner }}
+  cluster:
+    name: {{ .cluster }}
+  databaseReclaimPolicy: {{ .reclaimPolicy }}
+  {{- with .extensions }}
+  extensions:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+{{- end }}

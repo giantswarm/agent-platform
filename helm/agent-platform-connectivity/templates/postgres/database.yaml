@@ -21,6 +21,11 @@ spec:
   owner: {{ .Values.postgres.applicationDatabase.owner | default "kagent" }}
   cluster:
     name: {{ $clusterName }}
+  {{- if eq (.Values.postgres.applicationDatabase.ensure | default "present") "absent" }}
+  # The 30-day drop of the 0.10 database after the kagent API v2 cut-over
+  # (UPGRADE.md): CNPG drops the database and keeps this object as the record.
+  ensure: absent
+  {{- end }}
   extensions:
     - name: vector
 {{- end }}

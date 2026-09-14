@@ -5,9 +5,11 @@ components:
 kagent:
   namespaceOverride: kagent
   # CNPG DSN wiring — connects kagent to the platform Postgres instead of its
-  # bundled postgres:18.3-alpine. The CNPG Cluster generates Secret
-  # `agent-platform-pg-app` in the kagent namespace; its `uri` key holds the
-  # full connection string including the generated password.
+  # bundled postgres:18.3-alpine. The controller's database is kagent_v2
+  # (postgres.databases[] below); this chart's hook derives its connection
+  # Secret `kagent-pg-kagent-v2-app` (clusterName kagent-pg) in the kagent
+  # namespace from the Cluster's bootstrap Secret; its `uri` key holds the full
+  # connection string including the generated password.
   database:
     postgres:
       urlFile: /etc/cnpg/uri
@@ -18,7 +20,7 @@ kagent:
     volumes:
       - name: cnpg-dsn
         secret:
-          secretName: agent-platform-pg-app
+          secretName: kagent-pg-kagent-v2-app
           items:
             - key: uri
               path: uri

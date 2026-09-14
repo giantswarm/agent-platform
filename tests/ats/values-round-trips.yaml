@@ -24,6 +24,10 @@ global:
       secretName: agent-platform-idp-ca
 
 components:
+  # The write path of the agent round trips: agent-manager composes agents as
+  # Generic chart 1.x HelmReleases (an AgentTemplate on the platform Harness
+  # plus the agent's muster RemoteMCPServer) for the kagent of
+  # values-kagent.yaml.
   agent-manager:
     enabled: true
 

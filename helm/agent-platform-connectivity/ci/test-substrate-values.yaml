@@ -1,0 +1,72 @@
+# Agent Substrate inside the chart, the fleet shape: kagent and its runtime on,
+# the platform's CNPG Cluster holding Substrate's control-plane database, the
+# Kyverno exceptions and the cilium network policies of Substrate's hops. The
+# meta chart forwards the roster (both Substrate entries follow
+# components.kagent there) and resolves substrate.postgres.enabled: auto to
+# false with the Cluster on; a render of this chart on its own does the same.
+components:
+  kagent:
+    enabled: true
+  substrate:
+    enabled: true
+  substrate-crds:
+    enabled: true
+
+kagent:
+  namespaceOverride: kagent
+  harness:
+    snapshotLocation: s3://ci-agent-snapshots/agents
+  database:
+    postgres:
+      urlFile: /etc/cnpg/uri
+      vectorEnabled: true
+      bundled:
+        enabled: false
+  controller:
+    volumes:
+      - name: cnpg-dsn
+        secret:
+          secretName: kagent-pg-app
+          items:
+            - key: uri
+              path: uri
+    volumeMounts:
+      - name: cnpg-dsn
+        mountPath: /etc/cnpg
+        readOnly: true
+
+postgres:
+  enabled: true
+  namespace: kagent
+  instances: 1
+  storage:
+    size: 5Gi
+    storageClass: standard
+  vector:
+    enabled: true
+    extensionImage:
+      reference: ghcr.io/cloudnative-pg/pgvector:0.8.0-17-bookworm
+
+kyvernoPolicies:
+  enabled: true
+networkPolicy:
+  flavor: cilium
+
+# muster-direct: this case exercises the Substrate wiring, not routing.
+ingress:
+  mode: muster-direct
+  parentRefs:
+    - name: giantswarm-default
+      namespace: envoy-gateway-system
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - muster.ci.example.com
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory

@@ -2,10 +2,6 @@
 {{- if and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference }}
 {{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
 {{- $clusterName := .Values.postgres.clusterName }}
-{{- $ruleNames := .Values.kyvernoPolicies.volumeTypesRuleNames | default list }}
-{{- if or (not $ruleNames) (ne (len (compact $ruleNames)) (len $ruleNames)) }}
-{{- fail "kyvernoPolicies.volumeTypesRuleNames must name at least one non-empty rule of kyvernoPolicies.volumeTypesPolicyName; an exception that names no rule matches nothing, and the CNPG instance pods then fail the volume-types policy" }}
-{{- end }}
 # GS clusters enforce restrict-volume-types: a pod may mount only configMap, csi,
 # downwardAPI, emptyDir, ephemeral, persistentVolumeClaim, projected and secret.
 #
@@ -16,7 +12,8 @@
 # its pgvector migration check, because there is no database to connect to.
 #
 # Scope: the cnpg.io/cluster label the operator sets on this Cluster's instance
-# pods and on its own bootstrap/join Jobs. Both carry the ImageVolume.
+# pods and on its own bootstrap/join Jobs. Both carry the ImageVolume. The rule
+# is restrict-volume-types' restricted-volumes (kyvernoPolicies.rules).
 #
 # PolicyExceptions must live in policy-exceptions, giantswarm, flux-giantswarm or
 # kube-system — restrict-polex-namespaces enforces this.
@@ -29,9 +26,7 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   exceptions:
-  - policyName: {{ .Values.kyvernoPolicies.volumeTypesPolicyName }}
-    ruleNames:
-    {{- toYaml $ruleNames | nindent 4 }}
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "restricted-volumes")) | nindent 2 }}
   match:
     any:
     - resources:

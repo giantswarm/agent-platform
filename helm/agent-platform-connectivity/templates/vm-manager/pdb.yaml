@@ -1,0 +1,43 @@
+{{- /* PodDisruptionBudget on the vm-manager pod (the same shape as
+agentManager.podDisruptionBudget, giantswarm/agent-platform#431). The component
+chart has no knob of its own, so the umbrella renders the budget next to the
+component's network policies, selecting the pod the way those do. With the
+component's one replica — whose children are the running VMs — minAvailable: 1
+refuses every voluntary eviction, and AlwaysAllow keeps a pod that is not
+Ready evictable. */ -}}
+{{- $pdb := .Values.vmManager.podDisruptionBudget }}
+{{- if and (include "agent-platform.vmManager.enabled" .) $pdb.enabled }}
+{{- $hasMin := not (kindIs "invalid" $pdb.minAvailable) }}
+{{- $hasMax := not (kindIs "invalid" $pdb.maxUnavailable) }}
+{{- if and $hasMin $hasMax }}
+{{- fail "vmManager.podDisruptionBudget sets both minAvailable and maxUnavailable; a PodDisruptionBudget takes exactly one" }}
+{{- end }}
+{{- if not (or $hasMin $hasMax) }}
+{{- fail "vmManager.podDisruptionBudget.enabled is true but neither minAvailable nor maxUnavailable is set; set exactly one" }}
+{{- end }}
+{{- with $pdb.unhealthyPodEvictionPolicy }}
+{{- if not (has . (list "IfHealthyBudget" "AlwaysAllow")) }}
+{{- fail (printf "vmManager.podDisruptionBudget.unhealthyPodEvictionPolicy=%q is not a PodDisruptionBudget eviction policy (IfHealthyBudget, AlwaysAllow)" .) }}
+{{- end }}
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "agent-platform.vmManager.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.vmManager.labels" . | nindent 4 }}
+spec:
+  {{- if $hasMin }}
+  minAvailable: {{ $pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- end }}
+  {{- with $pdb.unhealthyPodEvictionPolicy }}
+  unhealthyPodEvictionPolicy: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "agent-platform.vmManager.podSelector" . | nindent 6 }}
+{{- end }}

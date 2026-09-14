@@ -1,0 +1,58 @@
+{{- /*
+The derived connection Secrets of postgres.databases: CNPG mints
+<clusterName>-app (type kubernetes.io/basic-auth: username, password, host,
+port, dbname, uri, jdbc-uri, pgpass, the fqdn-* variants) for the initdb
+database only, and a Database CR mints none — so this post-install /
+post-upgrade hook Job waits for <clusterName>-app (the Cluster bootstraps
+after this release applies it), and for every enabled database writes
+<clusterName>-<key>-app with dbname, uri, jdbc-uri and pgpass rewritten to
+the database and everything else copied, into postgres.namespace and into
+every namespace of the entry's secretNamespaces (a consumer in another
+namespace — Substrate's ate-api-server in ate-system — mounts it there).
+Server-side applied with a fixed field manager, so a re-run — every upgrade —
+yields the same Secret and changes nothing; the log says created or present
+per Secret. The role's password comes from CNPG's own alphabet (no `:`, no
+URL-special characters), which is what the rewrite relies on.
+*/ -}}
+{{- $databases := include "agent-platform.postgres.databases" . | fromJsonArray }}
+{{- if $databases }}
+{{- $keys := list }}{{- range $databases }}{{- $keys = append $keys .key }}{{- end }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "postgres-databases" "hook" "post-install,post-upgrade" "timeout" 1200
+      "about" (printf "derive the connection Secret of every postgres.databases entry (%s) from the CNPG %s-app Secret" (join ", " $keys) .Values.postgres.clusterName)
+      "script" (include "agent-platform.postgres.databases.script" (dict "root" $ "databases" $databases))) }}
+{{- end }}
+
+{{- define "agent-platform.postgres.databases.script" -}}
+cluster={{ .root.Values.postgres.clusterName | quote }}
+ns={{ .root.Values.postgres.namespace | default .root.Release.Namespace | quote }}
+src="${cluster}-app"
+echo "waiting for Secret $ns/$src (CNPG writes it once the Cluster $cluster has bootstrapped)"
+kubectl -n "$ns" wait --for=create "secret/$src" --timeout=900s >/dev/null
+source_json=$(kubectl -n "$ns" get secret "$src" -o json)
+src_db=$(printf '%s' "$source_json" | jq -r '.data.dbname' | base64 -d)
+derive() {
+  key=$1; db=$2; target=$3
+  name="${cluster}-${key}-app"
+  if kubectl -n "$target" get secret "$name" >/dev/null 2>&1; then state=present; else state=created; fi
+  printf '%s' "$source_json" | jq --arg key "$key" --arg db "$db" --arg src_db "$src_db" --arg name "$name" --arg ns "$target" --arg src "$src" '
+    (.data | with_entries(
+      if .key == "dbname" then .value = ($db | @base64)
+      elif (.key == "uri" or .key == "fqdn-uri") then .value = ((.value | @base64d) | sub("/" + $src_db + "$"; "/" + $db) | @base64)
+      elif (.key == "jdbc-uri" or .key == "fqdn-jdbc-uri") then .value = ((.value | @base64d) | sub("/" + $src_db + "\\?"; "/" + $db + "?") | @base64)
+      elif .key == "pgpass" then .value = ((.value | @base64d) | split(":") | .[2] = $db | join(":") | @base64)
+      else . end)) as $data
+    | {apiVersion: "v1", kind: "Secret", type: .type,
+       metadata: {name: $name, namespace: $ns,
+                  labels: {"agent-platform.giantswarm.io/derived-from": $src},
+                  annotations: {"agent-platform.giantswarm.io/database": $key}},
+       data: $data}' \
+    | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
+  echo "database $key ($db): Secret $target/$name $state"
+}
+{{- range $db := .databases }}
+{{- range $target := $db.secretNamespaces }}
+derive {{ $db.key | quote }} {{ $db.name | quote }} {{ $target | quote }}
+{{- end }}
+{{- end }}
+echo "derived connection Secrets complete"
+{{- end -}}

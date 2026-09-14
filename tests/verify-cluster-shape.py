@@ -27,6 +27,7 @@ Each case below pins one promise:
 Deliberately stdlib-only: the CI image has no PyYAML.
 """
 
+import re
 import subprocess
 import sys
 
@@ -52,6 +53,12 @@ PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
 # kagent, agent-sandbox and postgres on, so every gated object is reachable.
 ON = [
     "--set", "components.kagent.enabled=true",
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    # Agent Substrate follows kagent in the meta chart's roster; the connectivity
+    # chart, rendered on its own below, reads the roster — so both are set. Its
+    # four PolicyExceptions are the kyverno.io objects the Kyverno cases count.
+    "--set", "components.substrate.enabled=true",
+    "--set", "components.substrate-crds.enabled=true",
     "--set", "components.agent-sandbox.enabled=true",
     "--set", "postgres.enabled=true",
     # The modelServing switch with its KServe prerequisites: its values block
@@ -225,13 +232,22 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     expect(got == yes(envoy), f"{where} dicebear route.enabled = {got!r}, want {yes(envoy)!r}")
 
     # The connectivity chart on its own, same served groups: the matching objects.
-    objects = kinds(render(connectivity, [*PARENT_REF, *ON, *apis(served)]))
+    # kagent.serviceMonitor is off by default (the kagent line serves no
+    # /metrics), so the one ServiceMonitor the gate can produce is switched on
+    # here to see the gate resolve; the default is verify-global's.
+    rendered = render(connectivity, [*PARENT_REF, *ON, *apis(served), "--set", "kagent.serviceMonitor.enabled=true"])
+    objects = kinds(rendered)
     cnp, netpol = objects.get("CiliumNetworkPolicy", 0), objects.get("NetworkPolicy", 0)
     expect(not (cnp and netpol), f"{where} connectivity renders both network-policy flavors")
     expect((cnp > 0) == cilium and (netpol > 0) == (not cilium),
            f"{where} connectivity flavor objects: CiliumNetworkPolicy={cnp} NetworkPolicy={netpol}")
     for kind in ("ClusterPolicy", "PolicyException"):
         expect((objects.get(kind, 0) > 0) == kyverno, f"{where} connectivity {kind} count={objects.get(kind, 0)}, kyverno served={kyverno}")
+    # kagent API v2: no Agent CR, per-agent Deployment or config Secret is left to
+    # mutate, so the two kagent declarative-agent ClusterPolicies are gone from
+    # every shape; the chart's ClusterPolicy is the agent-sandbox one.
+    expect(not re.search(r"kagent-declarative-pod-security|kagent-srt-settings|kagent\.dev/v1alpha2", rendered),
+           f"{where} connectivity render carries a kagent v1alpha2 Agent mutation or object")
     expect((objects.get("ServiceMonitor", 0) > 0) == monitors,
            f"{where} connectivity ServiceMonitor count={objects.get('ServiceMonitor', 0)}, monitoring served={monitors}")
 

@@ -33,6 +33,15 @@ ingress:
 networkPolicy:
   enabled: false
 
+# The kagent API v2 cut-over Job (agentManager.migration, on by default with
+# kagent and agent-manager on) runs `agent-manager migrate` (agent-manager
+# 1.1.0). Off here: the smoke's kagent is fresh — there is no 0.10 agent to
+# migrate, so the Job would only report an empty run; the migration rehearsal
+# (agentlab#143) is the Job's proof, not this smoke.
+agentManager:
+  migration:
+    enabled: false
+
 components:
   valkey:
     enabled: false

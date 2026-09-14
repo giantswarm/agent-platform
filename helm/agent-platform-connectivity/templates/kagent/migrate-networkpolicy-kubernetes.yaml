@@ -1,0 +1,44 @@
+{{- if and (include "agent-platform.kagent.migration" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+---
+# Egress of the cut-over Job (migrate-job.yaml): DNS, the Kubernetes API and —
+# vanilla NetworkPolicy has no FQDN selector — the agent chart's sources on 443
+# as agent-manager's own egress admits them, from one helper: every public
+# destination, or agentManager.networkPolicy.egress.cidrs when set
+# (networkPolicy.additionalEgressCIDRs adds private ones). The Job serves
+# nothing. A regular object, not a hook one: it selects the Job's pods by
+# label, so it also covers a hand re-run.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agent-platform.kagent.migration.name" . }}
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent-manager-migrate
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- include "agent-platform.agentManager.chartSourcesEgress.kubernetes" . | nindent 4 }}
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+{{- end }}

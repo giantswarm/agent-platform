@@ -1,5 +1,12 @@
-# kagent controllerRoute with the JWT policy enabled: renders the
-# AgentgatewayPolicy + kagent-controller-jwks AgentgatewayBackend alongside the routes.
+# kagent controllerRoute in its default shape: the JWT policy is on (Strict,
+# issuer from global.identity.issuerUrl, JWKS backend), so the render carries the
+# kagent-controller GRPCRoute, the AgentgatewayPolicy with the identity
+# transformation and the kagent-controller-jwks AgentgatewayBackend. Nothing
+# under jwtAuthentication is set here on purpose.
+global:
+  identity:
+    issuerUrl: https://dex.ci.example.com
+
 components:
   agentgateway:
     enabled: true
@@ -11,10 +18,6 @@ kagent:
   controllerRoute:
     enabled: true
     hostname: agentgateway.ci.example.com
-    pathPrefix: /kagent
-    jwtAuthentication:
-      enabled: true
-      issuer: https://dex.ci.example.com
 
 ingress:
   mode: agentgateway-muster

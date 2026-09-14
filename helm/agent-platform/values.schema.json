@@ -106,6 +106,9 @@
                                 "type": "string"
                             }
                         },
+                        "disableWaitForJobs": {
+                            "type": "boolean"
+                        },
                         "forwardAllValues": {
                             "type": "boolean"
                         },
@@ -299,20 +302,56 @@
                         "chart": {
                             "type": "string"
                         },
-                        "crds": {
-                            "type": "string"
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "driftDetection": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "mode": {
+                                    "type": "string"
+                                }
+                            }
                         },
                         "enabled": {
                             "type": "boolean"
                         },
-                        "installDisableWait": {
-                            "type": "boolean"
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "omitKeys": {
                             "type": "array",
                             "items": {
                                 "type": "string"
                             }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "kagent-crds": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
                         },
                         "repository": {
                             "type": "string"
@@ -526,6 +565,87 @@
                         }
                     }
                 },
+                "substrate": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "valuesFromRefs": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "optional": {
+                                        "type": "boolean"
+                                    },
+                                    "valuesKey": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "substrate-crds": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "valkey": {
                     "type": "object",
                     "additionalProperties": true,
@@ -535,6 +655,45 @@
                         },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "vm-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedValues": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "repository": {
                             "type": "string"
@@ -573,6 +732,39 @@
                     "properties": {
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "external": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "cidrs": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "pattern": "^(?:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(?:3[0-2]|[12]?[0-9])|(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?:(?::[0-9A-Fa-f]{1,4}){1,7}|:)|::(?:[Ff]{4}(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|(?:[0-9A-Fa-f]{1,4}:){1,4}:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9]))$"
+                                    }
+                                },
+                                "fqdns": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "matchName": {
+                                                "type": "string"
+                                            },
+                                            "matchPattern": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "port": {
+                                    "type": "integer",
+                                    "maximum": 65535,
+                                    "minimum": 1
+                                }
+                            }
                         },
                         "namespace": {
                             "type": "string"
@@ -712,6 +904,15 @@
                         },
                         "name": {
                             "type": "string"
+                        },
+                        "podAnnotations": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "karpenter.sh/do-not-disrupt": {
+                                    "type": "string"
+                                }
+                            }
                         },
                         "podSecurityContext": {
                             "type": "object",
@@ -853,6 +1054,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "semverFilter": {
+                            "type": "string"
+                        },
                         "versionRange": {
                             "type": "string"
                         }
@@ -964,6 +1168,42 @@
                 }
             }
         },
+        "hooks": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "kubectlImage": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "registry": {
+                            "type": "string"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "tag": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "opensslImage": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "registry": {
+                            "type": "string"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "tag": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "ingress": {
             "type": "object",
             "additionalProperties": false,
@@ -1049,6 +1289,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "kagent-crds": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "klausGateway": {
             "type": "object",
             "additionalProperties": true
@@ -1088,27 +1332,50 @@
                 "policyExceptionNamespace": {
                     "type": "string"
                 },
-                "seccompPolicyName": {
-                    "type": "string"
-                },
-                "seccompRuleNames": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "minItems": 1,
-                    "uniqueItems": true
-                },
-                "volumeTypesPolicyName": {
-                    "type": "string"
-                },
-                "volumeTypesRuleNames": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "minItems": 1,
-                    "uniqueItems": true
+                "rules": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "adding-capabilities": {
+                            "type": "string"
+                        },
+                        "adding-capabilities-strict": {
+                            "type": "string"
+                        },
+                        "app-armor": {
+                            "type": "string"
+                        },
+                        "check-seccomp": {
+                            "type": "string"
+                        },
+                        "check-seccomp-strict": {
+                            "type": "string"
+                        },
+                        "host-path": {
+                            "type": "string"
+                        },
+                        "host-ports-none": {
+                            "type": "string"
+                        },
+                        "privilege-escalation": {
+                            "type": "string"
+                        },
+                        "privileged-containers": {
+                            "type": "string"
+                        },
+                        "require-drop-all": {
+                            "type": "string"
+                        },
+                        "restricted-volumes": {
+                            "type": "string"
+                        },
+                        "run-as-non-root": {
+                            "type": "string"
+                        },
+                        "run-as-non-root-user": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         },
@@ -1359,6 +1626,15 @@
                         }
                     }
                 },
+                "modelConfigPolicy": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "pathPrefixes": {
                     "type": "array",
                     "items": {
@@ -1459,6 +1735,13 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "ensure": {
+                            "type": "string",
+                            "enum": [
+                                "present",
+                                "absent"
+                            ]
+                        },
                         "name": {
                             "type": "string"
                         },
@@ -1750,6 +2033,66 @@
                 "clusterName": {
                     "type": "string"
                 },
+                "databases": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "kagent-v2": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "component": {
+                                    "type": "string"
+                                },
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "extensions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "reclaimPolicy": {
+                                    "type": "string"
+                                },
+                                "secretNamespaces": {
+                                    "type": "array"
+                                }
+                            }
+                        },
+                        "substrate": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "component": {
+                                    "type": "string"
+                                },
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "extensions": {
+                                    "type": "array"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "reclaimPolicy": {
+                                    "type": "string"
+                                },
+                                "secretNamespaces": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -1830,10 +2173,47 @@
         "provider": {
             "type": "string"
         },
+        "scheduling": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "singletons": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "nodeSelector": {
+                            "type": "object",
+                            "description": "Node labels the four stateful singletons (muster, muster-valkey, the kagent controller, klaus-gateway) must land on, merged into each component's own nodeSelector (its keys win). On a Karpenter spot installation: `karpenter.sh/capacity-type: on-demand`. Empty = as before.",
+                            "additionalProperties": true
+                        },
+                        "tolerations": {
+                            "type": "array",
+                            "description": "Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint."
+                        }
+                    }
+                }
+            }
+        },
         "subscriptionID": {
             "type": "string"
         },
+        "substrate": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "substrate-crds": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "valkey": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "vm-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "vmManager": {
             "type": "object",
             "additionalProperties": true
         }
