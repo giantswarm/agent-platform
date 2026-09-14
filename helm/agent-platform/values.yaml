@@ -1613,6 +1613,27 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     dataStorage:
       enabled: true
       requestedSize: 1Gi
+    # Valkey's own memory bound (giantswarm/agent-platform#446). The upstream
+    # subchart appends this fragment to the generated valkey.conf; without one
+    # Valkey runs with `maxmemory 0` and the only bound is the container limit:
+    # the dataset grows until the kernel kills the process, the pod restarts,
+    # loads the RDB back to the same size and the next background save (a
+    # fork, copy-on-write on top of the dataset) tips it over again — gazelle
+    # 2026-09-14, 19 OOM kills in 90 minutes before the limit below was raised.
+    # `maxmemory` sits at ~60 % of resources.limits.memory so the fork's
+    # copy-on-write pages, client buffers and allocator fragmentation have
+    # their headroom under the cgroup (keep the two in step: tests/verify-valkey.py
+    # holds maxmemory at or under two thirds of the limit). `volatile-lru`
+    # evicts the least recently used key that carries a TTL — every muster
+    # record does (tokens, sessions, capability caches); an evicted token costs
+    # one re-sign-in, an evicted capability entry one re-list on the next
+    # connect. The store is a cache (see the persistence note above): eviction
+    # is the intended behaviour under pressure, a killed process is not. An
+    # installation's own valkeyConfig replaces the fragment whole (a string
+    # value is not merged).
+    valkeyConfig: |
+      maxmemory 640mb
+      maxmemory-policy volatile-lru
     # The store holds every OAuth token, session and cached capability of every
     # person and agent, encrypted at rest, and Valkey loads the whole RDB into
     # memory on every start: gazelle's held 247 MB after three weeks (5237

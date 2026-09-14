@@ -492,6 +492,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.valkey.auth.aclUsers.default.passwordKey | string | `""` |  |
 | valkey.valkey.dataStorage.enabled | bool | `true` |  |
 | valkey.valkey.dataStorage.requestedSize | string | `"1Gi"` |  |
+| valkey.valkey.valkeyConfig | string | `"maxmemory 640mb\nmaxmemory-policy volatile-lru\n"` |  |
 | valkey.valkey.resources.requests.cpu | string | `"50m"` |  |
 | valkey.valkey.resources.requests.memory | string | `"256Mi"` |  |
 | valkey.valkey.resources.limits.cpu | string | `"200m"` |  |

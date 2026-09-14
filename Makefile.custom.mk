@@ -721,6 +721,16 @@ KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --se
 # deletes; until then they are the only place `app: kagent` may still appear.
 KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
 .PHONY: verify-kagent-netpol
+verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim.
+	@echo "====> $@ ($(CHART_DIR))"
+	@echo "--> default render: the fragment, the bound, the policy"
+	@helm template t $(CHART_DIR) $(VM) >/tmp/vv-meta.out 2>&1 || { cat /tmp/vv-meta.out; exit 1; }
+	@python3 tests/verify-valkey.py /tmp/vv-meta.out
+	@echo "--> an installation's own valkeyConfig replaces the fragment whole"
+	@helm template t $(CHART_DIR) $(VM) -f $(CHART_DIR)/ci/test-valkey-override-values.yaml >/tmp/vv-meta-override.out 2>&1 || { cat /tmp/vv-meta-override.out; exit 1; }
+	@python3 tests/verify-valkey.py --override /tmp/vv-meta-override.out
+	@echo "$@: all passed"
+
 verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on the agentgateway data plane (AgentgatewayParameters overlay), muster, kagent-controller, klaus-gateway and muster-valkey (their charts' podAnnotations); PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager and muster-valkey (#439); every knob off = nothing; the budgets' guards. And the placement of the stateful singletons (#439): scheduling.singletons.nodeSelector / tolerations reach muster, muster-valkey, the kagent controller and klaus-gateway as their charts' knobs (a component's own keys win), never the connectivity release; empty = nothing forwarded.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, agent-manager on: the data-plane pod annotation and the agent-manager budget render"
