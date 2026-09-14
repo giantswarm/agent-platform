@@ -97,16 +97,6 @@ The LM Studio base URL model-manager dials (model-manager.lmstudio.endpoint).
 {{- end -}}
 
 {{/*
-The endpoint of a host-proxying backend — ollama: model-manager.ollama.endpoint,
-lemonade: model-manager.lemonade.endpoint, lmstudio:
-model-manager.lmstudio.endpoint. Empty for kserve, which has none.
-*/}}
-{{- define "agent-platform.modelManager.hostEndpoint" -}}
-{{- $backend := include "agent-platform.modelManager.backend" . -}}
-{{- if eq $backend "ollama" -}}{{ include "agent-platform.modelManager.ollamaEndpoint" . }}{{- else if eq $backend "lemonade" -}}{{ include "agent-platform.modelManager.lemonadeEndpoint" . }}{{- else if eq $backend "lmstudio" -}}{{ include "agent-platform.modelManager.lmstudioEndpoint" . }}{{- end -}}
-{{- end -}}
-
-{{/*
 An endpoint URL (the argument) split for network policies, as JSON:
   { "host": "<host>", "port": <int>, "isIP": bool }
 The port defaults from the scheme (80 / 443) when the URL carries none.
@@ -125,37 +115,35 @@ The port defaults from the scheme (80 / 443) when the URL carries none.
 {{- end -}}
 
 {{/*
-The Ollama endpoint split for network policies (endpointTarget of ollamaEndpoint).
-*/}}
-{{- define "agent-platform.modelManager.ollamaTarget" -}}
-{{- include "agent-platform.modelManager.endpointTarget" (include "agent-platform.modelManager.ollamaEndpoint" .) -}}
-{{- end -}}
-
-{{/*
-The host backend's endpoint split for network policies — ollama, lemonade or
-lmstudio; an empty JSON object for kserve.
-*/}}
-{{- define "agent-platform.modelManager.hostTarget" -}}
-{{- $endpoint := include "agent-platform.modelManager.hostEndpoint" . -}}
-{{- if $endpoint -}}{{ include "agent-platform.modelManager.endpointTarget" $endpoint }}{{- else -}}{}{{- end -}}
-{{- end -}}
-
-{{/*
 Every host model server among the component's backends (ollama, lemonade,
 lmstudio), split for network policies, as a JSON list of
   { "backend": "<name>", "host": "<host>", "port": <int>, "isIP": bool }
 in the order of the backends list. Empty when none is listed (kserve alone).
+
+Usage: include "agent-platform.modelManager.hostTargets" (dict "root" . "key" "endpoint")
+
+The key names which address of each backend to read, so the two policies that
+need these targets share one list of host backends instead of spelling it out
+in a dialect each: "endpoint" is what model-manager itself dials, "agentHost"
+what it writes into the ModelConfigs for the agent pods to dial, which falls
+back to the endpoint where it is unset.
 */}}
 {{- define "agent-platform.modelManager.hostTargets" -}}
+{{- $root := .root -}}
+{{- $key := .key -}}
+{{- $chart := include "agent-platform.modelManager.chartValues" $root | fromJson -}}
 {{- $out := list -}}
-{{- range $name := include "agent-platform.modelManager.backends" . | fromJsonArray -}}
-{{- $endpoint := "" -}}
-{{- if eq $name "ollama" -}}{{- $endpoint = include "agent-platform.modelManager.ollamaEndpoint" $ -}}
-{{- else if eq $name "lemonade" -}}{{- $endpoint = include "agent-platform.modelManager.lemonadeEndpoint" $ -}}
-{{- else if eq $name "lmstudio" -}}{{- $endpoint = include "agent-platform.modelManager.lmstudioEndpoint" $ -}}
+{{- range $name := include "agent-platform.modelManager.backends" $root | fromJsonArray -}}
+{{- if has $name (list "ollama" "lemonade" "lmstudio") -}}
+{{- $address := dig $name $key "" $chart | default (dig $name "endpoint" "" $chart) -}}
+{{- /* urlParse errors hard on some malformed values (a host:port with no
+       scheme), and template render order is not ours to rely on, so an address
+       the guards reject is skipped rather than parsed here: validate.yaml
+       rejects the same value with a message naming the key, and it renders in
+       every network-policy flavour, so a render that completes has passed it. */ -}}
+{{- if regexMatch "^https?://[^/]+" $address -}}
+{{- $out = append $out (merge (dict "backend" $name) (include "agent-platform.modelManager.endpointTarget" $address | fromJson)) -}}
 {{- end -}}
-{{- if $endpoint -}}
-{{- $out = append $out (merge (dict "backend" $name) (include "agent-platform.modelManager.endpointTarget" $endpoint | fromJson)) -}}
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
