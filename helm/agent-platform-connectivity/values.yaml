@@ -882,12 +882,20 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         # The JVM's options: its heap as a share of the memory limit (the
         # image's own default leaves most of the limit unused); always set a limit.
         javaOpts: -XX:MaxRAMPercentage=70
+        # The ephemeral-storage requests and limit are required as well: the
+        # container mounts two emptyDirs (/tmp for the JVM, the image's /data)
+        # that take the limit as their sizeLimit, and Kyverno's
+        # require-emptydir-requests-and-limits reports a container mounting an
+        # emptyDir without both (the render refuses it). The façade streams —
+        # a snapshot never lands on its disk — so a small bound is enough.
         resources:
           requests:
             cpu: 250m
             memory: 1Gi
+            ephemeral-storage: 256Mi
           limits:
             memory: 1Gi
+            ephemeral-storage: 1Gi
         azure:
           # https://<account>.blob.core.windows.net (a lab's Azurite:
           # http://azurite:10000/devstoreaccount1). Derived with provider capz;

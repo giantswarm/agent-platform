@@ -2,6 +2,15 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the s3proxy façade declares its ephemeral storage and bounds its emptyDirs)
+
+The `substrate-s3proxy` container (`kagent.harness.snapshotStore.s3proxy`, on with provider `capz` or `s3proxy.enabled`) carries `resources.requests.ephemeral-storage` (256Mi) and `resources.limits.ephemeral-storage` (1Gi), and its two emptyDirs (`/tmp`, `/data`) a `sizeLimit` equal to the limit (giantswarm/agent-platform#438). Kyverno's `require-emptydir-requests-and-limits` stops reporting the Deployment on every rollout, and a cluster that enforces the policy admits the façade.
+
+### Operator action
+
+- None: the connectivity release re-renders the Deployment and the façade's two pods roll once. The rolling update surges a new pod before it takes an old one down (two replicas, the default strategy) and a draining pod answers `/healthz` 503 for its 5 s preStop, so the Service keeps one ready replica throughout.
+- An installation's own `s3proxy.resources` entries merge over the defaults, so both `ephemeral-storage` fields stay unless set to `null` — which the render refuses, naming the key (`kagent.harness.snapshotStore.s3proxy.resources.<requests|limits>.ephemeral-storage is required`). A bigger `limits.ephemeral-storage` moves both emptyDirs' `sizeLimit` with it.
+
 ## \<current\> → \<next\> (the Substrate line re-pins to `v0.0.27-gs.9`, the kagent line to `v0.11.0-gs.12`: a superseded template's crashed golden actor is collected and frees its worker)
 
 `components.kagent` / `components.kagent-crds` move to `>=0.11.0-gs.12 <0.11.1-0` and `components.substrate` / `components.substrate-crds` to `>=0.0.27-gs.9 <0.0.28-0`. `v0.11.0-gs.12` stamps the Substrate worker image `0.0.27-gs.9` into the kagent chart's `substrateWorkerPool.workerImage`; `v0.0.27-gs.9` = `gs.8` + giantswarm/substrate#30 (the gVisor worker's terminate collects a workload whose runsc containers are already gone). Before it, an `AgentTemplate` changed while its previous revision's golden boot was crash-looping (a skill that fails to load, an image the registry refuses after the first pull) left the superseded revision uncollectable: the kagent controller logged `failed to collect runtime revision … delete unreferenced ActorTemplate kagent/<agent>-kagent-<rev>: … while running `runsc state`: exit status 128` every minute per template, the golden actor stayed `ACTOR_STATE_DELETING` with its worker assignment intact, and **one worker of the pool was pinned per such template** (gazelle 2026-09-13: two of four workers; giantswarm/giantswarm#37773). The new revision itself was Ready and unaffected.
