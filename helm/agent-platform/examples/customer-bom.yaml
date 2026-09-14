@@ -50,7 +50,7 @@ components:
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.20.0" }
   agent-manager:                 { versionRange: "1.0.0" }
-  vm-manager:                    { versionRange: "0.20.0" }
+  vm-manager:                    { versionRange: "0.20.1" }
   agent-platform-connectivity: { versionRange: "4.11.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
