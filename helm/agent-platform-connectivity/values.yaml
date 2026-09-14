@@ -1845,11 +1845,14 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway
       # A release of the Giant Swarm line of agentgateway
-      # (github.com/giantswarm/agentgateway-upstream, FORK.md: upstream v1.5.0
-      # rebuilt, scanned and signed there, mirrored into gsoci by the retagger)
-      # — the same release the giantswarm/agentgateway packaging chart pins for
-      # the controller; move both together.
-      tag: v1.5.1-gs.1
+      # (github.com/giantswarm/agentgateway-upstream, FORK.md: upstream main at
+      # the line's pin — since v1.5.1-gs.4 a main commit past v1.5.0, the
+      # substrate protocol the Substrate line's v0.0.29 router speaks — rebuilt,
+      # scanned and signed there, mirrored into gsoci by the retagger) — the
+      # same release the giantswarm/agentgateway packaging chart pins for the
+      # controller and the Substrate line's chart for its router; move all
+      # three together.
+      tag: v1.5.1-gs.4
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
