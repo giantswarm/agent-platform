@@ -135,6 +135,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.versionRange | string | `">=5.12.0 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
+| components.muster.driftDetection.mode | string | `"enabled"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agentgateway.versionRange | string | `"2.x"` |  |

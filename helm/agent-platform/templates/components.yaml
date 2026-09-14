@@ -155,7 +155,10 @@ knowledge:
       its objects must tolerate the re-apply (a field another controller owns
       needs an ignore rule; an object opts out with the annotation
       helm.toolkit.fluxcd.io/driftDetection: disabled). kagent carries it for
-      the platform Harness, the runtime of every agent (#409).
+      the platform Harness, the runtime of every agent (#409); muster for its
+      own CiliumNetworkPolicy, whose egress selectors named the pre-rename
+      namespace on a live cluster while the release manifest named the new one
+      (#287).
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
       HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace

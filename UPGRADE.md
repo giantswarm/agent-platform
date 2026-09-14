@@ -167,6 +167,17 @@ The platform Harness `kagent` admits templates by `agent-platform.giantswarm.io/
 - Do not set `eks.amazonaws.com/role-arn` on `substrate.atelet.serviceAccount.annotations` / `substrate.ateApiServer.serviceAccount.annotations` yourself while the block is on — the derived one wins and a differing one fails the render; other annotations of yours stay.
 - A BOM pins `substrate`/`substrate-crds` to `0.0.27-gs.8` or later (`examples/customer-bom.yaml`).
 
+## \<current\> → \<next\> (the muster release detects and corrects drift: a CiliumNetworkPolicy edited away from its manifest comes back on the next reconcile)
+
+The muster HelmRelease carries `spec.driftDetection.mode: enabled` (`components.muster.driftDetection`), the second release to carry it after kagent. On every reconcile of the release — `gitops.interval`, 10 minutes by default — helm-controller compares the manifest in the Helm storage with the cluster and re-applies what differs or is missing, as a server-side apply, without a Helm revision. The reason is the muster chart's own `CiliumNetworkPolicy` `muster`, whose egress selectors name the release namespace: on a management cluster that carried the platform through the `agentic-platform` → `agent-platform` rename the live object kept the old namespace while the release manifest named the new one. Helm's three-way merge patches only what changed **between two release manifests**, so a drifted live object stays drifted across every upgrade — muster's egress to Valkey stayed denied (`Policy denied DROPPED` in Hubble), its OAuth server never started, and `/.well-known/oauth-protected-resource` answered 503 for hours after a routine pod restart (giantswarm/agent-platform#287). Now the policy is back on its manifest within one interval.
+
+### Operator action
+
+- None. A cluster whose live muster objects drifted is corrected on the first reconcile after the upgrade; check it once with `kubectl -n <gitops.targetNamespace, the release namespace by default> get ciliumnetworkpolicy muster -o yaml` if the cluster came through the rename.
+- A hand edit to an object of the muster release (`kubectl edit` on the Deployment, the Service, the policy, …) is reverted on the next reconcile; make the change in the values. An object of the chart opts out with the annotation `helm.toolkit.fluxcd.io/driftDetection: disabled`.
+- **`muster.autoscaling.enabled: true`**: add an ignore rule before you turn the HPA on, or the release and the HPA overwrite each other's `spec.replicas` on every interval — the muster chart renders `spec.replicas` whether or not the HPA is on. Set `components.muster.driftDetection.ignore` to `[{paths: ["/spec/replicas"], target: {kind: Deployment, name: muster}}]`. The fleet leaves the HPA off, so nothing needs the rule today.
+- `components.<name>.driftDetection` is available for every component and set for kagent and muster only; turning it on for another release is a decision per release (its objects must tolerate the re-apply).
+
 ## \<current\> → \<next\> (the kagent release detects and corrects drift: a deleted platform Harness comes back on the next reconcile)
 
 The kagent HelmRelease carries `spec.driftDetection.mode: enabled` (`components.kagent.driftDetection`; the key is a passthrough every component entry takes, set for kagent only). On every reconcile of the release — `gitops.interval`, 10 minutes by default — helm-controller compares the manifest in the Helm storage with the cluster and re-applies what differs or is missing, as a server-side apply, without a Helm revision. The reason is the platform `Harness` `kagent`, the runtime of every agent: a consumer whose exactly pinned connectivity chart skipped 4.7.19's `keep` lost it on the 4.8.0 upgrade, and a kagent release without drift detection never recreated it — a plain reconcile of an unchanged release reports "in-sync" (600 s observed, every template unadmitted; giantswarm/agent-platform#409). Now it is back within one interval and the templates it admits are Ready again ~25 s later; the ATS smoke deletes it on every PR and sees it back.
@@ -175,7 +186,7 @@ The kagent HelmRelease carries `spec.driftDetection.mode: enabled` (`components.
 
 - None. The forced reconcile the 4.8.0 note below names is not needed from this release on.
 - A hand edit to an object of the kagent release (`kubectl edit` on the controller Deployment, the WorkerPool, the Harness, …) is reverted on the next reconcile; make the change in the values. An object of the chart opts out with the annotation `helm.toolkit.fluxcd.io/driftDetection: disabled`; a field another controller owns is ignored through `components.kagent.driftDetection.ignore` (JSON Pointer paths, an optional target selector). Neither is needed for the kagent chart today: nothing of the platform edits its objects in place.
-- `components.<name>.driftDetection` is available for every component and set for kagent only; turning it on for another release is a decision per release (its objects must tolerate the re-apply).
+- `components.<name>.driftDetection` is available for every component; turning it on for another release is a decision per release (its objects must tolerate the re-apply).
 
 ## 4.7.x → 4.8.0 (the kagent chart names its own images; the platform Harness is the kagent release's)
 

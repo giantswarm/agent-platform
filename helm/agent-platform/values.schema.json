@@ -554,6 +554,15 @@
                         "crds": {
                             "type": "string"
                         },
+                        "driftDetection": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "mode": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },

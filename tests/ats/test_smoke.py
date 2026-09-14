@@ -34,11 +34,14 @@ module top to bottom; each one builds on the state the previous left):
      agent chart 1.x into the kagent namespace, the HelmRelease runs as
      kagent-flux and reaches Ready, the AgentTemplate reaches Ready on the
      Harness and the agent's RemoteMCPServer (the toolset carrier) is Accepted;
-     and the drift correction: the platform Harness deleted by hand (what the
-     4.8.0 upgrade does to a consumer whose pinned connectivity chart skipped
-     4.7.19's keep) is back on the kagent release's next reconcile — a
-     requested reconcile stands in for the 10-minute interval; no forceAt, no
-     Helm revision — and both templates return to Ready on it;
+     and the drift correction on the two releases that carry it: the platform
+     Harness deleted by hand (what the 4.8.0 upgrade does to a consumer whose
+     pinned connectivity chart skipped 4.7.19's keep) is back on the kagent
+     release's next reconcile — a requested reconcile stands in for the
+     10-minute interval; no forceAt, no Helm revision — and both templates
+     return to Ready on it; an object of the muster release edited by hand is
+     back on its manifest the same way (the PDB stands in for the chart's
+     CiliumNetworkPolicy, which kind renders none of);
   7. the fixpoint: two self-management intervals after the adoption `helm
      history` is unchanged and the values Secret equals the values used;
   8. the Helm CLI is day-0 only: `helm upgrade` is refused by the admission
@@ -568,6 +571,50 @@ def test_deleted_platform_harness_comes_back_on_the_next_reconcile(kube: Kube, k
     assert hr["status"]["history"][0]["version"] == revision, f"the correction wrote a Helm revision ({revision} -> {hr['status']['history'][0]['version']}); a drift correction is a server-side apply, not an upgrade"
     logger.info("Harness %s deleted and back (uid %s -> %s) on a plain reconcile of the kagent release, Helm revision %s unchanged; templates %s Ready again",
                 HARNESS, before["metadata"]["uid"], harness["metadata"]["uid"], revision, (DECLARATIVE_AGENT, MANAGED_AGENT))
+
+
+@pytest.mark.smoke
+def test_edited_muster_object_is_reverted_on_the_next_reconcile(kube: Kube, muster: PortForward) -> None:
+    """The muster release detects and corrects drift (spec.driftDetection.mode:
+    enabled, giantswarm/agent-platform#287): an object of the release edited by
+    hand is back on the manifest on the release's next reconcile, as a
+    server-side apply, with no Helm revision. The object on the management
+    cluster was the chart's CiliumNetworkPolicy `muster`, whose egress selectors
+    kept the pre-rename namespace `agentic-platform` while the release manifest
+    named `agent-platform` — Helm's three-way merge patches only what changed
+    between two release manifests, so the live object stayed drifted and muster's
+    egress to Valkey stayed denied. Kind runs no Cilium and the smoke renders no
+    network policy, so the PodDisruptionBudget of the same release stands in for
+    it: one field of the manifest, edited away from it and back. As in the kagent
+    case, `reconcile.fluxcd.io/requestedAt` stands in for the interval."""
+    hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", "muster", namespace=NAMESPACE)
+    assert (hr["spec"].get("driftDetection") or {}).get("mode") == "enabled", f"the muster HelmRelease carries no spec.driftDetection.mode: enabled: {hr['spec'].get('driftDetection')}"
+    revision = hr["status"]["history"][0]["version"]
+    before = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
+    assert before, f"no PodDisruptionBudget muster in {NAMESPACE} to edit"
+    assert before["spec"].get("minAvailable") == 1, f"the muster PDB does not budget one pod; pick another drift target: {before['spec']}"
+    started = time.monotonic()
+    kube.cmd(["-n", NAMESPACE, "patch", "poddisruptionbudgets", "muster", "--type=merge", "-p", '{"spec":{"minAvailable":2}}'])
+    assert kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)["spec"]["minAvailable"] == 2, "the hand edit did not take"
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    kube.cmd(["-n", NAMESPACE, "annotate", "helmreleases.helm.toolkit.fluxcd.io", "muster", f"reconcile.fluxcd.io/requestedAt={stamp}", "--overwrite"])
+
+    def reverted() -> Any:
+        pdb = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
+        return pdb if pdb and pdb["spec"].get("minAvailable") == 1 else False
+
+    try:
+        wait_for("muster PDB reverted by the muster release's reconcile", reverted, 180)
+        TIMINGS.record("edited muster PDB reverted (drift correction on a requested reconcile, no forceAt)", time.monotonic() - started)
+    except AssertionError:
+        kube.dump([f"-n {NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io muster -o yaml",
+                   f"-n {NAMESPACE} get poddisruptionbudgets muster -o yaml",
+                   f"-n {NAMESPACE} logs deployment/helm-controller --tail=80"])
+        raise
+    hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", "muster", namespace=NAMESPACE)
+    assert is_ready(hr), f"the muster HelmRelease is not Ready after the correction: {condition(hr)}"
+    assert hr["status"]["history"][0]["version"] == revision, f"the correction wrote a Helm revision ({revision} -> {hr['status']['history'][0]['version']}); a drift correction is a server-side apply, not an upgrade"
+    logger.info("muster PDB edited and reverted on a plain reconcile of the muster release, Helm revision %s unchanged", revision)
 
 
 # ---------------------------------------------------------------------------

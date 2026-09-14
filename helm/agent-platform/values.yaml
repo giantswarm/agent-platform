@@ -312,6 +312,32 @@ components:  # @schema additionalProperties: true
     # on its own). It owns their version, so no CRD dependsOn; consumers of its CR
     # kinds (agent-platform-mcps) dependsOn muster instead.
     crds: CreateReplace
+    # Drift detection on this release (HelmRelease v2 spec.driftDetection): on
+    # every reconcile — gitops.interval — helm-controller compares the release's
+    # manifest with the cluster and re-applies what differs, as a server-side
+    # apply, without a Helm revision. Because of the chart's own
+    # CiliumNetworkPolicy `muster`, whose egress selectors name
+    # .Release.Namespace: on a management cluster that carried the platform
+    # through the agentic-platform -> agent-platform rename the live object kept
+    # the old namespace, while the release manifest had the new one. Helm's
+    # three-way merge only patches what changed BETWEEN two release manifests,
+    # so a drifted live object stays drifted across every upgrade. muster's
+    # egress to Valkey stayed denied (Policy denied DROPPED in Hubble), its
+    # OAuth server never started and /.well-known/oauth-protected-resource
+    # answered 503 for hours after a routine pod restart
+    # (giantswarm/agent-platform#287). With drift detection the policy is back
+    # on the manifest within one interval.
+    # No ignore rule: nothing of the platform edits this release's objects in
+    # place — none of the connectivity chart's Kyverno mutate rules or its
+    # MutatingAdmissionPolicy matches a muster object, and the chart renders no
+    # HPA by default. An installation that sets muster.autoscaling.enabled: true
+    # must add an ignore rule for /spec/replicas on the Deployment: the chart
+    # renders spec.replicas whether or not the HPA is on, so the release and the
+    # HPA would otherwise overwrite each other on every interval. An object of
+    # the chart opts out with the annotation
+    # helm.toolkit.fluxcd.io/driftDetection: disabled.
+    driftDetection:  # @schema additionalProperties: true
+      mode: enabled
   agentgateway:  # @schema additionalProperties: true
     chart: agentgateway
     # GS-vendored chart (upstream agentgateway controller flattened onto the
@@ -433,8 +459,9 @@ components:  # @schema additionalProperties: true
     # of the platform edits this release's objects in place (no HPA on its
     # Deployments, no webhook-injected field, no hook). An object of the
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
-    # disabled. kagent's only by default — turning it on for another release
-    # is a decision per release (tests/verify-kagent-wiring.py asserts both).
+    # disabled. kagent's and muster's only by default — turning it on for
+    # another release is a decision per release, its objects must tolerate the
+    # re-apply (tests/verify-kagent-wiring.py asserts the set).
     driftDetection:  # @schema additionalProperties: true
       mode: enabled
     # These keys are the connectivity chart's, not kagent's: it reads them for
