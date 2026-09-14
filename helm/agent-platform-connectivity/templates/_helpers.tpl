@@ -962,7 +962,10 @@ and neither key decides anything: a host of fewer than three labels, which is
 neither a qualified Service name nor a public issuer; an in-cluster host while
 gateway.jwksEgress is off, so nothing opens its port; and an in-cluster host in
 a namespace or on a port gateway.jwksEgress does not name, so the one rule it
-renders reaches a different endpoint.
+renders reaches a different endpoint. The last one stands down for a host
+reached by address: gateway.jwksEgress.external.cidrs non-empty on
+external.port equal to the route's jwks.port, which is the chart's one way to
+carry a second in-cluster issuer.
 Usage: include "agent-platform.jwks.validate" (dict "ctx" . "path" "kagent.controllerRoute.jwtAuthentication" "jwks" $jwks)
 */}}
 {{- define "agent-platform.jwks.validate" -}}
@@ -995,14 +998,23 @@ Usage: include "agent-platform.jwks.validate" (dict "ctx" . "path" "kagent.contr
 {{- if include "agent-platform.jwks.inCluster" $host -}}
 {{- /* gateway.jwksEgress renders one rule, for one namespace on one port. An
 in-cluster host is qualified, so its second label is the namespace it resolves
-in and a mismatch is decidable here rather than at runtime. */ -}}
+in and a mismatch is decidable here rather than at runtime. An external.cidrs
+block opened on the route's own port is the operator's statement that those
+addresses are this issuer's, so it stands in for the rule and both checks step
+aside. */ -}}
 {{- $ns := index (splitList "." (include "agent-platform.jwks.normalizeHost" $host)) 1 -}}
-{{- if ne $ns ($egress.namespace | toString) -}}
-{{- fail (printf "%s.jwks.host is %q, which resolves in namespace %q, but gateway.jwksEgress.namespace is %q. The controller's only in-cluster JWKS rule opens the namespace that key names, so the fetch is denied and signature validation fails closed. Set gateway.jwksEgress.namespace: %s." .path $host $ns ($egress.namespace | toString) $ns) -}}
-{{- end -}}
+{{- $egressNs := $egress.namespace | toString -}}
+{{- $egressPort := $egress.port | int -}}
 {{- $port := $jwks.port | int -}}
-{{- if ne $port ($egress.port | int) -}}
-{{- fail (printf "%s.jwks.port is %d but gateway.jwksEgress.port is %d. The controller's only in-cluster JWKS rule opens the port that key names, so the fetch is denied and signature validation fails closed. Set gateway.jwksEgress.port: %d." .path $port ($egress.port | int) $port) -}}
+{{- $external := $egress.external | default dict -}}
+{{- $byAddress := and ($external.cidrs | default list) (eq ($external.port | default 443 | int) $port) -}}
+{{- if not $byAddress -}}
+{{- if ne $ns $egressNs -}}
+{{- fail (printf "%s.jwks.host is %q, which resolves in namespace %q, but gateway.jwksEgress.namespace is %q. The controller's only in-cluster JWKS rule opens the namespace that key names, so the fetch is denied and signature validation fails closed. Set gateway.jwksEgress.namespace: %s. This chart carries one in-cluster issuer: if another route already names an in-cluster host in a different namespace, reach this one by address instead, with its pod blocks in gateway.jwksEgress.external.cidrs on gateway.jwksEgress.external.port: %d." .path $host $ns $egressNs $ns $port) -}}
+{{- end -}}
+{{- if ne $port $egressPort -}}
+{{- fail (printf "%s.jwks.port is %d but gateway.jwksEgress.port is %d. The controller's only in-cluster JWKS rule opens the port that key names, so the fetch is denied and signature validation fails closed. Set gateway.jwksEgress.port: %d." .path $port $egressPort $port) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

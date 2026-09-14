@@ -232,6 +232,16 @@ therefore the Service it names, not an external host.
 `namespace` and `port` must be the ones that host names. An external host needs
 none of them, and leaving `enabled` on changes nothing else.
 
+It is one rule, so the chart carries one in-cluster issuer. Reach a second one
+by address: its pod blocks in `gateway.jwksEgress.external.cidrs`, opened on
+`external.port`. With that port equal to the route's `jwks.port`, the namespace
+and port guards below stand down for that route — the blocks are the operator's
+statement that they are the issuer's.
+
+`gateway.jwksEgress.podSelector` narrows the rule to pods inside the namespace.
+No guard reads it, because a hostname carries no pod labels: a selector that
+matches no issuer pod renders green and denies the fetch.
+
 Five render guards refuse a host or port that reaches no issuer in any flavour.
 Each one is a green render and a runtime `401` without it, and the route
 subtrees are open objects in `values.schema.json`, so no schema pattern can hold
@@ -255,7 +265,7 @@ Three more depend on the rule that renders, so they follow
 |---|---|
 | A host of fewer than three labels (`dex`, `dex.giantswarm`, `okta.com`) | it is neither a qualified Service name nor a public issuer. A short Service name resolves through the pod's search path, which the egress rule cannot follow |
 | An in-cluster host while `gateway.jwksEgress` is off | nothing opens its port |
-| An in-cluster host outside `gateway.jwksEgress.namespace` or off its `port` | that key renders one rule, for one namespace on one port |
+| An in-cluster host outside `gateway.jwksEgress.namespace` or off its `port`, and not reached through `external.cidrs` | that key renders one rule, for one namespace on one port |
 
 With no policy rendered, every destination is reachable and neither key decides
 anything.
