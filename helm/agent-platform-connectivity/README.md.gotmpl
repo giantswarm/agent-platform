@@ -178,6 +178,36 @@ platform needs:
 The meta chart's README ("Agent Substrate") has the prerequisites, the version
 pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 
+## klaus-gateway — reaching its stores
+
+Three policies select the klaus-gateway pod under `networkPolicy.enabled`
+(`templates/klausgateway/netpol.yaml`, both flavours): `-klausgateway-a2a-egress`
+(DNS, the agentgateway data plane on 8080; with `klausGateway.a2a.enabled`),
+`-klausgateway-obo-egress` (DNS, `world` / `cluster` on 443 and 10443 for
+muster's token endpoint; with `klausGateway.obo.enabled`) and
+`-klausgateway-store-egress` (DNS + one rule per store), which renders exactly
+while the gateway reaches a store beyond its own process:
+
+| Store | Knob | Rule |
+|---|---|---|
+| The Valkey routing store | `klausGateway.routing.store: valkey`, the valkey component on | the platform's Valkey pods (`agent-platform.valkey.podSelector`, the release namespace) on `valkey.valkey.service.port` |
+| The Secret link store | `klausGateway.obo.store: secret`, OBO on | the kube-apiserver (`kube-apiserver` entity; `networkPolicy.kubernetes.apiServerCIDR`) |
+| The configmap / crd routing stores, the embedded ChannelRoute controller | `klausGateway.routing.store: configmap` / `crd`, `klausGateway.controller.enabled` | the kube-apiserver, as above |
+
+The keys are the klaus-gateway chart's, forwarded by the meta chart; one left
+unset is read with that chart's default (memory, bolt, off), so the default
+shape gets no policy. An out-of-band Valkey (`routing.valkey.url` outside the
+platform, the component off) gets no rule: nothing in the namespace to select,
+the installation adds that egress itself. The valkey release's own policy
+admits clients from the whole cluster on 6379, so the client side is the only
+missing half.
+
+The first policy that selects the pod puts it in default-deny egress, so a
+store without its rule fails at start with `context deadline exceeded` on the
+API — not `forbidden`, which would be the Role — or hangs every binding write
+and the readiness probe on the Valkey connect. `make verify-klausgateway-netpol`
+asserts every gate and both flavours.
+
 ## `gateway.jwksEgress` — reaching the issuer's JWKS
 
 The agentgateway controller fetches the JWKS of every `jwtAuthentication`
