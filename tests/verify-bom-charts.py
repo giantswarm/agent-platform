@@ -47,6 +47,15 @@ PIN_RE = re.compile(r'^\s{2}([a-z0-9][a-z0-9-]*):\s*\{\s*versionRange:\s*"([^"]+
 # chart that drops out of the check for any other reason is a failure, not a
 # silent skip: the whole point is that no pinned chart goes unrendered without
 # someone saying so.
+
+# Components whose chart lives in this repo and is released off the same tag as
+# the meta chart: the pair an installation gets is always the pair in this
+# commit, so the working tree is the chart to render, not the published version
+# the example BOM happens to pin. Pulling the pin instead would fail every
+# change that adds a key to both charts at once -- the key exists nowhere but
+# here until the tag is cut.
+LOCAL_CHARTS = {"agent-platform-connectivity": "helm/agent-platform-connectivity"}
+
 TIMEOUT = 300
 
 
@@ -229,6 +238,7 @@ def main() -> None:
         fail("usage: verify-bom-charts.py <meta-render> <bom.yaml>")
     render = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
     bom = pathlib.Path(sys.argv[2])
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
 
     selftest()
 
@@ -262,13 +272,21 @@ def main() -> None:
             if values is None:
                 no_values.append(name)
                 continue
-            pulled = run("helm", "pull", url, "--version", version,
-                         "--untar", "--untardir", f"{tmp}/{name}")
-            if pulled.returncode != 0:
-                fail(f"{name} {version}: cannot pull {url}\n{pulled.stderr.strip()}")
+            local = LOCAL_CHARTS.get(name)
+            if local:
+                chart = str(repo_root / local)
+                if not pathlib.Path(chart, "Chart.yaml").is_file():
+                    fail(f"{name}: no chart at {chart} — LOCAL_CHARTS names a path this repo does not have")
+                version = f"{version} (BOM) / working tree"
+            else:
+                pulled = run("helm", "pull", url, "--version", version,
+                             "--untar", "--untardir", f"{tmp}/{name}")
+                if pulled.returncode != 0:
+                    fail(f"{name} {version}: cannot pull {url}\n{pulled.stderr.strip()}")
+                chart = f"{tmp}/{name}/{name}"
             vf = pathlib.Path(tmp) / f"{name}-values.yaml"
             vf.write_text(values, encoding="utf-8")
-            rendered = run("helm", "template", name, f"{tmp}/{name}/{name}",
+            rendered = run("helm", "template", name, chart,
                            "--namespace", "agent-platform", "-f", str(vf))
             if rendered.returncode != 0:
                 err = rendered.stderr.strip()

@@ -140,24 +140,35 @@ its container and its probes.
 | | cilium flavour | kubernetes flavour |
 |---|---|---|
 | Objects | one `CiliumNetworkPolicy` | one ingress and one egress `NetworkPolicy` |
-| The portal's route | the front Gateway's Envoy pods in `envoy-gateway-system`; the agentgateway data plane instead when `gatewayApi.gateway.create` makes this chart own the edge | the same, as a `namespaceSelector` and `podSelector` pair |
+| The portal's route | the front Gateway's Envoy pods, in the namespaces the route names as its parents (`backstage.parentRefs`, else `global.gatewayApi.parentRefs`); the agentgateway data plane instead when `gatewayApi.gateway.create` makes this chart own the edge and the route names no parent of its own | the same, as a `namespaceSelector` and `podSelector` pair |
 | Kubelet probes | `fromEntities: [host, remote-node]`, the pattern the manager, kserve and model-serving policies use | left to the CNI: vanilla `NetworkPolicy` selects pods, never the node. The bare `namespaceSelector` this flavour renders is the chart's pattern for it, and admits any pod in the cluster on the app port |
 | DNS | CoreDNS in `kube-system`, with the proxy clause the FQDN selectors need | CoreDNS in `kube-system` |
-| The identity provider | the issuer host by name on 443, plus the `cluster` entity for an issuer behind an in-cluster Gateway | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs` on 443 |
+| The identity provider | the issuer host by name on 443, plus the `cluster` entity on 443 and 10443 for an issuer behind an in-cluster Gateway | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs` on 443 |
 | The kube-apiserver | the `kube-apiserver` entity | `networkPolicy.kubernetes.apiServerCIDR` |
-| The edge | the `cluster` entity leg above | the front Gateway's Envoy pods on 443, or the agentgateway data plane on 443 while `gatewayApi.gateway.create` makes this chart the edge |
+| The edge | the `cluster` entity leg the identity-provider include renders, on 443 and 10443 | the Envoy pods of the Gateways the muster, kagent-controller and model-manager routes attach to, on 443 and 10443, plus the agentgateway data plane on 443 for each of those routes that attaches to it |
 | muster | its pods in this namespace, on the muster Service port | the same, as a `podSelector` |
 | The portal's database | its CNPG pods by `cnpg.io/cluster`, on 5432, while `backstage.database.engine` is `postgresql` | the same, as a `podSelector` |
 | The scaffolder catalog | `github.com`, `api.github.com` and `raw.githubusercontent.com` on 443, while `backstage.catalogs.version` is set | the world rule above |
 
 The app-config addresses muster, the kagent controller and the model manager by
-their public hostnames, so those calls leave through the front Gateway rather
-than through muster's own pod leg.
+their public hostnames, so those calls leave through the edge rather than
+through muster's own pod leg. That edge is the one *those* routes attach to
+(`ingress.parentRefs` for muster, `kagent.controllerRoute.parentRef` and
+`modelManager.route.parentRef` for the other two, each falling back to the
+chart-owned edge, else `global.gatewayApi.parentRefs`) — never
+`backstage.parentRefs`, which moves the portal's own route only. The address they resolve to is the edge's
+LoadBalancer, which both flavours translate to the proxy pods before the policy
+decides: an Envoy Gateway proxy binds the listener's port plus 10000, so a
+listener on 443 is a pod on 10443 and both ports are open. In the cilium
+flavour that leg is the `cluster` entity the identity-provider include renders
+— narrowing that include to the issuer alone would take the portal's calls to
+the kagent controller and the model manager with it.
 
 A private identity provider inside one of `worldExcludedCIDRs` needs its
-address in `networkPolicy.additionalEgressCIDRs`. A route pinned to a third
-Gateway with `backstage.parentRefs` needs that Gateway's pods admitted by a
-policy of its own.
+address in `networkPolicy.additionalEgressCIDRs`. The policy names the proxy
+pods as Envoy Gateway labels them (`app.kubernetes.io/name: envoy`), so a route
+pinned with `backstage.parentRefs` to a Gateway of another implementation needs
+that Gateway's pods admitted by a policy of its own.
 
 The backstage chart's own CNPG policy is not this chart's: its missing DNS and
 operator legs, and the missing arm64 images, are filed against
@@ -178,6 +189,11 @@ accepted keys are `enablePodAntiAffinity`, `topologyKey`,
 the render, so a typo never reaches the `Cluster` silently. A core
 `podAffinity` or `podAntiAffinity` key fails with a message of its own: pass a
 core term through `additionalPodAffinity` or `additionalPodAntiAffinity`.
+
+Both schemas take the block as free-form, and the guard is this chart's, so a
+typo set on the meta chart passes its own install and fails the
+`agent-platform-connectivity` `HelmRelease` instead — that release's message
+names the key.
 
 Both render no field while unset, so the operator's own defaults apply.
 

@@ -836,6 +836,86 @@ Usage: include "agent-platform.idpHosts" (dict "provider" "dex" "issuerUrl" $url
 {{- end -}}
 
 {{/*
+True when the portal's route attaches to the chart-owned data plane, in the
+precedence agent-platform.parentRefs resolves the route's parents with:
+`backstage.parentRefs` wins over gatewayApi.gateway.create, so a pinned route
+keeps the front Gateway as its peer even while the chart owns the edge.
+Usage: include "agent-platform.backstage.routeToDataPlane" .
+*/}}
+{{- define "agent-platform.backstage.routeToDataPlane" -}}
+{{- $backstage := .Values.backstage | default dict -}}
+{{- if not $backstage.parentRefs -}}
+{{- include "agent-platform.edgeIsDataPlane" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The edge the portal's app-config reaches by public hostname, as a JSON object
+`{"dataPlane": bool, "namespaces": [...]}`: the parents of the routes that
+serve those hostnames — muster (`ingress.parentRefs`), the kagent controller
+and the model manager (their own `parentRef`, each counted only while its route
+is enabled) — resolved in the precedence agent-platform.parentRefs uses. A
+route that resolves to the chart-owned data plane sets `dataPlane`; every other
+one contributes its Gateway's namespace. `backstage.parentRefs` is not among
+them: it moves the portal's own route, not the routes the portal calls.
+Usage: include "agent-platform.backstage.appConfigEdge" . | fromJson
+*/}}
+{{- define "agent-platform.backstage.appConfigEdge" -}}
+{{- $global := .Values.global.gatewayApi.parentRefs | default list -}}
+{{- $overrides := list (.Values.ingress.parentRefs | default list) -}}
+{{- $kagentRoute := dig "controllerRoute" dict (.Values.kagent | default dict) -}}
+{{- if and $kagentRoute.enabled (dig "parentRef" "name" "" $kagentRoute) -}}
+{{- $overrides = append $overrides (list $kagentRoute.parentRef) -}}
+{{- else if $kagentRoute.enabled -}}
+{{- $overrides = append $overrides list -}}
+{{- end -}}
+{{- $mmRoute := dig "route" dict (.Values.modelManager | default dict) -}}
+{{- if and $mmRoute.enabled (dig "parentRef" "name" "" $mmRoute) -}}
+{{- $overrides = append $overrides (list $mmRoute.parentRef) -}}
+{{- else if $mmRoute.enabled -}}
+{{- $overrides = append $overrides list -}}
+{{- end -}}
+{{- $dataPlane := false -}}
+{{- $namespaces := list -}}
+{{- range $refs := $overrides -}}
+{{- if $refs -}}
+{{- range $refs -}}
+{{- $namespaces = append $namespaces (dig "namespace" "" . | default $.Release.Namespace) -}}
+{{- end -}}
+{{- else if (include "agent-platform.edgeIsDataPlane" $) -}}
+{{- $dataPlane = true -}}
+{{- else -}}
+{{- range $global -}}
+{{- $namespaces = append $namespaces (dig "namespace" "" . | default $.Release.Namespace) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- dict "dataPlane" $dataPlane "namespaces" ($namespaces | uniq | sortAlpha) | toJson -}}
+{{- end -}}
+
+{{/*
+The namespaces of the front Gateway the portal's route attaches to, as a JSON
+list, in the order the route names its parents: `backstage.parentRefs` when the
+route is pinned, else `global.gatewayApi.parentRefs`. A parentRef without a
+namespace attaches to a Gateway of the route's own namespace (Gateway API), so
+that is what an absent key means here too. Empty when the route attaches to the
+chart-owned data plane — the data plane is then the peer, selected by the
+Gateway's own name.
+Usage: include "agent-platform.backstage.edgeNamespaces" . | fromJsonArray
+*/}}
+{{- define "agent-platform.backstage.edgeNamespaces" -}}
+{{- $backstage := .Values.backstage | default dict -}}
+{{- $refs := $backstage.parentRefs | default .Values.global.gatewayApi.parentRefs | default list -}}
+{{- $namespaces := list -}}
+{{- if not (include "agent-platform.backstage.routeToDataPlane" .) -}}
+{{- range $refs -}}
+{{- $namespaces = append $namespaces (dig "namespace" $.Release.Namespace .) -}}
+{{- end -}}
+{{- end -}}
+{{- $namespaces | uniq | toJson -}}
+{{- end -}}
+
+{{/*
 Cilium egress rules from a platform service to the login identity provider:
 the hosts of agent-platform.idpHosts (discovery, JWKS, userinfo, token) by
 name on 443 (through the DNS proxy rule the caller renders), plus the cluster

@@ -5,6 +5,8 @@
 {{- /* The backstage chart names its CNPG cluster <its chart name>-<suffix>, so
 the prefix is the literal chart name, not backstage.name. */}}
 {{- $cnpg := printf "backstage-%s" (dig "database" "postgresql" "clusterNameSuffix" "cnpg" $backstage) }}
+{{- $edgeNamespaces := include "agent-platform.backstage.edgeNamespaces" . | fromJsonArray }}
+{{- $appConfigEdge := include "agent-platform.backstage.appConfigEdge" . | fromJson }}
 ---
 # Ingress to the portal: the Gateway that serves its public route.
 apiVersion: networking.k8s.io/v1
@@ -20,9 +22,10 @@ spec:
       {{- toYaml $selector | nindent 6 }}
   policyTypes: [Ingress]
   ingress:
-    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
-    # The chart owns the edge: the portal's route attaches to the agentgateway
-    # data plane's HTTPS listener, so the data-plane pods are the peer.
+    {{- if (include "agent-platform.backstage.routeToDataPlane" .) }}
+    # The chart owns the edge and the route names no parent of its own, so it
+    # attaches to the agentgateway data plane's HTTPS listener and the
+    # data-plane pods are the peer.
     - from:
         - podSelector:
             matchLabels:
@@ -33,15 +36,18 @@ spec:
     {{- else }}
     # The route attaches to the platform's front Gateway (the Envoy edge), which
     # proxies straight to the portal's Service: agentgateway is not in this path.
-    # A route pinned elsewhere with backstage.parentRefs needs that Gateway's
-    # pods admitted by a policy of its own.
+    # The namespaces are the route's own parents (backstage.parentRefs, else
+    # global.gatewayApi.parentRefs); `app.kubernetes.io/name: envoy` is the
+    # label Envoy Gateway stamps on the proxy pods it runs for a Gateway.
     - from:
+        {{- range $ns := $edgeNamespaces }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: envoy-gateway-system
+              kubernetes.io/metadata.name: {{ $ns }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: envoy
+        {{- end }}
       ports:
         - port: {{ $port }}
           protocol: TCP
@@ -98,8 +104,9 @@ spec:
     # The edge. The app-config addresses muster, the kagent controller and the
     # model manager by their public hostnames, which resolve to the edge's
     # LoadBalancer address; that address sits inside the private blocks the
-    # world rule below subtracts, so the edge needs a leg of its own.
-    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
+    # world rule below subtracts, so the edge needs a leg of its own. The peer
+    # is the Gateway each of those routes attaches to, not the portal's own.
+    {{- if $appConfigEdge.dataPlane }}
     # The chart owns the edge: the agentgateway data-plane pods serve those
     # hostnames on their HTTPS listener, pod port 443.
     - to:
@@ -109,17 +116,25 @@ spec:
       ports:
         - port: 443
           protocol: TCP
-    {{- else }}
-    # The platform's front Gateway (the Envoy edge).
+    {{- end }}
+    {{- with $appConfigEdge.namespaces }}
+    # The front Gateway (the Envoy edge). Envoy Gateway gives a proxy the
+    # listener's port plus 10000 so the container binds no privileged port, so
+    # the pod behind the LoadBalancer's 443 listens on 10443; 443 stays for a
+    # Gateway whose proxy binds the listener port itself.
     - to:
+        {{- range $ns := . }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: envoy-gateway-system
+              kubernetes.io/metadata.name: {{ $ns }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: envoy
+        {{- end }}
       ports:
         - port: 443
+          protocol: TCP
+        - port: 10443
           protocol: TCP
     {{- end }}
     {{- if eq (dig "database" "engine" "" $backstage) "postgresql" }}

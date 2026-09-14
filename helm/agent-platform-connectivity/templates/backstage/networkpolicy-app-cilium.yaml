@@ -4,6 +4,7 @@
 {{- /* The backstage chart names its CNPG cluster <its chart name>-<suffix>, so
 the prefix is the literal chart name, not backstage.name. */}}
 {{- $cnpg := printf "backstage-%s" (dig "database" "postgresql" "clusterNameSuffix" "cnpg" $backstage) }}
+{{- $edgeNamespaces := include "agent-platform.backstage.edgeNamespaces" . | fromJsonArray }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -19,9 +20,10 @@ spec:
       app: {{ include "agent-platform.backstage.name" . }}
       component: backstage
   ingress:
-    {{- if (include "agent-platform.edgeIsDataPlane" .) }}
-    # The chart owns the edge: the portal's route attaches to the agentgateway
-    # data plane's HTTPS listener, so the data-plane pods are the peer.
+    {{- if (include "agent-platform.backstage.routeToDataPlane" .) }}
+    # The chart owns the edge and the route names no parent of its own, so it
+    # attaches to the agentgateway data plane's HTTPS listener and the
+    # data-plane pods are the peer.
     - fromEndpoints:
         - matchLabels:
             gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
@@ -33,12 +35,16 @@ spec:
     {{- else }}
     # The route attaches to the platform's front Gateway (the Envoy edge), which
     # proxies straight to the portal's Service: agentgateway is not in this path.
-    # A route pinned elsewhere with backstage.parentRefs needs that Gateway's
-    # pods admitted by a policy of its own.
+    # The namespaces are the route's own parents (backstage.parentRefs, else
+    # global.gatewayApi.parentRefs); `app.kubernetes.io/name: envoy` is the
+    # label Envoy Gateway stamps on the proxy pods it runs for a Gateway, as
+    # the oauth2-proxy policy selects them.
     - fromEndpoints:
+        {{- range $ns := $edgeNamespaces }}
         - matchLabels:
             app.kubernetes.io/name: envoy
-            io.kubernetes.pod.namespace: envoy-gateway-system
+            io.kubernetes.pod.namespace: {{ $ns }}
+        {{- end }}
       toPorts:
         - ports:
             - port: {{ $port | toString | quote }}
@@ -59,7 +65,9 @@ spec:
     - toEntities:
         - kube-apiserver
     # The login identity provider: OIDC discovery, JWKS, userinfo and token.
-    # The backend exits when discovery times out.
+    # The backend exits when discovery times out. The include also renders the
+    # `cluster` entity on 443 and 10443, which is what carries the portal's
+    # calls to the edge: keep both legs when it is narrowed.
     {{- include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerUrl" (include "agent-platform.issuerUrl" (dict "ctx" . "for" "the Backstage network policy"))) | trim | nindent 4 }}
     {{- if eq (dig "database" "engine" "" $backstage) "postgresql" }}
     # The portal's own CNPG cluster (backstage.database.engine=postgresql). The
@@ -94,9 +102,12 @@ spec:
             - port: "443"
               protocol: TCP
     {{- end }}
-    # muster's MCP endpoint. The app-config addresses muster by its public
-    # hostname, which resolves to the edge and is `cluster` at policy time (the
-    # entity leg above); this leg covers a direct in-cluster address.
+    # muster's MCP endpoint. The app-config addresses muster, the kagent
+    # controller and the model manager by their public hostnames, which resolve
+    # to the edge; Cilium translates that address to the edge pods, which are
+    # `cluster` on 443 and 10443 — the entity leg the idpEgress include above
+    # renders, and the only leg those three calls have. This leg covers a direct
+    # in-cluster address for muster.
     {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
     - toEndpoints:
         - matchLabels:

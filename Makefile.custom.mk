@@ -1614,13 +1614,13 @@ WIRING_OFF := $(VM) --namespace agent-platform --set components.kagent.enabled=t
 # The Backstage app pods' own policy. WIRING_BACKSTAGE already carries the
 # portal's quick-start inputs, the front Gateway its route attaches to among
 # them; the agentgateway-* mode gives muster's leg a data plane to name.
-WIRING_BACKSTAGE_NETPOL := $(WIRING_BACKSTAGE) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true
+WIRING_BACKSTAGE_NETPOL := $(WIRING_BACKSTAGE) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set 'ingress.parentRefs[0].namespace=envoy-gateway-system'
 # The same, with the portal on its own database: an egress leg the default
 # sqlite engine does not render.
 WIRING_BACKSTAGE_NETPOL_FULL := $(WIRING_BACKSTAGE_NETPOL) --set backstage.database.engine=postgresql
 # The same, with the chart owning the edge: the portal's route then attaches to
 # the agentgateway data plane, not to the front Gateway.
-WIRING_BACKSTAGE_NETPOL_EDGE := $(WIRING_BACKSTAGE_NETPOL) --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls
+WIRING_BACKSTAGE_NETPOL_EDGE := $(WIRING_BACKSTAGE_NETPOL) --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls --set ingress.parentRefs=null
 # The platform Postgres Cluster's placement and pull secrets.
 WIRING_PG := $(VM) --namespace agent-platform --set postgres.enabled=true
 WIRING_PG_SET := $(WIRING_PG) --set 'postgres.imagePullSecrets[0].name=mirror-pull-secret' --set postgres.affinity.enablePodAntiAffinity=true --set postgres.affinity.topologyKey=topology.kubernetes.io/zone
@@ -1821,6 +1821,24 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_EDGE) --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-edge.out
 	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vw-bsnp-edge.out || { echo "FAIL: with the chart owning the edge the policy does not admit the data plane"; cat /tmp/vw-bsnp-edge.out; exit 1; }
 	@if grep -q 'envoy-gateway-system' /tmp/vw-bsnp-edge.out; then echo "FAIL: with the chart owning the edge the policy still admits the front Gateway"; exit 1; fi
+	@echo "--> the edge namespace follows the Gateway the route names as its parent, in both flavors"
+	@for flavor in cilium kubernetes; do \
+		helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=$$flavor --set 'global.gatewayApi.parentRefs[0].name=edge' --set 'global.gatewayApi.parentRefs[0].namespace=ingress' 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' | grep -E '^ *(io.kubernetes.pod.namespace|kubernetes.io/metadata.name): ' >/tmp/vw-bsnp-ns-$$flavor.out; \
+		grep -q ': ingress$$' /tmp/vw-bsnp-ns-$$flavor.out || { echo "FAIL: the $$flavor Backstage ingress policy pins envoy-gateway-system instead of the parentRef's namespace"; cat /tmp/vw-bsnp-ns-$$flavor.out; exit 1; }; \
+		if grep -q 'envoy-gateway-system' /tmp/vw-bsnp-ns-$$flavor.out; then echo "FAIL: the $$flavor Backstage ingress policy still names envoy-gateway-system with the parentRef elsewhere"; exit 1; fi; \
+	done
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=cilium --set 'backstage.parentRefs[0].name=own' --set 'backstage.parentRefs[0].namespace=portal-edge' 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' | grep -q 'io.kubernetes.pod.namespace: portal-edge' || { echo "FAIL: a route pinned with backstage.parentRefs does not move the policy's edge namespace"; exit 1; }
+	@echo "--> the egress edge follows the routes the app-config calls, not the portal's own route"
+	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=kubernetes --set 'backstage.parentRefs[0].name=own' --set 'backstage.parentRefs[0].namespace=portal-edge' 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage-egress$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-k8s-eg-pin.out
+	@grep -q 'kubernetes.io/metadata.name: envoy-gateway-system' /tmp/vw-bsnp-k8s-eg-pin.out || { echo "FAIL: the kubernetes Backstage egress leg to the edge does not follow ingress.parentRefs"; cat /tmp/vw-bsnp-k8s-eg-pin.out; exit 1; }
+	@if grep -q 'portal-edge' /tmp/vw-bsnp-k8s-eg-pin.out; then echo "FAIL: the kubernetes Backstage egress leg follows backstage.parentRefs, which moves the portal's own route and not the routes the app-config calls"; exit 1; fi
+	@echo "--> backstage.parentRefs wins over the chart-owned edge, as it does for the route, in both flavors"
+	@for flavor in cilium kubernetes; do \
+		helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_EDGE) --set networkPolicy.flavor=$$flavor --set 'backstage.parentRefs[0].name=own' --set 'backstage.parentRefs[0].namespace=portal-edge' 2>/dev/null >/tmp/vw-bsnp-pin-$$flavor.out; \
+		grep -q 'portal-edge' /tmp/vw-bsnp-pin-$$flavor.out || { echo "FAIL: the $$flavor Backstage policy follows the chart-owned edge while the route is pinned with backstage.parentRefs, so the portal is unreachable through the Gateway that serves it"; exit 1; }; \
+		awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' /tmp/vw-bsnp-pin-$$flavor.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' && { echo "FAIL: the $$flavor Backstage policy still admits the data plane while the route is pinned elsewhere"; exit 1; }; \
+		true; \
+	done
 	@echo "--> the scaffolder catalog's egress follows backstage.catalogs.version; the portal's database gets a leg on the postgresql engine"
 	@for pattern in 'matchName: github.com' 'matchName: raw.githubusercontent.com'; do \
 		grep -q -- "$$pattern" /tmp/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks $$pattern, so the catalog location it fetches is denied"; cat /tmp/vw-bsnp-cilium.out; exit 1; }; \
@@ -1840,6 +1858,12 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@for pattern in 'k8s-app' 'app.kubernetes.io/name: muster' '10.0.0.0/8' 'kubernetes.io/metadata.name: envoy-gateway-system'; do \
 		grep -q -- "$$pattern" /tmp/vw-bsnp-k8s-eg.out || { echo "FAIL: the kubernetes Backstage egress policy lacks $$pattern"; cat /tmp/vw-bsnp-k8s-eg.out; exit 1; }; \
 	done
+	@echo "--> the Envoy edge is reached on 10443 too (a listener on 443 is a proxy pod on listener+10000), in both flavors"
+	@awk '/app.kubernetes.io\/name: envoy$$/{f=1} f&&/^    - to:$$/{exit} f' /tmp/vw-bsnp-k8s-eg.out >/tmp/vw-bsnp-k8s-edge.out
+	@for port in 443 10443; do \
+		grep -q -- "- port: $$port$$" /tmp/vw-bsnp-k8s-edge.out || { echo "FAIL: the kubernetes Backstage egress leg to the Envoy edge does not open $$port, so the app-config's public hostnames are denied behind an Envoy Gateway (a listener on 443 is a proxy pod on 10443)"; cat /tmp/vw-bsnp-k8s-eg.out; exit 1; }; \
+	done
+	@awk '/^    - toEntities:$$/{f=1} f&&/^    - /&&!/toEntities/{f=0} f' /tmp/vw-bsnp-cilium.out | grep -q '10443' || { echo "FAIL: the cilium Backstage policy opens no cluster entity on 10443, so the edge is unreachable"; cat /tmp/vw-bsnp-cilium.out; exit 1; }
 	@grep -q 'kubernetes.io/metadata.name: envoy-gateway-system' /tmp/vw-bsnp-k8s-in.out || { echo "FAIL: the kubernetes Backstage ingress policy does not name the front Gateway that serves its route"; cat /tmp/vw-bsnp-k8s-in.out; exit 1; }
 	@echo "--> the kubernetes egress follows the same edge split as the ingress"
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_EDGE) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage-egress$$/{f=1} f&&/^---$$/{exit} f' >/tmp/vw-bsnp-k8s-edge-eg.out
