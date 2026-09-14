@@ -179,9 +179,17 @@ gateway:
   # covered by the default cluster egress rules (80/443) — typically Dex on 5556.
   jwksEgress:                  # any agentgateway-* mode with a non-muster JWKS source
     enabled: false
+    # The namespace and the port of the in-cluster issuer a route names. Under
+    # networkPolicy.enabled the render fails when a route's in-cluster
+    # jwks.host resolves elsewhere, or answers on another port: this is one
+    # rule, and a mismatch reaches every caller as `401 token uses the unknown
+    # key`. One in-cluster issuer is carried; reach a second one by address,
+    # through external.cidrs below on external.port.
     namespace: giantswarm
     port: 5556
     # Optional extra pod label selectors to narrow the target beyond namespace.
+    # No render guard reads them — a hostname carries no pod labels — so a
+    # selector that matches no issuer pod renders green and denies the fetch.
     podSelector: {}
     # The agentgateway controller fetches the JWKS of every jwtAuthentication
     # policy this chart renders and pushes the keys to the data plane over xDS,
