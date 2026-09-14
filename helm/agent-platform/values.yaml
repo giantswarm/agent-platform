@@ -420,9 +420,14 @@ components:  # @schema additionalProperties: true
     # (controller.agentImage.digest, harness.create, the kagent-images
     # ConfigMap). 0.11.0-gs.12 stamps the Substrate worker 0.0.27-gs.9, whose
     # terminate collects a crashed golden actor (giantswarm/giantswarm#37773).
+    # 0.11.0-gs.14 is the line re-pinned onto upstream main 800015de (2026-09-14,
+    # kagent-dev/kagent#2802: the a2a gateway addresses an actor by the
+    # ate-target-actor header) and stamps the Substrate worker 0.0.30-gs.1 —
+    # the two lines move together, a gs.14 kagent on a 0.0.27 Substrate fails
+    # every turn.
     # No semverFilter: a dev build is selected only by a consumer
     # that sets one (README "Dev channel").
-    versionRange: ">=0.11.0-gs.12 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.14 <0.11.1-0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -510,7 +515,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://ghcr.io/giantswarm/kagent/helm
-    versionRange: ">=0.11.0-gs.12 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.14 <0.11.1-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -533,27 +538,30 @@ components:  # @schema additionalProperties: true
     # render — agent-platform.validateSubstrate). Both releases land in
     # ate-system (targetNamespace; the chart's Roles name that namespace), and
     # both carry ONE version pin: the same range in the two versionRanges
-    # (>=0.0.27-gs.9 <0.0.28-0, the kagent entry's shape — the line's releases
-    # of upstream 0.0.27 from gs.9 on: a terminate that collects a crashed
-    # golden actor whose runsc containers are already gone (a superseded
-    # template's golden used to pin its worker for good,
-    # giantswarm/giantswarm#37773), the ServiceAccount annotations of atelet
-    # and ate-api-server (the snapshot store's IRSA role,
-    # kagent.harness.snapshotStore) and ateApiServer.extraEnv, on top of gs.5's
-    # egress gateway frontend policy for its agentgateway dataplane, the
-    # connection string from a Secret, atelet scheduling,
-    # helm.sh/resource-policy: keep on the three CRD templates so a
-    # concurrent uninstall never fails on a vanished kind, and a golden boot
-    # whose image the registry refuses failing with the reason, and the kept
-    # podcertificate-controller namespace so a reinstall keeps its trust chain),
-    # whose floor is the
+    # (>=0.0.30-gs.1 <0.0.31-0, the kagent entry's shape — the line's releases
+    # of upstream 0.0.29 from gs.1 on: the pin kagent main names since
+    # kagent-dev/kagent#2802 — its router addresses an actor by the
+    # ate-target-actor header, which kagent 0.11.0-gs.14 sets and Substrate
+    # 0.0.27 did not know — with the line's ten carried patches replayed (the
+    # egress gateway's frontend policy for its agentgateway dataplane is
+    # upstream's own from v0.0.29, under agentgateway#3318's name; the
+    # dataplane is the agentgateway line's v1.5.1-gs.4), among them a
+    # terminate that collects a crashed golden actor whose runsc containers
+    # are already gone (giantswarm/giantswarm#37773), the ServiceAccount
+    # annotations of atelet and ate-api-server (the snapshot store's IRSA
+    # role, kagent.harness.snapshotStore) and ateApiServer.extraEnv, the
+    # connection string from a Secret, atelet scheduling, `keep` on the three
+    # CRD templates so a concurrent uninstall never fails on a vanished kind,
+    # a golden boot whose image the registry refuses failing with the reason,
+    # and the kept podcertificate-controller namespace so a reinstall keeps
+    # its trust chain), whose floor is the
     # release whose worker image the kagent chart stamps into
-    # substrateWorkerPool.workerImage (0.0.27-gs.9 from kagent 0.11.0-gs.12) —
+    # substrateWorkerPool.workerImage (0.0.30-gs.1 from kagent 0.11.0-gs.14) —
     # a Substrate re-pin that changes the runtime moves the three together
     # with the kagent pin (README "Agent Substrate"). A
     # mirror sets `repository` here and substrate.image.registry below.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.27-gs.9 <0.0.28-0"
+    versionRange: ">=0.0.30-gs.1 <0.0.31-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -575,7 +583,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.27-gs.9 <0.0.28-0"
+    versionRange: ">=0.0.30-gs.1 <0.0.31-0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
