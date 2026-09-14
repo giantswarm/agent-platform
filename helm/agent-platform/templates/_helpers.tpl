@@ -102,6 +102,13 @@ derived one, otherwise the render fails naming the single key to set — a silen
 overwrite would hide a values file that still spells the old key.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  muster.url from the muster Service (agent-platform.musterMcpUrl).
+  klaus-gateway: with klausGateway.routing.store: valkey, the platform's own
+    Valkey fills in what the routing.valkey block leaves unset — url from the
+    valkey release's Service (agent-platform.valkeyAddress), existingSecret and
+    passwordKey from the Secret and key the valkey release authenticates its
+    default user with (agent-platform.valkeySecretName / valkeyPasswordKey), so
+    the switch is one line. These are defaults, not the single-source rule
+    above: an operator's own url (an out-of-band Valkey), Secret or key wins.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation).
   substrate: atelet.serviceAccount.annotations and
@@ -136,6 +143,17 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
 {{- end -}}
 {{- $_ := set $derived "muster" (dict "url" $url) -}}
+{{- end -}}
+{{- if eq .name "klaus-gateway" -}}
+{{- $kg := .root.Values.klausGateway | default dict -}}
+{{- if and (eq (dig "routing" "store" "" $kg) "valkey") (include "agent-platform.componentEnabled" (dict "root" .root "name" "valkey")) -}}
+{{- $own := dig "routing" "valkey" dict $kg -}}
+{{- $valkey := dict -}}
+{{- range $k, $v := dict "url" (include "agent-platform.valkeyAddress" .root) "existingSecret" (include "agent-platform.valkeySecretName" .root) "passwordKey" (include "agent-platform.valkeyPasswordKey" .root) -}}
+{{- if and $v (not (dig $k "" $own)) -}}{{- $_ := set $valkey $k $v -}}{{- end -}}
+{{- end -}}
+{{- if $valkey -}}{{- $_ := set $derived "routing" (dict "valkey" $valkey) -}}{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
@@ -714,6 +732,40 @@ public route's backendRef and the agent-platform-mcps musterUrl always target
 the real muster Service, and turns a misconfiguration into a loud render-time
 failure instead of a silent 503.
 */}}
+{{/*
+The platform's Valkey as a client in the release namespace reaches it:
+<valkey.valkey.fullnameOverride>:<service port>, the bare Service name muster's
+own storage.valkey.url uses. Usage: include "agent-platform.valkeyAddress" .
+*/}}
+{{- define "agent-platform.valkeyAddress" -}}
+{{- $v := .Values.valkey | default dict -}}
+{{- printf "%s:%v" (dig "valkey" "fullnameOverride" "muster-valkey" $v) (dig "valkey" "service" "port" 6379 $v) -}}
+{{- end -}}
+
+{{/*
+The Secret the valkey release authenticates its default user from
+(valkey.valkey.auth.usersExistingSecret), else the one muster reads the same
+password from, else the platform Secret (global.identity.existingSecret).
+Empty when none is named. Usage: include "agent-platform.valkeySecretName" .
+*/}}
+{{- define "agent-platform.valkeySecretName" -}}
+{{- $v := .Values.valkey | default dict -}}
+{{- $m := .Values.muster | default dict -}}
+{{- coalesce (dig "valkey" "auth" "usersExistingSecret" "" $v) (dig "muster" "oauth" "server" "storage" "valkey" "existingSecret" "" $m) (dig "muster" "oauth" "server" "existingSecret" "" $m) (dig "identity" "existingSecret" "" (.Values.global | default dict)) "" -}}
+{{- end -}}
+
+{{/*
+The key of the default user's password in that Secret
+(valkey.valkey.auth.aclUsers.default.passwordKey, else muster's
+storage.valkey.secretKeyPassword, else valkey-password).
+Usage: include "agent-platform.valkeyPasswordKey" .
+*/}}
+{{- define "agent-platform.valkeyPasswordKey" -}}
+{{- $v := .Values.valkey | default dict -}}
+{{- $m := .Values.muster | default dict -}}
+{{- coalesce (dig "valkey" "auth" "aclUsers" "default" "passwordKey" "" $v) (dig "muster" "oauth" "server" "storage" "valkey" "secretKeyPassword" "" $m) "valkey-password" -}}
+{{- end -}}
+
 {{- define "agent-platform.musterFullname" -}}
 {{- required "muster.fullnameOverride must be set — the umbrella owns muster's public route and its backendRef targets this exact Service name" .Values.muster.fullnameOverride -}}
 {{- end -}}
