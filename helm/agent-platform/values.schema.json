@@ -1727,6 +1727,10 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "affinity": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
                 "applicationDatabase": {
                     "type": "object",
                     "additionalProperties": false,
@@ -2098,6 +2102,18 @@
                     "properties": {
                         "name": {
                             "type": "string"
+                        }
+                    }
+                },
+                "imagePullSecrets": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            }
                         }
                     }
                 },
