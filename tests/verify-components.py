@@ -386,7 +386,19 @@ def main(meta: str, connectivity: str) -> int:
         bom_s3proxy = (bom_s3proxy or {}).get(k)
     if bom_s3proxy != s3proxy_meta["tag"]:
         fail(f"examples/customer-bom.yaml pins kagent.harness.snapshotStore.s3proxy.image.tag {bom_s3proxy!r}; the chart's default is {s3proxy_meta['tag']!r} — the BOM pins the façade's image like a component")
-    print("ok: the s3proxy façade's image is the gsoci mirror, the same default in both charts, pinned by the BOM")
+    # The façade's resources too: the connectivity chart's render refuses a block
+    # without ephemeral-storage requests and limits (the emptyDirs' sizeLimit
+    # follows the limit; Kyverno's require-emptydir-requests-and-limits, #438),
+    # so the default the meta chart forwards must carry both, the same as the
+    # connectivity chart's own.
+    res_meta = yaml.safe_load(open(f"{meta}/values.yaml"))["kagent"]["harness"]["snapshotStore"]["s3proxy"]["resources"]
+    res_conn = yaml.safe_load(open(f"{connectivity}/values.yaml"))["kagent"]["harness"]["snapshotStore"]["s3proxy"]["resources"]
+    if res_meta != res_conn:
+        fail(f"kagent.harness.snapshotStore.s3proxy.resources differs between the charts: meta {res_meta}, connectivity {res_conn}")
+    for kind in ("requests", "limits"):
+        if "ephemeral-storage" not in res_meta.get(kind, {}):
+            fail(f"kagent.harness.snapshotStore.s3proxy.resources.{kind} carries no ephemeral-storage — the façade mounts emptyDirs, Kyverno's require-emptydir-requests-and-limits reports the pod without it (#438)")
+    print("ok: the s3proxy façade's image is the gsoci mirror, the same default in both charts, pinned by the BOM; its resources the same default in both charts, ephemeral-storage requested and limited")
 
     # --- the BOM pins every one exactly ------------------------------------------
     bom_file = open(f"{meta}/examples/customer-bom.yaml").read()
