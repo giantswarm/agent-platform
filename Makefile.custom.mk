@@ -71,7 +71,7 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # Both sides render with valkey.podDisruptionBudget.enabled=false (a chart that
 # predates the key ignores it, the valkey block is additionalProperties: true),
 # and verify-disruption asserts the budget on, off and inert.
-# The eighth intended change (giantswarm/agent-platform#NNN): the kagent
+# The eighth intended change (giantswarm/agent-platform#455): the kagent
 # controller VerticalPodAutoscaler this chart renders by default with
 # autoscaling.k8s.io/v1 served (templates/kagent/controller-vpa.yaml). Both
 # sides render with kagent.controller.vpa.enabled=false (a chart that predates

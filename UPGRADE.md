@@ -4,7 +4,7 @@ Operator action required between releases. CHANGELOG.md captures the diff; UPGRA
 
 ## \<current\> → \<next\> (the kagent controller gets a VerticalPodAutoscaler: `kagent.controller.vpa`, `InPlaceOrRecreate`)
 
-giantswarm/agent-platform#NNN: the connectivity chart renders a `VerticalPodAutoscaler kagent-controller` in the kagent namespace on the controller Deployment wherever the cluster serves `autoscaling.k8s.io/v1` (`kagent.controller.vpa.enabled: auto`). Its update mode is `InPlaceOrRecreate`: the running pod's CPU and memory requests are resized in place, no eviction and no roll. The chart's limits stay (`controlledValues: RequestsOnly`), and the recommendation is held between the chart's requests (100m / 128Mi) and its limits (2 / 512Mi).
+giantswarm/agent-platform#455: the connectivity chart renders a `VerticalPodAutoscaler kagent-controller` in the kagent namespace on the controller Deployment wherever the cluster serves `autoscaling.k8s.io/v1` (`kagent.controller.vpa.enabled: auto`). Its update mode is `InPlaceOrRecreate`: the running pod's CPU and memory requests are resized in place, no eviction and no roll. The chart's limits stay (`controlledValues: RequestsOnly`), and the recommendation is held between the chart's requests (100m / 128Mi) and its limits (2 / 512Mi).
 
 ### Operator action
 
