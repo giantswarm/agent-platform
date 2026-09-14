@@ -997,9 +997,6 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | vm-manager.fullnameOverride | string | `"vm-manager"` |  |
-| vm-manager.host.devices.enabled | bool | `true` |  |
-| vm-manager.images.existingClaim | string | `""` |  |
-| vm-manager.images.hostPath | string | `""` |  |
 | vm-manager.persistence.existingClaim | string | `""` |  |
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |

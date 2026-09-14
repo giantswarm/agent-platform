@@ -227,8 +227,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
-| components.vm-manager.repository | string | `"oci://ghcr.io/giantswarm/vm-manager/helm"` |  |
-| components.vm-manager.versionRange | string | `">=0.19.0 <1.0.0"` |  |
+| components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.vm-manager.versionRange | string | `">=0.20.2 <1.0.0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
@@ -887,9 +887,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | vm-manager.fullnameOverride | string | `"vm-manager"` |  |
-| vm-manager.host.devices.enabled | bool | `true` |  |
-| vm-manager.images.existingClaim | string | `""` |  |
-| vm-manager.images.hostPath | string | `""` |  |
 | vm-manager.persistence.existingClaim | string | `""` |  |
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |
