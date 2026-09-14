@@ -16,6 +16,15 @@ with exactly the values the HelmRelease carries.
 `tests/verify-toolset-presets.py` does the same for muster's toolset presets;
 this is the BOM-wide form of that check.
 
+Next to tests/verify-components-charts.py, which renders the same way but over
+a hand-kept list of thirteen components and at two versions each (the pin and
+the version the range resolves to today). The lists are what separate them:
+neither agent-platform-connectivity nor klaus-gateway is on that one, which is
+why the two breaks this check found on main had gone unseen. Here the set
+comes from the BOM itself, so a component is covered the day it is pinned
+rather than the day someone remembers to add it; the per-component depth --
+the resolved range, the kagent API version, the Harness label -- stays there.
+
 Deliberately stdlib-only, as that script is: the CI image has no PyYAML. The
 render is split on document separators and each values block is cut by
 indentation, which is all the shape of a HelmRelease needs; the BOM's pins are
