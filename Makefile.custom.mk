@@ -2583,6 +2583,7 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 # an agentgateway-* mode; the store knobs are the klaus-gateway chart's, forwarded
 # by the meta chart, so the connectivity chart reads them at their defaults here.
 KG_NETPOL := $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set ingress.mode=agentgateway-muster --set klausGateway.a2a.enabled=true --set klausGateway.obo.enabled=true
+KG_OTLP_POLICY := agent-platform-connectivity-klausgateway-otlp-egress
 KG_STORE_POLICY := agent-platform-connectivity-klausgateway-store-egress
 
 .PHONY: verify-actor-telemetry-egress
@@ -2707,6 +2708,66 @@ verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443
 	@if grep -q 'klausgateway-.*-egress' /tmp/vkg-npoff.out; then echo "FAIL: a klaus-gateway egress policy renders with networkPolicy.enabled=false"; exit 1; fi
 	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set components.klaus-gateway.enabled=false >/tmp/vkg-off.out 2>&1 || { cat /tmp/vkg-off.out; exit 1; }
 	@if grep -q 'klausgateway' /tmp/vkg-off.out; then echo "FAIL: klaus-gateway wiring renders with the component off"; grep -n klausgateway /tmp/vkg-off.out | head; exit 1; fi
+	@echo "ok: $@"
+
+.PHONY: verify-klausgateway-otlp
+verify-klausgateway-otlp: ## Assert klaus-gateway's trace export (giantswarm/klaus-gateway#263): the meta chart defaults klausGateway.observability to the platform's OTLP gateway with the tenant header and forwards endpoint + headers (never the enabled knob) to the klaus-gateway release; enabled auto follows the monitors (off = an empty endpoint, no headers), an explicit true keeps the endpoint without monitors, false empties it with them; the connectivity chart renders -klausgateway-otlp-egress exactly while the endpoint is set — DNS + the endpoint's namespace on its port in the cilium flavour (the cluster entity for a host that is not an in-cluster Service), a namespaceSelector on the port in the kubernetes one — selecting the pod by klausGateway.fullnameOverride; none with networkPolicy off or the component off; the kagent controller's OTLP rule is unchanged by the shared helper.
+	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
+	@echo "--> meta chart, defaults: the klaus-gateway release carries the OTLP gateway and the tenant header, not the knob"
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true >/tmp/vko-default.out 2>&1 || { cat /tmp/vko-default.out; exit 1; }
+	@$(PICK) /tmp/vko-default.out HelmRelease klaus-gateway >/tmp/vko-default-hr.out || { echo "FAIL: no klaus-gateway HelmRelease"; exit 1; }
+	@grep -q '^      otlpEndpoint: http://otlp-gateway.kube-system.svc:4317$$' /tmp/vko-default-hr.out || { echo "FAIL: the klaus-gateway release does not carry the OTLP gateway endpoint by default"; grep -n otlp /tmp/vko-default-hr.out; exit 1; }
+	@grep -q '^        X-Scope-OrgID: giantswarm$$' /tmp/vko-default-hr.out || { echo "FAIL: the klaus-gateway release does not carry the tenant header"; grep -n -A3 otlpHeaders /tmp/vko-default-hr.out; exit 1; }
+	@if awk '/^    observability:$$/,/^    [a-z]/' /tmp/vko-default-hr.out | grep -q '^      enabled:'; then echo "FAIL: klausGateway.observability.enabled reached the klaus-gateway release (its schema refuses it)"; exit 1; fi
+	@echo "ok: endpoint + header forwarded, the knob held back"
+	@echo "--> monitors off (auto resolves off): an empty endpoint and no headers"
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set global.observability.metrics.serviceMonitor.enabled=false >/tmp/vko-off.out 2>&1 || { cat /tmp/vko-off.out; exit 1; }
+	@$(PICK) /tmp/vko-off.out HelmRelease klaus-gateway >/tmp/vko-off-hr.out
+	@grep -q '^      otlpEndpoint: ""$$' /tmp/vko-off-hr.out || { echo "FAIL: with the monitors off the klaus-gateway release still names an OTLP endpoint"; grep -n otlp /tmp/vko-off-hr.out; exit 1; }
+	@if grep -q 'X-Scope-OrgID' /tmp/vko-off-hr.out; then echo "FAIL: with the monitors off the klaus-gateway release still carries the tenant header"; exit 1; fi
+	@echo "ok: monitors off -> no export"
+	@echo "--> explicit true keeps the endpoint without monitors; explicit false empties it with them"
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set global.observability.metrics.serviceMonitor.enabled=false --set klausGateway.observability.enabled=true >/tmp/vko-force.out 2>&1 || { cat /tmp/vko-force.out; exit 1; }
+	@$(PICK) /tmp/vko-force.out HelmRelease klaus-gateway | grep -q '^      otlpEndpoint: http://otlp-gateway.kube-system.svc:4317$$' || { echo "FAIL: klausGateway.observability.enabled=true does not keep the endpoint without monitors"; exit 1; }
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set klausGateway.observability.enabled=false >/tmp/vko-false.out 2>&1 || { cat /tmp/vko-false.out; exit 1; }
+	@$(PICK) /tmp/vko-false.out HelmRelease klaus-gateway | grep -q '^      otlpEndpoint: ""$$' || { echo "FAIL: klausGateway.observability.enabled=false does not empty the endpoint"; exit 1; }
+	@echo "ok: the explicit values win"
+	@echo "--> connectivity, cilium: the OTLP egress policy renders with an endpoint, selects the pod, admits DNS + the endpoint's namespace on its port"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 >/tmp/vko-cnp.out 2>&1 || { cat /tmp/vko-cnp.out; exit 1; }
+	@$(PICK) /tmp/vko-cnp.out CiliumNetworkPolicy $(KG_OTLP_POLICY) >/tmp/vko-cnp-pol.out || { echo "FAIL: no CiliumNetworkPolicy $(KG_OTLP_POLICY) with an OTLP endpoint"; exit 1; }
+	@grep -q 'app.kubernetes.io/name: "klaus-gateway"' /tmp/vko-cnp-pol.out || { echo "FAIL: the OTLP policy does not select the klaus-gateway pod"; exit 1; }
+	@grep -q 'io.kubernetes.pod.namespace: kube-system' /tmp/vko-cnp-pol.out || { echo "FAIL: the OTLP policy does not select the endpoint's namespace"; cat /tmp/vko-cnp-pol.out; exit 1; }
+	@grep -q 'port: "4317"' /tmp/vko-cnp-pol.out || { echo "FAIL: the OTLP policy is not on 4317"; exit 1; }
+	@grep -q 'k8s-app: kube-dns' /tmp/vko-cnp-pol.out || { echo "FAIL: the OTLP policy carries no DNS rule"; exit 1; }
+	@if grep -q 'world\|kube-apiserver\|toCIDR' /tmp/vko-cnp-pol.out; then echo "FAIL: the OTLP policy admits more than DNS and the collector"; exit 1; fi
+	@echo "ok: cilium OTLP policy"
+	@echo "--> a collector that is not an in-cluster Service: the cluster entity on the endpoint's port (443 for an https URL without one)"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=https://collector.example.com >/tmp/vko-ext.out 2>&1 || { cat /tmp/vko-ext.out; exit 1; }
+	@$(PICK) /tmp/vko-ext.out CiliumNetworkPolicy $(KG_OTLP_POLICY) >/tmp/vko-ext-pol.out || { echo "FAIL: no OTLP policy for an external collector"; exit 1; }
+	@grep -q 'toEntities:' /tmp/vko-ext-pol.out && grep -q '^        - cluster$$' /tmp/vko-ext-pol.out || { echo "FAIL: an external collector does not fall back to the cluster entity"; cat /tmp/vko-ext-pol.out; exit 1; }
+	@grep -q 'port: "443"' /tmp/vko-ext-pol.out || { echo "FAIL: an https collector without a port is not on 443"; exit 1; }
+	@echo "ok: external collector -> cluster entity on 443"
+	@echo "--> kubernetes flavour: a NetworkPolicy, Egress only, the endpoint's namespace on the port + DNS"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vko-k8s.out 2>&1 || { cat /tmp/vko-k8s.out; exit 1; }
+	@$(PICK) /tmp/vko-k8s.out NetworkPolicy $(KG_OTLP_POLICY) >/tmp/vko-k8s-pol.out || { echo "FAIL: no NetworkPolicy $(KG_OTLP_POLICY) in the kubernetes flavour"; exit 1; }
+	@if $(PICK) /tmp/vko-k8s.out CiliumNetworkPolicy $(KG_OTLP_POLICY) >/dev/null 2>&1; then echo "FAIL: the cilium OTLP policy renders in the kubernetes flavour"; exit 1; fi
+	@grep -q 'policyTypes: \[Egress\]' /tmp/vko-k8s-pol.out || { echo "FAIL: the NetworkPolicy is not Egress only"; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: kube-system' /tmp/vko-k8s-pol.out || { echo "FAIL: the NetworkPolicy does not select the endpoint's namespace"; cat /tmp/vko-k8s-pol.out; exit 1; }
+	@grep -q 'port: 4317' /tmp/vko-k8s-pol.out || { echo "FAIL: the NetworkPolicy is not on 4317"; exit 1; }
+	@echo "ok: kubernetes OTLP policy"
+	@echo "--> the selector follows klausGateway.fullnameOverride; no endpoint, networkPolicy off, component off: none"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 --set klausGateway.fullnameOverride=kg-renamed 2>/dev/null | $(PICK) /dev/stdin CiliumNetworkPolicy $(KG_OTLP_POLICY) | grep -q 'app.kubernetes.io/name: "kg-renamed"' || { echo "FAIL: the OTLP policy does not select the renamed pod"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) >/tmp/vko-none.out 2>&1 || { cat /tmp/vko-none.out; exit 1; }
+	@if grep -q '$(KG_OTLP_POLICY)' /tmp/vko-none.out; then echo "FAIL: the OTLP policy renders without an endpoint (the connectivity chart's own default is empty)"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 --set networkPolicy.enabled=false 2>/dev/null | grep -q '$(KG_OTLP_POLICY)' && { echo "FAIL: the OTLP policy renders with networkPolicy.enabled=false"; exit 1; } || true
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 --set components.klaus-gateway.enabled=false 2>/dev/null | grep -q '$(KG_OTLP_POLICY)' && { echo "FAIL: the OTLP policy renders with the component off"; exit 1; } || true
+	@echo "ok: guards"
+	@echo "--> the kagent controller's OTLP rule is unchanged by the shared helper"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.otel.tracing.enabled=true --set kagent.otel.logging.enabled=true >/tmp/vko-kagent.out 2>&1 || { cat /tmp/vko-kagent.out; exit 1; }
+	@$(PICK) /tmp/vko-kagent.out CiliumNetworkPolicy agent-platform-connectivity-kagent-controller-egress >/tmp/vko-kagent-pol.out || { echo "FAIL: no kagent controller egress policy"; exit 1; }
+	@grep -q "The OTLP gateway kagent's exporters send to (http://otlp-gateway.kube-system.svc:4317)" /tmp/vko-kagent-pol.out || { echo "FAIL: the kagent controller's OTLP rule lost its comment"; grep -n -B1 -A6 "OTLP" /tmp/vko-kagent-pol.out; exit 1; }
+	@grep -c "The OTLP gateway kagent's exporters send to" /tmp/vko-kagent-pol.out | grep -qx 1 || { echo "FAIL: expected exactly one OTLP rule on the kagent controller (tracing and logging share the destination)"; grep -c "The OTLP gateway" /tmp/vko-kagent-pol.out; exit 1; }
+	@grep -q 'port: "4317"' /tmp/vko-kagent-pol.out || { echo "FAIL: the kagent controller's OTLP rule lost its port"; exit 1; }
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-storage-version
