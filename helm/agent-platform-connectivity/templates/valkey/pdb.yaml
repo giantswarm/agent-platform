@@ -9,19 +9,6 @@ keeps a pod that is not Ready evictable. A spot reclaim is not a voluntary
 eviction; scheduling.singletons on the meta chart is the answer to that. */ -}}
 {{- $pdb := .Values.valkey.podDisruptionBudget }}
 {{- if and (include "agent-platform.valkey.enabled" .) $pdb.enabled }}
-{{- $hasMin := not (kindIs "invalid" $pdb.minAvailable) }}
-{{- $hasMax := not (kindIs "invalid" $pdb.maxUnavailable) }}
-{{- if and $hasMin $hasMax }}
-{{- fail "valkey.podDisruptionBudget sets both minAvailable and maxUnavailable; a PodDisruptionBudget takes exactly one" }}
-{{- end }}
-{{- if not (or $hasMin $hasMax) }}
-{{- fail "valkey.podDisruptionBudget.enabled is true but neither minAvailable nor maxUnavailable is set; set exactly one" }}
-{{- end }}
-{{- with $pdb.unhealthyPodEvictionPolicy }}
-{{- if not (has . (list "IfHealthyBudget" "AlwaysAllow")) }}
-{{- fail (printf "valkey.podDisruptionBudget.unhealthyPodEvictionPolicy=%q is not a PodDisruptionBudget eviction policy (IfHealthyBudget, AlwaysAllow)" .) }}
-{{- end }}
-{{- end }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -31,14 +18,7 @@ metadata:
   labels:
     {{- include "agent-platform.valkey.labels" . | nindent 4 }}
 spec:
-  {{- if $hasMin }}
-  minAvailable: {{ $pdb.minAvailable }}
-  {{- else }}
-  maxUnavailable: {{ $pdb.maxUnavailable }}
-  {{- end }}
-  {{- with $pdb.unhealthyPodEvictionPolicy }}
-  unhealthyPodEvictionPolicy: {{ . }}
-  {{- end }}
+  {{- include "agent-platform.podDisruptionBudget.spec" (dict "path" "valkey.podDisruptionBudget" "pdb" $pdb) | nindent 2 }}
   selector:
     matchLabels:
       {{- include "agent-platform.valkey.podSelector" . | nindent 6 }}
