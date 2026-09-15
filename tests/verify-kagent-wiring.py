@@ -70,8 +70,11 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 # controller derives the caller from (AUTH_USER_ID_CLAIM) is also the claim the
 # gateway's identity transformation copies into x-user-id (ONE value).
 # substrateWorkerPool and harness are the kagent chart's: it renders the WorkerPool and,
-# since 4.8.0, the platform Harness (harness.create) from them.
-UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness"}
+# since 4.8.0, the platform Harness (harness.create) from them. otel is the kagent
+# chart's exporter configuration (the controller ConfigMap); the connectivity chart
+# reads the same endpoints for the OTLP egress of the controller and of the actors'
+# egress gateway (agent-platform.kagent.otlpTargets, giantswarm/agent-platform#456).
+UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness", "otel"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
 LINE_REPOSITORY = "oci://ghcr.io/giantswarm/kagent/helm"

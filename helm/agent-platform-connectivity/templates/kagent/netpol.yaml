@@ -68,9 +68,12 @@ spec:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
 ---
-# Egress from the kagent controller: DNS, Postgres, Kubernetes API, OTLP, muster,
-# Substrate's ate-api and atenet router, and the built-in tool server when it is
-# enabled.
+# Egress from the kagent controller: DNS, Postgres, Kubernetes API, the OTLP
+# gateway kagent.otel names (the pods of the endpoint's
+# namespace on its port, nothing when both exporters are off;
+# agent-platform.kagent.otlpEgress, shared with the actors' egress gateway),
+# muster, Substrate's ate-api and atenet router, and the built-in tool server
+# when it is enabled.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -93,12 +96,7 @@ spec:
               protocol: TCP
     - toEntities:
         - kube-apiserver
-    - toEntities:
-        - cluster
-      toPorts:
-        - ports:
-            - port: "4317"
-              protocol: TCP
+    {{- include "agent-platform.kagent.otlpEgress" . | nindent 4 }}
     - toEntities:
         - world
       toPorts:

@@ -2541,6 +2541,59 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 KG_NETPOL := $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set ingress.mode=agentgateway-muster --set klausGateway.a2a.enabled=true --set klausGateway.obo.enabled=true
 KG_STORE_POLICY := agent-platform-connectivity-klausgateway-store-egress
 
+.PHONY: verify-actor-telemetry-egress
+# The actors' and the controller's OTLP egress (giantswarm/agent-platform#456):
+# the on-state of verify-kagent-netpol (Substrate, cilium) with the monitoring
+# API served, so kagent.otel.*.enabled auto resolves on; the kagent chart's
+# default endpoint for both signals.
+ATE_OTLP := $(KAGENT_NETPOL)
+ATE_EGRESS := substrate-atenet-egress
+CTRL_EGRESS := agent-platform-connectivity-kagent-controller-egress
+verify-actor-telemetry-egress: ## Assert the OTLP egress of the actors (Substrate's egress gateway) and of the kagent controller (giantswarm/agent-platform#456): one rule per distinct destination of the kagent.otel signals that are on, selecting the pods of the endpoint's namespace (<svc>.<ns>.svc[.cluster.local]) on the endpoint's port — the kube-system OTLP gateway on 4317 by default, once for both signals; a second endpoint a second rule; an endpoint that is not a Service address the cluster entity on its port (443 for https without a port); nothing with both signals off, nothing when auto resolves off (no monitoring API), nothing with Substrate off for the actors; the worker pods keep only the egress gateway; the kubernetes flavour renders no egress policy (its egress is open).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> default: the kube-system gateway on 4317, one rule on the egress gateway and one on the controller"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) >/tmp/vate-default.out 2>&1 || { cat /tmp/vate-default.out; exit 1; }
+	@for pol in $(ATE_EGRESS) $(CTRL_EGRESS); do \
+		$(PICK) /tmp/vate-default.out CiliumNetworkPolicy $$pol >/tmp/vate-default-$$pol.out || { echo "FAIL: no CiliumNetworkPolicy $$pol"; exit 1; }; \
+		[ "$$(grep -c 'exporters send to (' /tmp/vate-default-$$pol.out)" = "1" ] || { echo "FAIL: $$pol does not carry exactly one OTLP rule (tracing and logging share the endpoint: one rule)"; grep -n 'exporters send to (' /tmp/vate-default-$$pol.out; exit 1; }; \
+		grep -A7 'exporters send to (' /tmp/vate-default-$$pol.out | grep -q 'io.kubernetes.pod.namespace: kube-system$$' || { echo "FAIL: $$pol: the OTLP rule does not select the kube-system pods (the DNS rules aside)"; grep -A7 'exporters send to (' /tmp/vate-default-$$pol.out; exit 1; }; \
+		grep -A7 'exporters send to (' /tmp/vate-default-$$pol.out | grep -q 'port: "4317"' || { echo "FAIL: $$pol: the OTLP rule is not on 4317"; exit 1; }; \
+		if grep -B1 -A4 -- '- cluster$$' /tmp/vate-default-$$pol.out | grep -q 'port: "4317"'; then echo "FAIL: $$pol still opens 4317 on the cluster entity next to the namespace rule"; exit 1; fi; \
+		echo "ok: $$pol -> kube-system:4317"; \
+	done
+	@grep -q "agent-platform#456" /tmp/vate-default-$(ATE_EGRESS).out || { echo "FAIL: the egress gateway's rule carries no explanation (the comment gated with the rule)"; exit 1; }
+	@$(PICK) /tmp/vate-default.out CiliumNetworkPolicy substrate-workers >/tmp/vate-default-workers.out || { echo "FAIL: no substrate-workers policy"; exit 1; }
+	@if grep -q '4317\|OTLP' /tmp/vate-default-workers.out; then echo "FAIL: the worker pods gained an OTLP rule; the actors' export leaves through the egress gateway"; exit 1; fi
+	@echo "--> a second endpoint (logs on an http/protobuf collector elsewhere) is a second rule; tracing on a plain host is the cluster entity on 443"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.logging.exporter.otlp.endpoint=http://collector.observability.svc.cluster.local:4318 --set kagent.otel.tracing.exporter.otlp.endpoint=https://otlp.example.com >/tmp/vate-split.out 2>&1 || { cat /tmp/vate-split.out; exit 1; }
+	@$(PICK) /tmp/vate-split.out CiliumNetworkPolicy $(ATE_EGRESS) >/tmp/vate-split-egress.out
+	@[ "$$(grep -c 'exporters send to (' /tmp/vate-split-egress.out)" = "2" ] || { echo "FAIL: two distinct endpoints are not two rules"; grep -n 'exporters send to (' /tmp/vate-split-egress.out; exit 1; }
+	@grep -A5 'io.kubernetes.pod.namespace: observability$$' /tmp/vate-split-egress.out | grep -q 'port: "4318"' || { echo "FAIL: the logging endpoint's namespace and port (observability, 4318) are not a rule"; cat /tmp/vate-split-egress.out; exit 1; }
+	@grep -A7 'otlp.example.com' /tmp/vate-split-egress.out | grep -q -- '- cluster$$' && grep -A7 'otlp.example.com' /tmp/vate-split-egress.out | grep -q 'port: "443"' || { echo "FAIL: an https endpoint on a plain host is not the cluster entity on 443"; grep -A7 'otlp.example.com' /tmp/vate-split-egress.out; exit 1; }
+	@if grep -q 'port: "4317"' /tmp/vate-split-egress.out; then echo "FAIL: the default gateway rule remains after both endpoints moved"; exit 1; fi
+	@echo "--> a port left out follows the protocol: grpc 4317, http/protobuf 4318"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.tracing.exporter.otlp.endpoint=http://otlp-gateway.kube-system.svc --set kagent.otel.logging.exporter.otlp.endpoint=http://otlp-gateway.kube-system.svc 2>/dev/null | $(PICK) /dev/stdin CiliumNetworkPolicy $(ATE_EGRESS) | grep -A5 'kube-system$$' | grep -q 'port: "4317"' || { echo "FAIL: no port + grpc is not 4317"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.tracing.exporter.otlp.endpoint=http://otlp-gateway.kube-system.svc --set kagent.otel.logging.exporter.otlp.endpoint=http://otlp-gateway.kube-system.svc --set kagent.otel.tracing.exporter.otlp.protocol=http/protobuf 2>/dev/null | $(PICK) /dev/stdin CiliumNetworkPolicy $(ATE_EGRESS) | grep -A5 'kube-system$$' | grep -q 'port: "4318"' || { echo "FAIL: no port + http/protobuf is not 4318"; exit 1; }
+	@echo "ok: ports"
+	@echo "--> both signals off: no OTLP rule on either policy, no comment; the rest of the egress gateway unchanged"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.tracing.enabled=false --set kagent.otel.logging.enabled=false >/tmp/vate-off.out 2>&1 || { cat /tmp/vate-off.out; exit 1; }
+	@for pol in $(ATE_EGRESS) $(CTRL_EGRESS); do \
+		$(PICK) /tmp/vate-off.out CiliumNetworkPolicy $$pol >/tmp/vate-off-$$pol.out; \
+		if grep -q 'OTLP gateway\|port: "4317"' /tmp/vate-off-$$pol.out; then echo "FAIL: $$pol keeps an OTLP rule with both signals off"; exit 1; fi; \
+	done
+	@grep -q 'port: "8083"' /tmp/vate-off-$(ATE_EGRESS).out && grep -q 'port: "10443"' /tmp/vate-off-$(ATE_EGRESS).out || { echo "FAIL: the egress gateway lost its other rules with the signals off"; exit 1; }
+	@echo "ok: off"
+	@echo "--> auto with no monitoring API served resolves off: no rule"
+	@helm template t $(CONNECTIVITY_DIR) --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --api-versions cilium.io/v2 --set components.kagent.enabled=true $(SUBSTRATE_ON) --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent >/tmp/vate-auto.out 2>&1 || { cat /tmp/vate-auto.out; exit 1; }
+	@if $(PICK) /tmp/vate-auto.out CiliumNetworkPolicy $(ATE_EGRESS) | grep -q 'OTLP gateway'; then echo "FAIL: auto rendered the rule without the observability platform"; exit 1; else echo "ok: auto off"; fi
+	@echo "--> one signal on is enough"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.tracing.enabled=false 2>/dev/null | $(PICK) /dev/stdin CiliumNetworkPolicy $(ATE_EGRESS) | grep -A7 'exporters send to (' | grep -q 'port: "4317"' || { echo "FAIL: logging alone renders no rule"; exit 1; }
+	@echo "--> kubernetes flavour: no Substrate egress policy (its egress is open), no cilium object"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set networkPolicy.flavor=kubernetes >/tmp/vate-k8s.out 2>&1 || { cat /tmp/vate-k8s.out; exit 1; }
+	@if grep -q 'OTLP gateway\|cilium.io' /tmp/vate-k8s.out; then echo "FAIL: the kubernetes flavour renders an OTLP rule or a cilium object"; exit 1; fi
+	@echo "--> the meta chart's Harness env (the actors' side of the same path) is tests/verify-kagent-harness.py"
+	@echo "ok: $@"
+
 .PHONY: verify-klausgateway-netpol
 verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443): the -klausgateway-store-egress policy renders exactly while a store or the controller reaches beyond the pod — the platform's Valkey pods on their Service port with klausGateway.routing.store valkey (and the valkey component on; off = an out-of-band Valkey, no rule), the kube-apiserver with klausGateway.obo.store secret and OBO on, routing.store configmap or crd, or controller.enabled — as DNS + the rules in the cilium flavour and DNS + the pod selector / networkPolicy.kubernetes.apiServerCIDR (Egress only) in the kubernetes one, each rule only with its store, selecting the pod by klausGateway.fullnameOverride; the default shape (memory routing, the bolt link store, no controller) renders none of it next to the unchanged a2a and OBO policies; none with the Secret store but OBO off, with networkPolicy off, or with the component off.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"

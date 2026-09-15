@@ -6,7 +6,10 @@ what (the substrate chart's arguments and Service definitions):
         muster (tool calls), the kagent controller :8083 (A2A, task and session
         state), the LLM provider (world:443, or the agentgateway LLM listener),
         the built-in tool server when it is on, cluster:443/10443 (a public
-        hostname behind an internal LB); atenet-egress asks ate-api :443 which
+        hostname behind an internal LB), the OTLP gateway kagent's exporters
+        send to (the actors' traces and logs, kagent.otel — the pods of the
+        endpoint's namespace on its port, agent-platform.kagent.otlpEgress);
+        atenet-egress asks ate-api :443 which
         actor a connection belongs to (the substrateEgress policy) — nothing
         leaves a worker pod for those destinations directly; the sandbox's
         outbound traffic is tunnelled to atenet-egress, so the actors' egress
@@ -378,7 +381,8 @@ spec:
 # the actors' destinations are allowed: muster (tool calls as the caller), the
 # kagent controller (A2A, sessions), the LLM provider — through the
 # agentgateway LLM listener when llmRouting is on, the provider's endpoint on
-# world:443 either way — the built-in tool server when it is on, and
+# world:443 either way — the built-in tool server when it is on, the OTLP
+# gateway of kagent's exporters (the actors' traces and logs), and
 # cluster:443/10443 (muster's OAuth endpoints on the public hostname resolve to
 # an internal LB VIP; 10443 is the Envoy listener after an Azure LB DNAT).
 apiVersion: cilium.io/v2
@@ -446,6 +450,15 @@ spec:
         - ports:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
+    {{- with include "agent-platform.kagent.otlpEgress" . }}
+    # The actors' telemetry: the OTLP gateway kagent.otel names, the same
+    # destination the controller's egress policy opens for its own spans.
+    # The Go ADK flushes a turn's spans before the A2A response closes
+    # (KAGENT_PRE_RESPONSE_TRACE_FLUSH, a checkpoint runtime has no later
+    # window); without this rule the flush ran into its deadline on every turn
+    # and the stream closed 3 s after the task had completed (agent-platform#456).
+    {{- . | nindent 4 }}
+    {{- end }}
     {{- end }}
     {{- if (include "agent-platform.llmRouting" .) }}
     # Model inference through the agentgateway LLM listener. Additive: the

@@ -2339,13 +2339,35 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           accountKeySecretRef:
             name: ""
             key: ""
-    # The Harness's environment: KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
+    # The Harness's environment. KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
     # the caller's bearer on its MCP calls, so muster sees the person, not the
-    # platform. Nothing else today (a per-namespace skills credential is a
-    # later, separate decision).
+    # platform. The OTel entries wire the actors' telemetry to the OTLP gateway
+    # kagent.otel names — the controller forwards only its tracing variables to
+    # the actors (OTEL_TRACING_ENABLED, the endpoint, the protocol):
+    # OTEL_LOGGING_ENABLED makes the Go ADK export the actors' logs over gRPC to
+    # that endpoint (without it the ADK's built-in log exporter posts HTTP to
+    # the gRPC port and every batch ends in EOF); OTEL_EXPORTER_OTLP_HEADERS is
+    # the tenant header the controller sends (kagent.controller.env), which the
+    # controller deliberately keeps from the actors. The meta chart drops
+    # OTEL_LOGGING_ENABLED when kagent.otel.logging resolves off and the header
+    # when both exporters do (auto: no observability platform), like the
+    # controller's header. KAGENT_TRACE_FLUSH_TIMEOUT_MS bounds the Go ADK's
+    # pre-response trace flush (KAGENT_PRE_RESPONSE_TRACE_FLUSH, set by the
+    # controller on Substrate actors — a checkpoint runtime has no later export
+    # window): a turn's A2A stream closes only after it, so its deadline is the
+    # turn's tail whenever the collector is slow or unreachable — 3 s by the
+    # ADK's default, 0.5 s here; an in-cluster export takes tens of
+    # milliseconds (giantswarm/agent-platform#456). Nothing else today (a
+    # per-namespace skills credential is a later, separate decision).
     env:
       - name: KAGENT_PROPAGATE_TOKEN
         value: "true"
+      - name: OTEL_LOGGING_ENABLED
+        value: "true"
+      - name: OTEL_EXPORTER_OTLP_HEADERS
+        value: "X-Scope-OrgID=giantswarm"
+      - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
+        value: "500"
     # The admission contract: a template is admitted by the ONE label the
     # Generic agent chart 1.x stamps (the value is the Harness's name). Helm
     # merges maps on coalesce, so the kagent chart's own default key
