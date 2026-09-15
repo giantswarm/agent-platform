@@ -3107,14 +3107,24 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   controller:
     image:
       repository: giantswarm/agentgateway-controller
-    # Two controller pods, with leader election (the chart's default; every
-    # replica serves xDS, the leader alone writes status and reconciles the
-    # data plane) so a data-plane pod that starts on a rebooted node finds its
-    # config unless both controller pods sat on that node. The packaging
-    # chart's strict values schema declares controller.podDisruptionBudget,
-    # controller.strategy and affinity as empty objects (every key inside is
-    # rejected), so a budget and a spread for the controller wait for a schema
-    # there.
+    # Two controller pods. Leader election is on: the controller's manager sets
+    # LeaderElection: !DisableLeaderElection, and that setting defaults to false
+    # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
+    # both reconcile the data plane or write Gateway status -- the status syncer
+    # returns NeedLeaderElection() true (the leader alone), the xDS Syncer
+    # returns false (every replica serves xDS). The chart grants the lease in
+    # the controller namespace (templates/role.yaml) and sets no
+    # AGW_DISABLE_LEADER_ELECTION.
+    #
+    # What the second replica buys is a pod-level failure and a rolling restart:
+    # xDS keeps being served while one pod is gone. It is NOT node redundancy --
+    # the packaging chart's strict values schema declares
+    # controller.podDisruptionBudget, controller.strategy and affinity as empty
+    # objects with additionalProperties: false (every key inside is rejected) and
+    # declares no topologySpreadConstraints at all, so there is no way to spread
+    # the two pods and they often land on the same node. A budget and a spread
+    # for the controller wait for a schema fix there
+    # (giantswarm/agentgateway#51).
     replicaCount: 2
   proxy:
     image:

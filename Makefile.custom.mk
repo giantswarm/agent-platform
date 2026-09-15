@@ -705,15 +705,17 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-min-params.out | grep -q 'minAvailable: 1' || { echo "FAIL: minAvailable 1 below replicas 2 was not rendered"; exit 1; }
 	@if grep -q 'maxUnavailable' /tmp/vha-min-params.out; then echo "FAIL: the template's maxUnavailable default renders next to an operator's minAvailable; Kubernetes rejects the budget"; exit 1; fi
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.minAvailable=50% >/tmp/vha-pct.out 2>&1 || { cat /tmp/vha-pct.out; exit 1; }
-	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-pct.out | grep -q 'minAvailable: 50%' || { echo "FAIL: a percentage minAvailable was not rendered"; exit 1; }
+	@$(AGP_DOC) /tmp/vha-pct.out >/tmp/vha-pct-params.out
+	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-pct-params.out | grep -q 'minAvailable: 50%' || { echo "FAIL: a percentage minAvailable was not rendered"; exit 1; }
 	@echo "--> unhealthyPodEvictionPolicy set ALONE survives the template's own default: the default fills in the missing budget field, it does not replace the spec"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.unhealthyPodEvictionPolicy=AlwaysAllow >/tmp/vha-pol.out 2>&1 || { cat /tmp/vha-pol.out; exit 1; }
 	@$(AGP_DOC) /tmp/vha-pol.out >/tmp/vha-pol-params.out
 	@grep -A3 '^  podDisruptionBudget:$$' /tmp/vha-pol-params.out | grep -q 'unhealthyPodEvictionPolicy: AlwaysAllow' || { echo "FAIL: unhealthyPodEvictionPolicy set on its own is dropped by the template's default budget; the operator asked for AlwaysAllow to unblock drains past an unhealthy data-plane pod and silently got IfHealthyBudget"; exit 1; }
 	@grep -A3 '^  podDisruptionBudget:$$' /tmp/vha-pol-params.out | grep -q 'maxUnavailable: 1' || { echo "FAIL: the template's maxUnavailable default is gone when only unhealthyPodEvictionPolicy is set"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.podDisruptionBudget.maxUnavailable=50% --set gateway.parameters.podDisruptionBudget.unhealthyPodEvictionPolicy=AlwaysAllow >/tmp/vha-maxpct.out 2>&1 || { cat /tmp/vha-maxpct.out; exit 1; }
-	@grep -A3 '^  podDisruptionBudget:$$' /tmp/vha-maxpct.out | grep -q 'maxUnavailable: 50%' || { echo "FAIL: a percentage maxUnavailable was not rendered"; exit 1; }
-	@grep -A3 '^  podDisruptionBudget:$$' /tmp/vha-maxpct.out | grep -q 'unhealthyPodEvictionPolicy: AlwaysAllow' || { echo "FAIL: unhealthyPodEvictionPolicy is not passed through"; exit 1; }
+	@$(AGP_DOC) /tmp/vha-maxpct.out >/tmp/vha-maxpct-params.out
+	@grep -A3 '^  podDisruptionBudget:$$' /tmp/vha-maxpct-params.out | grep -q 'maxUnavailable: 50%' || { echo "FAIL: a percentage maxUnavailable was not rendered"; exit 1; }
+	@grep -A3 '^  podDisruptionBudget:$$' /tmp/vha-maxpct-params.out | grep -q 'unhealthyPodEvictionPolicy: AlwaysAllow' || { echo "FAIL: unhealthyPodEvictionPolicy is not passed through"; exit 1; }
 	@echo "ok: budget pass-through"
 	@echo "--> through the meta chart: minAvailable set there reaches the connectivity render alone (a null never reaches this chart's defaults; the default is the template's)"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gateway.parameters.podDisruptionBudget.minAvailable=1 >/tmp/vha-meta-min.out 2>&1 || { cat /tmp/vha-meta-min.out; exit 1; }
@@ -735,7 +737,8 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	$(call vha_must_fail,fractional minAvailable (--set hands Helm the string),--set gateway.parameters.podDisruptionBudget.minAvailable=1.5,is neither an integer nor a percentage)
 	$(call vha_must_fail,a numeric string budget (no %),--set-string gateway.parameters.podDisruptionBudget.maxUnavailable=1,is neither an integer nor a percentage)
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set-json gateway.parameters.podDisruptionBudget.minAvailable=1 >/tmp/vha-float.out 2>&1 || { echo "FAIL: a whole number from JSON (float64 1) was refused as fractional"; tail -2 /tmp/vha-float.out; exit 1; }
-	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-float.out | grep -q 'minAvailable: 1' || { echo "FAIL: a whole number from JSON did not render as minAvailable: 1"; exit 1; }
+	@$(AGP_DOC) /tmp/vha-float.out >/tmp/vha-float-params.out
+	@grep -A2 '^  podDisruptionBudget:$$' /tmp/vha-float-params.out | grep -q 'minAvailable: 1' || { echo "FAIL: a whole number from JSON did not render as minAvailable: 1"; exit 1; }
 	@echo "ok: a whole float passes"
 	$(call vha_must_fail,empty-keys guard,--set gateway.parameters.spread.topologyKeys=null,needs at least one gateway.parameters.spread.topologyKeys)
 	@echo "--> guards: a negative or over-100% budget; a key the budget block does not pass through; an unhealthyPodEvictionPolicy outside the API's enum"
@@ -744,6 +747,7 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	$(call vha_must_fail,maxUnavailable over 100%,--set gateway.parameters.podDisruptionBudget.maxUnavailable=200%,is neither an integer nor a percentage from 0% to 100%)
 	$(call vha_must_fail,a misspelt budget field (the schema leaves the block open),--set gateway.parameters.podDisruptionBudget.minAvailabe=1,minAvailabe is not one of the PodDisruptionBudget spec fields)
 	$(call vha_must_fail,a budget key that is not a PDB spec field,--set gateway.parameters.podDisruptionBudget.bogusKey=x,bogusKey is not one of the PodDisruptionBudget spec fields)
+	$(call vha_must_fail,a misspelt budget field with the budget OFF (the guard is outside the enabled check, so the typo is caught now and not on the day the budget is turned on),--set gateway.parameters.podDisruptionBudget.enabled=false --set gateway.parameters.podDisruptionBudget.minAvailabe=1,minAvailabe is not one of the PodDisruptionBudget spec fields)
 	$(call vha_must_fail,unhealthyPodEvictionPolicy enum,--set gateway.parameters.podDisruptionBudget.unhealthyPodEvictionPolicy=Always,is not a PodDisruptionBudget eviction policy)
 	@echo "--> guards: a key Helm DELETED rather than set — a null through the meta chart, an emptied entry in a values file — which no schema keyword can see"
 	$(call vha_must_fail,replicas unset (nil would render 0 and scale the data plane to zero),--set gateway.parameters.replicas=null,gateway.parameters.replicas is unset)

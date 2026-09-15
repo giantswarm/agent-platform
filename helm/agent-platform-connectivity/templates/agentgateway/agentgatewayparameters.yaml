@@ -46,12 +46,16 @@ plane. All fail the render instead of the deployer or the drain. */ -}}
 {{- $pdb := $params.podDisruptionBudget }}
 {{- $pdbFields := list "minAvailable" "maxUnavailable" "unhealthyPodEvictionPolicy" }}
 {{- $pdbSpec := dict }}
-{{- if $pdb.enabled }}
+{{- /* The spelling guard is OUTSIDE the `enabled` check on purpose: a misspelt
+key is misspelt whether the budget is on or off, and inside the check it would
+be accepted today and fail the render on the day somebody turns the budget on --
+which is the worst moment to learn the key never did anything. */ -}}
 {{- range $field, $value := $pdb }}
 {{- if and (ne $field "enabled") (not (has $field $pdbFields)) }}
 {{- fail (printf "gateway.parameters.podDisruptionBudget.%s is not one of the PodDisruptionBudget spec fields this chart passes through (%s); the block is open in the schema so that the two budget fields need no default there, which leaves the spelling to this guard" $field (join ", " $pdbFields)) }}
 {{- end }}
 {{- end }}
+{{- if $pdb.enabled }}
 {{- $min := $pdb.minAvailable }}
 {{- $max := $pdb.maxUnavailable }}
 {{- if and (not (kindIs "invalid" $min)) (not (kindIs "invalid" $max)) }}

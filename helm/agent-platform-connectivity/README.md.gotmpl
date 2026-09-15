@@ -173,10 +173,14 @@ session lives on the pod that answered `/sse`, the ClusterIP Service balances
 each later POST on its own, and a POST that lands on the other pod finds no
 session — so a legacy SSE client fails against a two-pod data plane whether or
 not a pod ever changes. Use streamable-HTTP.
-The meta chart forwards `agentgateway.controller.replicaCount: 2` (every
-replica serves xDS; the leader alone writes status and reconciles the data
-plane), so a data-plane pod that starts on a rebooted node finds its config
-unless both controller pods sat on that node.
+The meta chart forwards `agentgateway.controller.replicaCount: 2`. Leader
+election is on (the controller's manager defaults `DisableLeaderElection` to
+false), so the two pods do not fight: the status syncer runs on the leader
+alone and the xDS syncer on every replica. What the second pod buys is a
+pod-level failure and a rolling restart -- xDS keeps being served while one is
+gone. It is **not** node redundancy: the packaging chart's schema admits no
+`podDisruptionBudget`, no `affinity` and no `topologySpreadConstraints` for the
+controller, so the two pods often land on the same node.
 
 ## The Backstage component on a default-deny cluster
 
