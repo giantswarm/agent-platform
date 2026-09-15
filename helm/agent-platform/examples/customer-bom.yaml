@@ -31,7 +31,7 @@
 # render refuses such a pin.
 # substrate and substrate-crds pin the SAME release of the Substrate line
 # (vX.Y.Z-gs.N like kagent's; the floor of components.substrate.versionRange —
-# 0.0.30-gs.1 is the worker image the kagent chart stamps from 0.11.0-gs.15:
+# 0.0.30-gs.1 is the worker image the kagent chart stamps from 0.11.0-gs.16:
 # upstream Substrate v0.0.29, whose router kagent main addresses actors on
 # since kagent-dev/kagent#2802 — the two move together).
 # =============================================================================
@@ -45,8 +45,8 @@ components:
   agentgateway:                  { versionRange: "2.0.7" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "0.11.0-gs.15" }
-  kagent-crds:                   { versionRange: "0.11.0-gs.15" }
+  kagent:                        { versionRange: "0.11.0-gs.16" }
+  kagent-crds:                   { versionRange: "0.11.0-gs.16" }
   substrate:                     { versionRange: "0.0.30-gs.1" }
   substrate-crds:                { versionRange: "0.0.30-gs.1" }
   klaus-gateway:                 { versionRange: "1.1.0" }

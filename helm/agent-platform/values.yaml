@@ -430,9 +430,16 @@ components:  # @schema additionalProperties: true
     # breakpoints in the Go ADK — the floor, because providers.anthropic.config
     # below sets both and an older CRD would prune them at admission, leaving
     # the models uncached in silence (giantswarm/giantswarm#37788).
+    # 0.11.0-gs.16 carries kagent-dev/kagent#2790: spec.context.compaction on
+    # the AgentTemplate CRD (kagent-crds) and the Go ADK runtime honouring it
+    # through ADK v2.3.0's session/compaction — the floor, because the agent
+    # chart (giantswarm/agent 1.3+) renders a compaction default on every
+    # platform agent and an older CRD would prune it at admission, leaving
+    # every long turn re-reading its whole history in silence
+    # (giantswarm/giantswarm#37792).
     # No semverFilter: a dev build is selected only by a consumer
     # that sets one (README "Dev channel").
-    versionRange: ">=0.11.0-gs.15 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.16 <0.11.1-0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -520,7 +527,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://ghcr.io/giantswarm/kagent/helm
-    versionRange: ">=0.11.0-gs.15 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.16 <0.11.1-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
