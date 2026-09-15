@@ -5,7 +5,9 @@
 # `demo` — HelmRelease flux-giantswarm/demo-gpu-operator. `lookup` is empty under
 # `helm template`, so the refusal shows only on a cluster (the agentlab):
 #
-#   kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml
+#   kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml   # the CRD stub (the ClusterPolicy waits for it)
+#   kubectl wait --for=condition=Established crd/clusterpolicies.nvidia.com
+#   kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml   # now the ClusterPolicy
 #   helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server \
 #     -f helm/agent-platform/ci/ci-values.yaml --set components.flux.enabled=false \
 #     --set components.gpu-operator.enabled=true

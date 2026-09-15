@@ -426,12 +426,16 @@ NVIDIA's GPU operator — the device plugin, GPU feature discovery (the `nvidia.
 
 Flatcar carries the driver and the container toolkit, and the cluster chart's containerd registers the `nvidia` runtime, so both stay off — the GPU guide's prescription and the chart's defaults. On hosts with a pre-installed driver the operator writes its `deploy.*` labels only where a node has none and its driver DaemonSet selects `=true`, so the pre-set label keeps the driver off and `toolkit.enabled: true` installs the toolkit next to it.
 
+**Cilium.** gpu-operator-app renders `CiliumNetworkPolicy` objects for the operator, node-feature-discovery and the validator without a switch, so the component needs `cilium.io/v2` served — every Giant Swarm cluster's shape. A cluster without Cilium (a bare kind cluster) refuses the install with `no matches for kind "CiliumNetworkPolicy"`; the meta chart cannot switch those policies off.
+
 **The `nvidia` RuntimeClass.** In every configuration the operator creates it — its pre-requisites state runs before the driver and toolkit states and is gated only on the CDI NRI plugin — so the GPU guide's prerequisite for GPU pods exists wherever the operator runs, and this chart adds none. GPU pods use `runtimeClassName: nvidia`; where the platform's own release serves models, its values set `modelServing.serving.runtimeClassName: nvidia` (the serving slice's profile, [#326](https://github.com/giantswarm/agent-platform/issues/326), sets it).
 
 **One owner per cluster.** With the component on, the render refuses a cluster that already runs an operator that is not this release's — a `ClusterPolicy` whose owner (the Flux labels `helm.toolkit.fluxcd.io/name` + `/namespace`, else Helm's `meta.helm.sh/release-name` + `/release-namespace` annotations) is another release or none, a HelmRelease of the chart under another name or in another namespace (cluster-manager's `<cluster>-gpu-operator`), an App of it — naming what it saw and the handover: delete that release (cluster-manager's detection then sees this component and never re-creates it; a hand-installed operator likewise), then switch the toggle on — or leave it off. Adopting the running objects is not this chart's. The `ClusterPolicy` CRD is under `ownedCrds` as the backstop. Both are `lookup` guards: silent under `helm template`, skipped with the target knob (there the detection is cluster-manager's). On a cluster:
 
 ```sh
-kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml     # a ClusterPolicy owned by HelmRelease flux-giantswarm/demo-gpu-operator
+kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml     # the ClusterPolicy CRD stub first …
+kubectl wait --for=condition=Established crd/clusterpolicies.nvidia.com && \
+  kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml   # … then the ClusterPolicy owned by HelmRelease flux-giantswarm/demo-gpu-operator
 helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server \
   -f helm/agent-platform/ci/ci-values.yaml --set components.flux.enabled=false --set components.gpu-operator.enabled=true
 # → "components.gpu-operator.enabled=true, but this cluster already runs a GPU operator … ClusterPolicy cluster-policy belongs to
