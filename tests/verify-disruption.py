@@ -185,9 +185,13 @@ def main(argv: list[str]) -> int:
         expect(not block(vals, "agentManager"), f"{name}: the agentManager wiring block leaked into the component release")
     connectivity = values(helm_release(manifest, "agent-platform-connectivity"))
     expect([l.strip() for l in block(connectivity, "agentManager", "podDisruptionBudget")], "connectivity: agentManager.podDisruptionBudget not forwarded")
-    expect(ANNOTATION in [l.strip() for l in block(connectivity, "gateway", "parameters", "podAnnotations")], "connectivity: gateway.parameters.podAnnotations not forwarded")
+    # The data plane is HA rather than undisruptable (two replicas, a budget and a
+    # hostname spread; verify-dataplane-ha owns that shape), so the meta chart must
+    # NOT forward #431's annotation onto it: it would pin both pods' nodes against
+    # Karpenter's consolidation, drift and expiry and the budget would never be reached.
+    expect(ANNOTATION not in [l.strip() for l in block(connectivity, "gateway", "parameters", "podAnnotations")], "connectivity: the meta chart still forwards karpenter.sh/do-not-disrupt onto the HA data plane")
 
-    print("ok: muster, kagent-controller, klaus-gateway and muster-valkey carry do-not-disrupt and their budgets travel where their charts read them" + (" (switched off)" if off else "") + "; scheduling.singletons empty forwards no placement")
+    print("ok: muster, kagent-controller, klaus-gateway and muster-valkey carry do-not-disrupt (the HA data plane does not) and their budgets travel where their charts read them" + (" (switched off)" if off else "") + "; scheduling.singletons empty forwards no placement")
     return 0
 
 
