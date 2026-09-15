@@ -666,6 +666,20 @@ Emits nothing for every other provider (empty string = falsy).
 {{- end -}}
 
 {{/*
+Key of the ModelConfigSpec provider block that carries promptCaching and
+cacheTTL, for a spec.provider value in any case: Anthropic (anthropic) and
+Bedrock (bedrock), the two providers whose adapters mark cache_control
+breakpoints (kagent line 0.11.0-gs.15+, kagent-dev/kagent#2788). Emits nothing
+for every other provider (empty string = falsy): the API server would prune the
+fields at admission and the model would stay uncached in silence, so the
+template refuses them instead.
+*/}}
+{{- define "agent-platform.modelConfigCacheKey" -}}
+{{- $keys := dict "anthropic" "anthropic" "bedrock" "bedrock" -}}
+{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the model-price ConfigMap — defaults to <release>-model-catalog.
 */}}
 {{- define "agent-platform.modelCatalogName" -}}

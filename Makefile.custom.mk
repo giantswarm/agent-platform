@@ -647,6 +647,50 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@echo "ok: cutover forwarded"
 	@echo "All llmRouting behaviors verified."
 
+# Anthropic prompt caching (giantswarm/giantswarm#37788; kagent line 0.11.0-gs.15+).
+.PHONY: verify-prompt-caching
+verify-prompt-caching: ## Assert Anthropic prompt caching: the meta chart forwards kagent.providers.anthropic.config.promptCaching: true + cacheTTL to the kagent release (the default ModelConfig) and to the connectivity release; the connectivity chart's Anthropic catalog entries inherit both in the one provider block next to the listener baseUrl, an entry's own keys win (false included), an OpenAI entry gets nothing, a Bedrock entry takes its own keys under spec.bedrock, the chart alone renders nothing; a cacheTTL outside the CRD's enum and the keys on a provider without them fail the render naming the entry.
+	@echo "====> $@"
+	@echo "--> the meta chart forwards promptCaching + cacheTTL to the kagent release and to the connectivity release"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/vpc-meta.out 2>&1 || { cat /tmp/vpc-meta.out; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' /tmp/vpc-meta.out >/tmp/vpc-meta-kagent.out
+	@grep -A14 '^    providers:$$' /tmp/vpc-meta-kagent.out | grep -q 'promptCaching: true' || { echo "FAIL: the kagent HelmRelease values carry no providers.anthropic.config.promptCaching: true; the default ModelConfig would stay uncached"; exit 1; }
+	@grep -A14 '^    providers:$$' /tmp/vpc-meta-kagent.out | grep -q 'cacheTTL: 5m' || { echo "FAIL: the kagent HelmRelease values carry no providers.anthropic.config.cacheTTL"; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vpc-meta.out >/tmp/vpc-meta-conn.out
+	@grep -q 'promptCaching: true' /tmp/vpc-meta-conn.out || { echo "FAIL: the connectivity HelmRelease values carry no providers.anthropic.config.promptCaching; the catalog's Anthropic entries would inherit nothing"; exit 1; }
+	@echo "ok: forwarded to both releases"
+	@echo "--> connectivity: an Anthropic entry inherits the platform default in one block next to the listener baseUrl; an OpenAI entry gets nothing"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >/tmp/vpc-ci.out 2>&1 || { cat /tmp/vpc-ci.out; exit 1; }
+	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vpc-ci.out >/tmp/vpc-sonnet.out
+	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' /tmp/vpc-sonnet.out && grep -q '^    promptCaching: true$$' /tmp/vpc-sonnet.out && grep -q '^    cacheTTL: 5m$$' /tmp/vpc-sonnet.out || { cat /tmp/vpc-sonnet.out; echo "FAIL: an Anthropic entry without its own keys did not inherit promptCaching: true / cacheTTL: 5m under spec.anthropic next to the listener baseUrl"; exit 1; }
+	@if [ "$$(grep -c '^  anthropic:$$' /tmp/vpc-sonnet.out)" != "1" ]; then cat /tmp/vpc-sonnet.out; echo "FAIL: the anthropic block renders more than once (baseUrl and the cache keys share one block; a second would overwrite the first)"; exit 1; fi
+	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' /tmp/vpc-ci.out >/tmp/vpc-openai.out
+	@if grep -qE 'promptCaching|cacheTTL' /tmp/vpc-openai.out; then cat /tmp/vpc-openai.out; echo "FAIL: an OpenAI entry carries the Anthropic cache keys; the API server would prune them"; exit 1; fi
+	@echo "ok: inherited by Anthropic entries only"
+	@echo "--> an entry's own keys win, false included"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].promptCaching=false' --set 'kagent.modelConfigs[1].cacheTTL=1h' >/tmp/vpc-own.out 2>&1 || { cat /tmp/vpc-own.out; exit 1; }
+	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' /tmp/vpc-own.out >/tmp/vpc-opus.out
+	@grep -q '^    promptCaching: false$$' /tmp/vpc-opus.out && grep -q '^    cacheTTL: 1h$$' /tmp/vpc-opus.out || { cat /tmp/vpc-opus.out; echo "FAIL: an entry's own promptCaching: false / cacheTTL: 1h did not win over the platform default"; exit 1; }
+	@echo "ok: own keys win"
+	@echo "--> the connectivity chart alone (no platform default): nothing renders"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"plain","provider":"Anthropic","model":"m","apiKeySecret":"s","apiKeySecretKey":"k"}]' >/tmp/vpc-plain.out 2>&1 || { cat /tmp/vpc-plain.out; exit 1; }
+	@if grep -qE 'promptCaching|cacheTTL' /tmp/vpc-plain.out; then cat /tmp/vpc-plain.out; echo "FAIL: the connectivity chart invents a caching default of its own; the meta chart owns it"; exit 1; fi
+	@echo "ok: nothing by default"
+	@echo "--> a Bedrock entry takes its own keys under spec.bedrock (no baseUrl there)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"bedrock","provider":"Bedrock","model":"m","apiKeySecret":"s","promptCaching":true,"cacheTTL":"1h"}]' >/tmp/vpc-bedrock.out 2>&1 || { cat /tmp/vpc-bedrock.out; exit 1; }
+	@grep -A2 '^  bedrock:$$' /tmp/vpc-bedrock.out | grep -q 'promptCaching: true' || { cat /tmp/vpc-bedrock.out; echo "FAIL: a Bedrock entry's promptCaching is not under spec.bedrock"; exit 1; }
+	@echo "ok: bedrock block"
+	@echo "--> guards: a cacheTTL outside the CRD's enum, and the keys on a provider without them, fail naming the entry"
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].cacheTTL=10m' >/tmp/vpc-ttl.out 2>&1; then \
+		echo "FAIL: cacheTTL 10m rendered; the CRD's enum is 5m, 1h and the API server refuses it after the render said nothing"; exit 1; \
+	elif ! grep -q 'anthropic-sonnet' /tmp/vpc-ttl.out || ! grep -q '5m, 1h' /tmp/vpc-ttl.out; then cat /tmp/vpc-ttl.out; echo "FAIL: the cacheTTL guard does not name the entry and the enum"; exit 1; \
+	else echo "ok: cacheTTL guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[2].promptCaching=true' >/tmp/vpc-foreign.out 2>&1; then \
+		echo "FAIL: promptCaching on an OpenAI entry rendered; the API server would prune it and the model would stay uncached in silence"; exit 1; \
+	elif ! grep -q 'openai-gpt-direct' /tmp/vpc-foreign.out; then cat /tmp/vpc-foreign.out; echo "FAIL: the provider guard does not name the entry"; exit 1; \
+	else echo "ok: provider guard"; fi
+	@echo "All prompt-caching behaviors verified."
+
 .PHONY: verify-engine
 verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"

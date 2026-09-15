@@ -40,6 +40,11 @@ kagent:
       # match gateway.name, the release namespace and llmRouting.listener.port.
       config:
         baseUrl: http://agentgateway.default.svc:8081
+        # The platform's prompt-caching default (the meta chart sets it; kagent
+        # line 0.11.0-gs.15+): the chart's Anthropic entries below inherit it,
+        # verify-prompt-caching asserts the inheritance and the precedence.
+        promptCaching: true
+        cacheTTL: "5m"
   # Three extra, chart-owned ModelConfigs. The first names no baseUrl, so the
   # chart fills in the listener: a new entry is metered unless somebody names
   # another upstream. The second names its own, which wins — that is how a model

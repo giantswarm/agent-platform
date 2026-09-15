@@ -425,9 +425,14 @@ components:  # @schema additionalProperties: true
     # ate-target-actor header) and stamps the Substrate worker 0.0.30-gs.1 —
     # the two lines move together, a gs.14 kagent on a 0.0.27 Substrate fails
     # every turn.
+    # 0.11.0-gs.15 carries kagent-dev/kagent#2788: spec.anthropic.promptCaching
+    # and cacheTTL on the ModelConfig CRD (kagent-crds) and the cache_control
+    # breakpoints in the Go ADK — the floor, because providers.anthropic.config
+    # below sets both and an older CRD would prune them at admission, leaving
+    # the models uncached in silence (giantswarm/giantswarm#37788).
     # No semverFilter: a dev build is selected only by a consumer
     # that sets one (README "Dev channel").
-    versionRange: ">=0.11.0-gs.14 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.15 <0.11.1-0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -515,7 +520,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://ghcr.io/giantswarm/kagent/helm
-    versionRange: ">=0.11.0-gs.14 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.15 <0.11.1-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -2015,6 +2020,23 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       apiKeySecretRef: kagent-anthropic
       apiKeySecretKey: ANTHROPIC_API_KEY
       apiKey: ""  # Leave empty; pre-create the apiKeySecretRef Secret instead
+      # Provider options the kagent chart renders into the default ModelConfig's
+      # `anthropic` block, next to the baseUrl the LLM cut-over forwards
+      # (llmRouting; README "LLM routing"). promptCaching (kagent line
+      # 0.11.0-gs.15+, kagent-dev/kagent#2788) marks the last tool definition,
+      # the last system prompt block and the last content block of the latest
+      # turn with cache_control, so every model call after the first reads its
+      # prefix — system prompt, tool schemas, previous turns — from Anthropic's
+      # cache at a tenth of the input price and with a time to first token that
+      # no longer grows with the history; the first call of a turn writes the
+      # cache at 1.25× (giantswarm/giantswarm#37788). On for the platform: an
+      # agent loop reads every prefix it writes. cacheTTL "5m" (each hit
+      # refreshes the window) or "1h" (dearer writes, for calls spaced further
+      # apart). The connectivity chart's kagent.modelConfigs[] entries inherit
+      # both for their Anthropic models unless an entry sets its own.
+      config:
+        promptCaching: true
+        cacheTTL: "5m"
 
   # The controller metrics Service and ServiceMonitor the connectivity chart
   # renders under the global.observability.metrics.serviceMonitor gate (which
