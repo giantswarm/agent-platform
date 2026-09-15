@@ -101,7 +101,7 @@ LINE = {
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
-    "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+    "model-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
     # 0.20.2 is the first vm-manager release from the generated CircleCI
     # pipeline with its guest image artifact (gsoci, the catalog). muster
     # alone: the MCPServer CR.

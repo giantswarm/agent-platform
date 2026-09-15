@@ -77,7 +77,11 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # kagent.substrateWorkerPool.podDisruptionBudget.enabled=false (the kagent
 # block is additionalProperties: true), and verify-workerpool asserts the
 # budget on, off and its selector.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false
+# The ninth (giantswarm/agent-platform#329): components.model-manager is on by
+# default with no backend, so the default render carries its wiring. Both sides
+# render with the component off (a chart that predates the default accepts the
+# key), and verify-managers asserts the default shape and the static forms.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -746,7 +750,7 @@ verify-components-charts: ## Render every component chart with the values the me
 # agent-manager (route + JWT policy + network policies + render-time guards). A
 # valid configuration of both on the agentgateway topology, with the identity
 # contract set so the OAuth guards are satisfied.
-MANAGERS_ON := $(VM) --namespace agent-platform --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true --set components.model-manager.enabled=true --set components.agent-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth --set gateway.jwksEgress.enabled=true
+MANAGERS_ON := $(VM) --namespace agent-platform --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true --set components.model-manager.enabled=true --set components.agent-manager.enabled=true --set model-manager.backend=ollama --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth --set gateway.jwksEgress.enabled=true
 MANAGERS_ROUTES := --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true
 # A minimal on-state that trips no other guard, for probing one guard at a time.
 MANAGERS_MIN := $(VM) --set components.kagent.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth --set global.domain=ci.example.com
@@ -782,7 +786,7 @@ KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --se
 # An actor whose ModelConfig points at a host model server dials it through the
 # egress gateway, on a port the gateway's allow-list does not otherwise open:
 # the same on-state plus a model-manager in front of one.
-KAGENT_MM := $(KAGENT_NETPOL) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth
+KAGENT_MM := $(KAGENT_NETPOL) --set components.model-manager.enabled=true --set model-manager.backend=ollama --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth
 # The two files of the v1alpha2 agent templates giantswarm/agent-platform#299
 # deletes; until then they are the only place `app: kagent` may still appear.
 KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
@@ -1181,9 +1185,27 @@ verify-workerpool: ## Assert the Substrate WorkerPool reaches the cluster as wri
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> both components off (the default) render nothing of theirs"
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vmg-off.out 2>&1 || { cat /tmp/vmg-off.out; exit 1; }
+	@echo "--> both components off render nothing of theirs (agent-manager is off by default; model-manager is on since giantswarm/agent-platform#329)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.model-manager.enabled=false >/tmp/vmg-off.out 2>&1 || { cat /tmp/vmg-off.out; exit 1; }
 	@if grep -qE 'model-manager|agent-manager' /tmp/vmg-off.out; then echo "FAIL: model-manager / agent-manager objects render while the components are off"; grep -nE 'model-manager|agent-manager' /tmp/vmg-off.out | head; exit 1; else echo "ok: inert while off"; fi
+	@echo "--> the default (giantswarm/agent-platform#329): model-manager on with no backend — its policies render without a model-server or Hub egress, no endpoint is required"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >/tmp/vmg-default.out 2>&1 || { cat /tmp/vmg-default.out; exit 1; }
+	@for n in model-manager-ingress model-manager-egress muster-to-model-manager; do \
+		grep -A3 '^kind: CiliumNetworkPolicy$$' /tmp/vmg-default.out | grep -q "^  name: agent-platform-connectivity-$$n$$" || { echo "FAIL: CiliumNetworkPolicy agent-platform-connectivity-$$n missing from the default render"; exit 1; }; \
+	done
+	@awk '/^  name: agent-platform-connectivity-model-manager-egress$$/,/^---/' /tmp/vmg-default.out >/tmp/vmg-default-egress.out
+	@if grep -qE 'huggingface.co|/32' /tmp/vmg-default-egress.out; then echo "FAIL: the default model-manager egress opens a model server or the Hub without a static backend"; cat /tmp/vmg-default-egress.out; exit 1; fi
+	@grep -q 'matchName: dex.ci.example.com' /tmp/vmg-default-egress.out || { echo "FAIL: the default model-manager egress lost the identity provider"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) --set networkPolicy.flavor=kubernetes >/tmp/vmg-default-k8s.out 2>&1 || { cat /tmp/vmg-default-k8s.out; exit 1; }
+	@grep -A3 '^kind: NetworkPolicy$$' /tmp/vmg-default-k8s.out | grep -q '^  name: agent-platform-connectivity-model-manager-egress$$' || { echo "FAIL: kubernetes flavor: the default model-manager egress policy is missing"; exit 1; }
+	@if grep -q 'cidr: 10.0.0.1/32' /tmp/vmg-default-k8s.out; then echo "FAIL: kubernetes flavor: a model-server address renders without a static backend"; exit 1; fi
+	@echo "ok: default shape, zero backends"
+	@echo "--> the one-backend form and the one-element backends list render alike (the old default, backend: ollama, is now a static choice)"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) >/tmp/vmg-one-form.out 2>&1 || { cat /tmp/vmg-one-form.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend= --set 'model-manager.backends[0]=ollama' >/tmp/vmg-list-form.out 2>&1 || { cat /tmp/vmg-list-form.out; exit 1; }
+	@grep -q '10.0.0.1/32' /tmp/vmg-one-form.out || { echo "FAIL: backend: ollama does not open the Ollama endpoint"; exit 1; }
+	@grep -q '10.0.0.1/32' /tmp/vmg-list-form.out || { echo "FAIL: backends: [ollama] does not open the Ollama endpoint"; exit 1; }
+	@echo "ok: static forms"
 	@echo "--> cilium: routes, JWT policies and network policies of both components"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) >/tmp/vmg-cilium.out 2>&1 || { cat /tmp/vmg-cilium.out; exit 1; }
 	@for name in model-manager agent-manager; do \
@@ -1324,7 +1346,8 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@if grep -q 'io.kubernetes.pod.namespace' /tmp/vmg-peers-k8s.out; then echo "FAIL: a Cilium namespace label leaked into the kubernetes flavor"; exit 1; fi
 	@echo "ok: ingress.additionalPeers"
 	@echo "--> guards"
-	$(call managers_must_fail,ollama endpoint required,$(MANAGERS_MIN) --set components.model-manager.enabled=true,model-manager.ollama.endpoint is empty)
+	$(call managers_must_fail,ollama endpoint required,$(MANAGERS_MIN) --set model-manager.backend=ollama,model-manager.ollama.endpoint is empty)
+	$(call managers_must_fail,backends list ollama endpoint required (one element),$(MANAGERS_MIN) --set 'model-manager.backends[0]=ollama',model-manager.ollama.endpoint is empty)
 	$(call managers_must_fail,backend enum,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=bogus,must be one of: ollama)
 	$(call managers_must_fail,lemonade endpoint required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=lemonade,model-manager.lemonade.endpoint is empty)
 	$(call managers_must_fail,lemonade endpoint must be a URL,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=lemonade --set model-manager.lemonade.endpoint=172.21.0.1:13305,must be an http(s) URL)

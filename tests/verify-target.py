@@ -191,12 +191,22 @@ def check_golden(meta: str, connectivity: str) -> None:
     shutil.rmtree(tree)
     subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, ref], check=True)
     try:
+        # Intended differences to GOLDEN_REF are held equal on both sides
+        # (giantswarm/agent-platform#329, model-manager on by default with no
+        # backend): the connectivity shapes render with the component off (a
+        # chart that predates the default accepts the key); the meta shapes,
+        # which forward the model-manager block to the connectivity release
+        # whatever the toggle, also with the one-backend form the old default
+        # forwarded — so a static-backend installation's render is proven
+        # unchanged.
+        mm_off = ["--set", "components.model-manager.enabled=false"]
+        mm_static = ["--set", "model-manager.backend=ollama"]
         shapes = [
-            ("meta default", meta, []),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]),
-            ("connectivity default", connectivity, VM),
-            ("connectivity full", connectivity, CONN_FULL),
-            ("connectivity backstage", connectivity, CONN_BACKSTAGE),
+            ("meta default", meta, [*mm_off, *mm_static]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static]),
+            ("connectivity default", connectivity, [*VM, *mm_off]),
+            ("connectivity full", connectivity, [*CONN_FULL, *mm_off]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
