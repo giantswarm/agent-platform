@@ -8,19 +8,9 @@
 # the primary `agent-platform` chart).
 #
 # What this file carries beyond the golden (single-chart) pipeline:
-#   - test-ingress-modes: the `make verify-modes` + `make verify-global` +
-#     `make verify-managers` + `make verify-disruption` + `make verify-valkey` + `make verify-kagent-netpol` + `make verify-kagent-route` + `make verify-kagent-discovery` + `make verify-meta` +
-#     `make verify-engine` + `make verify-self` + `make verify-labels` + `make verify-postgres` +
-#     `make verify-secrets` + `make verify-login-connector` +
-#     `make verify-components` + `make verify-auto` + `make verify-identity` +
-#     `make verify-wiring` + `make verify-llm-routing` + `make verify-prompt-caching` + `make verify-kagent-crds` + `make verify-workerpool` + `make verify-kyverno` + `make verify-kagent-storage-version` + `make verify-hooks-netpol` + `make verify-klausgateway-netpol` + `make verify-klausgateway-otlp` checks on branches (ingress-mode guards, the global.*
-#     contract, the model-manager / agent-manager wiring, the kagent tool-server
-#     egress, app-of-apps meta-package render, the bundled Flux engine's two
-#     shapes, the self-management shapes, the postgres.backup wiring and guards,
-#     the roster entries of the standalone chart's extras and the component
-#     charts' acceptance of the forwarded values, the cluster-shape `auto` knobs,
-#     the kagent-flux tenant identity, the standalone's ported wiring, the
-#     LLM routing toggle)
+#   - test-ingress-modes: `make verify-all`, every offline assertion of the
+#     chart's render (Makefile.custom.mk's verify-* targets, listed by
+#     `make help`)
 #   - the standalone agent-platform-connectivity chart (build, branch dev push,
 #     tag push), the consumer-side wiring rendered by the meta-package as a
 #     HelmRelease versioned in lockstep with agent-platform off the same git
@@ -64,71 +54,15 @@ jobs:
           sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
           helm version
     - run:
-        name: verify ingress-mode guards + global contract + meta-package render + LLM routing
-        # verify-modes (connectivity chart ingress guards), verify-global (the
-        # global.* contract behaviors and their guards), verify-managers (the
-        # model-manager / agent-manager wiring and guards), verify-kagent-netpol
-        # (the kagent controller/agent egress to the built-in tool server),
-        # verify-kagent-route (the kagent controller GRPCRoute on both hops,
-        # the JWT policy with the identity transformation, the UI route's
-        # header strip, the controller's ingress admission and the guards),
-        # verify-kagent-discovery (the muster RemoteMCPServer opts out of
-        # controller-side tool discovery iff muster runs with OAuth on, and
-        # never carries a static header),
-        # verify-meta (root app-of-apps render: the flux-engine subchart the
-        # only Chart.yaml dependency and no component pin, ranges as values,
-        # Flux the only engine, pure renderer with the engine off, pinned BOM,
-        # and the schema symmetry between the two charts down to every nested
-        # key — tests/verify-schema-symmetry.py, with its negative cases),
-        # verify-engine (the bundled Flux engine's two shapes: engine off renders
-        # no CRD/hook/operator/identity, engine on exactly the eleven CRDs, the
-        # operator, the FluxInstance, agent-platform-flux on every HelmRelease
-        # and the teardown hooks — with the Helm 3 installed here), verify-self
-        # (self-management: engine off renders nothing of it; engine on the
-        # self OCIRepository + suspended HelmRelease, the -6/-5/0 hooks, the
-        # identity and the admission policy that makes the Helm CLI day-0
-        # only; self off the hand-back hooks only; the guards), verify-postgres
-        # (the postgres.backup wiring and guards), verify-substrate-store (Agent
-        # Substrate's snapshot store: the Crossplane bucket + IRSA role on aws, the
-        # Azure account + Workload Identity behind the s3proxy façade on capz, the
-        # derived snapshot location, role annotations and S3 environment, the
-        # guards) and verify-secrets
-        # (gitops.forbidInlineSecrets: off by default, names only the inline
-        # credential paths, passes on referenced Secrets), verify-components
-        # (the standalone chart's extras as components: off by default, sources
-        # and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree
-        # against the connectivity schema), verify-components-charts (pulls
-        # the seven component charts and renders each with the forwarded
-        # values), verify-auto (the cluster-shape knobs: `auto` resolves by
-        # served API group, the fleet shape is unchanged, the vanilla shape
-        # carries no Kyverno / Cilium / monitor / Envoy-only object) and
-        # verify-identity (the kagent-flux tenant identity from one value, and
-        # the fixes that retired the standalone's template patches) and
-        # verify-wiring (the standalone's ported wiring: the Backstage
-        # app-config surface, the mcp-kubernetes MCPServer, model serving on
-        # the kserve components and its guards, toggles off = no object) and
-        # verify-llm-routing (the llmRouting toggle, both states, and its
-        # guards) and verify-kagent-crds (every kagent.dev object the connectivity
-        # chart renders — the ModelConfig / RemoteMCPServer catalog — validated
-        # against the kagent line's CRDs at the pinned release; no v1alpha2 in
-        # any render) and verify-kagent-harness (the connectivity chart renders
-        # exactly one platform Harness per managed namespace with the shape the
-        # platform owns — the Go ADK image by digest, KAGENT_PROPAGATE_TOKEN, the
-        # WorkerPool, the snapshot location and the admission label — a tag image
-        # fails, kagent off renders none) and verify-migration (the agent-manager
-        # migrate Job of the kagent API v2 cut-over: gating, identity, image,
-        # token, RBAC set, network policy in both flavors, guards; verify-postgres
-        # and verify-identity carry the kagent_v2 database and the one
-        # ClusterRoleBinding as prerequisites) and verify-kagent-storage-version (the
-        # kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over: the backup
-        # at pre-upgrade records the v1alpha2 catalog, stops the HelmRelease that
-        # applied the three CRDs from re-applying them (crds: Skip, #416), removes
-        # them and watches they stay gone; the restore at post-upgrade brings the
-        # hand-created ModelConfigs back at
-        # v1alpha3; with the engine off too, nothing with kagent off) are the
-        # single source of truth, also run locally. The meta chart's one dependency is the flux-engine
-        # subchart, a directory in its charts/, which needs no `helm dependency build`.
-        command: make verify-modes verify-global verify-meta verify-engine verify-self verify-labels verify-insecure verify-managers verify-disruption verify-valkey verify-klausgateway-valkey verify-kagent-netpol verify-kagent-route verify-kagent-discovery verify-kagent-crds verify-kagent-harness verify-workerpool verify-kyverno verify-postgres verify-substrate-store verify-secrets verify-login-connector verify-presets verify-components verify-components-charts verify-auto verify-identity verify-wiring verify-llm-routing verify-prompt-caching verify-migration verify-kagent-storage-version verify-hooks-netpol verify-klausgateway-netpol verify-klausgateway-otlp verify-actor-telemetry-egress
+        name: verify every render assertion (make verify-all)
+        # Every verify-* target of Makefile.custom.mk, which is the set
+        # `make verify-all` derives from that file: a new target reaches this
+        # job by existing, and nothing names the set twice. `make help` lists
+        # what each one asserts. They are the single source of truth for the
+        # chart's render, also run locally. The meta chart's one dependency is
+        # the flux-engine subchart, a directory in its charts/, which needs no
+        # `helm dependency build`.
+        command: make verify-all
 
 workflows:
   build:
