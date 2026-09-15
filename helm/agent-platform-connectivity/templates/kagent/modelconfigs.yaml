@@ -43,9 +43,41 @@ spec:
   default ModelConfig is redirected through the forwarded
   kagent.providers.<default>.config.baseUrl instead, which this chart does not
   render. */}}
-  {{- with $baseUrl }}
-  {{ $urlKey }}:
+  {{- /* Prompt caching (kagent line 0.11.0-gs.15+, kagent-dev/kagent#2788): an
+  entry's own promptCaching / cacheTTL win, `false` included; an Anthropic entry
+  that sets neither inherits the platform's default from
+  kagent.providers.anthropic.config — the block the kagent chart renders into
+  the default ModelConfig — so the catalog's Anthropic models are cached the way
+  the default model is, without a value per entry. Bedrock takes the entry's own
+  keys only. Any other provider has neither field in ModelConfigSpec: the API
+  server would prune them and the model would stay uncached in silence, so the
+  render refuses them naming the entry; cacheTTL is held to the CRD's enum here
+  for the same reason. */}}
+  {{- $cacheKey := include "agent-platform.modelConfigCacheKey" $provider }}
+  {{- $inherit := dict }}
+  {{- if eq $cacheKey "anthropic" }}
+  {{- $inherit = dig "providers" "anthropic" "config" (dict) ($.Values.kagent | default dict) }}
+  {{- end }}
+  {{- if and (not $cacheKey) (or (not (kindIs "invalid" .promptCaching)) .cacheTTL) }}
+  {{- fail (printf "kagent.modelConfigs[].promptCaching / cacheTTL is set on %q, whose provider %s has neither in ModelConfigSpec (Anthropic and Bedrock have them; the API server would prune the fields and the model would stay uncached)" .name $provider) }}
+  {{- end }}
+  {{- $promptCaching := .promptCaching }}
+  {{- if kindIs "invalid" $promptCaching }}{{ $promptCaching = $inherit.promptCaching }}{{ end }}
+  {{- $cacheTTL := .cacheTTL | default $inherit.cacheTTL }}
+  {{- if and $cacheTTL (not (has (toString $cacheTTL) (list "5m" "1h"))) }}
+  {{- fail (printf "kagent.modelConfigs[].cacheTTL %q on %q is not one of the CRD's values 5m, 1h" (toString $cacheTTL) .name) }}
+  {{- end }}
+  {{- $cache := dict }}
+  {{- if not (kindIs "invalid" $promptCaching) }}{{ $_ := set $cache "promptCaching" $promptCaching }}{{ end }}
+  {{- with $cacheTTL }}{{ $_ := set $cache "cacheTTL" (toString .) }}{{ end }}
+  {{- if or $baseUrl $cache }}
+  {{ $urlKey | default $cacheKey }}:
+    {{- with $baseUrl }}
     baseUrl: {{ . | quote }}
+    {{- end }}
+    {{- with $cache }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
 {{- end }}
 {{- end }}

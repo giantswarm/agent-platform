@@ -49,7 +49,7 @@ import yaml
 
 # The kagent line's release the platform pins (meta chart: the floor of the
 # components.kagent / components.kagent-crds range). Move it with the pin.
-KAGENT_LINE_REF = "v0.11.0-gs.14"
+KAGENT_LINE_REF = "v0.11.0-gs.15"
 CRD_URL = "https://raw.githubusercontent.com/giantswarm/kagent-upstream/{ref}/helm/kagent-crds/templates/{file}"
 CRD_FILES = {
     "ModelConfig": "kagent.dev_modelconfigs.yaml",
@@ -69,7 +69,7 @@ CATALOG_SHAPE = [
     "--set", "ingress.parentRefs[0].name=x",
     "--set", "components.kagent.enabled=true",
     "--set", "kagent.namespaceOverride=kagent",
-    "--set-json", 'kagent.modelConfigs=[{"name":"anthropic-sonnet","displayName":"Anthropic Sonnet 4.6","provider":"Anthropic","model":"claude-sonnet-4-6","apiKeySecret":"kagent-anthropic","baseUrl":"http://agentgateway.default.svc:8081"}]',
+    "--set-json", 'kagent.modelConfigs=[{"name":"anthropic-sonnet","displayName":"Anthropic Sonnet 4.6","provider":"Anthropic","model":"claude-sonnet-4-6","apiKeySecret":"kagent-anthropic","baseUrl":"http://agentgateway.default.svc:8081","promptCaching":true,"cacheTTL":"1h"}]',
     "--set-json", 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp","description":"an MCP server reached with the propagated token"}]',
 ]
 
