@@ -499,6 +499,9 @@ components:  # @schema additionalProperties: true
       - remoteMcpServers
       - serviceMonitor
       - uiRoute
+      # The worker PodDisruptionBudget is the connectivity chart's (the kagent
+      # chart has no budget template for the WorkerPool; #472).
+      - substrateWorkerPool.podDisruptionBudget
     # The kagent chart stamps its own image references at publish (the build's
     # controller/UI tag, the Go ADK digest the Harness runs, the gVisor worker
     # of the Substrate version it was built against). An installation may
@@ -1861,6 +1864,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       ateApiEndpoint: dns:///api.ate-system.svc:443
       atenetRouterURL: http://atenet-router.ate-system.svc:80
+      # INERT on kagent API v2 — not a knob. The kagent chart renders it as the
+      # controller's SUBSTRATE_DEFAULT_WORKERPOOL_NAME / _NAMESPACE env, and
+      # nothing in the line reads them: every ActorTemplate is pinned to the
+      # pool of the Harness that admitted it (the Harness's workerPoolRef,
+      # kagent.harness), which follows substrateWorkerPool.name below. Kept in
+      # step with that name so the env is at least not misleading
+      # (giantswarm/agent-platform#472).
       defaultWorkerPool:
         name: kagent-default
     auth:
@@ -1932,15 +1942,19 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # .omitEmptyKeys; the chart refuses an empty value). sandboxClass gvisor is
   # what kagent's generated ActorTemplates select. The Harness's workerPoolRef
   # follows `name`; replicas and template (resources, node placement, the
-  # CPU feature-set pin) are the capacity knobs.
+  # CPU feature-set pin) are the capacity knobs; podDisruptionBudget (the
+  # connectivity chart's object, never forwarded to the kagent release) and
+  # the template's Karpenter annotation and capacity-type selector are the
+  # disruption knobs.
   substrateWorkerPool:
     create: true
     name: kagent-default
     replicas: 4
     workerImage: ""
     sandboxClass: gvisor
-    # The worker pods' template (WorkerPool.spec.template: nodeSelector,
-    # tolerations, priorityClassName, nodeAffinity, resources). One pool runs
+    # The worker pods' template (WorkerPool.spec.template: labels, annotations,
+    # nodeSelector, tolerations, priorityClassName, nodeAffinity, resources —
+    # nothing else reaches the cluster, see "Spread" below). One pool runs
     # one CPU FEATURE SET — one vendor and one generation, not just one
     # architecture: an actor's golden snapshot is a gVisor checkpoint, and
     # gVisor restores a checkpoint only on a host whose CPU offers every
@@ -1998,6 +2012,58 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # raise limits for heavier agents, replicas for more concurrency (a
     # management cluster budgets replicas × limits — 4 × 2Gi/2vCPU here).
     # README "Agent Substrate: worker capacity".
+    #
+    # Disruption (giantswarm/agent-platform#472; README "Voluntary disruption").
+    # The pool is the platform's one failure domain: a worker that goes loses
+    # the turn in flight on it and every session paused on it (a pause
+    # checkpoint is node-local, giantswarm/giantswarm#37795); on a Karpenter
+    # installation all four workers may bin-pack onto one spot node (gazelle,
+    # 2026-09-15). Three knobs, one on by default:
+    #   - podDisruptionBudget (below, ON): a budget on the worker pods,
+    #     maxUnavailable: 1, so a voluntary drain — Karpenter consolidation, a
+    #     node roll, `kubectl drain` — moves one worker at a time. It cannot
+    #     stop a spot reclaim (involuntary: the node goes two minutes after the
+    #     notice whatever the budget says).
+    #   - template.annotations `karpenter.sh/do-not-disrupt: "true"` (OFF —
+    #     document-only, an installation's choice): Karpenter's consolidation,
+    #     drift and expiry never drain a worker node at all. Caveat: a drift or
+    #     expiry roll then waits on that node until the NodePool's
+    #     terminationGracePeriod — a NodePool without one (the fleet's set
+    #     30m; a bare one sets none) never rolls the node while a worker is on
+    #     it. Substrate's own runbook wants worker nodes rolled deliberately
+    #     anyway. Karpenter-only: harmless elsewhere (an annotation nothing
+    #     reads).
+    #   - template.nodeSelector `karpenter.sh/capacity-type: on-demand` (OFF —
+    #     the fleet template renders it from an installation's
+    #     agentPlatform.workerPoolCapacityType): the only knob that covers a
+    #     spot interruption, at on-demand prices for the worker nodes.
+    #     Karpenter-only: NEVER on CAPZ, on-prem or a CAPA pool that cluster-aws
+    #     node pools provision — no node carries the label there and the
+    #     workers stay Pending.
+    # Every change to `template` (a label, an annotation, a selector, the
+    # resources) rolls the pool's Deployment once — RollingUpdate 25 %/25 %,
+    # one worker at a time under the budget, about a minute per worker on a
+    # node that is up and about three when Karpenter has to launch one; a turn
+    # in flight on a replaced worker is lost, a session paused on it too;
+    # goldens are untouched (a template change re-snapshots nothing). Land it
+    # in a quiet window.
+    #
+    # Spread. WorkerPool.spec.template carries no topologySpreadConstraints or
+    # podAntiAffinity in any published release of the Substrate line yet: the
+    # CRD prunes them at admission, silently. The render REFUSES both keys
+    # (agent-platform.validateWorkerPool) until components.substrate
+    # .versionRange's floor is the release that carries them (the carried
+    # patch giantswarm/giantswarm#37797), and forwards them verbatim from
+    # then on; every other key WorkerPool.spec.template does not have is
+    # refused the same way (a typo would be pruned in silence). Recommended
+    # once available: hostname maxSkew 1 / minDomains 2 / DoNotSchedule
+    # (Karpenter provisions the second node) and zone maxSkew 1 /
+    # ScheduleAnyway, both selecting `ate.dev/worker-pool: <name>`.
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: null
+      maxUnavailable: 1
+      unhealthyPodEvictionPolicy: AlwaysAllow
     template:
       nodeSelector:
         kubernetes.io/arch: amd64
