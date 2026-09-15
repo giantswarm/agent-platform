@@ -719,7 +719,7 @@ verify-components: ## Assert the roster: the standalone chart's extras (backstag
 	@echo "component roster verified."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Pull EVERY component the customer BOM pins (the set comes from the BOM, never a list kept by hand) at the range's resolution and at the BOM pin, resolved the way Flux does, and render each with the values the meta chart forwards to it — a forwarded key a chart's closed schema does not declare fails its release on every installation, which a meta-only render cannot see. Also asserts the managers' pinned --kagent-api-version and the kagent Harness's admission label. Network: gsoci.azurecr.io, ghcr.io.
+verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, resolved the way Flux does; a chart released with the meta chart (releasedWithChart) from the working tree. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. Network: gsoci.azurecr.io, ghcr.io.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."

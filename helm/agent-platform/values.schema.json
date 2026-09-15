@@ -118,6 +118,9 @@
                                 "type": "string"
                             }
                         },
+                        "releasedWithChart": {
+                            "type": "boolean"
+                        },
                         "repository": {
                             "type": "string"
                         },

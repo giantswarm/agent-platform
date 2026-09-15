@@ -872,14 +872,22 @@ components:  # @schema additionalProperties: true
   agent-platform-connectivity:  # @schema additionalProperties: true
     chart: agent-platform-connectivity
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # This repo's own wiring chart, released off the same tag as this chart and
-    # re-resolved by every installation's Flux on each reconcile of the
-    # connectivity OCIRepository. Its own major: the 4.x wiring is the kagent
-    # API v2 line's (kagent.dev/v1alpha3 objects for the kagent line) and the
-    # bound keeps a 4.x installation off the next major's wiring, the way the
-    # 3.x line stayed below 4.0.0 (giantswarm/agent-platform#348); an
-    # installation moves majors through the meta chart's own range.
-    versionRange: ">=4.0.0 <5.0.0"
+    # This repo's own wiring chart, released off the same tag as this chart:
+    # two charts, one commit, one version. Its version IS this chart's version
+    # (releasedWithChart — the OCIRepository's exact semver, re-resolved by
+    # every installation's Flux on each reconcile, so the connectivity release
+    # rolls exactly when this chart does), never a range or a pin of its own: a
+    # connectivity behind the meta chart refuses a key the meta chart forwards
+    # (its root schema is additionalProperties: false) and its release fails on
+    # every installation until the pin moves (giantswarm/agent-platform#431,
+    # #441, #339); one ahead may have retired a key the older meta chart still
+    # forwards. The next major's wiring reaches an installation with the next
+    # major of this chart, and only then. versionRange stays empty and is
+    # refused when set for this repository without a semverFilter (that is the
+    # lagging pin); a development build keeps its knobs — a semverFilter for a
+    # dev channel, another repository for a chart pushed by hand.
+    releasedWithChart: true
+    versionRange: ""
     forwardAllValues: true
     # The release carries the agent-manager migrate Job (agentManager.migration,
     # the kagent API v2 cut-over of an installation's agents) as a plain Job

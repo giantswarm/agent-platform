@@ -13,7 +13,13 @@ roster that the fleet, the quick-start values or the connectivity wiring rely on
   `crds:` policy (none of the seven ships a crds/ dir), and the CRD-before-CR
   order in `dependsOn` — kserve-crd before the KServe controllers, the operator
   and control plane before their CR consumers (connectivity, model-manager);
-- the customer BOM pins every one of them exactly;
+- the customer BOM pins every one of them exactly, and does not pin the wiring
+  chart: agent-platform-connectivity is released off the meta chart's tag and
+  its OCIRepository carries the meta chart's own exact version
+  (components.<name>.releasedWithChart — a packaged 4.99.0-test.1+abc renders
+  4.99.0-test.1: pre-release kept, build metadata dropped), the two Chart.yaml
+  versions are one, a pin at the chart's repository is refused, and the two
+  development shapes (a semverFilter, another repository) are admitted;
 - the values tree the meta chart forwards to the connectivity release validates
   against the connectivity chart's schema with the seven off and on. The
   connectivity root schema is additionalProperties: false, so a top-level block
@@ -65,11 +71,12 @@ NEW = {
     ),
 }
 
-# The wiring chart's range: released off the same tag as the meta chart and
-# re-resolved by every installation's Flux, so it holds its own major -- the
-# 4.x wiring is the kagent API v2 line's, and the next major's wiring must not
-# reach a 4.x installation ahead of its cut-over (the 3.x line held <4.0.0).
-CONNECTIVITY_RANGE = ">=4.0.0 <5.0.0"
+# The wiring chart has no range of its own: released off the same tag as the
+# meta chart, it is rendered at the meta chart's exact version
+# (components.agent-platform-connectivity.releasedWithChart), so the pair an
+# installation runs is the pair of one commit and the next major's wiring
+# reaches an installation only with the meta chart's next major.
+CONNECTIVITY = "agent-platform-connectivity"
 
 # The components whose ranges the kagent API v2 line changed (component ->
 # repository, versionRange, dependsOn with every component on): the kagent line's
@@ -312,11 +319,37 @@ def main(meta: str, connectivity: str) -> int:
         fail("an installation's own substrate.atelet.imageCache.pinnedImages is not forwarded verbatim")
     print("ok: the substrate release pins atelet's runtime images from the kagent release's ConfigMap, an installation's own list only when set")
 
-    # --- the wiring chart's range is bounded below the next major ------------------
-    conn_oci = off.get(("OCIRepository", "agent-platform-connectivity"))
-    if not conn_oci or f'semver: "{CONNECTIVITY_RANGE}"' not in conn_oci:
-        fail(f"the connectivity OCIRepository does not carry versionRange {CONNECTIVITY_RANGE!r}: the wiring chart holds its own major, which every installation re-resolves on each reconcile")
-    print(f"ok: the connectivity range is {CONNECTIVITY_RANGE} -- its own major, bounded below the next")
+    # --- the wiring chart is released with the meta chart: one version --------------
+    # The OCIRepository carries the meta chart's own exact version, never a range
+    # or a pin of its own: a connectivity behind the meta chart refuses the keys
+    # the meta chart forwards (its root schema is additionalProperties: false) and
+    # fails on every installation until the pin moves (#431, #441, #339).
+    chart_version = lambda d: re.search(r"^version: (\S+)$", open(f"{d}/Chart.yaml").read(), re.M).group(1).strip("'\"")
+    if chart_version(meta) != chart_version(connectivity):
+        fail(f"the two charts of this repository carry different Chart.yaml versions: agent-platform {chart_version(meta)}, {CONNECTIVITY} {chart_version(connectivity)} — they are published off one tag as one version")
+    conn_oci = off.get(("OCIRepository", CONNECTIVITY))
+    if not conn_oci or f'semver: "{chart_version(meta)}"' not in conn_oci:
+        fail(f"the connectivity OCIRepository does not carry the meta chart's own version {chart_version(meta)!r} (components.{CONNECTIVITY}.releasedWithChart)")
+    # A published build: a pre-release stays (a dev build is one version for the two
+    # charts), build metadata goes (helm-controller renders <version>+<oci digest>).
+    with tempfile.TemporaryDirectory() as d:
+        r = subprocess.run(["helm", "package", meta, "--version", "4.99.0-test.1+abc123", "-d", d], capture_output=True, text=True, check=False)
+        if r.returncode != 0:
+            fail(f"helm package of the meta chart failed:\n{r.stderr}")
+        packaged = docs(render(f"{d}/agent-platform-4.99.0-test.1+abc123.tgz", ci))
+        if 'semver: "4.99.0-test.1"' not in packaged[("OCIRepository", CONNECTIVITY)]:
+            fail("the connectivity OCIRepository of a chart packaged as 4.99.0-test.1+abc123 does not carry 4.99.0-test.1 (pre-release kept, build metadata dropped)")
+        if 'semver: ">=4.99.0-test.1 <5.0.0"' not in docs(render(f"{d}/agent-platform-4.99.0-test.1+abc123.tgz", ["--set", "gitops.self.enabled=true"]))[("OCIRepository", "t")]:
+            fail("the self OCIRepository's derived range no longer floors at the chart's own version (agent-platform.chartVersion)")
+    # A pin at the chart's own repository is the lagging pin; refused. The two
+    # development shapes keep their knobs.
+    pin = ["--set", f"components.{CONNECTIVITY}.versionRange=4.11.0"]
+    render_fails(meta, [*ci, *pin], "released with this chart", "a versionRange on the connectivity component")
+    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.semverFilter=.*-dev\\.x\\..*"]))[("OCIRepository", CONNECTIVITY)]:
+        fail("a connectivity versionRange together with a semverFilter (a dev channel) is not admitted")
+    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.repository=oci://registry.lab.svc:5000/charts"]))[("OCIRepository", CONNECTIVITY)]:
+        fail("a connectivity versionRange together with another repository (a chart pushed by hand) is not admitted")
+    print(f"ok: the connectivity OCIRepository carries the meta chart's own version ({chart_version(meta)} here; 4.99.0-test.1 for a build packaged as 4.99.0-test.1+abc123), the two Chart.yaml versions are one, a pin at the chart's repository is refused, a dev channel and another repository are admitted")
 
     # --- all on ---------------------------------------------------------------
     on_manifest = render(meta, [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]])
@@ -419,7 +452,9 @@ def main(meta: str, connectivity: str) -> int:
     # --- the BOM pins every one exactly ------------------------------------------
     bom_file = open(f"{meta}/examples/customer-bom.yaml").read()
     bom = docs(render(meta, [*ci, "-f", f"{meta}/examples/customer-bom.yaml", *ON]))
-    for name in (*NEW, *LINE, "agent-platform-connectivity"):
+    if re.search(rf"^\s*{re.escape(CONNECTIVITY)}:", bom_file, re.M):
+        fail(f"examples/customer-bom.yaml pins components.{CONNECTIVITY}: the wiring chart is released with the meta chart and follows its version (releasedWithChart) — a pin here lags the moment the meta chart moves")
+    for name in (*NEW, *LINE):
         m = re.search(rf"^\s*{re.escape(name)}:\s*\{{\s*versionRange:\s*\"([^\"]+)\"\s*\}}", bom_file, re.M)
         if not m:
             fail(f"examples/customer-bom.yaml does not pin components.{name}.versionRange")
@@ -443,7 +478,7 @@ def main(meta: str, connectivity: str) -> int:
         fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
     if substrate_pins != {SUBSTRATE_PIN}:
         fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the control plane and the workers (the kagent chart's stamped workerImage) are one Substrate version")
-    print("ok: the customer BOM pins the seven, the kagent line, the managers and the wiring chart exactly")
+    print("ok: the customer BOM pins the seven, the kagent line and the managers exactly, and not the wiring chart")
 
     # --- the forwarded tree validates against the connectivity chart --------------
     # The meta chart's defaults plus the one input every render needs; the CI
