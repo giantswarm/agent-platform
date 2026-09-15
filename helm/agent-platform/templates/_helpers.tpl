@@ -552,6 +552,23 @@ run it.
 {{- end -}}
 
 {{/*
+Fail the render when a value of kagent.substrateWorkerPool.template.nodeSelector
+is not a string. The kagent chart forwards the template verbatim into
+WorkerPool.spec.template (toYaml), whose nodeSelector is map[string]string: a
+bare number — the CPU generation pin written `karpenter.k8s.aws/instance-generation: 6`
+instead of "6" — renders, passes this chart's open kagent schema and fails only
+when helm-controller applies the kagent release, on every installation that
+carries it (giantswarm/agent-platform#457). Named here, at the render, instead.
+*/}}
+{{- define "agent-platform.validateWorkerPool" -}}
+{{- range $key, $value := dig "substrateWorkerPool" "template" "nodeSelector" (dict) .Values.kagent -}}
+{{- if not (kindIs "string" $value) -}}
+{{- fail (printf "kagent.substrateWorkerPool.template.nodeSelector.%s is %v (%s), not a string: a nodeSelector value is a string (WorkerPool.spec.template.nodeSelector is map[string]string), so quote it — the CPU generation pin is karpenter.k8s.aws/instance-generation: \"6\"" $key $value (kindOf $value)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fail the render when a component's on/off toggle is still set the old way, inside
 the component's own values block. Those blocks are additionalProperties: true, so
 a leftover `enabled` key validates and is then ignored — the component silently

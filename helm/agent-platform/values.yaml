@@ -1944,10 +1944,23 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     #     may replace a node with another vendor's at any time, the vendor —
     #     karpenter.k8s.aws/instance-cpu-manufacturer: amd (or intel; the
     #     fleet template carries amd, the vendor the fleet's golden snapshots
-    #     were taken on) — and, where a generation change must be ruled out
-    #     too, the family (karpenter.k8s.aws/instance-family: c5a): a snapshot
-    #     taken on a newer generation of one vendor does not restore on an
-    #     older one either;
+    #     were taken on) — AND the CPU generation, karpenter.k8s.aws/
+    #     instance-generation: "6" (quoted: a label value is a string, and the
+    #     render refuses a bare number): a snapshot taken on a newer
+    #     generation of one vendor does not restore on an older one either
+    #     (gazelle 2026-09-14: goldens taken on m7a, generation 7, failed on
+    #     c5ad, generation 5, `missing features: … avx512f …`;
+    #     giantswarm/agent-platform#457). Pin a generation that is one CPU
+    #     model across its families — for AMD on AWS 6 (c6a/m6a/r6a, EPYC
+    #     Milan) or 7 (c7a/m7a/r7a, EPYC Genoa); 5 is not (m5a/r5a Naples
+    #     next to c5a/c5ad Rome) — and one the goldens restore on: a golden
+    #     taken on an older generation restores on a newer one, never the
+    #     reverse. The pin narrows the spot pool to that generation's
+    #     families × the NodePool's sizes; read `kubectl get nodes -L
+    #     node.kubernetes.io/instance-type,karpenter.k8s.aws/instance-generation`
+    #     and the NodePool's requirements first (three families is the
+    #     floor). The family (karpenter.k8s.aws/instance-family: c6a) narrows
+    #     to one type where even that matters;
     #   - on CAPZ and the other providers a node pool is one VM size, so the
     #     pool label (giantswarm.io/machine-pool: <pool>) or
     #     node.kubernetes.io/instance-type pins it.
@@ -1955,7 +1968,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # values under it. Substrate placing a restore only on a worker whose CPU
     # covers the snapshot's feature set is the durable fix
     # (giantswarm/giantswarm#37742 row 12); until then the pin is the
-    # installation's to keep exact.
+    # installation's to keep exact — `make verify-workerpool` asserts it
+    # reaches the WorkerPool as written.
     #
     # resources is the platform's capacity knob (giantswarm/agent-platform#344,
     # bumblebee-plans#51 D5). One worker hosts one actor at a time, so a

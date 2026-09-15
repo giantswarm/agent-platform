@@ -1149,6 +1149,13 @@ verify-kagent-harness: ## Assert the platform Harness is the kagent chart's sinc
 	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR) $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-workerpool
+verify-workerpool: ## Assert the Substrate WorkerPool's placement pin (giantswarm/agent-platform#457): the meta chart forwards kagent.substrateWorkerPool.template.nodeSelector to the kagent release verbatim — the architecture alone by default, an installation's vendor + CPU generation pin (karpenter.k8s.aws/instance-cpu-manufacturer, karpenter.k8s.aws/instance-generation) as set, every value a string — and the kagent chart the range resolves to renders it unchanged into the one WorkerPool's spec.template.nodeSelector; a nodeSelector value that is not a string (an unquoted generation, which the apiserver refuses only on apply) fails the render naming the key. Network: ghcr.io; needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-workerpool.py $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
