@@ -578,13 +578,14 @@ Usage: include "agent-platform.semverRangeFloor" "<range>"
 The first release of the Substrate line (giantswarm/substrate, the chart
 components.substrate pins) whose WorkerPool CRD carries spec.template
 .topologySpreadConstraints and spec.template.podAntiAffinity — the carried patch
-tracked as giantswarm/giantswarm#37797 (#37742 row 46). EMPTY until that release
-is out: agent-platform.validateWorkerPool then refuses the two keys
-unconditionally, because every published Substrate release prunes them silently
+tracked as giantswarm/giantswarm#37797 (#37742 row 46), released as v0.0.30-gs.2
+(2026-09-15). agent-platform.validateWorkerPool refuses the two keys while
+components.substrate.versionRange's floor is below it — every earlier release
+prunes them silently — and forwards them verbatim from it on
 (giantswarm/agent-platform#472). One line, no comment inside the define:
 tests/verify-workerpool.py reads the value from this file.
 */}}
-{{- define "agent-platform.substrate.workerPoolSpreadFloor" -}}{{- end -}}
+{{- define "agent-platform.substrate.workerPoolSpreadFloor" -}}0.0.30-gs.2{{- end -}}
 
 {{/*
 Fail the render when kagent.substrateWorkerPool.template would not reach the
@@ -600,8 +601,8 @@ at the render, instead:
     map[string]string);
   - `topologySpreadConstraints` and `podAntiAffinity`, which the Substrate line
     carries only from the release agent-platform.substrate.workerPoolSpreadFloor
-    names (none yet): refused while components.substrate.versionRange's floor is
-    below it, forwarded verbatim from it on;
+    names (0.0.30-gs.2): refused while components.substrate.versionRange's floor
+    is below it, forwarded verbatim from it on;
   - any other key WorkerPool.spec.template does not have (labels, annotations,
     nodeSelector, tolerations, priorityClassName, nodeAffinity, resources are
     the fields of the pinned line; a typo such as `nodeSelectors` would be

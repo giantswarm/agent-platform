@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=0.11.0-gs.16 <0.11.1-0"
 # both following components.kagent. The pin is the line's release range, the
 # kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.30-gs.1 <0.0.31-0"
-SUBSTRATE_PIN = "0.0.30-gs.1"  # the range's floor: the BOM pin and the worker image the kagent chart (0.11.0-gs.16) stamps
+SUBSTRATE_RANGE = ">=0.0.30-gs.2 <0.0.31-0"
+SUBSTRATE_PIN = "0.0.30-gs.2"  # the range's floor and the BOM pin: the release whose WorkerPool CRD carries the spread fields (#472); the worker image the kagent chart (0.11.0-gs.16) stamps stays 0.0.30-gs.1
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
@@ -479,7 +479,7 @@ def main(meta: str, connectivity: str) -> int:
     if not SUBSTRATE_RANGE.startswith(f">={SUBSTRATE_PIN} "):
         fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
     if substrate_pins != {SUBSTRATE_PIN}:
-        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the control plane and the workers (the kagent chart's stamped workerImage) are one Substrate version")
+        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the two Substrate charts are one release of the line (the worker image the kagent chart stamps may trail it while the runtime is unchanged)")
     print("ok: the customer BOM pins the seven, the kagent line and the managers exactly, and not the wiring chart")
 
     # --- the forwarded tree validates against the connectivity chart --------------

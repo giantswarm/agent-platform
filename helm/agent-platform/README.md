@@ -126,18 +126,20 @@ up, about three when Karpenter has to launch one). A turn in flight on a replace
 worker is lost, a session paused on it too; the goldens are untouched (a template
 change re-snapshots nothing). Land it in a quiet window.
 
-**Spread.** `WorkerPool.spec.template` carries no `topologySpreadConstraints` or
-`podAntiAffinity` in any published release of the Substrate line yet — the CRD
-prunes both silently. The render **refuses the two keys** naming the key and the
-range until `components.substrate.versionRange`'s floor is the release that
-carries them (the carried patch giantswarm/giantswarm#37797;
-`agent-platform.substrate.workerPoolSpreadFloor` names it once it is out), and
-forwards them verbatim from then on. Recommended once available: hostname
-`maxSkew: 1`, `minDomains: 2`, `whenUnsatisfiable: DoNotSchedule` (Karpenter
-provisions the second node) and zone `maxSkew: 1`, `ScheduleAnyway`, both with a
-`labelSelector` on `ate.dev/worker-pool: <name>`. `make verify-workerpool`
-asserts all of it: the budget, the two knobs reaching the kagent release and the
-`WorkerPool` verbatim, the refused keys, still exactly one `WorkerPool`.
+**Spread.** `WorkerPool.spec.template` carries `topologySpreadConstraints` and
+`podAntiAffinity` from Substrate `0.0.30-gs.2` (the carried patch
+giantswarm/giantswarm#37797) — every release before it prunes both silently. The
+render **refuses the two keys** naming the key, the floor and the range while
+`components.substrate.versionRange`'s floor is below that release
+(`agent-platform.substrate.workerPoolSpreadFloor` names it), and forwards them
+verbatim from it on. Recommended: hostname `maxSkew: 1`, `minDomains: 2`,
+`whenUnsatisfiable: DoNotSchedule` (the provisioner adds the second node) and
+zone `maxSkew: 1`, `ScheduleAnyway`, both with a `labelSelector` on
+`ate.dev/worker-pool: <name>` — what the fleet template renders behind its knob.
+A spread is a template change and rolls the pool's Deployment once (above).
+`make verify-workerpool` asserts all of it: the budget, the two knobs reaching the
+kagent release and the `WorkerPool` verbatim, the spread refused below the floor
+and forwarded at it, still exactly one `WorkerPool`.
 
 ## Voluntary disruption
 
@@ -257,13 +259,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.30-gs.2 <0.0.31-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.30-gs.2 <0.0.31-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
