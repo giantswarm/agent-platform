@@ -37,8 +37,8 @@ lab value, so a run that sets nothing behaves as the CI job does. See
 scenarios.py and README.md.
 
 Local run (a throwaway kind cluster; the lab URLs carry their ports, so the lab
-Dex port and the muster port must be free — ATS_ISSUER_PORT and ATS_MUSTER_PORT
-move them, see scenarios.py and lab-dex.yaml):
+Dex port and the muster port must be free — ATS_MUSTER_BASE_URL moves muster's,
+see scenarios.py and lab-dex.yaml):
 
   helm package helm/agent-platform --version 3.99.0-dev.local -d dist
   cd tests/ats && KUBECONFIG=… ATS_CHART_PATH=$PWD/../../dist/agent-platform-3.99.0-dev.local.tgz \
@@ -587,7 +587,7 @@ class PortForward:
             err = (self._proc.stderr.read() if self._proc.stderr else "")[:500]
             raise AssertionError(
                 f"port-forward to {self.namespace}/{self.service} on local port {self.local_port} exited with {self._proc.returncode}: {err}\n"
-                f"(a process already listening on {self.local_port}? the scenario's URLs carry the port — free it, or move it with ATS_MUSTER_PORT / ATS_ISSUER_PORT)")
+                f"(a process already listening on {self.local_port}? the scenario's URLs carry the port — free it, or move muster's with ATS_MUSTER_BASE_URL)")
 
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None

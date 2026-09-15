@@ -194,7 +194,7 @@ def dump_auth(kube: Kube) -> None:
 def smoke_sets(candidate_version: str) -> List[str]:
     """The --set values of the smoke install: self-management against the
     in-cluster registry, the connectivity chart of this checkout from the same
-    registry (and the muster base URL when the local port moved)."""
+    registry, and muster's own base URL pinned to the one the tests call."""
     return self_management_sets(candidate_version) + connectivity_sets() + MUSTER_BASE_URL_SETS
 
 

@@ -169,9 +169,8 @@ kind delete cluster --name aps
 
 The lab URLs carry fixed ports — `https://dex.127.0.0.1.nip.io:5554` and
 `http://localhost:8090` are the same inside the cluster and from the test — so
-5554 and 8090 must be free. `ATS_MUSTER_PORT=18090` moves muster's base URL and
-the port-forward when 8090 is taken (the lab Dex client lists that callback
-too). Every credential in `lab-dex.yaml` is a public lab fixture; never point
+5554 and 8090 must be free. `ATS_MUSTER_BASE_URL=http://localhost:18090` moves
+muster's base URL and the port-forward with it when 8090 is taken. Every credential in `lab-dex.yaml` is a public lab fixture; never point
 it at real users or apply it to a cluster you care about (it replaces the
 kube-system CoreDNS Corefile).
 
@@ -201,17 +200,18 @@ The knobs of the target:
 | `E2E_DOMAIN`, `E2E_ISSUER_URL`, `E2E_CLIENT_ID`, `E2E_IDP_SECRET_NAME`, `E2E_IDP_CA_SECRET` | — | When any is set, [e2e_overlay.py](../e2e_overlay.py) turns them into a values overlay, which the target writes to a temporary file, layers last and removes on exit. It prints the line count, never a value. |
 
 Each of those names one fact that both the chart and the tests need, so the run
-names it once: the target derives `ATS_ISSUER_URL` from `E2E_ISSUER_URL`,
-`ATS_CLIENT_ID` from `E2E_CLIENT_ID`, `ATS_IDP_CA_SECRET` from
-`E2E_IDP_CA_SECRET`, and — on a cluster type other than `kind`, whose muster
-answers on a hostname — `ATS_MUSTER_BASE_URL` from `https://muster.<E2E_DOMAIN>`,
-the hostname the chart itself derives. An `ATS_` variable already in the
-caller's environment wins, so a run with an `ingress.hostnames` override names
-`ATS_MUSTER_BASE_URL` itself.
+names it once. The target passes them through, and the scenario loader reads
+each as the fallback of the matching `ATS_` variable: `E2E_ISSUER_URL` behind
+`ATS_ISSUER_URL`, `E2E_CLIENT_ID` behind `ATS_CLIENT_ID`, `E2E_IDP_CA_SECRET`
+behind `ATS_IDP_CA_SECRET`. Where muster answers on a hostname, the loader
+derives `https://muster.<E2E_DOMAIN>` for its base URL, the hostname the chart
+itself derives. An `ATS_` variable the caller sets wins, so a run with an
+`ingress.hostnames` override names `ATS_MUSTER_BASE_URL` itself.
 
 `make verify-scenarios` asserts the scenario loader and the overlay offline:
-the kind and eks defaults, every refusal, the derived base URL and the
-overlay's shapes. It runs in CI with the other `verify-*` targets.
+the kind and eks defaults, every refusal, the derived ports, the `E2E_`
+fallback and the overlay's shapes. `make verify-all` runs it with every other
+offline assertion, which is what CI runs.
 
 **Secrets and the domain stay out of the repository.** The example files carry
 placeholders. `E2E_IDP_SECRET_NAME` and `E2E_IDP_CA_SECRET` are the NAMES of
@@ -224,20 +224,20 @@ from `ATS_CLIENT_SECRET` in the caller's environment.
 A run's cluster-specific inputs are one `scenarios.Scenario`
 ([scenarios.py](scenarios.py)). The assertions never change; only these do.
 Every field defaults to the kind lab value, so a run that sets nothing behaves
-exactly as the CI job does. `ATS_CLUSTER_TYPE` picks the defaults and each
-field has its own environment variable on top.
+exactly as the CI job does. `ATS_CLUSTER_TYPE` picks the defaults and most
+fields have their own variable on top. A port is read out of the URL that
+carries it, so the two can never disagree.
 
 | Input | Environment variable | kind default |
 |---|---|---|
 | Values files | `ATS_VALUES` (colon- or comma-separated) | `helm/agent-platform/examples/kind-lab-dex.yaml`, `values-kagent.yaml`, `values-round-trips.yaml`. The `eks` scenario has none: a run must name them. |
 | Values layered last | `ATS_OVERLAY_VALUES` | none (`make e2e` writes one from the environment) |
-| The issuer | `ATS_ISSUER_URL`, `ATS_ISSUER_PORT` | the lab Dex on its loopback `nip.io` name |
+| The issuer | `ATS_ISSUER_URL` | the lab Dex on its loopback `nip.io` name; the port comes from the URL |
 | The OAuth client | `ATS_CLIENT_ID`, `ATS_CLIENT_SECRET` | the lab client and its public fixture secret |
 | muster's registration token | `ATS_REGISTRATION_TOKEN` | the lab fixture token |
 | A static user | `ATS_IDP_USER`, `ATS_IDP_PASSWORD` | the lab Dex static user; empty skips the three tests that log in |
 | The issuer's CA Secret | `ATS_IDP_CA_SECRET` | `agent-platform-idp-ca`; empty means the system trust store |
-| Install the lab Dex | `ATS_LAB_DEX` | true; false on a cluster with its own identity provider |
-| muster's base URL | `ATS_MUSTER_BASE_URL`, `ATS_MUSTER_PORT` | `http://localhost:<the lab port>` |
+| muster's base URL | `ATS_MUSTER_BASE_URL` | `http://localhost:<the lab port>`; the port-forward follows the URL |
 | How muster is reached | `ATS_MUSTER_REACH` | `port-forward`; `hostname` for a real hostname behind the Gateway |
 | The OAuth redirect | `ATS_OAUTH_CALLBACK` | the lab loopback callback, never served |
 | Budgets | `ATS_INSTALL_TIMEOUT`, `ATS_UNINSTALL_TIMEOUT`, `ATS_UNINSTALL_BUDGET_S`, `ATS_READY_TIMEOUT_S` | measured on kind |
@@ -247,11 +247,16 @@ Two rules the suite enforces itself:
 - The values file the smoke installs must be an example file the repository
   ships (`test_the_scenario_installs_the_example_file`), so the documented
   install and the tested install cannot drift.
-- An unknown `ATS_CLUSTER_TYPE`, an unknown `ATS_MUSTER_REACH`, an
-  `ATS_LAB_DEX` that is not a boolean, a missing issuer, client or muster base
-  URL, a scenario that names no values file, and a values file that does not
-  exist each fail the run with a message naming the variable, rather than
-  falling back to the kind lab silently.
+- An unknown `ATS_CLUSTER_TYPE`, an unknown `ATS_MUSTER_REACH`, a budget that
+  is not an integer, a missing issuer, client or muster base URL, a scenario
+  that names no values file, and a values file that does not exist each fail
+  the run with a message naming the variable, rather than falling back to the
+  kind lab silently.
+- A fact the chart and the suite both need is named once. `make e2e` sets
+  `E2E_ISSUER_URL`, `E2E_CLIENT_ID`, `E2E_IDP_CA_SECRET` and `E2E_DOMAIN` for
+  the install; the loader reads each as the fallback of the matching `ATS_`
+  variable, derives muster's base URL from the domain where muster answers on a
+  hostname, and an `ATS_` variable the caller sets wins.
 
 The `eks` scenario carries no defaults of its own for the issuer, the client,
 muster's base URL or the values files: a managed cloud cluster brings its own,

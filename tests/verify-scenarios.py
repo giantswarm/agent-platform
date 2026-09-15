@@ -13,13 +13,12 @@ Each case below pins one property a run on a real cluster relies on:
   the lab ports, budgets and credentials, and `eks` brings no default issuer,
   client, base URL or values file;
 - every refusal names its variable: an unknown cluster type, an unknown reach,
-  a non-boolean ATS_LAB_DEX, a non-integer port, a missing issuer, client or
-  base URL, a scenario with no values file, and a values file that is absent;
-- the derived base URL: a moved ATS_MUSTER_PORT moves the URL with it, because
-  the port is part of the URL muster is configured with, and an empty
-  ATS_MUSTER_BASE_URL counts as unset there as everywhere else;
-- the base-URL `--set`: none while the scenario's own values files carry the
-  URL, one as soon as the run's URL differs from them, ATS_VALUES included;
+  a non-integer budget, a missing issuer, client or base URL, a scenario with no
+  values file, and a values file that is absent;
+- the derived ports: each is read out of the URL that carries it, so a moved
+  port and its URL can never disagree;
+- the E2E_ fallback: `make e2e` names a fact once and the matching ATS_
+  variable, when the caller sets one, wins;
 - the overlay's shapes: `global.identity` appears only when one of its keys is
   set, because an empty `identity:` is a null that drops the block from every
   component release, and every value is a quoted scalar.
@@ -46,7 +45,7 @@ FAILURES = []
 
 def load(**env):
     """The scenario of a run whose environment is exactly `env`."""
-    for name in [n for n in os.environ if n.startswith("ATS_")]:
+    for name in [n for n in os.environ if n.startswith(("ATS_", "E2E_"))]:
         del os.environ[name]
     os.environ.update({k: v for k, v in env.items() if v is not None})
     importlib.reload(scenarios)
@@ -88,8 +87,8 @@ def main() -> int:
 
     # `make e2e` passes every derived variable, empty ones included, so an
     # empty variable must leave the scenario's default in place.
-    blanked = load(ATS_ISSUER_URL="", ATS_CLIENT_ID="", ATS_IDP_CA_SECRET="",
-                   ATS_MUSTER_BASE_URL="", ATS_VALUES="", ATS_OVERLAY_VALUES="")
+    blanked = load(ATS_MUSTER_BASE_URL="", ATS_VALUES="", ATS_OVERLAY_VALUES="",
+                   E2E_DOMAIN="", E2E_ISSUER_URL="", E2E_CLIENT_ID="", E2E_IDP_CA_SECRET="")
     # A reload rebinds the dataclass, so the two instances compare by field.
     check("an empty variable keeps the kind default",
           dataclasses.astuple(blanked) == dataclasses.astuple(kind), scenarios.summary(blanked))
@@ -112,9 +111,6 @@ def main() -> int:
     # --- every refusal names its variable
     refuses("an unknown cluster type", ["ATS_CLUSTER_TYPE", "gke", "kind"], ATS_CLUSTER_TYPE="gke")
     refuses("an unknown reach", ["ATS_MUSTER_REACH", "tunnel"], ATS_MUSTER_REACH="tunnel")
-    refuses("a non-boolean ATS_LAB_DEX", ["ATS_LAB_DEX", "maybe"], ATS_LAB_DEX="maybe")
-    refuses("a non-integer ATS_MUSTER_PORT", ["ATS_MUSTER_PORT", "abc"], ATS_MUSTER_PORT="abc")
-    refuses("a non-integer ATS_ISSUER_PORT", ["ATS_ISSUER_PORT", "https"], ATS_ISSUER_PORT="https")
     refuses("a non-integer ATS_UNINSTALL_BUDGET_S", ["ATS_UNINSTALL_BUDGET_S"], ATS_UNINSTALL_BUDGET_S="5m")
     refuses("an eks run that names nothing",
             ["ATS_ISSUER_URL", "ATS_CLIENT_ID", "ATS_MUSTER_BASE_URL"], ATS_CLUSTER_TYPE="eks")
@@ -123,32 +119,50 @@ def main() -> int:
             ATS_CLIENT_ID="platform", ATS_MUSTER_BASE_URL="https://muster.example.com")
     refuses("a values file that does not exist", ["tests/ats/nope.yaml"],
             ATS_VALUES="tests/ats/nope.yaml")
-    print("ok: the refusals — an unknown cluster type, an unknown reach, a non-boolean flag, a non-integer port or budget, a missing issuer / client / base URL, no values file, an absent values file")
+    print("ok: the refusals — an unknown cluster type, an unknown reach, a non-integer budget, a missing issuer / client / base URL, no values file, an absent values file")
 
-    # --- the derived base URL
-    moved = load(ATS_MUSTER_PORT="9000")
-    check("a moved port moves the base URL", moved.muster_base_url == "http://localhost:9000", moved.muster_base_url)
-    empty = load(ATS_MUSTER_PORT="9000", ATS_MUSTER_BASE_URL="")
-    check("an empty ATS_MUSTER_BASE_URL counts as unset",
-          empty.muster_base_url == "http://localhost:9000", empty.muster_base_url)
-    named = load(ATS_MUSTER_PORT="9000", ATS_MUSTER_BASE_URL="http://localhost:7000")
-    check("a named base URL wins", named.muster_base_url == "http://localhost:7000", named.muster_base_url)
-    hostname = load(ATS_MUSTER_PORT="9000", ATS_MUSTER_REACH="hostname",
-                    ATS_MUSTER_BASE_URL="https://muster.example.com")
-    check("a hostname reach keeps its URL", hostname.muster_base_url == "https://muster.example.com",
-          hostname.muster_base_url)
-    print("ok: the derived base URL — a moved port moves it, an empty variable counts as unset, a named URL wins")
+    # --- the derived ports
+    check("the kind issuer port is the issuer URL's", kind.issuer_port == scenarios.LAB_DEX_PORT, str(kind.issuer_port))
+    check("the kind muster port is the base URL's", kind.muster_port == scenarios.LAB_MUSTER_PORT, str(kind.muster_port))
+    moved = load(ATS_MUSTER_BASE_URL="http://localhost:9000")
+    check("a moved base URL moves the port", moved.muster_port == 9000, str(moved.muster_port))
+    check("an https URL without a port is 443", eks.issuer_port == 443, str(eks.issuer_port))
+    check("a hostname base URL is 443", eks.muster_port == 443, str(eks.muster_port))
+    print("ok: the derived ports — each read out of the URL that carries it, a scheme's default where the URL names none")
+
+    # --- the E2E_ fallback of `make e2e`
+    e2e = load(ATS_CLUSTER_TYPE="eks", E2E_DOMAIN="example.com",
+               E2E_ISSUER_URL="https://dex.example.com", E2E_CLIENT_ID="platform",
+               E2E_IDP_CA_SECRET="idp-ca",
+               ATS_VALUES="helm/agent-platform/examples/kind-lab-dex.yaml")
+    check("E2E_ISSUER_URL fills the issuer", e2e.issuer_url == "https://dex.example.com", e2e.issuer_url)
+    check("E2E_CLIENT_ID fills the client", e2e.client_id == "platform", e2e.client_id)
+    check("E2E_IDP_CA_SECRET fills the CA Secret", e2e.ca_secret == "idp-ca", e2e.ca_secret)
+    check("E2E_DOMAIN derives muster's base URL", e2e.muster_base_url == "https://muster.example.com",
+          e2e.muster_base_url)
+    won = load(ATS_CLUSTER_TYPE="eks", E2E_DOMAIN="example.com",
+               E2E_ISSUER_URL="https://dex.example.com", E2E_CLIENT_ID="platform",
+               ATS_ISSUER_URL="https://own.example.com",
+               ATS_MUSTER_BASE_URL="https://own-muster.example.com",
+               ATS_VALUES="helm/agent-platform/examples/kind-lab-dex.yaml")
+    check("an ATS_ variable wins over its E2E_ fallback",
+          (won.issuer_url, won.muster_base_url) == ("https://own.example.com", "https://own-muster.example.com"),
+          scenarios.summary(won))
+    # kind reaches muster through a port-forward, so a domain never moves its
+    # base URL off the loopback the forward serves.
+    kind_domain = load(E2E_DOMAIN="example.com")
+    check("E2E_DOMAIN leaves a port-forward scenario alone",
+          kind_domain.muster_base_url == kind.muster_base_url, kind_domain.muster_base_url)
+    print("ok: the E2E_ fallback — `make e2e` names each fact once, an ATS_ variable wins, a port-forward keeps its loopback")
 
     # --- the base-URL --set
-    check("no --set while the values files carry the URL", scenarios.base_url_sets(load()) == [],
-          str(scenarios.base_url_sets(load())))
-    sets = scenarios.base_url_sets(load(ATS_MUSTER_PORT="9000"))
-    check("one --set once the URL differs",
-          sets == ["muster.muster.oauth.server.baseUrl=http://localhost:9000"], str(sets))
-    own = scenarios.base_url_sets(load(ATS_VALUES="helm/agent-platform/examples/kind-lab-dex.yaml"))
-    check("one --set for a run that names its own values files",
-          own == [f"muster.muster.oauth.server.baseUrl=http://localhost:{scenarios.LAB_MUSTER_PORT}"], str(own))
-    print("ok: the base-URL --set — none while the scenario's values files carry it, one as soon as the run's differs")
+    pin = scenarios.base_url_sets(kind)
+    check("the install always pins muster's base URL",
+          pin == [f"muster.muster.oauth.server.baseUrl=http://localhost:{scenarios.LAB_MUSTER_PORT}"], str(pin))
+    own = scenarios.base_url_sets(load(ATS_MUSTER_BASE_URL="http://localhost:9000"))
+    check("the pin follows the run's URL",
+          own == ["muster.muster.oauth.server.baseUrl=http://localhost:9000"], str(own))
+    print("ok: the base-URL --set — the install pins muster's own base URL to the one the tests call")
 
     # --- the make e2e overlay
     check("no overlay from an empty environment", e2e_overlay.overlay_lines({}) == [],

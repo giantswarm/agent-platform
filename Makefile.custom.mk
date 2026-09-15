@@ -2913,11 +2913,10 @@ VALUES ?=
 # (global.identity.existingSecret) and, for the tests' own logins, in
 # ATS_CLIENT_SECRET in the caller's environment.
 #
-# Each of these names one fact, which the chart and the suite both need: the
-# target derives the suite's ATS_ISSUER_URL, ATS_CLIENT_ID, ATS_IDP_CA_SECRET
-# and — on a cluster type whose muster answers on a hostname — ATS_MUSTER_BASE_URL
-# from them, so the run names the fact once. An ATS_ variable already in the
-# caller's environment wins.
+# Each of these names one fact, which the chart and the suite both need, so the
+# run names it once: the target passes them through, scenarios.load() reads each
+# as the fallback of the matching ATS_ variable, and an ATS_ variable that the
+# caller sets wins.
 E2E_DOMAIN ?=
 E2E_ISSUER_URL ?=
 E2E_CLIENT_ID ?=
@@ -2946,13 +2945,6 @@ e2e: ## Run one ATS scenario against any cluster (KUBECONFIG=… [SCENARIO=smoke
 		python3 $(CURDIR)/tests/e2e_overlay.py > "$$overlay"; \
 		echo "--> values overlay written from the environment ($$(grep -c . "$$overlay") lines; values not printed)"; \
 	fi; \
-	ats_issuer="$${ATS_ISSUER_URL:-$(E2E_ISSUER_URL)}"; \
-	ats_client="$${ATS_CLIENT_ID:-$(E2E_CLIENT_ID)}"; \
-	ats_ca="$${ATS_IDP_CA_SECRET:-$(E2E_IDP_CA_SECRET)}"; \
-	ats_muster="$${ATS_MUSTER_BASE_URL:-}"; \
-	if [ -z "$$ats_muster" ] && [ -n "$(E2E_DOMAIN)" ] && [ "$(CLUSTER_TYPE)" != "kind" ]; then \
-		ats_muster="https://muster.$(E2E_DOMAIN)"; \
-	fi; \
 	cd tests/ats && uv sync --quiet && \
 	KUBECONFIG="$(E2E_KUBECONFIG)" \
 	ATS_CHART_PATH="$$archive" \
@@ -2960,10 +2952,10 @@ e2e: ## Run one ATS scenario against any cluster (KUBECONFIG=… [SCENARIO=smoke
 	ATS_CLUSTER_TYPE=$(CLUSTER_TYPE) \
 	ATS_OVERLAY_VALUES="$$overlay" \
 	ATS_VALUES="$(VALUES)" \
-	ATS_ISSUER_URL="$$ats_issuer" \
-	ATS_CLIENT_ID="$$ats_client" \
-	ATS_IDP_CA_SECRET="$$ats_ca" \
-	ATS_MUSTER_BASE_URL="$$ats_muster" \
+	E2E_DOMAIN="$(E2E_DOMAIN)" \
+	E2E_ISSUER_URL="$(E2E_ISSUER_URL)" \
+	E2E_CLIENT_ID="$(E2E_CLIENT_ID)" \
+	E2E_IDP_CA_SECRET="$(E2E_IDP_CA_SECRET)" \
 	uv run pytest -m $(SCENARIO) --log-cli-level info -o log_cli=true
 
 .PHONY: verify-scenarios
@@ -2971,3 +2963,25 @@ verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and
 	@echo "====> $@"
 	@python3 tests/verify-scenarios.py
 	@echo "the ATS scenario inputs verified."
+
+# --- verify-all --------------------------------------------------------------
+# Every offline assertion of this repository in one target, which is what CI
+# runs. The list is read out of this file, so a new verify-* target reaches CI
+# by existing; nothing names the set twice.
+#
+# Network: a few of these resolve a component chart (gsoci.azurecr.io,
+# ghcr.io). Some need PyYAML. Each target's own help line says so.
+VERIFY_MK := $(lastword $(MAKEFILE_LIST))
+# Every target this file defines, less verify-all itself and the ones another
+# verify target already chains as a prerequisite.
+VERIFY_ALL_DEFINED := $(sort $(shell sed -n 's/^\(verify-[a-z0-9-]*\):.*/\1/p' $(VERIFY_MK)))
+VERIFY_CHAINED := $(sort $(shell sed -n 's/^verify-[a-z0-9-]*: *\(verify-.*\)$$/\1/p' $(VERIFY_MK)))
+VERIFY_TARGETS := $(filter-out verify-all $(VERIFY_CHAINED),$(VERIFY_ALL_DEFINED))
+
+.PHONY: verify-all
+verify-all: ## Run every verify-* target of this file, the set CI runs. Some resolve a component chart over the network.
+	@echo "====> $@ ($(words $(VERIFY_TARGETS)) targets)"
+	@for target in $(VERIFY_TARGETS); do \
+		$(MAKE) --no-print-directory $$target || { echo "FAIL: $$target"; exit 1; }; \
+	done
+	@echo "all $(words $(VERIFY_TARGETS)) verify targets passed."
