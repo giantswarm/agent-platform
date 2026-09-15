@@ -41,13 +41,25 @@ or `tolerations`.
   as the provider's node labels allow: the architecture (`kubernetes.io/arch:
   amd64` by default; an arm64 installation sets `arm64`), and on CAPA — where
   Karpenter consolidation may replace a node with another vendor's at any time —
-  the vendor, `karpenter.k8s.aws/instance-cpu-manufacturer: amd` (the fleet
-  template carries it), or the family (`karpenter.k8s.aws/instance-family`)
-  where a generation change must be ruled out too; on CAPZ and the other
-  providers the node pool (`giantswarm.io/machine-pool`) or
-  `node.kubernetes.io/instance-type`. Recognise a mixed pool by `kubectl get
-  nodes -L <the label>` showing two values under it
-  (giantswarm/agent-platform#429).
+  the vendor, `karpenter.k8s.aws/instance-cpu-manufacturer: amd`, and the CPU
+  generation, `karpenter.k8s.aws/instance-generation: "6"` (quoted — a label
+  value is a string, and the render refuses a bare number), both rendered by
+  the fleet template from the installation's values: a snapshot taken on a
+  newer generation of one vendor does not restore on an older one either
+  (gazelle, 2026-09-14: goldens from `m7a` workers, generation 7, failed on
+  `c5ad`, generation 5, `missing features: … avx512f …`;
+  giantswarm/agent-platform#457). Pin a generation that is one CPU model
+  across its families (for AMD on AWS 6, `c6a`/`m6a`/`r6a`, or 7,
+  `c7a`/`m7a`/`r7a`; 5 mixes Naples `m5a`/`r5a` with Rome `c5a`/`c5ad`) and
+  one the goldens restore on — an older generation's golden restores on a
+  newer one, never the reverse — and check the spot pool it leaves (the
+  generation's families × the NodePool's sizes; three families is the floor).
+  The family (`karpenter.k8s.aws/instance-family`) narrows to one type where
+  even that matters; on CAPZ and the other providers the node pool
+  (`giantswarm.io/machine-pool`) or `node.kubernetes.io/instance-type` pins
+  it. Recognise a mixed pool by `kubectl get nodes -L <the label>` showing two
+  values under it (giantswarm/agent-platform#429, #457). `make
+  verify-workerpool` asserts the pin reaches the WorkerPool as written.
 
 `kagent.substrateWorkerPool.template` also accepts `tolerations`, `nodeAffinity`
 and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
