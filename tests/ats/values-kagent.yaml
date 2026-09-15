@@ -1,5 +1,5 @@
-# The kagent runtime of the ATS agent round trips, layered over
-# tests/test-values.yaml (tests/ats/conftest.py): the smoke's declarative
+# The kagent runtime of the ATS agent round trips, layered over the scenario's
+# base values file (tests/ats/scenarios.py): the smoke's declarative
 # AgentTemplate and agent-manager's create_agent need the kagent controller, and
 # on this line the controller needs Agent Substrate — every agent is a Substrate
 # actor in a gVisor worker pod. The own-Flux scenario deploys an agent through

@@ -1,5 +1,17 @@
-# Values of the ATS kind smoke (tests/ats/test_smoke.py; .ats/main.yaml) — the
-# shape the chart installs on a bare kind cluster with `helm install --wait`:
+# The kind lab shape, with the lab Dex (tests/ats/lab-dex.yaml).
+#
+# This file IS what the ATS kind smoke installs (tests/ats/test_smoke.py, the
+# `kind` scenario in tests/ats/scenarios.py; .ats/main.yaml points ATS at it
+# too, and tests/ats/test_smoke.py asserts the scenario names this path, so the
+# example and the test cannot drift). Install it by hand the same way:
+#
+#   helm install agent-platform helm/agent-platform -n agent-platform \
+#     --create-namespace -f helm/agent-platform/examples/kind-lab-dex.yaml
+#
+# It carries no secret and no real domain: the lab Dex serves
+# dex.127.0.0.1.nip.io and its credentials are public lab fixtures.
+#
+# The shape the chart installs on a bare kind cluster with `helm install --wait`:
 # the bundled Flux engine on (the default) and the minimal component set that
 # needs nothing but the Gateway API CRDs the smoke pre-applies — muster, dicebear
 # and the connectivity wiring, the bundled valkey off, muster without its own
