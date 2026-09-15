@@ -1050,6 +1050,9 @@ Two leaves have no `auto` form and are derived directly, off only:
       fleet's HelmRelease values are unchanged. An explicit value is kept.
   kagent.controller.env[name=OTEL_EXPORTER_OTLP_HEADERS] — the tenant header
       of the OTLP gateway; dropped when both kagent OTel exporters resolve off.
+  kagent.harness.env — the actors' copies: OTEL_EXPORTER_OTLP_HEADERS dropped
+      the same way, OTEL_LOGGING_ENABLED (the actors' log exporter) dropped
+      when kagent.otel.logging resolves off (agent-platform.shape.dropEnv).
 mcp-kubernetes' Cilium policy joins this list once mcp-kubernetes is a component.
 Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 */}}
@@ -1103,21 +1106,40 @@ connectivity release both read the resolved value. */ -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- /* kagent OTLP tenant header: gone when neither OTel exporter is on. */ -}}
+{{- /* kagent OTLP env: the tenant header on the controller and on the Harness
+(the actors) is gone when neither OTel exporter is on; the actors' log exporter
+(OTEL_LOGGING_ENABLED on the Harness) when the logging exporter is off. */ -}}
 {{- $kagent := index $v "kagent" | default dict -}}
 {{- if kindIs "map" $kagent -}}
-{{- $tracing := dig "otel" "tracing" "enabled" false $kagent -}}
-{{- $logging := dig "otel" "logging" "enabled" false $kagent -}}
-{{- $ctrl := index $kagent "controller" -}}
-{{- if and (not $tracing) (not $logging) (kindIs "map" $ctrl) (kindIs "slice" (index $ctrl "env")) -}}
+{{- $tracing := eq (toString (dig "otel" "tracing" "enabled" false $kagent)) "true" -}}
+{{- $logging := eq (toString (dig "otel" "logging" "enabled" false $kagent)) "true" -}}
+{{- $drop := list -}}
+{{- if and (not $tracing) (not $logging) -}}
+{{- $drop = append $drop "OTEL_EXPORTER_OTLP_HEADERS" -}}
+{{- end -}}
+{{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "controller") "names" $drop) -}}
+{{- if not $logging -}}
+{{- $drop = append $drop "OTEL_LOGGING_ENABLED" -}}
+{{- end -}}
+{{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "harness") "names" $drop) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Drop the entries of .owner.env (a list of name/value maps — kagent.controller.env,
+kagent.harness.env) whose name is in .names, in place on the shaped values tree.
+A missing owner or env, or no names, changes nothing. Emits nothing.
+*/}}
+{{- define "agent-platform.shape.dropEnv" -}}
+{{- $owner := .owner -}}
+{{- if and .names (kindIs "map" $owner) (kindIs "slice" (index $owner "env")) -}}
 {{- $env := list -}}
-{{- range (index $ctrl "env") -}}
-{{- if not (and (kindIs "map" .) (eq (toString (index . "name")) "OTEL_EXPORTER_OTLP_HEADERS")) -}}
+{{- range (index $owner "env") -}}
+{{- if not (and (kindIs "map" .) (has (toString (index . "name")) $.names)) -}}
 {{- $env = append $env . -}}
 {{- end -}}
 {{- end -}}
-{{- $_ := set $ctrl "env" $env -}}
-{{- end -}}
+{{- $_ := set $owner "env" $env -}}
 {{- end -}}
 {{- end -}}
 
