@@ -70,13 +70,18 @@ def helm(meta: str, flags: list, expect_fail: bool = False) -> str:
 
 
 def documents(render: str) -> dict:
-    """(kind, name) -> the document, for every document that has both."""
+    """(kind, name) -> the document, for every document that has both.
+
+    Every document ends in exactly one newline: the last document of a render
+    ends in as many as the Helm build prints, and the assertions below match
+    whole lines.
+    """
     out = {}
     for doc in render.split("\n---\n"):
         kind = re.search(r"^kind: (\S+)", doc, re.M)
         name = re.search(r"^  name: (\S+)", doc, re.M)
         if kind and name:
-            out[(kind.group(1), name.group(1))] = doc
+            out[(kind.group(1), name.group(1))] = doc.rstrip("\n") + "\n"
     return out
 
 
@@ -115,7 +120,7 @@ def main(meta: str) -> int:
     for absent in ("dependsOn", "kubeConfig", "\n    global:", "valuesFrom", "postRenderers"):
         if absent in hr:
             fail(f"the HelmRelease carries {absent.strip()!r}; the operator has no dependency, no target, no global")
-    values = hr.split("\n  values:\n", 1)[1].rstrip("\n") + "\n"
+    values = hr.split("\n  values:\n", 1)[1]
     if values != FLATCAR_ROW:
         fail(f"the forwarded values are not the Flatcar row nested under the wrapper's key:\n{values}")
     # Nothing else of the render moves: the same documents, the roster flipped.
