@@ -120,6 +120,15 @@
                         }
                     }
                 },
+                "dicebear": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "kagent": {
                     "type": "object",
                     "additionalProperties": true,
@@ -193,6 +202,15 @@
                     }
                 },
                 "modelServing": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "muster": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {

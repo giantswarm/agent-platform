@@ -105,6 +105,32 @@ gitops:
   # rights-less default account and fails), omitted otherwise. Set a name to
   # override either way.
   serviceAccountName: ""
+  # === Target cluster: one release of this chart per cluster (giantswarm/agent-platform#328) ===
+  # The cluster the component releases install into, when it is not the one
+  # this chart is installed on. Set target.kubeConfig.secretRef.name to a Secret
+  # in the release namespace holding a kubeconfig for the target — the fleet's
+  # `<cluster>-kubeconfig`, the way every workload-cluster app is installed
+  # from an installation — and every component HelmRelease this chart renders
+  # carries `spec.kubeConfig.secretRef` verbatim, the connectivity release
+  # included: the installation's helm-controller installs each component into
+  # the target from the OCIRepositories in the release namespace, dependsOn
+  # intact, install.createNamespace creating the target namespaces there, the
+  # connectivity chart's lookup / Capabilities guards evaluated against the
+  # target, where they belong. The target runs no Flux of its own: the bundled
+  # engine cannot be combined with the knob (components.flux.enabled must be
+  # false; the render fails otherwise), and no Helm hook of this chart renders
+  # with it (a hook Job runs where the chart is installed, not on the target).
+  # The render's own lookups (the one-owner guard, components.<name>.ownedCrds)
+  # see the installation on this path, so what the target already runs is the
+  # composer's to detect. Empty (the default) renders exactly what it did
+  # before the key existed.
+  target:
+    kubeConfig:
+      secretRef:
+        name: ""
+        # Key in the Secret holding the kubeconfig; empty = helm-controller's
+        # default (`value` or `value.yaml`).
+        key: ""
   # The Helm hook Jobs of this chart — the ordered teardown on `helm uninstall`
   # and the self-management bracket (rendered only when components.flux.enabled
   # is true). `image` runs the hooks that are one plain kubectl command, without
@@ -240,6 +266,20 @@ gitops:
 #   crds         — Helm CRD lifecycle (CreateReplace) for a component that ships its
 #       own CRDs in its chart's crds/ dir (app-owned CRDs). Such a component owns its
 #       CRD version; its CR consumers dependsOn it instead.
+#   ownedCrds    — names of CRDs the component installs (a crds/ dir or a CRD
+#       chart). A cluster-scoped object has exactly one owner per cluster: when
+#       one of them exists on the cluster the chart renders against and its Flux
+#       labels (helm.toolkit.fluxcd.io/name, /namespace — helm-controller stamps
+#       them on every object of a release, crds/ included) name another
+#       HelmRelease than the one this render produces, the render fails naming
+#       that release: remove it first, or turn the component off in this release
+#       (a slice release beside the platform's own leaves the controller and its
+#       CRDs to the platform's). Skipped with gitops.target set: the render then
+#       runs on the installation while the component lands on the target, and
+#       what the target already runs is the composer's to detect. A CRD without
+#       the labels is left to Helm as before. `lookup` is live under
+#       install/upgrade, --dry-run=server and helm-controller; silent under
+#       `helm template`.
 #
 # The per-component VALUES + on/off toggles live in their existing top-level
 # blocks below (muster:, agentgateway:, kagent:, valkey:, klausGateway:,
@@ -338,6 +378,16 @@ components:  # @schema additionalProperties: true
     # helm.toolkit.fluxcd.io/driftDetection: disabled.
     driftDetection:  # @schema additionalProperties: true
       mode: enabled
+    # On by default. A slice release of one target cluster — beside the
+    # platform's own release on the installation's cluster, or on a workload
+    # cluster through gitops.target — turns muster off: the installation's
+    # muster serves every agent, and a second one would be a second
+    # authorization server. The connectivity chart reads the same answer and
+    # renders none of muster's wiring while it is off (the /mcp route, the
+    # policies that select its pods).
+    enabled: true
+    ownedCrds:
+      - mcpservers.muster.giantswarm.io
   agentgateway:  # @schema additionalProperties: true
     chart: agentgateway
     # GS-vendored chart (upstream agentgateway controller flattened onto the
@@ -350,6 +400,11 @@ components:  # @schema additionalProperties: true
     versionRange: "2.x"
     valuesFrom: agentgateway
     enabled: false
+    # The slice profiles set this per target: on for a workload cluster, off
+    # beside the platform's release on the installation's own cluster, which
+    # owns the controller and its CRDs (see ownedCrds).
+    ownedCrds:
+      - agentgatewaypolicies.agentgateway.dev
     # App-owned CRDs: the wrapper chart ships the agentgateway.dev CRDs (with
     # helm.sh/resource-policy: keep) in its own crds/ dir; CreateReplace upgrades
     # them atomically with the app on every release. It owns their version, so it
@@ -534,6 +589,8 @@ components:  # @schema additionalProperties: true
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
+    ownedCrds:
+      - modelconfigs.kagent.dev
   substrate-crds:  # @schema additionalProperties: true
     chart: substrate-crds
     # Agent Substrate — kagent API v2's actor runtime: every agent runs as a
@@ -835,6 +892,8 @@ components:  # @schema additionalProperties: true
     versionRange: "0.2.x"
     valuesFrom: kserve-crd
     enabled: false
+    ownedCrds:
+      - inferenceservices.serving.kserve.io
   kserve-resources:  # @schema additionalProperties: true
     chart: kserve-resources
     # The KServe controller (giantswarm/kserve): plain Deployments and Services
@@ -858,6 +917,8 @@ components:  # @schema additionalProperties: true
     versionRange: "0.2.x"
     valuesFrom: kserve-llmisvc-crd
     enabled: false
+    ownedCrds:
+      - llminferenceservices.serving.kserve.io
   kserve-llmisvc-resources:  # @schema additionalProperties: true
     chart: kserve-llmisvc-resources
     # The LLMInferenceService (llm-d) controller (giantswarm/kserve). It reuses
@@ -893,6 +954,10 @@ components:  # @schema additionalProperties: true
     # Strict values.schema.json (additionalProperties:false); the chart consumes
     # registry.domain, not global — so do not inject global.
     injectGlobal: false
+    # On by default; a slice release turns it off with muster (the avatars are
+    # the portal's, which every slice leaves to the platform's release). The
+    # connectivity chart drops the avatars host from the portal's CSP with it.
+    enabled: true
   agent-platform-connectivity:  # @schema additionalProperties: true
     chart: agent-platform-connectivity
     repository: oci://gsoci.azurecr.io/charts/giantswarm

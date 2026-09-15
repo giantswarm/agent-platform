@@ -444,6 +444,8 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | global.observability.traces.otlp.endpoint | string | `""` |  |
 | global.observability.traces.otlp.protocol | string | `""` |  |
 | global.observability.traces.otlp.headers | object | `{}` |  |
+| components.muster.enabled | bool | `true` |  |
+| components.dicebear.enabled | bool | `true` |  |
 | components.agentgateway.enabled | bool | `false` |  |
 | components.agent-platform-mcps.enabled | bool | `false` |  |
 | components.kagent.enabled | bool | `false` |  |

@@ -62,6 +62,8 @@ spec:
               protocol: TCP
             - port: "443"
               protocol: TCP
+    {{- /* The data plane's upstream is muster (components.muster.enabled); a slice release without muster has no rule to it. */}}
+    {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: muster
@@ -69,6 +71,7 @@ spec:
         - ports:
             - port: "8090"
               protocol: TCP
+    {{- end }}
     # xDS to the agentgateway controller. agentgateway runs as its own release
     # (separate from this connectivity release), so match on the controller-only
     # `agentgateway: agentgateway` label rather than a release-scoped instance.

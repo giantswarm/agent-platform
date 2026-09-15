@@ -11,6 +11,49 @@
 
 {{ template "chart.requirementsSection" . }}
 
+## One release per target cluster
+
+The serving slice ([#326](https://github.com/giantswarm/agent-platform/issues/326)) and the runtime slice
+([#317](https://github.com/giantswarm/agent-platform/issues/317)) are values profiles of this chart that cluster-manager
+installs as **one `<cluster>-agent-platform` release per target cluster**, the slices as toggles in its values — created
+with the first slice, its values updated in place when the second is switched on, never two releases of the chart on one
+cluster (both slices need agentgateway's cluster-scoped CRDs, which have exactly one owner). Such a release runs beside
+the platform's own release on the installation's cluster, or installs onto a workload cluster that runs no Flux
+([#328](https://github.com/giantswarm/agent-platform/issues/328), bumblebee-plans#46). Four knobs serve that shape:
+
+- **`gitops.target.kubeConfig.secretRef`** — the target cluster. Set `name` (and `key` when the Secret's key is not
+  helm-controller's default) to the kubeconfig Secret of the target in the release namespace — the fleet's
+  `<cluster>-kubeconfig` — and every component HelmRelease this chart renders carries `spec.kubeConfig.secretRef`
+  verbatim, the connectivity release included: the installation's helm-controller installs each component into the
+  target from the OCIRepositories in the release namespace, `dependsOn` intact, `install.createNamespace` creating the
+  target namespaces there, the connectivity chart's `lookup` / Capabilities guards evaluated against the target. Unset,
+  the render is byte-identical to a chart without the key. The bundled engine is refused with it (`components.flux.enabled`
+  must be `false`: no Flux is installed into a workload cluster, nor into a cluster that runs one), and no Helm hook of
+  this chart renders with it (a hook Job runs where the chart is installed, not on the target).
+- **`components.muster.enabled`, `components.dicebear.enabled`** (default `true`) — a slice release turns them off: the
+  installation's muster serves every agent, the avatars are the portal's. The connectivity chart reads the same roster
+  and renders none of their wiring while they are off (muster's `/mcp` route and egress policy, every policy rule that
+  selects its pods, the avatars host in the portal's CSP). `components.agentgateway.enabled` follows the target: **on**
+  for a workload cluster, **off** beside the platform's release, which owns the controller and its CRDs.
+- **`components.<name>.ownedCrds`** — one owner per cluster-scoped component. When a CRD a component installs already
+  exists on the cluster the chart renders against and its Flux labels (`helm.toolkit.fluxcd.io/name`, `/namespace` —
+  helm-controller stamps them on every object of a release, `crds/` included) name another HelmRelease than the one this
+  render produces, the render fails naming that release: remove it first, or turn the component off in this release.
+  Skipped with the target knob, where the render's lookups see the installation while the components land on the target
+  (what the target already runs is the composer's to detect). A CRD without the labels is left to Helm as before.
+
+`make verify-target` asserts the offline half (`tests/verify-target.py`): the knob's stamp and byte-identity, the
+toggles on both charts, the engine guard, the hooks, the serving- and runtime-shaped toggle sets alone, combined and
+targeted (`ci/test-slice-*-values.yaml`, `ci/test-target-values.yaml`). The two `lookup` guards need a cluster — on one
+that runs Flux (the agentlab, an installation), from a checkout:
+
+```sh
+# a foreign helm-controller with the bundled engine on → "this cluster runs Flux; set components.flux.enabled=false …"
+helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server -f helm/agent-platform/ci/ci-values.yaml
+# a second owner of a component's CRDs → "… has exactly one owner per cluster … belongs to HelmRelease <ns>/<name>. Remove that release first …"
+helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server -f helm/agent-platform/ci/test-slice-serving-values.yaml --set components.agentgateway.enabled=true
+```
+
 ## Agent Substrate: worker capacity
 
 On kagent API v2 an agent runs as an Agent Substrate actor inside a gVisor worker

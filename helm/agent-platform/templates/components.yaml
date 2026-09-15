@@ -99,8 +99,9 @@ knowledge:
       (additionalProperties:false) rejects an unexpected `global` key
       (agent-platform-mcps, agent-sandbox).
   enabled       — the component's only on/off switch. Omit to force-enable
-      (muster, dicebear, connectivity). Set false to leave a component out, or to
-      delegate it to a cluster prerequisite. Every answer is also forwarded as
+      (connectivity). Set false to leave a component out, or to delegate it to a
+      cluster prerequisite — or, in a slice release of one target cluster, to the
+      platform's own release (muster, dicebear). Every answer is also forwarded as
       part of the forwarded values, under this same key path, so a chart that
       renders a component's wiring (agent-platform-connectivity) gates on the
       same answer that decided whether the release exists. The forwarded copy
@@ -177,6 +178,16 @@ knowledge:
       own CiliumNetworkPolicy, whose egress selectors named the pre-rename
       namespace on a live cluster while the release manifest named the new one
       (#287).
+  ownedCrds     — CRDs the component installs; a second owner on the cluster fails
+      the render naming the release to remove first
+      (agent-platform.validateCrdOwners in _helpers.tpl; skipped with the target
+      knob, where the lookups see the installation).
+  target knob   — gitops.target.kubeConfig.secretRef (giantswarm/agent-platform#328):
+      when set, every HelmRelease of this loop carries spec.kubeConfig.secretRef
+      verbatim and installs into that cluster through the installation's
+      helm-controller, from the OCIRepositories in the release namespace. One
+      release of this chart per target cluster, the slices as toggles in its
+      values. Refused with the bundled engine (agent-platform.validateTarget).
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
       HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
@@ -203,6 +214,11 @@ and this guard refuses anything else that gets past it. */ -}}
 {{- /* The bundled engine (components.flux.enabled): refuse a cluster that already
 runs Flux, and a gitops.namespace the tenant identity cannot reach. */ -}}
 {{- include "agent-platform.validateEngine" . -}}
+{{- include "agent-platform.validateTarget" . -}}
+{{- include "agent-platform.validateCrdOwners" . -}}
+{{- /* The target cluster's kubeconfig Secret, stamped on every HelmRelease below when set. */ -}}
+{{- $target := include "agent-platform.targetSecretName" . -}}
+{{- $targetKey := dig "target" "kubeConfig" "secretRef" "key" "" $g -}}
 {{- /* Namespace the rendered Flux CRs live in. Defaults to the release
 namespace; set gitops.namespace to a tenancy-exempt namespace (e.g.
 flux-giantswarm on Giant Swarm clusters) so the child HelmReleases are not
@@ -329,6 +345,14 @@ spec:
   {{- end }}
   {{- with $sa }}
   serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with $target }}
+  kubeConfig:
+    secretRef:
+      name: {{ . }}
+      {{- with $targetKey }}
+      key: {{ . }}
+      {{- end }}
   {{- end }}
   chartRef:
     kind: OCIRepository

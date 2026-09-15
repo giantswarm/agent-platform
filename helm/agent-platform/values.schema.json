@@ -202,6 +202,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -274,6 +280,9 @@
                     "properties": {
                         "chart": {
                             "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
                         },
                         "injectGlobal": {
                             "type": "boolean"
@@ -356,6 +365,12 @@
                         "injectGlobal": {
                             "type": "boolean"
                         },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -404,6 +419,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -424,6 +445,12 @@
                         },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "repository": {
                             "type": "string"
@@ -570,6 +597,15 @@
                                 "mode": {
                                     "type": "string"
                                 }
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
                             }
                         },
                         "repository": {
@@ -1082,6 +1118,30 @@
                 },
                 "serviceAccountName": {
                     "type": "string"
+                },
+                "target": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "kubeConfig": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "secretRef": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "name": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
                 "targetNamespace": {
                     "type": "string"
