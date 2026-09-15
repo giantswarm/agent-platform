@@ -97,7 +97,11 @@ KAGENT = ["kagent-crds", "kagent"]
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists. Empty
 # today: every range resolves to a published chart.
-UNRELEASED: dict[str, str] = {}
+UNRELEASED: dict[str, str] = {
+    # klaus-gateway#265 -> 1.10.0: the turn records, the otlpHeaders knob and
+    # the URL endpoint the meta chart forwards by default (klaus-gateway#263).
+    "klaus-gateway": "1.10.0",
+}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release. Empty today.
