@@ -1493,6 +1493,73 @@ under `helm template`, where this guard is therefore silent.
 {{- end -}}
 
 {{/*
+One GPU operator per cluster (components.gpu-operator, giantswarm/agent-platform#327).
+NVIDIA's operator owns one ClusterPolicy and one set of DaemonSets, so with the
+component on the render fails when the cluster it renders against already runs an
+operator that is not this release's: a ClusterPolicy whose owner — the Flux labels
+helm.toolkit.fluxcd.io/name + /namespace, else Helm's meta.helm.sh/release-name +
+/release-namespace annotations — is another release or none; a HelmRelease of the
+gpu-operator chart under another name or in another namespace (cluster-manager's
+<cluster>-gpu-operator, before or after its ClusterPolicy exists); an App of it.
+The message names what was seen and the handover: delete that release
+(cluster-manager's detection then sees this component and never re-creates it),
+then switch the toggle on — or leave it off. Adopting the running objects is not
+this chart's. Skipped with the target knob, as agent-platform.validateCrdOwners
+is: the lookups see the installation while the component lands on the target,
+where the detection is cluster-manager's. Each lookup is gated on its API being
+served, and `lookup` is empty under `helm template`, where the guard is silent —
+tests/fixtures/gpu-operator-foreign-owner.yaml on a cluster and --dry-run=server
+show it (README, "The GPU operator").
+*/}}
+{{- define "agent-platform.validateGpuOperatorOwner" -}}
+{{- $c := index .Values.components "gpu-operator" | default dict -}}
+{{- if and $c (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "gpu-operator")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
+{{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
+{{- $release := $c.chart -}}
+{{- $releaseNs := $c.targetNamespace | default .Values.gitops.targetNamespace | default .Release.Namespace -}}
+{{- $foreign := list -}}
+{{- if .Capabilities.APIVersions.Has "nvidia.com/v1" -}}
+{{- range ((lookup "nvidia.com/v1" "ClusterPolicy" "" "").items | default list) -}}
+{{- $fluxName := dig "metadata" "labels" "helm.toolkit.fluxcd.io/name" "" . -}}
+{{- $fluxNs := dig "metadata" "labels" "helm.toolkit.fluxcd.io/namespace" "" . -}}
+{{- $helmName := dig "metadata" "annotations" "meta.helm.sh/release-name" "" . -}}
+{{- $helmNs := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" . -}}
+{{- if $fluxName -}}
+{{- if or (ne $fluxName $release) (ne $fluxNs $ns) -}}
+{{- $foreign = append $foreign (printf "ClusterPolicy %s belongs to HelmRelease %s/%s (labels helm.toolkit.fluxcd.io/name=%s, helm.toolkit.fluxcd.io/namespace=%s)" .metadata.name $fluxNs $fluxName $fluxName $fluxNs) -}}
+{{- end -}}
+{{- else if $helmName -}}
+{{- if or (ne $helmName $release) (ne $helmNs $releaseNs) -}}
+{{- $foreign = append $foreign (printf "ClusterPolicy %s belongs to the Helm release %s in %s (annotations meta.helm.sh/release-name=%s, meta.helm.sh/release-namespace=%s — installed by hand or as an App)" .metadata.name $helmName $helmNs $helmName $helmNs) -}}
+{{- end -}}
+{{- else -}}
+{{- $foreign = append $foreign (printf "ClusterPolicy %s carries no owner (no helm.toolkit.fluxcd.io/name label, no meta.helm.sh/release-name annotation)" .metadata.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if .Capabilities.APIVersions.Has "helm.toolkit.fluxcd.io/v2" -}}
+{{- range ((lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" "" "").items | default list) -}}
+{{- $chart := dig "spec" "chart" "spec" "chart" "" . -}}
+{{- $chartRef := dig "spec" "chartRef" "name" "" . -}}
+{{- if and (or (eq $chart $release) (eq $chartRef $release) (hasSuffix "-gpu-operator" $chartRef) (hasSuffix "-gpu-operator" .metadata.name)) (not (and (eq .metadata.name $release) (eq .metadata.namespace $ns))) -}}
+{{- $foreign = append $foreign (printf "HelmRelease %s/%s installs the operator" .metadata.namespace .metadata.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if .Capabilities.APIVersions.Has "application.giantswarm.io/v1alpha1" -}}
+{{- range ((lookup "application.giantswarm.io/v1alpha1" "App" "" "").items | default list) -}}
+{{- if eq (dig "spec" "name" "" .) $release -}}
+{{- $foreign = append $foreign (printf "App %s/%s installs the operator" .metadata.namespace .metadata.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- with $foreign -}}
+{{- fail (printf "components.gpu-operator.enabled=true, but this cluster already runs a GPU operator, and NVIDIA's operator is one per cluster (one ClusterPolicy, one set of DaemonSets): %s. This release would be a second owner (HelmRelease %s/%s, the Helm release %s in %s). Hand the operator over first: delete that release — cluster-manager's <cluster>-gpu-operator, whose detection then sees this component and never re-creates it, or the operator installed by hand — then switch the toggle on; or leave components.gpu-operator.enabled=false and keep the operator where it is. Adopting the running objects is not this chart's. The component configures the operator from the gpu-operator block, one of two rows: Flatcar — driver and toolkit off (the default); nodes with a pre-installed driver — gpu-operator.toolkit.enabled=true" (join "; " .) $ns $release $release $releaseNs) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Names of the platform HelmReleases this chart renders (every enabled roster
 entry with a chart), in roster order. The teardown hook deletes exactly these.
 Usage: include "agent-platform.platformReleaseNames" . | fromYamlArray

@@ -1,0 +1,57 @@
+# A foreign GPU operator, for the one-owner guard of components.gpu-operator
+# (agent-platform.validateGpuOperatorOwner, giantswarm/agent-platform#327): the
+# ClusterPolicy CRD and the one ClusterPolicy an operator owns, labelled the way
+# helm-controller stamps the objects of cluster-manager's release for a cluster
+# `demo` — HelmRelease flux-giantswarm/demo-gpu-operator. `lookup` is empty under
+# `helm template`, so the refusal shows only on a cluster (the agentlab):
+#
+#   kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml
+#   helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server \
+#     -f helm/agent-platform/ci/ci-values.yaml --set components.flux.enabled=false \
+#     --set components.gpu-operator.enabled=true
+#   # → "components.gpu-operator.enabled=true, but this cluster already runs a GPU operator …
+#   #    ClusterPolicy cluster-policy belongs to HelmRelease flux-giantswarm/demo-gpu-operator …
+#   #    Hand the operator over first: delete that release …"
+#   kubectl delete -f tests/fixtures/gpu-operator-foreign-owner.yaml
+#
+# The CRD is a stub (unknown fields preserved), enough for the lookup; a running
+# operator's CRD is the subchart's. Never apply it to a cluster that runs one.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clusterpolicies.nvidia.com
+  labels:
+    helm.toolkit.fluxcd.io/name: demo-gpu-operator
+    helm.toolkit.fluxcd.io/namespace: flux-giantswarm
+spec:
+  group: nvidia.com
+  scope: Cluster
+  names:
+    kind: ClusterPolicy
+    listKind: ClusterPolicyList
+    plural: clusterpolicies
+    singular: clusterpolicy
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+---
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: cluster-policy
+  labels:
+    helm.toolkit.fluxcd.io/name: demo-gpu-operator
+    helm.toolkit.fluxcd.io/namespace: flux-giantswarm
+  annotations:
+    meta.helm.sh/release-name: demo-gpu-operator
+    meta.helm.sh/release-namespace: kube-system
+spec:
+  driver:
+    enabled: false
+  toolkit:
+    enabled: false

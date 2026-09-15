@@ -41,6 +41,8 @@ the platform's own release on the installation's cluster, or installs onto a wor
   render produces, the render fails naming that release: remove it first, or turn the component off in this release.
   Skipped with the target knob, where the render's lookups see the installation while the components land on the target
   (what the target already runs is the composer's to detect). A CRD without the labels is left to Helm as before.
+  `components.gpu-operator` adds its own guard on the same principle — a `ClusterPolicy`, HelmRelease or App of the
+  operator that is not this release's fails the render naming the handover (root README, "The GPU operator").
 
 `make verify-target` asserts the offline half (`tests/verify-target.py`): the knob's stamp and byte-identity, the
 toggles on both charts, the engine guard, the hooks, the serving- and runtime-shaped toggle sets alone, combined and
