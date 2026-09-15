@@ -44,6 +44,7 @@ spec:
               protocol: TCP
   egress:
     - toEntities: ["kube-apiserver"]
+    {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: {{ include "agent-platform.musterFullname" . }}
@@ -51,6 +52,7 @@ spec:
         - ports:
             - port: "8090"
               protocol: TCP
+    {{- end }}
     {{- with .Values.gateway.jwksEgress }}
     {{- if .enabled }}
     # The controller fetches remote JWKS centrally (and distributes the keys to

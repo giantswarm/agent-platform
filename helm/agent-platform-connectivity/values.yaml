@@ -76,6 +76,14 @@ global:
 # for; the meta chart forwards an entry for every component it knows, so the map
 # stays open. Set them directly only when you install this chart on its own.
 components:  # @schema additionalProperties: true
+  # muster and dicebear are on unless the meta chart says otherwise: a slice
+  # release of one target cluster turns them off (giantswarm/agent-platform#328),
+  # and this chart then renders none of their wiring (muster's /mcp route and the
+  # policy rules that select its pods, the avatars host in the portal's CSP).
+  muster:  # @schema additionalProperties: true
+    enabled: true
+  dicebear:  # @schema additionalProperties: true
+    enabled: true
   agentgateway:  # @schema additionalProperties: true
     enabled: false
   agent-platform-mcps:  # @schema additionalProperties: true

@@ -696,6 +696,12 @@ verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure 
 	@python3 tests/verify-engine.py $(CHART_DIR)
 	@echo "flux engine shapes verified."
 
+.PHONY: verify-target
+verify-target: ## Assert one release of this chart per target cluster (giantswarm/agent-platform#328): gitops.target.kubeConfig.secretRef stamps spec.kubeConfig.secretRef (name, key when set) onto every component HelmRelease and changes nothing else — unset, the meta and connectivity renders are byte-identical to GOLDEN_REF; components.muster / components.dicebear gain enabled (off = no release, the roster says so, the connectivity chart drops the /mcp route, muster's egress policy, every rule selecting its pods and the avatars host in the portal's CSP); the knob with the bundled engine fails; no hook Job renders with the knob; the serving- and runtime-shaped toggle sets (ci/test-slice-*-values.yaml) render alone, combined (the union, the first slice's documents unchanged — an in-place upgrade) and with the knob (ci/test-target-values.yaml), agentgateway off beside the platform's release and on for a workload cluster; the schema. The lookup guards (a foreign helm-controller, a second owner of a component's CRDs — components.<name>.ownedCrds) need a live cluster: README "One release per target cluster". HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@GOLDEN_REF="$(GOLDEN_REF)" python3 tests/verify-target.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "target cluster shapes verified."
+
 .PHONY: verify-self
 verify-self: ## Assert self-management's shapes: engine off renders nothing of it; engine on renders the self OCIRepository + suspended HelmRelease, the -6/-5/0 hooks, the identity and the admission policy (CLI day-0 only); engine on with self off (lab, hand-back) renders the -6/-5 hooks at pre-upgrade too and nothing else; the guards and knobs. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"

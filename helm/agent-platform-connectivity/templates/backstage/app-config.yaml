@@ -68,7 +68,9 @@ data:
           - "'self'"
           - "data:"
           - https://s.giantswarm.io
+          {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear") }}
           - https://avatars.{{ $domain }}
+          {{- end }}
       {{- if eq (dig "database" "engine" "" $backstage) "postgresql" }}
       {{- /* backstage.database.engine=postgresql makes the Backstage chart
       deploy the CNPG Cluster, the POSTGRES_* env and the CA mount — but no

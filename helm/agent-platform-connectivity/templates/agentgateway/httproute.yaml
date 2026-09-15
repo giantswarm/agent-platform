@@ -1,6 +1,8 @@
 {{- /* Layer-1 route: the public Gateway forwards /mcp to the agentgateway data
-plane. Not rendered when that data plane is the edge itself. */ -}}
-{{- if and (include "agent-platform.ingress.agentgateway" .) (not (include "agent-platform.edgeIsDataPlane" .)) }}
+plane. Not rendered when that data plane is the edge itself, nor without muster
+(components.muster.enabled): the MCP surface is muster's, and a slice release
+that leaves muster to the platform's own release has none. */ -}}
+{{- if and (include "agent-platform.ingress.agentgateway" .) (not (include "agent-platform.edgeIsDataPlane" .)) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
 {{- $fullName := .Values.gateway.name }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

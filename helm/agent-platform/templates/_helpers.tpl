@@ -1335,10 +1335,13 @@ Whether the kagent CRDs' storage-version hooks render
 (hooks/kagent-crds-storage-version.yaml, giantswarm/agent-platform#396): whenever
 the kagent line's CRD component is on — with or without the bundled engine. A
 cluster's own Flux runs this chart's hooks too, and every installation that ran
-kagent 0.10 needs the step; the other hooks stay the engine's. Emits "true" or "".
+kagent 0.10 needs the step; the other hooks stay the engine's. Never with
+gitops.target set: a hook Job runs where the chart is installed, and there the
+kagent CRDs are another release's (the platform's own) — the target cluster
+starts on the kagent API v2 line and has no cut-over to run. Emits "true" or "".
 */}}
 {{- define "agent-platform.kagent.storageVersionHooks" -}}
-{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds") }}true{{ end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) (not (include "agent-platform.targetSecretName" .)) }}true{{ end -}}
 {{- end -}}
 
 {{/*
@@ -1425,6 +1428,66 @@ fleet's render — engine off, exempt namespace — makes no API call at all.
 {{- end -}}
 {{- with $foreign -}}
 {{- fail (printf "this cluster runs Flux; set components.flux.enabled=false or install the chart through it (found %s)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The target cluster's kubeconfig Secret (gitops.target.kubeConfig.secretRef.name,
+giantswarm/agent-platform#328): its name when this release installs its
+components into another cluster, "" otherwise. One release of this chart per
+target cluster — the slices are toggles in its values, never two releases of the
+chart on one cluster (both need the same cluster-scoped CRDs).
+*/}}
+{{- define "agent-platform.targetSecretName" -}}
+{{- dig "target" "kubeConfig" "secretRef" "name" "" (.Values.gitops | default dict) -}}
+{{- end -}}
+
+{{/*
+Render guard of the target knob: the components install into the target through
+the installation's helm-controller, so the bundled engine has no place in such a
+release — no Flux is ever installed into a workload cluster, nor into a cluster
+that runs one.
+*/}}
+{{- define "agent-platform.validateTarget" -}}
+{{- with (include "agent-platform.targetSecretName" .) -}}
+{{- if eq (include "agent-platform.engineEnabled" $) "true" -}}
+{{- fail (printf "gitops.target.kubeConfig.secretRef.name=%s cannot be combined with the bundled Flux engine: the components install into the target cluster through the installation's helm-controller, and no Flux is installed into a workload cluster or into a cluster that runs one. Set components.flux.enabled=false" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+One owner per cluster-scoped component (components.<name>.ownedCrds): a CRD the
+component installs that already exists and whose Flux labels name another
+HelmRelease than the one this render produces (<gitops.namespace | release
+namespace>/<chart>) fails the render naming that release. helm-controller stamps
+helm.toolkit.fluxcd.io/name and /namespace on every object of a release, the
+crds/ directory's CRDs included, so the labels are the owner. A CRD without them
+is left to Helm as before (adoption is not this chart's). Skipped with
+gitops.target set: the lookups see the installation while the components land
+on the target, so there the detection is the composer's. `lookup` is empty
+under `helm template`, where this guard is therefore silent.
+*/}}
+{{- define "agent-platform.validateCrdOwners" -}}
+{{- if not (include "agent-platform.targetSecretName" .) -}}
+{{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
+{{- $foreign := list -}}
+{{- range $key, $c := .Values.components -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $key)) (hasKey $c "chart") -}}
+{{- range ($c.ownedCrds | default list) -}}
+{{- with (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" .) -}}
+{{- $owner := dig "metadata" "labels" "helm.toolkit.fluxcd.io/name" "" . -}}
+{{- $ownerNs := dig "metadata" "labels" "helm.toolkit.fluxcd.io/namespace" "" . -}}
+{{- if and $owner (or (ne $owner $c.chart) (ne $ownerNs $ns)) -}}
+{{- $foreign = append $foreign (printf "%s (components.%s) belongs to HelmRelease %s/%s" .metadata.name $key $ownerNs $owner) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- with $foreign -}}
+{{- fail (printf "a cluster-scoped component has exactly one owner per cluster, and release %s (HelmReleases in %s) would be a second one: %s. Remove that release first, or set components.<name>.enabled=false here — a slice release beside the platform's own leaves the controller and its CRDs to the platform's release" $.Release.Name $ns (join "; " .)) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
