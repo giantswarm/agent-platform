@@ -1,0 +1,50 @@
+{{- /*
+Render-time guards of the vm-manager component. They fail `helm template`
+(and therefore CI lint + install) with an actionable message instead of
+shipping a pod that cannot validate its callers, an MCPServer CR without its
+CRD, or an image directory named twice.
+*/ -}}
+{{- if (include "agent-platform.vmManager.enabled" .) }}
+  {{- $vm := .Values.vmManager }}
+  {{- $chart := include "agent-platform.vmManager.chartValues" . | fromJson }}
+  {{- $_ := include "agent-platform.vmManager.fullname" . }}
+
+  {{- /* The image directory is one source: a claim or a node path. */ -}}
+  {{- if and (dig "images" "existingClaim" "" $chart) (dig "images" "hostPath" "" $chart) }}
+    {{- fail "vm-manager.images names both existingClaim and hostPath: the image directory is mounted from exactly one of them" }}
+  {{- end }}
+
+  {{- /* The MCP endpoint is how muster and the agents reach the tools
+         (the MCPServer CRD ships with muster). */ -}}
+  {{- if and (dig "muster" "mcpServer" "enabled" false $chart) (not (include "agent-platform.componentEnabled" (dict "root" . "name" "muster"))) }}
+    {{- fail "vm-manager.muster.mcpServer.enabled is true but components.muster.enabled is false: the MCPServer CRD ships with muster, so the CR has no API to map to. Turn on muster or set vm-manager.muster.mcpServer.enabled: false" }}
+  {{- end }}
+
+  {{- /* The component release resolves its OAuth inputs through the chart's
+         global.identity / global.domain fallbacks; a missing one fails inside
+         the child release, out of sight. Fail here, naming both keys. */ -}}
+  {{- if (include "agent-platform.vmManager.oauthEnabled" .) }}
+    {{- $oauth := dig "oauth" dict $chart }}
+    {{- if and (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
+      {{- fail "vm-manager.oauth.enabled is true but vm-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL" }}
+    {{- end }}
+    {{- if eq (dig "provider" "dex" $oauth) "dex" }}
+      {{- if not (include "agent-platform.vmManager.issuerUrl" .) }}
+        {{- fail "vm-manager.oauth.enabled is true but vm-manager.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set: the resource server needs the login issuer" }}
+      {{- end }}
+      {{- if and (not (dig "dex" "clientID" "" $oauth)) (not .Values.global.identity.clientId) }}
+        {{- fail "vm-manager.oauth.enabled is true but vm-manager.oauth.dex.clientID is empty and global.identity.clientId is not set: the resource server needs the platform OAuth client" }}
+      {{- end }}
+      {{- if and (not (dig "existingSecret" "" $oauth)) (not (dig "dex" "clientSecret" "" $oauth)) (not .Values.global.identity.existingSecret) }}
+        {{- fail "vm-manager.oauth.enabled is true but none of vm-manager.oauth.existingSecret, vm-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: the resource server needs the platform client's secret (key dex-client-secret)" }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* The guests' egress blocks are CIDRs. */ -}}
+  {{- range concat ($vm.networkPolicy.guestEgress.cidrs | default list) ($vm.networkPolicy.guestEgress.except | default list) }}
+    {{- if not (regexMatch `^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$` .) }}
+      {{- fail (printf "vmManager.networkPolicy.guestEgress: %q is not an IPv4 CIDR" .) }}
+    {{- end }}
+  {{- end }}
+{{- end }}

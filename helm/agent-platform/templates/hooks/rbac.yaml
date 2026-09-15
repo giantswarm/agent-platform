@@ -1,14 +1,18 @@
 {{- /*
 The identity the hook Jobs run as: a ServiceAccount in the release namespace
 bound to cluster-admin (the hooks delete HelmReleases and the FluxInstance and
-wait on their finalizers; the kagent namespace hook creates a namespace).
-Weight -10 so it exists before any hook Job; the hook-succeeded policy removes
-both once every hook of the event has succeeded. Created for pre-delete (the
-ordered teardown) and — while the kagent namespace hook renders — for
-pre-install and pre-upgrade too (agent-platform.hooks.serviceAccountEvents).
-Rendered only with the bundled engine — without it this chart has no hooks.
+wait on their finalizers; the kagent namespace hook creates a namespace; the
+storage-version hooks delete CRDs and re-create ModelConfigs). Weight -10 so
+it exists before any hook Job; the hook-succeeded policy removes both once
+every hook of the event has succeeded, and before-hook-creation brings them
+back for the next event. Created for pre-delete (the ordered teardown) and —
+while the kagent namespace hook and the storage-version hooks render — for
+pre-install, pre-upgrade, post-install and post-upgrade too
+(agent-platform.hooks.serviceAccountEvents). Rendered with the bundled engine,
+and without it only while the storage-version hooks render (the one hook
+family a cluster's own Flux runs, giantswarm/agent-platform#396).
 */ -}}
-{{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+{{- if or (eq (include "agent-platform.engineEnabled" .) "true") (include "agent-platform.kagent.storageVersionHooks" .) }}
 {{- $events := include "agent-platform.hooks.serviceAccountEvents" . }}
 apiVersion: v1
 kind: ServiceAccount

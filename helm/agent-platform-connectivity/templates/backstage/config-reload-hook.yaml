@@ -13,6 +13,12 @@ Backstage ignores). The patch is a no-op while the checksum is unchanged
 (kubectl sends the same value, the Deployment generation does not move) and a
 normal rolling update when it differs.
 
+The checksum covers the ConfigMap's data only — the app-config document the
+pod mounts — never its metadata: labels.common carries helm.sh/chart with this
+chart's version, and the connectivity chart is versioned with the meta chart,
+so a hash over the whole ConfigMap moved on every release and restarted the
+portal (~60 s, open sessions lost) with no config change behind it (#424).
+
 The Deployment is selected by label (app=<backstage.name>), not by name:
 `kubectl set env` with a selector exits 0 when nothing matches, which is the
 normal first install — the backstage release dependsOn this one (its pod mounts
@@ -20,7 +26,8 @@ the ConfigMap rendered here), so the Deployment does not exist yet when this
 hook runs, and there is nothing to roll. The kubectl image has no shell, so the
 selector is what makes the Job tolerant of that. Escape hatches: set
 backstage.configReload.enabled=false, or install with --no-hooks. */}}
-{{- $checksum := include (print $.Template.BasePath "/backstage/app-config.yaml") . | sha256sum }}
+{{- $appConfig := include (print $.Template.BasePath "/backstage/app-config.yaml") . | fromYaml }}
+{{- $checksum := required "config-reload: the rendered Backstage app-config ConfigMap has no data" (get $appConfig "data") | toYaml | sha256sum }}
 {{- $deployment := include "agent-platform.backstage.name" . }}
 {{- $image := .Values.backstage.configReload.image }}
 {{- $name := printf "%s-backstage-config-reload" (include "name" .) }}

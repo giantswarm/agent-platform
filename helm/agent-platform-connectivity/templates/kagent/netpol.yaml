@@ -1,16 +1,13 @@
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.networkPolicy.enabled }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $controllerPort := "8083" }}
-{{- /* kagent's built-in tool server (the kagent-tools subchart of the kagent chart).
-     The kagent chart renders a RemoteMCPServer for it at
-     http://kagent-tools.<tools namespace>:<port>/mcp; the controller discovers its
-     tools there and every agent that references it calls it there. The kagent
-     wrapper chart pins the subchart to the kagent namespace; an explicit
-     kagent.kagent-tools.namespaceOverride wins. */}}
-{{- $toolsValues := index .Values.kagent "kagent-tools" | default dict }}
-{{- $toolsEnabled := $toolsValues.enabled }}
-{{- $toolsNs := $toolsValues.namespaceOverride | default $kagentNs }}
-{{- $toolsPort := dig "service" "ports" "tools" "targetPort" "8084" $toolsValues | toString }}
+{{- /* kagent's built-in tool server (the kagent-tools subchart of the kagent chart):
+     the namespace and port the kagent chart renders it into — and composes its
+     RemoteMCPServer URL from — derived by the agent-platform.kagentTools.*
+     helpers the way the chart derives them (_helpers.tpl). */}}
+{{- $toolsEnabled := include "agent-platform.kagentTools.enabled" . }}
+{{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
+{{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $clusterName := .Values.postgres.clusterName }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
@@ -71,9 +68,12 @@ spec:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
 ---
-# Egress from the kagent controller: DNS, Postgres, Kubernetes API, OTLP, muster,
-# Substrate's ate-api and atenet router, and the built-in tool server when it is
-# enabled.
+# Egress from the kagent controller: DNS, Postgres, Kubernetes API, the OTLP
+# gateway kagent.otel names (the pods of the endpoint's
+# namespace on its port, nothing when both exporters are off;
+# agent-platform.kagent.otlpEgress, shared with the actors' egress gateway),
+# muster, Substrate's ate-api and atenet router, and the built-in tool server
+# when it is enabled.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -96,12 +96,7 @@ spec:
               protocol: TCP
     - toEntities:
         - kube-apiserver
-    - toEntities:
-        - cluster
-      toPorts:
-        - ports:
-            - port: "4317"
-              protocol: TCP
+    {{- include "agent-platform.kagent.otlpEgress" . | nindent 4 }}
     - toEntities:
         - world
       toPorts:

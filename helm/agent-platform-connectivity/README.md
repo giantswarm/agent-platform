@@ -112,8 +112,14 @@ On the installation, after the cutover:
 - Only one metrics policy may target a Gateway: custom labels replace rather
   than merge, and when two policies target the same Gateway the one with the
   lexicographically lowest policy key wins while the other is silently dropped.
-- An extra `kagent.modelConfigs[]` entry calls the provider directly unless it
-  sets its own `baseUrl`.
+- An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
+  own `baseUrl` or names a provider other than `llmRouting.backend.provider`.
+  The `baseUrl` lands under the CRD's block for the entry's provider —
+  `anthropic`, `openAI`, `sapAICore`, the three `ModelConfigSpec` gives one —
+  never the lower-cased provider name, which the API server would prune; the
+  render refuses a `baseUrl` on any other provider and a `provider` outside the
+  CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
+  of the enum against the kagent line's CRD.
 - The data-plane `PodMonitor` is gated on the agentgateway component, not on
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
@@ -152,6 +158,13 @@ from the `Gateway`. This chart shapes it through `AgentgatewayParameters`
   single node then waits on the budget (the replacement pod cannot schedule);
   turn `podDisruptionBudget.enabled` off there.
 
+`gateway.parameters.podAnnotations` is empty by default. The
+`karpenter.sh/do-not-disrupt: "true"` of giantswarm/agent-platform#431 was the
+answer to a single data-plane pod; next to the three knobs above it would pin
+both pods' nodes against Karpenter's consolidation, drift and expiry and the
+budget would never be reached. Set it back on an installation that would rather
+keep the streams open on a pod than let Karpenter churn its node.
+
 `replicas`, `spread.maxSkew` and `spread.whenUnsatisfiable` are each refused
 when unset. A `null` set through the meta chart does not travel — Helm deletes
 the key at that layer — so it arrives here as a missing key, which no schema
@@ -174,6 +187,79 @@ replica serves xDS; the leader alone writes status and reconciles the data
 plane), so a data-plane pod that starts on a rebooted node finds its config
 unless both controller pods sat on that node.
 
+## The Backstage component on a default-deny cluster
+
+With `components.backstage.enabled` and `networkPolicy.enabled`, the chart
+renders a policy for the portal's own pods next to the config-reload hook's
+policy. Without it the app boots into nothing on a default-deny cluster: DNS to
+CoreDNS is denied, OIDC discovery to the identity provider times out and the
+backend exits, and the route to the portal answers nothing.
+
+The policy selects the backstage chart's pod labels — `app: <backstage.name>`
+and `component: backstage`; `app` alone is not unique in the namespace — and
+uses `backstage.port` (default 7007) as the app port, the port that chart gives
+its container and its probes.
+
+| | cilium flavour | kubernetes flavour |
+|---|---|---|
+| Objects | one `CiliumNetworkPolicy` | one ingress and one egress `NetworkPolicy` |
+| The portal's route | the front Gateway's Envoy pods, in the namespaces the route names as its parents (`backstage.parentRefs`, else `global.gatewayApi.parentRefs`); the agentgateway data plane instead when `gatewayApi.gateway.create` makes this chart own the edge and the route names no parent of its own | the same, as a `namespaceSelector` and `podSelector` pair |
+| Kubelet probes | `fromEntities: [host, remote-node]`, the pattern the manager, kserve and model-serving policies use | left to the CNI: vanilla `NetworkPolicy` selects pods, never the node. The bare `namespaceSelector` this flavour renders is the chart's pattern for it, and admits any pod in the cluster on the app port |
+| DNS | CoreDNS in `kube-system`, with the proxy clause the FQDN selectors need | CoreDNS in `kube-system` |
+| The identity provider | the issuer host by name on 443, plus the `cluster` entity on 443 and 10443 for an issuer behind an in-cluster Gateway | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs` on 443 |
+| The kube-apiserver | the `kube-apiserver` entity | `networkPolicy.kubernetes.apiServerCIDR` |
+| The edge | the `cluster` entity leg the identity-provider include renders, on 443 and 10443 | the Envoy pods of the Gateways the muster, kagent-controller and model-manager routes attach to, on 443 and 10443, plus the agentgateway data plane on 443 for each of those routes that attaches to it |
+| muster | its pods in this namespace, on the muster Service port | the same, as a `podSelector` |
+| The portal's database | its CNPG pods by `cnpg.io/cluster`, on 5432, while `backstage.database.engine` is `postgresql` | the same, as a `podSelector` |
+| The scaffolder catalog | `github.com`, `api.github.com` and `raw.githubusercontent.com` on 443, while `backstage.catalogs.version` is set | the world rule above |
+
+The app-config addresses muster, the kagent controller and the model manager by
+their public hostnames, so those calls leave through the edge rather than
+through muster's own pod leg. That edge is the one *those* routes attach to
+(`ingress.parentRefs` for muster, `kagent.controllerRoute.parentRef` and
+`modelManager.route.parentRef` for the other two, each falling back to the
+chart-owned edge, else `global.gatewayApi.parentRefs`) — never
+`backstage.parentRefs`, which moves the portal's own route only. The address they resolve to is the edge's
+LoadBalancer, which both flavours translate to the proxy pods before the policy
+decides: an Envoy Gateway proxy binds the listener's port plus 10000, so a
+listener on 443 is a pod on 10443 and both ports are open. In the cilium
+flavour that leg is the `cluster` entity the identity-provider include renders
+— narrowing that include to the issuer alone would take the portal's calls to
+the kagent controller and the model manager with it.
+
+A private identity provider inside one of `worldExcludedCIDRs` needs its
+address in `networkPolicy.additionalEgressCIDRs`. The policy names the proxy
+pods as Envoy Gateway labels them (`app.kubernetes.io/name: envoy`), so a route
+pinned with `backstage.parentRefs` to a Gateway of another implementation needs
+that Gateway's pods admitted by a policy of its own.
+
+The backstage chart's own CNPG policy is not this chart's: its missing DNS and
+operator legs, and the missing arm64 images, are filed against
+giantswarm/backstage.
+
+## The platform Postgres `Cluster`
+
+`postgres.imagePullSecrets` renders `Cluster.spec.imagePullSecrets`. The
+bootstrap init container runs the **operator** image, not the operand image, so
+a private mirror needs the secret even with `postgres.image.name` left at the
+operator's default.
+
+`postgres.affinity` is forwarded verbatim as `Cluster.spec.affinity`. That is
+CNPG's own `AffinityConfiguration`, not a core Kubernetes `Affinity`: the
+accepted keys are `enablePodAntiAffinity`, `topologyKey`,
+`podAntiAffinityType`, `nodeSelector`, `nodeAffinity`, `tolerations`,
+`additionalPodAffinity` and `additionalPodAntiAffinity`. Any other key fails
+the render, so a typo never reaches the `Cluster` silently. A core
+`podAffinity` or `podAntiAffinity` key fails with a message of its own: pass a
+core term through `additionalPodAffinity` or `additionalPodAntiAffinity`.
+
+Both schemas take the block as free-form, and the guard is this chart's, so a
+typo set on the meta chart passes its own install and fails the
+`agent-platform-connectivity` `HelmRelease` instead — that release's message
+names the key.
+
+Both render no field while unset, so the operator's own defaults apply.
+
 ## Agent Substrate
 
 With `components.substrate` on (the meta chart turns it on with kagent) this
@@ -189,10 +275,23 @@ platform needs:
   its OpenID discovery document. Key material comes from `openssl` in an init
   container (`hooks.opensslImage`), the objects from `kubectl`
   (`hooks.kubectlImage`); a pool that exists is never touched (a re-run says
-  `present`), the two namespaces are created bare when missing. Identity:
-  `<release>-hooks`, a ClusterRole on secrets, configmaps and namespaces for
-  the hook's lifetime (`templates/substrate/hooks-rbac.yaml`; the hook Job
-  include is `agent-platform.hooks.job` in `templates/_hooks.tpl`).
+  `present`), the two namespaces are created bare when missing. The trust
+  anchors are applied server-side as pure functions of their pools on every
+  run: `actor-id-ca-certs`, and the podcert signers' cluster-scoped
+  `ClusterTrustBundle`s (`servicedns.podcert.ate.dev:identity:primary-bundle`,
+  `podidentity.podcert.ate.dev:identity:primary-bundle` — the roots of the two
+  podcertificate pools, the objects every Substrate pod projects as its trust
+  anchor). The podcertificate-controller publishes and refreshes those bundles
+  itself, but a pod reads the bundle that exists when it starts, once; the
+  hook runs before the `substrate` release, so a bundle left by a previous
+  install never reaches a pod with roots the current pools do not have
+  (giantswarm/agent-platform#384; a re-run says `present`, `created` or
+  `republished`). Identity: `<release>-hooks`, a ClusterRole on secrets,
+  configmaps, namespaces and clustertrustbundles, with `attest` on the two
+  podcert signers (the apiserver's condition for writing a bundle that names a
+  signer), for the hook's lifetime
+  (`templates/substrate/hooks-rbac.yaml`; the hook Job include is
+  `agent-platform.hooks.job` in `templates/_hooks.tpl`).
 - **The database** (`templates/postgres/databases.yaml`, `databases-hook.yaml`):
   `postgres.databases` is a map of further CNPG `Database`s on the platform
   Cluster, one derived connection Secret `<clusterName>-<key>-app` each (the
@@ -206,22 +305,187 @@ platform needs:
 - **Kyverno** (`templates/substrate/policy-exceptions.yaml`): one
   `PolicyException` per Substrate workload — `substrate-atelet`,
   `substrate-workers` (every WorkerPool's pods, label `ate.dev/worker-pool`),
-  `substrate-control-plane`, `substrate-podcertificate-controller` — naming
+  `substrate-control-plane` (matched by workload name),
+  `substrate-podcertificate-controller` — naming
   exactly the restricted-PSS rules the workload violates, each with its
   `autogen-` copy, looked up in `kyvernoPolicies.rules` (rule → ClusterPolicy).
   `make verify-kyverno` computes the violations and holds the lists.
 - **Network policies** (`templates/substrate/netpol.yaml`, both flavours):
   Substrate's hops and the actors' destinations on the egress gateway
   `atenet-egress`, where an actor's connections leave (muster, the kagent
-  controller, the LLM path, DNS); the worker pods reach only the egress
+  controller, the LLM path, DNS, the OTLP gateway `kagent.otel` names — the
+  pods of the endpoint's namespace on its port, the rule the controller's
+  egress policy shares through `agent-platform.kagent.otlpEgress`; without
+  it every turn ended 3 s late on the Go ADK's pre-response trace flush,
+  giantswarm/agent-platform#456); the worker pods reach only the egress
   gateway, the dns and the cluster DNS. The kubernetes flavour renders the
-  ingress policies. `make verify-kagent-netpol` asserts the render.
+  ingress policies. `make verify-kagent-netpol` asserts the render,
+  `make verify-actor-telemetry-egress` the OTLP rules.
 - **Guards** (`templates/substrate/validate.yaml`): a Substrate with no
   database, a `postgres.databases` entry whose name is not an identifier or is
   the initdb database's, the Substrate Secret not copied into `ate-system`.
 
 The meta chart's README ("Agent Substrate") has the prerequisites, the version
 pin and the snapshot store; `docs/substrate-security.md` the security write-up.
+
+## klaus-gateway — reaching its stores
+
+Three policies select the klaus-gateway pod under `networkPolicy.enabled`
+(`templates/klausgateway/netpol.yaml`, both flavours): `-klausgateway-a2a-egress`
+(DNS, the agentgateway data plane on 8080; with `klausGateway.a2a.enabled`),
+`-klausgateway-obo-egress` (DNS, `world` / `cluster` on 443 and 10443 for
+muster's token endpoint; with `klausGateway.obo.enabled`) and
+`-klausgateway-store-egress` (DNS + one rule per store), which renders exactly
+while the gateway reaches a store beyond its own process:
+
+| Store | Knob | Rule |
+|---|---|---|
+| The Valkey routing store | `klausGateway.routing.store: valkey`, the valkey component on | the platform's Valkey pods (`agent-platform.valkey.podSelector`, the release namespace) on `valkey.valkey.service.port` |
+| The Secret link store | `klausGateway.obo.store: secret`, OBO on | the kube-apiserver (`kube-apiserver` entity; `networkPolicy.kubernetes.apiServerCIDR`) |
+| The configmap / crd routing stores, the embedded ChannelRoute controller | `klausGateway.routing.store: configmap` / `crd`, `klausGateway.controller.enabled` | the kube-apiserver, as above |
+
+The keys are the klaus-gateway chart's, forwarded by the meta chart; one left
+unset is read with that chart's default (memory, bolt, off), so the default
+shape gets no policy. An out-of-band Valkey (`routing.valkey.url` outside the
+platform, the component off) gets no rule: nothing in the namespace to select,
+the installation adds that egress itself. The valkey release's own policy
+admits clients from the whole cluster on 6379, so the client side is the only
+missing half.
+
+The first policy that selects the pod puts it in default-deny egress, so a
+store without its rule fails at start with `context deadline exceeded` on the
+API — not `forbidden`, which would be the Role — or hangs every binding write
+and the readiness probe on the Valkey connect. `make verify-klausgateway-netpol`
+asserts every gate and both flavours.
+
+## `gateway.jwksEgress` — reaching the issuer's JWKS
+
+The agentgateway controller fetches the JWKS of every `jwtAuthentication`
+policy this chart renders and pushes the keys to the data plane over xDS. The
+data plane fetches nothing. So the controller's network policy, not the data
+plane's, must reach every issuer.
+
+Under `networkPolicy.enabled` the controller's egress is the kube-apiserver,
+muster, DNS and the destinations below. Without a rule for the issuer the fetch
+is denied on a default-deny cluster and every request that carries a valid
+token is answered `401 token uses the unknown key`.
+
+Three route blocks name a JWKS host and port, and the controller policy reads
+them directly — there is no second list to keep in sync:
+
+- `kagent.controllerRoute.jwtAuthentication.jwks`
+- `modelManager.route.jwtAuthentication.jwks`
+- `agentManager.route.jwtAuthentication.jwks`
+
+Only a rendered policy contributes: the component, its route and its
+`jwtAuthentication` must all be on.
+
+A `jwks.host` is always a name. An in-cluster issuer is its qualified Service
+name; a public issuer is its full host. An address goes in
+`gateway.jwksEgress.external.cidrs` below.
+
+| The host | cilium flavour | kubernetes flavour |
+|---|---|---|
+| In-cluster (`svc` as the third dot-separated label, then nothing, `cluster` or `cluster.local`) | the `gateway.jwksEgress` rule: that namespace on that port | the same, as a namespace selector |
+| An external name (`www.googleapis.com`) | a `toFQDNs` `matchName` on the JWKS port, behind the policy's DNS proxy rule | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs`, on the JWKS port |
+
+The kubernetes flavour narrows the controller's egress only while
+`networkPolicy.kubernetes.apiServerCIDR` is a real API-server block. It defaults
+to `0.0.0.0/0` on every port, and the policy's first rule carries it, so on that
+default the controller already reaches every IPv4 destination and the rules
+above add nothing.
+
+Every host is classified and selected in its normalized form: lower case, with
+the root label's trailing dot removed. `dex.giantswarm.svc.cluster.local.` is
+therefore the Service it names, not an external host.
+
+`gateway.jwksEgress.enabled` is required only for an in-cluster host, and its
+`namespace` and `port` must be the ones that host names. An external host needs
+none of them, and leaving `enabled` on changes nothing else.
+
+It is one rule, so the chart carries one in-cluster issuer. Reach a second one
+by address: its pod blocks in `gateway.jwksEgress.external.cidrs`, opened on
+`external.port`. With that port equal to the route's `jwks.port`, the namespace
+and port guards below stand down for that route — the blocks are the operator's
+statement that they are the issuer's.
+
+`gateway.jwksEgress.podSelector` narrows the rule to pods inside the namespace.
+No guard reads it, because a hostname carries no pod labels: a selector that
+matches no issuer pod renders green and denies the fetch.
+
+Five render guards refuse a host or port that reaches no issuer in any flavour.
+Each one is a green render and a runtime `401` without it, and the route
+subtrees are open objects in `values.schema.json`, so no schema pattern can hold
+them:
+
+| The shape | Why no rule reaches it |
+|---|---|
+| An empty host | the JWKS backend renders no host and resolves nothing |
+| An empty `jwks.port` | the JWKS backend renders no port and the API server refuses it |
+| A host that carries a port (`dex.example.com:5556`) | the port belongs in `jwks.port`; both the JWKS backend and the egress rule are built from the two keys |
+| An address literal (`198.51.100.7`, `2001:db8::1`, `1.2.3.999`) | the controller selects an external issuer by name; to reach one by address, name its blocks in `gateway.jwksEgress.external.cidrs` |
+| A host that is no hostname either (`accounts.google.com/keys`, `a..b.example.com`) | the backend resolves no address; the kubernetes flavour still opens its wide rule, so the render stays green and the fetch never happens |
+
+A host carries the issuer's name alone. Its scheme belongs to `issuer`, and the
+JWKS path to `jwks.path`.
+
+Three more depend on the rule that renders, so they follow
+`networkPolicy.enabled`:
+
+| The shape | Why no rule reaches it |
+|---|---|
+| A host of fewer than three labels (`dex`, `dex.giantswarm`, `okta.com`) | it is neither a qualified Service name nor a public issuer. A short Service name resolves through the pod's search path, which the egress rule cannot follow |
+| An in-cluster host while `gateway.jwksEgress` is off | nothing opens its port |
+| An in-cluster host outside `gateway.jwksEgress.namespace` or off its `port`, and not reached through `external.cidrs` | that key renders one rule, for one namespace on one port |
+
+With no policy rendered, every destination is reachable and neither key decides
+anything.
+
+All three routes originate TLS to the issuer when `jwks.port` is 443, which
+serves no plain HTTP, or when `jwks.tls.enabled` is set for another port. The
+route's `AgentgatewayBackend` then verifies against `jwks.tls.caSecretName`,
+else the controller's system trust. `jwks.tls.enabled` adds one fallback the
+port alone does not: `global.identity.ca.secretName`, the CA of the platform's
+own identity provider. The key names one provider, so it is the right default
+only for a route pointed at that provider deliberately; a public issuer on 443
+verified against a private CA would fail the fetch and answer every caller
+`401 token uses the unknown key`. An in-cluster Dex on 5556 keeps its
+plain-HTTP fetch.
+
+`gateway.jwksEgress.external` covers an issuer the routes do not name and an
+issuer reached by address. Both
+lists open `external.port` (443 by default) as their own rule, and both apply
+whether or not `gateway.jwksEgress.enabled` is set:
+
+| The key | The flavour that reads it |
+|---|---|
+| `external.fqdns` — Cilium FQDN selectors (`matchName`, `matchPattern`) | cilium, behind the policy's DNS proxy rule. The kubernetes flavour selects addresses and never names, so it ignores them |
+| `external.cidrs` — IP blocks of either family | both |
+
+An `external.fqdns` item is a selector object (`- matchName: keys.example.com`),
+never a bare string. The schema types the item, so a string list fails the
+render instead of the apply.
+
+`external.cidrs` also covers the issuer the kubernetes flavour cannot reach by
+name at all: the wide rule it renders for a name is `0.0.0.0/0`, so it reaches
+public IPv4 destinations only. A private identity provider inside one of
+`worldExcludedCIDRs`, and an issuer the cluster resolves over IPv6, belong
+there.
+
+The cilium controller policy renders the DNS proxy clause only while a name is
+selected. With in-cluster hosts alone it renders no external rule and no proxy
+clause, in either flavour; `make verify-wiring` asserts that against
+`origin/main`, the controller policies first and then the whole render.
+
+## Voluntary disruption
+
+Two objects of this chart guard the platform's single-replica pods against Karpenter consolidation and node drains (giantswarm/agent-platform#431); the other components' guards travel on their own charts' knobs through the meta chart.
+
+- `gateway.parameters.podAnnotations` (default `karpenter.sh/do-not-disrupt: "true"`) is merged onto the agentgateway data-plane pod template through `AgentgatewayParameters` `deployment.spec.template.metadata` (strategic merge). Every MCP call, every A2A stream and — with `llmRouting` on — every model stream crosses those pods. Set the value to `"false"` or the map to `{}` to opt out.
+- `agentManager.podDisruptionBudget` (default `enabled: true`, `minAvailable: 1`, `unhealthyPodEvictionPolicy: AlwaysAllow`) renders a `PodDisruptionBudget agent-manager` in the release namespace, selecting the agent-manager pods by name the way the component's network policies do — the agent-manager chart has no knob of its own. Exactly one of `minAvailable` / `maxUnavailable` (int or percentage); the render refuses both, neither, and a policy outside the API's enum. Inert while `components.agent-manager.enabled` is false.
+- `valkey.podDisruptionBudget` (same defaults and guards; giantswarm/agent-platform#439) renders a `PodDisruptionBudget muster-valkey` — named after `valkey.valkey.fullnameOverride`, which the render requires — selecting the pod the way the valkey subchart labels it (`app.kubernetes.io/name: valkey` and the component's release name, `valkey`). muster's OAuth token store is that one pod on an RWO volume; neither the wrapper nor the upstream subchart has a budget knob. Inert while `components.valkey.enabled` is false; the meta chart never forwards the key to the valkey release.
+
+With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpenter reports `DisruptionBlocked`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`) — and `AlwaysAllow` keeps a pod that is not Ready evictable. `make verify-disruption` asserts the render, the knobs off and the guards. A spot reclaim is not a voluntary eviction: the placement of the stateful singletons on on-demand capacity is the meta chart's `scheduling.singletons`, which reaches the component releases as their charts' `nodeSelector` / `tolerations` and is never forwarded here.
 
 ## Values
 
@@ -249,6 +513,7 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | components.agent-sandbox.enabled | bool | `false` |  |
 | components.model-manager.enabled | bool | `false` |  |
 | components.agent-manager.enabled | bool | `false` |  |
+| components.vm-manager.enabled | bool | `false` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
 | components.cloudnative-pg.enabled | bool | `false` |  |
@@ -281,6 +546,9 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | gateway.jwksEgress.namespace | string | `"giantswarm"` |  |
 | gateway.jwksEgress.port | int | `5556` |  |
 | gateway.jwksEgress.podSelector | object | `{}` |  |
+| gateway.jwksEgress.external.fqdns | list | `[]` |  |
+| gateway.jwksEgress.external.cidrs | list | `[]` |  |
+| gateway.jwksEgress.external.port | int | `443` |  |
 | gateway.parameters.enabled | bool | `true` |  |
 | gateway.parameters.name | string | `""` |  |
 | gateway.parameters.serviceType | string | `"ClusterIP"` |  |
@@ -305,6 +573,7 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
+| gateway.parameters.podAnnotations | object | `{}` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -321,6 +590,7 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | llmRouting.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
 | llmRouting.metricLabels[1].name | string | `"agent_namespace"` |  |
 | llmRouting.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
 | llmRouting.modelCatalog.key | string | `"catalog.json"` |  |
@@ -408,8 +678,13 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
+| valkey.podDisruptionBudget.enabled | bool | `true` |  |
+| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
+| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
+| valkey.valkey.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |
@@ -417,9 +692,9 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | valkey.valkey.dataStorage.enabled | bool | `true` |  |
 | valkey.valkey.dataStorage.requestedSize | string | `"1Gi"` |  |
 | valkey.valkey.resources.requests.cpu | string | `"50m"` |  |
-| valkey.valkey.resources.requests.memory | string | `"64Mi"` |  |
+| valkey.valkey.resources.requests.memory | string | `"256Mi"` |  |
 | valkey.valkey.resources.limits.cpu | string | `"200m"` |  |
-| valkey.valkey.resources.limits.memory | string | `"256Mi"` |  |
+| valkey.valkey.resources.limits.memory | string | `"1Gi"` |  |
 | valkey.valkey.podSecurityContext.fsGroup | int | `1000` |  |
 | valkey.valkey.podSecurityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.podSecurityContext.runAsGroup | int | `1000` |  |
@@ -441,6 +716,45 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
+| kagent.harness.snapshotLocation | string | `""` |  |
+| kagent.harness.snapshotStore.prefix | string | `"kagent"` |  |
+| kagent.harness.snapshotStore.crossplane.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.provider | string | `"aws"` |  |
+| kagent.harness.snapshotStore.crossplane.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.region | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.observeOnly | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.tags | object | `{}` |  |
+| kagent.harness.snapshotStore.crossplane.aws.bucketName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.accountId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.oidcProvider | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.roleName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.lifecycleDays | int | `30` |  |
+| kagent.harness.snapshotStore.crossplane.capz.storageAccountName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.containerName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.resourceGroup | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.subscriptionId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.replicationType | string | `"LRS"` |  |
+| kagent.harness.snapshotStore.crossplane.capz.lifecycleDays | int | `30` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.identityName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.name | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.namespace | string | `"crossplane"` |  |
+| kagent.harness.snapshotStore.s3proxy.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.s3proxy.image.repository | string | `"gsoci.azurecr.io/giantswarm/s3proxy"` |  |
+| kagent.harness.snapshotStore.s3proxy.image.tag | string | `"4.1.1"` |  |
+| kagent.harness.snapshotStore.s3proxy.replicas | int | `2` |  |
+| kagent.harness.snapshotStore.s3proxy.javaOpts | string | `"-XX:MaxRAMPercentage=70"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.cpu | string | `"250m"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.ephemeral-storage | string | `"256Mi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.limits.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.limits.ephemeral-storage | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.endpoint | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.account | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.container | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
 | kagent.registry | string | `"gsoci.azurecr.io/giantswarm"` |  |
 | kagent.controller.image.repository | string | `"kagent-controller"` |  |
 | kagent.controller.agentImage.repository | string | `"kagent-app"` |  |
@@ -454,8 +768,6 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
-| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:7db42765cc401f4e356f876cf76a25de39c5109e56fabc9fe45ec0bf7e2d3137"` |  |
-| kagent.harness.snapshotLocation | string | `"s3://ate-snapshots/kagent"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |
 | kagent.podSecurityContext.runAsNonRoot | bool | `true` |  |
@@ -553,45 +865,11 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
 | kagent.controllerRoute.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[0] | string | `"CreateAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[1] | string | `"CreateAgentInstanceShare"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[2] | string | `"DeleteAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[3] | string | `"GetAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[4] | string | `"ListAgentInstanceShares"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[5] | string | `"ListAgentInstances"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[6] | string | `"ResumeAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[7] | string | `"RevokeAgentInstanceShare"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[8] | string | `"SuspendAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[9] | string | `"UpdateAgentInstanceName"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[0] | string | `"CreateAgentTemplate"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[1] | string | `"DeleteAgentTemplate"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[2] | string | `"GetAgentTemplate"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[3] | string | `"ListAgentTemplates"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[4] | string | `"UpdateAgentTemplate"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[0] | string | `"CreateModelConfig"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[1] | string | `"DeleteModelConfig"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[2] | string | `"GetModelConfig"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[3] | string | `"ListConfiguredProviders"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[4] | string | `"ListModelConfigs"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[5] | string | `"ListProviderModels"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[6] | string | `"ListSupportedModelProviders"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[7] | string | `"ListSupportedModels"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[8] | string | `"UpdateModelConfig"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[0] | string | `"GetCurrentUser"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[1] | string | `"GetSubstrateStatus"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[2] | string | `"GetVersion"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[3] | string | `"ListNamespaces"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[0] | string | `"CancelTask"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[1] | string | `"CreateTaskPushNotificationConfig"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[2] | string | `"DeleteTaskPushNotificationConfig"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[3] | string | `"GetExtendedAgentCard"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[4] | string | `"GetTask"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[5] | string | `"GetTaskPushNotificationConfig"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[6] | string | `"ListTaskPushNotificationConfigs"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[7] | string | `"ListTasks"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[8] | string | `"SendMessage"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[9] | string | `"SendStreamingMessage"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[10] | string | `"SubscribeToTask"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService" | list | `[]` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -617,6 +895,8 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |
+| postgres.imagePullSecrets | list | `[]` |  |
+| postgres.affinity | object | `{}` |  |
 | postgres.vector.enabled | bool | `false` |  |
 | postgres.vector.extensionImage.reference | string | `""` |  |
 | postgres.applicationDatabase.name | string | `"kagent"` |  |
@@ -727,7 +1007,7 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"v1.5.1-gs.1"` |  |
+| agentgateway.proxy.image.tag | string | `"v1.5.1-gs.4"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -790,6 +1070,24 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| vm-manager.fullnameOverride | string | `"vm-manager"` |  |
+| vm-manager.persistence.existingClaim | string | `""` |  |
+| vm-manager.persistence.create | bool | `false` |  |
+| vm-manager.oauth.enabled | bool | `true` |  |
+| vm-manager.oauth.provider | string | `"dex"` |  |
+| vm-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| vm-manager.muster.mcpServer.enabled | bool | `true` |  |
+| vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
+| vm-manager.networkPolicy.enabled | bool | `false` |  |
+| vmManager.podDisruptionBudget.enabled | bool | `true` |  |
+| vmManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| vmManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| vmManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
+| vmManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| vmManager.networkPolicy.guestEgress.cidrs[0] | string | `"0.0.0.0/0"` |  |
+| vmManager.networkPolicy.guestEgress.except | list | `[]` |  |
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
@@ -818,6 +1116,10 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | agentManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| agentManager.podDisruptionBudget.enabled | bool | `true` |  |
+| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
@@ -826,7 +1128,7 @@ pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.1.0"` |  |
+| agentManager.migration.image.tag | string | `"1.1.5"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |

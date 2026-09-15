@@ -13,6 +13,24 @@ knowledge:
       the flux-engine subchart): it is part of the roster forwarded to
       connectivity and of the enabled/disabled logic like every other entry, but
       this loop renders no release for it.
+  releasedWithChart — the component's chart is published off THIS chart's git
+      tag (agent-platform-connectivity: two charts, one commit, one version),
+      so it has exactly one right version, this chart's own
+      (agent-platform.chartVersion: build metadata dropped, a pre-release
+      kept), rendered as the OCIRepository's exact semver. Not a range: a
+      connectivity behind the meta chart refuses a key the meta chart forwards
+      (its root schema is additionalProperties: false) and its release fails
+      on every installation until the pin moves (giantswarm/agent-platform#431,
+      #441, #339 — three breaks in three runs); one ahead may have retired a
+      key the older meta chart still forwards. Flux re-resolves the exact
+      version on every reconcile, so the connectivity release rolls exactly
+      when this chart does. versionRange stays empty; a versionRange set on
+      such an entry is REFUSED when it would pull from the repository this
+      chart's own releases come from (gitops.self.repository) with no
+      semverFilter — that is the lagging pin. The two development shapes keep
+      their knobs: a semverFilter selects a dev channel (the lab following a
+      branch's builds), another repository a chart pushed by hand (the ATS's
+      in-cluster registry, a lab registry).
   semverFilter  — optional Go regexp the OCI tags must match BEFORE versionRange
       is evaluated (OCIRepository.spec.ref.semverFilter). Selects a dev channel:
       the branch builds of one branch (`.*-dev\.<sanitized-branch>\..*` today)
@@ -29,11 +47,14 @@ knowledge:
       wrapped. global is injected at the wrapped top level so the subchart still
       inherits it. No component uses it today: muster, agentgateway, kagent and
       the GS-owned connectivity/crds charts all take their values at top level.
-  omitKeys      — keys dropped from the forwarded block. For a component whose
-      top-level block holds a key that belongs to THIS umbrella rather than to
-      the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs, which only
-      the connectivity chart reads), and whose chart validates values with
-      additionalProperties: false and would reject it. Applied after valuesKey,
+  omitKeys      — keys dropped from the forwarded block, top-level or dotted
+      paths (agent-platform.omitPath; a parent emptied by the drop goes too).
+      For a component whose block holds a key that belongs to THIS umbrella
+      rather than to the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs
+      and harness.snapshotStore, which only the connectivity chart reads), and
+      whose chart validates values with additionalProperties: false and would
+      reject it — or, without a schema, would carry a block it never reads
+      (the kagent chart). Applied after valuesKey,
       so it always addresses the block's own keys. With forwardAllValues it
       drops top-level blocks from the forwarded tree instead: a block the
       connectivity chart does not read yet is held back until it does, because
@@ -41,12 +62,30 @@ knowledge:
       connectivity release re-resolves its chart on its own OCIRepository
       interval — a block the live chart does not declare would fail that
       release until the chart catches up, on every installation.
+  omitEmptyKeys — dotted paths dropped from the forwarded block when their value
+      is empty (agent-platform.omitEmpty). For a chart that stamps a default at
+      publish and would take an empty override as the value (kagent's
+      substrateWorkerPool.workerImage, harness.image), and for a release whose
+      spec.values must not shadow its valuesFromRefs (Flux lets spec.values
+      win: substrate's atelet.imageCache.pinnedImages). Applied after omitKeys,
+      before valuesKey.
+  valuesFromRefs — Flux HelmRelease spec.valuesFrom entries (ConfigMap/Secret
+      references, resolved in this chart's namespace) rendered verbatim: values
+      another release publishes for this one, e.g. the kagent release's
+      ConfigMap kagent-images (key substrate-values.yaml, atelet's pinned
+      runtime images) for the substrate release. optional: true lets the
+      release install before the source exists.
   forwardAllValues — pass the WHOLE values tree (minus the meta keys) instead of
       a single block. Used by agent-platform-connectivity, which reads many
       blocks (ingress, gateway, networkPolicy, kagent, klausGateway, …). Like
       every block, it is taken from the tree AFTER the cluster-shape knobs are
       resolved (see agent-platform.shape.apply in _helpers.tpl), so the child
       never sees `auto`.
+  scheduling    — scheduling.singletons.nodeSelector / tolerations, merged into
+      the scheduling knobs of muster, valkey, kagent (controller) and
+      klausGateway on the shaped tree before any release renders
+      (agent-platform.scheduling.apply) and held back from the connectivity
+      release by its omitKeys.
   derived values — a value another block owns, merged over the forwarded block
       by the agent-platform.componentDerivedValues helper (the per-component
       knowledge lives there, not in this loop): agent-manager's
@@ -66,6 +105,16 @@ knowledge:
       renders a component's wiring (agent-platform-connectivity) gates on the
       same answer that decided whether the release exists. The forwarded copy
       holds only `enabled`.
+  gatedValues   — top-level values blocks of THIS component that travel to a
+      forwardAllValues release only while the component is on (vm-manager's
+      `vm-manager` and `vmManager`). The connectivity chart reads them for the
+      wiring it renders for the component, and nothing while the component is
+      off; a live connectivity chart that predates the blocks would refuse them
+      (additionalProperties: false) on every installation until its
+      OCIRepository re-resolved — the same window omitKeys closes for a new key
+      and the switch rule closes for a switch's block, closed here for a new
+      component without a follow-up release: an installation turns the
+      component on when both charts know it.
   feature switch — an entry WITHOUT `chart:` is a switch, not a component: the
       loop renders no OCIRepository / HelmRelease for it and forwards its
       `enabled` in the roster like every other entry, so a subchart condition
@@ -110,6 +159,24 @@ knowledge:
       connectivity chart's agent-manager migrate Job, the per-installation
       cut-over of the agents next to the platform Harness the same release
       renders.
+  driftDetection — optional Flux drift detection for the child HelmRelease
+      (HelmRelease v2 spec.driftDetection, passed through verbatim: mode
+      enabled|warn|disabled, ignore rules). Enabled, helm-controller compares
+      the manifest in the Helm storage with the cluster on every reconcile of
+      the release (a server-side dry-run apply) and re-applies what differs or
+      is missing — a deleted object is back within one interval, as a
+      server-side apply, without a Helm revision. Unset (helm-controller's
+      default, disabled) a plain reconcile of a release whose chart and values
+      are unchanged reports "in-sync" and touches nothing, so a deleted object
+      stays deleted until the next values or chart change or a forced
+      reconcile (reconcile.fluxcd.io/forceAt). Set per release, not fleet-wide:
+      its objects must tolerate the re-apply (a field another controller owns
+      needs an ignore rule; an object opts out with the annotation
+      helm.toolkit.fluxcd.io/driftDetection: disabled). kagent carries it for
+      the platform Harness, the runtime of every agent (#409); muster for its
+      own CiliumNetworkPolicy, whose egress selectors named the pre-rename
+      namespace on a live cluster while the release manifest named the new one
+      (#287).
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
       HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
@@ -120,6 +187,7 @@ knowledge:
 {{- include "agent-platform.validateLegacyToggles" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
 {{- include "agent-platform.validateSubstrate" . -}}
+{{- include "agent-platform.validateWorkerPool" . -}}
 {{- include "agent-platform.validateInlineSecrets" . -}}
 {{- include "agent-platform.validatePinnedLoginConnector" . -}}
 {{- include "agent-platform.validateToolsetPresets" . -}}
@@ -165,6 +233,11 @@ here, not in the child charts: the connectivity chart receives the resolved
 values and every component the same one flavor. */ -}}
 {{- $shaped := deepCopy (omit $root.Values "gitops" "components") -}}
 {{- include "agent-platform.shape.apply" (dict "root" $root "values" $shaped) -}}
+{{- /* The placement of the stateful singletons (scheduling.singletons,
+giantswarm/agent-platform#439) is merged into the four components' own
+nodeSelector / tolerations on the same copy, so the muster, valkey, kagent and
+klaus-gateway releases carry it as their charts' knobs. */ -}}
+{{- include "agent-platform.scheduling.apply" (dict "values" $shaped) -}}
 {{- range $key, $c := .Values.components }}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
@@ -174,16 +247,22 @@ values and every component the same one flavor. */ -}}
 {{- if $c.forwardAllValues }}
 {{- $vals = mergeOverwrite (deepCopy $shaped) (dict "components" $roster) }}
 {{- /* Hold back the top-level blocks the chart does not read yet (see omitKeys above). */ -}}
-{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- range $c.omitKeys }}{{- $vals = include "agent-platform.omitPath" (dict "vals" $vals "path" .) | fromJson }}{{- end }}
 {{- /* A switch's values block travels only while the switch is on (see feature switch above). */ -}}
 {{- range $switch, $sw := $root.Values.components }}
 {{- if and (not (hasKey $sw "chart")) (not (index $roster $switch).enabled) (hasKey $vals $switch) }}{{- $vals = omit $vals $switch }}{{- end }}
+{{- end }}
+{{- /* A component's gated blocks travel only while the component is on (see gatedValues above). */ -}}
+{{- range $gated, $gc := $root.Values.components }}
+{{- if not (index $roster $gated).enabled }}{{- range ($gc.gatedValues | default list) }}{{- $vals = omit $vals . }}{{- end }}{{- end }}
 {{- end }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
-{{- range $c.omitKeys }}{{- $vals = omit $vals . }}{{- end }}
+{{- range $c.omitKeys }}{{- $vals = include "agent-platform.omitPath" (dict "vals" $vals "path" .) | fromJson }}{{- end }}
+{{- /* An empty override must not reach a chart that stamps the default (see omitEmptyKeys above). */ -}}
+{{- with $c.omitEmptyKeys }}{{- $vals = include "agent-platform.omitEmpty" (dict "vals" $vals "paths" .) | fromJson }}{{- end }}
 {{- /* GS wrapper charts vendor the upstream chart as a subchart of the same name;
 nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- with $c.valuesKey }}{{- $vals = dict . $vals }}{{- end }}
@@ -203,6 +282,17 @@ that CRD either, so the dependency is moot. */ -}}
 {{- $deps = append $deps . }}
 {{- end }}
 {{- end }}
+{{- /* The version constraint: the entry's range, or — for a chart released off
+this chart's tag (see releasedWithChart above) — this chart's exact version. */ -}}
+{{- $semver := $c.versionRange }}
+{{- if $c.releasedWithChart }}
+{{- $ownVersion := include "agent-platform.chartVersion" $root }}
+{{- $selfRepo := trimSuffix "/" (($g.self | default dict).repository | default "") }}
+{{- if and $semver (not $c.semverFilter) (eq (trimSuffix "/" ($c.repository | default "")) $selfRepo) }}
+{{- fail (printf "components.%s.versionRange=%q pins a chart that is released with this chart: its version is this chart's own (%s), and a pin behind or ahead of it fails the release on every installation (giantswarm/agent-platform#431, #441, #339). Remove the pin. A development build keeps its knobs: a semverFilter selects a dev channel, another repository a chart pushed by hand" $key $semver $ownVersion) }}
+{{- end }}
+{{- if not $semver }}{{ $semver = $ownVersion }}{{ end }}
+{{- end }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
@@ -218,7 +308,7 @@ spec:
   insecure: true
   {{- end }}
   ref:
-    semver: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
+    semver: {{ required (printf "components.%s.versionRange is required" $key) $semver | quote }}
     {{- with $c.semverFilter }}
     semverFilter: {{ . | quote }}
     {{- end }}
@@ -266,6 +356,10 @@ spec:
     {{- end }}
     remediation:
       retries: {{ $g.retries }}
+  {{- with $c.driftDetection }}
+  driftDetection:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- with $deps }}
   dependsOn:
     {{- range . }}
@@ -274,6 +368,10 @@ spec:
   {{- end }}
   {{- with $c.postRenderers }}
   postRenderers:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $c.valuesFromRefs }}
+  valuesFrom:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   values:

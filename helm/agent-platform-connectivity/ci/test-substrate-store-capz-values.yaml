@@ -1,0 +1,77 @@
+# Agent Substrate's snapshot store provisioned by the chart on CAPZ: kagent and
+# its runtime on, kagent.harness.snapshotStore.crossplane with provider capz
+# renders the Azure storage Account and Container (lifecycle ManagementPolicy),
+# the UserAssignedIdentity federated for the s3proxy ServiceAccount with Storage
+# Blob Data Contributor on the container (provider-kubernetes bridging the ids),
+# and the s3proxy façade (Deployment, Service, Secrets, PDB, network policy) —
+# the fleet shape on Azure. No explicit snapshotLocation: the meta chart derives
+# s3://giantswarm-ci-substrate/kagent and hands the substrate release the
+# façade's S3 environment; this chart renders the cloud objects and the façade.
+components:
+  kagent:
+    enabled: true
+  substrate:
+    enabled: true
+  substrate-crds:
+    enabled: true
+
+kagent:
+  namespaceOverride: kagent
+  harness:
+    snapshotStore:
+      prefix: kagent
+      crossplane:
+        enabled: true
+        provider: capz
+        providerConfigRef: ci
+        region: westeurope
+        tags:
+          installation: ci
+        capz:
+          storageAccountName: giantswarmcisubstrate
+          containerName: giantswarm-ci-substrate
+          resourceGroup: ci
+          subscriptionId: 00000000-0000-0000-0000-000000000000
+          workloadIdentity:
+            oidcIssuerUrl: https://oidc.ci.example.com/
+            providerKubernetes:
+              providerConfigRef: ci-kubernetes
+              serviceAccount:
+                name: provider-kubernetes-ci
+  database:
+    postgres:
+      urlFile: /etc/cnpg/uri
+      vectorEnabled: true
+      bundled:
+        enabled: false
+
+postgres:
+  enabled: true
+  namespace: kagent
+  instances: 1
+  storage:
+    size: 5Gi
+    storageClass: standard
+  vector:
+    enabled: true
+    extensionImage:
+      reference: ghcr.io/cloudnative-pg/pgvector:0.8.0-17-bookworm
+
+# muster-direct: this case exercises the store, not routing.
+ingress:
+  mode: muster-direct
+  parentRefs:
+    - name: giantswarm-default
+      namespace: envoy-gateway-system
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - muster.ci.example.com
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory

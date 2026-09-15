@@ -1,5 +1,5 @@
 # The four CustomResourceDefinitions of the Flux Operator, lifted from the
-# upstream chart controlplaneio-fluxcd/flux-operator 0.59.0 (templates/crds.yaml
+# upstream chart controlplaneio-fluxcd/flux-operator 0.60.0 (templates/crds.yaml
 # rendered with installCRDs=true, release-specific labels removed). They live in
 # crds/ so Helm installs them before the FluxInstance template is validated.
 # Helm never upgrades or deletes crds/: the operator owns them once running, and

@@ -68,6 +68,23 @@ route the API server rejects, or an MCPServer CR without its CRD.
     {{- end }}
   {{- end }}
 
+  {{- /* agentHost is the address model-manager writes into the ModelConfigs —
+         what an agent pod dials for inference, which may differ from the
+         endpoint model-manager itself dials. Optional: unset, the endpoint
+         above stands in, and that one is already guarded. A set value is
+         parsed by the network policies with urlParse, which answers an empty
+         host for a value carrying no scheme and errors on some others, so it
+         needs the endpoint's shape. */ -}}
+  {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson }}
+  {{- range $name, $example := dict "ollama" "http://172.21.0.1:11434" "lemonade" "http://172.21.0.1:13305" "lmstudio" "http://172.21.0.1:1234" }}
+    {{- if include "agent-platform.modelManager.hasBackend" (dict "root" $ "name" $name) }}
+      {{- $agentHost := dig $name "agentHost" "" $chart }}
+      {{- if and $agentHost (not (regexMatch "^https?://[^/]+" $agentHost)) }}
+        {{- fail (printf "model-manager.%s.agentHost (%q) must be an http(s) URL with a host, e.g. %s — it is the address the ModelConfigs carry, and the network policies parse it as a URL" $name $agentHost $example) }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+
   {{- /* The kserve backend manages InferenceServices: it needs KServe on the
          cluster. Only checkable through its CRDs at render time — unless this
          platform installs KServe itself: with the kserve-resources component
@@ -148,12 +165,10 @@ route the API server rejects, or an MCPServer CR without its CRD.
       {{- if not $mm.route.jwtAuthentication.issuer }}
         {{- $_ := include "agent-platform.issuerUrl" (dict "ctx" . "for" "modelManager.route.jwtAuthentication (or set its .issuer)") }}
       {{- end }}
-      {{- /* The data plane can only fetch the JWKS from the issuer when
-             jwksEgress is on; without it Strict/Optional validation fails
-             closed on every token. */ -}}
-      {{- if not .Values.gateway.jwksEgress.enabled }}
-        {{- fail "modelManager.route.jwtAuthentication.enabled is true but gateway.jwksEgress.enabled is false. The agentgateway data plane cannot reach the issuer's JWKS endpoint, so signature validation fails closed. Set gateway.jwksEgress.enabled: true (and its namespace/port to the issuer's)." }}
-      {{- end }}
+      {{- /* An in-cluster JWKS endpoint needs jwksEgress; an external one is
+             covered by the controller policy's own rules, on the port the route names.
+             The shared helper carries every JWKS guard. */ -}}
+      {{- $_ := include "agent-platform.jwks.validate" (dict "ctx" . "path" "modelManager.route.jwtAuthentication" "jwks" $mm.route.jwtAuthentication.jwks) }}
     {{- end }}
   {{- end }}
 {{- end }}

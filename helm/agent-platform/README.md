@@ -45,16 +45,64 @@ or `tolerations`.
   worker holds ~16Mi and a golden-booted actor ~20Mi; a Go ADK turn's working set
   (the model client, tool calls and gVisor overhead) stays well under `2Gi`.
   Raise the limits for heavier agents.
-- **One architecture per pool.** An actor's golden snapshot is
-  architecture-specific, so a mixed-architecture pool wedges the actors that land
-  on the other one. `kagent.substrateWorkerPool.template.nodeSelector` pins the
-  pool to the installation's architecture (`kubernetes.io/arch: amd64` by default;
-  an arm64 installation sets `arm64`).
+- **One CPU feature set per pool — one vendor and generation, not just one
+  architecture.** An actor's golden snapshot is a gVisor checkpoint, and gVisor
+  restores it only on a host whose CPU offers every feature the checkpoint
+  recorded; a worker on a CPU that lacks one fails every restore placed on it
+  (`incompatible FeatureSet: missing features: …` in its log every 30 s, the
+  turn `request timed out`) and the actor never recovers.
+  `kagent.substrateWorkerPool.template.nodeSelector` pins the pool as precisely
+  as the provider's node labels allow: the architecture (`kubernetes.io/arch:
+  amd64` by default; an arm64 installation sets `arm64`), and on CAPA — where
+  Karpenter consolidation may replace a node with another vendor's at any time —
+  the vendor, `karpenter.k8s.aws/instance-cpu-manufacturer: amd`, and the CPU
+  generation, `karpenter.k8s.aws/instance-generation: "6"` (quoted — a label
+  value is a string, and the render refuses a bare number), both rendered by
+  the fleet template from the installation's values: a snapshot taken on a
+  newer generation of one vendor does not restore on an older one either
+  (gazelle, 2026-09-14: goldens from `m7a` workers, generation 7, failed on
+  `c5ad`, generation 5, `missing features: … avx512f …`;
+  giantswarm/agent-platform#457). Pin a generation that is one CPU model
+  across its families (for AMD on AWS 6, `c6a`/`m6a`/`r6a`, or 7,
+  `c7a`/`m7a`/`r7a`; 5 mixes Naples `m5a`/`r5a` with Rome `c5a`/`c5ad`) and
+  one the goldens restore on — an older generation's golden restores on a
+  newer one, never the reverse — and check the spot pool it leaves (the
+  generation's families × the NodePool's sizes; three families is the floor).
+  The family (`karpenter.k8s.aws/instance-family`) narrows to one type where
+  even that matters; on CAPZ and the other providers the node pool
+  (`giantswarm.io/machine-pool`) or `node.kubernetes.io/instance-type` pins
+  it. Recognise a mixed pool by `kubectl get nodes -L <the label>` showing two
+  values under it (giantswarm/agent-platform#429, #457). `make
+  verify-workerpool` asserts the pin reaches the WorkerPool as written.
 
 `kagent.substrateWorkerPool.template` also accepts `tolerations`, `nodeAffinity`
 and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
 "the Generic chart's per-agent placement values are gone, capacity is the
 WorkerPool".
+
+## Voluntary disruption
+
+The platform's core runs as single replicas — the agentgateway data plane, muster, the kagent controller, klaus-gateway, agent-manager — and each carries long-lived streams (MCP sessions, A2A and portal SSE turns, the LLM listener). A voluntary eviction (Karpenter consolidation, a node drain) cuts them mid-turn (giantswarm/agent-platform#431). Two guards, both on by default:
+
+- **`karpenter.sh/do-not-disrupt: "true"`** on the pods that carry live streams — the agentgateway data plane (`gateway.parameters.podAnnotations`, rendered by the connectivity chart through `AgentgatewayParameters`), muster (`muster.podAnnotations`), the kagent controller (`kagent.controller.podAnnotations`) and klaus-gateway (`klausGateway.podAnnotations`). Karpenter's consolidation, drift and expiry work around the node until the NodePool's `terminationGracePeriod`; an involuntary disruption (spot interruption, node failure) is not affected. Set the value to `"false"` (or drop the key) to opt out per component.
+- **`PodDisruptionBudget minAvailable: 1`** on muster (`muster.podDisruptionBudget`, the muster chart's knob), the kagent controller (`kagent.controller.pdb`, the kagent chart's knob), klaus-gateway (`klausGateway.podDisruptionBudget`, the klaus-gateway chart's knob, 1.1.0+) and agent-manager (`agentManager.podDisruptionBudget`, rendered by the connectivity chart). With one replica the budget refuses every voluntary eviction: Karpenter reports `DisruptionBlocked … pdb`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`; a MachineDeployment after its `nodeDrainTimeout`). `unhealthyPodEvictionPolicy: AlwaysAllow` where the chart supports it keeps a pod that is not Ready evictable, so a crash-looping component never wedges a drain. `enabled: false` on a knob removes that budget. The data plane's budget is `gateway.parameters.podDisruptionBudget` (with two replicas, so a drain can still proceed one pod at a time).
+
+Two replicas are the long-term answer for the stateless components; the budgets on one replica are the interim guard. Backstage's budget is the backstage chart's (`maxUnavailable: 1` today, which protects nothing with one replica) — a change there, not here.
+
+muster-valkey — muster's OAuth token store, one replica on an RWO volume — carries the same two guards (giantswarm/agent-platform#439): `karpenter.sh/do-not-disrupt` through the valkey subchart's `valkey.valkey.podAnnotations`, and a `PodDisruptionBudget muster-valkey` (`valkey.podDisruptionBudget`, `minAvailable: 1`, `AlwaysAllow`) rendered by the connectivity chart, since neither the wrapper nor the upstream subchart has a budget knob. The budget key never reaches the valkey release (`components.valkey.omitKeys`).
+
+## Placement of the stateful singletons
+
+The guards above hold off Karpenter's *voluntary* disruption. A spot reclaim is involuntary: the instance goes two minutes after the notice whatever the budget says, and a PDB-blocked pod is then killed with its termination grace instead of being moved first — on gazelle (fifteen spot workers) one reclaim wave took muster-valkey down for two minutes (every token refresh blocked inside muster for up to 27 s) and killed klaus-gateway mid-turn, whose replacement then waited four minutes on a `Multi-Attach` error for its volume (giantswarm/agent-platform#439). On an installation whose workers are Karpenter spot capacity, pin the four single-replica stateful pods — muster, muster-valkey, the kagent controller, klaus-gateway — to on-demand capacity:
+
+```yaml
+scheduling:
+  singletons:
+    nodeSelector:
+      karpenter.sh/capacity-type: on-demand
+```
+
+The map is merged into each component's own `nodeSelector` (`muster.nodeSelector`, `valkey.valkey.nodeSelector`, `kagent.controller.nodeSelector`, `klausGateway.nodeSelector`; a key a component sets itself wins) and `scheduling.singletons.tolerations` is appended to each one's `tolerations` (for a dedicated, tainted pool). Karpenter launches one small on-demand node for them from a NodePool that admits `on-demand` in the volumes' zone — the fleet's NodePools admit both capacity types and carry no taint — and, with the guards above, leaves it alone. Cost: one `xlarge`-class on-demand instance per such installation. Empty (the default) forwards nothing and every installation renders as before; set it only where nodes carry the label (a cluster without Karpenter — CAPZ, on-prem — would leave the four pods Pending). Enabling rolls each of the four pods once; the two with a `Recreate` strategy (muster-valkey, klaus-gateway) are down until the node is up, about two minutes on AWS. klaus-gateway takes the keys from chart 1.3.3 on (giantswarm/klaus-gateway#253; earlier 1.x schemas refused every key under `nodeSelector`), which the `1.x` range resolves. The block is the meta chart's alone: it is merged before any release renders and held back from the connectivity release. `make verify-disruption` asserts the merge, the precedence and the default.
 
 ## Values
 
@@ -99,6 +147,7 @@ WorkerPool".
 | components.muster.versionRange | string | `">=5.12.0 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
+| components.muster.driftDetection.mode | string | `"enabled"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agentgateway.versionRange | string | `"2.x"` |  |
@@ -110,6 +159,7 @@ WorkerPool".
 | components.valkey.versionRange | string | `"0.x"` |  |
 | components.valkey.valuesFrom | string | `"valkey"` |  |
 | components.valkey.enabled | bool | `true` |  |
+| components.valkey.omitKeys[0] | string | `"podDisruptionBudget"` |  |
 | components.agent-platform-mcps.chart | string | `"agent-platform-mcps"` |  |
 | components.agent-platform-mcps.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agent-platform-mcps.versionRange | string | `"0.x"` |  |
@@ -120,44 +170,53 @@ WorkerPool".
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=0.11.0-gs.1 <0.11.1-0"` |  |
+| components.kagent.versionRange | string | `">=0.11.0-gs.16 <0.11.1-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
 | components.kagent.dependsOn[2] | string | `"substrate"` |  |
 | components.kagent.dependsOn[3] | string | `"agent-platform-connectivity"` |  |
+| components.kagent.driftDetection.mode | string | `"enabled"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
-| components.kagent.omitKeys[2] | string | `"harness"` |  |
+| components.kagent.omitKeys[2] | string | `"harness.snapshotStore"` |  |
 | components.kagent.omitKeys[3] | string | `"modelConfigs"` |  |
 | components.kagent.omitKeys[4] | string | `"oauth2ProxyIngress"` |  |
 | components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
 | components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
 | components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
+| components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
+| components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=0.11.0-gs.1 <0.11.1-0"` |  |
+| components.kagent-crds.versionRange | string | `">=0.11.0-gs.16 <0.11.1-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.27-gs.2 <0.0.28-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.27-gs.2 <0.0.28-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.dependsOn[0] | string | `"substrate-crds"` |  |
 | components.substrate.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
+| components.substrate.valuesFromRefs[0].kind | string | `"ConfigMap"` |  |
+| components.substrate.valuesFromRefs[0].name | string | `"kagent-images"` |  |
+| components.substrate.valuesFromRefs[0].valuesKey | string | `"substrate-values.yaml"` |  |
+| components.substrate.valuesFromRefs[0].optional | bool | `true` |  |
+| components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.klaus-gateway.versionRange | string | `"0.x"` |  |
+| components.klaus-gateway.versionRange | string | `">=1.10.0 <2.0.0"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
+| components.klaus-gateway.omitKeys[0] | string | `"observability.enabled"` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.chart | string | `"agent-sandbox"` |  |
 | components.agent-sandbox.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
@@ -181,6 +240,14 @@ WorkerPool".
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
+| components.vm-manager.chart | string | `"vm-manager"` |  |
+| components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.vm-manager.versionRange | string | `">=0.20.2 <1.0.0"` |  |
+| components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
+| components.vm-manager.enabled | bool | `false` |  |
+| components.vm-manager.dependsOn[0] | string | `"muster"` |  |
+| components.vm-manager.gatedValues[0] | string | `"vm-manager"` |  |
+| components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.backstage.versionRange | string | `">=1.0.0 <3.0.0"` |  |
@@ -241,10 +308,12 @@ WorkerPool".
 | components.dicebear.injectGlobal | bool | `false` |  |
 | components.agent-platform-connectivity.chart | string | `"agent-platform-connectivity"` |  |
 | components.agent-platform-connectivity.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-connectivity.versionRange | string | `">=4.0.0 <5.0.0"` |  |
+| components.agent-platform-connectivity.releasedWithChart | bool | `true` |  |
+| components.agent-platform-connectivity.versionRange | string | `""` |  |
 | components.agent-platform-connectivity.forwardAllValues | bool | `true` |  |
 | components.agent-platform-connectivity.disableWaitForJobs | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
+| components.agent-platform-connectivity.omitKeys[1] | string | `"scheduling"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -279,6 +348,9 @@ WorkerPool".
 | gateway.jwksEgress.namespace | string | `"giantswarm"` |  |
 | gateway.jwksEgress.port | int | `5556` |  |
 | gateway.jwksEgress.podSelector | object | `{}` |  |
+| gateway.jwksEgress.external.fqdns | list | `[]` |  |
+| gateway.jwksEgress.external.cidrs | list | `[]` |  |
+| gateway.jwksEgress.external.port | int | `443` |  |
 | gateway.parameters.enabled | bool | `true` |  |
 | gateway.parameters.name | string | `""` |  |
 | gateway.parameters.serviceType | string | `"ClusterIP"` |  |
@@ -303,6 +375,7 @@ WorkerPool".
 | gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
+| gateway.parameters.podAnnotations | object | `{}` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -319,6 +392,7 @@ WorkerPool".
 | llmRouting.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
 | llmRouting.metricLabels[1].name | string | `"agent_namespace"` |  |
 | llmRouting.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
 | llmRouting.modelCatalog.key | string | `"catalog.json"` |  |
@@ -376,6 +450,8 @@ WorkerPool".
 | kyvernoPolicies.rules.check-seccomp | string | `"restrict-seccomp"` |  |
 | kyvernoPolicies.rules.check-seccomp-strict | string | `"restrict-seccomp-strict"` |  |
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
+| scheduling.singletons.nodeSelector | object | `{}` | Node labels the four stateful singletons (muster, muster-valkey, the kagent controller, klaus-gateway) must land on, merged into each component's own nodeSelector (its keys win). On a Karpenter spot installation: `karpenter.sh/capacity-type: on-demand`. Empty = as before. |
+| scheduling.singletons.tolerations | list | `[]` | Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint. |
 | extraObjects | list | `[]` |  |
 | muster.enabled | bool | `true` |  |
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
@@ -397,6 +473,9 @@ WorkerPool".
 | muster.networkPolicy.flavor | string | `"auto"` |  |
 | muster.networkPolicy.cilium.allowClusterIngress | bool | `true` |  |
 | muster.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
+| muster.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| muster.podDisruptionBudget.enabled | bool | `true` |  |
+| muster.podDisruptionBudget.minAvailable | int | `1` |  |
 | muster.gatewayAPI.enabled | bool | `false` |  |
 | muster.muster.oauth.server.enabled | bool | `true` |  |
 | muster.muster.oauth.server.baseUrl | string | `""` |  |
@@ -408,7 +487,7 @@ WorkerPool".
 | muster.muster.oauth.server.storage.valkey.secretKeyPassword | string | `"valkey-password"` |  |
 | muster.muster.toolsetPresets.infrastructure.description | string | `"The servers for the infrastructure underneath the platform (Giant Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus."` |  |
 | muster.muster.toolsetPresets.infrastructure.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=infrastructure"` |  |
-| muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, cluster-manager and muster's core tools."` |  |
+| muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, vm-manager, cluster-manager and muster's core tools."` |  |
 | muster.muster.toolsetPresets.agent-platform.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=agent-platform"` |  |
 | muster.muster.toolsetPresets.agent-platform.include[1].pattern | string | `"core_*"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | string | `"auto"` |  |
@@ -420,19 +499,25 @@ WorkerPool".
 | muster.muster.observability.grafanaDashboard.giantswarm.enabled | bool | `true` |  |
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
+| valkey.podDisruptionBudget.enabled | bool | `true` |  |
+| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
+| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
 | valkey.valkey.deploymentStrategy | string | `"Recreate"` |  |
+| valkey.valkey.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |
 | valkey.valkey.auth.aclUsers.default.passwordKey | string | `""` |  |
 | valkey.valkey.dataStorage.enabled | bool | `true` |  |
 | valkey.valkey.dataStorage.requestedSize | string | `"1Gi"` |  |
+| valkey.valkey.valkeyConfig | string | `"maxmemory 640mb\nmaxmemory-policy volatile-lru\n"` |  |
 | valkey.valkey.resources.requests.cpu | string | `"50m"` |  |
-| valkey.valkey.resources.requests.memory | string | `"64Mi"` |  |
+| valkey.valkey.resources.requests.memory | string | `"256Mi"` |  |
 | valkey.valkey.resources.limits.cpu | string | `"200m"` |  |
-| valkey.valkey.resources.limits.memory | string | `"256Mi"` |  |
+| valkey.valkey.resources.limits.memory | string | `"1Gi"` |  |
 | valkey.valkey.podSecurityContext.fsGroup | int | `1000` |  |
 | valkey.valkey.podSecurityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.podSecurityContext.runAsGroup | int | `1000` |  |
@@ -455,7 +540,6 @@ WorkerPool".
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"ghcr.io"` |  |
-| kagent.tag | string | `"0.11.0-gs.2"` |  |
 | kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
 | kagent.controller.agentImage.repository | string | `"giantswarm/kagent/golang-adk"` |  |
 | kagent.controller.substrate.enabled | bool | `true` |  |
@@ -464,6 +548,11 @@ WorkerPool".
 | kagent.controller.substrate.defaultWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
+| kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| kagent.controller.pdb.enabled | bool | `true` |  |
+| kagent.controller.pdb.minAvailable | int | `1` |  |
+| kagent.controller.pdb.maxUnavailable | string | `""` |  |
+| kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.controller.metrics.enabled | bool | `false` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
@@ -471,7 +560,7 @@ WorkerPool".
 | kagent.substrateWorkerPool.create | bool | `true` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.substrateWorkerPool.replicas | int | `4` |  |
-| kagent.substrateWorkerPool.workerImage | string | `"ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.27-gs.2"` |  |
+| kagent.substrateWorkerPool.workerImage | string | `""` |  |
 | kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
 | kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.cpu | string | `"250m"` |  |
@@ -494,6 +583,8 @@ WorkerPool".
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
+| kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
+| kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
 | kagent.serviceMonitor.enabled | bool | `false` |  |
 | kagent.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
@@ -549,54 +640,70 @@ WorkerPool".
 | kagent.oauth2-proxy.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.grafana-mcp.enabled | bool | `false` |  |
 | kagent.kagent-tools.enabled | bool | `false` |  |
+| kagent.kagent-tools.namespaceOverride | string | `"kagent"` |  |
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
-| kagent.harness.image | string | `"ghcr.io/giantswarm/kagent/golang-adk@sha256:7db42765cc401f4e356f876cf76a25de39c5109e56fabc9fe45ec0bf7e2d3137"` |  |
+| kagent.harness.create | bool | `true` |  |
+| kagent.harness.image | string | `""` |  |
 | kagent.harness.snapshotLocation | string | `""` |  |
+| kagent.harness.snapshotStore.prefix | string | `"kagent"` |  |
+| kagent.harness.snapshotStore.crossplane.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.provider | string | `"aws"` |  |
+| kagent.harness.snapshotStore.crossplane.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.region | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.observeOnly | bool | `false` |  |
+| kagent.harness.snapshotStore.crossplane.tags | object | `{}` |  |
+| kagent.harness.snapshotStore.crossplane.aws.bucketName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.accountId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.oidcProvider | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.roleName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.aws.lifecycleDays | int | `30` |  |
+| kagent.harness.snapshotStore.crossplane.capz.storageAccountName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.containerName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.resourceGroup | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.subscriptionId | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.replicationType | string | `"LRS"` |  |
+| kagent.harness.snapshotStore.crossplane.capz.lifecycleDays | int | `30` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.identityName | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.name | string | `""` |  |
+| kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.namespace | string | `"crossplane"` |  |
+| kagent.harness.snapshotStore.s3proxy.enabled | bool | `false` |  |
+| kagent.harness.snapshotStore.s3proxy.image.repository | string | `"gsoci.azurecr.io/giantswarm/s3proxy"` |  |
+| kagent.harness.snapshotStore.s3proxy.image.tag | string | `"4.1.1"` |  |
+| kagent.harness.snapshotStore.s3proxy.replicas | int | `2` |  |
+| kagent.harness.snapshotStore.s3proxy.javaOpts | string | `"-XX:MaxRAMPercentage=70"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.cpu | string | `"250m"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.requests.ephemeral-storage | string | `"256Mi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.limits.memory | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.resources.limits.ephemeral-storage | string | `"1Gi"` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.endpoint | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.account | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.container | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name | string | `""` |  |
+| kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
+| kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
+| kagent.harness.env[0].value | string | `"true"` |  |
+| kagent.harness.env[1].name | string | `"OTEL_LOGGING_ENABLED"` |  |
+| kagent.harness.env[1].value | string | `"true"` |  |
+| kagent.harness.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.harness.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
+| kagent.harness.env[3].name | string | `"KAGENT_TRACE_FLUSH_TIMEOUT_MS"` |  |
+| kagent.harness.env[3].value | string | `"500"` |  |
+| kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |
+| kagent.harness.allowedAgentTemplates.selector.matchLabels."kagent.dev/harness" | string | `""` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
 | kagent.controllerRoute.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[0] | string | `"CreateAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[1] | string | `"CreateAgentInstanceShare"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[2] | string | `"DeleteAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[3] | string | `"GetAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[4] | string | `"ListAgentInstanceShares"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[5] | string | `"ListAgentInstances"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[6] | string | `"ResumeAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[7] | string | `"RevokeAgentInstanceShare"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[8] | string | `"SuspendAgentInstance"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService"[9] | string | `"UpdateAgentInstanceName"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[0] | string | `"CreateAgentTemplate"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[1] | string | `"DeleteAgentTemplate"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[2] | string | `"GetAgentTemplate"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[3] | string | `"ListAgentTemplates"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService"[4] | string | `"UpdateAgentTemplate"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[0] | string | `"CreateModelConfig"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[1] | string | `"DeleteModelConfig"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[2] | string | `"GetModelConfig"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[3] | string | `"ListConfiguredProviders"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[4] | string | `"ListModelConfigs"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[5] | string | `"ListProviderModels"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[6] | string | `"ListSupportedModelProviders"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[7] | string | `"ListSupportedModels"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService"[8] | string | `"UpdateModelConfig"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[0] | string | `"GetCurrentUser"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[1] | string | `"GetSubstrateStatus"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[2] | string | `"GetVersion"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService"[3] | string | `"ListNamespaces"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[0] | string | `"CancelTask"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[1] | string | `"CreateTaskPushNotificationConfig"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[2] | string | `"DeleteTaskPushNotificationConfig"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[3] | string | `"GetExtendedAgentCard"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[4] | string | `"GetTask"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[5] | string | `"GetTaskPushNotificationConfig"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[6] | string | `"ListTaskPushNotificationConfigs"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[7] | string | `"ListTasks"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[8] | string | `"SendMessage"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[9] | string | `"SendStreamingMessage"` |  |
-| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService"[10] | string | `"SubscribeToTask"` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService" | list | `[]` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -622,6 +729,8 @@ WorkerPool".
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |
+| postgres.imagePullSecrets | list | `[]` |  |
+| postgres.affinity | object | `{}` |  |
 | postgres.vector.enabled | bool | `false` |  |
 | postgres.vector.extensionImage.reference | string | `""` |  |
 | postgres.applicationDatabase.name | string | `"kagent"` |  |
@@ -698,6 +807,10 @@ WorkerPool".
 | postgres.backup.crossplane.azure.subnetName | string | `"node-subnet"` |  |
 | postgres.backup.crossplane.azure.privateDnsZoneRef | string | `""` |  |
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
+| klausGateway.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| klausGateway.podDisruptionBudget.enabled | bool | `true` |  |
+| klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
+| klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.agentgateway.enabled | bool | `false` |  |
 | klausGateway.crd.install | bool | `true` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
@@ -705,7 +818,9 @@ WorkerPool".
 | klausGateway.lifecycle.driver | string | `"static"` |  |
 | klausGateway.lifecycle.staticInstances | string | `""` |  |
 | klausGateway.upstream.agentgatewayURL | string | `""` |  |
-| klausGateway.observability.otlpEndpoint | string | `""` |  |
+| klausGateway.observability.enabled | string | `"auto"` |  |
+| klausGateway.observability.otlpEndpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| klausGateway.observability.otlpHeaders.X-Scope-OrgID | string | `"giantswarm"` |  |
 | klausGateway.slack.enabled | bool | `false` |  |
 | klausGateway.slack.mode | string | `"events"` |  |
 | klausGateway.slack.secretName | string | `""` |  |
@@ -769,6 +884,7 @@ WorkerPool".
 | model-manager.lmstudio.endpoint | string | `""` |  |
 | model-manager.lmstudio.agentHost | string | `""` |  |
 | model-manager.kagent.namespace | string | `"kagent"` |  |
+| model-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | model-manager.kagent.disableWiring | bool | `false` |  |
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
@@ -802,8 +918,27 @@ WorkerPool".
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| vm-manager.fullnameOverride | string | `"vm-manager"` |  |
+| vm-manager.persistence.existingClaim | string | `""` |  |
+| vm-manager.persistence.create | bool | `false` |  |
+| vm-manager.oauth.enabled | bool | `true` |  |
+| vm-manager.oauth.provider | string | `"dex"` |  |
+| vm-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| vm-manager.muster.mcpServer.enabled | bool | `true` |  |
+| vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
+| vm-manager.networkPolicy.enabled | bool | `false` |  |
+| vmManager.podDisruptionBudget.enabled | bool | `true` |  |
+| vmManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| vmManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| vmManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
+| vmManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| vmManager.networkPolicy.guestEgress.cidrs[0] | string | `"0.0.0.0/0"` |  |
+| vmManager.networkPolicy.guestEgress.except | list | `[]` |  |
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
+| agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
 | agent-manager.agentChart.semver | string | `"1.x"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
@@ -830,6 +965,10 @@ WorkerPool".
 | agentManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| agentManager.podDisruptionBudget.enabled | bool | `true` |  |
+| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | agentManager.networkPolicy.egress.fqdns[0].matchPattern | string | `"*.blob.core.windows.net"` |  |
@@ -838,7 +977,7 @@ WorkerPool".
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.1.0"` |  |
+| agentManager.migration.image.tag | string | `"1.1.5"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |
@@ -910,6 +1049,7 @@ WorkerPool".
 | substrate.atelet.tolerations | list | `[]` |  |
 | substrate.atelet.affinity | object | `{}` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
+| substrate.atelet.imageCache.pinnedImages | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
 | hooks.kubectlImage.registry | string | `"docker.io"` |  |
 | hooks.kubectlImage.repository | string | `"alpine/k8s"` |  |

@@ -29,7 +29,7 @@ A Giant Swarm cluster enforces the restricted standard through Kyverno. The conn
 | the control plane (`ate-api-server`, `ate-controller`, `atenet-router`, `atenet-egress`, `dns`) | `require-drop-all`, `run-as-non-root`, `privilege-escalation`, `check-seccomp-strict` — the Deployments declare no securityContext; the images are distroless and run as non-root users, the fields are what the standard checks |
 | `podcertificate-controller` | `run-as-non-root`, `check-seccomp-strict` |
 
-Nothing else is excepted: no `app: kagent` selector remains (the v1alpha2 agent Deployments' exception is gone with them), the exceptions are scoped to the two Substrate namespaces and the WorkerPool label in the kagent namespace, and the hook Jobs of the connectivity release run under the restricted profile themselves.
+Nothing else is excepted: no `app: kagent` selector remains (the v1alpha2 agent Deployments' exception is gone with them), the exceptions are scoped to the two Substrate namespaces (the control plane matched by workload name — its Deployments carry no labels of their own) and the WorkerPool label in the kagent namespace, and the hook Jobs of the connectivity release run under the restricted profile themselves.
 
 ## Compensating controls
 
@@ -55,6 +55,6 @@ Substrate is an early project; its own [threat model](https://github.com/kagent-
 ## What an installation owner does
 
 1. Kubernetes 1.35 and the three gates on all three components, ahead of the cut-over (UPGRADE.md).
-2. The snapshot store: an S3 bucket and an IRSA role for `atelet` and `ate-api-server` (CAPA), or an S3-compatible store with its credentials in a Secret; `kagent.harness.snapshotLocation` names it.
+2. The snapshot store: an S3 bucket and an IRSA role for `atelet` and `ate-api-server` (CAPA — `kagent.harness.snapshotStore.crossplane` renders both through Crossplane and derives the location; CAPZ — `provider: capz` renders the storage account, the container, the Workload Identity and the s3proxy façade Substrate talks S3 to, admitted only from atelet and ate-api-server), or an S3-compatible store with its credentials in a Secret; otherwise `kagent.harness.snapshotLocation` names it.
 3. Node placement, when the installation dedicates a node pool to the sandboxes: `substrate.atelet.nodeSelector` / `tolerations` and `kagent.substrateWorkerPool.template`.
 4. Nothing else: the bootstrap, the database on the platform's CNPG Cluster, the exceptions and the policies come with the chart.

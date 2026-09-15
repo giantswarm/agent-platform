@@ -163,6 +163,11 @@ spec:
     spec:
       replicas: {{ $replicas }}
       template:
+        {{- with .Values.gateway.parameters.podAnnotations }}
+        metadata:
+          annotations:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
         spec:
           automountServiceAccountToken: true
           securityContext:

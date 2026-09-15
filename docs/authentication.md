@@ -209,13 +209,15 @@ targets is the platform's — `agent-platform.musterMcpUrl`, defined in both
 charts: `http://<muster.fullnameOverride>.<release namespace>.svc.cluster.local:<muster.service.port>/mcp`
 while the muster component is on. The meta chart derives agent-manager's chart
 value `muster.url` from it (next to `flux.helmReleaseServiceAccount`; a
-differing `agent-manager.muster.url` fails the render naming the source), the
-connectivity chart renders it into the portal's app-config as
-`agentPlatform.musterMcpUrl`; both composers pass it to the agent chart as
-`muster.url`. Chart 1.x defaults `muster.url` to the same URL on a default
-install (`http://muster.agent-platform.svc.cluster.local:8090/mcp`), so a
-composer may omit it; the value exists for an installation whose muster answers
-under another name, namespace or port.
+differing `agent-manager.muster.url` fails the render naming the source), and
+agent-manager passes it to the agent chart as `muster.url` on every agent it
+composes and reports it in `get_info`. The Dev Portal sends no muster URL — it
+creates agents through agent-manager's tools, and `create_agent` takes no muster
+argument — so the app-config the connectivity chart renders carries none. Chart
+1.x defaults `muster.url` to the same URL on a default install
+(`http://muster.agent-platform.svc.cluster.local:8090/mcp`), so agent-manager
+may omit it; the value exists for an installation whose muster answers under
+another name, namespace or port.
 
 **Never a static `Authorization` header on a muster server.** The person's
 token propagated by the Harness (`KAGENT_PROPAGATE_TOKEN` in its environment)
@@ -395,7 +397,7 @@ flowchart LR
 | Object | What it does |
 |---|---|
 | `AgentgatewayBackend kagent` | The controller Service with `policies.auth.passthrough` (the validated bearer is re-injected so the controller and, through `KAGENT_PROPAGATE_TOKEN` on the Harness, the actor see the person's token). No protocol pin: agentgateway infers HTTP/2 (h2c) for gRPC and keeps HTTP/1.1 for gRPC-Web, and the controller needs that split — it serves both on `:8083` and hands every HTTP/2 request whose content-type starts with `application/grpc` to its native gRPC server, so gRPC-Web pinned onto HTTP/2 is answered `415`. |
-| `GRPCRoute kagent-controller` | Matched by gRPC service **and method** — one rule per service, one exact match per RPC of `kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService, ModelService, SystemService}` and `lf.a2a.v1.A2AService` (`kagent.controllerRoute.grpc.services`, the line's `proto/` at its pin) — on the data-plane Gateway, without a hostname so the in-cluster authority `agentgateway.<ns>.svc.cluster.local:8080` matches. Every RPC is listed because the agentgateway controller translates a service-only match into the exact path `/<service>/`, which no request has, and ignores `type: RegularExpression`; exact service/method matches are translated faithfully and outrank the MCP catch-all's `PathPrefix: /`. An RPC the line adds is reachable once listed; an unlisted one fails loudly (the catch-all answers `406`). No path prefix: the controller has no REST. gRPC-Web rides the same route (same `/<service>/<method>` paths over HTTP/1.1). |
+| `GRPCRoute kagent-controller` | Matched by gRPC service — one rule per service, one service-only match each for `kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService, ModelService, SystemService}` and `lf.a2a.v1.A2AService` (`kagent.controllerRoute.grpc.services`), which the agentgateway controller (chart ≥ 2.1.1, the line's `v1.5.1-gs.3`) translates into the path prefix `/<service>/`; a service with RPCs listed gets one exact service/method match per RPC instead (the shape an older controller needs, or a way to expose a subset). Either outranks the MCP catch-all's `PathPrefix: /`. On the data-plane Gateway, without a hostname so the in-cluster authority `agentgateway.<ns>.svc.cluster.local:8080` matches. No path prefix: the controller has no REST. gRPC-Web rides the same route (same `/<service>/<method>` paths over HTTP/1.1). |
 | `GRPCRoute kagent-controller-public` | The same matches on the public Gateway for `kagent.controllerRoute.hostname` (`agentgateway.<domain>`), forwarding to the agentgateway Service (Envoy Gateway carries HTTP/2 to a GRPCRoute backend); a `BackendTrafficPolicy` lifts Envoy's route timeout for streaming turns (`ingress.backendTrafficPolicy`). Not rendered when the chart-owned Gateway is the edge. |
 | `AgentgatewayPolicy kagent-controller-jwt` | On the GRPCRoute: `jwtAuthentication` in `Strict` mode against `global.identity.issuerUrl` with the JWKS fetched from `jwtAuthentication.jwks` (a static `AgentgatewayBackend`, TLS-verified when `jwks.tls.enabled`); an `authorization` rule requiring the identity claim (`has(jwt.email)`); a `transformation` that **sets** `x-user-id` to `jwt.email`. `set` replaces every inbound value of the header, so a forged `x-user-id` never reaches the controller. |
 

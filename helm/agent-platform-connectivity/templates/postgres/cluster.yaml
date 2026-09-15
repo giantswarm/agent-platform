@@ -36,6 +36,17 @@ spec:
   {{- if .Values.postgres.image.name }}
   imageName: {{ .Values.postgres.image.name | quote }}
   {{- end }}
+  {{- with .Values.postgres.imagePullSecrets }}
+  # The bootstrap init container runs the operator image, not the operand image,
+  # so a private mirror needs these even with imageName unset.
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.postgres.affinity }}
+  # CNPG's AffinityConfiguration, forwarded verbatim.
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   storage:
     size: {{ .Values.postgres.storage.size | default "20Gi" | quote }}
     {{- if .Values.postgres.storage.storageClass }}

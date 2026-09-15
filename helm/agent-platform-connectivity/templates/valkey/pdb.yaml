@@ -1,0 +1,45 @@
+{{- /* PodDisruptionBudget on the muster-valkey pod (giantswarm/agent-platform#439,
+the #431 pattern). Neither the wrapper chart nor the upstream valkey subchart
+has a budget knob, so the umbrella renders the budget the way it does
+agent-manager's, selecting the pod the way the subchart labels it. muster's
+OAuth token store is this one pod on an RWO volume: with minAvailable: 1 every
+voluntary eviction is refused — Karpenter's consolidation reports
+DisruptionBlocked, a node drain waits for its drain timeout — and AlwaysAllow
+keeps a pod that is not Ready evictable. A spot reclaim is not a voluntary
+eviction; scheduling.singletons on the meta chart is the answer to that. */ -}}
+{{- $pdb := .Values.valkey.podDisruptionBudget }}
+{{- if and (include "agent-platform.valkey.enabled" .) $pdb.enabled }}
+{{- $hasMin := not (kindIs "invalid" $pdb.minAvailable) }}
+{{- $hasMax := not (kindIs "invalid" $pdb.maxUnavailable) }}
+{{- if and $hasMin $hasMax }}
+{{- fail "valkey.podDisruptionBudget sets both minAvailable and maxUnavailable; a PodDisruptionBudget takes exactly one" }}
+{{- end }}
+{{- if not (or $hasMin $hasMax) }}
+{{- fail "valkey.podDisruptionBudget.enabled is true but neither minAvailable nor maxUnavailable is set; set exactly one" }}
+{{- end }}
+{{- with $pdb.unhealthyPodEvictionPolicy }}
+{{- if not (has . (list "IfHealthyBudget" "AlwaysAllow")) }}
+{{- fail (printf "valkey.podDisruptionBudget.unhealthyPodEvictionPolicy=%q is not a PodDisruptionBudget eviction policy (IfHealthyBudget, AlwaysAllow)" .) }}
+{{- end }}
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "agent-platform.valkey.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.valkey.labels" . | nindent 4 }}
+spec:
+  {{- if $hasMin }}
+  minAvailable: {{ $pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- end }}
+  {{- with $pdb.unhealthyPodEvictionPolicy }}
+  unhealthyPodEvictionPolicy: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "agent-platform.valkey.podSelector" . | nindent 6 }}
+{{- end }}

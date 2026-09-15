@@ -14,8 +14,10 @@ management cluster) on the ATS kind cluster, after the smoke's uninstall.
      FluxInstance, exactly one helm-controller, the Flux CRDs' field managers
      exactly what `flux install` left (`flux` and the apiserver);
   4. an agent deploys through the cluster's Flux: an OCIRepository + HelmRelease
-     of the agent chart in the kagent namespace, run as the kagent-flux identity
-     the connectivity release rendered, reach Ready; the Agent reaches Ready;
+     of the agent chart 1.x in the kagent namespace, run as the kagent-flux
+     identity the connectivity release rendered, reach Ready; the AgentTemplate
+     reaches Ready on the platform Harness — Agent Substrate, from the chart
+     through that Flux, runs it — and the agent's RemoteMCPServer is Accepted;
   5. the render guard: flipping the value to true makes the HelmRelease FAIL
      with `this cluster runs Flux; set components.flux.enabled=false or install
      the chart through it` — no operator, no FluxInstance, the platform and the
@@ -26,17 +28,20 @@ management cluster) on the ATS kind cluster, after the smoke's uninstall.
      helm-controller joins their field managers (asserted and logged as the
      finding it is; `upgrade.crds: Skip` on the installing HelmRelease avoids
      it). Flipping the value back recovers;
-  6. the way back: deleting the HelmRelease lets that Flux uninstall the
-     platform (the chart renders no hook here and never touches the cluster's
-     Flux); the Flux install is removed last.
+  6. the way back: deleting the meta HelmRelease is the whole uninstall — that
+     Flux finalizes the platform HelmReleases the chart rendered, all at once
+     and concurrently (the chart renders no hook here and never touches the
+     cluster's Flux; helm-controller has no reverse-dependsOn uninstall,
+     fluxcd/flux2#1744), and every release goes clean because the CRD charts
+     keep their CRDs: no uninstall fails on a vanished kind, the kept CRDs
+     stay, no SandboxConfig or WorkerPool outlives the release that owned it;
+     the Flux install is removed last.
 
 Runs as the `functional` scenario (one pytest process after the smoke's); the
-smoke leaves the lab Dex, the registry with the chart and the four operator
-CRDs behind, and nothing else the guard could mistake for an engine.
-
-values-kagent.yaml leaves kagent off (the kagent line cannot run on the ATS
-kind cluster yet — the file says why), so step 4 is skipped with that reason
-and the kagent assertions are gated on KAGENT_ON.
+smoke leaves the lab Dex, the registry with the chart, the four operator CRDs
+and the kept kagent and ate.dev CRDs behind (this scenario's kagent-crds and
+substrate-crds releases adopt them: the same release names and storage
+namespaces), and nothing else the guard could mistake for an engine.
 """
 
 import logging
@@ -48,23 +53,43 @@ import requests
 import yaml
 
 from conftest import (
+    AGENT_CHART_SEMVER,
+    Abort,
+    AGENT_CHART_URL,
+    ATE_NAMESPACE,
     BASE_VALUES,
+    PODCERT_NAMESPACE,
+    HARNESS,
+    HARNESS_LABEL,
+    INSTALL_TIMEOUT,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
-    KAGENT_ON,
     KAGENT_VALUES,
+    KEPT_CRDS,
+    MODEL_CONFIG,
     NAMESPACE,
-    NO_KAGENT_REASON,
     OPERATOR_CRDS,
     REGISTRY_URL,
     RELEASE,
+    SANDBOX_CONFIG,
     TIMINGS,
+    TOOLSET,
     Kube,
+    apply_placeholder_provider_secret,
+    assert_kept_crds,
+    assert_remote_mcp_server,
+    assert_substrate_trust_chain,
     condition,
     connectivity_values,
+    dump_agents,
     is_ready,
     load_values,
+    template_ready,
+    template_state,
     wait_for,
+    wait_for_namespaces_settled,
+    wait_for_substrate,
+    wait_for_template_ready,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,10 +100,17 @@ FLUX_NAMESPACE = "flux-system"
 FLUX_COMPONENTS = {"source-controller", "helm-controller"}
 FLUX_FIELD_MANAGER = "flux"
 GUARD_MESSAGE = "this cluster runs Flux; set components.flux.enabled=false or install the chart through it"
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", *(("kagent",) if KAGENT_ON else ()))
+# The component HelmReleases the smoke's base + kagent values turn on (no
+# agent-manager here: it belongs to the round-trips values of the smoke).
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds")
 AGENT = "ats-flux-agent"
-AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
-MODEL_CONFIG = "default-model-config"
+# The way back's bound: helm-controller uninstalls the seven releases
+# concurrently and the meta release's uninstall waits for their HelmRelease
+# objects to be gone. Well above what the bundled engine's ordered teardown
+# measures (~30 s with five waves), below the meta HelmRelease's own Helm
+# timeout (INSTALL_TIMEOUT), so a hang is this test's failure with a dump, not
+# helm-controller's retry.
+UNINSTALL_THROUGH_FLUX_TIMEOUT_S = 600
 
 
 class State:
@@ -96,10 +128,12 @@ def dump(kube: Kube) -> None:
         f"-n {FLUX_NAMESPACE} get helmrelease {RELEASE} -o yaml",
         f"-n {NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io,ocirepositories.source.toolkit.fluxcd.io -o wide",
         f"-n {NAMESPACE} get pods -o wide",
-        f"-n {KAGENT_NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io,agents.kagent.dev,pods -o wide",
+        f"-n {ATE_NAMESPACE} get pods -o wide",
         f"-n {FLUX_NAMESPACE} logs deployment/helm-controller --tail=60",
         f"-n {FLUX_NAMESPACE} logs deployment/source-controller --tail=40",
+        f"-n {NAMESPACE} logs -l job-name=agent-platform-connectivity-substrate-bootstrap --all-containers --prefix --tail=40",
     ])
+    dump_agents(kube)
 
 
 def flux_crd_managers(kube: Kube) -> Dict[str, Set[str]]:
@@ -153,14 +187,19 @@ def platform_values() -> Dict[str, Any]:
 def meta_helmrelease(version: str, engine: bool) -> List[Dict[str, Any]]:
     values = platform_values()
     values["components"]["flux"]["enabled"] = engine
-    values["components"].update(connectivity_values(version)["components"])
+    values["components"].update(connectivity_values()["components"])
     return [
         {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
          "metadata": {"name": RELEASE, "namespace": FLUX_NAMESPACE},
          "spec": {"interval": "1m", "url": f"{REGISTRY_URL}/{RELEASE}", "insecure": True, "ref": {"semver": version}}},
+        # timeout: helm-controller runs the Helm 4 SDK, whose --wait holds the
+        # install until the component HelmReleases are Ready — the sequential
+        # CRDs -> connectivity -> Substrate -> kagent chain takes 4-6 minutes on
+        # the CI executor, longer than Flux's 5-minute default (the smoke's
+        # `helm install --wait` gets the same 12 minutes).
         {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
          "metadata": {"name": RELEASE, "namespace": FLUX_NAMESPACE},
-         "spec": {"interval": "1m", "releaseName": RELEASE, "targetNamespace": NAMESPACE,
+         "spec": {"interval": "1m", "timeout": INSTALL_TIMEOUT, "releaseName": RELEASE, "targetNamespace": NAMESPACE,
                   "chartRef": {"kind": "OCIRepository", "name": RELEASE},
                   "install": {"createNamespace": True}, "values": values}},
     ]
@@ -196,27 +235,32 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     STATE.crd_specs = flux_crd_specs(kube)
     # The cluster owns its namespaces: the fleet bases create kagent's on every
     # management cluster; here the test does (README "Clusters that run Flux").
-    # The smoke's teardown deleted the namespace with the connectivity release;
-    # its termination may still be running when this scenario starts.
-    wait_for(f"namespace {KAGENT_NAMESPACE} gone or Active (not Terminating)",
-             lambda: (kube.get("namespace", KAGENT_NAMESPACE) or {}).get("status", {}).get("phase", "gone") != "Terminating", 300)
+    # The smoke's teardown deleted the kagent namespace; its termination may
+    # still be running when this scenario starts. Substrate's two namespaces
+    # it left in place on purpose — the ate-system pools, the kept
+    # podcertificate-controller-system with its CA pools, the signers'
+    # ClusterTrustBundles — so this install is the reinstall onto a cluster
+    # with Substrate's leftovers (giantswarm/agent-platform#384); the settle
+    # wait only guards against a Terminating namespace, which a bootstrap
+    # cannot write into.
+    wait_for_namespaces_settled(kube, KAGENT_NAMESPACE, ATE_NAMESPACE, PODCERT_NAMESPACE)
     kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": KAGENT_NAMESPACE}})
     TIMINGS.record(f"flux install ({', '.join(sorted(FLUX_COMPONENTS))} {FLUX_VERSION}; {len(keep)} objects, components dropped: {dropped})", time.monotonic() - started)
     logger.info("Flux CRD managers after flux install: %s", sorted({m for ms in STATE.crd_managers.values() for m in ms}))
     yield
-    # 6. the way back (best effort, bounded): the HelmRelease first — that Flux
-    # uninstalls the platform — then the Flux install.
+    # The way back is test_the_way_back_uninstalls_through_the_clusters_flux's
+    # (the last test): this is what is left when it passed — nothing but the
+    # Flux install — or what it did not reach (best effort, bounded; cleanup
+    # never masks a verdict, the job deletes the cluster).
     started = time.monotonic()
     try:
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE, timeout="3m")
         kube.delete("ocirepositories.source.toolkit.fluxcd.io", "agent", namespace=KAGENT_NAMESPACE, timeout="1m")
-        kube.delete("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="3m")
-        wait_for("the platform HelmReleases uninstalled by the cluster's Flux",
-                 lambda: not kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE), 120)
+        kube.delete("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="5m")
         kube.delete("ocirepositories.source.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, timeout="1m")
         kube.cmd(["delete", "--ignore-not-found", "--wait=false", "-f", "-"], stdin=yaml.safe_dump_all(STATE.flux_manifest), check=False)
-        TIMINGS.record("the way back: HelmRelease deleted, platform uninstalled by the cluster's Flux, Flux removed", time.monotonic() - started)
-    except AssertionError as exc:  # cleanup never masks a verdict; the job deletes the cluster
+        TIMINGS.record("the Flux install removed", time.monotonic() - started)
+    except AssertionError as exc:
         logger.error("cleanup incomplete: %s", exc)
     for phase, seconds in TIMINGS.entries.items():
         logger.info("TIMING %-90s %6.0f s", phase, seconds)
@@ -228,15 +272,22 @@ def platform_through_flux(kube: Kube, own_flux: None, pushed_chart: str, candida
     started = time.monotonic()
     kube.apply(meta_helmrelease(candidate_version, engine=False))
     try:
-        wait_for(f"HelmRelease {FLUX_NAMESPACE}/{RELEASE} Ready",
-                 lambda: is_ready(kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE)), 600)
+        def meta_ready() -> Any:
+            hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE)
+            if hr and condition(hr).get("status") == "False" and "failed" in condition(hr).get("message", ""):
+                raise Abort(f"HelmRelease {RELEASE} failed: {condition(hr).get('message')}")
+            return is_ready(hr)
+
+        # The Helm timeout (12 min) plus a reconcile; a failed install ends the
+        # wait at once (Abort) instead of being waited out.
+        wait_for(f"HelmRelease {FLUX_NAMESPACE}/{RELEASE} Ready", meta_ready, 900)
         TIMINGS.record("HelmRelease agent-platform Ready through the cluster's Flux (engine off)", time.monotonic() - started)
 
         def components_ready() -> bool:
             hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
             return set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values())
 
-        wait_for("the platform HelmReleases Ready under the cluster's Flux", components_ready, 600)
+        wait_for("the platform HelmReleases Ready under the cluster's Flux", components_ready, 300)
     except AssertionError:
         dump(kube)
         raise
@@ -255,8 +306,7 @@ def test_platform_installs_through_the_clusters_flux(kube: Kube, platform_throug
     for name, hr in hrs.items():
         assert is_ready(hr), f"{name}: {condition(hr)}"
         assert "serviceAccountName" not in hr["spec"], f"{name} names a serviceAccountName with the engine off: {hr['spec'].get('serviceAccountName')}"
-    if KAGENT_ON:
-        assert hrs["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "engine off: the kagent HelmRelease must keep gitops.targetNamespace (the fleet render)"
+    assert hrs["kagent"]["spec"]["targetNamespace"] == NAMESPACE, "engine off: the kagent HelmRelease must keep gitops.targetNamespace (the fleet render)"
     assert_no_engine(kube)
     hook_jobs = [j["metadata"]["name"] for j in kube.items("jobs", "-l", f"app.kubernetes.io/instance={RELEASE}", namespace=NAMESPACE)]
     assert not hook_jobs, f"the chart rendered hooks with the engine off: {hook_jobs}"
@@ -267,32 +317,43 @@ def test_platform_installs_through_the_clusters_flux(kube: Kube, platform_throug
 
 
 @pytest.mark.functional
-@pytest.mark.skipif(not KAGENT_ON, reason=NO_KAGENT_REASON)
 def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_flux: None) -> None:
+    """The agent chart 1.x through the cluster's Flux as the tenant identity:
+    the AgentTemplate it renders reaches Ready on the platform Harness (Agent
+    Substrate from the chart, through that Flux, runs it) and the agent's
+    RemoteMCPServer is Accepted."""
     started = time.monotonic()
     try:
         kube.wait_deployment(KAGENT_NAMESPACE, "kagent-controller", timeout=600)
         wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
         assert kube.get("serviceaccount", KAGENT_FLUX_SA, namespace=KAGENT_NAMESPACE), f"the connectivity release did not render ServiceAccount {KAGENT_FLUX_SA}"
-        kube.apply({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "kagent-anthropic", "namespace": KAGENT_NAMESPACE},
-                    "stringData": {"ANTHROPIC_API_KEY": "lab-only-placeholder-key"}})
+        apply_placeholder_provider_secret(kube)
+        wait_for_substrate(kube)
+        # The reinstall's trust chain: each signer's bundle carries the roots
+        # of the pool the podcertificate-controller signs from — with the pools
+        # kept and the bundles republished by the bootstrap, the roots the smoke
+        # ran on (giantswarm/agent-platform#384).
+        logger.info("Substrate trust chain consistent after the reinstall: %s", assert_substrate_trust_chain(kube))
         kube.apply([
             {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
              "metadata": {"name": "agent", "namespace": KAGENT_NAMESPACE},
-             "spec": {"interval": "10m", "url": AGENT_CHART_URL, "ref": {"semver": ">=0.2.1 <1.0.0"}}},  # the 0.x chart: 1.0.0 renders kagent API v2
+             "spec": {"interval": "10m", "url": AGENT_CHART_URL, "ref": {"semver": AGENT_CHART_SEMVER}}},
             {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
              "metadata": {"name": AGENT, "namespace": KAGENT_NAMESPACE},
              "spec": {"interval": "10m", "releaseName": AGENT, "serviceAccountName": KAGENT_FLUX_SA,
                       "chartRef": {"kind": "OCIRepository", "name": "agent"},
                       "values": {"agent": {"description": "ATS own-Flux agent (lab only)", "systemMessage": "You are the ATS own-Flux agent."},
-                                 "modelConfig": {"name": MODEL_CONFIG}, "toolset": ["preset:none"]}}},
+                                 "modelConfig": {"name": MODEL_CONFIG}, "toolset": TOOLSET}}},
         ])
         wait_for(f"HelmRelease {AGENT} Ready", lambda: is_ready(kube.get("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE)), 600)
-        wait_for(f"Agent {AGENT} Ready", lambda: is_ready(kube.get("agents.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), 600)
+        template = wait_for_template_ready(kube, AGENT)
+        assert (template["metadata"].get("labels") or {}).get(HARNESS_LABEL) == HARNESS, template["metadata"].get("labels")
+        assert_remote_mcp_server(kube, AGENT)
     except AssertionError:
         dump(kube)
         raise
-    TIMINGS.record("agent through the cluster's Flux: HelmRelease + Agent Ready", time.monotonic() - started)
+    TIMINGS.record(f"agent through the cluster's Flux: HelmRelease Ready, AgentTemplate Ready on Harness {HARNESS}, RemoteMCPServer Accepted", time.monotonic() - started)
+    logger.info("AgentTemplate %s on Harness %s: %s", AGENT, HARNESS, template_state(template))
 
 
 @pytest.mark.functional
@@ -311,8 +372,7 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
         assert set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values()), {n: condition(h) for n, h in hrs.items()}
         assert all("serviceAccountName" not in hr["spec"] for hr in hrs.values()), "the failed upgrade changed the platform HelmReleases"
-        if KAGENT_ON:
-            assert is_ready(kube.get("agents.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent is no longer Ready"
+        assert template_ready(kube.get("agenttemplates.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent's template is no longer Ready on the Harness"
         logger.info("guard fired: %s", messages[:300])
         # the way out the message names: the value back to false recovers
         kube.apply(meta_helmrelease(candidate_version, engine=False))
@@ -323,3 +383,54 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         dump(kube)
         raise
     TIMINGS.record("render guard flipped on and back (refusal, nothing touched, recovery)", time.monotonic() - started)
+
+
+@pytest.mark.functional
+def test_the_way_back_uninstalls_through_the_clusters_flux(kube: Kube, platform_through_flux: None) -> None:
+    """Deleting the meta HelmRelease is the whole uninstall on a cluster that
+    runs its own Flux: helm-controller uninstalls the meta release, which
+    deletes every platform HelmRelease the chart rendered in one pass, and
+    finalizes those concurrently, in whatever order it gets to them — the chart
+    renders no hook here and never touches the cluster's Flux, and
+    helm-controller has no reverse-dependsOn uninstall (fluxcd/flux2#1744). It
+    is clean because the CRD charts keep their CRDs (helm.sh/resource-policy:
+    keep on the kagent-crds and substrate-crds templates): a consumer's
+    uninstall can always delete its CRs, so no release fails on a vanished
+    kind. Before the Substrate line carried the policy this race was measured
+    here (giantswarm/agent-platform#385): substrate-crds went before substrate,
+    whose uninstall failed for good on its SandboxConfig (`failed to delete
+    release: substrate`) and was retried until the meta HelmRelease's finalizer
+    timed out — the way back then deleted the components in dependency waves
+    itself. The agent goes first, by hand, while the kagent controller still
+    runs (its template's cleanup on Substrate needs it), as an operator does."""
+    started = time.monotonic()
+    kube.delete("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE, timeout="3m")
+    kube.delete("ocirepositories.source.toolkit.fluxcd.io", "agent", namespace=KAGENT_NAMESPACE, timeout="1m")
+    before = sorted(hr["metadata"]["name"] for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE))
+    assert before == sorted(COMPONENTS), before
+    assert kube.get("sandboxconfigs.ate.dev", SANDBOX_CONFIG), f"the substrate release's SandboxConfig {SANDBOX_CONFIG} is not there before the uninstall"
+    kube.delete("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE, wait=False)
+    try:
+        def uninstalled() -> bool:
+            hrs = kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)
+            for hr in hrs:
+                for c in hr.get("status", {}).get("conditions", []) or []:
+                    if c.get("reason") == "UninstallFailed" or "failed to delete release" in c.get("message", ""):
+                        raise Abort(f"the {hr['metadata']['name']} release's uninstall failed: {c.get('message')}")
+            return not hrs and kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=FLUX_NAMESPACE) is None
+
+        wait_for("the meta HelmRelease and every platform HelmRelease gone — the cluster's Flux uninstalled the platform",
+                 uninstalled, UNINSTALL_THROUGH_FLUX_TIMEOUT_S, interval=5)
+        elapsed = time.monotonic() - started
+        assert_kept_crds(kube)
+        assert kube.get("sandboxconfigs.ate.dev", SANDBOX_CONFIG) is None, "the substrate release's SandboxConfig survived its uninstall"
+        assert not kube.items("workerpools.ate.dev", all_namespaces=True), "a WorkerPool survived the kagent release's uninstall"
+        assert kube.get("deployment", "muster", namespace=NAMESPACE) is None, "muster survived the uninstall"
+        wait_for(f"Substrate's control plane gone from {ATE_NAMESPACE}", lambda: not kube.items("pods", namespace=ATE_NAMESPACE), 180, interval=3)
+        wait_for(f"no workload left in {KAGENT_NAMESPACE} (the controller, the UI, its Postgres, the WorkerPool's workers)",
+                 lambda: not (kube.items("deployments", namespace=KAGENT_NAMESPACE) or kube.items("statefulsets", namespace=KAGENT_NAMESPACE) or kube.items("pods", namespace=KAGENT_NAMESPACE)), 180, interval=3)
+    except AssertionError:
+        dump(kube)
+        raise
+    TIMINGS.record("the way back: meta HelmRelease deleted, the seven platform releases uninstalled concurrently by the cluster's Flux, kept CRDs in place", elapsed)
+    logger.info("the way back clean in %.0f s: releases %s gone, kept CRDs %s, no SandboxConfig, no WorkerPool", elapsed, before, sorted(KEPT_CRDS))

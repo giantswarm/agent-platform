@@ -50,6 +50,13 @@ WIRING = {
         ["--set", "components.kagent.enabled=true", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "agent-manager.oauth.enabled=false"],
         [],
     ),
+    # The egress policy renders whenever the component is on; the guard needs
+    # only muster (the MCPServer CRD), which the CI values have.
+    "vm-manager": (
+        "agent-platform-connectivity-vm-manager-egress",
+        ["--set", "vm-manager.oauth.enabled=false"],
+        [],
+    ),
 }
 
 # The fleet's API groups: the cluster-shape knobs default to `auto` and resolve

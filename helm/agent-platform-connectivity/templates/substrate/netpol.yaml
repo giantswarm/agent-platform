@@ -6,7 +6,10 @@ what (the substrate chart's arguments and Service definitions):
         muster (tool calls), the kagent controller :8083 (A2A, task and session
         state), the LLM provider (world:443, or the agentgateway LLM listener),
         the built-in tool server when it is on, cluster:443/10443 (a public
-        hostname behind an internal LB); atenet-egress asks ate-api :443 which
+        hostname behind an internal LB), the OTLP gateway kagent's exporters
+        send to (the actors' traces and logs, kagent.otel — the pods of the
+        endpoint's namespace on its port, agent-platform.kagent.otlpEgress);
+        atenet-egress asks ate-api :443 which
         actor a connection belongs to (the substrateEgress policy) — nothing
         leaves a worker pod for those destinations directly; the sandbox's
         outbound traffic is tunnelled to atenet-egress, so the actors' egress
@@ -14,12 +17,15 @@ what (the substrate chart's arguments and Service definitions):
         egress gateway, the atenet dns and the cluster DNS.
   kagent controller ──▶ ate-api :443 (actor lifecycle), atenet-router :8080
         (a turn's ingress, atenetRouterURL); atenet-router ──▶ ate-api :443
-        (which worker hosts the actor), the worker's tunnel :443.
+        (which worker hosts the actor), the worker :443 (its tunnel) and :8443
+        (its mTLS CONNECT listener, through which the A2A request reaches the
+        actor).
   ate-api-server ──▶ atelet :8085 (a hostPort on every node — the bootstrap API
         drives the node agent; the egress rule upstream lacks), atenet-egress
         :443 (the egress gateway address), Postgres (the platform's CNPG
         Cluster, the bundled StatefulSet or an external one), the snapshot
-        store (world:443, or the bundled in-cluster store :9000), the apiserver.
+        store (world:443, the bundled in-cluster store :9000, or the s3proxy façade
+        :8080 in the release namespace), the apiserver.
   atelet ──▶ ate-api :443, the apiserver, world:443 (the actor images it pulls,
         the gVisor asset from storage.googleapis.com, the S3 snapshot store; a
         registry mirror behind a private address is cluster:443), the bundled
@@ -46,10 +52,25 @@ the render.
 {{- $controllerPort := "8083" }}
 {{- $pgMode := include "agent-platform.substrate.postgresMode" . }}
 {{- $rustfs := dig "rustfs" "enabled" false (.Values.substrate | default dict) }}
-{{- $toolsValues := index .Values.kagent "kagent-tools" | default dict }}
-{{- $toolsNs := $toolsValues.namespaceOverride | default $kagentNs }}
-{{- $toolsPort := dig "service" "ports" "tools" "targetPort" "8084" $toolsValues | toString }}
+{{- $s3proxy := include "agent-platform.substrateStore.s3proxy" . }}
+{{- /* kagent's built-in tool server, where the kagent chart renders it (the
+agent-platform.kagentTools.* helpers, _helpers.tpl). */}}
+{{- $toolsEnabled := include "agent-platform.kagentTools.enabled" . }}
+{{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
+{{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
+{{- /* The host model servers an actor may dial for inference: the address
+model-manager writes into the ModelConfigs (agentHost, falling back to the
+endpoint it dials itself), split for the policy. Empty unless a model-manager
+fronts a host backend. A server named by a hostname needs the DNS proxy on the
+egress gateway, since Cilium fills the toFQDNs cache only from the answers its
+own proxy sees. */}}
+{{- $modelServers := list }}
+{{- if include "agent-platform.modelManager.enabled" . }}
+{{- $modelServers = include "agent-platform.modelManager.hostTargets" (dict "root" . "key" "agentHost") | fromJsonArray }}
+{{- end }}
+{{- $modelServersNeedDns := false }}
+{{- range $server := $modelServers }}{{- if not $server.isIP }}{{- $modelServersNeedDns = true }}{{- end }}{{- end }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
@@ -177,6 +198,18 @@ spec:
             - port: "9000"
               protocol: TCP
     {{- end }}
+    {{- if $s3proxy }}
+    # The s3proxy façade in front of Azure Blob (kagent.harness.snapshotStore).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: s3proxy
+            app.kubernetes.io/component: snapshot-store
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- end }}
 ---
 # ate-controller: reconciles WorkerPools into worker Deployments through the
 # apiserver and registers the workers with ate-api.
@@ -265,10 +298,27 @@ spec:
             - port: "9000"
               protocol: TCP
     {{- end }}
+    {{- if $s3proxy }}
+    # The s3proxy façade in front of Azure Blob (kagent.harness.snapshotStore).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: s3proxy
+            app.kubernetes.io/component: snapshot-store
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- end }}
 ---
 # atenet-router: a turn's ingress. The kagent controller sends it the request
 # (atenetRouterURL, Service port 80 → 8080); it asks ate-api which worker hosts
-# the actor and connects to that worker's tunnel on 443 (mTLS).
+# the actor and reaches the actor through that worker: the A2A request is
+# tunnelled through the worker's mTLS CONNECT listener on 8443 (ateom
+# `--atunnel-connect-listen-address :8443`, the router's `connectTargetPort`),
+# the worker's tunnel itself listens on 443. Both ports, or every turn fails
+# with "upstream call failed: Connect: deadline has elapsed" under Cilium's
+# default-deny (agent-platform#383).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -323,13 +373,16 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+            - port: "8443"
+              protocol: TCP
 ---
 # atenet-egress: the actors' egress gateway. The worker pods' tunnels come in
 # on 8443; every connection an actor opens leaves from here, so this is where
 # the actors' destinations are allowed: muster (tool calls as the caller), the
 # kagent controller (A2A, sessions), the LLM provider — through the
 # agentgateway LLM listener when llmRouting is on, the provider's endpoint on
-# world:443 either way — the built-in tool server when it is on, and
+# world:443 either way — the built-in tool server when it is on, the OTLP
+# gateway of kagent's exporters (the actors' traces and logs), and
 # cluster:443/10443 (muster's OAuth endpoints on the public hostname resolve to
 # an internal LB VIP; 10443 is the Envoy listener after an Azure LB DNAT).
 apiVersion: cilium.io/v2
@@ -363,7 +416,11 @@ spec:
             - port: "15020"
               protocol: TCP
   egress:
+    {{- if $modelServersNeedDns }}
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- else }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- end }}
     - toEntities:
         - kube-apiserver
     - toEndpoints:
@@ -393,6 +450,15 @@ spec:
         - ports:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
+    {{- with include "agent-platform.kagent.otlpEgress" . }}
+    # The actors' telemetry: the OTLP gateway kagent.otel names, the same
+    # destination the controller's egress policy opens for its own spans.
+    # The Go ADK flushes a turn's spans before the A2A response closes
+    # (KAGENT_PRE_RESPONSE_TRACE_FLUSH, a checkpoint runtime has no later
+    # window); without this rule the flush ran into its deadline on every turn
+    # and the stream closed 3 s after the task had completed (agent-platform#456).
+    {{- . | nindent 4 }}
+    {{- end }}
     {{- end }}
     {{- if (include "agent-platform.llmRouting" .) }}
     # Model inference through the agentgateway LLM listener. Additive: the
@@ -407,7 +473,9 @@ spec:
             - port: {{ .Values.llmRouting.listener.port | quote }}
               protocol: TCP
     {{- end }}
-    {{- if $toolsValues.enabled }}
+    {{- if $toolsEnabled }}
+    # The actors' calls to the built-in tool server, where the kagent chart
+    # renders it (the controller's discovery of it is templates/kagent/netpol.yaml).
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: kagent-tools
@@ -416,6 +484,39 @@ spec:
         - ports:
             - port: {{ $toolsPort | quote }}
               protocol: TCP
+    {{- end }}
+    {{- /* A host model server is neither on 443 nor HTTPS, so the world rule
+           below does not reach it: an actor whose ModelConfig points at an
+           Ollama, a Lemonade Server or an LM Studio on the host needs that
+           address and port opened. model-manager's own policy opens the
+           endpoint it manages models through; this is the inference path, at
+           the address the ModelConfigs carry. */ -}}
+    {{- range $server := $modelServers }}
+    {{- if $server.isIP }}
+    # The {{ $server.backend }} host model server the actors dial, an IP endpoint.
+    - toCIDR:
+        - {{ $server.host }}/32
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    {{- else }}
+    # The {{ $server.backend }} host model server the actors dial, named by hostname.
+    - toFQDNs:
+        - matchName: {{ $server.host }}
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    # The same name may resolve to an in-cluster Service, which toFQDNs alone
+    # does not admit.
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ $server.port | quote }}
+              protocol: TCP
+    {{- end }}
     {{- end }}
     - toEntities:
         - world
@@ -484,7 +585,8 @@ spec:
         - kube-apiserver
 ---
 # The worker pods of every WorkerPool in the kagent namespace: a turn comes in
-# from atenet-router on the tunnel (443); the actors' outbound traffic leaves
+# from atenet-router on the tunnel (443) and the mTLS CONNECT listener (8443);
+# the actors' outbound traffic leaves
 # through atenet-egress (8443) — nothing else leaves a worker: the sandbox's
 # destinations are decided at the egress gateway, not here. The node agent
 # reaches the worker through the node's filesystem (the hostPath socket), not

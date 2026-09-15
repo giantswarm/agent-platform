@@ -1,4 +1,13 @@
 {{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
+{{- $external := include "agent-platform.jwks.externalTargets" . | fromJsonArray }}
+{{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
+{{- $extraCidrs := $extra.cidrs | default list }}
+{{- $extraFqdns := $extra.fqdns | default list }}
+{{- $extraPort := $extra.port | default 443 | int }}
+{{- /* A toFQDNs selector matches nothing without the DNS proxy clause, so the
+policy renders the proxy variant of the DNS rule as soon as one name is
+selected, and the plain variant otherwise. */}}
+{{- $needsDnsProxy := or (gt (len $external) 0) (gt (len $extraFqdns) 0) }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -58,5 +67,39 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
+    {{- /* Each external issuer the routes name, by name on its own JWKS port. */}}
+    {{- range $external }}
+    - toFQDNs:
+        - matchName: {{ .host | quote }}
+      toPorts:
+        - ports:
+            - port: {{ .port | toString | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- /* gateway.jwksEgress.external.fqdns: an issuer the routes do not name,
+    selected by name. Cilium FQDN selectors verbatim (matchName, matchPattern).
+    */}}
+    {{- if $extraFqdns }}
+    - toFQDNs:
+        {{- toYaml $extraFqdns | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: {{ $extraPort | toString | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- /* gateway.jwksEgress.external.cidrs: an issuer the routes do not name,
+    or one the kubernetes flavour's IPv4 wide rule cannot reach. */}}
+    {{- if $extraCidrs }}
+    - toCIDR:
+        {{- toYaml $extraCidrs | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: {{ $extraPort | toString | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if $needsDnsProxy }}
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- else }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- end }}
 {{- end }}

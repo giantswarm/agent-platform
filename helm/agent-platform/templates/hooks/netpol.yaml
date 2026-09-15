@@ -1,0 +1,80 @@
+{{- /*
+The network policy of the hook identity (giantswarm/agent-platform#413). Every
+hook Job of this chart — the kagent namespace hook, the two storage-version
+hooks, the self hooks, the ordered teardown — runs `kubectl` (and `helm`,
+which is the same apiserver traffic) from the release namespace under the pod
+labels app.kubernetes.io/instance: <release> + app.kubernetes.io/component:
+hooks, and nothing else: in-cluster kubectl dials KUBERNETES_SERVICE_HOST by IP,
+no DNS. On a cluster whose network policy is default-deny for every endpoint
+(Cilium policyEnforcementMode: always, a hardened installation) a pod no policy
+selects reaches nothing, the hook loops on `dial tcp <apiserver>:443: i/o
+timeout` until the Job's deadline, and the operation fails on its first hook —
+the first 4.x installation lost every meta-chart upgrade from 4.7.13 to this
+release that way.
+
+Rendered as a HOOK object, not a chart object: a pre-install / pre-upgrade hook
+runs before the release's manifests are applied, so a regular object could never
+cover the first run. Weight -10 next to the hook identity's ServiceAccount and
+ClusterRoleBinding (rbac.yaml), the same delete policy — hook-succeeded removes
+it with the identity once every hook of the event succeeded, before-hook-creation
+brings it back for the next event — at every event a hook Job of this chart
+runs: with the bundled engine all five (the self hooks run at pre-upgrade or
+post-install/post-upgrade depending on the self shape, the teardown at
+pre-delete), without it the storage-version hooks' four
+(agent-platform.hooks.serviceAccountEvents). The self-management resumer Job is
+not a hook and carries app.kubernetes.io/component: self-management — it is
+not this policy's. Gated like the identity (rbac.yaml) and, like every policy
+the platform renders, on networkPolicy.enabled, in the flavour
+networkPolicy.flavor resolves to (agent-platform.shape.networkPolicyFlavor).
+Egress to the apiserver only: the kube-apiserver entity in the cilium flavour,
+networkPolicy.kubernetes.apiServerCIDR in the kubernetes one (vanilla
+NetworkPolicy has no entity selectors); no ingress — the hook serves nothing.
+*/ -}}
+{{- $engine := eq (include "agent-platform.engineEnabled" .) "true" }}
+{{- if and .Values.networkPolicy.enabled (or $engine (include "agent-platform.kagent.storageVersionHooks" .)) }}
+{{- $events := ternary "pre-install,pre-upgrade,post-install,post-upgrade,pre-delete" (include "agent-platform.hooks.serviceAccountEvents" .) $engine }}
+{{- if eq (include "agent-platform.shape.networkPolicyFlavor" .) "cilium" }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "agent-platform.hooks.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $events }}
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+      app.kubernetes.io/component: hooks
+  egress:
+    - toEntities: ["kube-apiserver"]
+{{- else }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agent-platform.hooks.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $events }}
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+      app.kubernetes.io/component: hooks
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+{{- end }}
+{{- end }}

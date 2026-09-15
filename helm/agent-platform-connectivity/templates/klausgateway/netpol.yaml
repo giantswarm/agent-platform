@@ -14,7 +14,7 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Values.klausGateway.fullnameOverride | default "klaus-gateway" | quote }}
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
   egress:
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
     - toEndpoints:
@@ -36,7 +36,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Values.klausGateway.fullnameOverride | default "klaus-gateway" | quote }}
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
   policyTypes: [Egress]
   egress:
     - to:
@@ -69,7 +69,7 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Values.klausGateway.fullnameOverride | default "klaus-gateway" | quote }}
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
   egress:
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
     - toEntities:
@@ -93,7 +93,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Values.klausGateway.fullnameOverride | default "klaus-gateway" | quote }}
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
   policyTypes: [Egress]
   egress:
     - to:
@@ -110,9 +110,86 @@ spec:
           protocol: TCP
 {{- end }}
 {{- end }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) (include "agent-platform.klausGateway.storeEgress" .) .Values.networkPolicy.enabled }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# Egress from klaus-gateway to its stores: the platform's Valkey on its Service
+# port (klausGateway.routing.store: valkey — the thread bindings and the record
+# of the turn in flight; the valkey release's own policy admits clients from
+# the cluster, so the client side is what is missing) and the Kubernetes API
+# (the Secret link store, klausGateway.obo.store: secret — one Secret read at
+# start and updated on every link; the configmap / crd routing stores; the
+# embedded ChannelRoute controller). The a2a-egress and obo-egress policies
+# above put this pod in Cilium default-deny egress and neither carries the
+# Valkey pods or the kube-apiserver entity (the API is reached by its Service
+# address, which Cilium's socket-LB resolves to the control plane before the
+# policy applies, so a port rule on `cluster` never matches it): with the
+# Secret store on and no rule here the gateway crash-loops at start — `read
+# secret …: context deadline exceeded`, not `forbidden`; on the Valkey store
+# every binding write and the readiness probe would hang the same way. Each
+# rule renders only while its store is on (agent-platform.klausGateway.*Egress);
+# the default shape — memory routing, the bolt link store — gets no policy.
+# DNS as in the siblings, so this policy alone leaves the pod resolving names.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-store-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- if include "agent-platform.klausGateway.valkeyEgress" . }}
+    - toEndpoints:
+        - matchLabels:
+            {{- include "agent-platform.valkey.podSelector" . | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ include "agent-platform.klausGateway.valkeyPort" . | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if include "agent-platform.klausGateway.apiServerEgress" . }}
+    - toEntities: ["kube-apiserver"]
+    {{- end }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-store-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
+  policyTypes: [Egress]
+  egress:
+    {{- if include "agent-platform.klausGateway.valkeyEgress" . }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agent-platform.valkey.podSelector" . | nindent 14 }}
+      ports:
+        - port: {{ include "agent-platform.klausGateway.valkeyPort" . | int }}
+          protocol: TCP
+    {{- end }}
+    {{- if include "agent-platform.klausGateway.apiServerEgress" . }}
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+    {{- end }}
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+{{- end }}
+{{- end }}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled .Values.networkPolicy.enabled }}
 {{- $klausgatewayPort := "8080" }}
-{{- $fullname := .Values.klausGateway.fullnameOverride | default "klaus-gateway" }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Egress from the agentgateway data-plane to klaus-gateway. The channel paths
@@ -139,7 +216,7 @@ spec:
   egress:
     - toEndpoints:
         - matchLabels:
-            app.kubernetes.io/name: {{ $fullname | quote }}
+            app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
       toPorts:
         - ports:
             - port: {{ $klausgatewayPort | quote }}
@@ -162,9 +239,76 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: {{ $fullname | quote }}
+              app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
       ports:
         - port: {{ $klausgatewayPort | int }}
           protocol: TCP
+{{- end }}
+{{- end }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.networkPolicy.enabled }}
+{{- $otlpEndpoint := dig "observability" "otlpEndpoint" "" (.Values.klausGateway | default dict) | toString | trim }}
+{{- if $otlpEndpoint }}
+{{- $otlp := include "agent-platform.otlpTarget" (dict "endpoint" $otlpEndpoint "protocol" "grpc") | fromJson }}
+{{- $fullname := .Values.klausGateway.fullnameOverride | default "klaus-gateway" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# Egress from klaus-gateway to the OTLP gateway its traces go to
+# (klausGateway.observability.otlpEndpoint; giantswarm/klaus-gateway#263): every
+# channel turn is one trace whose root the gateway exports, the kagent
+# controller's SendStreamingMessage and the actor's spans continue it. The pod
+# runs in Cilium default-deny egress (the a2a policy above), so without this
+# rule the batched export is dropped and the gateway's spans never reach Tempo.
+# Same destination rule as the kagent controller's and the actors'
+# (agent-platform.otlpEgressRule): the pods of the endpoint's namespace on its
+# port, or the cluster entity for a host that is not an in-cluster Service.
+# Renders exactly while an endpoint is set; the meta chart empties it when
+# klausGateway.observability.enabled resolves off.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-otlp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $fullname | quote }}
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- include "agent-platform.otlpEgressRule" (dict "target" $otlp "who" "klaus-gateway's traces go to") | nindent 4 }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-otlp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $fullname | quote }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- if $otlp.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $otlp.namespace }}
+        {{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        {{- end }}
+      ports:
+        - port: {{ $otlp.port | int }}
+          protocol: TCP
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+{{- end }}
 {{- end }}
 {{- end }}

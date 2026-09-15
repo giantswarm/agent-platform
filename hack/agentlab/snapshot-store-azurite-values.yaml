@@ -1,0 +1,19 @@
+# agentlab overlay (platform.valuesFiles): the s3proxy façade alone, in front of
+# the Azurite fixture (azurite.yaml), as Agent Substrate's snapshot store — the
+# lab shape of the CAPZ store without Azure. The lab's own snapshotLocation
+# (s3://ate-snapshots/kagent) equals the derived one, so it may stay.
+kagent:
+  harness:
+    snapshotStore:
+      s3proxy:
+        enabled: true
+        azure:
+          endpoint: http://azurite.agent-platform.svc:10000/devstoreaccount1
+          account: devstoreaccount1
+          container: ate-snapshots
+          accountKeySecretRef:
+            name: azurite
+            key: key
+substrate:
+  rustfs:
+    enabled: false

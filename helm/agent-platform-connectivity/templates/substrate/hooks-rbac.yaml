@@ -1,10 +1,13 @@
 {{- /*
 The identity the hook Jobs of this release run as (templates/_hooks.tpl): a
 ServiceAccount in the release namespace bound to a ClusterRole on secrets,
-configmaps and namespaces — get, list, watch, create and patch (server-side
-apply), never delete. Cluster-scoped because the bootstrap writes into two
-namespaces the substrate release has not created yet (a Role there cannot
-precede its namespace) and the databases hook into every namespace of
+configmaps and namespaces, and on the podcert signers' cluster-scoped
+ClusterTrustBundles the bootstrap publishes — get, list, watch, create and
+patch (server-side apply), never delete — plus `attest` on the two podcert
+signers, which the apiserver demands of whoever writes a bundle naming them. Cluster-scoped because the bootstrap
+writes into two namespaces the substrate release has not created yet (a Role
+there cannot precede its namespace), publishes cluster-scoped objects, and the
+databases hook writes into every namespace of
 postgres.databases.*.secretNamespaces. Created for each hook event at weight
 -5, ahead of the Jobs at 0, and removed once the event's hooks succeeded.
 */ -}}
@@ -42,6 +45,18 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "create"]
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["clustertrustbundles"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  # A ClusterTrustBundle that names a signer is admitted only for a client
+  # allowed to attest that signer (the podcertificate-controller's own
+  # ClusterRole carries sign + attest on servicedns.podcert.ate.dev/* and
+  # podidentity.podcert.ate.dev/*); the bootstrap publishes the two signers'
+  # bundles, so it attests exactly those two — never sign.
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["signers"]
+    resourceNames: ["servicedns.podcert.ate.dev/identity", "podidentity.podcert.ate.dev/identity"]
+    verbs: ["attest"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
