@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (`agent-platform-connectivity` follows the meta chart's own version; a pin on it is refused)
+
+giantswarm/agent-platform#450: the wiring chart is published off the same tag as this chart, but its `versionRange` was a range of its own (`>=4.0.0 <5.0.0`) that a BOM pinned separately — and every BOM's connectivity lagged the moment the meta chart moved. Three releases in a row forwarded a key the pinned connectivity's closed schema refused (#431, #441, #339), failing the release on every BOM-pinned installation. `components.agent-platform-connectivity` is now `releasedWithChart: true` with an empty `versionRange`: the OCIRepository carries the meta chart's own exact version, so the connectivity release rolls exactly when the meta chart rolls.
+
+### Operator action
+
+- **None** for an installation on the chart's defaults: the connectivity OCIRepository's `semver` changes from the range to the exact version of the meta chart it runs. For an installation on the current release that is the chart the range resolved to already; for one whose connectivity had lagged (a BOM that pinned it) it is an upgrade to the meta chart's version, which is the pair that was tested together.
+- **A BOM that pins `components.agent-platform-connectivity.versionRange`** must drop the pin: the render refuses it (`pins a chart that is released with this chart`). The example BOM no longer carries one; `tests/verify-components.py` refuses one in it.
+- **A lab that follows a branch's connectivity build** keeps its knobs: a `versionRange` together with a `semverFilter` (the dev channel) or with another `repository` (a chart pushed by hand) is admitted as before. A lab that installs the meta chart from a checkout (`platform.chartPath`) renders connectivity at the checkout's placeholder version, which no registry publishes — set the dev channel of your branch on the connectivity entry, the way the agentlab skill's loop C does.
+- **Recognising the old state**: `kubectl -n <flux namespace> get ocirepository agent-platform-connectivity -o jsonpath='{.spec.ref.semver}'` prints a range (`>=4.0.0 <5.0.0`) or a pin; after the upgrade it prints the meta chart's version.
+
 ## \<current\> → \<next\> (the actors reach the OTLP gateway; the pre-response trace flush is capped at 0.5 s)
 
 giantswarm/agent-platform#456: every turn ended 3 s after its task had completed — the Go ADK's pre-response trace flush (`KAGENT_PRE_RESPONSE_TRACE_FLUSH`, set by the controller on Substrate actors) spent its full 3 s deadline because `substrate-atenet-egress`, the actors' egress allow-list, opened nothing towards the OTLP gateway. The connectivity chart now opens the gateway kagent.otel names on the egress gateway and on the controller's policy (the pods of the endpoint's namespace on its port — kube-system:4317 by default; the controller's rule was the `cluster` entity on 4317, now the namespace), and the platform Harness's env carries `OTEL_LOGGING_ENABLED=true`, `OTEL_EXPORTER_OTLP_HEADERS=X-Scope-OrgID=giantswarm` and `KAGENT_TRACE_FLUSH_TIMEOUT_MS=500`.

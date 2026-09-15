@@ -385,10 +385,6 @@ verify-login-connector: ## Assert gitops.forbidPinnedLoginConnector: off by defa
 # the engine's own objects (operator, FluxInstance, identities, hooks, CRDs)
 # are asserted by verify-engine in both shapes.
 ENGINE_OFF := --set components.flux.enabled=false
-# Every component the customer BOM pins, turned on: tests/verify-bom-charts.py
-# renders each pinned chart against the values its HelmRelease carries, and a
-# component left off renders neither, so it would drop out of the check unseen.
-BOM_ALL_COMPONENTS := $(shell sed -n 's/^  \([a-z0-9][a-z0-9-]*\): *{ versionRange: "[0-9][0-9.]*[^"]*".*/--set components.\1.enabled=true/p' helm/agent-platform/examples/customer-bom.yaml)
 .PHONY: verify-meta
 verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with the engine off, ranges as values, Flux the only engine, pinned BOM).
 	@echo "====> $@ ($(CHART_DIR))"
@@ -470,9 +466,6 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@grep -q 'semver: "5.12.0"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to 5.12.0"; exit 1; }
 	@if grep -qE 'semver: "[0-9]+\.x"' /tmp/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
-	@echo "--> every chart the BOM pins accepts the values the meta chart forwards to it"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml $(ENGINE_OFF) $(BOM_ALL_COMPONENTS) >/tmp/ap-bom-all.out 2>&1 || { cat /tmp/ap-bom-all.out; exit 1; }
-	@python3 tests/verify-bom-charts.py /tmp/ap-bom-all.out $(CHART_DIR)/examples/customer-bom.yaml
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agent-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
 	@python3 -c 'import re,sys; docs=open("/tmp/ap-ns.out").read().split("\n---\n"); bad=[(re.search(r"^kind: (\S+)$$", d, re.M).group(1), re.search(r"^  namespace: (\S+)$$", d, re.M).group(1)) for d in docs if re.search(r"^kind: (OCIRepository|HelmRelease)$$", d, re.M) and re.search(r"^  namespace: (\S+)$$", d, re.M) and re.search(r"^  namespace: (\S+)$$", d, re.M).group(1) != "flux-giantswarm"]; sys.exit("FAIL: a rendered CR is not in the gitops.namespace: " + str(bad)) if bad else print("ok: all CRs in flux-giantswarm (the hook Jobs stay in the release namespace, where Helm runs them)")'
@@ -726,7 +719,7 @@ verify-components: ## Assert the roster: the standalone chart's extras (backstag
 	@echo "component roster verified."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Pull the component charts the meta chart composes values for — the seven extras, the two managers (closed schemas: a forwarded key they do not declare fails the release), the kagent line's kagent + kagent-crds — at the range's resolution and at the BOM pin, resolved the way Flux does, and render each with the values the meta chart forwards to it (the managers' pods carry the pinned --kagent-api-version). Network: gsoci.azurecr.io, ghcr.io.
+verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, resolved the way Flux does; a chart released with the meta chart (releasedWithChart) from the working tree. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. Network: gsoci.azurecr.io, ghcr.io.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."

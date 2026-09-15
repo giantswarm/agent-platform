@@ -295,7 +295,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.dicebear.injectGlobal | bool | `false` |  |
 | components.agent-platform-connectivity.chart | string | `"agent-platform-connectivity"` |  |
 | components.agent-platform-connectivity.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-connectivity.versionRange | string | `">=4.0.0 <5.0.0"` |  |
+| components.agent-platform-connectivity.releasedWithChart | bool | `true` |  |
+| components.agent-platform-connectivity.versionRange | string | `""` |  |
 | components.agent-platform-connectivity.forwardAllValues | bool | `true` |  |
 | components.agent-platform-connectivity.disableWaitForJobs | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |

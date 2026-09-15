@@ -1500,11 +1500,23 @@ the controller applies. Build metadata (helm-controller renders the chart as
 {{- with .Values.gitops.self.versionRange -}}
 {{- . -}}
 {{- else -}}
-{{- $v := semver .Chart.Version -}}
-{{- $floor := printf "%d.%d.%d" $v.Major $v.Minor $v.Patch -}}
-{{- with $v.Prerelease }}{{ $floor = printf "%s-%s" $floor . }}{{ end -}}
-{{- printf ">=%s <%d.0.0" $floor (add1 $v.Major) -}}
+{{- printf ">=%s <%d.0.0" (include "agent-platform.chartVersion" .) (add1 (semver .Chart.Version).Major) -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+This chart's own version as its releases are published: <major>.<minor>.<patch>
+with a pre-release kept (a dev build is X.Y.Z-dev.<branch>.<date>.h<sha>, one
+version for the two charts of a commit) and build metadata dropped
+(helm-controller renders the chart as <version>+<oci digest>). The floor of
+the self range above, and the exact version of every component released off
+the same tag as this chart (components.<name>.releasedWithChart).
+*/}}
+{{- define "agent-platform.chartVersion" -}}
+{{- $v := semver .Chart.Version -}}
+{{- $out := printf "%d.%d.%d" $v.Major $v.Minor $v.Patch -}}
+{{- with $v.Prerelease }}{{ $out = printf "%s-%s" $out . }}{{ end -}}
+{{- $out -}}
 {{- end -}}
 
 {{/*

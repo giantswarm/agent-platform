@@ -199,23 +199,28 @@ def self_management_sets(version: str) -> List[str]:
 
 
 # The connectivity chart of this checkout, pushed to the in-cluster registry
-# next to the meta chart (both charts release off one tag and change together;
-# the published one would not carry this PR's connectivity changes). The
-# component's roster entry is pointed at the registry at the same version.
+# next to the meta chart at the candidate's version (both charts release off one
+# tag and change together; the published one would not carry this PR's
+# connectivity changes). The component's roster entry is pointed at the
+# registry and nothing else: the chart is released with the meta chart
+# (components.agent-platform-connectivity.releasedWithChart), so the meta chart
+# renders its OCIRepository at its own exact version — the candidate's,
+# pre-release and all — and the scenarios prove that derivation against a real
+# source-controller. (A versionRange here would be refused: the registry is the
+# one the meta chart's own source names too, gitops.self.repository.)
 CONNECTIVITY_CHART_DIR = REPO_ROOT / "helm" / "agent-platform-connectivity"
 CONNECTIVITY = "agent-platform-connectivity"
 
 
-def connectivity_sets(version: str) -> List[str]:
+def connectivity_sets() -> List[str]:
     return [
         f"components.{CONNECTIVITY}.repository={REGISTRY_URL}",
-        f"components.{CONNECTIVITY}.versionRange={version}",
         f"components.{CONNECTIVITY}.insecure=true",
     ]
 
 
-def connectivity_values(version: str) -> Dict[str, Any]:
-    return {"components": {CONNECTIVITY: {"repository": REGISTRY_URL, "versionRange": version, "insecure": True}}}
+def connectivity_values() -> Dict[str, Any]:
+    return {"components": {CONNECTIVITY: {"repository": REGISTRY_URL, "insecure": True}}}
 
 # ---------------------------------------------------------------------------
 # Processes, waiting, timing
