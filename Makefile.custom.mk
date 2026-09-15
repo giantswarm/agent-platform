@@ -889,7 +889,7 @@ VPA_ON := $(VM) --set components.kagent.enabled=true
 VPA_VANILLA := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --set components.kagent.enabled=true
 
 .PHONY: verify-kagent-vpa
-verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with autoscaling.k8s.io/v1 served the connectivity chart renders it on Deployment kagent-controller in the kagent namespace (InPlaceOrRecreate, RequestsOnly, minAllowed the chart's requests, maxAllowed a step under its limits, minReplicas 1); a vanilla render none; an explicit true / false wins both ways; inert with kagent off; the enum guards fire in both charts; the meta chart forwards the knob resolved to the connectivity release and never to the kagent release.
+verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with autoscaling.k8s.io/v1 served the connectivity chart renders it on Deployment kagent-controller in the kagent namespace (InPlaceOrRecreate, RequestsOnly, minAllowed the chart's requests, maxAllowed a step under its limits, minReplicas 1); a vanilla render none; an explicit true / false wins both ways; inert with kagent off; the enum guards, the spelling guard (VPA off too) and the unset wording fire; the meta chart forwards the knob resolved to the connectivity release and never to the kagent release, and a meta-layer override reaches the rendered object.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, autoscaling.k8s.io/v1 served (the fleet): the VPA renders"
 	@helm template t $(CONNECTIVITY_DIR) $(VPA_ON) >/tmp/vk-on.out 2>&1 || { cat /tmp/vk-on.out; exit 1; }
@@ -932,6 +932,12 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 		grep -q 'kagent.controller.vpa.enabled' /tmp/vk-maybe.out || { echo "FAIL: $$chart: wrong error for kagent.controller.vpa.enabled=maybe"; tail -3 /tmp/vk-maybe.out; exit 1; }; \
 	done
 	@echo "ok: the enum guards fire in both charts"
+	@echo "--> a misspelt key is refused, VPA on or off (the kagent block is open in the schema); an unset updateMode is named as unset"
+	@if helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) --set kagent.controller.vpa.maxAllowd.cpu=5 >/tmp/vk-typo.out 2>&1; then echo "FAIL: kagent.controller.vpa.maxAllowd (a typo) rendered with the VPA off"; exit 1; fi
+	@grep -q 'kagent.controller.vpa.maxAllowd is not a key' /tmp/vk-typo.out || { echo "FAIL: wrong error for the misspelt key"; tail -3 /tmp/vk-typo.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.updateMode=null >/tmp/vk-unset.out 2>&1; then echo "FAIL: an unset updateMode rendered"; exit 1; fi
+	@grep -q 'kagent.controller.vpa.updateMode is unset' /tmp/vk-unset.out || { echo "FAIL: an unset updateMode is not named as unset"; tail -3 /tmp/vk-unset.out; exit 1; }
+	@echo "ok: the spelling guard and the unset wording"
 	@echo "--> meta chart: the resolved knob reaches the connectivity release, never the kagent release"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_ON) >/tmp/vk-meta.out 2>&1 || { cat /tmp/vk-meta.out; exit 1; }
 	@$(PICK) /tmp/vk-meta.out HelmRelease kagent >/tmp/vk-meta-kagent.out || { echo "FAIL: no kagent HelmRelease in the meta render"; exit 1; }
@@ -944,6 +950,15 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn-vanilla.out | grep -q '^          enabled: false$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to false without the API"; exit 1; }
 	@if grep -q 'enabled: auto' /tmp/vk-meta.out /tmp/vk-meta-vanilla.out; then echo "FAIL: an unresolved auto reached a HelmRelease"; exit 1; fi
 	@echo "ok: resolved once, forwarded to connectivity only"
+	@echo "--> meta chart: an override set at the meta layer (updateMode, maxAllowed.memory) reaches the rendered VPA through the connectivity HelmRelease's values"
+	@helm template t $(CHART_DIR) $(VPA_ON) --set kagent.controller.vpa.updateMode=Initial --set kagent.controller.vpa.maxAllowed.memory=400Mi >/tmp/vk-meta-over.out 2>&1 || { cat /tmp/vk-meta-over.out; exit 1; }
+	@$(PICK) /tmp/vk-meta-over.out HelmRelease agent-platform-connectivity | sed -n '/^  values:$$/,$$p' | sed '1d; s/^    //' | sed '/^---$$/,$$d' >/tmp/vk-meta-over-values.yaml
+	@helm template t $(CONNECTIVITY_DIR) -n default -f /tmp/vk-meta-over-values.yaml $(FLEET_APIS) >/tmp/vk-conn-over.out 2>&1 || { echo "FAIL: the connectivity chart rejects the values the meta chart forwards"; tail -3 /tmp/vk-conn-over.out; exit 1; }
+	@awk '/^kind: VerticalPodAutoscaler/,/^---/' /tmp/vk-conn-over.out >/tmp/vk-conn-over-vpa.out
+	@grep -q '^    updateMode: Initial$$' /tmp/vk-conn-over-vpa.out || { echo "FAIL: kagent.controller.vpa.updateMode set at the meta layer did not reach the rendered VPA"; cat /tmp/vk-conn-over-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-conn-over-vpa.out | grep -q 'memory: 400Mi' || { echo "FAIL: kagent.controller.vpa.maxAllowed.memory set at the meta layer did not reach the rendered VPA"; cat /tmp/vk-conn-over-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-conn-over-vpa.out | grep -q 'cpu: 1900m' || { echo "FAIL: the untouched maxAllowed.cpu default did not survive a sibling override at the meta layer"; cat /tmp/vk-conn-over-vpa.out; exit 1; }
+	@echo "ok: meta-layer overrides reach the object, siblings keep their defaults"
 	@echo "$@: all passed"
 
 verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: ghcr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); that the egress gateway opens every host model server model-manager fronts, at its agentHost, with the DNS proxy on where one is named by hostname; and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.

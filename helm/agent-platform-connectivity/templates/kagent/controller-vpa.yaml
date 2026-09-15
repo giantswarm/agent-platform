@@ -16,12 +16,30 @@ maxAllowed stays under them: requests equal to limits on both resources would
 turn the Burstable pod Guaranteed, a QoS change no resize may make. */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 {{- $vpa := .Values.kagent.controller.vpa | default dict }}
+{{- /* The spelling guard sits OUTSIDE the enabled check on purpose (the #373
+lesson): the kagent block is open in the schema, so a misspelt key would be
+dropped in silence — and inside the check it would pass today and fail the
+render on the day somebody turns the VPA on. */ -}}
+{{- $keys := list "enabled" "updateMode" "controlledValues" "minAllowed" "maxAllowed" }}
+{{- range $key, $_ := $vpa }}
+{{- if not (has $key $keys) }}
+{{- fail (printf "kagent.controller.vpa.%s is not a key of the controller's VerticalPodAutoscaler knob (%s); the kagent block is open in the schema, so the spelling is this guard's to check" $key (join ", " $keys)) }}
+{{- end }}
+{{- end }}
 {{- if (include "agent-platform.kagentControllerVpa" .) }}
+{{- /* A null set through the meta chart deletes the key at that layer, so it
+arrives here as unset — say so instead of quoting "<nil>". */ -}}
 {{- $modes := list "Off" "Initial" "Recreate" "InPlaceOrRecreate" "Auto" }}
+{{- if kindIs "invalid" $vpa.updateMode }}
+{{- fail (printf "kagent.controller.vpa.updateMode is unset (a null set through the meta chart deletes the key rather than passing it on); set one of %s" (join ", " $modes)) }}
+{{- end }}
 {{- if not (has (toString $vpa.updateMode) $modes) }}
 {{- fail (printf "kagent.controller.vpa.updateMode=%q is not a VerticalPodAutoscaler update mode (%s)" (toString $vpa.updateMode) (join ", " $modes)) }}
 {{- end }}
 {{- $controlled := list "RequestsAndLimits" "RequestsOnly" }}
+{{- if kindIs "invalid" $vpa.controlledValues }}
+{{- fail (printf "kagent.controller.vpa.controlledValues is unset (a null set through the meta chart deletes the key rather than passing it on); set one of %s" (join ", " $controlled)) }}
+{{- end }}
 {{- if not (has (toString $vpa.controlledValues) $controlled) }}
 {{- fail (printf "kagent.controller.vpa.controlledValues=%q is not a VerticalPodAutoscaler controlledValues (%s)" (toString $vpa.controlledValues) (join ", " $controlled)) }}
 {{- end }}

@@ -425,6 +425,16 @@ Two objects of this chart guard the platform's single-replica pods against Karpe
 
 With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpenter reports `DisruptionBlocked`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`) — and `AlwaysAllow` keeps a pod that is not Ready evictable. `make verify-disruption` asserts the render, the knobs off and the guards; `make verify-workerpool` the worker budget. A spot reclaim is not a voluntary eviction: the placement of the stateful singletons on on-demand capacity is the meta chart's `scheduling.singletons`, which reaches the component releases as their charts' `nodeSelector` / `tolerations` and is never forwarded here.
 
+## The kagent controller's VerticalPodAutoscaler
+
+The kagent chart has no VPA knob, so this chart renders one for the controller the way it renders the muster-valkey budget (giantswarm/agent-platform#455): `VerticalPodAutoscaler kagent-controller` in the kagent namespace, on the Deployment and the container the kagent chart names (`templates/kagent/controller-vpa.yaml`; `make verify-kagent-netpol` ties both names to the kagent chart the range resolves to). The knob is `kagent.controller.vpa`:
+
+- `enabled: auto` — the object renders where the cluster serves `autoscaling.k8s.io/v1`; the VPA CRD is not part of Kubernetes conformance. An explicit `true` / `false` wins. Under the meta chart the knob is resolved once with the other cluster-shape knobs and arrives here as a boolean.
+- `updateMode: InPlaceOrRecreate` (VPA 1.5+ on Kubernetes 1.33+ with in-place pod resize). The controller is one replica behind a `PodDisruptionBudget minAvailable: 1`, so an evicting mode (`Auto`, `Recreate`) could never apply. In place, the running pod's requests change with no eviction and no roll; a resize the cluster cannot apply in place falls back to an eviction the budget refuses, and the pod keeps its requests until its next roll. `minReplicas: 1` keeps the single replica eligible whatever the updater's `--min-replicas` says.
+- `controlledValues: RequestsOnly` — the chart's limits stay. `minAllowed` is the chart's requests (`100m` / `128Mi`); `maxAllowed` is a step under its limits (`1900m` / `480Mi`) and must stay there: requests equal to the limits on both resources would turn the Burstable pod Guaranteed, and Kubernetes refuses a resize that changes the QoS class.
+
+The kagent block is open in the schema, so the template refuses a key under `kagent.controller.vpa` that is not one of the five above (VPA on or off), an `updateMode` or `controlledValues` outside the API's enum, and names a key that arrives unset — a `null` set through the meta chart deletes the key at that layer rather than passing it on. The knob never reaches the kagent release (`components.kagent.omitKeys`). `kagent.controller.vpa.enabled: false` opts out; a cluster whose VPA predates 1.5 takes `updateMode: Initial` or `Off`.
+
 ## Values
 
 | Key | Type | Default | Description |
