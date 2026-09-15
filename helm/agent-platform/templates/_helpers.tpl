@@ -552,16 +552,82 @@ run it.
 {{- end -}}
 
 {{/*
-Fail the render when a value of kagent.substrateWorkerPool.template.nodeSelector
-is not a string. The kagent chart forwards the template verbatim into
-WorkerPool.spec.template (toYaml), whose nodeSelector is map[string]string: a
-bare number — the CPU generation pin written `karpenter.k8s.aws/instance-generation: 6`
-instead of "6" — renders, passes this chart's open kagent schema and fails only
-when helm-controller applies the kagent release, on every installation that
-carries it (giantswarm/agent-platform#457). Named here, at the render, instead.
+The floor of a Flux semver range as the roster carries it (components.<name>
+.versionRange): the version of its `>=` (or `>`, `^`, `~`, `=`) term, or the
+range itself when it is one exact version (a BOM pin, `0.0.30-gs.1`). Empty for
+a range without a floor (`0.x`, `*`, a `<` term alone) — the caller decides what
+that means. Terms are separated by spaces or commas (Masterminds/semver, which
+source-controller uses).
+Usage: include "agent-platform.semverRangeFloor" "<range>"
+*/}}
+{{- define "agent-platform.semverRangeFloor" -}}
+{{- $floor := "" -}}
+{{- range splitList " " (. | replace "," " " | trim) -}}
+{{- $term := trim . -}}
+{{- if and (not $floor) $term (not (hasPrefix "<" $term)) -}}
+{{- $v := $term | trimPrefix ">=" | trimPrefix ">" | trimPrefix "^" | trimPrefix "~" | trimPrefix "=" | trimPrefix "v" -}}
+{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" $v -}}
+{{- $floor = $v -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $floor -}}
+{{- end -}}
+
+{{/*
+The first release of the Substrate line (giantswarm/substrate, the chart
+components.substrate pins) whose WorkerPool CRD carries spec.template
+.topologySpreadConstraints and spec.template.podAntiAffinity — the carried patch
+tracked as giantswarm/giantswarm#37797 (#37742 row 46). EMPTY until that release
+is out: agent-platform.validateWorkerPool then refuses the two keys
+unconditionally, because every published Substrate release prunes them silently
+(giantswarm/agent-platform#472). One line, no comment inside the define:
+tests/verify-workerpool.py reads the value from this file.
+*/}}
+{{- define "agent-platform.substrate.workerPoolSpreadFloor" -}}{{- end -}}
+
+{{/*
+Fail the render when kagent.substrateWorkerPool.template would not reach the
+cluster as written (giantswarm/agent-platform#457, #472). The kagent chart
+forwards the template verbatim into WorkerPool.spec.template (toYaml), and the
+WorkerPool CRD is a structural schema without preserve-unknown-fields, so what
+the schema does not know is PRUNED at admission — the values look applied and
+do nothing — and what it knows but cannot type fails only when helm-controller
+applies the kagent release, on every installation that carries it. Named here,
+at the render, instead:
+  - a nodeSelector value that is not a string — the CPU generation pin written
+    `karpenter.k8s.aws/instance-generation: 6` instead of "6" (nodeSelector is
+    map[string]string);
+  - `topologySpreadConstraints` and `podAntiAffinity`, which the Substrate line
+    carries only from the release agent-platform.substrate.workerPoolSpreadFloor
+    names (none yet): refused while components.substrate.versionRange's floor is
+    below it, forwarded verbatim from it on;
+  - any other key WorkerPool.spec.template does not have (labels, annotations,
+    nodeSelector, tolerations, priorityClassName, nodeAffinity, resources are
+    the fields of the pinned line; a typo such as `nodeSelectors` would be
+    pruned in silence).
 */}}
 {{- define "agent-platform.validateWorkerPool" -}}
-{{- range $key, $value := dig "substrateWorkerPool" "template" "nodeSelector" (dict) .Values.kagent -}}
+{{- $template := dig "substrateWorkerPool" "template" (dict) .Values.kagent -}}
+{{- $known := list "labels" "annotations" "nodeSelector" "tolerations" "priorityClassName" "nodeAffinity" "resources" -}}
+{{- $gated := list "topologySpreadConstraints" "podAntiAffinity" -}}
+{{- $spreadFloor := include "agent-platform.substrate.workerPoolSpreadFloor" . -}}
+{{- $range := dig "substrate" "versionRange" "" .Values.components -}}
+{{- $floor := include "agent-platform.semverRangeFloor" $range -}}
+{{- range $key, $value := $template -}}
+{{- if has $key $gated -}}
+{{- if not $spreadFloor -}}
+{{- fail (printf "kagent.substrateWorkerPool.template.%s is set, but no release of the Substrate line (components.substrate.versionRange %q, giantswarm/substrate) carries WorkerPool.spec.template.%s yet: the apiserver prunes the value silently (the CRD is a structural schema), so the render refuses it until the release that carries the field is out (giantswarm/agent-platform#472, giantswarm/giantswarm#37797); remove the key" $key $range $key) -}}
+{{- else if not $floor -}}
+{{- fail (printf "kagent.substrateWorkerPool.template.%s needs the Substrate line at %s or later (the release whose WorkerPool CRD carries spec.template.%s), and components.substrate.versionRange %q has no floor to check that against: pin a range with a >= floor (README \"Agent Substrate\") or remove the key" $key $spreadFloor $key $range) -}}
+{{- else if lt ((semver $floor).Compare (semver $spreadFloor)) 0 -}}
+{{- fail (printf "kagent.substrateWorkerPool.template.%s needs the Substrate line at %s or later (the release whose WorkerPool CRD carries spec.template.%s), and components.substrate.versionRange %q has the floor %s: below it the apiserver prunes the value silently. Move components.substrate.versionRange and components.substrate-crds.versionRange to that release (with the kagent pin, README \"Agent Substrate\") or remove the key" $key $spreadFloor $key $range $floor) -}}
+{{- end -}}
+{{- else if not (has $key $known) -}}
+{{- fail (printf "kagent.substrateWorkerPool.template.%s is not a WorkerPool.spec.template field of the Substrate line (labels, annotations, nodeSelector, tolerations, priorityClassName, nodeAffinity, resources): the apiserver would prune it silently; remove or rename the key" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- range $key, $value := dig "nodeSelector" (dict) $template -}}
 {{- if not (kindIs "string" $value) -}}
 {{- fail (printf "kagent.substrateWorkerPool.template.nodeSelector.%s is %v (%s), not a string: a nodeSelector value is a string (WorkerPool.spec.template.nodeSelector is map[string]string), so quote it — the CPU generation pin is karpenter.k8s.aws/instance-generation: \"6\"" $key $value (kindOf $value)) -}}
 {{- end -}}

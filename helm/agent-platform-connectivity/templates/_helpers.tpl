@@ -77,6 +77,43 @@ Usage: include "agent-platform.optionalComponentEnabled" (dict "root" $ "name" "
 {{- end -}}
 
 {{/*
+The spec fields of a PodDisruptionBudget this chart renders from a knob of the
+shape {enabled, minAvailable, maxUnavailable, unhealthyPodEvictionPolicy}
+(agentManager.podDisruptionBudget, valkey.podDisruptionBudget,
+vmManager.podDisruptionBudget, kagent.substrateWorkerPool.podDisruptionBudget),
+with the knob's guards: exactly one of minAvailable / maxUnavailable (an int or a
+percentage), and a policy inside the API's enum. The render fails naming the
+knob (`path`) — a budget with both fields, or with neither, is refused by the
+apiserver only on apply, long after a silent render. Rendered as YAML mapping
+entries under `spec:`; the caller provides the indentation and the selector.
+Usage: include "agent-platform.podDisruptionBudget.spec" (dict "path" "valkey.podDisruptionBudget" "pdb" .Values.valkey.podDisruptionBudget)
+*/}}
+{{- define "agent-platform.podDisruptionBudget.spec" -}}
+{{- $pdb := .pdb -}}
+{{- $hasMin := not (kindIs "invalid" $pdb.minAvailable) -}}
+{{- $hasMax := not (kindIs "invalid" $pdb.maxUnavailable) -}}
+{{- if and $hasMin $hasMax -}}
+{{- fail (printf "%s sets both minAvailable and maxUnavailable; a PodDisruptionBudget takes exactly one" .path) -}}
+{{- end -}}
+{{- if not (or $hasMin $hasMax) -}}
+{{- fail (printf "%s.enabled is true but neither minAvailable nor maxUnavailable is set; set exactly one" .path) -}}
+{{- end -}}
+{{- with $pdb.unhealthyPodEvictionPolicy -}}
+{{- if not (has . (list "IfHealthyBudget" "AlwaysAllow")) -}}
+{{- fail (printf "%s.unhealthyPodEvictionPolicy=%q is not a PodDisruptionBudget eviction policy (IfHealthyBudget, AlwaysAllow)" $.path .) -}}
+{{- end -}}
+{{- end -}}
+{{- if $hasMin -}}
+minAvailable: {{ $pdb.minAvailable }}
+{{- else -}}
+maxUnavailable: {{ $pdb.maxUnavailable }}
+{{- end }}
+{{- with $pdb.unhealthyPodEvictionPolicy }}
+unhealthyPodEvictionPolicy: {{ . }}
+{{- end }}
+{{- end -}}
+
+{{/*
 The tenant identity of the agents' Flux HelmReleases: the ServiceAccount name
 (kagent.fluxServiceAccountName) while the kagent component is on, "" otherwise.
 ONE value, three consumers: templates/kagent/flux-service-account.yaml renders
