@@ -250,9 +250,14 @@ platform needs:
 - **Network policies** (`templates/substrate/netpol.yaml`, both flavours):
   Substrate's hops and the actors' destinations on the egress gateway
   `atenet-egress`, where an actor's connections leave (muster, the kagent
-  controller, the LLM path, DNS); the worker pods reach only the egress
+  controller, the LLM path, DNS, the OTLP gateway `kagent.otel` names — the
+  pods of the endpoint's namespace on its port, the rule the controller's
+  egress policy shares through `agent-platform.kagent.otlpEgress`; without
+  it every turn ended 3 s late on the Go ADK's pre-response trace flush,
+  giantswarm/agent-platform#456); the worker pods reach only the egress
   gateway, the dns and the cluster DNS. The kubernetes flavour renders the
-  ingress policies. `make verify-kagent-netpol` asserts the render.
+  ingress policies. `make verify-kagent-netpol` asserts the render,
+  `make verify-actor-telemetry-egress` the OTLP rules.
 - **Guards** (`templates/substrate/validate.yaml`): a Substrate with no
   database, a `postgres.databases` entry whose name is not an identifier or is
   the initdb database's, the Substrate Secret not copied into `ate-system`.
@@ -940,7 +945,7 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"v1.5.1-gs.1"` |  |
+| agentgateway.proxy.image.tag | string | `"v1.5.1-gs.4"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1061,7 +1066,7 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.1.3"` |  |
+| agentManager.migration.image.tag | string | `"1.1.5"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |

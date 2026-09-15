@@ -552,6 +552,23 @@ run it.
 {{- end -}}
 
 {{/*
+Fail the render when a value of kagent.substrateWorkerPool.template.nodeSelector
+is not a string. The kagent chart forwards the template verbatim into
+WorkerPool.spec.template (toYaml), whose nodeSelector is map[string]string: a
+bare number — the CPU generation pin written `karpenter.k8s.aws/instance-generation: 6`
+instead of "6" — renders, passes this chart's open kagent schema and fails only
+when helm-controller applies the kagent release, on every installation that
+carries it (giantswarm/agent-platform#457). Named here, at the render, instead.
+*/}}
+{{- define "agent-platform.validateWorkerPool" -}}
+{{- range $key, $value := dig "substrateWorkerPool" "template" "nodeSelector" (dict) .Values.kagent -}}
+{{- if not (kindIs "string" $value) -}}
+{{- fail (printf "kagent.substrateWorkerPool.template.nodeSelector.%s is %v (%s), not a string: a nodeSelector value is a string (WorkerPool.spec.template.nodeSelector is map[string]string), so quote it — the CPU generation pin is karpenter.k8s.aws/instance-generation: \"6\"" $key $value (kindOf $value)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fail the render when a component's on/off toggle is still set the old way, inside
 the component's own values block. Those blocks are additionalProperties: true, so
 a leftover `enabled` key validates and is then ignored — the component silently
@@ -1062,6 +1079,14 @@ Two leaves have no `auto` form and are derived directly, off only:
       fleet's HelmRelease values are unchanged. An explicit value is kept.
   kagent.controller.env[name=OTEL_EXPORTER_OTLP_HEADERS] — the tenant header
       of the OTLP gateway; dropped when both kagent OTel exporters resolve off.
+  kagent.harness.env — the actors' copies: OTEL_EXPORTER_OTLP_HEADERS dropped
+      the same way, OTEL_LOGGING_ENABLED (the actors' log exporter) dropped
+      when kagent.otel.logging resolves off (agent-platform.shape.dropEnv).
+  klausGateway.observability.otlpEndpoint / .otlpHeaders — emptied when
+      klausGateway.observability.enabled (auto | true | false; auto follows the
+      monitors) resolves off, so the klaus-gateway release exports nothing; the
+      knob itself is dropped from that release by components.klaus-gateway
+      .omitKeys (the chart's observability block is closed).
 mcp-kubernetes' Cilium policy joins this list once mcp-kubernetes is a component.
 Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 */}}
@@ -1119,21 +1144,49 @@ connectivity release both read the resolved value. */ -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- /* kagent OTLP tenant header: gone when neither OTel exporter is on. */ -}}
+{{- /* kagent OTLP env: the tenant header on the controller and on the Harness
+(the actors) is gone when neither OTel exporter is on; the actors' log exporter
+(OTEL_LOGGING_ENABLED on the Harness) when the logging exporter is off. */ -}}
 {{- $kagent := index $v "kagent" | default dict -}}
 {{- if kindIs "map" $kagent -}}
-{{- $tracing := dig "otel" "tracing" "enabled" false $kagent -}}
-{{- $logging := dig "otel" "logging" "enabled" false $kagent -}}
-{{- $ctrl := index $kagent "controller" -}}
-{{- if and (not $tracing) (not $logging) (kindIs "map" $ctrl) (kindIs "slice" (index $ctrl "env")) -}}
+{{- $tracing := eq (toString (dig "otel" "tracing" "enabled" false $kagent)) "true" -}}
+{{- $logging := eq (toString (dig "otel" "logging" "enabled" false $kagent)) "true" -}}
+{{- $drop := list -}}
+{{- if and (not $tracing) (not $logging) -}}
+{{- $drop = append $drop "OTEL_EXPORTER_OTLP_HEADERS" -}}
+{{- end -}}
+{{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "controller") "names" $drop) -}}
+{{- if not $logging -}}
+{{- $drop = append $drop "OTEL_LOGGING_ENABLED" -}}
+{{- end -}}
+{{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "harness") "names" $drop) -}}
+{{- end -}}
+{{- /* klaus-gateway's trace export follows the same answer: the knob resolved
+from auto, and the endpoint and headers the klaus-gateway chart reads emptied
+when it is off (giantswarm/klaus-gateway#263). */ -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "klausGateway" "observability" "enabled") "value" $monitors) -}}
+{{- $kgObs := dig "observability" nil (index $v "klausGateway" | default dict) -}}
+{{- if and (kindIs "map" $kgObs) (hasKey $kgObs "enabled") (ne (toString (index $kgObs "enabled")) "true") -}}
+{{- $_ := set $kgObs "otlpEndpoint" "" -}}
+{{- $_ := set $kgObs "otlpHeaders" dict -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Drop the entries of .owner.env (a list of name/value maps — kagent.controller.env,
+kagent.harness.env) whose name is in .names, in place on the shaped values tree.
+A missing owner or env, or no names, changes nothing. Emits nothing.
+*/}}
+{{- define "agent-platform.shape.dropEnv" -}}
+{{- $owner := .owner -}}
+{{- if and .names (kindIs "map" $owner) (kindIs "slice" (index $owner "env")) -}}
 {{- $env := list -}}
-{{- range (index $ctrl "env") -}}
-{{- if not (and (kindIs "map" .) (eq (toString (index . "name")) "OTEL_EXPORTER_OTLP_HEADERS")) -}}
+{{- range (index $owner "env") -}}
+{{- if not (and (kindIs "map" .) (has (toString (index . "name")) $.names)) -}}
 {{- $env = append $env . -}}
 {{- end -}}
 {{- end -}}
-{{- $_ := set $ctrl "env" $env -}}
-{{- end -}}
+{{- $_ := set $owner "env" $env -}}
 {{- end -}}
 {{- end -}}
 
@@ -1494,11 +1547,23 @@ the controller applies. Build metadata (helm-controller renders the chart as
 {{- with .Values.gitops.self.versionRange -}}
 {{- . -}}
 {{- else -}}
-{{- $v := semver .Chart.Version -}}
-{{- $floor := printf "%d.%d.%d" $v.Major $v.Minor $v.Patch -}}
-{{- with $v.Prerelease }}{{ $floor = printf "%s-%s" $floor . }}{{ end -}}
-{{- printf ">=%s <%d.0.0" $floor (add1 $v.Major) -}}
+{{- printf ">=%s <%d.0.0" (include "agent-platform.chartVersion" .) (add1 (semver .Chart.Version).Major) -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+This chart's own version as its releases are published: <major>.<minor>.<patch>
+with a pre-release kept (a dev build is X.Y.Z-dev.<branch>.<date>.h<sha>, one
+version for the two charts of a commit) and build metadata dropped
+(helm-controller renders the chart as <version>+<oci digest>). The floor of
+the self range above, and the exact version of every component released off
+the same tag as this chart (components.<name>.releasedWithChart).
+*/}}
+{{- define "agent-platform.chartVersion" -}}
+{{- $v := semver .Chart.Version -}}
+{{- $out := printf "%d.%d.%d" $v.Major $v.Minor $v.Patch -}}
+{{- with $v.Prerelease }}{{ $out = printf "%s-%s" $out . }}{{ end -}}
+{{- $out -}}
 {{- end -}}
 
 {{/*

@@ -22,14 +22,18 @@
 # them; the line's releases are prereleases by scheme, vX.Y.Z-gs.N, so the pin
 # carries the suffix).
 # agent-manager and backstage pin the first releases of their kagent API v2
-# lines; the connectivity chart the release of this chart is published with —
-# it moves with this chart: a connectivity pin behind 4.7.19 renders a second
-# owner of the platform Harness next to the kagent release (UPGRADE.md
-# "4.7.x → 4.8.0").
+# lines. agent-platform-connectivity is NOT pinned here and must not be: it is
+# released off the same tag as the meta chart and follows the meta chart's own
+# version (components.agent-platform-connectivity.releasedWithChart) — a pin
+# here lags the moment the meta chart moves, and a lagging connectivity
+# refuses the keys the meta chart forwards on every installation (#431, #441,
+# #339; UPGRADE.md "4.7.x → 4.8.0" for the Harness it renders twice). The
+# render refuses such a pin.
 # substrate and substrate-crds pin the SAME release of the Substrate line
 # (vX.Y.Z-gs.N like kagent's; the floor of components.substrate.versionRange —
-# 0.0.27-gs.9 is the worker image the kagent chart stamps from 0.11.0-gs.12:
-# its terminate collects a crashed golden actor, giantswarm/giantswarm#37773).
+# 0.0.30-gs.1 is the worker image the kagent chart stamps from 0.11.0-gs.16:
+# upstream Substrate v0.0.29, whose router kagent main addresses actors on
+# since kagent-dev/kagent#2802 — the two move together).
 # =============================================================================
 
 gitops:
@@ -41,17 +45,16 @@ components:
   agentgateway:                  { versionRange: "2.0.7" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "0.11.0-gs.12" }
-  kagent-crds:                   { versionRange: "0.11.0-gs.12" }
-  substrate:                     { versionRange: "0.0.27-gs.9" }
-  substrate-crds:                { versionRange: "0.0.27-gs.9" }
-  klaus-gateway:                 { versionRange: "1.1.0" }
+  kagent:                        { versionRange: "0.11.0-gs.16" }
+  kagent-crds:                   { versionRange: "0.11.0-gs.16" }
+  substrate:                     { versionRange: "0.0.30-gs.1" }
+  substrate-crds:                { versionRange: "0.0.30-gs.1" }
+  klaus-gateway:                 { versionRange: "1.10.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.20.0" }
   agent-manager:                 { versionRange: "1.0.0" }
   vm-manager:                    { versionRange: "0.20.2" }
-  agent-platform-connectivity: { versionRange: "4.11.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the three kserve charts and the two

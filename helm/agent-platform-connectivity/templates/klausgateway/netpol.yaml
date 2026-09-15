@@ -245,3 +245,70 @@ spec:
           protocol: TCP
 {{- end }}
 {{- end }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.networkPolicy.enabled }}
+{{- $otlpEndpoint := dig "observability" "otlpEndpoint" "" (.Values.klausGateway | default dict) | toString | trim }}
+{{- if $otlpEndpoint }}
+{{- $otlp := include "agent-platform.otlpTarget" (dict "endpoint" $otlpEndpoint "protocol" "grpc") | fromJson }}
+{{- $fullname := .Values.klausGateway.fullnameOverride | default "klaus-gateway" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# Egress from klaus-gateway to the OTLP gateway its traces go to
+# (klausGateway.observability.otlpEndpoint; giantswarm/klaus-gateway#263): every
+# channel turn is one trace whose root the gateway exports, the kagent
+# controller's SendStreamingMessage and the actor's spans continue it. The pod
+# runs in Cilium default-deny egress (the a2a policy above), so without this
+# rule the batched export is dropped and the gateway's spans never reach Tempo.
+# Same destination rule as the kagent controller's and the actors'
+# (agent-platform.otlpEgressRule): the pods of the endpoint's namespace on its
+# port, or the cluster entity for a host that is not an in-cluster Service.
+# Renders exactly while an endpoint is set; the meta chart empties it when
+# klausGateway.observability.enabled resolves off.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-otlp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $fullname | quote }}
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- include "agent-platform.otlpEgressRule" (dict "target" $otlp "who" "klaus-gateway's traces go to") | nindent 4 }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-otlp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $fullname | quote }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- if $otlp.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $otlp.namespace }}
+        {{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        {{- end }}
+      ports:
+        - port: {{ $otlp.port | int }}
+          protocol: TCP
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

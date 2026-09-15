@@ -55,13 +55,25 @@ or `tolerations`.
   as the provider's node labels allow: the architecture (`kubernetes.io/arch:
   amd64` by default; an arm64 installation sets `arm64`), and on CAPA — where
   Karpenter consolidation may replace a node with another vendor's at any time —
-  the vendor, `karpenter.k8s.aws/instance-cpu-manufacturer: amd` (the fleet
-  template carries it), or the family (`karpenter.k8s.aws/instance-family`)
-  where a generation change must be ruled out too; on CAPZ and the other
-  providers the node pool (`giantswarm.io/machine-pool`) or
-  `node.kubernetes.io/instance-type`. Recognise a mixed pool by `kubectl get
-  nodes -L <the label>` showing two values under it
-  (giantswarm/agent-platform#429).
+  the vendor, `karpenter.k8s.aws/instance-cpu-manufacturer: amd`, and the CPU
+  generation, `karpenter.k8s.aws/instance-generation: "6"` (quoted — a label
+  value is a string, and the render refuses a bare number), both rendered by
+  the fleet template from the installation's values: a snapshot taken on a
+  newer generation of one vendor does not restore on an older one either
+  (gazelle, 2026-09-14: goldens from `m7a` workers, generation 7, failed on
+  `c5ad`, generation 5, `missing features: … avx512f …`;
+  giantswarm/agent-platform#457). Pin a generation that is one CPU model
+  across its families (for AMD on AWS 6, `c6a`/`m6a`/`r6a`, or 7,
+  `c7a`/`m7a`/`r7a`; 5 mixes Naples `m5a`/`r5a` with Rome `c5a`/`c5ad`) and
+  one the goldens restore on — an older generation's golden restores on a
+  newer one, never the reverse — and check the spot pool it leaves (the
+  generation's families × the NodePool's sizes; three families is the floor).
+  The family (`karpenter.k8s.aws/instance-family`) narrows to one type where
+  even that matters; on CAPZ and the other providers the node pool
+  (`giantswarm.io/machine-pool`) or `node.kubernetes.io/instance-type` pins
+  it. Recognise a mixed pool by `kubectl get nodes -L <the label>` showing two
+  values under it (giantswarm/agent-platform#429, #457). `make
+  verify-workerpool` asserts the pin reaches the WorkerPool as written.
 
 `kagent.substrateWorkerPool.template` also accepts `tolerations`, `nodeAffinity`
 and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
@@ -135,6 +147,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.versionRange | string | `">=5.12.0 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
+| components.muster.driftDetection.mode | string | `"enabled"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agentgateway.versionRange | string | `"2.x"` |  |
@@ -157,7 +170,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=0.11.0-gs.12 <0.11.1-0"` |  |
+| components.kagent.versionRange | string | `">=0.11.0-gs.16 <0.11.1-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -178,18 +191,18 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://ghcr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=0.11.0-gs.12 <0.11.1-0"` |  |
+| components.kagent-crds.versionRange | string | `">=0.11.0-gs.16 <0.11.1-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.27-gs.9 <0.0.28-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.27-gs.9 <0.0.28-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -202,8 +215,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.klaus-gateway.versionRange | string | `"1.x"` |  |
+| components.klaus-gateway.versionRange | string | `">=1.10.0 <2.0.0"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
+| components.klaus-gateway.omitKeys[0] | string | `"observability.enabled"` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.chart | string | `"agent-sandbox"` |  |
 | components.agent-sandbox.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
@@ -295,7 +309,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.dicebear.injectGlobal | bool | `false` |  |
 | components.agent-platform-connectivity.chart | string | `"agent-platform-connectivity"` |  |
 | components.agent-platform-connectivity.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-connectivity.versionRange | string | `">=4.0.0 <5.0.0"` |  |
+| components.agent-platform-connectivity.releasedWithChart | bool | `true` |  |
+| components.agent-platform-connectivity.versionRange | string | `""` |  |
 | components.agent-platform-connectivity.forwardAllValues | bool | `true` |  |
 | components.agent-platform-connectivity.disableWaitForJobs | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
@@ -570,6 +585,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
+| kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
+| kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
 | kagent.serviceMonitor.enabled | bool | `false` |  |
 | kagent.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
@@ -672,6 +689,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
 | kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
 | kagent.harness.env[0].value | string | `"true"` |  |
+| kagent.harness.env[1].name | string | `"OTEL_LOGGING_ENABLED"` |  |
+| kagent.harness.env[1].value | string | `"true"` |  |
+| kagent.harness.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.harness.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
+| kagent.harness.env[3].name | string | `"KAGENT_TRACE_FLUSH_TIMEOUT_MS"` |  |
+| kagent.harness.env[3].value | string | `"500"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."kagent.dev/harness" | string | `""` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
@@ -797,7 +820,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.lifecycle.driver | string | `"static"` |  |
 | klausGateway.lifecycle.staticInstances | string | `""` |  |
 | klausGateway.upstream.agentgatewayURL | string | `""` |  |
-| klausGateway.observability.otlpEndpoint | string | `""` |  |
+| klausGateway.observability.enabled | string | `"auto"` |  |
+| klausGateway.observability.otlpEndpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| klausGateway.observability.otlpHeaders.X-Scope-OrgID | string | `"giantswarm"` |  |
 | klausGateway.slack.enabled | bool | `false` |  |
 | klausGateway.slack.mode | string | `"events"` |  |
 | klausGateway.slack.secretName | string | `""` |  |
@@ -953,7 +978,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.1.3"` |  |
+| agentManager.migration.image.tag | string | `"1.1.5"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |

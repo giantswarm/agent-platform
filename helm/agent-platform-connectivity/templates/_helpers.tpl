@@ -685,6 +685,20 @@ Emits nothing for every other provider (empty string = falsy).
 {{- end -}}
 
 {{/*
+Key of the ModelConfigSpec provider block that carries promptCaching and
+cacheTTL, for a spec.provider value in any case: Anthropic (anthropic) and
+Bedrock (bedrock), the two providers whose adapters mark cache_control
+breakpoints (kagent line 0.11.0-gs.15+, kagent-dev/kagent#2788). Emits nothing
+for every other provider (empty string = falsy): the API server would prune the
+fields at admission and the model would stay uncached in silence, so the
+template refuses them instead.
+*/}}
+{{- define "agent-platform.modelConfigCacheKey" -}}
+{{- $keys := dict "anthropic" "anthropic" "bedrock" "bedrock" -}}
+{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the model-price ConfigMap — defaults to <release>-model-catalog.
 */}}
 {{- define "agent-platform.modelCatalogName" -}}
@@ -1750,5 +1764,132 @@ Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list 
     - {{ . }}
     - autogen-{{ . }}
   {{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+kagent.otel.<signal>.enabled resolved to "true" or "false" — .signal is
+"tracing" or "logging". `auto` (the chart default) follows the resolved
+global.observability.metrics.serviceMonitor.enabled, the rule the meta chart
+applies before forwarding (the OTLP gateway the exporters send to is part of
+the observability platform whose monitoring.coreos.com/v1 CRDs that knob
+detects); an explicit true / false wins.
+Usage: include "agent-platform.kagent.otelSignal" (dict "root" $ "signal" "tracing")
+*/}}
+{{- define "agent-platform.kagent.otelSignal" -}}
+{{- $v := dig "otel" .signal "enabled" "auto" (.root.Values.kagent | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.serviceMonitor" .root -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" .root "key" (printf "kagent.otel.%s.enabled" .signal) "value" $v "api" "monitoring.coreos.com/v1") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+One OTLP destination for a network policy, from an exporter endpoint read
+the way the SDKs read it: a JSON {endpoint, namespace, port}. A port left
+out is the OTLP default, 4317, or 4318 for the http/protobuf protocol and
+443 for an https URL. An endpoint at an in-cluster Service address
+(<service>.<namespace>.svc[.cluster.local]) yields its namespace, whose
+pods the rule selects; any other host yields an empty namespace and the
+rule falls back to the cluster entity on that port. Shared by kagent's
+exporters (agent-platform.kagent.otlpTargets) and klaus-gateway's
+(templates/klausgateway/netpol.yaml).
+Usage: include "agent-platform.otlpTarget" (dict "endpoint" $e "protocol" $p) | fromJson
+*/}}
+{{- define "agent-platform.otlpTarget" -}}
+{{- $endpoint := .endpoint | toString | trim -}}
+{{- $protocol := .protocol | default "grpc" | toString | lower -}}
+{{- $scheme := "" -}}
+{{- $rest := $endpoint -}}
+{{- if contains "://" $endpoint -}}
+{{- $parts := splitList "://" $endpoint -}}
+{{- $scheme = first $parts | lower -}}
+{{- $rest = rest $parts | join "://" -}}
+{{- end -}}
+{{- $hostport := splitList "/" $rest | first -}}
+{{- $host := $hostport -}}
+{{- $port := "" -}}
+{{- if regexMatch ":[0-9]+$" $hostport -}}
+{{- $host = regexReplaceAll ":[0-9]+$" $hostport "" -}}
+{{- $port = regexFind "[0-9]+$" $hostport -}}
+{{- end -}}
+{{- if not $port -}}
+{{- if eq $scheme "https" -}}{{- $port = "443" -}}
+{{- else if eq $protocol "http/protobuf" -}}{{- $port = "4318" -}}
+{{- else -}}{{- $port = "4317" -}}
+{{- end -}}
+{{- end -}}
+{{- $ns := "" -}}
+{{- if regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.svc(\\.cluster\\.local)?\\.?$" $host -}}
+{{- $ns = index (splitList "." $host) 1 -}}
+{{- end -}}
+{{- dict "endpoint" $endpoint "namespace" $ns "port" $port | toJson -}}
+{{- end -}}
+
+{{/*
+One cilium egress rule to an OTLP destination (agent-platform.otlpTarget):
+the pods of the Service's namespace on the endpoint's port, or the cluster
+entity on that port for an endpoint that is not an in-cluster Service
+address. .who names the sender in the rule's comment. Rendered as a YAML
+list item; include with nindent under `egress:`.
+*/}}
+{{- define "agent-platform.otlpEgressRule" -}}
+# The OTLP gateway {{ .who }} ({{ .target.endpoint }}).
+{{- if .target.namespace }}
+- toEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.namespace: {{ .target.namespace }}
+{{- else }}
+- toEntities:
+    - cluster
+{{- end }}
+  toPorts:
+    - ports:
+        - port: {{ .target.port | quote }}
+          protocol: TCP
+{{- end -}}
+
+{{/*
+The OTLP gateways kagent's exporters send to, for a network policy: a JSON
+list of {endpoint, namespace, port} (agent-platform.otlpTarget), one per
+distinct destination of the signals that are on (kagent.otel.tracing /
+.logging: exporter.otlp.endpoint). Empty when both signals are off: no
+export, no rule.
+Usage: include "agent-platform.kagent.otlpTargets" . | fromJsonArray
+*/}}
+{{- define "agent-platform.kagent.otlpTargets" -}}
+{{- $targets := list -}}
+{{- $seen := dict -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $protocol := dig "otel" "tracing" "exporter" "otlp" "protocol" "grpc" $kagent | toString | lower -}}
+{{- range $signal := list "tracing" "logging" -}}
+{{- if eq (include "agent-platform.kagent.otelSignal" (dict "root" $ "signal" $signal)) "true" -}}
+{{- $endpoint := dig "otel" $signal "exporter" "otlp" "endpoint" "" $kagent | toString | trim -}}
+{{- if $endpoint -}}
+{{- $t := include "agent-platform.otlpTarget" (dict "endpoint" $endpoint "protocol" $protocol) | fromJson -}}
+{{- $key := printf "%s:%s" $t.namespace $t.port -}}
+{{- if not (hasKey $seen $key) -}}
+{{- $_ := set $seen $key true -}}
+{{- $targets = append $targets $t -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $targets | toJson -}}
+{{- end -}}
+
+{{/*
+The cilium egress rules to the OTLP gateways kagent's exporters send to
+(agent-platform.kagent.otlpTargets), one per destination
+(agent-platform.otlpEgressRule). Nothing when both signals are off (an empty
+string, so `with` gates a caller's comment). Include with nindent under
+`egress:`.
+*/}}
+{{- define "agent-platform.kagent.otlpEgress" -}}
+{{- range $i, $t := include "agent-platform.kagent.otlpTargets" . | fromJsonArray -}}
+{{- if $i }}
+{{ end -}}
+{{- include "agent-platform.otlpEgressRule" (dict "target" $t "who" "kagent's exporters send to") -}}
 {{- end }}
 {{- end -}}

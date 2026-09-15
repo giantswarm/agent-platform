@@ -30,4 +30,21 @@
   // already produces those updates, so a second manager opens a duplicate PR
   // per bump under a different dependency name (alpine/k8s next to
   // docker.io/alpine/k8s) and cannot resolve registry.k8s.io/kubectl at all.
+  //
+  // The one line the built-in managers cannot see is charts/flux-engine/
+  // Chart.yaml's appVersion, which verify-engine holds equal to the operator
+  // image tag: without the manager below every operator bump fails CI until a
+  // hand commit moves it (agent-platform#392). The manager names the same
+  // dependency as the helm-values update, so both land on one Renovate branch.
+  customManagers: [
+    {
+      customType: 'regex',
+      description: 'charts/flux-engine/Chart.yaml appVersion follows the Flux Operator image tag',
+      managerFilePatterns: ['/^helm/agent-platform/charts/flux-engine/Chart\\.yaml$/'],
+      matchStrings: ['appVersion: "(?<currentValue>v\\d+\\.\\d+\\.\\d+)"'],
+      depNameTemplate: 'ghcr.io/controlplaneio-fluxcd/flux-operator',
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'docker',
+    },
+  ],
 }

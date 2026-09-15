@@ -1448,6 +1448,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # ModelConfigSpec, under the CRD's block key (anthropic, openAI,
   #   # sapAICore); the render fails for a baseUrl on any other provider.
   #   baseUrl: http://agentgateway.<release namespace>.svc:8081
+  #   # Optional (Anthropic and Bedrock; kagent line 0.11.0-gs.15+). An
+  #   # Anthropic entry that sets neither inherits the platform's default from
+  #   # kagent.providers.anthropic.config (the meta chart turns promptCaching
+  #   # on there); an entry's own values win, `false` included. Any other
+  #   # provider refuses the keys: ModelConfigSpec has none for it.
+  #   promptCaching: true
+  #   cacheTTL: "5m"   # or "1h"
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
@@ -1873,11 +1880,14 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway
       # A release of the Giant Swarm line of agentgateway
-      # (github.com/giantswarm/agentgateway-upstream, FORK.md: upstream v1.5.0
-      # rebuilt, scanned and signed there, mirrored into gsoci by the retagger)
-      # — the same release the giantswarm/agentgateway packaging chart pins for
-      # the controller; move both together.
-      tag: v1.5.1-gs.1
+      # (github.com/giantswarm/agentgateway-upstream, FORK.md: upstream main at
+      # the line's pin — since v1.5.1-gs.4 a main commit past v1.5.0, the
+      # substrate protocol the Substrate line's v0.0.29 router speaks — rebuilt,
+      # scanned and signed there, mirrored into gsoci by the retagger) — the
+      # same release the giantswarm/agentgateway packaging chart pins for the
+      # controller and the Substrate line's chart for its router; move all
+      # three together.
+      tag: v1.5.1-gs.4
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -2398,7 +2408,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.1.3
+      tag: 1.1.5
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false

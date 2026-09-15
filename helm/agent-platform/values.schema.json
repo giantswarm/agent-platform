@@ -118,6 +118,9 @@
                                 "type": "string"
                             }
                         },
+                        "releasedWithChart": {
+                            "type": "boolean"
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -374,6 +377,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -553,6 +562,15 @@
                         },
                         "crds": {
                             "type": "string"
+                        },
+                        "driftDetection": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "mode": {
+                                    "type": "string"
+                                }
+                            }
                         },
                         "repository": {
                             "type": "string"

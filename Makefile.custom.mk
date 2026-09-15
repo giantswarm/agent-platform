@@ -391,10 +391,6 @@ verify-login-connector: ## Assert gitops.forbidPinnedLoginConnector: off by defa
 # the engine's own objects (operator, FluxInstance, identities, hooks, CRDs)
 # are asserted by verify-engine in both shapes.
 ENGINE_OFF := --set components.flux.enabled=false
-# Every component the customer BOM pins, turned on: tests/verify-bom-charts.py
-# renders each pinned chart against the values its HelmRelease carries, and a
-# component left off renders neither, so it would drop out of the check unseen.
-BOM_ALL_COMPONENTS := $(shell sed -n 's/^  \([a-z0-9][a-z0-9-]*\): *{ versionRange: "[0-9][0-9.]*[^"]*".*/--set components.\1.enabled=true/p' helm/agent-platform/examples/customer-bom.yaml)
 .PHONY: verify-meta
 verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with the engine off, ranges as values, Flux the only engine, pinned BOM).
 	@echo "====> $@ ($(CHART_DIR))"
@@ -476,9 +472,6 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@grep -q 'semver: "5.12.0"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to 5.12.0"; exit 1; }
 	@if grep -qE 'semver: "[0-9]+\.x"' /tmp/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
-	@echo "--> every chart the BOM pins accepts the values the meta chart forwards to it"
-	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml $(ENGINE_OFF) $(BOM_ALL_COMPONENTS) >/tmp/ap-bom-all.out 2>&1 || { cat /tmp/ap-bom-all.out; exit 1; }
-	@python3 tests/verify-bom-charts.py /tmp/ap-bom-all.out $(CHART_DIR)/examples/customer-bom.yaml
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set gitops.namespace=flux-giantswarm --set gitops.targetNamespace=agent-platform >/tmp/ap-ns.out 2>&1 || { cat /tmp/ap-ns.out; exit 1; }
 	@python3 -c 'import re,sys; docs=open("/tmp/ap-ns.out").read().split("\n---\n"); bad=[(re.search(r"^kind: (\S+)$$", d, re.M).group(1), re.search(r"^  namespace: (\S+)$$", d, re.M).group(1)) for d in docs if re.search(r"^kind: (OCIRepository|HelmRelease)$$", d, re.M) and re.search(r"^  namespace: (\S+)$$", d, re.M) and re.search(r"^  namespace: (\S+)$$", d, re.M).group(1) != "flux-giantswarm"]; sys.exit("FAIL: a rendered CR is not in the gitops.namespace: " + str(bad)) if bad else print("ok: all CRs in flux-giantswarm (the hook Jobs stay in the release namespace, where Helm runs them)")'
@@ -653,6 +646,50 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@echo "ok: cutover forwarded"
 	@echo "All llmRouting behaviors verified."
 
+# Anthropic prompt caching (giantswarm/giantswarm#37788; kagent line 0.11.0-gs.15+).
+.PHONY: verify-prompt-caching
+verify-prompt-caching: ## Assert Anthropic prompt caching: the meta chart forwards kagent.providers.anthropic.config.promptCaching: true + cacheTTL to the kagent release (the default ModelConfig) and to the connectivity release; the connectivity chart's Anthropic catalog entries inherit both in the one provider block next to the listener baseUrl, an entry's own keys win (false included), an OpenAI entry gets nothing, a Bedrock entry takes its own keys under spec.bedrock, the chart alone renders nothing; a cacheTTL outside the CRD's enum and the keys on a provider without them fail the render naming the entry.
+	@echo "====> $@"
+	@echo "--> the meta chart forwards promptCaching + cacheTTL to the kagent release and to the connectivity release"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/vpc-meta.out 2>&1 || { cat /tmp/vpc-meta.out; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' /tmp/vpc-meta.out >/tmp/vpc-meta-kagent.out
+	@grep -A14 '^    providers:$$' /tmp/vpc-meta-kagent.out | grep -q 'promptCaching: true' || { echo "FAIL: the kagent HelmRelease values carry no providers.anthropic.config.promptCaching: true; the default ModelConfig would stay uncached"; exit 1; }
+	@grep -A14 '^    providers:$$' /tmp/vpc-meta-kagent.out | grep -q 'cacheTTL: 5m' || { echo "FAIL: the kagent HelmRelease values carry no providers.anthropic.config.cacheTTL"; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vpc-meta.out >/tmp/vpc-meta-conn.out
+	@grep -q 'promptCaching: true' /tmp/vpc-meta-conn.out || { echo "FAIL: the connectivity HelmRelease values carry no providers.anthropic.config.promptCaching; the catalog's Anthropic entries would inherit nothing"; exit 1; }
+	@echo "ok: forwarded to both releases"
+	@echo "--> connectivity: an Anthropic entry inherits the platform default in one block next to the listener baseUrl; an OpenAI entry gets nothing"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >/tmp/vpc-ci.out 2>&1 || { cat /tmp/vpc-ci.out; exit 1; }
+	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vpc-ci.out >/tmp/vpc-sonnet.out
+	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' /tmp/vpc-sonnet.out && grep -q '^    promptCaching: true$$' /tmp/vpc-sonnet.out && grep -q '^    cacheTTL: 5m$$' /tmp/vpc-sonnet.out || { cat /tmp/vpc-sonnet.out; echo "FAIL: an Anthropic entry without its own keys did not inherit promptCaching: true / cacheTTL: 5m under spec.anthropic next to the listener baseUrl"; exit 1; }
+	@if [ "$$(grep -c '^  anthropic:$$' /tmp/vpc-sonnet.out)" != "1" ]; then cat /tmp/vpc-sonnet.out; echo "FAIL: the anthropic block renders more than once (baseUrl and the cache keys share one block; a second would overwrite the first)"; exit 1; fi
+	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' /tmp/vpc-ci.out >/tmp/vpc-openai.out
+	@if grep -qE 'promptCaching|cacheTTL' /tmp/vpc-openai.out; then cat /tmp/vpc-openai.out; echo "FAIL: an OpenAI entry carries the Anthropic cache keys; the API server would prune them"; exit 1; fi
+	@echo "ok: inherited by Anthropic entries only"
+	@echo "--> an entry's own keys win, false included"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].promptCaching=false' --set 'kagent.modelConfigs[1].cacheTTL=1h' >/tmp/vpc-own.out 2>&1 || { cat /tmp/vpc-own.out; exit 1; }
+	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' /tmp/vpc-own.out >/tmp/vpc-opus.out
+	@grep -q '^    promptCaching: false$$' /tmp/vpc-opus.out && grep -q '^    cacheTTL: 1h$$' /tmp/vpc-opus.out || { cat /tmp/vpc-opus.out; echo "FAIL: an entry's own promptCaching: false / cacheTTL: 1h did not win over the platform default"; exit 1; }
+	@echo "ok: own keys win"
+	@echo "--> the connectivity chart alone (no platform default): nothing renders"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"plain","provider":"Anthropic","model":"m","apiKeySecret":"s","apiKeySecretKey":"k"}]' >/tmp/vpc-plain.out 2>&1 || { cat /tmp/vpc-plain.out; exit 1; }
+	@if grep -qE 'promptCaching|cacheTTL' /tmp/vpc-plain.out; then cat /tmp/vpc-plain.out; echo "FAIL: the connectivity chart invents a caching default of its own; the meta chart owns it"; exit 1; fi
+	@echo "ok: nothing by default"
+	@echo "--> a Bedrock entry takes its own keys under spec.bedrock (no baseUrl there)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"bedrock","provider":"Bedrock","model":"m","apiKeySecret":"s","promptCaching":true,"cacheTTL":"1h"}]' >/tmp/vpc-bedrock.out 2>&1 || { cat /tmp/vpc-bedrock.out; exit 1; }
+	@grep -A2 '^  bedrock:$$' /tmp/vpc-bedrock.out | grep -q 'promptCaching: true' || { cat /tmp/vpc-bedrock.out; echo "FAIL: a Bedrock entry's promptCaching is not under spec.bedrock"; exit 1; }
+	@echo "ok: bedrock block"
+	@echo "--> guards: a cacheTTL outside the CRD's enum, and the keys on a provider without them, fail naming the entry"
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].cacheTTL=10m' >/tmp/vpc-ttl.out 2>&1; then \
+		echo "FAIL: cacheTTL 10m rendered; the CRD's enum is 5m, 1h and the API server refuses it after the render said nothing"; exit 1; \
+	elif ! grep -q 'anthropic-sonnet' /tmp/vpc-ttl.out || ! grep -q '5m, 1h' /tmp/vpc-ttl.out; then cat /tmp/vpc-ttl.out; echo "FAIL: the cacheTTL guard does not name the entry and the enum"; exit 1; \
+	else echo "ok: cacheTTL guard"; fi
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[2].promptCaching=true' >/tmp/vpc-foreign.out 2>&1; then \
+		echo "FAIL: promptCaching on an OpenAI entry rendered; the API server would prune it and the model would stay uncached in silence"; exit 1; \
+	elif ! grep -q 'openai-gpt-direct' /tmp/vpc-foreign.out; then cat /tmp/vpc-foreign.out; echo "FAIL: the provider guard does not name the entry"; exit 1; \
+	else echo "ok: provider guard"; fi
+	@echo "All prompt-caching behaviors verified."
+
 .PHONY: verify-engine
 verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
@@ -688,7 +725,7 @@ verify-components: ## Assert the roster: the standalone chart's extras (backstag
 	@echo "component roster verified."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Pull the component charts the meta chart composes values for — the seven extras, the two managers (closed schemas: a forwarded key they do not declare fails the release), the kagent line's kagent + kagent-crds — at the range's resolution and at the BOM pin, resolved the way Flux does, and render each with the values the meta chart forwards to it (the managers' pods carry the pinned --kagent-api-version). Network: gsoci.azurecr.io, ghcr.io.
+verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, resolved the way Flux does; a chart released with the meta chart (releasedWithChart) from the working tree. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. Network: gsoci.azurecr.io, ghcr.io.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
@@ -1180,6 +1217,13 @@ verify-kagent-harness: ## Assert the platform Harness is the kagent chart's sinc
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR) $(CHART_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-workerpool
+verify-workerpool: ## Assert the Substrate WorkerPool's placement pin (giantswarm/agent-platform#457): the meta chart forwards kagent.substrateWorkerPool.template.nodeSelector to the kagent release verbatim — the architecture alone by default, an installation's vendor + CPU generation pin (karpenter.k8s.aws/instance-cpu-manufacturer, karpenter.k8s.aws/instance-generation) as set, every value a string — and the kagent chart the range resolves to renders it unchanged into the one WorkerPool's spec.template.nodeSelector; a nodeSelector value that is not a string (an unquoted generation, which the apiserver refuses only on apply) fails the render naming the key. Network: ghcr.io; needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-workerpool.py $(CHART_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-managers
@@ -2609,7 +2653,61 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 # an agentgateway-* mode; the store knobs are the klaus-gateway chart's, forwarded
 # by the meta chart, so the connectivity chart reads them at their defaults here.
 KG_NETPOL := $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set ingress.mode=agentgateway-muster --set klausGateway.a2a.enabled=true --set klausGateway.obo.enabled=true
+KG_OTLP_POLICY := agent-platform-connectivity-klausgateway-otlp-egress
 KG_STORE_POLICY := agent-platform-connectivity-klausgateway-store-egress
+
+.PHONY: verify-actor-telemetry-egress
+# The actors' and the controller's OTLP egress (giantswarm/agent-platform#456):
+# the on-state of verify-kagent-netpol (Substrate, cilium) with the monitoring
+# API served, so kagent.otel.*.enabled auto resolves on; the kagent chart's
+# default endpoint for both signals.
+ATE_OTLP := $(KAGENT_NETPOL)
+ATE_EGRESS := substrate-atenet-egress
+CTRL_EGRESS := agent-platform-connectivity-kagent-controller-egress
+verify-actor-telemetry-egress: ## Assert the OTLP egress of the actors (Substrate's egress gateway) and of the kagent controller (giantswarm/agent-platform#456): one rule per distinct destination of the kagent.otel signals that are on, selecting the pods of the endpoint's namespace (<svc>.<ns>.svc[.cluster.local]) on the endpoint's port — the kube-system OTLP gateway on 4317 by default, once for both signals; a second endpoint a second rule; an endpoint that is not a Service address the cluster entity on its port (443 for https without a port); nothing with both signals off, nothing when auto resolves off (no monitoring API), nothing with Substrate off for the actors; the worker pods keep only the egress gateway; the kubernetes flavour renders no egress policy (its egress is open).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> default: the kube-system gateway on 4317, one rule on the egress gateway and one on the controller"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) >/tmp/vate-default.out 2>&1 || { cat /tmp/vate-default.out; exit 1; }
+	@for pol in $(ATE_EGRESS) $(CTRL_EGRESS); do \
+		$(PICK) /tmp/vate-default.out CiliumNetworkPolicy $$pol >/tmp/vate-default-$$pol.out || { echo "FAIL: no CiliumNetworkPolicy $$pol"; exit 1; }; \
+		[ "$$(grep -c 'exporters send to (' /tmp/vate-default-$$pol.out)" = "1" ] || { echo "FAIL: $$pol does not carry exactly one OTLP rule (tracing and logging share the endpoint: one rule)"; grep -n 'exporters send to (' /tmp/vate-default-$$pol.out; exit 1; }; \
+		grep -A7 'exporters send to (' /tmp/vate-default-$$pol.out | grep -q 'io.kubernetes.pod.namespace: kube-system$$' || { echo "FAIL: $$pol: the OTLP rule does not select the kube-system pods (the DNS rules aside)"; grep -A7 'exporters send to (' /tmp/vate-default-$$pol.out; exit 1; }; \
+		grep -A7 'exporters send to (' /tmp/vate-default-$$pol.out | grep -q 'port: "4317"' || { echo "FAIL: $$pol: the OTLP rule is not on 4317"; exit 1; }; \
+		if grep -B1 -A4 -- '- cluster$$' /tmp/vate-default-$$pol.out | grep -q 'port: "4317"'; then echo "FAIL: $$pol still opens 4317 on the cluster entity next to the namespace rule"; exit 1; fi; \
+		echo "ok: $$pol -> kube-system:4317"; \
+	done
+	@grep -q "agent-platform#456" /tmp/vate-default-$(ATE_EGRESS).out || { echo "FAIL: the egress gateway's rule carries no explanation (the comment gated with the rule)"; exit 1; }
+	@$(PICK) /tmp/vate-default.out CiliumNetworkPolicy substrate-workers >/tmp/vate-default-workers.out || { echo "FAIL: no substrate-workers policy"; exit 1; }
+	@if grep -q '4317\|OTLP' /tmp/vate-default-workers.out; then echo "FAIL: the worker pods gained an OTLP rule; the actors' export leaves through the egress gateway"; exit 1; fi
+	@echo "--> a second endpoint (logs on an http/protobuf collector elsewhere) is a second rule; tracing on a plain host is the cluster entity on 443"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.logging.exporter.otlp.endpoint=http://collector.observability.svc.cluster.local:4318 --set kagent.otel.tracing.exporter.otlp.endpoint=https://otlp.example.com >/tmp/vate-split.out 2>&1 || { cat /tmp/vate-split.out; exit 1; }
+	@$(PICK) /tmp/vate-split.out CiliumNetworkPolicy $(ATE_EGRESS) >/tmp/vate-split-egress.out
+	@[ "$$(grep -c 'exporters send to (' /tmp/vate-split-egress.out)" = "2" ] || { echo "FAIL: two distinct endpoints are not two rules"; grep -n 'exporters send to (' /tmp/vate-split-egress.out; exit 1; }
+	@grep -A5 'io.kubernetes.pod.namespace: observability$$' /tmp/vate-split-egress.out | grep -q 'port: "4318"' || { echo "FAIL: the logging endpoint's namespace and port (observability, 4318) are not a rule"; cat /tmp/vate-split-egress.out; exit 1; }
+	@grep -A7 'otlp.example.com' /tmp/vate-split-egress.out | grep -q -- '- cluster$$' && grep -A7 'otlp.example.com' /tmp/vate-split-egress.out | grep -q 'port: "443"' || { echo "FAIL: an https endpoint on a plain host is not the cluster entity on 443"; grep -A7 'otlp.example.com' /tmp/vate-split-egress.out; exit 1; }
+	@if grep -q 'port: "4317"' /tmp/vate-split-egress.out; then echo "FAIL: the default gateway rule remains after both endpoints moved"; exit 1; fi
+	@echo "--> a port left out follows the protocol: grpc 4317, http/protobuf 4318"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.tracing.exporter.otlp.endpoint=http://otlp-gateway.kube-system.svc --set kagent.otel.logging.exporter.otlp.endpoint=http://otlp-gateway.kube-system.svc 2>/dev/null | $(PICK) /dev/stdin CiliumNetworkPolicy $(ATE_EGRESS) | grep -A5 'kube-system$$' | grep -q 'port: "4317"' || { echo "FAIL: no port + grpc is not 4317"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.tracing.exporter.otlp.endpoint=http://otlp-gateway.kube-system.svc --set kagent.otel.logging.exporter.otlp.endpoint=http://otlp-gateway.kube-system.svc --set kagent.otel.tracing.exporter.otlp.protocol=http/protobuf 2>/dev/null | $(PICK) /dev/stdin CiliumNetworkPolicy $(ATE_EGRESS) | grep -A5 'kube-system$$' | grep -q 'port: "4318"' || { echo "FAIL: no port + http/protobuf is not 4318"; exit 1; }
+	@echo "ok: ports"
+	@echo "--> both signals off: no OTLP rule on either policy, no comment; the rest of the egress gateway unchanged"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.tracing.enabled=false --set kagent.otel.logging.enabled=false >/tmp/vate-off.out 2>&1 || { cat /tmp/vate-off.out; exit 1; }
+	@for pol in $(ATE_EGRESS) $(CTRL_EGRESS); do \
+		$(PICK) /tmp/vate-off.out CiliumNetworkPolicy $$pol >/tmp/vate-off-$$pol.out; \
+		if grep -q 'OTLP gateway\|port: "4317"' /tmp/vate-off-$$pol.out; then echo "FAIL: $$pol keeps an OTLP rule with both signals off"; exit 1; fi; \
+	done
+	@grep -q 'port: "8083"' /tmp/vate-off-$(ATE_EGRESS).out && grep -q 'port: "10443"' /tmp/vate-off-$(ATE_EGRESS).out || { echo "FAIL: the egress gateway lost its other rules with the signals off"; exit 1; }
+	@echo "ok: off"
+	@echo "--> auto with no monitoring API served resolves off: no rule"
+	@helm template t $(CONNECTIVITY_DIR) --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --api-versions cilium.io/v2 --set components.kagent.enabled=true $(SUBSTRATE_ON) --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent >/tmp/vate-auto.out 2>&1 || { cat /tmp/vate-auto.out; exit 1; }
+	@if $(PICK) /tmp/vate-auto.out CiliumNetworkPolicy $(ATE_EGRESS) | grep -q 'OTLP gateway'; then echo "FAIL: auto rendered the rule without the observability platform"; exit 1; else echo "ok: auto off"; fi
+	@echo "--> one signal on is enough"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set kagent.otel.tracing.enabled=false 2>/dev/null | $(PICK) /dev/stdin CiliumNetworkPolicy $(ATE_EGRESS) | grep -A7 'exporters send to (' | grep -q 'port: "4317"' || { echo "FAIL: logging alone renders no rule"; exit 1; }
+	@echo "--> kubernetes flavour: no Substrate egress policy (its egress is open), no cilium object"
+	@helm template t $(CONNECTIVITY_DIR) $(ATE_OTLP) --set networkPolicy.flavor=kubernetes >/tmp/vate-k8s.out 2>&1 || { cat /tmp/vate-k8s.out; exit 1; }
+	@if grep -q 'OTLP gateway\|cilium.io' /tmp/vate-k8s.out; then echo "FAIL: the kubernetes flavour renders an OTLP rule or a cilium object"; exit 1; fi
+	@echo "--> the meta chart's Harness env (the actors' side of the same path) is tests/verify-kagent-harness.py"
+	@echo "ok: $@"
 
 .PHONY: verify-klausgateway-netpol
 verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443): the -klausgateway-store-egress policy renders exactly while a store or the controller reaches beyond the pod — the platform's Valkey pods on their Service port with klausGateway.routing.store valkey (and the valkey component on; off = an out-of-band Valkey, no rule), the kube-apiserver with klausGateway.obo.store secret and OBO on, routing.store configmap or crd, or controller.enabled — as DNS + the rules in the cilium flavour and DNS + the pod selector / networkPolicy.kubernetes.apiServerCIDR (Egress only) in the kubernetes one, each rule only with its store, selecting the pod by klausGateway.fullnameOverride; the default shape (memory routing, the bolt link store, no controller) renders none of it next to the unchanged a2a and OBO policies; none with the Secret store but OBO off, with networkPolicy off, or with the component off.
@@ -2680,6 +2778,66 @@ verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443
 	@if grep -q 'klausgateway-.*-egress' /tmp/vkg-npoff.out; then echo "FAIL: a klaus-gateway egress policy renders with networkPolicy.enabled=false"; exit 1; fi
 	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set components.klaus-gateway.enabled=false >/tmp/vkg-off.out 2>&1 || { cat /tmp/vkg-off.out; exit 1; }
 	@if grep -q 'klausgateway' /tmp/vkg-off.out; then echo "FAIL: klaus-gateway wiring renders with the component off"; grep -n klausgateway /tmp/vkg-off.out | head; exit 1; fi
+	@echo "ok: $@"
+
+.PHONY: verify-klausgateway-otlp
+verify-klausgateway-otlp: ## Assert klaus-gateway's trace export (giantswarm/klaus-gateway#263): the meta chart defaults klausGateway.observability to the platform's OTLP gateway with the tenant header and forwards endpoint + headers (never the enabled knob) to the klaus-gateway release; enabled auto follows the monitors (off = an empty endpoint, no headers), an explicit true keeps the endpoint without monitors, false empties it with them; the connectivity chart renders -klausgateway-otlp-egress exactly while the endpoint is set — DNS + the endpoint's namespace on its port in the cilium flavour (the cluster entity for a host that is not an in-cluster Service), a namespaceSelector on the port in the kubernetes one — selecting the pod by klausGateway.fullnameOverride; none with networkPolicy off or the component off; the kagent controller's OTLP rule is unchanged by the shared helper.
+	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
+	@echo "--> meta chart, defaults: the klaus-gateway release carries the OTLP gateway and the tenant header, not the knob"
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true >/tmp/vko-default.out 2>&1 || { cat /tmp/vko-default.out; exit 1; }
+	@$(PICK) /tmp/vko-default.out HelmRelease klaus-gateway >/tmp/vko-default-hr.out || { echo "FAIL: no klaus-gateway HelmRelease"; exit 1; }
+	@grep -q '^      otlpEndpoint: http://otlp-gateway.kube-system.svc:4317$$' /tmp/vko-default-hr.out || { echo "FAIL: the klaus-gateway release does not carry the OTLP gateway endpoint by default"; grep -n otlp /tmp/vko-default-hr.out; exit 1; }
+	@grep -q '^        X-Scope-OrgID: giantswarm$$' /tmp/vko-default-hr.out || { echo "FAIL: the klaus-gateway release does not carry the tenant header"; grep -n -A3 otlpHeaders /tmp/vko-default-hr.out; exit 1; }
+	@if awk '/^    observability:$$/,/^    [a-z]/' /tmp/vko-default-hr.out | grep -q '^      enabled:'; then echo "FAIL: klausGateway.observability.enabled reached the klaus-gateway release (its schema refuses it)"; exit 1; fi
+	@echo "ok: endpoint + header forwarded, the knob held back"
+	@echo "--> monitors off (auto resolves off): an empty endpoint and no headers"
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set global.observability.metrics.serviceMonitor.enabled=false >/tmp/vko-off.out 2>&1 || { cat /tmp/vko-off.out; exit 1; }
+	@$(PICK) /tmp/vko-off.out HelmRelease klaus-gateway >/tmp/vko-off-hr.out
+	@grep -q '^      otlpEndpoint: ""$$' /tmp/vko-off-hr.out || { echo "FAIL: with the monitors off the klaus-gateway release still names an OTLP endpoint"; grep -n otlp /tmp/vko-off-hr.out; exit 1; }
+	@if grep -q 'X-Scope-OrgID' /tmp/vko-off-hr.out; then echo "FAIL: with the monitors off the klaus-gateway release still carries the tenant header"; exit 1; fi
+	@echo "ok: monitors off -> no export"
+	@echo "--> explicit true keeps the endpoint without monitors; explicit false empties it with them"
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set global.observability.metrics.serviceMonitor.enabled=false --set klausGateway.observability.enabled=true >/tmp/vko-force.out 2>&1 || { cat /tmp/vko-force.out; exit 1; }
+	@$(PICK) /tmp/vko-force.out HelmRelease klaus-gateway | grep -q '^      otlpEndpoint: http://otlp-gateway.kube-system.svc:4317$$' || { echo "FAIL: klausGateway.observability.enabled=true does not keep the endpoint without monitors"; exit 1; }
+	@helm template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true --set components.agentgateway.enabled=true --set klausGateway.observability.enabled=false >/tmp/vko-false.out 2>&1 || { cat /tmp/vko-false.out; exit 1; }
+	@$(PICK) /tmp/vko-false.out HelmRelease klaus-gateway | grep -q '^      otlpEndpoint: ""$$' || { echo "FAIL: klausGateway.observability.enabled=false does not empty the endpoint"; exit 1; }
+	@echo "ok: the explicit values win"
+	@echo "--> connectivity, cilium: the OTLP egress policy renders with an endpoint, selects the pod, admits DNS + the endpoint's namespace on its port"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 >/tmp/vko-cnp.out 2>&1 || { cat /tmp/vko-cnp.out; exit 1; }
+	@$(PICK) /tmp/vko-cnp.out CiliumNetworkPolicy $(KG_OTLP_POLICY) >/tmp/vko-cnp-pol.out || { echo "FAIL: no CiliumNetworkPolicy $(KG_OTLP_POLICY) with an OTLP endpoint"; exit 1; }
+	@grep -q 'app.kubernetes.io/name: "klaus-gateway"' /tmp/vko-cnp-pol.out || { echo "FAIL: the OTLP policy does not select the klaus-gateway pod"; exit 1; }
+	@grep -q 'io.kubernetes.pod.namespace: kube-system' /tmp/vko-cnp-pol.out || { echo "FAIL: the OTLP policy does not select the endpoint's namespace"; cat /tmp/vko-cnp-pol.out; exit 1; }
+	@grep -q 'port: "4317"' /tmp/vko-cnp-pol.out || { echo "FAIL: the OTLP policy is not on 4317"; exit 1; }
+	@grep -q 'k8s-app: kube-dns' /tmp/vko-cnp-pol.out || { echo "FAIL: the OTLP policy carries no DNS rule"; exit 1; }
+	@if grep -q 'world\|kube-apiserver\|toCIDR' /tmp/vko-cnp-pol.out; then echo "FAIL: the OTLP policy admits more than DNS and the collector"; exit 1; fi
+	@echo "ok: cilium OTLP policy"
+	@echo "--> a collector that is not an in-cluster Service: the cluster entity on the endpoint's port (443 for an https URL without one)"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=https://collector.example.com >/tmp/vko-ext.out 2>&1 || { cat /tmp/vko-ext.out; exit 1; }
+	@$(PICK) /tmp/vko-ext.out CiliumNetworkPolicy $(KG_OTLP_POLICY) >/tmp/vko-ext-pol.out || { echo "FAIL: no OTLP policy for an external collector"; exit 1; }
+	@grep -q 'toEntities:' /tmp/vko-ext-pol.out && grep -q '^        - cluster$$' /tmp/vko-ext-pol.out || { echo "FAIL: an external collector does not fall back to the cluster entity"; cat /tmp/vko-ext-pol.out; exit 1; }
+	@grep -q 'port: "443"' /tmp/vko-ext-pol.out || { echo "FAIL: an https collector without a port is not on 443"; exit 1; }
+	@echo "ok: external collector -> cluster entity on 443"
+	@echo "--> kubernetes flavour: a NetworkPolicy, Egress only, the endpoint's namespace on the port + DNS"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vko-k8s.out 2>&1 || { cat /tmp/vko-k8s.out; exit 1; }
+	@$(PICK) /tmp/vko-k8s.out NetworkPolicy $(KG_OTLP_POLICY) >/tmp/vko-k8s-pol.out || { echo "FAIL: no NetworkPolicy $(KG_OTLP_POLICY) in the kubernetes flavour"; exit 1; }
+	@if $(PICK) /tmp/vko-k8s.out CiliumNetworkPolicy $(KG_OTLP_POLICY) >/dev/null 2>&1; then echo "FAIL: the cilium OTLP policy renders in the kubernetes flavour"; exit 1; fi
+	@grep -q 'policyTypes: \[Egress\]' /tmp/vko-k8s-pol.out || { echo "FAIL: the NetworkPolicy is not Egress only"; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: kube-system' /tmp/vko-k8s-pol.out || { echo "FAIL: the NetworkPolicy does not select the endpoint's namespace"; cat /tmp/vko-k8s-pol.out; exit 1; }
+	@grep -q 'port: 4317' /tmp/vko-k8s-pol.out || { echo "FAIL: the NetworkPolicy is not on 4317"; exit 1; }
+	@echo "ok: kubernetes OTLP policy"
+	@echo "--> the selector follows klausGateway.fullnameOverride; no endpoint, networkPolicy off, component off: none"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 --set klausGateway.fullnameOverride=kg-renamed 2>/dev/null | $(PICK) /dev/stdin CiliumNetworkPolicy $(KG_OTLP_POLICY) | grep -q 'app.kubernetes.io/name: "kg-renamed"' || { echo "FAIL: the OTLP policy does not select the renamed pod"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) >/tmp/vko-none.out 2>&1 || { cat /tmp/vko-none.out; exit 1; }
+	@if grep -q '$(KG_OTLP_POLICY)' /tmp/vko-none.out; then echo "FAIL: the OTLP policy renders without an endpoint (the connectivity chart's own default is empty)"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 --set networkPolicy.enabled=false 2>/dev/null | grep -q '$(KG_OTLP_POLICY)' && { echo "FAIL: the OTLP policy renders with networkPolicy.enabled=false"; exit 1; } || true
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.observability.otlpEndpoint=http://otlp-gateway.kube-system.svc:4317 --set components.klaus-gateway.enabled=false 2>/dev/null | grep -q '$(KG_OTLP_POLICY)' && { echo "FAIL: the OTLP policy renders with the component off"; exit 1; } || true
+	@echo "ok: guards"
+	@echo "--> the kagent controller's OTLP rule is unchanged by the shared helper"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.otel.tracing.enabled=true --set kagent.otel.logging.enabled=true >/tmp/vko-kagent.out 2>&1 || { cat /tmp/vko-kagent.out; exit 1; }
+	@$(PICK) /tmp/vko-kagent.out CiliumNetworkPolicy agent-platform-connectivity-kagent-controller-egress >/tmp/vko-kagent-pol.out || { echo "FAIL: no kagent controller egress policy"; exit 1; }
+	@grep -q "The OTLP gateway kagent's exporters send to (http://otlp-gateway.kube-system.svc:4317)" /tmp/vko-kagent-pol.out || { echo "FAIL: the kagent controller's OTLP rule lost its comment"; grep -n -B1 -A6 "OTLP" /tmp/vko-kagent-pol.out; exit 1; }
+	@grep -c "The OTLP gateway kagent's exporters send to" /tmp/vko-kagent-pol.out | grep -qx 1 || { echo "FAIL: expected exactly one OTLP rule on the kagent controller (tracing and logging share the destination)"; grep -c "The OTLP gateway" /tmp/vko-kagent-pol.out; exit 1; }
+	@grep -q 'port: "4317"' /tmp/vko-kagent-pol.out || { echo "FAIL: the kagent controller's OTLP rule lost its port"; exit 1; }
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-storage-version
@@ -2784,3 +2942,116 @@ verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks 
 	@helm lint $(CHART_DIR) $(STORAGE_ON) >/tmp/vsv-lint.out 2>&1 || { cat /tmp/vsv-lint.out; exit 1; }
 	@echo "ok: helm lint"
 	@echo "ok: $@"
+
+# --- e2e ---------------------------------------------------------------------
+# One ATS scenario against any cluster its kubeconfig points at. The suite is
+# already kubeconfig-driven; this target only packages the chart and hands the
+# scenario its inputs (tests/ats/scenarios.py).
+#
+#   make e2e KUBECONFIG=~/.kube/lab.yaml
+#   make e2e KUBECONFIG=… SCENARIO=functional
+#   make e2e KUBECONFIG=… CLUSTER_TYPE=eks VALUES=helm/agent-platform/examples/managed-cloud-gs.yaml
+#
+# SECRETS AND THE DOMAIN STAY OUT OF THE REPOSITORY. The example files carry
+# placeholders; tests/e2e_overlay.py turns the environment into an overlay,
+# which this target writes to a temporary file that is removed on exit, and it
+# never prints a value.
+SCENARIO ?= smoke
+CLUSTER_TYPE ?= kind
+# The kubeconfig with a leading `~` expanded. zsh leaves the tilde of an
+# argument of the form KUBECONFIG=~/.kube/lab.yaml alone, and the recipe quotes
+# the value, so the shell never expands it either.
+E2E_KUBECONFIG := $(abspath $(subst ~,$(HOME),$(KUBECONFIG)))
+# The version the chart is packaged and installed under. A prerelease keeps a
+# published self HelmRelease from ever matching it.
+E2E_VERSION ?= 3.99.0-dev.local
+E2E_DIST ?= dist
+# The values files of the run, colon-separated, in Helm's order. This REPLACES
+# the smoke's own list, so it must be complete: the kind smoke needs
+# helm/agent-platform/examples/kind-lab-dex.yaml plus tests/ats/values-kagent.yaml
+# and tests/ats/values-round-trips.yaml. Empty (the default) keeps the
+# scenario's list, which is what a kind run wants. The overlay this target
+# writes from the environment is layered after these, whatever they are.
+# SCENARIO=functional installs the first of these files plus
+# tests/ats/values-kagent.yaml, with the overlay last: that scenario's shape is
+# the example with the engine off, not the smoke's round trips.
+VALUES ?=
+# The overlay this target writes from the environment, when any of these is set.
+# None of them is a credential: E2E_IDP_SECRET_NAME and E2E_IDP_CA_SECRET are
+# the NAMES of Secrets already on the cluster. The client secret itself never
+# passes through a command line; it lives in the Secret the chart reads
+# (global.identity.existingSecret) and, for the tests' own logins, in
+# ATS_CLIENT_SECRET in the caller's environment.
+#
+# Each of these names one fact, which the chart and the suite both need, so the
+# run names it once: the target passes them through, scenarios.load() reads each
+# as the fallback of the matching ATS_ variable, and an ATS_ variable that the
+# caller sets wins.
+E2E_DOMAIN ?=
+E2E_ISSUER_URL ?=
+E2E_CLIENT_ID ?=
+E2E_IDP_SECRET_NAME ?=
+E2E_IDP_CA_SECRET ?=
+
+.PHONY: e2e
+e2e: ## Run one ATS scenario against any cluster (KUBECONFIG=… [SCENARIO=smoke|functional] [CLUSTER_TYPE=kind|eks] [VALUES=a.yaml:b.yaml]). Packages the chart first; builds a values overlay from the environment so no secret or domain is committed.
+	@echo "====> $@ (scenario $(SCENARIO), cluster type $(CLUSTER_TYPE))"
+	@test -n "$(KUBECONFIG)" || { echo "FAIL: KUBECONFIG is required, e.g. make e2e KUBECONFIG=~/.kube/lab.yaml"; exit 1; }
+	@test -r "$(E2E_KUBECONFIG)" || { echo "FAIL: cannot read KUBECONFIG=$(KUBECONFIG)"; exit 1; }
+	@mkdir -p $(E2E_DIST)
+	@helm package $(CHART_DIR) --version $(E2E_VERSION) -d $(E2E_DIST) >/dev/null
+	@archive=$(abspath $(E2E_DIST))/agent-platform-$(E2E_VERSION).tgz; \
+	test -f "$$archive" || { echo "FAIL: helm package produced no $$archive"; exit 1; }; \
+	overlay=""; \
+	identity="$(E2E_ISSUER_URL)$(E2E_CLIENT_ID)$(E2E_IDP_SECRET_NAME)$(E2E_IDP_CA_SECRET)"; \
+	if [ -n "$(E2E_DOMAIN)$$identity" ]; then \
+		overlay=$$(mktemp "$${TMPDIR:-/tmp}/agent-platform-e2e-XXXXXX.yaml"); \
+		trap 'rm -f "$$overlay"' EXIT INT TERM; \
+		E2E_DOMAIN="$(E2E_DOMAIN)" \
+		E2E_ISSUER_URL="$(E2E_ISSUER_URL)" \
+		E2E_CLIENT_ID="$(E2E_CLIENT_ID)" \
+		E2E_IDP_SECRET_NAME="$(E2E_IDP_SECRET_NAME)" \
+		E2E_IDP_CA_SECRET="$(E2E_IDP_CA_SECRET)" \
+		python3 $(CURDIR)/tests/e2e_overlay.py > "$$overlay"; \
+		echo "--> values overlay written from the environment ($$(grep -c . "$$overlay") lines; values not printed)"; \
+	fi; \
+	cd tests/ats && uv sync --quiet && \
+	KUBECONFIG="$(E2E_KUBECONFIG)" \
+	ATS_CHART_PATH="$$archive" \
+	ATS_CHART_VERSION=$(E2E_VERSION) \
+	ATS_CLUSTER_TYPE=$(CLUSTER_TYPE) \
+	ATS_OVERLAY_VALUES="$$overlay" \
+	ATS_VALUES="$(VALUES)" \
+	E2E_DOMAIN="$(E2E_DOMAIN)" \
+	E2E_ISSUER_URL="$(E2E_ISSUER_URL)" \
+	E2E_CLIENT_ID="$(E2E_CLIENT_ID)" \
+	E2E_IDP_CA_SECRET="$(E2E_IDP_CA_SECRET)" \
+	uv run pytest -m $(SCENARIO) --log-cli-level info -o log_cli=true
+
+.PHONY: verify-scenarios
+verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and the `make e2e` values overlay (tests/e2e_overlay.py) offline: the kind and eks defaults, every refusal naming its variable, the derived muster base URL, the base-URL --set, and the overlay's shapes.
+	@echo "====> $@"
+	@python3 tests/verify-scenarios.py
+	@echo "the ATS scenario inputs verified."
+
+# --- verify-all --------------------------------------------------------------
+# Every offline assertion of this repository in one target, which is what CI
+# runs. The list is read out of this file, so a new verify-* target reaches CI
+# by existing; nothing names the set twice.
+#
+# Network: a few of these resolve a component chart (gsoci.azurecr.io,
+# ghcr.io). Some need PyYAML. Each target's own help line says so.
+VERIFY_MK := $(lastword $(MAKEFILE_LIST))
+# Every target this file defines, less verify-all itself and the ones another
+# verify target already chains as a prerequisite.
+VERIFY_ALL_DEFINED := $(sort $(shell sed -n 's/^\(verify-[a-z0-9-]*\):.*/\1/p' $(VERIFY_MK)))
+VERIFY_CHAINED := $(sort $(shell sed -n 's/^verify-[a-z0-9-]*: *\(verify-.*\)$$/\1/p' $(VERIFY_MK)))
+VERIFY_TARGETS := $(filter-out verify-all $(VERIFY_CHAINED),$(VERIFY_ALL_DEFINED))
+
+.PHONY: verify-all
+verify-all: ## Run every verify-* target of this file, the set CI runs. Some resolve a component chart over the network.
+	@echo "====> $@ ($(words $(VERIFY_TARGETS)) targets)"
+	@for target in $(VERIFY_TARGETS); do \
+		$(MAKE) --no-print-directory $$target || { echo "FAIL: $$target"; exit 1; }; \
+	done
+	@echo "all $(words $(VERIFY_TARGETS)) verify targets passed."

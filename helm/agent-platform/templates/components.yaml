@@ -13,6 +13,24 @@ knowledge:
       the flux-engine subchart): it is part of the roster forwarded to
       connectivity and of the enabled/disabled logic like every other entry, but
       this loop renders no release for it.
+  releasedWithChart — the component's chart is published off THIS chart's git
+      tag (agent-platform-connectivity: two charts, one commit, one version),
+      so it has exactly one right version, this chart's own
+      (agent-platform.chartVersion: build metadata dropped, a pre-release
+      kept), rendered as the OCIRepository's exact semver. Not a range: a
+      connectivity behind the meta chart refuses a key the meta chart forwards
+      (its root schema is additionalProperties: false) and its release fails
+      on every installation until the pin moves (giantswarm/agent-platform#431,
+      #441, #339 — three breaks in three runs); one ahead may have retired a
+      key the older meta chart still forwards. Flux re-resolves the exact
+      version on every reconcile, so the connectivity release rolls exactly
+      when this chart does. versionRange stays empty; a versionRange set on
+      such an entry is REFUSED when it would pull from the repository this
+      chart's own releases come from (gitops.self.repository) with no
+      semverFilter — that is the lagging pin. The two development shapes keep
+      their knobs: a semverFilter selects a dev channel (the lab following a
+      branch's builds), another repository a chart pushed by hand (the ATS's
+      in-cluster registry, a lab registry).
   semverFilter  — optional Go regexp the OCI tags must match BEFORE versionRange
       is evaluated (OCIRepository.spec.ref.semverFilter). Selects a dev channel:
       the branch builds of one branch (`.*-dev\.<sanitized-branch>\..*` today)
@@ -155,7 +173,10 @@ knowledge:
       its objects must tolerate the re-apply (a field another controller owns
       needs an ignore rule; an object opts out with the annotation
       helm.toolkit.fluxcd.io/driftDetection: disabled). kagent carries it for
-      the platform Harness, the runtime of every agent (#409).
+      the platform Harness, the runtime of every agent (#409); muster for its
+      own CiliumNetworkPolicy, whose egress selectors named the pre-rename
+      namespace on a live cluster while the release manifest named the new one
+      (#287).
   crds          — Helm CRD lifecycle policy for an app-owned-CRDs component (a chart
       that ships its CRDs in its own crds/ directory). Rendered into the child
       HelmRelease's spec.install.crds and spec.upgrade.crds. Set to CreateReplace
@@ -166,6 +187,7 @@ knowledge:
 {{- include "agent-platform.validateLegacyToggles" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
 {{- include "agent-platform.validateSubstrate" . -}}
+{{- include "agent-platform.validateWorkerPool" . -}}
 {{- include "agent-platform.validateInlineSecrets" . -}}
 {{- include "agent-platform.validatePinnedLoginConnector" . -}}
 {{- include "agent-platform.validateToolsetPresets" . -}}
@@ -260,6 +282,17 @@ that CRD either, so the dependency is moot. */ -}}
 {{- $deps = append $deps . }}
 {{- end }}
 {{- end }}
+{{- /* The version constraint: the entry's range, or — for a chart released off
+this chart's tag (see releasedWithChart above) — this chart's exact version. */ -}}
+{{- $semver := $c.versionRange }}
+{{- if $c.releasedWithChart }}
+{{- $ownVersion := include "agent-platform.chartVersion" $root }}
+{{- $selfRepo := trimSuffix "/" (($g.self | default dict).repository | default "") }}
+{{- if and $semver (not $c.semverFilter) (eq (trimSuffix "/" ($c.repository | default "")) $selfRepo) }}
+{{- fail (printf "components.%s.versionRange=%q pins a chart that is released with this chart: its version is this chart's own (%s), and a pin behind or ahead of it fails the release on every installation (giantswarm/agent-platform#431, #441, #339). Remove the pin. A development build keeps its knobs: a semverFilter selects a dev channel, another repository a chart pushed by hand" $key $semver $ownVersion) }}
+{{- end }}
+{{- if not $semver }}{{ $semver = $ownVersion }}{{ end }}
+{{- end }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
@@ -275,7 +308,7 @@ spec:
   insecure: true
   {{- end }}
   ref:
-    semver: {{ required (printf "components.%s.versionRange is required" $key) $c.versionRange | quote }}
+    semver: {{ required (printf "components.%s.versionRange is required" $key) $semver | quote }}
     {{- with $c.semverFilter }}
     semverFilter: {{ . | quote }}
     {{- end }}

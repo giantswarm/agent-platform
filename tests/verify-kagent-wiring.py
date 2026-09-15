@@ -40,12 +40,15 @@ time, in the child HelmRelease or in the running controller:
     HelmRelease CRD does not know: the 4.8.0 upgrade adopts the platform Harness
     the connectivity chart (through 4.7.19) left in place through helm.sh/resource-policy: keep
     (giantswarm/agent-platform#406 step 2);
-  * a kagent release without drift detection (spec.driftDetection.mode: enabled):
-    a plain reconcile of an unchanged release reports "in-sync", so the platform
-    Harness a consumer skipping 4.7.19 loses on the 4.8.0 upgrade would stay
-    deleted until a values change or a forced reconcile
-    (giantswarm/agent-platform#409); or drift detection on another release by
-    default — a decision per release, its objects must tolerate the re-apply.
+  * a kagent or muster release without drift detection (spec.driftDetection.mode:
+    enabled): a plain reconcile of an unchanged release reports "in-sync", so the
+    platform Harness a consumer skipping 4.7.19 loses on the 4.8.0 upgrade would
+    stay deleted until a values change or a forced reconcile
+    (giantswarm/agent-platform#409), and a muster CiliumNetworkPolicy left
+    drifted by the agentic-platform -> agent-platform rename would stay drifted
+    across every upgrade (giantswarm/agent-platform#287); or drift detection on
+    another release by default — a decision per release, its objects must
+    tolerate the re-apply.
 
 Reads a rendered meta-package manifest (the CI values: kagent on). Deliberately
 stdlib-only: the CI image has no PyYAML.
@@ -67,8 +70,11 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 # controller derives the caller from (AUTH_USER_ID_CLAIM) is also the claim the
 # gateway's identity transformation copies into x-user-id (ONE value).
 # substrateWorkerPool and harness are the kagent chart's: it renders the WorkerPool and,
-# since 4.8.0, the platform Harness (harness.create) from them.
-UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness"}
+# since 4.8.0, the platform Harness (harness.create) from them. otel is the kagent
+# chart's exporter configuration (the controller ConfigMap); the connectivity chart
+# reads the same endpoints for the OTLP egress of the controller and of the actors'
+# egress gateway (agent-platform.kagent.otlpTargets, giantswarm/agent-platform#456).
+UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness", "otel"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
 LINE_REPOSITORY = "oci://ghcr.io/giantswarm/kagent/helm"
@@ -331,29 +337,42 @@ def check_take_ownership(docs) -> None:
     print("ok: the kagent release keeps helm-controller's take-ownership default (no disableTakeOwnership, no invented takeOwnership) on install and upgrade")
 
 
+# release -> why it carries spec.driftDetection.mode: enabled. Every other
+# release keeps helm-controller's default (disabled).
+DRIFT_DETECTION = {
+    "kagent": "a platform Harness deleted on the 4.8.0 skip path would stay deleted until a values change or a forced "
+              "reconcile (giantswarm/agent-platform#409)",
+    "muster": "a CiliumNetworkPolicy the agentic-platform -> agent-platform rename left pointing at the old namespace "
+              "would stay drifted across every upgrade, with muster's egress to Valkey denied "
+              "(giantswarm/agent-platform#287)",
+}
+
+
 def check_drift_detection(docs) -> None:
-    """The kagent release detects and corrects drift (giantswarm/agent-platform#409): with
-    spec.driftDetection.mode: enabled helm-controller re-applies, on every reconcile, what
-    differs from the release manifest or is missing — the platform Harness a skipped 4.7.19
-    loses on the 4.8.0 upgrade is back within one interval, as a server-side apply, with no
-    forced reconcile and no Helm revision. Off (helm-controller's default) a plain reconcile
-    of the unchanged release reports in-sync and recreates nothing. Per release, not
-    fleet-wide: every other component keeps the default until its objects are known to
-    tolerate the re-apply, so a driftDetection block on another release is a deliberate
-    values change, never a side effect of this one."""
+    """The kagent and muster releases detect and correct drift
+    (giantswarm/agent-platform#409, #287): with spec.driftDetection.mode: enabled
+    helm-controller re-applies, on every reconcile, what differs from the release manifest or
+    is missing — the platform Harness a skipped 4.7.19 loses on the 4.8.0 upgrade, and a
+    muster object an operator or a rename edited away from its manifest — as a server-side
+    apply, with no forced reconcile and no Helm revision. Off (helm-controller's default) a
+    plain reconcile of the unchanged release reports in-sync and corrects nothing; Helm's
+    three-way merge does not correct it either, because it only patches what changed between
+    two release manifests. Per release, not fleet-wide: every other component keeps the
+    default until its objects are known to tolerate the re-apply, so a driftDetection block
+    on another release is a deliberate values change, never a side effect of these two."""
     for (kind, name), lines in docs.items():
         if kind != "HelmRelease":
             continue
         text = "\n".join(lines) + "\n"
         m = re.search(r"^  driftDetection:\n((?:    .*\n)+)", text, re.M)
-        if name == "kagent":
+        if name in DRIFT_DETECTION:
             if not m or not re.search(r"^    mode: enabled$", m.group(1), re.M):
-                fail("the kagent release does not carry spec.driftDetection.mode: enabled — a platform Harness deleted on the 4.8.0 skip path "
-                     "would stay deleted until a values change or a forced reconcile (giantswarm/agent-platform#409)")
+                fail(f"the {name} release does not carry spec.driftDetection.mode: enabled — {DRIFT_DETECTION[name]}")
         elif m:
             fail(f"the {name} release carries spec.driftDetection by default; drift detection is decided per release "
-                 "(components.<name>.driftDetection), today kagent's only")
-    print("ok: the kagent release detects and corrects drift (spec.driftDetection.mode: enabled); no other release does by default")
+                 f"(components.<name>.driftDetection), today {', '.join(sorted(DRIFT_DETECTION))} only")
+    print(f"ok: the {', '.join(sorted(DRIFT_DETECTION))} releases detect and correct drift "
+          "(spec.driftDetection.mode: enabled); no other release does by default")
 
 
 def main(path: str) -> int:

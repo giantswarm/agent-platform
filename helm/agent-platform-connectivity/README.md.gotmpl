@@ -241,9 +241,14 @@ platform needs:
 - **Network policies** (`templates/substrate/netpol.yaml`, both flavours):
   Substrate's hops and the actors' destinations on the egress gateway
   `atenet-egress`, where an actor's connections leave (muster, the kagent
-  controller, the LLM path, DNS); the worker pods reach only the egress
+  controller, the LLM path, DNS, the OTLP gateway `kagent.otel` names — the
+  pods of the endpoint's namespace on its port, the rule the controller's
+  egress policy shares through `agent-platform.kagent.otlpEgress`; without
+  it every turn ended 3 s late on the Go ADK's pre-response trace flush,
+  giantswarm/agent-platform#456); the worker pods reach only the egress
   gateway, the dns and the cluster DNS. The kubernetes flavour renders the
-  ingress policies. `make verify-kagent-netpol` asserts the render.
+  ingress policies. `make verify-kagent-netpol` asserts the render,
+  `make verify-actor-telemetry-egress` the OTLP rules.
 - **Guards** (`templates/substrate/validate.yaml`): a Substrate with no
   database, a `postgres.databases` entry whose name is not an identifier or is
   the initdb database's, the Substrate Secret not copied into `ate-system`.
