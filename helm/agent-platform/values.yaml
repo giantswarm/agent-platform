@@ -553,8 +553,8 @@ components:  # @schema additionalProperties: true
     # render — agent-platform.validateSubstrate). Both releases land in
     # ate-system (targetNamespace; the chart's Roles name that namespace), and
     # both carry ONE version pin: the same range in the two versionRanges
-    # (>=0.0.30-gs.1 <0.0.31-0, the kagent entry's shape — the line's releases
-    # of upstream 0.0.29 from gs.1 on: the pin kagent main names since
+    # (>=0.0.30-gs.2 <0.0.31-0, the kagent entry's shape — the line's releases
+    # of upstream 0.0.29, from gs.1 the pin kagent main names since
     # kagent-dev/kagent#2802 — its router addresses an actor by the
     # ate-target-actor header, which kagent 0.11.0-gs.14 sets and Substrate
     # 0.0.27 did not know — with the line's ten carried patches replayed (the
@@ -569,14 +569,20 @@ components:  # @schema additionalProperties: true
     # CRD templates so a concurrent uninstall never fails on a vanished kind,
     # a golden boot whose image the registry refuses failing with the reason,
     # and the kept podcertificate-controller namespace so a reinstall keeps
-    # its trust chain), whose floor is the
-    # release whose worker image the kagent chart stamps into
-    # substrateWorkerPool.workerImage (0.0.30-gs.1 from kagent 0.11.0-gs.14) —
-    # a Substrate re-pin that changes the runtime moves the three together
-    # with the kagent pin (README "Agent Substrate"). A
-    # mirror sets `repository` here and substrate.image.registry below.
+    # its trust chain, and from 0.0.30-gs.2 the WorkerPool template's
+    # topologySpreadConstraints and podAntiAffinity, giantswarm/giantswarm#37797,
+    # next to a paused actor's resume failing fast when its node is gone),
+    # whose floor is 0.0.30-gs.2: the release whose CRD carries the spread
+    # fields (agent-platform.substrate.workerPoolSpreadFloor, the render guard
+    # on kagent.substrateWorkerPool.template). The worker image the kagent
+    # chart stamps into substrateWorkerPool.workerImage stays 0.0.30-gs.1
+    # (kagent 0.11.0-gs.14 on): gs.2 changes ate-controller, the CRD and
+    # ate-api only, and a gs.1 worker runs under a gs.2 control plane. A
+    # Substrate re-pin that changes the RUNTIME moves the three together with
+    # the kagent pin (README "Agent Substrate"). A mirror sets `repository`
+    # here and substrate.image.registry below.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.30-gs.1 <0.0.31-0"
+    versionRange: ">=0.0.30-gs.2 <0.0.31-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -598,7 +604,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.30-gs.1 <0.0.31-0"
+    versionRange: ">=0.0.30-gs.2 <0.0.31-0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -2048,17 +2054,20 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # goldens are untouched (a template change re-snapshots nothing). Land it
     # in a quiet window.
     #
-    # Spread. WorkerPool.spec.template carries no topologySpreadConstraints or
-    # podAntiAffinity in any published release of the Substrate line yet: the
-    # CRD prunes them at admission, silently. The render REFUSES both keys
-    # (agent-platform.validateWorkerPool) until components.substrate
-    # .versionRange's floor is the release that carries them (the carried
-    # patch giantswarm/giantswarm#37797), and forwards them verbatim from
-    # then on; every other key WorkerPool.spec.template does not have is
-    # refused the same way (a typo would be pruned in silence). Recommended
-    # once available: hostname maxSkew 1 / minDomains 2 / DoNotSchedule
-    # (Karpenter provisions the second node) and zone maxSkew 1 /
-    # ScheduleAnyway, both selecting `ate.dev/worker-pool: <name>`.
+    # Spread. WorkerPool.spec.template carries topologySpreadConstraints and
+    # podAntiAffinity from Substrate 0.0.30-gs.2 (the carried patch
+    # giantswarm/giantswarm#37797); every release before it prunes them at
+    # admission, silently. The render REFUSES both keys
+    # (agent-platform.validateWorkerPool) while components.substrate
+    # .versionRange's floor is below that release
+    # (agent-platform.substrate.workerPoolSpreadFloor) and forwards them
+    # verbatim from it on; every other key WorkerPool.spec.template does not
+    # have is refused the same way (a typo would be pruned in silence).
+    # Recommended: hostname maxSkew 1 / minDomains 2 / DoNotSchedule (the
+    # provisioner adds the second node) and zone maxSkew 1 / ScheduleAnyway,
+    # both selecting `ate.dev/worker-pool: <name>` — what the fleet template
+    # renders behind its knob. A spread is a template change: it rolls the
+    # pool's Deployment once (above).
     podDisruptionBudget:
       enabled: true
       minAvailable: null
