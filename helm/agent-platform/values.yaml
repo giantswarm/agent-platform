@@ -627,8 +627,16 @@ components:  # @schema additionalProperties: true
     # grpc:// target), AgentTemplate discovery, one AgentInstance per thread
     # (giantswarm/klaus-gateway#234). A 0.x gateway talks REST to the 0.10
     # controller and gets 404s on this line; the 3.x meta chart keeps 0.x.
-    versionRange: "1.x"
+    # The floor is 1.10.0: the chart's closed observability block takes the
+    # otlpHeaders knob the meta chart forwards by default from there
+    # (giantswarm/klaus-gateway#263); an older chart's schema refuses it.
+    versionRange: ">=1.10.0 <2.0.0"
     valuesFrom: klausGateway
+    # klausGateway.observability.enabled is this chart's knob (auto | true |
+    # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
+    # observability block is closed and takes the endpoint and headers only.
+    omitKeys:
+      - observability.enabled
     enabled: false
   agent-sandbox:  # @schema additionalProperties: true
     chart: agent-sandbox
@@ -2900,9 +2908,26 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   upstream:
     agentgatewayURL: ""
 
-  # OTLP trace export. Set to the cluster OTLP gateway endpoint to enable.
+  # OTel traces to the GS Observability Platform's OTLP gateway, the tenant
+  # header selecting the Loki/Tempo tenant — the target kagent's exporters send
+  # to (kagent.otel). Every channel turn is one trace: the gateway's
+  # `slack.turn` span is the parent of the kagent controller's
+  # SendStreamingMessage and of the actor's spans under it, the Slack API calls
+  # and a token refresh hang off it too (giantswarm/klaus-gateway#263;
+  # klaus-gateway 1.10.0 or later for the headers knob and the URL endpoint).
+  # `enabled: auto` follows the resolved global.observability.metrics
+  # .serviceMonitor.enabled — the OTLP gateway is part of the platform whose
+  # monitoring CRDs that knob detects; an explicit true / false wins. The meta
+  # chart resolves it before forwarding: off, the klaus-gateway release gets an
+  # empty otlpEndpoint and no headers (the gateway then exports nothing); the
+  # knob itself never reaches the klaus-gateway chart, whose schema does not
+  # know it. The connectivity chart renders the gateway's egress rule to the
+  # endpoint (-klausgateway-otlp-egress).
   observability:
-    otlpEndpoint: ""
+    enabled: auto  # auto | true | false
+    otlpEndpoint: http://otlp-gateway.kube-system.svc:4317
+    otlpHeaders:
+      X-Scope-OrgID: giantswarm
 
   # Slack channel adapter. Provide a Secret with bot-token / signing-secret /
   # app-token before setting enabled: true.

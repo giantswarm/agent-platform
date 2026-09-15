@@ -1070,6 +1070,11 @@ Two leaves have no `auto` form and are derived directly, off only:
   kagent.harness.env — the actors' copies: OTEL_EXPORTER_OTLP_HEADERS dropped
       the same way, OTEL_LOGGING_ENABLED (the actors' log exporter) dropped
       when kagent.otel.logging resolves off (agent-platform.shape.dropEnv).
+  klausGateway.observability.otlpEndpoint / .otlpHeaders — emptied when
+      klausGateway.observability.enabled (auto | true | false; auto follows the
+      monitors) resolves off, so the klaus-gateway release exports nothing; the
+      knob itself is dropped from that release by components.klaus-gateway
+      .omitKeys (the chart's observability block is closed).
 mcp-kubernetes' Cilium policy joins this list once mcp-kubernetes is a component.
 Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 */}}
@@ -1139,6 +1144,15 @@ connectivity release both read the resolved value. */ -}}
 {{- $drop = append $drop "OTEL_LOGGING_ENABLED" -}}
 {{- end -}}
 {{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "harness") "names" $drop) -}}
+{{- end -}}
+{{- /* klaus-gateway's trace export follows the same answer: the knob resolved
+from auto, and the endpoint and headers the klaus-gateway chart reads emptied
+when it is off (giantswarm/klaus-gateway#263). */ -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "klausGateway" "observability" "enabled") "value" $monitors) -}}
+{{- $kgObs := dig "observability" nil (index $v "klausGateway" | default dict) -}}
+{{- if and (kindIs "map" $kgObs) (hasKey $kgObs "enabled") (ne (toString (index $kgObs "enabled")) "true") -}}
+{{- $_ := set $kgObs "otlpEndpoint" "" -}}
+{{- $_ := set $kgObs "otlpHeaders" dict -}}
 {{- end -}}
 {{- end -}}
 
