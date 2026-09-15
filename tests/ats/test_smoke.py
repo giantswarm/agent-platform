@@ -8,7 +8,7 @@ module top to bottom; each one builds on the state the previous left):
      platform's identity Secret, a self-signed CA, the CoreDNS rewrite) and an
      in-cluster registry the candidate archive is pushed to;
   2. `helm install --wait` of the candidate with the quick start's shape —
-     tests/test-values.yaml (muster, dicebear, connectivity; the bundled Flux
+     helm/agent-platform/examples/kind-lab-dex.yaml (muster, dicebear, connectivity; the bundled Flux
      engine on) + values-kagent.yaml (the kagent runtime) + values-round-trips.yaml
      (the lab Dex as global.identity, muster's OAuth server on, agent-manager) —
      and self-management ON against the in-cluster registry: the chart's own
@@ -72,7 +72,7 @@ import base64
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 import yaml
@@ -83,20 +83,27 @@ from conftest import (
     ATE_NAMESPACE,
     CONNECTIVITY,
     CROSS_CLIENT_AUDIENCE,
-    DEX_USER,
     FLUX_CRD_SUFFIX,
     HARNESS,
     HARNESS_LABEL,
+    Helm,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
     KEPT_CRDS,
+    Kube,
     MODEL_CONFIG,
     MUSTER_BASE_URL,
     MUSTER_BASE_URL_SETS,
+    MusterSession,
     NAMESPACE,
     OPERATOR_CRDS,
+    PODCERT_NAMESPACE,
+    PODCERT_SIGNERS,
+    PortForward,
     RELEASE,
+    REQUIRES_STATIC_USER,
     SANDBOX_CONFIG,
+    SCENARIO,
     SELF_INTERVAL_S,
     SELF_POLICY,
     SMOKE_VALUES,
@@ -106,16 +113,10 @@ from conftest import (
     UNINSTALL_BUDGET_S,
     VALUES_SECRET,
     WORKER_POOL,
-    assert_substrate_trust_chain,
-    PODCERT_SIGNERS,
-    PODCERT_NAMESPACE,
-    Helm,
-    Kube,
-    MusterSession,
-    PortForward,
     apply_placeholder_provider_secret,
     assert_kept_crds,
     assert_remote_mcp_server,
+    assert_substrate_trust_chain,
     condition,
     connectivity_sets,
     dex_password_grant,
@@ -125,14 +126,15 @@ from conftest import (
     load_values,
     login_through_muster,
     self_management_sets,
+    substrate_trust_bundles,
     template_state,
     unauthenticated_mcp_challenge,
     wait_for,
     wait_for_muster_healthy,
-    substrate_trust_bundles,
     wait_for_substrate,
     wait_for_template_ready,
 )
+from scenarios import EXAMPLES_DIR, KIND_LAB_VALUES
 
 logger = logging.getLogger(__name__)
 
@@ -192,8 +194,22 @@ def dump_auth(kube: Kube) -> None:
 def smoke_sets(candidate_version: str) -> List[str]:
     """The --set values of the smoke install: self-management against the
     in-cluster registry, the connectivity chart of this checkout from the same
-    registry (and the muster base URL when the local port moved)."""
+    registry, and muster's own base URL pinned to the one the tests call."""
     return self_management_sets(candidate_version) + connectivity_sets() + MUSTER_BASE_URL_SETS
+
+
+@pytest.mark.smoke
+def test_the_scenario_installs_the_example_file() -> None:
+    """The values file the smoke installs IS an example file the repository
+    ships, so the documented install and the tested install cannot drift. The
+    kind scenario's is helm/agent-platform/examples/kind-lab-dex.yaml."""
+    base = SCENARIO.base_values
+    assert base.is_file(), f"the scenario's base values file does not exist: {base}"
+    assert base.parent == EXAMPLES_DIR, (
+        f"the scenario installs {base}, which is not in {EXAMPLES_DIR}: the file the test installs "
+        "must be an example the repository ships, or the two drift")
+    if SCENARIO.name == "kind":
+        assert base == KIND_LAB_VALUES, f"the kind scenario installs {base}, not {KIND_LAB_VALUES}"
 
 
 @pytest.fixture(scope="module")
@@ -210,8 +226,8 @@ def app_deployment(kube: Kube, helm: Helm, prerequisites: None, chart_archive: P
 
 
 @pytest.fixture(scope="module")
-def muster(muster_forward: PortForward, app_deployment: float) -> PortForward:
-    """muster reachable and healthy (its OAuth server discovers the lab Dex)."""
+def muster(muster_forward: Optional[PortForward], app_deployment: float) -> Optional[PortForward]:
+    """muster reachable and healthy (its OAuth server discovers the issuer)."""
     started = time.monotonic()
     wait_for_muster_healthy(MUSTER_BASE_URL)
     TIMINGS.record("muster /health ok after the install", time.monotonic() - started)
@@ -219,8 +235,9 @@ def muster(muster_forward: PortForward, app_deployment: float) -> PortForward:
 
 
 @pytest.fixture(scope="module")
-def dex(dex_forward: PortForward, dex_ca: str, app_deployment: float) -> str:
-    """The lab Dex reachable from the test; returns the CA path."""
+def dex(dex_forward: Optional[PortForward], dex_ca: Optional[str], app_deployment: float) -> Optional[str]:
+    """The issuer reachable from the test; returns its CA path, or None when the
+    issuer is served by a publicly trusted certificate."""
     return dex_ca
 
 
@@ -350,7 +367,7 @@ def test_self_management_adopts_the_release(kube: Kube, helm: Helm, candidate_ve
 
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
-def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: PortForward) -> None:
+def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: Optional[PortForward]) -> None:
     try:
         meta = unauthenticated_mcp_challenge(MUSTER_BASE_URL)
     except AssertionError:
@@ -361,7 +378,8 @@ def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: P
 
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
-def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForward, dex: str) -> None:
+@REQUIRES_STATIC_USER
+def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
     """The lab Dex's OAuth password grant issues an ID token for the platform
     client (a trusted audience of muster) carrying the cross-client audience
     agent-manager requires; muster accepts it as a bearer and lists its tools."""
@@ -369,7 +387,7 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForw
     try:
         token = dex_password_grant(dex)
         claims = jwt_claims(token)
-        assert claims.get("email") == DEX_USER, claims
+        assert claims.get("email") == SCENARIO.user, claims
         aud = claims.get("aud") if isinstance(claims.get("aud"), list) else [claims.get("aud")]
         assert CROSS_CLIENT_AUDIENCE in aud, f"the token lacks the {CROSS_CLIENT_AUDIENCE} audience: {aud}"
         session = MusterSession(MUSTER_BASE_URL, token, "ats-password-grant").initialize()
@@ -382,12 +400,13 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: PortForw
         raise
     STATE.dex_token = token
     TIMINGS.record("auth round trip: password grant -> /mcp initialize -> tools/list -> list_tools", time.monotonic() - started)
-    logger.info("Dex user %s reached /mcp: %d meta-tools, %d aggregated tools", DEX_USER, len(tools), len(aggregated))
+    logger.info("Dex user %s reached /mcp: %d meta-tools, %d aggregated tools", SCENARIO.user, len(tools), len(aggregated))
 
 
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
-def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: PortForward, dex: str) -> None:
+@REQUIRES_STATIC_USER
+def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
     """The full muster login — dynamic client registration, authorization code
     with PKCE, the Dex login form — headless; the access token reaches /mcp."""
     started = time.monotonic()
@@ -446,7 +465,8 @@ def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, su
 
 
 @pytest.mark.smoke
-def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: PortForward, dex: str, kagent_controller: None, substrate: Dict[str, Any]) -> None:
+@REQUIRES_STATIC_USER
+def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: Optional[PortForward], dex: Optional[str], kagent_controller: None, substrate: Dict[str, Any]) -> None:
     """agent-manager's create_agent through muster, as the Dex user: muster
     forwards the bearer to agent-manager (MCPServer auth.forwardToken; the
     token carries the required cross-client audience), agent-manager validates
@@ -477,7 +497,7 @@ def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, must
             "description": "created through agent-manager by the ATS smoke (lab only)",
             "systemMessage": "You are the ATS managed agent.", "toolset": TOOLSET})
         logger.info("create_agent returned: %s", str(result)[:400])
-        assert result.get("requestedBy") == DEX_USER, f"the write is not attributed to the Dex user: {result.get('requestedBy')!r}"
+        assert result.get("requestedBy") == SCENARIO.user, f"the write is not attributed to the Dex user: {result.get('requestedBy')!r}"
     except AssertionError:
         dump_auth(kube)
         dump_agents(kube)

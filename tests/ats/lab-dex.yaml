@@ -44,7 +44,7 @@
 #   2. kubectl apply -f tests/ats/lab-dex.yaml
 #   3. kubectl -n agent-platform wait --for=condition=complete job/lab-dex-cert-gen
 #   4. kubectl -n kube-system rollout restart deployment coredns
-#   5. helm install with tests/test-values.yaml + tests/ats/values-kagent.yaml + tests/ats/values-round-trips.yaml
+#   5. helm install with helm/agent-platform/examples/kind-lab-dex.yaml + tests/ats/values-kagent.yaml + tests/ats/values-round-trips.yaml
 # =============================================================================
 apiVersion: v1
 kind: Namespace
