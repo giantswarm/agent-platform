@@ -50,6 +50,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "cluster-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "clusterCA": {
             "type": "string"
         },
@@ -61,6 +65,10 @@
         },
         "clusterID": {
             "type": "string"
+        },
+        "clusterManager": {
+            "type": "object",
+            "additionalProperties": true
         },
         "components": {
             "type": "object",
@@ -262,6 +270,39 @@
                         },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "cluster-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedValues": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "repository": {
                             "type": "string"

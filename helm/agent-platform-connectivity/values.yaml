@@ -100,6 +100,8 @@ components:  # @schema additionalProperties: true
     enabled: false
   vm-manager:  # @schema additionalProperties: true
     enabled: false
+  cluster-manager:  # @schema additionalProperties: true
+    enabled: false
   # The components the agent-platform-standalone umbrella carried on top of the
   # fleet's roster, forwarded by the meta chart like the rest so the wiring this
   # chart renders for them gates on the same answer: the Backstage app-config and
@@ -2424,6 +2426,123 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     # the fleet's flux-giantswarm): the Job reads them there (get, list; a Role
     # per namespace) and emits their rewrite as a diff, never writes them.
     gitopsNamespaces: []
+
+# === Cluster manager (cluster-manager) ===
+# Values forwarded verbatim to the cluster-manager component release
+# (giantswarm/cluster-manager, the cluster write surface of the Agent
+# Platform): the clusters and GPU node pools of this installation — list them,
+# create and delete a pool, switch model serving on a cluster — every write with
+# dryRun and mode apply|commit, MCP only (tools appear as x_cluster-manager_<tool>
+# through the chart's own MCPServer CR, labelled for the agent-platform tool
+# group; no REST API, the portal's Clusters pages call the tools through muster
+# as the signed-in user). The pinned Service name is what the wiring below
+# (network policies) targets, like model-manager.fullnameOverride.
+#
+# Identity as for model-manager above: an OAuth 2.1 resource server acting as
+# the caller — muster forwards the session's id_token (the MCPServer CR's auth
+# block) and requests requiredAudiences at login, the cross-client audience the
+# kube-apiserver trusts, so oauth.downstream presents the same token to the
+# Kubernetes API of this installation and of the workload clusters it targets;
+# the caller's RBAC governs and the ServiceAccount holds no permissions (the
+# chart renders no RBAC). The issuer, client, secret and CA fall back to
+# global.identity and the OAuth base URL to global.domain inside the chart; an
+# installation that sets no global.* names them here. The chart's own
+# NetworkPolicy stays off; the connectivity chart renders the policies
+# (clusterManager below).
+#
+# installation.name is the Cluster list_clusters reports as this installation's
+# own (its management cluster); empty marks none. modelManager.namespace — the
+# namespace create_node_pool registers a serving cluster's kserve backend in,
+# through model-manager's runtime-registration ConfigMap — is NOT set here:
+# templates/components.yaml derives it from the platform's own namespace
+# (gitops.targetNamespace, else the release namespace), where the model-manager
+# component lands, so the two can never disagree (a value set here must equal
+# it or the render fails).
+cluster-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: cluster-manager
+  installation:
+    name: ""
+  mcp:
+    enabled: true
+  oauth:
+    enabled: true
+    provider: dex
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+    downstream:
+      enabled: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+        requiredAudiences:
+          - dex-k8s-authenticator
+  networkPolicy:
+    enabled: false
+
+# The wiring the connectivity chart renders for the cluster-manager component
+# (it reads this block, not the chart's). Inert while
+# components.cluster-manager.enabled is false. No route: the tools reach
+# muster in-cluster without one, and cluster-manager has no REST API.
+clusterManager:  # @schema skipProperties: true; additionalProperties: true
+  flux:
+    # Fail the render when the Flux APIs cluster-manager writes in apply mode
+    # (helm.toolkit.fluxcd.io/v2 HelmRelease, source.toolkit.fluxcd.io/v1
+    # OCIRepository — the pool, operator and slice releases) are not on the
+    # cluster. Off by default: an offline `helm template` (lint, the catalog
+    # build) never sees cluster APIs; turn it on for installs that want a
+    # missing Flux to fail the upgrade instead of leaving pools "progressing".
+    requireApi: false
+  # Network policy inputs; the policies render under networkPolicy (enabled +
+  # flavor). Ingress: muster (MCPServer on) and the kubelet's probes. Egress:
+  # DNS, this installation's Kubernetes API (the Cluster API objects, the Flux
+  # objects it writes, model-manager's backend ConfigMap — as the caller), the
+  # identity provider (oauth on: the Dex issuer by name, or for
+  # cluster-manager.oauth.provider google its discovery, JWKS/userinfo and
+  # token hosts), the workload clusters' API servers (workloadClusters below —
+  # detection of the operator and the serving layer, the pool's target) and
+  # the names and blocks of egress.
+  networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to muster: a list of pod
+      # label maps (matchLabels), every one a workload in the release
+      # namespace. Empty, the default, admits no one else — the portal calls
+      # the tools through muster, not the Service.
+      additionalPeers: []
+    # The workload clusters' API servers cluster-manager reads and writes as
+    # the caller: a cluster's operator and serving layer are detected through
+    # its own apiserver, and a pool is targeted there. On Giant Swarm
+    # installations that is api.<cluster>.<base domain> on 443.
+    workloadClusters:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders — for a Giant
+      # Swarm installation `- matchPattern: "api.*.<base domain>"`. Ignored by
+      # the kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks of the workload clusters' API servers. kubernetes flavor:
+      # vanilla NetworkPolicy selects addresses, never names, so an empty list
+      # (the default) opens the ports below to every public destination —
+      # 0.0.0.0/0 minus networkPolicy.kubernetes.worldExcludedCIDRs. A list
+      # here narrows the egress to exactly these blocks. The cilium flavor adds
+      # them next to the names.
+      cidrs: []
+      # The API server ports the rules open, both flavors.
+      ports: [443, 6443]
+    # Further destinations of the service on 443 — the same knob as
+    # agentManager.networkPolicy.egress: a private identity provider.
+    egress:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders. Ignored by the
+      # kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks, opened on 443 in both flavors. In the kubernetes flavor the
+      # policy already opens every public destination while oauth is on, so
+      # this is where a private address (one of
+      # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
+      cidrs: []
 
 # === The standalone chart's extras: component chart values and their wiring ===
 # Values of the backstage, mcp-kubernetes, cloudnative-pg and kserve component
