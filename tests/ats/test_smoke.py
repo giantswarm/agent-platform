@@ -140,11 +140,13 @@ logger = logging.getLogger(__name__)
 
 # The component HelmReleases the smoke values turn on: the quick start's three,
 # kagent with its CRD chart, Agent Substrate with its CRD chart (both follow
-# components.kagent) and agent-manager.
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "agent-manager")
+# components.kagent), agent-manager, and model-manager — on by default with no
+# backend (giantswarm/agent-platform#329), nothing in the smoke values names it.
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "agent-manager", "model-manager")
 # The Deployments `helm install --wait` leaves running in the release namespace
 # (the kagent controller runs in the kagent namespace and is waited for separately).
-CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager")
+# model-manager Ready here is the zero-backend start-up: no backend registered.
+CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager", "model-manager")
 DECLARATIVE_AGENT = "ats-smoke-agent"
 MANAGED_AGENT = "ats-managed-agent"
 MANAGED_AGENT_DISPLAY_NAME = "ATS managed agent"

@@ -95,7 +95,7 @@ components:  # @schema additionalProperties: true
   agent-sandbox:  # @schema additionalProperties: true
     enabled: false
   model-manager:  # @schema additionalProperties: true
-    enabled: false
+    enabled: true
   agent-manager:  # @schema additionalProperties: true
     enabled: false
   vm-manager:  # @schema additionalProperties: true
@@ -1980,7 +1980,9 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # off; the connectivity chart renders the policies (modelManager below).
 model-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: model-manager
-  backend: ollama
+  # No static backend by default (model-manager >= 0.22.0 starts with none;
+  # backends are registered at runtime as labelled ConfigMaps). `backend` or
+  # `backends` set here is a static backend the guards and policies apply to.
   ollama:
     endpoint: ""
     agentHost: ""

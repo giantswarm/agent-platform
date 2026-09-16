@@ -101,7 +101,7 @@ LINE = {
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
-    "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+    "model-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
     # 0.20.2 is the first vm-manager release from the generated CircleCI
     # pipeline with its guest image artifact (gsoci, the catalog). muster
     # alone: the MCPServer CR.
@@ -290,6 +290,33 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"the roster forwarded to connectivity does not say {name}: enabled: false while kagent is off")
         if ro.get(name) is not True:
             fail(f"the roster forwarded to connectivity does not say {name}: enabled: true while kagent is on (got {ro.get(name)!r})")
+    # model-manager is on by default with no backend (#329), so the meta chart
+    # derives what its release must not do without its peers
+    # (agent-platform.componentDerivedValues): kagent off → kagent.disableWiring:
+    # true (no ModelConfigs wired into a kagent the installation does not run);
+    # muster off → muster.mcpServer.enabled: false (the MCPServer CRD ships with
+    # muster). With the peer on the block's own value stands.
+    def mm_values(manifest: dict) -> dict:
+        return yaml.safe_load(hr_values(manifest[("HelmRelease", "model-manager")]))
+
+    # Likewise muster's OAuth server off (the platform's one login, the lab shape of
+    # examples/kind-lab-dex.yaml) → oauth.enabled: false: no issuer to trust.
+    no_muster = docs(render(meta, [*ci, "--set", "components.muster.enabled=false"]))
+    no_login = docs(render(meta, [*ci, "--set", "muster.muster.oauth.server.enabled=false"]))
+    for peer, manifest, path, derived, own in (
+        ("components.kagent", no_kagent, "kagent.disableWiring", True, False),
+        ("components.muster", no_muster, "muster.mcpServer.enabled", False, True),
+        ("muster.muster.oauth.server.enabled", no_login, "oauth.enabled", False, True),
+    ):
+        got_off = mm_values(manifest)
+        got_on = mm_values(off)
+        for key in path.split("."):
+            got_off, got_on = got_off[key], got_on[key]
+        if got_off is not derived:
+            fail(f"{peer} off: the model-manager release carries {path}: {got_off!r}, expected the derived {derived!r}")
+        if got_on is not own:
+            fail(f"{peer} on: the model-manager release carries {path}: {got_on!r}, expected the block's own {own!r} (nothing derived)")
+    print("ok: kagent off derives kagent.disableWiring: true, muster off muster.mcpServer.enabled: false, muster's OAuth server off oauth.enabled: false for model-manager; with the peer on the block's own value stands")
     for name in ("substrate", "substrate-crds"):
         hr = off.get(("HelmRelease", name))
         if not hr or f"\n  targetNamespace: {SUBSTRATE_NAMESPACE}\n" not in hr:

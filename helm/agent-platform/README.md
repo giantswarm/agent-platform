@@ -342,9 +342,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=0.20.0 <1.0.0"` |  |
+| components.model-manager.versionRange | string | `">=0.22.0 <1.0.0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
-| components.model-manager.enabled | bool | `false` |  |
+| components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
 | components.model-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.model-manager.dependsOn[2] | string | `"kserve-resources"` |  |
@@ -1002,7 +1002,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentSandbox.podSecurity.containerSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentSandbox.podSecurity.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | model-manager.fullnameOverride | string | `"model-manager"` |  |
-| model-manager.backend | string | `"ollama"` |  |
 | model-manager.ollama.endpoint | string | `""` |  |
 | model-manager.ollama.agentHost | string | `""` |  |
 | model-manager.lemonade.endpoint | string | `""` |  |

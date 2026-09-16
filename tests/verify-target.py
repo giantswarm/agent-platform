@@ -191,12 +191,27 @@ def check_golden(meta: str, connectivity: str) -> None:
     shutil.rmtree(tree)
     subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, ref], check=True)
     try:
+        # Intended differences to GOLDEN_REF are held equal on both sides
+        # (giantswarm/agent-platform#329, model-manager on by default with no
+        # backend): the connectivity shapes render with the component off (a
+        # chart that predates the default accepts the key); the meta shapes,
+        # which forward the model-manager block to the connectivity release
+        # whatever the toggle, also with the one-backend form the old default
+        # forwarded — so a static-backend installation's render is proven
+        # unchanged.
+        mm_off = ["--set", "components.model-manager.enabled=false"]
+        mm_static = ["--set", "model-manager.backend=ollama"]
+        # The model-manager line moves to >=0.22.0 (zero-backend start-up) with
+        # the same change; the CI shape renders the release, so both sides get
+        # the range as a value (components.<name>.versionRange is one). Drop
+        # this once GOLDEN_REF carries the line.
+        mm_range = ["--set", "components.model-manager.versionRange=>=0.22.0 <1.0.0"]
         shapes = [
-            ("meta default", meta, []),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]),
-            ("connectivity default", connectivity, VM),
-            ("connectivity full", connectivity, CONN_FULL),
-            ("connectivity backstage", connectivity, CONN_BACKSTAGE),
+            ("meta default", meta, [*mm_off, *mm_static]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range]),
+            ("connectivity default", connectivity, [*VM, *mm_off]),
+            ("connectivity full", connectivity, [*CONN_FULL, *mm_off]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
@@ -275,7 +290,7 @@ def check_slices(meta: str) -> None:
     s, r, b = releases(serving), releases(runtime), releases(both)
     if not (s and r) or s & r != {"agent-platform-connectivity"} or b != s | r:
         sys.exit(f"FAIL: the combined release is not the union of the slices: serving={sorted(s)} runtime={sorted(r)} both={sorted(b)}")
-    if "muster" in b or "dicebear" in b or "valkey" in b or "agentgateway" in b:
+    if "muster" in b or "dicebear" in b or "valkey" in b or "agentgateway" in b or "model-manager" in b:
         sys.exit(f"FAIL: a slice beside the platform's release renders a component the platform's release owns: {sorted(b)}")
     for kind_name, doc in documents(serving).items():
         if kind_name[1] == "agent-platform-connectivity":

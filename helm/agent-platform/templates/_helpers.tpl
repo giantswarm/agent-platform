@@ -111,6 +111,17 @@ overwrite would hide a values file that still spells the old key.
     above: an operator's own url (an out-of-band Valkey), Secret or key wins.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation).
+  model-manager: kagent.disableWiring: true while components.kagent is off —
+    on by default with no backend (giantswarm/agent-platform#329), the release
+    must not wire ModelConfigs into a kagent the installation does not run;
+    with kagent on the block's own value stands. Likewise muster.mcpServer.enabled:
+    false while components.muster is off — the MCPServer CRD ships with muster,
+    so the MCP surface follows it (the connectivity chart's muster peer policy
+    reads the same toggle); the REST API stays. And oauth.enabled: false while
+    muster's OAuth server is off (muster.muster.oauth.server.enabled, the
+    platform's one login): a platform without a login has no issuer for a
+    resource server to trust — the lab shape of examples/kind-lab-dex.yaml —
+    the way the muster discovery label derives from the same toggle.
   substrate: atelet.serviceAccount.annotations and
     ateApiServer.serviceAccount.annotations gain eks.amazonaws.com/role-arn,
     the IRSA role the store block renders, while it does (a differing explicit
@@ -157,6 +168,15 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
+{{- end -}}
+{{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
+{{- $_ := set $derived "kagent" (dict "disableWiring" true) -}}
+{{- end -}}
+{{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "muster"))) -}}
+{{- $_ := set $derived "muster" (dict "mcpServer" (dict "enabled" false)) -}}
+{{- end -}}
+{{- if and (eq .name "model-manager") (not (dig "muster" "oauth" "server" "enabled" true (.root.Values.muster | default dict))) -}}
+{{- $_ := set $derived "oauth" (dict "enabled" false) -}}
 {{- end -}}
 {{- if and (eq .name "substrate") (eq (include "agent-platform.substrateStore.crossplane" .root) "aws") -}}
 {{- $arn := include "agent-platform.substrateStore.awsRoleArn" .root -}}

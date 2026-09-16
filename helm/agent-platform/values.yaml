@@ -724,17 +724,24 @@ components:  # @schema additionalProperties: true
   model-manager:  # @schema additionalProperties: true
     chart: model-manager
     # Model management for the Agent Platform (giantswarm/model-manager):
-    # inventory, pull, load/unload, delete and kagent ModelConfig wiring on an
-    # Ollama or a KServe backend, as REST and MCP. Off by default: it needs a
-    # serving backend the cluster has (model-manager.backend, .ollama.endpoint).
+    # inventory, pull, load/unload, delete and kagent ModelConfig wiring on
+    # Ollama, LM Studio, Lemonade or KServe backends, as REST and MCP. On by
+    # default with no backend (giantswarm/agent-platform#329): a backend is
+    # registered at runtime — by a person through the add_backend tool or the
+    # portal, by cluster-manager for a GPU node pool — as a labelled ConfigMap
+    # in model-manager's namespace; nothing here names a serving endpoint. An
+    # installation that does not want it sets enabled: false.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # model-manager stays on its 0.x line through the kagent API v2 change: it
     # renders its ModelConfigs at the kagent.dev version the cluster serves,
-    # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74) — the floor. The
-    # ceiling stays the next major, so minor releases roll on their own.
-    versionRange: ">=0.20.0 <1.0.0"
+    # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74). The floor is
+    # 0.22.0 (giantswarm/model-manager#68): zero-backend start-up, the runtime
+    # backend registry and the RBAC to read its documents — a release before
+    # it refuses to start without a backend. The ceiling stays the next major,
+    # so minor releases roll on their own.
+    versionRange: ">=0.22.0 <1.0.0"
     valuesFrom: model-manager
-    enabled: false
+    enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
     # and wires ModelConfigs into the kagent namespace, which the connectivity
     # release creates; both references are dropped at render time when the
@@ -3338,13 +3345,18 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # off; the connectivity chart renders the policies (modelManager below).
 model-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: model-manager
-  # The serving backend, or several at once: `backends: [ollama, lemonade]`
-  # (model-manager >= 0.17) runs one process in front of every server the
-  # host has — the first is the default backend, every listed driver reads its
-  # own block (ollama, lemonade, lmstudio, kserve) and the guards and network policies
-  # below apply to every listed driver. `backend` alone is the one-backend
-  # form; a set `backends` wins over it.
-  backend: ollama
+  # No backend is configured here: model-manager (>= 0.22.0) starts with none
+  # and the backends — Ollama, LM Studio, Lemonade, KServe — are registered at
+  # runtime as labelled ConfigMaps in its namespace (the add_backend tool, the
+  # portal's "Add model backend" page, cluster-manager for a GPU node pool;
+  # model-manager docs/backends.md), each carrying its own endpoint. A static
+  # backend still works as before: `backends: [ollama, lemonade]` runs one
+  # process in front of every server the host has — the first is the default
+  # backend, every listed driver reads its own block (ollama, lemonade,
+  # lmstudio, kserve) and the guards and network policies below apply to every
+  # listed driver, and only to those. `backend: ollama` alone is the one-backend
+  # form; a set `backends` wins over it. A kind listed here cannot be
+  # registered again at runtime (model-manager refuses the document).
   ollama:
     endpoint: ""
     agentHost: ""
