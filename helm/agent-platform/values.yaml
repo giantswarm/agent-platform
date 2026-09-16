@@ -560,10 +560,14 @@ components:  # @schema additionalProperties: true
     # The kagent chart stamps its own image references at publish (the build's
     # controller/UI tag, the Go ADK digest the Harness runs, the gVisor worker
     # of the Substrate version it was built against). An installation may
-    # override them, but an EMPTY value must not reach the chart — it would
-    # replace the stamp (substrate-workerpool.yaml refuses an empty
-    # workerImage; the Harness helper falls back to the stamp only when
-    # harness.image is absent or empty). So the two keys travel only when set.
+    # override harness.image, but an EMPTY value must not reach the chart — it
+    # would replace the stamp (the Harness helper falls back to the stamp only
+    # when harness.image is absent or empty). So the key travels only when
+    # set. substrateWorkerPool.workerImage is listed for the same reason
+    # (substrate-workerpool.yaml refuses an empty value), though the chart's
+    # stamp never reaches the cluster any more: the meta chart derives the
+    # worker from ITS Substrate pin over the forwarded block
+    # (agent-platform.componentDerivedValues, giantswarm/agent-platform#466).
     omitEmptyKeys:
       - substrateWorkerPool.workerImage
       - harness.image
@@ -610,7 +614,7 @@ components:  # @schema additionalProperties: true
     # render — agent-platform.validateSubstrate). Both releases land in
     # ate-system (targetNamespace; the chart's Roles name that namespace), and
     # both carry ONE version pin: the same range in the two versionRanges
-    # (>=0.0.30-gs.2 <0.0.31-0, the kagent entry's shape — the line's releases
+    # (>=0.0.30-gs.4 <0.0.31-0, the kagent entry's shape — the line's releases
     # of upstream 0.0.29, from gs.1 the pin kagent main names since
     # kagent-dev/kagent#2802 — its router addresses an actor by the
     # ate-target-actor header, which kagent 0.11.0-gs.14 sets and Substrate
@@ -629,17 +633,28 @@ components:  # @schema additionalProperties: true
     # its trust chain, and from 0.0.30-gs.2 the WorkerPool template's
     # topologySpreadConstraints and podAntiAffinity, giantswarm/giantswarm#37797,
     # next to a paused actor's resume failing fast when its node is gone),
-    # whose floor is 0.0.30-gs.2: the release whose CRD carries the spread
-    # fields (agent-platform.substrate.workerPoolSpreadFloor, the render guard
-    # on kagent.substrateWorkerPool.template). The worker image the kagent
-    # chart stamps into substrateWorkerPool.workerImage stays 0.0.30-gs.1
-    # (kagent 0.11.0-gs.14 on): gs.2 changes ate-controller, the CRD and
-    # ate-api only, and a gs.1 worker runs under a gs.2 control plane. A
-    # Substrate re-pin that changes the RUNTIME moves the three together with
-    # the kagent pin (README "Agent Substrate"). A mirror sets `repository`
-    # here and substrate.image.registry below.
+    # whose floor is 0.0.30-gs.4: gs.2 is the release whose CRD carries the
+    # spread fields (agent-platform.substrate.workerPoolSpreadFloor, the render
+    # guard on kagent.substrateWorkerPool.template), gs.3 makes every pause
+    # durable, gs.4 bounds the golden boot a workload keeps failing
+    # (giantswarm/substrate#39, giantswarm/giantswarm#37801: three boots, then
+    # GoldenActorNotReady with the workload's last output — the WORKER quotes
+    # it, so the floor is the release the fleet's workers already run). The
+    # worker image the kagent WorkerPool runs is DERIVED from this range's
+    # floor (agent-platform.substrate.workerImage: substrate.image.registry,
+    # ateom-gvisor, the floor), never taken from the kagent chart's stamp: the
+    # worker and the atelet are one Substrate release whatever kagent build
+    # components.kagent's range admits, and moving this floor rolls the pool
+    # (giantswarm/agent-platform#466 — chart 4.15.2 admitted a kagent stamping
+    # a 0.0.30 worker under its 0.0.27 atelet and booted no golden actor). So
+    # the range confines one release, `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` or an exact
+    # pin (agent-platform.substrate.validateRange refuses any other shape); a
+    # Substrate re-pin is this floor, and the kagent range follows when the
+    # kagent line's own pin moves (README "Agent Substrate"). A mirror sets
+    # `repository` here and substrate.image.registry below, which the derived
+    # worker image follows.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.30-gs.2 <0.0.31-0"
+    versionRange: ">=0.0.30-gs.4 <0.0.31-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -661,7 +676,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://ghcr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.30-gs.2 <0.0.31-0"
+    versionRange: ">=0.0.30-gs.4 <0.0.31-0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -2174,15 +2189,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # rendered by the kagent chart in the kagent namespace: platform capacity,
   # not an agent's — one worker hosts one actor at a time, so replicas bound
   # the concurrently active agents, and a worker's resources bound a sandbox.
-  # workerImage is the gVisor worker of the Substrate version the cluster runs:
+  # workerImage is the gVisor worker of the Substrate release the cluster runs:
   # the Giant Swarm Substrate line (giantswarm/substrate, published as
   # ghcr.io/giantswarm/substrate/*, tagged with the bare version; its FORK.md
-  # is the ledger). The kagent chart stamps it at publish with the Substrate
-  # version it was built against, which components.substrate.versionRange's
-  # floor must equal (the worker image and the control plane are one Substrate
-  # version; tests/verify-components.py asserts the floor) — so it stays EMPTY
-  # here and travels only when an installation sets it (components.kagent
-  # .omitEmptyKeys; the chart refuses an empty value). sandboxClass gvisor is
+  # is the ledger). The chart DERIVES it from components.substrate.versionRange's
+  # floor — <substrate.image.registry>/ateom-gvisor:<floor> — so the worker and
+  # the atelet are one Substrate release whatever kagent build the kagent range
+  # admits (giantswarm/agent-platform#466; the kagent chart's own stamp, the
+  # Substrate its build was published against, never reaches the cluster). It
+  # stays EMPTY here: the derived value lands over it. An installation that
+  # sets it names an ateom-gvisor image TAGGED WITH THAT FLOOR (a mirror by a
+  # path other than substrate.image.registry, which the derived image already
+  # follows); any other tag fails the render. sandboxClass gvisor is
   # what kagent's generated ActorTemplates select. The Harness's workerPoolRef
   # follows `name`; replicas and template (resources, node placement, the
   # CPU feature-set pin) are the capacity knobs; podDisruptionBudget (the

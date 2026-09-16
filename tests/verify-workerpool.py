@@ -139,6 +139,12 @@ def render_fails(meta: str, flags: list[str], needle: str, what: str) -> None:
         cc.fail(f"{what} failed the render for the wrong reason (expected {needle!r}):\n{r.stderr}")
 
 
+def next_patch(version: str) -> str:
+    """X.Y.(Z+1) of a version — the ceiling a Substrate range confines itself to (#466)."""
+    x, y, z = version.split("-", 1)[0].split(".")
+    return f"{x}.{y}.{int(z) + 1}"
+
+
 def spread_floor(meta: str) -> str:
     """The Substrate release agent-platform.substrate.workerPoolSpreadFloor names — the
     one line of _helpers.tpl this check and the guard share."""
@@ -255,9 +261,11 @@ def main(meta: str) -> int:
             needle = f"kagent.substrateWorkerPool.template.{key} needs the Substrate line at {floor} or later"
             render_fails(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", f"components.substrate.versionRange={BELOW_FLOOR_RANGE}"],
                          needle, f"template.{key} with components.substrate.versionRange below {floor}")
+            # A range without a floor is refused before the spread guard runs: the
+            # worker image is derived from the floor (#466, verify-worker-image.py).
             render_fails(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", "components.substrate.versionRange=0.x"],
-                         needle, f"template.{key} with a components.substrate.versionRange without a floor")
-            at_floor, _, _ = kagent_release(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", f"components.substrate.versionRange=>={floor} <99.0.0-0"])
+                         'components.substrate.versionRange "0.x" does not confine one Substrate release', f"template.{key} with a components.substrate.versionRange without a floor")
+            at_floor, _, _ = kagent_release(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", f"components.substrate.versionRange=>={floor} <{next_patch(floor)}-0"])
             if template_of(at_floor).get(key) != SPREAD[key]:
                 cc.fail(f"template.{key} does not reach the kagent release verbatim with the Substrate range at {floor}: {template_of(at_floor).get(key)!r}")
             print(f"ok: template.{key} fails the render below the Substrate floor {floor} (naming the key, the floor and the range) and reaches the kagent release verbatim from it on")

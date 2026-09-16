@@ -87,13 +87,16 @@ CONNECTIVITY = "agent-platform-connectivity"
 KAGENT_LINE = "oci://ghcr.io/giantswarm/kagent/helm"
 KAGENT_RANGE = ">=0.11.0-gs.16 <0.11.1-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
-# (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin
-# (the build the WorkerPool's worker image names), both landing in ate-system,
-# both following components.kagent. The pin is the line's release range, the
-# kagent entry's shape; its floor is the BOM pin and the worker image's tag.
+# (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
+# both landing in ate-system, both following components.kagent. The pin is the
+# line's release range, the kagent entry's shape; its floor is the BOM pin AND
+# the worker image's tag — the meta chart derives the kagent WorkerPool's
+# ateom-gvisor image from it, never from the kagent chart's stamp (#466;
+# tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.30-gs.2 <0.0.31-0"
-SUBSTRATE_PIN = "0.0.30-gs.2"  # the range's floor and the BOM pin: the release whose WorkerPool CRD carries the spread fields (#472); the worker image the kagent chart (0.11.0-gs.16) stamps stays 0.0.30-gs.1
+SUBSTRATE_RANGE = ">=0.0.30-gs.4 <0.0.31-0"
+SUBSTRATE_PIN = "0.0.30-gs.4"  # the range's floor, the BOM pin and the worker image's tag: the bounded golden boot (giantswarm/substrate#39, giantswarm/giantswarm#37801), the worker the fleet already ran under kagent 0.11.0-gs.20's stamp
+WORKER_IMAGE = f"ghcr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
@@ -509,12 +512,14 @@ def main(meta: str, connectivity: str) -> int:
     if len(substrate_pins) != 1:
         fail(f"the BOM pins substrate and substrate-crds to different builds {sorted(substrate_pins)}; the two charts are one build of the Substrate line")
     if re.search(r"^\s*workerImage:\s*(?!\"\"$|''$)\S+$", open(f"{meta}/values.yaml").read(), re.M):
-        fail("kagent.substrateWorkerPool.workerImage is set in values.yaml; the kagent chart stamps the worker of the Substrate version it was built against, the key stays empty here")
+        fail("kagent.substrateWorkerPool.workerImage is set in values.yaml; the chart derives the worker from components.substrate.versionRange's floor, the key stays empty here (#466)")
+    if not re.search(rf"^  workerImage: {re.escape(WORKER_IMAGE)}$", hr_values(on[("HelmRelease", "kagent")]), re.M):
+        fail(f"the kagent release does not carry substrateWorkerPool.workerImage {WORKER_IMAGE!r}, the worker of the Substrate release the chart pins (the floor of components.substrate.versionRange) — the worker and the atelet are one Substrate release (#466)")
     if not SUBSTRATE_RANGE.startswith(f">={SUBSTRATE_PIN} "):
         fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
     if substrate_pins != {SUBSTRATE_PIN}:
-        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the two Substrate charts are one release of the line (the worker image the kagent chart stamps may trail it while the runtime is unchanged)")
-    print("ok: the customer BOM pins the seven, the kagent line and the managers exactly, and not the wiring chart")
+        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the two Substrate charts and the derived worker image are one release of the line")
+    print(f"ok: the customer BOM pins the seven, the kagent line and the managers exactly, and not the wiring chart; the kagent release's worker image is {WORKER_IMAGE}, the chart's own Substrate pin")
 
     # --- the forwarded tree validates against the connectivity chart --------------
     # The meta chart's defaults plus the one input every render needs; the CI

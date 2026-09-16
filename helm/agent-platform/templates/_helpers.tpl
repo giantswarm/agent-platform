@@ -110,7 +110,14 @@ overwrite would hide a values file that still spells the old key.
     the switch is one line. These are defaults, not the single-source rule
     above: an operator's own url (an out-of-band Valkey), Secret or key wins.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
-    store block renders the bucket (agent-platform.kagent.snapshotLocation).
+    store block renders the bucket (agent-platform.kagent.snapshotLocation);
+    substrateWorkerPool.workerImage from the Substrate release THIS chart pins
+    (agent-platform.substrate.workerImage: the substrate block's image.registry,
+    ateom-gvisor, the floor of components.substrate.versionRange) — never the
+    worker the kagent build was published against, so the worker and the
+    atelet are one Substrate release whatever kagent build the range admits
+    (giantswarm/agent-platform#466). An installation's own workerImage stands
+    only while its tag is that release (a mirror by another path).
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -180,6 +187,24 @@ runtime-registration contract there. */ -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
+{{- end -}}
+{{- if eq .name "kagent" -}}
+{{- /* The worker image follows the chart's Substrate pin, not the kagent build's
+stamp (giantswarm/agent-platform#466): a 0.0.30 worker under a 0.0.27 atelet
+booted no golden actor (bundles/pause became bundles/_pause) and nothing named
+the skew. The derived value lands over the forwarded block's copy; an own
+value stands only while its tag is the pinned release. */ -}}
+{{- $pin := include "agent-platform.substrate.pinnedVersion" .root -}}
+{{- $image := include "agent-platform.substrate.workerImage" .root -}}
+{{- $own := dig "substrateWorkerPool" "workerImage" "" (.root.Values.kagent | default dict) -}}
+{{- if $own -}}
+{{- $ownTag := regexFind ":[^:/@]+(@sha256:[0-9a-f]+)?$" $own | trimPrefix ":" | splitList "@" | first -}}
+{{- if ne $ownTag $pin -}}
+{{- fail (printf "kagent.substrateWorkerPool.workerImage (%s) does not carry the Substrate release this chart pins (%s, the floor of components.substrate.versionRange): the worker and the atelet are one Substrate release — leave it unset (the chart derives %s; a mirror sets substrate.image.registry) or name an ateom-gvisor image tagged %s" $own $pin $image $pin) -}}
+{{- end -}}
+{{- else -}}
+{{- $_ := set $derived "substrateWorkerPool" (dict "workerImage" $image) -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
 {{- $_ := set $derived "kagent" (dict "disableWiring" true) -}}
@@ -588,6 +613,9 @@ run it.
 {{- if and $kagent (not (include "agent-platform.kagent.snapshotLocation" .)) -}}
 {{- fail "kagent.harness.snapshotLocation is required when components.kagent is on: the Substrate snapshot location the platform Harness writes the actors' snapshots to (snapshotPolicy.location), an object-store URL such as s3://<bucket>/<prefix> — the installation's S3 bucket (IRSA on CAPA; kagent.harness.snapshotStore.crossplane provisions it and derives the location), an S3-compatible store with its endpoint and credentials in substrate.atelet.extraEnv, or a lab's in-cluster store (substrate.rustfs.enabled: true, s3://ate-snapshots/<prefix>)" -}}
 {{- end -}}
+{{- if $substrate -}}
+{{- include "agent-platform.substrate.validateRange" . -}}
+{{- end -}}
 {{- if and $substrate (not (include "agent-platform.substrate.postgresMode" .)) -}}
 {{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; postgres.databases.substrate renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionString" -}}
 {{- end -}}
@@ -619,6 +647,68 @@ Usage: include "agent-platform.semverRangeFloor" "<range>"
 {{- end -}}
 {{- end -}}
 {{- $floor -}}
+{{- end -}}
+
+{{/*
+The Substrate release this chart pins: the floor of components.substrate
+.versionRange (an exact pin is its own floor). The gVisor worker image every
+kagent WorkerPool runs is derived from it (agent-platform.substrate.workerImage),
+so a range without a floor fails the render here, naming the shape the range
+takes (giantswarm/agent-platform#466).
+Usage: include "agent-platform.substrate.pinnedVersion" $root
+*/}}
+{{- define "agent-platform.substrate.pinnedVersion" -}}
+{{- $range := dig "substrate" "versionRange" "" .Values.components -}}
+{{- $floor := include "agent-platform.semverRangeFloor" $range -}}
+{{- if not $floor -}}
+{{- fail (printf "components.substrate.versionRange %q has no floor: the Substrate worker image the kagent WorkerPool runs (ateom-gvisor) is derived from the range's floor, so the range is one exact version or `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` (giantswarm/agent-platform#466)" $range) -}}
+{{- end -}}
+{{- $floor -}}
+{{- end -}}
+
+{{/*
+The gVisor worker image of the Substrate release this chart pins:
+<substrate.image.registry>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
+— the registry the substrate block names for the control plane's images (a
+mirror sets it there, once, for both), the tag the atelet's. Every release of
+the line publishes atelet and ateom-gvisor under the same tag.
+Usage: include "agent-platform.substrate.workerImage" $root
+*/}}
+{{- define "agent-platform.substrate.workerImage" -}}
+{{- $registry := dig "image" "registry" "ghcr.io/giantswarm/substrate" (.Values.substrate | default dict) -}}
+{{- printf "%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (include "agent-platform.substrate.pinnedVersion" .) -}}
+{{- end -}}
+
+{{/*
+Fail the render when components.substrate.versionRange could resolve to a
+Substrate release of another X.Y.Z than the one it pins (giantswarm/agent-
+platform#466). The worker image follows the range's FLOOR and the atelet
+follows what Flux RESOLVES, so the two are one runtime only while the range
+confines one release: an exact version (a BOM pin, `0.0.30-gs.4`), or a floor
+with the ceiling of its own patch, `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` — the line's
+later gs.N of that release may reach the control plane ahead of the worker
+(the line moves the pin when a patch changes the runtime), a 0.0.31 never.
+`0.x`, `~0.0.30`, `^0.0.30`, `<0.0.32-0` are refused. Called by
+agent-platform.validateSubstrate while components.substrate is on.
+*/}}
+{{- define "agent-platform.substrate.validateRange" -}}
+{{- $range := dig "substrate" "versionRange" "" .Values.components | replace "," " " | trim -}}
+{{- $terms := list -}}
+{{- range splitList " " $range -}}{{- if . -}}{{- $terms = append $terms . -}}{{- end -}}{{- end -}}
+{{- $version := "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" -}}
+{{- $ok := false -}}
+{{- if and (eq (len $terms) 1) (regexMatch $version (first $terms)) -}}
+{{- $ok = true -}}
+{{- else if and (eq (len $terms) 2) (hasPrefix ">=" (first $terms)) (hasPrefix "<" (last $terms)) (not (hasPrefix "<=" (last $terms))) -}}
+{{- $floor := trimPrefix ">=" (first $terms) -}}
+{{- if regexMatch $version $floor -}}
+{{- $parts := splitList "." (first (splitList "-" $floor)) -}}
+{{- $ok = eq (trimPrefix "<" (last $terms)) (printf "%s.%s.%d-0" (index $parts 0) (index $parts 1) (add1 (atoi (index $parts 2)))) -}}
+{{- end -}}
+{{- end -}}
+{{- if not $ok -}}
+{{- fail (printf "components.substrate.versionRange %q does not confine one Substrate release: the kagent WorkerPool's worker image (ateom-gvisor) follows the range's floor and the atelet follows the release Flux resolves, so the range is one exact version (0.0.30-gs.4) or a floor with the ceiling of its own patch (>=0.0.30-gs.4 <0.0.31-0) — a worker and an atelet of different releases boot no golden actor (giantswarm/agent-platform#466)" $range) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
