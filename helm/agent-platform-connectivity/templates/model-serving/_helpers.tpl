@@ -433,3 +433,69 @@ wildcard (gatewayApi.gateway.tls.secretName).
 {{- else -}}{{- .Values.gatewayApi.gateway.tls.secretName -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+The pods KServe runs for a served model come in two shapes, and their labels
+share nothing: the classic InferenceService predictor carries
+serving.kserve.io/inferenceservice=<name> and serves from kserve-container; the
+LLMInferenceService workload pod the llm-d controller creates carries
+kserve.io/component=workload with app.kubernetes.io/part-of=llminferenceservice
+and app.kubernetes.io/name=<name>, and serves from main
+(giantswarm/agent-platform#506). Every selector of the serving namespace's
+model pods — the Kyverno mutations, the network policies, the PolicyException —
+renders from this list, one entry per shape, so they never disagree. JSON:
+  [ { "name": "predictor" | "llmisvc-workload",   the object name suffix
+      "kind": "InferenceService" | "LLMInferenceService",
+      "nameLabel": <the label that carries the served model's name>,
+      "runtimeContainer": <the container that serves>,
+      "matchExpressions": [<the label selector of the shape>] } ]
+Usage: $shapes := include "agent-platform.modelServing.podShapes" . | fromJsonArray
+*/}}
+{{- define "agent-platform.modelServing.podShapes" -}}
+{{- $classic := dict "name" "predictor" "kind" "InferenceService" "nameLabel" "serving.kserve.io/inferenceservice" "runtimeContainer" "kserve-container" -}}
+{{- $_ := set $classic "matchExpressions" (list (dict "key" "serving.kserve.io/inferenceservice" "operator" "Exists")) -}}
+{{- $llmisvc := dict "name" "llmisvc-workload" "kind" "LLMInferenceService" "nameLabel" "app.kubernetes.io/name" "runtimeContainer" "main" -}}
+{{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "kserve.io/component" "operator" "In" "values" (list "workload")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
+{{- list $classic $llmisvc | toJson -}}
+{{- end -}}
+
+{{/*
+The Kyverno `match` entries selecting the model pods of the serving namespace
+at CREATE, one per pod shape (agent-platform.modelServing.podShapes, or the
+`shapes` subset given); the caller nests them under `match.any`. Kinds default
+to Pod; the operations to CREATE (a pod's init containers are immutable, and
+the filter keeps later updates untouched).
+Usage: include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "kinds" (list "Deployment") "operations" (list "CREATE" "UPDATE"))
+       include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "shapes" (list $shape))
+*/}}
+{{- define "agent-platform.modelServing.kyvernoMatch" -}}
+{{- $ns := include "agent-platform.modelServing.namespace" .root -}}
+{{- range (.shapes | default (include "agent-platform.modelServing.podShapes" .root | fromJsonArray)) }}
+# {{ .kind }}
+- resources:
+    kinds:
+      {{- toYaml ($.kinds | default (list "Pod")) | nindent 6 }}
+    namespaces:
+      - {{ $ns }}
+    operations:
+      {{- toYaml ($.operations | default (list "CREATE")) | nindent 6 }}
+    selector:
+      matchExpressions:
+        {{- toYaml .matchExpressions | nindent 8 }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The JMESPath (bare, no delimiters) of the served model's name on a model pod,
+whatever its shape: the first of the shapes' name labels the pod carries. It
+names the pod's cache subdirectory (<claim>/<model>). Kyverno evaluates it at
+admission; the caller wraps it in its delimiters (and `length(... || '')` for a
+precondition that the pod carries one at all).
+*/}}
+{{- define "agent-platform.modelServing.modelNamePath" -}}
+{{- $labels := list -}}
+{{- range (include "agent-platform.modelServing.podShapes" . | fromJsonArray) -}}
+{{- $labels = append $labels (printf "request.object.metadata.labels.%q" .nameLabel) -}}
+{{- end -}}
+{{- join " || " $labels -}}
+{{- end -}}
