@@ -77,7 +77,11 @@ SUBSTRATE_NAMESPACE = "ate-system"
 KAGENT_NAMESPACE = "kagent"
 # Exceptions that select something other than a Substrate workload, with the
 # one rule each may name.
-OTHER_EXCEPTIONS = {"kagent-pg-image-volume": {"restricted-volumes"}}
+OTHER_EXCEPTIONS = {
+    "kagent-pg-image-volume": {"restricted-volumes"},
+    # The serving predictors (root vLLM image; #498), rendered with modelServing on.
+    "model-serving-predictors": {"require-drop-all", "privilege-escalation", "run-as-non-root", "check-seccomp-strict"},
+}
 
 # The worker pod, as ate-controller renders it (see the module docstring).
 WORKER_POD = {

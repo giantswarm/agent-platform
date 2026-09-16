@@ -167,6 +167,25 @@ def check_ingress_guard(connectivity: str, base: list[str]) -> None:
     ok("ingress guard: the slice needs no edge Gateway; with muster on the Gateway and the mode/agentgateway agreement are still required; agentgateway-* modes still need the component")
 
 
+def check_policy_exception(connectivity: str, base: list[str]) -> None:
+    """The predictors' PolicyException (#498): the four restricted-PSS rules the root vLLM image violates, in the serving namespace."""
+    docs = documents(helm(connectivity, base))
+    pe = docs.get(("PolicyException", "model-serving-predictors"))
+    if not pe:
+        sys.exit("FAIL: no PolicyException model-serving-predictors: the fleet's restricted PSS policies deny the predictor Deployment")
+    for needle in ("  namespace: policy-exceptions", "  - policyName: disallow-capabilities-strict", "      - require-drop-all", "      - autogen-require-drop-all",
+                   "  - policyName: disallow-privilege-escalation", "      - autogen-privilege-escalation", "  - policyName: require-run-as-nonroot", "      - autogen-run-as-non-root",
+                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: serving.kserve.io/inferenceservice",
+                   '        - "*-kserve*"'):
+        need(pe, needle, "the predictors' PolicyException")
+    if pe.count("- policyName:") != 4:
+        sys.exit("FAIL: the predictors' PolicyException names more or fewer than the four policies the predictor violates")
+    off = documents(helm(connectivity, [*base, "--set", "kyvernoPolicies.enabled=false"]))
+    if ("PolicyException", "model-serving-predictors") in off:
+        sys.exit("FAIL: the predictors' PolicyException rendered with the Kyverno objects off")
+    ok("the predictors' PolicyException: the four restricted-PSS rules with their autogen copies, the serving namespace, label and name matches; none with Kyverno off")
+
+
 def check_controller_xds(connectivity: str, base: list[str]) -> None:
     """The controller admits xDS from every data plane of its GatewayClass in any namespace (#495)."""
     on = [*base, "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "ingress.parentRefs[0].name=x"]
@@ -332,6 +351,7 @@ def main(meta: str, connectivity: str) -> int:
     try:
         base = ["-f", values, "--namespace", "agent-platform", *FLEET_APIS]
         check_ingress_guard(connectivity, base)
+        check_policy_exception(connectivity, base)
         check_controller_xds(connectivity, base)
         check_gateway(connectivity, base)
         check_cache(connectivity, base)
