@@ -20,6 +20,10 @@ components:
     enabled: false
   valkey:
     enabled: false
+  # model-manager is on by default (#329) and the platform's release owns it: it
+  # runs on the installation and manages the slices' backends registered at runtime.
+  model-manager:
+    enabled: false
   kserve-crd:
     enabled: true
   kserve-resources:

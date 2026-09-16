@@ -451,7 +451,7 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | components.kagent.enabled | bool | `false` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.enabled | bool | `false` |  |
-| components.model-manager.enabled | bool | `false` |  |
+| components.model-manager.enabled | bool | `true` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.backstage.enabled | bool | `false` |  |
@@ -967,7 +967,6 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | agentSandbox.podSecurity.containerSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentSandbox.podSecurity.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | model-manager.fullnameOverride | string | `"model-manager"` |  |
-| model-manager.backend | string | `"ollama"` |  |
 | model-manager.ollama.endpoint | string | `""` |  |
 | model-manager.ollama.agentHost | string | `""` |  |
 | model-manager.lemonade.endpoint | string | `""` |  |

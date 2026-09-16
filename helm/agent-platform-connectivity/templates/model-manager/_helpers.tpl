@@ -48,20 +48,27 @@ The port the model-manager Service listens on (model-manager.service.port, defau
 {{/*
 The serving backend the chart is configured with (model-manager.backend) — the
 one-backend form; with model-manager.backends set, the default (first) backend.
+Empty when no backend is configured statically (the default: backends are
+registered at runtime, model-manager docs/backends.md).
 */}}
 {{- define "agent-platform.modelManager.backend" -}}
-{{- index (include "agent-platform.modelManager.backends" . | fromJsonArray) 0 -}}
+{{- with include "agent-platform.modelManager.backends" . | fromJsonArray }}{{ index . 0 }}{{ end -}}
 {{- end -}}
 
 {{/*
-The serving backends the component runs, as a JSON list: model-manager.backends
-when set (one model-manager in front of several servers, e.g. ollama and
-lemonade), else [model-manager.backend]. The first is the default backend.
+The serving backends the component runs statically, as a JSON list:
+model-manager.backends when set (one model-manager in front of several servers,
+e.g. ollama and lemonade), else [model-manager.backend] when that is set, else
+[] — the default: model-manager starts with no backend and the backends are
+registered at runtime as labelled ConfigMaps in its namespace (model-manager
+docs/backends.md), which no guard or policy here can see. The first is the
+default backend.
 */}}
 {{- define "agent-platform.modelManager.backends" -}}
 {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
 {{- $list := dig "backends" (list) $chart -}}
-{{- if $list }}{{ $list | toJson }}{{ else }}{{ list (dig "backend" "ollama" $chart) | toJson }}{{ end -}}
+{{- $one := dig "backend" "" $chart -}}
+{{- if $list }}{{ $list | toJson }}{{ else if $one }}{{ list $one | toJson }}{{ else }}[]{{ end -}}
 {{- end -}}
 
 {{/*
