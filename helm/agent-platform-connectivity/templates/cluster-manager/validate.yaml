@@ -1,0 +1,67 @@
+{{- /*
+Render-time guards of the cluster-manager component. They fail `helm template`
+(and therefore CI lint + install) with an actionable message instead of
+shipping a service that cannot validate its callers, an MCPServer CR without
+its CRD, or pool releases nothing reconciles.
+*/ -}}
+{{- if (include "agent-platform.clusterManager.enabled" .) }}
+  {{- $cm := .Values.clusterManager }}
+  {{- $chart := include "agent-platform.clusterManager.chartValues" . | fromJson }}
+  {{- $_ := include "agent-platform.clusterManager.fullname" . }}
+
+  {{- /* In apply mode the pool, operator and slice releases are Flux
+         HelmReleases: helm-controller and source-controller must run on the
+         cluster. Only checkable through their CRDs at render time; an offline
+         `helm template` passes with --api-versions helm.toolkit.fluxcd.io/v2
+         --api-versions source.toolkit.fluxcd.io/v1, or
+         clusterManager.flux.requireApi: false skips it. */ -}}
+  {{- if and $cm.flux.requireApi (not (.Capabilities.APIVersions.Has "helm.toolkit.fluxcd.io/v2")) }}
+    {{- fail "components.cluster-manager.enabled is true but the helm.toolkit.fluxcd.io/v2 API (HelmRelease) is not on the cluster: cluster-manager composes GPU node pools as Flux HelmReleases, which helm-controller and source-controller reconcile. Install Flux (its helm and source controllers) first, or set clusterManager.flux.requireApi: false for an offline render (or pass --api-versions helm.toolkit.fluxcd.io/v2 --api-versions source.toolkit.fluxcd.io/v1)." }}
+  {{- end }}
+  {{- if and $cm.flux.requireApi (not (.Capabilities.APIVersions.Has "source.toolkit.fluxcd.io/v1")) }}
+    {{- fail "components.cluster-manager.enabled is true but the source.toolkit.fluxcd.io/v1 API (OCIRepository) is not on the cluster: every pool release is tracked through a Flux OCIRepository. Install Flux's source-controller, or set clusterManager.flux.requireApi: false." }}
+  {{- end }}
+
+  {{- /* The MCP endpoint is the server's only surface: without muster nothing
+         calls the tools (the MCPServer CRD ships with muster). */ -}}
+  {{- if and (dig "muster" "mcpServer" "enabled" false $chart) (not (include "agent-platform.componentEnabled" (dict "root" . "name" "muster"))) }}
+    {{- fail "cluster-manager.muster.mcpServer.enabled is true but components.muster.enabled is false: the MCPServer CRD ships with muster, so the CR has no API to map to. Turn on muster (cluster-manager's tools reach the portal and the agents through it) or set cluster-manager.muster.mcpServer.enabled: false" }}
+  {{- end }}
+
+  {{- /* The component release resolves its OAuth inputs through the chart's
+         global.identity / global.domain fallbacks; a missing one fails inside
+         the child release, out of sight. Fail here, naming both keys. */ -}}
+  {{- if (include "agent-platform.clusterManager.oauthEnabled" .) }}
+    {{- $oauth := dig "oauth" dict $chart }}
+    {{- if and (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
+      {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL" }}
+    {{- end }}
+    {{- if eq (dig "provider" "dex" $oauth) "dex" }}
+      {{- if not (include "agent-platform.clusterManager.issuerUrl" .) }}
+        {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set: the resource server needs the login issuer" }}
+      {{- end }}
+      {{- if and (not (dig "dex" "clientID" "" $oauth)) (not .Values.global.identity.clientId) }}
+        {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.dex.clientID is empty and global.identity.clientId is not set: the resource server needs the platform OAuth client" }}
+      {{- end }}
+      {{- if and (not (dig "existingSecret" "" $oauth)) (not (dig "dex" "clientSecret" "" $oauth)) (not .Values.global.identity.existingSecret) }}
+        {{- fail "cluster-manager.oauth.enabled is true but none of cluster-manager.oauth.existingSecret, cluster-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: the resource server needs the platform client's secret (key dex-client-secret)" }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* The workload clusters' API servers: CIDRs are CIDRs, ports are ports. */ -}}
+  {{- $wc := $cm.networkPolicy.workloadClusters }}
+  {{- range concat ($wc.cidrs | default list) ($cm.networkPolicy.egress.cidrs | default list) }}
+    {{- if not (regexMatch `^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$` .) }}
+      {{- fail (printf "clusterManager.networkPolicy: %q is not an IPv4 CIDR" .) }}
+    {{- end }}
+  {{- end }}
+  {{- if not $wc.ports }}
+    {{- fail "clusterManager.networkPolicy.workloadClusters.ports is empty: name the API server ports of the workload clusters (443 on Giant Swarm installations; 6443 on kind and self-managed clusters)" }}
+  {{- end }}
+  {{- range $wc.ports }}
+    {{- if or (not (kindIs "float64" .)) (lt (. | int) 1) (gt (. | int) 65535) }}
+      {{- fail (printf "clusterManager.networkPolicy.workloadClusters.ports: %v is not a TCP port (1-65535)" .) }}
+    {{- end }}
+  {{- end }}
+{{- end }}

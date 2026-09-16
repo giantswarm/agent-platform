@@ -144,6 +144,18 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- end -}}
 {{- $_ := set $derived "muster" (dict "url" $url) -}}
 {{- end -}}
+{{- if eq .name "cluster-manager" -}}
+{{- /* model-manager's namespace: where the model-manager component lands — the
+platform's own namespace (gitops.targetNamespace, else the release namespace).
+create_node_pool writes the kserve backend ConfigMap of model-manager's
+runtime-registration contract there. */ -}}
+{{- $ns := .root.Values.gitops.targetNamespace | default .root.Release.Namespace -}}
+{{- $own := dig "modelManager" "namespace" "" (index .root.Values "cluster-manager" | default dict) -}}
+{{- if and $own (ne $own $ns) -}}
+{{- fail (printf "cluster-manager.modelManager.namespace (%s) differs from the platform's namespace (%s), where the model-manager component lands: cluster-manager registers a serving cluster's kserve backend through model-manager's ConfigMap there — leave cluster-manager.modelManager.namespace unset" $own $ns) -}}
+{{- end -}}
+{{- $_ := set $derived "modelManager" (dict "namespace" $ns) -}}
+{{- end -}}
 {{- if eq .name "klaus-gateway" -}}
 {{- $kg := .root.Values.klausGateway | default dict -}}
 {{- if and (eq (dig "routing" "store" "" $kg) "valkey") (include "agent-platform.componentEnabled" (dict "root" .root "name" "valkey")) -}}
@@ -714,7 +726,8 @@ by anyone allowed to get HelmReleases there.
       (list "klausGateway" (list "obo" "storeKey"))
       (list "model-manager" (list "oauth" "dex" "clientSecret"))
       (list "agent-manager" (list "oauth" "dex" "clientSecret"))
-      (list "vm-manager" (list "oauth" "dex" "clientSecret")) -}}
+      (list "vm-manager" (list "oauth" "dex" "clientSecret"))
+      (list "cluster-manager" (list "oauth" "dex" "clientSecret")) -}}
 {{- range $paths -}}
 {{- $cur := index $v (first .) | default dict -}}
 {{- $ok := kindIs "map" $cur -}}
