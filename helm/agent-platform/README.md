@@ -1133,7 +1133,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
-| cluster-manager.networkPolicy.enabled | bool | `false` |  |
 | clusterManager.flux.requireApi | bool | `false` |  |
 | clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
