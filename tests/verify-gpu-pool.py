@@ -19,7 +19,9 @@ onto the pool and published for model-manager. Each case below pins one property
   discovery ConfigMap;
 - an empty taint key (an untainted pool): no toleration anywhere, no taint in
   the discovery ConfigMap, and the serving render byte-identical to GOLDEN_REF
-  (origin/main; GOLDEN_REF= opts out) but for the discovery block itself;
+  (origin/main; GOLDEN_REF= opts out) but for the discovery block itself --
+  against a golden that already carries this change the override goes to both
+  sides, since a tainted golden could never equal an untainted head;
 - the guards: the effect, the key, string label values (a number must be
   quoted; --set-string passes);
 - the meta chart forwards the block to the connectivity release.
@@ -222,12 +224,22 @@ else:
     tree = tempfile.mkdtemp(prefix="ap-gpu-pool-golden-")
     subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, ref], check=True)
     try:
-        golden = documents(helm(f"{tree}/{CONN}", SERVING))
+        # Once GOLDEN_REF carries this change -- which it does from the commit
+        # that merges it -- the golden's own default render is TAINTED, and a
+        # tainted golden can never equal an untainted head: the assertion is
+        # that equal inputs render alike, so the golden takes the same
+        # UNTAINTED override and the discovery block comes out of both sides.
+        # A golden from before the change has neither the flag nor the block.
+        carries = "gpuPool:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
+        golden = documents(helm(f"{tree}/{CONN}", [*SERVING, *UNTAINTED] if carries else SERVING))
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
     head[DISCOVERY], cuts = GPU_POOL_BLOCK.subn("", head[DISCOVERY])
     expect("the discovery block cut out once", cuts, 1)
+    if carries:
+        golden[DISCOVERY], gcuts = GPU_POOL_BLOCK.subn("", golden[DISCOVERY])
+        expect(f"the discovery block cut out of {ref} once", gcuts, 1)
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):
