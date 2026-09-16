@@ -960,7 +960,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
 | klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.agentgateway.enabled | bool | `false` |  |
-| klausGateway.crd.install | bool | `true` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
 | klausGateway.routing.defaultTTL | string | `"24h"` |  |
 | klausGateway.lifecycle.driver | string | `"static"` |  |
