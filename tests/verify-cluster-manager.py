@@ -220,6 +220,16 @@ def main(meta: str, connectivity: str) -> int:
         fail("cilium egress: the IdP, the workload ports and the extra egress do not all open 443")
     ok("cilium: ingress (muster + probes), egress (DNS proxy, kube-apiserver, the Dex issuer, the workload clusters by name and address on 443/6443, the extra names and blocks), muster-to")
 
+    # --- model-manager reaches the Hugging Face Hub for the kserve backend cluster-manager registers (#494) ---
+    mm_egress = cilium.get(("CiliumNetworkPolicy", "agent-platform-connectivity-model-manager-egress"))
+    if not mm_egress:
+        fail("cilium: model-manager's egress policy missing")
+    must_have(mm_egress, ("matchName: huggingface.co\n",), "model-manager's egress with cluster-manager on (the runtime-registered kserve backend needs the hub)")
+    mm_off = documents(conn_off).get(("CiliumNetworkPolicy", "agent-platform-connectivity-model-manager-egress"), "")
+    if "huggingface.co" in mm_off:
+        fail("model-manager's egress opens the Hugging Face Hub with neither a static kserve backend nor cluster-manager")
+    ok("model-manager's egress: the Hugging Face Hub by name with cluster-manager on, not without a kserve backend")
+
     # --- connectivity, kubernetes -----------------------------------------------------
     k8s = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=kubernetes"], ci_values=False))
     for pol in POLICIES:
