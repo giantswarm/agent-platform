@@ -3053,6 +3053,15 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # download. Nothing to do on the node by hand.
   policies:
     enabled: auto  # auto | true | false
+  # The predictors' Kyverno PolicyException (#498), rendered with the Kyverno
+  # objects on: the four restricted-PSS rules the upstream vLLM image and its
+  # cache init container violate (drop ALL, privilege escalation, non-root,
+  # seccomp), for the serving namespace's predictor Pods, ReplicaSets and
+  # Deployments — a Giant Swarm cluster enforces the restricted profile on
+  # every namespace and denies the predictor without it. Off only where the
+  # serving namespace is exempted another way.
+  policyException:
+    enabled: true
     # The init container that prepares the cache subdirectory (runs as
     # root: the PVC root is root-owned).
     cacheInit:

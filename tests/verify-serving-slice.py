@@ -183,6 +183,9 @@ def check_policy_exception(connectivity: str, base: list[str]) -> None:
     off = documents(helm(connectivity, [*base, "--set", "kyvernoPolicies.enabled=false", "--set", "modelServing.policies.enabled=false"]))
     if ("PolicyException", "model-serving-predictors") in off:
         sys.exit("FAIL: the predictors' PolicyException rendered with the Kyverno objects off")
+    knob = documents(helm(connectivity, [*base, "--set", "modelServing.policyException.enabled=false"]))
+    if ("PolicyException", "model-serving-predictors") in knob:
+        sys.exit("FAIL: the predictors' PolicyException rendered with modelServing.policyException.enabled=false")
     ok("the predictors' PolicyException: the four restricted-PSS rules with their autogen copies, the serving namespace, label and name matches; none with Kyverno off")
 
 

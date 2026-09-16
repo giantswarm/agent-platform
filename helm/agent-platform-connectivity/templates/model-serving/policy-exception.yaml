@@ -14,7 +14,7 @@ serving.kserve.io/inferenceservice label every predictor pod carries, and the
 Deployment — evaluated at its own admission against its own labels — by the
 name the controller gives it (<inferenceservice>-kserve[-<role>]).
 */ -}}
-{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) }}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled }}
 apiVersion: kyverno.io/v2
 kind: PolicyException
 metadata:
