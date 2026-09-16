@@ -1289,6 +1289,7 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | modelServing.cache.pvc.storageClassName | string | `""` |  |
 | modelServing.cache.pvc.volumeName | string | `""` |  |
 | modelServing.cache.pvc.accessModes[0] | string | `"ReadWriteOnce"` |  |
+| modelServing.policyException.enabled | bool | `true` |  |
 | modelServing.policies.enabled | string | `"auto"` |  |
 | modelServing.policies.cacheInit.image.registry | string | `"gsoci.azurecr.io"` |  |
 | modelServing.policies.cacheInit.image.name | string | `"giantswarm/alpine"` |  |
