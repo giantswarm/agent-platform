@@ -348,10 +348,9 @@ while the gateway reaches a store beyond its own process:
 |---|---|---|
 | The Valkey routing store | `klausGateway.routing.store: valkey`, the valkey component on | the platform's Valkey pods (`agent-platform.valkey.podSelector`, the release namespace) on `valkey.valkey.service.port` |
 | The Secret link store | `klausGateway.obo.store: secret`, OBO on | the kube-apiserver (`kube-apiserver` entity; `networkPolicy.kubernetes.apiServerCIDR`) |
-| The configmap / crd routing stores, the embedded ChannelRoute controller | `klausGateway.routing.store: configmap` / `crd`, `klausGateway.controller.enabled` | the kube-apiserver, as above |
 
 The keys are the klaus-gateway chart's, forwarded by the meta chart; one left
-unset is read with that chart's default (memory, bolt, off), so the default
+unset is read with that chart's default (memory, bolt), so the default
 shape gets no policy. An out-of-band Valkey (`routing.valkey.url` outside the
 platform, the component off) gets no rule: nothing in the namespace to select,
 the installation adds that egress itself. The valkey release's own policy
@@ -1015,7 +1014,6 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | postgres.backup.crossplane.azure.privateDnsZoneRef | string | `""` |  |
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | klausGateway.agentgateway.enabled | bool | `false` |  |
-| klausGateway.crd.install | bool | `true` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
 | klausGateway.routing.defaultTTL | string | `"24h"` |  |
 | klausGateway.lifecycle.driver | string | `"static"` |  |

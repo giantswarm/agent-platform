@@ -2873,9 +2873,9 @@ verify-actor-telemetry-egress: ## Assert the OTLP egress of the actors (Substrat
 	@echo "ok: $@"
 
 .PHONY: verify-klausgateway-netpol
-verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443): the -klausgateway-store-egress policy renders exactly while a store or the controller reaches beyond the pod — the platform's Valkey pods on their Service port with klausGateway.routing.store valkey (and the valkey component on; off = an out-of-band Valkey, no rule), the kube-apiserver with klausGateway.obo.store secret and OBO on, routing.store configmap or crd, or controller.enabled — as DNS + the rules in the cilium flavour and DNS + the pod selector / networkPolicy.kubernetes.apiServerCIDR (Egress only) in the kubernetes one, each rule only with its store, selecting the pod by klausGateway.fullnameOverride; the default shape (memory routing, the bolt link store, no controller) renders none of it next to the unchanged a2a and OBO policies; none with the Secret store but OBO off, with networkPolicy off, or with the component off.
+verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443): the -klausgateway-store-egress policy renders exactly while a store reaches beyond the pod — the platform's Valkey pods on their Service port with klausGateway.routing.store valkey (and the valkey component on; off = an out-of-band Valkey, no rule) and the kube-apiserver with klausGateway.obo.store secret and OBO on — as DNS + the rules in the cilium flavour and DNS + the pod selector / networkPolicy.kubernetes.apiServerCIDR (Egress only) in the kubernetes one, each rule only with its store, selecting the pod by klausGateway.fullnameOverride; the default shape (memory routing, the bolt link store) renders none of it next to the unchanged a2a and OBO policies; none with the Secret store but OBO off, with networkPolicy off, or with the component off.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> default stores (memory routing, bolt links, no controller): the a2a and OBO policies, no store policy"
+	@echo "--> default stores (memory routing, bolt links): the a2a and OBO policies, no store policy"
 	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) >/tmp/vkg-default.out 2>&1 || { cat /tmp/vkg-default.out; exit 1; }
 	@$(PICK) /tmp/vkg-default.out CiliumNetworkPolicy agent-platform-connectivity-klausgateway-a2a-egress >/dev/null || { echo "FAIL: the a2a egress policy is gone"; exit 1; }
 	@$(PICK) /tmp/vkg-default.out CiliumNetworkPolicy agent-platform-connectivity-klausgateway-obo-egress >/dev/null || { echo "FAIL: the OBO egress policy is gone"; exit 1; }
@@ -2896,12 +2896,7 @@ verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443
 	@echo "--> the Secret store with OBO off: none (the gateway builds no linker, reads no Secret)"
 	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set klausGateway.obo.enabled=false >/tmp/vkg-obooff.out 2>&1 || { cat /tmp/vkg-obooff.out; exit 1; }
 	@if grep -q '$(KG_STORE_POLICY)' /tmp/vkg-obooff.out; then echo "FAIL: the store egress policy renders for obo.store=secret while OBO is off"; exit 1; fi
-	@echo "--> the configmap and crd routing stores and the controller each render the policy; the bolt routing store does not"
-	@for knob in klausGateway.routing.store=configmap klausGateway.routing.store=crd klausGateway.controller.enabled=true; do \
-		helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set $$knob >/tmp/vkg-knob.out 2>&1 || { cat /tmp/vkg-knob.out; exit 1; }; \
-		$(PICK) /tmp/vkg-knob.out CiliumNetworkPolicy $(KG_STORE_POLICY) | grep -q 'toEntities: \["kube-apiserver"\]' || { echo "FAIL: $$knob renders no store egress policy to the kube-apiserver"; exit 1; }; \
-		echo "ok: $$knob"; \
-	done
+	@echo "--> the bolt routing store renders no policy"
 	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.routing.store=bolt >/tmp/vkg-bolt.out 2>&1 || { cat /tmp/vkg-bolt.out; exit 1; }
 	@if grep -q '$(KG_STORE_POLICY)' /tmp/vkg-bolt.out; then echo "FAIL: the store egress policy renders for the bolt routing store, which is a file"; exit 1; fi
 	@echo "--> cilium, the Valkey routing store: the platform's Valkey pods on 6379 in the release namespace, no kube-apiserver"

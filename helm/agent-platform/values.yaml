@@ -3183,23 +3183,17 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   agentgateway:
     enabled: false
 
-  # ChannelRoute CRD managed inline by the sub-chart.
-  crd:
-    install: true
-
   # Routing store: the binding of every thread to its agent instance and the
   # record of the turn in flight (klaus-gateway 1.6.0). "memory" loses both on
   # a gateway restart. "valkey" keeps them in the platform's own Valkey
   # (components.valkey): with store: valkey the url, the Secret and the
   # password key below default to the valkey release's Service and the Secret
   # its default user authenticates from (the same one muster reads), so the
-  # switch is this one line; set them only for an out-of-band Valkey. "crd" +
-  # controller.enabled: true is the store for a platform without Valkey. The
+  # switch is this one line; set them only for an out-of-band Valkey. The
   # connectivity chart renders the gateway pod's egress to its stores from
   # these keys (templates/klausgateway/netpol.yaml, -klausgateway-store-egress):
   # the platform's Valkey pods on 6379 with store: valkey; the kube-apiserver
-  # for configmap / crd, the controller and the Secret link store (obo.store:
-  # secret).
+  # for the Secret link store (obo.store: secret).
   routing:
     store: memory
     defaultTTL: "24h"

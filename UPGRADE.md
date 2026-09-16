@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (klaus-gateway drops the crd and configmap routing stores; the meta chart stops setting `klausGateway.crd.install`)
+
+giantswarm/klaus-gateway#271 removes the `crd` and `configmap` routing stores, the `ChannelRoute` CRD and the embedded controller from klaus-gateway, and that chart's `values.schema.json` is closed (`additionalProperties: false`), so it refuses `crd.*` and `controller.*`. The meta chart forwards the whole `klausGateway` block to the klaus-gateway release and its defaults carried `klausGateway.crd.install: true`, so this release has to be on an installation **before** the klaus-gateway release that drops those keys rolls — the component range `>=1.10.0 <2.0.0` takes it with no PR, and a values file the schema refuses fails the Helm upgrade: the klaus-gateway HelmRelease sticks, with its pods up on the old revision. The connectivity chart's Kubernetes API egress for the gateway pod (`-klausgateway-store-egress`) now has one gate, the Secret link store (`klausGateway.obo.store: secret` with OBO on); the Valkey rule and every other policy are unchanged.
+
+### Operator action
+
+- **None** for an installation on `klausGateway.routing.store: valkey` — all three are. The klaus-gateway release gets one Helm revision (a values change: `crd.install` leaves the forwarded block, and the current klaus-gateway chart defaults it to `true`, so the rendered objects do not change) and no pod rolls.
+- **An installation that set `klausGateway.crd.*` or `klausGateway.controller.*` in its own values must remove them** before the next klaus-gateway chart rolls. Left in place they reach the release through the whole-block forward, the closed schema refuses them and the klaus-gateway HelmRelease fails validation (`values don't meet the specifications of the schema`) and stays on its last revision. None of the fleet's installations sets either.
+- **An installation that ran `klausGateway.routing.store: crd` or `configmap`** switches to `valkey` first (the platform's own Valkey, `components.valkey`; the meta chart fills `routing.valkey` from that release) — the two stores are gone from the gateway. None did.
+- **Recognising it worked**: in the meta chart's namespace (`flux-giantswarm` on the fleet), `kubectl -n flux-giantswarm get helmrelease klaus-gateway -o jsonpath='{.spec.values.crd}'` is empty, the release is `Ready`, and the gateway pod's age is unchanged.
+
 ## \<current\> → \<next\> (the agentgateway data plane runs two replicas behind a `PodDisruptionBudget`, spread across nodes)
 
 `gateway.parameters` gains `replicas` (`2`), `podDisruptionBudget` (`enabled: true`; the spec is `maxUnavailable: 1` unless `minAvailable` or `maxUnavailable` is set) and `spread` (`enabled: true`, `topologyKeys: [kubernetes.io/hostname]`, `maxSkew: 1`, `whenUnsatisfiable: ScheduleAnyway`, and `matchLabelKeys: [pod-template-hash]` so a rollout spreads the new `ReplicaSet` against itself rather than against the revision it replaces), rendered into the `AgentgatewayParameters` the agentgateway controller reconciles the data-plane `Deployment` from (`templates/agentgateway/agentgatewayparameters.yaml`). The meta chart declares the same keys at the same defaults and forwards `agentgateway.controller.replicaCount: 2` to the controller release.
