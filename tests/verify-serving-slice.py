@@ -19,6 +19,10 @@ property the slice relies on:
 - modelServing.serving.runtimeClassName: nvidia reaches the connectivity release;
 - with the target knob (ci/test-target-values.yaml) agentgateway is on and every
   HelmRelease carries the kubeConfig;
+- the controller policy of the slice on a workload cluster (components.agentgateway
+  on, no ingress mode): rendered in both flavours and admitting the issuer's JWKS
+  host on 443 — the agentgateway controller fetches the key set (#505); beside the
+  platform's release none;
 - the connectivity chart, rendered with the values the profile forwards: the
   models Gateway (HTTPS listener on models.<global.domain>, the wildcard Secret,
   routes from every namespace, the external-dns hostname), one AgentgatewayPolicy
@@ -219,6 +223,40 @@ def check_controller_xds(connectivity: str, base: list[str]) -> None:
     ok("the controller admits xDS from every data plane of its GatewayClass in any namespace, both flavours")
 
 
+def check_controller_jwks_egress(connectivity: str, base: list[str]) -> None:
+    """The controller reaches the models policy's JWKS on a workload cluster (#505).
+
+    The agentgateway controller fetches the JWKS of every JWT policy and pushes the
+    keys to the data plane over xDS; a fetch its network policy denies is an empty
+    key set and `401 token uses the unknown key` for every caller. On a workload
+    cluster the slice's own release runs the controller (components.agentgateway on,
+    ingress.mode at its muster-direct default, no edge Gateway), so its controller
+    policy must render there and admit the issuer's host on 443: a toFQDNs matchName
+    behind the DNS proxy clause in the cilium flavour, port 443 of the wide rule in
+    the kubernetes flavour. Beside the platform's release (the component off) the
+    slice renders no controller policy — the platform's release owns it and admits
+    the issuer itself (Makefile.custom.mk verify-wiring).
+    """
+    on = [*base, "--set", "components.agentgateway.enabled=true"]
+    cil = documents(helm(connectivity, [*on, "--set", "networkPolicy.flavor=cilium"])).get(("CiliumNetworkPolicy", "agent-platform-connectivity-controller"))
+    if not cil:
+        sys.exit("FAIL: no CiliumNetworkPolicy agent-platform-connectivity-controller for the slice on a workload cluster (components.agentgateway on, ingress.mode muster-direct): the controller runs there without a policy that admits the issuer")
+    need(cil, '        - matchName: "dex.mc.example.com"\n      toPorts:\n        - ports:\n            - port: "443"', "the controller's egress to the issuer's JWKS (cilium)")
+    need(cil, '          rules:\n            dns:\n              - matchPattern: "*"', "the DNS proxy clause the toFQDNs selector needs (cilium)")
+    own = documents(helm(connectivity, [*on, "--set", "networkPolicy.flavor=cilium", "--set", "modelServing.modelsGateway.jwtAuthentication.jwks.host=keys.other.example.com"]))[("CiliumNetworkPolicy", "agent-platform-connectivity-controller")]
+    for host in ("dex.mc.example.com", "keys.other.example.com"):
+        need(own, f'        - matchName: "{host}"\n      toPorts:\n        - ports:\n            - port: "443"', f"the controller's egress to {host} with an own jwks.host")
+    k8s = documents(helm(connectivity, [*on, "--set", "networkPolicy.flavor=kubernetes"])).get(("NetworkPolicy", "agent-platform-connectivity-controller"))
+    if not k8s:
+        sys.exit("FAIL: no NetworkPolicy agent-platform-connectivity-controller for the slice on a workload cluster (kubernetes flavour)")
+    need(k8s, "            cidr: 0.0.0.0/0", "the controller's wide egress rule (kubernetes)")
+    need(k8s[k8s.index("cidr: 0.0.0.0/0"):], "        - port: 443\n          protocol: TCP", "port 443 on the controller's wide egress rule (kubernetes)")
+    for flavor, kind in (("cilium", "CiliumNetworkPolicy"), ("kubernetes", "NetworkPolicy")):
+        if (kind, "agent-platform-connectivity-controller") in documents(helm(connectivity, [*base, "--set", f"networkPolicy.flavor={flavor}"])):
+            sys.exit(f"FAIL: the slice beside the platform's release (components.agentgateway off) rendered a controller policy ({flavor}); the platform's release owns it")
+    ok("the slice on a workload cluster renders the controller policy without an ingress mode and admits the issuer's JWKS host on 443 (toFQDNs + DNS proxy; the wide rule's 443), an own jwks.host beside it; beside the platform none")
+
+
 def check_gateway(connectivity: str, base: list[str]) -> None:
     render = helm(connectivity, base)
     docs = documents(render)
@@ -397,6 +435,7 @@ def main(meta: str, connectivity: str) -> int:
         check_ingress_guard(connectivity, base)
         check_policy_exception(connectivity, base)
         check_controller_xds(connectivity, base)
+        check_controller_jwks_egress(connectivity, base)
         check_gateway(connectivity, base)
         check_cache(connectivity, base)
     finally:

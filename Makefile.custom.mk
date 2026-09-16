@@ -850,6 +850,16 @@ verify-serving-slice: ## Assert the serving slice (giantswarm/agent-platform#326
 	@python3 tests/verify-serving-slice.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "serving slice verified."
 
+# The live half of verify-serving-slice that needs no GPU (giantswarm/agent-platform#505). Not a
+# verify-* target: it reads a cluster, so verify-all must not collect it.
+GATEWAY ?= models
+CONTROLLER_NAMESPACE ?= agent-platform
+.PHONY: live-serving-slice
+live-serving-slice: ## Against the current kubeconfig (KUBE_CONTEXT= selects a context), a cluster with the serving slice installed: the models JWT policy's Accepted condition is Valid on every ancestor and the agentgateway controller's jwks-store holds keys for the backend's URL — the controller fetches every JWKS and pushes the keys to the data plane, so a failed fetch is `401 token uses the unknown key` for every caller; on a failure the JWKS URL and the controller's `error fetching jwks` lines are printed. NAMESPACE=<the slice's release namespace> (required), GATEWAY=models, CONTROLLER_NAMESPACE=agent-platform.
+	@test -n "$(NAMESPACE)" || { echo "usage: make live-serving-slice NAMESPACE=<the slice's release namespace> [GATEWAY=models] [CONTROLLER_NAMESPACE=agent-platform] [KUBE_CONTEXT=<context>]"; exit 2; }
+	@echo "====> $@ (namespace $(NAMESPACE), gateway $(GATEWAY), controller in $(CONTROLLER_NAMESPACE))"
+	@python3 tests/verify-serving-slice-live.py --namespace "$(NAMESPACE)" --gateway "$(GATEWAY)" --controller-namespace "$(CONTROLLER_NAMESPACE)" $(if $(KUBE_CONTEXT),--context "$(KUBE_CONTEXT)")
+
 .PHONY: verify-gpu-operator
 verify-gpu-operator: ## Assert the GPU operator component (giantswarm/agent-platform#327): components.gpu-operator off by default (no release, the roster says so, the gpu-operator values block held back from connectivity); on, ONE OCIRepository (the catalog's gpu-operator wrapper chart, 1.x) + ONE HelmRelease into kube-system (release history there too, crds CreateReplace on install and upgrade, no dependsOn, no global) with the values nested under the wrapper's subchart key — the Flatcar row, driver and toolkit off — and nothing else of the render moved but the roster entry; the pre-installed-driver row (gpu-operator.toolkit.enabled=true) reaches the release with the driver off; the target knob stamps kubeConfig.secretRef on it; the one-owner guard is silent offline with the nvidia.com, Flux and App APIs served; the schema refuses a non-boolean toggle; the BOM pins the exact version and the pin reaches the OCIRepository. The lookup guard itself needs a cluster: tests/fixtures/gpu-operator-foreign-owner.yaml (README "The GPU operator"). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
@@ -1945,6 +1955,14 @@ WIRING_BACKSTAGE_FULL := $(WIRING_BACKSTAGE) --set components.kagent.enabled=tru
 # TLS.
 JWKS_BASE := $(VM) --namespace agent-platform --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true --set global.domain=ci.example.com --set kagent.controllerRoute.enabled=true --set kagent.controllerRoute.jwtAuthentication.enabled=true
 JWKS_INCLUSTER := $(JWKS_BASE) --set global.identity.issuerUrl=https://dex.ci.example.com --set gateway.jwksEgress.enabled=true
+# Nothing external at all: the platform's issuer in-cluster too (giantswarm/agent-platform#505
+# admits global.identity.issuerUrl's host from the controller policy, so a public issuer is an
+# external target whatever the routes name). This is the shape held against GOLDEN_REF.
+JWKS_ISSUER_INCLUSTER := $(JWKS_BASE) --set global.identity.issuerUrl=https://dex.giantswarm.svc.cluster.local:5556 --set gateway.jwksEgress.enabled=true
+# The platform's release beside a serving slice: the controller on, no route with a JWT policy
+# of its own (kagent off), a public issuer. The slice's models policy in another namespace
+# takes that issuer on 443, and only this release's policy governs the controller.
+JWKS_PLATFORM := $(VM) --namespace agent-platform --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com
 JWKS_EXTERNAL := $(JWKS_BASE) --set global.identity.issuerUrl=https://accounts.google.com --set kagent.controllerRoute.jwtAuthentication.jwks.host=www.googleapis.com --set kagent.controllerRoute.jwtAuthentication.jwks.port=443
 # The controller policy of one render, isolated from the rest of the manifest.
 CTRL_POLICY := awk '/^  name: agent-platform-connectivity-controller$$/{f=1} f&&/^---$$/{exit} f'
@@ -2210,13 +2228,13 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@echo "--> the meta chart declares postgres.imagePullSecrets and postgres.affinity (schema symmetry)"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(FLEET_APIS) --set 'postgres.imagePullSecrets[0].name=mirror-pull-secret' --set postgres.affinity.enablePodAntiAffinity=true >/tmp/vw-pg-meta.out 2>&1 || { echo "FAIL: the meta chart rejects postgres.imagePullSecrets / postgres.affinity"; cat /tmp/vw-pg-meta.out; exit 1; }
 	@echo "ok: the Postgres Cluster knobs and the Backstage app policy verified"
-	@echo "--> the controller's JWKS egress: an in-cluster host renders today's policies, in both flavors and for both shapes"
+	@echo "--> the controller's JWKS egress: an in-cluster issuer and in-cluster route hosts render today's policies, in both flavors and for both shapes"
 	@for flavor in cilium kubernetes; do \
 		for shape in "$(FLEET_APIS)" ""; do \
-			helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set networkPolicy.flavor=$$flavor $$shape 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-$$flavor.out; \
+			helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set networkPolicy.flavor=$$flavor $$shape 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-$$flavor.out; \
 			[ -s /tmp/vw-jwks-$$flavor.out ] || { echo "FAIL: no controller policy rendered ($$flavor)"; exit 1; }; \
-			for pattern in 'www.googleapis.com' 'rules:' '0.0.0.0/0$$'; do \
-				if grep -q -- "$$pattern" /tmp/vw-jwks-$$flavor.out; then echo "FAIL: an in-cluster JWKS host rendered $$pattern on the $$flavor controller policy"; exit 1; fi; \
+			for pattern in 'toFQDNs' 'rules:' '0.0.0.0/0$$'; do \
+				if grep -q -- "$$pattern" /tmp/vw-jwks-$$flavor.out; then echo "FAIL: in-cluster JWKS hosts alone rendered $$pattern on the $$flavor controller policy"; exit 1; fi; \
 			done; \
 		done; \
 	done
@@ -2224,11 +2242,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if [ -n "$(GOLDEN_REF)" ] && git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
 		rm -rf /tmp/vw-jwks-ref && git worktree add -q --detach /tmp/vw-jwks-ref $(GOLDEN_REF) && \
 		for flavor in cilium kubernetes; do \
-			helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-jwks-new-$$flavor.out; \
-			helm template t /tmp/vw-jwks-ref/$(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-jwks-old-$$flavor.out; \
+			helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-jwks-new-$$flavor.out; \
+			helm template t /tmp/vw-jwks-ref/$(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-jwks-old-$$flavor.out; \
 			$(CTRL_POLICY) /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-pol-$$flavor.out; \
 			$(CTRL_POLICY) /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-pol-$$flavor.out; \
-			diff -u /tmp/vw-jwks-old-pol-$$flavor.out /tmp/vw-jwks-new-pol-$$flavor.out || { echo "FAIL: the $$flavor CONTROLLER POLICY changed for an in-cluster JWKS host - a regression in this slice"; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
+			diff -u /tmp/vw-jwks-old-pol-$$flavor.out /tmp/vw-jwks-new-pol-$$flavor.out || { echo "FAIL: the $$flavor CONTROLLER POLICY changed for in-cluster JWKS hosts (issuer and routes) - a regression in this slice"; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
 			grep -vE '^ *image:' /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-noimg-$$flavor.out; grep -vE '^ *image:' /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-noimg-$$flavor.out; diff -u /tmp/vw-jwks-old-noimg-$$flavor.out /tmp/vw-jwks-new-noimg-$$flavor.out || { \
 				if git merge-base --is-ancestor $(GOLDEN_REF) HEAD; then echo "note: the $$flavor render differs from $(GOLDEN_REF) outside the controller policy and the image references — this branch's own change ($(GOLDEN_REF) is an ancestor of HEAD; the policies above match)"; \
 				else echo "FAIL: the $$flavor render changed for an in-cluster JWKS host, outside the controller policy and the image references (a re-pin moves those by design). The policies above match and $(GOLDEN_REF) is not an ancestor of HEAD, so the branch is behind $(GOLDEN_REF): merge it and run again."; git worktree remove --force /tmp/vw-jwks-ref; exit 1; fi; }; \
@@ -2236,6 +2254,24 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		git worktree remove --force /tmp/vw-jwks-ref; \
 		echo "ok: against $(GOLDEN_REF) — the controller policies identical, the render otherwise identical or the branch's own change"; \
 	else echo "skipped: no GOLDEN_REF"; fi
+	@echo "--> the platform's identity provider (giantswarm/agent-platform#505): a public global.identity.issuerUrl is opened from the controller policy on 443 whatever the routes name — the kagent route on an in-cluster host, and no route at all (the platform's release beside a serving slice, whose models policy takes the issuer on 443)"
+	@for shape in JWKS_INCLUSTER JWKS_PLATFORM; do \
+		case $$shape in JWKS_INCLUSTER) flags="$(JWKS_INCLUSTER)";; JWKS_PLATFORM) flags="$(JWKS_PLATFORM)";; esac; \
+		helm template t $(CONNECTIVITY_DIR) $$flags --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-issuer-cilium.out; \
+		[ -s /tmp/vw-jwks-issuer-cilium.out ] || { echo "FAIL: no cilium controller policy rendered ($$shape)"; exit 1; }; \
+		grep -q 'matchName: "dex.ci.example.com"' /tmp/vw-jwks-issuer-cilium.out || { echo "FAIL: $$shape: the platform's issuer is not a toFQDNs matchName on the cilium controller policy; the controller cannot fetch the models Gateway's JWKS"; cat /tmp/vw-jwks-issuer-cilium.out; exit 1; }; \
+		awk '/matchName: "dex.ci.example.com"/{f=1} f&&/port:/{print;exit}' /tmp/vw-jwks-issuer-cilium.out | grep -q '"443"' || { echo "FAIL: $$shape: the platform's issuer is not opened on 443"; exit 1; }; \
+		grep -q 'matchPattern: "\*"' /tmp/vw-jwks-issuer-cilium.out || { echo "FAIL: $$shape: the cilium controller policy has no DNS proxy rule, so the issuer's toFQDNs selector matches nothing"; exit 1; }; \
+		if grep -q 'matchName: "dex.giantswarm.svc.cluster.local"' /tmp/vw-jwks-issuer-cilium.out; then echo "FAIL: $$shape: the in-cluster JWKS host rendered as a toFQDNs selector"; exit 1; fi; \
+		helm template t $(CONNECTIVITY_DIR) $$flags --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-issuer-kubernetes.out; \
+		grep -q 'cidr: 0.0.0.0/0' /tmp/vw-jwks-issuer-kubernetes.out || { echo "FAIL: $$shape: the kubernetes controller policy has no wide rule for the platform's issuer"; cat /tmp/vw-jwks-issuer-kubernetes.out; exit 1; }; \
+		sed -n '/cidr: 0.0.0.0\/0/,$$p' /tmp/vw-jwks-issuer-kubernetes.out | grep -q '^        - port: 443$$' || { echo "FAIL: $$shape: the kubernetes wide rule does not open 443 for the platform's issuer"; cat /tmp/vw-jwks-issuer-kubernetes.out; exit 1; }; \
+	done
+	@echo "--> the issuer URL's own port is the one opened; an in-cluster issuer adds no external rule"
+	@helm template t $(CONNECTIVITY_DIR) $(JWKS_PLATFORM) --set global.identity.issuerUrl=https://dex.ci.example.com:8443/dex --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | awk '/matchName: "dex.ci.example.com"/{f=1} f&&/port:/{print;exit}' | grep -q '"8443"' || { echo "FAIL: an issuer URL carrying a port is not opened on that port"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(JWKS_PLATFORM) --set global.identity.issuerUrl=https://dex.giantswarm.svc.cluster.local:5556 --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-issuer-incluster.out
+	@if grep -q 'toFQDNs\|rules:' /tmp/vw-jwks-issuer-incluster.out; then echo "FAIL: an in-cluster issuer rendered an external rule or the DNS proxy clause"; cat /tmp/vw-jwks-issuer-incluster.out; exit 1; fi
+	@echo "ok: the platform's issuer is an external JWKS target of the controller policy in both flavors, with or without a route policy, on the URL's port; in-cluster it adds nothing"
 	@echo "--> an external JWKS host (Google-shaped): the cilium controller policy names it on its port, behind the DNS proxy rule"
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-ext-cilium.out
 	@grep -q 'matchName: "www.googleapis.com"' /tmp/vw-jwks-ext-cilium.out || { echo "FAIL: the external JWKS host is not a toFQDNs matchName on the cilium controller policy"; cat /tmp/vw-jwks-ext-cilium.out; exit 1; }
@@ -2254,17 +2290,17 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		grep -q 'gateway.jwksEgress.external.cidrs' /tmp/vw-jwks-addr.out || { echo "FAIL: the address-literal guard does not name gateway.jwksEgress.external.cidrs"; exit 1; }; \
 	done
 	@echo "--> gateway.jwksEgress.external.cidrs: its own rule in both flavors, on external.port"
-	@helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set 'gateway.jwksEgress.external.cidrs[0]=10.20.30.0/24' --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q -- '- 10.20.30.0/24' || { echo "FAIL: gateway.jwksEgress.external.cidrs did not reach the cilium controller policy"; exit 1; }
-	@helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set 'gateway.jwksEgress.external.cidrs[0]=10.20.30.0/24' --set gateway.jwksEgress.external.port=8443 --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | awk '/cidr: "10.20.30.0\/24"/{f=1} f&&/- port:/{print;exit}' | grep -q '8443' || { echo "FAIL: gateway.jwksEgress.external.cidrs/.port did not reach the kubernetes controller policy"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set 'gateway.jwksEgress.external.cidrs[0]=10.20.30.0/24' --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q -- '- 10.20.30.0/24' || { echo "FAIL: gateway.jwksEgress.external.cidrs did not reach the cilium controller policy"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set 'gateway.jwksEgress.external.cidrs[0]=10.20.30.0/24' --set gateway.jwksEgress.external.port=8443 --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | awk '/cidr: "10.20.30.0\/24"/{f=1} f&&/- port:/{print;exit}' | grep -q '8443' || { echo "FAIL: gateway.jwksEgress.external.cidrs/.port did not reach the kubernetes controller policy"; exit 1; }
 	@echo "--> an in-cluster host with external.cidrs set renders no wide rule: the narrow form stays narrow"
-	@if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set 'gateway.jwksEgress.external.cidrs[0]=10.20.30.0/24' --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'cidr: 0.0.0.0/0'; then \
+	@if helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set 'gateway.jwksEgress.external.cidrs[0]=10.20.30.0/24' --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'cidr: 0.0.0.0/0'; then \
 		echo "FAIL: gateway.jwksEgress.external.cidrs alone opened every public destination"; exit 1; fi
 	@echo "--> gateway.jwksEgress.external.fqdns: a cilium name selector on external.port, behind the DNS proxy rule; the kubernetes flavor ignores it"
-	@helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set 'gateway.jwksEgress.external.fqdns[0].matchName=keys.example.com' --set gateway.jwksEgress.external.port=8443 --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-extfqdn.out
+	@helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set 'gateway.jwksEgress.external.fqdns[0].matchName=keys.example.com' --set gateway.jwksEgress.external.port=8443 --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) >/tmp/vw-jwks-extfqdn.out
 	@grep -q 'matchName: keys.example.com' /tmp/vw-jwks-extfqdn.out || { echo "FAIL: gateway.jwksEgress.external.fqdns did not reach the cilium controller policy"; cat /tmp/vw-jwks-extfqdn.out; exit 1; }
 	@awk '/matchName: keys.example.com/{f=1} f&&/port:/{print;exit}' /tmp/vw-jwks-extfqdn.out | grep -q '"8443"' || { echo "FAIL: gateway.jwksEgress.external.fqdns is not opened on external.port"; exit 1; }
 	@grep -q 'matchPattern: "\*"' /tmp/vw-jwks-extfqdn.out || { echo "FAIL: gateway.jwksEgress.external.fqdns rendered no DNS proxy rule, so its selector matches nothing"; exit 1; }
-	@if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set 'gateway.jwksEgress.external.fqdns[0].matchName=keys.example.com' --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'keys.example.com\|cidr: 0.0.0.0/0'; then \
+	@if helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set 'gateway.jwksEgress.external.fqdns[0].matchName=keys.example.com' --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'keys.example.com\|cidr: 0.0.0.0/0'; then \
 		echo "FAIL: the kubernetes controller policy acted on gateway.jwksEgress.external.fqdns, which selects a name it cannot express"; exit 1; fi
 	@echo "--> gateway.jwksEgress.external: null renders, and the schema types cidrs"
 	@printf 'gateway:\n  jwksEgress:\n    enabled: true\n    external: null\n' >/tmp/vw-jwks-null-external.yaml
@@ -2317,9 +2353,9 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	$(call managers_must_pass,a public host carrying an svc label,$(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=a.b.svc.example.com)
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=a.b.svc.example.com --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q 'matchName: "a.b.svc.example.com"' || { echo "FAIL: a public host with an svc label was read as in-cluster and got no egress rule"; exit 1; }
 	@for form in dex.giantswarm.svc dex.giantswarm.svc.cluster dex.giantswarm.svc.cluster.local dex.giantswarm.svc.cluster.local. DEX.Giantswarm.SVC.Cluster.Local; do \
-		if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=$$form --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q 'matchName'; then \
+		if helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=$$form --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q 'matchName'; then \
 			echo "FAIL: the in-cluster form $$form rendered an external name selector"; exit 1; fi; \
-		if helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=$$form --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'cidr: 0.0.0.0/0'; then \
+		if helm template t $(CONNECTIVITY_DIR) $(JWKS_ISSUER_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=$$form --set networkPolicy.flavor=kubernetes 2>/dev/null | $(CTRL_POLICY) | grep -q 'cidr: 0.0.0.0/0'; then \
 			echo "FAIL: the in-cluster form $$form opened every public destination on the JWKS port"; exit 1; fi; \
 	done
 	@echo "--> an external host is selected in its normalized form: lower case, no root dot"

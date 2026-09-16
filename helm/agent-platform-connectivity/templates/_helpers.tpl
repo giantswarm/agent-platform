@@ -214,6 +214,21 @@ emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
+Truthy when the agentgateway controller runs in this release: an agentgateway-*
+ingress mode, or the component on with muster off — the serving slice on a
+workload cluster (components.agentgateway.enabled: true, ingress.mode at its
+muster-direct default, no edge Gateway), whose controller serves the models
+Gateway and fetches its JWKS. The controller's network policies follow this,
+not the ingress mode: a controller without its policy has no egress rule for
+the issuer, and one with the edge's policy alone has no route to the public
+issuer either. Usage:
+  {{- if (include "agent-platform.agentgateway.controller" .) }}
+*/}}
+{{- define "agent-platform.agentgateway.controller" -}}
+{{- if or (include "agent-platform.ingress.agentgateway" .) (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Fully-qualified name of the muster service. Single source of truth: the umbrella
 pins muster.fullnameOverride (see values.yaml), which the muster sub-chart uses
 verbatim for its Service name. Reading that same key here — rather than
@@ -1091,8 +1106,9 @@ Usage: include "agent-platform.jwks.tlsEnabled" $jwks
 
 {{/*
 The CA Secret the JWKS backend verifies the issuer's certificate against, empty
-for the data plane's system trust. jwks.tls.caSecretName when set; otherwise
-global.identity.ca.secretName, but only while jwks.tls.enabled asks for TLS.
+for the system trust of the agentgateway controller, which fetches the key set.
+jwks.tls.caSecretName when set; otherwise global.identity.ca.secretName, but
+only while jwks.tls.enabled asks for TLS.
 The global key is the CA of ONE identity provider — the platform's — so it is
 the right default only for a route pointed at that provider deliberately. TLS
 implied by port 443 carries no such statement: a public issuer verified against
@@ -1182,20 +1198,45 @@ aside. */ -}}
 {{- end -}}
 
 {{/*
+The platform's identity provider as a JWKS target, { "host": "<host>", "port":
+<int> } from global.identity.issuerUrl (the URL's port, else 443 — the port the
+models Gateway's default JWKS source dials); empty while the URL is unset.
+Usage: include "agent-platform.jwks.issuerTarget" .
+*/}}
+{{- define "agent-platform.jwks.issuerTarget" -}}
+{{- with .Values.global.identity.issuerUrl -}}
+{{- $u := urlParse . -}}
+{{- $port := regexFind ":[0-9]+$" ($u.host | default "") | trimPrefix ":" | default "443" | int -}}
+{{- with $u.hostname -}}
+{{- dict "host" . "port" $port | toJson -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The external JWKS endpoints the agentgateway controller fetches, as a JSON list
 of { "host": "<host>", "port": <int> }, deduplicated on host and port. The
-controller fetches the JWKS of every jwtAuthentication policy the chart renders
-and pushes the keys to the data plane over xDS, so its egress needs each of
-them; the routes already name host and port, and no second knob restates them.
-Only a rendered policy contributes: the component, its route and its
-jwtAuthentication are all on. In-cluster hosts are absent — gateway.jwksEgress
-covers those. Each host is normalized, the form a Cilium toFQDNs matchName is
-matched in.
+controller fetches the JWKS of every jwtAuthentication policy of its
+GatewayClass and pushes the keys to the data plane over xDS (a failed fetch
+pushes an empty key set: every token is refused as "unknown key"), so its
+egress needs each of them; the routes already name host and port, and no
+second knob restates them. A route contributes while its policy renders: the
+component, its route and its jwtAuthentication are all on. The platform's
+identity provider (global.identity.issuerUrl on 443) contributes whatever the
+routes name: the controller serves the JWT policies of every release in the
+cluster, and the serving slice's models policy beside the platform's release
+(giantswarm/agent-platform#505) takes the issuer's public host on 443 by
+default — a release the platform's controller policy cannot see. In-cluster
+hosts are absent — gateway.jwksEgress covers those. Each host is normalized,
+the form a Cilium toFQDNs matchName is matched in.
 */}}
 {{- define "agent-platform.jwks.externalTargets" -}}
 {{- $out := list -}}
 {{- $seen := dict -}}
 {{- $sources := list -}}
+{{- with (include "agent-platform.jwks.issuerTarget" .) -}}
+{{- $sources = append $sources (. | fromJson) -}}
+{{- end -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (.Values.kagent.controllerRoute).enabled (.Values.kagent.controllerRoute.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.kagent.controllerRoute.jwtAuthentication.jwks -}}
 {{- end -}}
