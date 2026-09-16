@@ -1,18 +1,20 @@
 {{- /*
-Kyverno PolicyException for the serving predictors (giantswarm/agent-platform#498).
+Kyverno PolicyException for the serving model pods (giantswarm/agent-platform#498).
 Giant Swarm clusters enforce the restricted Pod Security Standard through
-Kyverno on every namespace; the predictor pods the llmisvc controller creates
-from an LLMInferenceService — the upstream vLLM image runs as root, so does
-the storage-initializer / cache init container that creates the per-model cache
-directory — declare none of the four fields the restricted profile checks:
-no drop ALL, no allowPrivilegeEscalation: false, no runAsNonRoot, no
-seccompProfile. Without this exception admission denies the Deployment and no
-model is ever served. Named: exactly those four rules (kyvernoPolicies.rules),
-each with its autogen copy for the controller kinds.
-Matched in the serving namespace: the Pods and ReplicaSets by the
-serving.kserve.io/inferenceservice label every predictor pod carries, and the
-Deployment — evaluated at its own admission against its own labels — by the
-name the controller gives it (<inferenceservice>-kserve[-<role>]).
+Kyverno on every namespace; the model pods KServe creates — the upstream vLLM
+image runs as root, so does the storage-initializer / cache init container that
+creates the per-model cache directory — declare none of the four fields the
+restricted profile checks: no drop ALL, no allowPrivilegeEscalation: false, no
+runAsNonRoot, no seccompProfile. Without this exception admission denies the
+Deployment and no model is ever served. Named: exactly those four rules
+(kyvernoPolicies.rules), each with its autogen copy for the controller kinds.
+Matched in the serving namespace: the Pods, ReplicaSets and Deployments of
+every pod shape by the labels they carry (the classic InferenceService
+predictor and the LLMInferenceService workload pod: _helpers.tpl,
+agent-platform.modelServing.podShapes — the same selectors as the network
+policies and the mutations, giantswarm/agent-platform#506), and the
+Deployment — evaluated at its own admission against its own labels — also by
+the name the llm-d controller gives it (<llminferenceservice>-kserve[-<role>]).
 */ -}}
 {{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled }}
 apiVersion: kyverno.io/v2
@@ -27,17 +29,19 @@ spec:
   {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "require-drop-all" "privilege-escalation" "run-as-non-root" "check-seccomp-strict")) | nindent 2 }}
   match:
     any:
+    {{- range (include "agent-platform.modelServing.podShapes" . | fromJsonArray) }}
+    # {{ .kind }} pods, their ReplicaSets and Deployments, by their labels.
     - resources:
         kinds:
         - Pod
         - ReplicaSet
         - Deployment
         namespaces:
-        - {{ include "agent-platform.modelServing.namespace" . }}
+        - {{ include "agent-platform.modelServing.namespace" $ }}
         selector:
           matchExpressions:
-          - key: serving.kserve.io/inferenceservice
-            operator: Exists
+          {{- toYaml .matchExpressions | nindent 10 }}
+    {{- end }}
     - resources:
         kinds:
         - Deployment

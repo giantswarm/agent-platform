@@ -33,7 +33,7 @@ jobs:
     steps:
     - checkout
     - run:
-        name: install helm + make + PyYAML
+        name: install helm + kyverno + make + PyYAML
         command: |
           # python3 is in cimg/base, PyYAML is not: tests/verify-kagent-crds.py
           # and tests/verify-kyverno.py parse rendered objects (and the kagent
@@ -53,6 +53,12 @@ jobs:
           curl -fsSL --connect-timeout 20 --max-time 180 --retry 5 --retry-delay 10 --retry-all-errors https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz | tar xz -C /tmp
           sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
           helm version
+          # The kyverno CLI, pinned: tests/verify-model-serving-policies.py runs
+          # `kyverno apply` of the rendered model-serving mutations over a pod
+          # of each shape (the tarball holds `kyverno` and LICENSE at its root).
+          curl -fsSL --connect-timeout 20 --max-time 180 --retry 5 --retry-delay 10 --retry-all-errors https://github.com/kyverno/kyverno/releases/download/v1.19.1/kyverno-cli_v1.19.1_linux_x86_64.tar.gz | tar xz -C /tmp kyverno
+          sudo mv /tmp/kyverno /usr/local/bin/kyverno
+          kyverno version
     - run:
         name: verify every render assertion (make verify-all)
         # Every verify-* target of Makefile.custom.mk, which is the set

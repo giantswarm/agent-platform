@@ -190,7 +190,8 @@ def check_policy_exception(connectivity: str, base: list[str]) -> None:
         sys.exit("FAIL: no PolicyException model-serving-predictors: the fleet's restricted PSS policies deny the predictor Deployment")
     for needle in ("  namespace: policy-exceptions", "  - policyName: disallow-capabilities-strict", "      - require-drop-all", "      - autogen-require-drop-all",
                    "  - policyName: disallow-privilege-escalation", "      - autogen-privilege-escalation", "  - policyName: require-run-as-nonroot", "      - autogen-run-as-non-root",
-                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: serving.kserve.io/inferenceservice",
+                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: serving.kserve.io/inferenceservice", "          - key: kserve.io/component", "          - key: app.kubernetes.io/part-of",
+                   "            - llminferenceservice",
                    '        - "*-kserve*"'):
         need(pe, needle, "the predictors' PolicyException")
     if pe.count("- policyName:") != 4:
@@ -201,7 +202,7 @@ def check_policy_exception(connectivity: str, base: list[str]) -> None:
     knob = documents(helm(connectivity, [*base, "--set", "modelServing.policyException.enabled=false"]))
     if ("PolicyException", "model-serving-predictors") in knob:
         sys.exit("FAIL: the predictors' PolicyException rendered with modelServing.policyException.enabled=false")
-    ok("the predictors' PolicyException: the four restricted-PSS rules with their autogen copies, the serving namespace, label and name matches; none with Kyverno off")
+    ok("the predictors' PolicyException: the four restricted-PSS rules with their autogen copies, the serving namespace, both pod shapes' labels (#506) and the name match; none with Kyverno off")
 
 
 def check_controller_xds(connectivity: str, base: list[str]) -> None:

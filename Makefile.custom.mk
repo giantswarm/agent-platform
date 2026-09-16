@@ -878,6 +878,11 @@ verify-insecure: ## Assert components.<name>.insecure renders OCIRepository.spec
 	@if ! grep -q 'url: oci://registry.registry.svc.cluster.local:5000/charts/muster' /tmp/ap-insecure-on.out; then echo "FAIL: components.muster.repository did not steer the OCIRepository url"; exit 1; fi
 	@echo "components.<name>.insecure verified."
 
+.PHONY: verify-model-serving-policies
+verify-model-serving-policies: ## Assert the model-serving policies over both pod shapes KServe creates (giantswarm/agent-platform#506): `kyverno apply` of the rendered ClusterPolicies over a fixture pod of the classic InferenceService predictor and of the LLMInferenceService workload pod (tests/fixtures/model-serving-*-pod.yaml) mounts the hf-cache claim at /mnt/models with the model's name as subPath on the storage-initializer and the shape's runtime container (kserve-container / main), raises the initializer's limit, puts hf-cache-init first, keeps containers and volumes; a pod without a storage-initializer and a download-Job pod are untouched, a workload pod without a model name gets no cache mount; both shapes' Deployments get the progress deadline; the network policies (both flavours), the kagent agents' egress and the PolicyException select each fixture by exactly its own shape's policy and never the download Job's pod. Needs PyYAML and the kyverno CLI. HELM and KYVERNO select the binaries.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 tests/verify-model-serving-policies.py $(CONNECTIVITY_DIR)
+
 .PHONY: verify-gpu-pool
 verify-gpu-pool: ## Assert the GPU node pool input of the model serving layer (giantswarm/agent-platform#315): modelServing.gpuPool.taint tolerated by the ClusterServingRuntime and every published preset (the pool's entry first, a preset's equal entry once; Exists without a value, Equal with one), modelServing.gpuPool.nodeSelector merged under the runtime's and the presets' own (their keys win), both published as spec.gpuPool in the discovery ConfigMap model-manager >= 0.23.0 reads; an empty taint key renders no toleration and no taint and leaves the serving render byte-identical to GOLDEN_REF but for the discovery block; the guards (effect, key, string label values); the meta chart forwards the block. Fixture: ci/test-model-serving-gpu-pool-values.yaml. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"

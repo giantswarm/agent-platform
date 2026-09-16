@@ -3036,8 +3036,9 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # in the serving namespace. `auto` (the default) follows the resolved
   # kyvernoPolicies.enabled — they render where kyverno.io/v1 is served and
   # nowhere else; `true` / `false` force them (an explicit true with Kyverno
-  # off fails the render). On, every predictor pod gets: an init container
-  # that creates the pod's cache subdirectory (<claim>/<inferenceservice>)
+  # off fails the render). On, every model pod — an InferenceService
+  # predictor or an LLMInferenceService workload pod — gets: an init container
+  # that creates the pod's cache subdirectory (<claim>/<model>)
   # world-writable before the KServe storage-initializer runs (the kubelet
   # creates a missing subPath directory root-owned 0750, which the
   # storage-initializer's uid cannot write), the storage-initializer's and
@@ -3082,8 +3083,9 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # Network policies of the serving namespace, rendered under networkPolicy
   # (enabled + the resolved flavor) like every other component's wiring:
   # nothing renders while networkPolicy.enabled is false. On, both flavors
-  # get: ingress to the predictor pods (every pod KServe runs for an
-  # InferenceService, label serving.kserve.io/inferenceservice) on the
+  # get: ingress to the model pods (every pod KServe runs for an
+  # InferenceService or an LLMInferenceService — the two shapes share no
+  # label, so a policy renders per shape) on the
   # runtime port from the kagent agent pods, the release namespace and
   # predictor.additionalIngressNamespaces; egress from the predictor pods
   # (the storage-initializer download, the runtime) and from model-manager's
