@@ -3636,6 +3636,32 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # this is where a private address (one of
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
+    # Egress to backends registered at runtime. model-manager starts with no
+    # backend; a backend — an in-cluster Ollama, an LM Studio on a node, a
+    # Lemonade Server — is registered while it runs (the add_backend tool, the
+    # portal's Serving page, cluster-manager for a GPU node pool) as a
+    # labelled ConfigMap the chart never sees, so nothing above opens its
+    # endpoint: under an enforcing policy the registration succeeds and every
+    # model call is dropped. List the destinations the installation allows
+    # here, one entry per backend — its address block or its hostname, and its
+    # port — and the egress policy opens exactly those, in both flavors,
+    # next to the static-backend rules (which are unchanged). Empty, the
+    # default, renders nothing. The guards fail the render on a cidr that is
+    # not an IPv4 CIDR, a missing or non-TCP port, an entry with both or
+    # neither of cidr and fqdn, and an fqdn under the kubernetes flavor
+    # (vanilla NetworkPolicy has no FQDN selector: list the backend's address
+    # as cidr there). cilium flavor: a cidr selects destinations outside the
+    # cluster — Cilium's CIDR rules match neither pods nor nodes — and a name
+    # is opened through the DNS proxy rule and, for an in-cluster Service, the
+    # cluster entity on that port, as the static hostname rule does; so an
+    # in-cluster Ollama is listed by its Service name there, and by its
+    # Service's or pods' block under the kubernetes flavor.
+    #   registeredBackends:
+    #     - fqdn: ollama.models.svc.cluster.local   # an in-cluster Ollama (cilium flavor)
+    #       port: 11434
+    #     - cidr: 192.0.2.7/32                     # an LM Studio on the LAN
+    #       port: 1234
+    registeredBackends: []
 
 # === VM manager (vm-manager) ===
 # Values forwarded verbatim to the vm-manager component release

@@ -907,6 +907,9 @@ verify-components-charts: ## Render every component chart with the values the me
 # valid configuration of both on the agentgateway topology, with the identity
 # contract set so the OAuth guards are satisfied.
 MANAGERS_ON := $(VM) --namespace agent-platform --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true --set components.model-manager.enabled=true --set components.agent-manager.enabled=true --set model-manager.backend=ollama --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth --set gateway.jwksEgress.enabled=true
+# modelManager.networkPolicy.registeredBackends (giantswarm/agent-platform#478): a block and a name; the block alone for the kubernetes flavor.
+REGISTERED_BACKENDS := --set 'modelManager.networkPolicy.registeredBackends[0].cidr=192.0.2.0/24' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434' --set 'modelManager.networkPolicy.registeredBackends[1].fqdn=ollama.models.svc.cluster.local' --set 'modelManager.networkPolicy.registeredBackends[1].port=1234'
+REGISTERED_BACKENDS_CIDR := --set 'modelManager.networkPolicy.registeredBackends[0].cidr=192.0.2.0/24' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434'
 MANAGERS_ROUTES := --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true
 # A minimal on-state that trips no other guard, for probing one guard at a time.
 MANAGERS_MIN := $(VM) --set components.kagent.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth --set global.domain=ci.example.com
@@ -1418,6 +1421,30 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 		grep -q -e "$$pattern" /tmp/vmg-mm-egress-k8s-policy.out || { echo "FAIL: kubernetes model-manager egress lacks $$pattern"; exit 1; }; \
 	done
 	@echo "ok: model-manager egress knob"
+	@echo "--> modelManager.networkPolicy.registeredBackends (giantswarm/agent-platform#478): a backend registered at runtime is opened by its block or name on its port, in both flavors, next to the static rules; empty, nothing renders"
+	@if grep -q 'registered at runtime' /tmp/vmg-default-egress.out; then echo "FAIL: the default model-manager egress carries a registered-backend rule with the list empty"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(REGISTERED_BACKENDS) >/tmp/vmg-registered.out 2>&1 || { cat /tmp/vmg-registered.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-model-manager-egress$$/,/^---/' /tmp/vmg-registered.out >/tmp/vmg-registered-policy.out
+	@for pattern in '- 192.0.2.0/24' 'port: "11434"' 'matchName: ollama.models.svc.cluster.local' 'port: "1234"' '- 10.0.0.1/32'; do \
+		grep -q -e "$$pattern" /tmp/vmg-registered-policy.out || { echo "FAIL: cilium model-manager egress lacks $$pattern"; cat /tmp/vmg-registered-policy.out; exit 1; }; \
+	done
+	@sed -n '/matchName: ollama.models.svc.cluster.local/,$$p' /tmp/vmg-registered-policy.out | grep -q '^        - cluster$$' || { echo "FAIL: the fqdn entry does not open the cluster entity on its port (an in-cluster Service)"; exit 1; }
+	@[ "$$(grep -c 'registered at runtime' /tmp/vmg-registered-policy.out)" = "2" ] || { echo "FAIL: expected one registered-backend rule per entry (2)"; exit 1; }
+	@[ "$$(awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' /tmp/vmg-registered.out | grep -c 'registered at runtime')" = "0" ] || { echo "FAIL: the registered-backend rules leaked into agent-manager's egress"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set networkPolicy.flavor=kubernetes $(REGISTERED_BACKENDS_CIDR) >/tmp/vmg-registered-k8s.out 2>&1 || { cat /tmp/vmg-registered-k8s.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-model-manager-egress$$/,/^---/' /tmp/vmg-registered-k8s.out >/tmp/vmg-registered-k8s-policy.out
+	@for pattern in 'cidr: "192.0.2.0/24"' 'port: 11434' 'cidr: 10.0.0.1/32'; do \
+		grep -q -e "$$pattern" /tmp/vmg-registered-k8s-policy.out || { echo "FAIL: kubernetes model-manager egress lacks $$pattern"; cat /tmp/vmg-registered-k8s-policy.out; exit 1; }; \
+	done
+	@echo "ok: registered backends in both flavors"
+	$(call managers_must_fail,registered backend: cidr must parse,$(MANAGERS_ON) --set 'modelManager.networkPolicy.registeredBackends[0].cidr=10.244.0.0' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434',is not an IPv4 CIDR)
+	$(call managers_must_fail,registered backend: port required,$(MANAGERS_ON) --set 'modelManager.networkPolicy.registeredBackends[0].cidr=10.244.0.0/16',has no port)
+	$(call managers_must_fail,registered backend: port is a number in range,$(MANAGERS_ON) --set 'modelManager.networkPolicy.registeredBackends[0].cidr=10.244.0.0/16' --set 'modelManager.networkPolicy.registeredBackends[0].port=70000',is not a TCP port)
+	$(call managers_must_fail,registered backend: fqdn refused under the kubernetes flavor,$(MANAGERS_ON) --set networkPolicy.flavor=kubernetes --set 'modelManager.networkPolicy.registeredBackends[0].fqdn=ollama.models.svc.cluster.local' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434',needs the cilium network-policy flavor)
+	$(call managers_must_fail,registered backend: one destination per entry,$(MANAGERS_ON) --set 'modelManager.networkPolicy.registeredBackends[0].cidr=10.244.0.0/16' --set 'modelManager.networkPolicy.registeredBackends[0].fqdn=ollama.lan' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434',sets both cidr)
+	$(call managers_must_fail,registered backend: a destination is required,$(MANAGERS_ON) --set 'modelManager.networkPolicy.registeredBackends[0].port=11434',names no destination)
+	$(call managers_must_fail,registered backend: fqdn is a hostname,$(MANAGERS_ON) --set 'modelManager.networkPolicy.registeredBackends[0].fqdn=http://ollama:11434' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434',is not a hostname)
+	$(call managers_must_pass,registered backend: fqdn under the kubernetes flavor with policies off renders,$(MANAGERS_ON) --set networkPolicy.flavor=kubernetes --set networkPolicy.enabled=false --set 'modelManager.networkPolicy.registeredBackends[0].fqdn=ollama.models.svc.cluster.local' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434')
 	@echo "--> cilium, kserve backend: Hugging Face egress instead of the Ollama endpoint"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.backend=kserve --set modelManager.kserve.requireApi=false >/tmp/vmg-kserve.out 2>&1 || { cat /tmp/vmg-kserve.out; exit 1; }
 	@grep -q 'matchName: huggingface.co' /tmp/vmg-kserve.out || { echo "FAIL: no Hugging Face egress for the kserve backend"; exit 1; }

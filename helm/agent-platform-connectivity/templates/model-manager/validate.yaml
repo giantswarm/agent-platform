@@ -145,6 +145,45 @@ login provider beside global.identity, or a route the API server rejects.
     {{- end }}
   {{- end }}
 
+  {{- /* Backends registered at runtime need their egress listed by hand
+         (modelManager.networkPolicy.registeredBackends): the chart cannot see
+         a ConfigMap written while the service runs. Every entry is a map with
+         a TCP port and exactly one destination — a cidr that parses as IPv4,
+         or an fqdn (a hostname, not a URL). An fqdn is a Cilium FQDN selector:
+         under the kubernetes flavor, with policies on, vanilla NetworkPolicy
+         has nothing to render it into, so the render fails naming the flavor
+         instead of shipping a policy that silently drops the backend. */ -}}
+  {{- range $i, $entry := ($mm.networkPolicy.registeredBackends | default list) }}
+    {{- $at := printf "modelManager.networkPolicy.registeredBackends[%d]" $i }}
+    {{- if not (kindIs "map" $entry) }}
+      {{- fail (printf "%s: every entry is a map with a port and exactly one of cidr or fqdn, e.g. {cidr: 10.244.0.0/16, port: 11434}; got %v" $at $entry) }}
+    {{- end }}
+    {{- $cidr := toString ($entry.cidr | default "") }}
+    {{- $fqdn := toString ($entry.fqdn | default "") }}
+    {{- if and $cidr $fqdn }}
+      {{- fail (printf "%s sets both cidr (%s) and fqdn (%s): one destination per entry — list two entries" $at $cidr $fqdn) }}
+    {{- end }}
+    {{- if not (or $cidr $fqdn) }}
+      {{- fail (printf "%s names no destination: set cidr (an IPv4 block, e.g. 10.244.0.0/16) or fqdn (a hostname, cilium flavor only)" $at) }}
+    {{- end }}
+    {{- if and $cidr (not (regexMatch `^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(3[0-2]|[12]?[0-9])$` $cidr)) }}
+      {{- fail (printf "%s.cidr (%q) is not an IPv4 CIDR: an address block with a prefix length, e.g. 10.244.0.0/16, or a single address as 10.0.0.7/32" $at $cidr) }}
+    {{- end }}
+    {{- if and $fqdn (not (regexMatch `^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$` $fqdn)) }}
+      {{- fail (printf "%s.fqdn (%q) is not a hostname: the name the backend is reached by, e.g. ollama.models.svc.cluster.local — no scheme, port or path" $at $fqdn) }}
+    {{- end }}
+    {{- if and $fqdn $.Values.networkPolicy.enabled (ne (include "agent-platform.networkPolicyFlavor" $) "cilium") }}
+      {{- fail (printf "%s.fqdn (%s) needs the cilium network-policy flavor (networkPolicy.flavor: cilium, a Cilium FQDN selector): the resolved flavor is kubernetes, and vanilla NetworkPolicy selects addresses, never names — list the backend's address as cidr instead" $at $fqdn) }}
+    {{- end }}
+    {{- if not (hasKey $entry "port") }}
+      {{- fail (printf "%s has no port: the TCP port the backend listens on is required (11434 for Ollama, 1234 for LM Studio, 13305 for Lemonade)" $at) }}
+    {{- end }}
+    {{- $port := $entry.port }}
+    {{- if or (not (or (kindIs "float64" $port) (kindIs "int64" $port) (kindIs "int" $port))) (lt ($port | int) 1) (gt ($port | int) 65535) }}
+      {{- fail (printf "%s.port (%v) is not a TCP port: a number from 1 to 65535" $at $port) }}
+    {{- end }}
+  {{- end }}
+
   {{- if $mm.route.enabled }}
     {{- /* The route renders agentgateway.dev resources on the agentgateway
            Gateway. */ -}}

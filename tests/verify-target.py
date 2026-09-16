@@ -262,9 +262,14 @@ def check_golden(meta: str, connectivity: str) -> None:
         ]
         ha_hold = ["--set-string", "gateway.parameters.podAnnotations.karpenter\\.sh/do-not-disrupt=true"]
         ha_hold_meta = [*ha_hold, "--set", "agentgateway.controller.replicaCount=1"]
+        # modelManager.networkPolicy.registeredBackends (giantswarm/agent-platform#478)
+        # is a new default key the meta chart forwards to the connectivity
+        # release; empty it renders no rule, so the golden side gets the same
+        # empty list as a value. Drop this once GOLDEN_REF carries the key.
+        mm_registered = ["--set-json", "modelManager.networkPolicy.registeredBackends=[]"]
         shapes = [
-            ("meta default", meta, [*mm_off, *mm_static, *ha_hold_meta]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *ha_hold_meta]),
+            ("meta default", meta, [*mm_off, *mm_static, *ha_hold_meta, *mm_registered]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *ha_hold_meta, *mm_registered]),
             ("connectivity default", connectivity, [*VM, *mm_off, *ha_hold]),
             ("connectivity full", connectivity, [*CONN_FULL, *mm_off, *ha_hold]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off, *ha_hold]),
