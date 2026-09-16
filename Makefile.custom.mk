@@ -1346,6 +1346,13 @@ verify-workerpool: ## Assert the Substrate WorkerPool reaches the cluster as wri
 	@python3 tests/verify-workerpool.py $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-worker-image
+verify-worker-image: ## Assert the Substrate worker image follows the chart's own Substrate pin (giantswarm/agent-platform#466): the kagent release carries substrateWorkerPool.workerImage = <substrate.image.registry>/ateom-gvisor:<floor of components.substrate.versionRange> — derived over the forwarded block, never the kagent build's stamp — so the worker and the atelet are one Substrate release whatever kagent build the kagent range admits (the 4.15.2 shape forwards the 0.0.27-gs.9 worker); a mirror's substrate.image.registry moves it; an own workerImage stands while its tag is the pinned release and fails the render otherwise; an exact pin derives that version; a Substrate range that does not confine one release (no floor, a ceiling past the next patch, ~, ^, <=) fails the render naming the range; the kagent chart the range resolves to renders the one WorkerPool with the derived image and was published against the pinned release's X.Y.Z (its Chart.yaml substrate dependency). Network: ghcr.io; needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-worker-image.py $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"

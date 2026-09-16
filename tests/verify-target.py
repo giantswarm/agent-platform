@@ -216,9 +216,18 @@ def check_golden(meta: str, connectivity: str) -> None:
         # modelServing block, which the golden chart accepts, so both sides
         # render without it. Drop this once GOLDEN_REF carries the exception.
         ms_polex_off = ["--set", "modelServing.policyException.enabled=false"]
+        # The Substrate worker image follows the chart's Substrate pin
+        # (giantswarm/agent-platform#466): the head derives kagent
+        # .substrateWorkerPool.workerImage from components.substrate.versionRange's
+        # floor and moves the two Substrate ranges to 0.0.30-gs.4; the golden
+        # forwards an own workerImage verbatim, so both sides get the derived
+        # image and the range as values. Drop this once GOLDEN_REF carries the line.
+        substrate = ["--set", "components.substrate.versionRange=>=0.0.30-gs.4 <0.0.31-0",
+                     "--set", "components.substrate-crds.versionRange=>=0.0.30-gs.4 <0.0.31-0",
+                     "--set", "kagent.substrateWorkerPool.workerImage=ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.30-gs.4"]
         shapes = [
-            ("meta default", meta, [*mm_off, *mm_static, *mm_registered]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered]),
+            ("meta default", meta, [*mm_off, *mm_static, *mm_registered, *substrate]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered, *substrate]),
             ("connectivity default", connectivity, [*VM, *mm_off, *ms_polex_off]),
             ("connectivity full", connectivity, [*CONN_FULL, *mm_off, *ms_polex_off]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off, *ms_polex_off]),

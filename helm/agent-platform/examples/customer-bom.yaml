@@ -31,11 +31,12 @@
 # render refuses such a pin.
 # substrate and substrate-crds pin the SAME release of the Substrate line
 # (vX.Y.Z-gs.N like kagent's; the floor of components.substrate.versionRange —
-# 0.0.30-gs.2 is the release whose WorkerPool CRD carries the spread fields
-# (giantswarm/giantswarm#37797) on upstream Substrate v0.0.29, whose router
-# kagent main addresses actors on since kagent-dev/kagent#2802; the worker
-# image the kagent chart stamps from 0.11.0-gs.16 stays 0.0.30-gs.1 and runs
-# under it — a re-pin that changes the runtime moves the two together).
+# 0.0.30-gs.4, the bounded golden boot, on upstream Substrate v0.0.29, whose
+# router kagent main addresses actors on since kagent-dev/kagent#2802). The
+# pin is also the worker image the kagent WorkerPool runs: the meta chart
+# derives ateom-gvisor:<this pin> for the kagent release, so the kagent pin
+# above may move on its own — the worker never follows a kagent build's stamp
+# (giantswarm/agent-platform#466).
 # =============================================================================
 
 gitops:
@@ -49,8 +50,8 @@ components:
   agent-platform-mcps:         { versionRange: "0.9.0" }
   kagent:                        { versionRange: "0.11.0-gs.16" }
   kagent-crds:                   { versionRange: "0.11.0-gs.16" }
-  substrate:                     { versionRange: "0.0.30-gs.2" }
-  substrate-crds:                { versionRange: "0.0.30-gs.2" }
+  substrate:                     { versionRange: "0.0.30-gs.4" }
+  substrate-crds:                { versionRange: "0.0.30-gs.4" }
   klaus-gateway:                 { versionRange: "1.10.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
