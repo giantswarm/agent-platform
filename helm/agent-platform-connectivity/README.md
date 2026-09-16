@@ -348,10 +348,11 @@ while the gateway reaches a store beyond its own process:
 |---|---|---|
 | The Valkey routing store | `klausGateway.routing.store: valkey`, the valkey component on | the platform's Valkey pods (`agent-platform.valkey.podSelector`, the release namespace) on `valkey.valkey.service.port` |
 | The Secret link store | `klausGateway.obo.store: secret`, OBO on | the kube-apiserver (`kube-apiserver` entity; `networkPolicy.kubernetes.apiServerCIDR`) |
+| The team-review endpoint's TokenReview (giantswarm/klaus-gateway#273) | `klausGateway.reviews.enabled`, whatever the link store | the kube-apiserver (the same rule, rendered once) |
 
 The keys are the klaus-gateway chart's, forwarded by the meta chart; one left
-unset is read with that chart's default (memory, bolt), so the default
-shape gets no policy. An out-of-band Valkey (`routing.valkey.url` outside the
+unset is read with that chart's default (memory, bolt, reviews off), so the
+default shape gets no policy. An out-of-band Valkey (`routing.valkey.url` outside the
 platform, the component off) gets no rule: nothing in the namespace to select,
 the installation adds that egress itself. The valkey release's own policy
 admits clients from the whole cluster on 6379, so the client side is the only
@@ -1044,6 +1045,9 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | klausGateway.obo.stateKey | string | `""` |  |
 | klausGateway.obo.storeKey | string | `""` |  |
 | klausGateway.obo.connectors.enabled | bool | `false` |  |
+| klausGateway.reviews.enabled | bool | `false` |  |
+| klausGateway.reviews.audience | string | `"klaus-gateway"` |  |
+| klausGateway.reviews.allowedCallers | list | `[]` |  |
 | klausGateway.cli.enabled | bool | `false` |  |
 | klausGateway.a2a.enabled | bool | `false` |  |
 | klausGateway.a2a.defaultAgent | string | `""` |  |

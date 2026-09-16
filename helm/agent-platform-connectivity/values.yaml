@@ -1817,7 +1817,8 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # This chart renders the gateway pod's egress to its stores from these keys
   # (templates/klausgateway/netpol.yaml, -klausgateway-store-egress): the
   # platform's Valkey pods on their Service port with store: valkey; the
-  # kube-apiserver for the Secret link store (obo.store: secret).
+  # kube-apiserver for the Secret link store (obo.store: secret) and for the
+  # team-review endpoint's TokenReview (reviews.enabled).
   routing:
     store: memory
     defaultTTL: "24h"
@@ -1889,6 +1890,24 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # klaus-gateway subchart.
     connectors:
       enabled: false
+
+  # Team-review endpoint (klaus-gateway >= 1.11.0, giantswarm/klaus-gateway#273):
+  # POST /reviews and POST /notices for managers authenticated as a Kubernetes
+  # ServiceAccount. The gateway verifies every caller with an
+  # authentication.k8s.io/v1 TokenReview at the kube-apiserver, so while
+  # enabled this chart renders the gateway's egress to the API server in
+  # -klausgateway-store-egress (the kube-apiserver entity; the Kubernetes
+  # flavor's networkPolicy.kubernetes.apiServerCIDR) whatever the link store —
+  # without it every review times out and the endpoint answers 503. Requires
+  # slack.enabled and obo.enabled (the gateway's own gate). Forwarded to the
+  # klaus-gateway subchart; the defaults are that chart's.
+  reviews:
+    enabled: false
+    # The token audience the API server checks; callers project their
+    # ServiceAccount token for it.
+    audience: klaus-gateway
+    # The ServiceAccounts that may post, as system:serviceaccount:<namespace>:<name>.
+    allowedCallers: []
 
   # CLI channel adapter (remote klausctl users). Off by default.
   cli:
