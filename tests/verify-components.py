@@ -106,6 +106,10 @@ LINE = {
     # pipeline with its guest image artifact (gsoci, the catalog). muster
     # alone: the MCPServer CR.
     "vm-manager": (GSOCI, ">=0.20.2 <1.0.0", ["muster"]),
+    # 0.4.2 is the first cluster-manager release with the muster registration and
+    # the identity contract the meta chart forwards that also tolerates a cluster
+    # without the Cluster API group. muster alone: the MCPServer CR.
+    "cluster-manager": (GSOCI, ">=0.4.2 <1.0.0", ["muster"]),
     # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
     # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
     # REST client and belongs to the 3.x meta chart. The floor is 1.10.0, the
@@ -123,7 +127,7 @@ LINE = {
 KAGENT_API_VERSION = "v1alpha3"
 MANAGERS = ["model-manager", "agent-manager"]
 # Blocks a component gates behind its own switch (components.<name>.gatedValues).
-GATED = {"vm-manager": ["vm-manager", "vmManager"]}
+GATED = {"vm-manager": ["vm-manager", "vmManager"], "cluster-manager": ["cluster-manager", "clusterManager"]}
 
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
@@ -161,7 +165,7 @@ DEV_CHANNEL: dict[str, str] = {}
 # the backslashes a real filter has (`\.`), so the quoting is exercised.
 PROBE_FILTER = ".*-dev\\.x\\..*"
 
-ON = [f"--set=components.{n}.enabled=true" for n in (*NEW, "klaus-gateway")]
+ON = [f"--set=components.{n}.enabled=true" for n in (*NEW, "klaus-gateway", "cluster-manager")]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
 # The bundled Flux engine (components.flux.enabled, default true) adds its own
 # objects to the render; its two shapes are tests/verify-engine.py's. The roster
@@ -265,13 +269,16 @@ def main(meta: str, connectivity: str) -> int:
     # --- gated blocks: a component's blocks travel only while it is on ---------------
     # (components.<name>.gatedValues; vm-manager's two blocks — a connectivity
     # chart before 4.11 refuses them, and nothing reads them while it is off.)
-    without = docs(render(meta, [*ci, "--set=components.vm-manager.enabled=false"]))
-    conn_without = hr_values(without[("HelmRelease", "agent-platform-connectivity")])
-    for name in GATED["vm-manager"]:
-        if re.search(rf"^{re.escape(name)}:", conn_without, re.M):
-            fail(f"the {name} block reached the connectivity release while components.vm-manager is off (gatedValues)")
-        if not re.search(rf"^{re.escape(name)}:", conn_off, re.M):
-            fail(f"the {name} block did not reach the connectivity release with components.vm-manager on; its wiring reads it")
+    for component, blocks in GATED.items():
+        without = docs(render(meta, [*ci, f"--set=components.{component}.enabled=false"]))
+        conn_without = hr_values(without[("HelmRelease", "agent-platform-connectivity")])
+        with_it = docs(render(meta, [*ci, f"--set=components.{component}.enabled=true"]))
+        conn_with = hr_values(with_it[("HelmRelease", "agent-platform-connectivity")])
+        for name in blocks:
+            if re.search(rf"^{re.escape(name)}:", conn_without, re.M):
+                fail(f"the {name} block reached the connectivity release while components.{component} is off (gatedValues)")
+            if not re.search(rf"^{re.escape(name)}:", conn_with, re.M):
+                fail(f"the {name} block did not reach the connectivity release with components.{component} on; its wiring reads it")
     for (kind, name), d in off.items():
         if kind == "HelmRelease":
             dangling = [x for x in depends_on(d) if x in NEW]
