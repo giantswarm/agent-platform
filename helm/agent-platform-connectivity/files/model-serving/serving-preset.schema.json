@@ -108,6 +108,11 @@
           "type": "object",
           "additionalProperties": true,
           "description": "Extra InferenceService predictor fields copied verbatim (e.g. minReplicas, timeout, deploymentStrategy); they win over the component defaults."
+        },
+        "template": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Extra LLMInferenceService template fields copied verbatim (the llm-d path). A preset names no image: the predictor runs the mirrored llm-d-cuda the well-known LLMInferenceServiceConfig names (components.kserve-runtime-configs); an image here is the exception and states its reason in description."
         }
       }
     }

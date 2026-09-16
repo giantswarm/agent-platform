@@ -2889,3 +2889,66 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.additionalEgressCIDRs and additionalEgressFQDNs apply to
       # both flavors as well.
       cidrs: []
+  # The models Gateway (giantswarm/agent-platform#326; bumblebee-plans#46, D6):
+  # one agentgateway Gateway per serving cluster that every LLMInferenceService
+  # route attaches to — KServe's ingress-gateway value on the kserve-resources
+  # release is derived from it (kserve.controller.gateway.ingressGateway.kserveGateway,
+  # `<release namespace>/<name>`; leave the block's own copy unset) — with one
+  # JWT policy against the platform's Dex. A served model answers at
+  #   https://<hostPrefix>.<global.domain>/<namespace>/<model>/v1/chat/completions
+  # with a person's id_token (200) and 401 without one; the data plane strips
+  # the bearer before the model server sees the request. The Gateway is the
+  # serving slice's (examples/serving-slice.yaml turns it on): off by default,
+  # so a platform release that serves models on the classic path renders no
+  # Gateway and needs none of its inputs. Renders while enabled is true and
+  # components.modelServing and components.kserve-llmisvc-resources are on.
+  # The GatewayClass it names is the agentgateway controller's — the
+  # platform's release's beside this one, or this release's own
+  # (components.agentgateway) on a workload cluster; nothing is detected, the
+  # operator sets the toggle by the target's shape.
+  modelsGateway:
+    enabled: false
+    # Name of the Gateway (release namespace); the policy objects are
+    # <name>-jwks and <name>-jwt, the Certificate <name>-tls.
+    name: models
+    # Public hostname <hostPrefix>.<global.domain>; global.domain is already
+    # <cluster>.<base domain>.
+    hostPrefix: models
+    # Empty takes gateway.gatewayClassName.
+    gatewayClassName: ""
+    tls:
+      # The TLS Secret of the HTTPS listener. Empty takes
+      # gatewayApi.gateway.tls.secretName — the platform's wildcard covers
+      # <hostPrefix>.<global.domain> — unless issuerRef.name is set, in which
+      # case a cert-manager Certificate for the hostname renders from that
+      # issuer into <name>-tls (or secretName when set).
+      secretName: ""
+      issuerRef:
+        name: ""
+        kind: ClusterIssuer
+        group: cert-manager.io
+    # external-dns: the hostname annotation on the Gateway's infrastructure,
+    # which the data plane's LoadBalancer Service inherits.
+    externalDns:
+      enabled: true
+    jwtAuthentication:
+      # Strict: a request without a valid token is answered 401 at the edge.
+      mode: Strict
+      # The issuer exactly as in the token's iss claim; empty takes
+      # global.identity.issuerUrl.
+      issuer: ""
+      # The audiences accepted: the installation's login client, which mints
+      # the id_token a person holds after the Dex login (kubectl, the portal).
+      # A token for another client (an agent's, a service's) is refused.
+      audiences: [dex-k8s-authenticator]
+      # JWKS source. An empty host takes the issuer's host on 443 — the public
+      # issuer, which a workload cluster reaches without gateway.jwksEgress
+      # (443 needs none; the port implies TLS). An in-cluster host and port
+      # work as in the other policies' jwks blocks.
+      jwks:
+        host: ""
+        port: 443
+        path: /keys
+        tls:
+          enabled: false
+          caSecretName: ""

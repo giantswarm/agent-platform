@@ -556,6 +556,33 @@
                         }
                     }
                 },
+                "kserve-runtime-configs": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "mcp-kubernetes": {
                     "type": "object",
                     "additionalProperties": true,
@@ -1431,6 +1458,10 @@
             "additionalProperties": true
         },
         "kserve-resources": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kserve-runtime-configs": {
             "type": "object",
             "additionalProperties": true
         },

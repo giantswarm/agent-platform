@@ -30,6 +30,24 @@ objects the API server rejects or a preset the portal cannot use.
   {{- if and $ms.cache.enabled (not $ms.cache.pvc.existingClaim) (not $ms.cache.pvc.name) }}
     {{- fail "modelServing.cache.pvc.name is empty: name the cache claim, or set cache.pvc.existingClaim" }}
   {{- end }}
+  {{- /* The models Gateway (#326): an issuer to verify against, a resolvable
+         JWKS source, a certificate for its listener. The GatewayClass is not
+         checked — the controller is the platform's release's or this one's
+         (components.agentgateway), and nothing is detected. */ -}}
+  {{- if (include "agent-platform.modelServing.modelsGateway.enabled" .) }}
+    {{- $mg := $ms.modelsGateway }}
+    {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $mg.name) }}
+      {{- fail (printf "modelServing.modelsGateway.name (%q) must be a lowercase DNS-1123 label" $mg.name) }}
+    {{- end }}
+    {{- if not $mg.jwtAuthentication.audiences }}
+      {{- fail "modelServing.modelsGateway.jwtAuthentication.audiences is empty: the models Gateway accepts the installation's login client only (dex-k8s-authenticator); name it, or the tokens of every client the issuer mints would open every model" }}
+    {{- end }}
+    {{- $_ := include "agent-platform.modelServing.modelsGateway.issuer" . }}
+    {{- $_ := include "agent-platform.jwks.validate" (dict "ctx" . "path" "modelServing.modelsGateway.jwtAuthentication" "jwks" (include "agent-platform.modelServing.modelsGateway.jwks" . | fromJson)) }}
+    {{- if not (include "agent-platform.modelServing.modelsGateway.tlsSecretName" .) }}
+      {{- fail "modelServing.modelsGateway.tls names no certificate: set gatewayApi.gateway.tls.secretName (the platform's wildcard), modelServing.modelsGateway.tls.secretName, or tls.issuerRef.name for a cert-manager Certificate of the models host" }}
+    {{- end }}
+  {{- end }}
   {{- /* Every preset in effect must resolve: the helpers fail on a bad name,
          a missing required field or an unresolvable chat template. */ -}}
   {{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}

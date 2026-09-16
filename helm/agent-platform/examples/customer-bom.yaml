@@ -68,6 +68,7 @@ components:
   kserve-resources:              { versionRange: "0.2.2" }
   kserve-llmisvc-crd:            { versionRange: "0.2.2" }
   kserve-llmisvc-resources:      { versionRange: "0.2.2" }
+  kserve-runtime-configs:        { versionRange: "0.2.4" }
   # The GPU operator (components.gpu-operator, off by default): the catalog's
   # gpu-operator wrapper chart, 1.3.0 = operator 26.3.1.
   gpu-operator:                  { versionRange: "1.3.0" }
