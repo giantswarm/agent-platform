@@ -28,7 +28,11 @@ property the slice relies on:
   nothing of it with modelsGateway.enabled: false; the guards (no issuer, no
   certificate, no audience, a host carrying a port) fail naming the key;
 - the two 24 GB presets pass the preset schema's required keys, name no image,
-  enable tools with a parser, request one GPU and fit 24 GB;
+  enable tools with a parser, request one GPU, fit 24 GB, and request no more
+  CPU and memory than the smallest L4 instance (a g6.xlarge: 4 vCPU, 16 GiB)
+  leaves a predictor after the node's kubelet reservations and daemonsets
+  (giantswarm/agent-platform#502) -- the same node model cluster-manager's
+  create_node_pool answers with;
 - the cache claim (giantswarm/agent-platform#483): no PersistentVolumeClaim object
   in the connectivity render -- a post-install,post-upgrade hook Job server-side
   applies hf-cache into the serving namespace (keep, the access modes, the size,
@@ -57,6 +61,17 @@ INSTALLATION = ["--namespace", "agent-platform", "--set", "global.domain=wc01.ex
                 "--set", "gatewayApi.gateway.tls.secretName=wildcard-tls"]
 SERVING = {"kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources", "kserve-runtime-configs", "agent-platform-connectivity"}
 PRESETS = ("qwen3-4b-instruct", "qwen3-8b-fp8")
+# The smallest instance of the presets' accelerator (nvidia-l4 -> g6.xlarge:
+# 4 vCPU, 16 GiB) and what a Giant Swarm node of that shape leaves a predictor
+# (giantswarm/agent-platform#502): the hypervisor takes ~5 % of the memory, the
+# kubelet keeps 0.6 vCPU and ~1.8 GiB (a 4 vCPU / 16 GiB node reports 3.4 vCPU
+# / 13.4 GiB allocatable), and the daemonsets that follow the pool's taint
+# request ~0.4 vCPU / ~1.5 GiB (Cilium, the exporters, Alloy, the DNS cache,
+# the GPU operator's operands). cluster-manager's instance table
+# (internal/compose/instances.go) applies the same model to every size.
+G6_XLARGE_VCPU, G6_XLARGE_GIB = 4, 16
+USABLE_VCPU = G6_XLARGE_VCPU - 1.0
+USABLE_GIB = G6_XLARGE_GIB * 0.95 - 3.3
 AUDIENCE = "dex-k8s-authenticator"
 
 
@@ -341,9 +356,34 @@ def check_presets(connectivity: str) -> None:
         o = float(re.search(r"overheadGiB: ([\d.]+)", text).group(1))
         if w + o > 24:
             sys.exit(f"FAIL: preset {name} needs {w + o} GiB, more than a 24 GB GPU")
+        cpu, mem = resource_requests(text, name)
+        if cpu > USABLE_VCPU or mem > USABLE_GIB:
+            sys.exit(f"FAIL: preset {name} requests {cpu:g} vCPU / {mem:g} GiB; a g6.xlarge leaves a predictor {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB "
+                     "after the kubelet's reservations and the daemonsets (giantswarm/agent-platform#502)")
+        if "g6.xlarge" not in text:
+            sys.exit(f"FAIL: preset {name}'s description does not name the instance it is sized for (g6.xlarge)")
     if "template" not in spec_keys:
         sys.exit("FAIL: the preset schema has no spec.template")
-    ok(f"presets {', '.join(PRESETS)}: schema keys, no image, tools on with a parser, one GPU, <= 24 GiB; the schema knows spec.template")
+    ok(f"presets {', '.join(PRESETS)}: schema keys, no image, tools on with a parser, one GPU, <= 24 GiB, "
+       f"requests within a g6.xlarge's {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB; the schema knows spec.template")
+
+
+def resource_requests(text: str, name: str) -> tuple:
+    """The preset's requests.cpu (vCPU) and requests.memory (GiB), from the
+    authoring form's `resources:` block (quantities as Kubernetes writes them)."""
+    block = re.search(r"^  resources:\n((?:    .*\n)+)", text, re.M)
+    if not block:
+        sys.exit(f"FAIL: preset {name} carries no resources block")
+    requests = re.search(r"^    requests:\n((?:      .*\n)+)", block.group(1), re.M)
+    if not requests:
+        sys.exit(f"FAIL: preset {name} carries no resources.requests")
+    cpu = re.search(r'^      cpu: "?([\d.]+)(m?)"?$', requests.group(1), re.M)
+    mem = re.search(r"^      memory: ([\d.]+)(Gi|Mi)$", requests.group(1), re.M)
+    if not cpu or not mem:
+        sys.exit(f"FAIL: preset {name}'s requests name no cpu (a count or millicores) or no memory (Gi or Mi)")
+    vcpu = float(cpu.group(1)) / (1000 if cpu.group(2) == "m" else 1)
+    gib = float(mem.group(1)) / (1024 if mem.group(2) == "Mi" else 1)
+    return vcpu, gib
 
 
 def main(meta: str, connectivity: str) -> int:

@@ -236,6 +236,7 @@ else:
         # A golden from before the change has neither the flag nor the block.
         carries = "gpuPool:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         golden = documents(helm(f"{tree}/{CONN}", [*SERVING, *UNTAINTED, *NO_CACHE] if carries else [*SERVING, *NO_CACHE]))
+        resized = "g6.xlarge" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-4b-instruct.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -244,6 +245,15 @@ else:
     if carries:
         golden[DISCOVERY], gcuts = GPU_POOL_BLOCK.subn("", golden[DISCOVERY])
         expect(f"the discovery block cut out of {ref} once", gcuts, 1)
+    # The two L4 presets are sized for a g6.xlarge (giantswarm/agent-platform#502:
+    # requests 2 vCPU / 10 GiB, the description says so); a golden from before
+    # carries the old 4 vCPU / 16 GiB, so its two preset documents are left out
+    # of the comparison on both sides. Drop this once GOLDEN_REF carries #502.
+    if not resized:
+        for name in ("qwen3-4b-instruct", "qwen3-8b-fp8"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: the two L4 presets are resized on this side (#502) and not on {ref}: their ConfigMaps are left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):
