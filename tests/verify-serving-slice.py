@@ -110,8 +110,11 @@ def check_profile(meta: str) -> str:
         sys.exit(f"FAIL: the profile renders {sorted(releases(render))}, expected exactly {sorted(SERVING)}")
     docs = documents(render)
     rc = docs[("HelmRelease", "kserve-runtime-configs")]
-    for needle in ("    - name: kserve-llmisvc-crd", "  targetNamespace: kserve", "  storageNamespace: kserve", "      llmisvcConfigs:\n        enabled: true", "      servingruntime:\n        enabled: false"):
+    for needle in ("    - name: kserve-llmisvc-crd", "      llmisvcConfigs:\n        enabled: true", "      servingruntime:\n        enabled: false"):
         need(rc, needle, "the kserve-runtime-configs release")
+    need(rc, "  targetNamespace: agent-platform", "the kserve-runtime-configs release")
+    if "storageNamespace" in rc:
+        sys.exit("FAIL: the kserve-runtime-configs release targets a namespace of its own; the llm-d controller resolves the well-known configs from the LLMInferenceService's namespace and its own (the release namespace) only")
     if "imageRegistry" in rc:
         sys.exit("FAIL: the kserve-runtime-configs release passes a registry value; the chart's gsoci default stands (giantswarm/kserve#78)")
     need(docs[("HelmRelease", "kserve-resources")], "            kserveGateway: agent-platform/models", "the kserve-resources release")
@@ -122,7 +125,7 @@ def check_profile(meta: str) -> str:
     need(conn, "      kserve-runtime-configs:\n        enabled: true", "the connectivity release's roster")
     if "kubeConfig" in render:
         sys.exit("FAIL: the profile without the target knob renders a kubeConfig")
-    ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into kserve (configs on, runtimes off, no registry, held back from connectivity); kserveGateway derived; runtimeClassName nvidia")
+    ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into the release namespace, the llm-d controller's (configs on, runtimes off, no registry, held back from connectivity); kserveGateway derived; runtimeClassName nvidia")
 
     helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway=other/gw"],
          expect_failure="kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway (other/gw) differs")

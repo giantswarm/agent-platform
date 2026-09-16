@@ -423,7 +423,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-runtime-configs.valuesFrom | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.enabled | bool | `false` |  |
 | components.kserve-runtime-configs.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
-| components.kserve-runtime-configs.targetNamespace | string | `"kserve"` |  |
 | components.modelServing.enabled | bool | `false` |  |
 | components.gpu-operator.chart | string | `"gpu-operator"` |  |
 | components.gpu-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |

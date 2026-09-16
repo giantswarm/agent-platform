@@ -11,7 +11,11 @@
 # operator sets the toggle by the target's shape. Layer this file over the
 # installation's platform inputs (global.domain, global.identity, ingress.mode
 # agentgateway-*, gatewayApi.gateway.tls.secretName) and a BOM
-# (examples/customer-bom.yaml).
+# (examples/customer-bom.yaml). The target runs cert-manager (the KServe
+# controllers' webhook certificates come from a self-signed Issuer of the
+# release namespace) — part of every Giant Swarm installation; the well-known
+# LLMInferenceServiceConfigs install into the release namespace, where the llm-d
+# controller resolves them from (besides an LLMInferenceService's own).
 #
 # A served LLMInferenceService answers at
 #   https://models.<cluster>.<base domain>/<namespace>/<model>/v1/chat/completions

@@ -943,9 +943,10 @@ components:  # @schema additionalProperties: true
     # The well-known LLMInferenceServiceConfigs (giantswarm/kserve;
     # giantswarm/agent-platform#326, bumblebee-plans#46's D8): the templates an
     # LLMInferenceService composes from by baseRefs — the mirrored llm-d-cuda
-    # image among them — installed into the llm-d controller's lookup
-    # namespace `kserve` (targetNamespace; the chart replaces upstream's
-    # namespace). Its images come from gsoci by default (the chart's own
+    # image among them — installed into the release namespace: the llm-d
+    # controller (kserve-llmisvc-resources, the same namespace) resolves a
+    # well-known config from the LLMInferenceService's namespace, then from
+    # its own, and nowhere else. Its images come from gsoci by default (the chart's own
     # kserve.llmisvcConfigs.imageRegistry, giantswarm/kserve#78), so no
     # registry value is passed here; a private registry sets it in the
     # kserve-runtime-configs: block below. Its ServingRuntimes stay off: they
@@ -957,7 +958,6 @@ components:  # @schema additionalProperties: true
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
-    targetNamespace: kserve
   # Model serving on KServe with vLLM (the standalone umbrella's modelServing
   # component): a feature switch, not a component — no chart, so the loop
   # renders no release for it; the flag is forwarded to the connectivity
