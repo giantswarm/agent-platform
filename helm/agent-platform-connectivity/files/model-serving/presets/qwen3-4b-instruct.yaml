@@ -13,6 +13,12 @@ spec:
     400 without --enable-auto-tool-choice). Tuned for one 24 GB GPU of the
     L4 class (--gpu-memory-utilization=0.90, 16k context) under the nvidia
     RuntimeClass the serving slice sets (modelServing.serving.runtimeClassName).
+    Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+    node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+    follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+    requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+    its host memory is the runtime and the weights passing through the page
+    cache; the KV cache lives on the GPU.
   model:
     id: Qwen/Qwen3-4B-Instruct-2507
     storageUri: hf://Qwen/Qwen3-4B-Instruct-2507
@@ -31,11 +37,11 @@ spec:
   resources:
     gpus: 1
     requests:
-      cpu: "4"
-      memory: 16Gi
+      cpu: "2"
+      memory: 10Gi
     limits:
-      cpu: "8"
-      memory: 24Gi
+      cpu: "4"
+      memory: 12Gi
   requirements:
     weightsGiB: 8
     overheadGiB: 12
