@@ -295,11 +295,17 @@ inconsistent. Rendered exactly once via templates/validate.yaml.
 {{- fail "ingress.mode=agentgateway-direct requires a DCR-capable IdP (RFC 7591/8707), e.g. Zitadel; not yet supported" -}}
 {{- end -}}
 {{- $isAgentgateway := or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct") -}}
+{{- $musterEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
 {{- /* The muster `/` route needs a Gateway in every mode; the helper fails the
 render when neither ingress.parentRefs, the chart-owned edge nor
 global.gatewayApi.parentRefs names one — an empty result would render a route
-bound to no Gateway, leaving muster unreachable while install reports success. */ -}}
+bound to no Gateway, leaving muster unreachable while install reports success.
+Only while muster is on: a release without muster (the serving slice,
+examples/serving-slice.yaml) renders no route that could be left unbound and
+has no edge of its own — its Gateway is the models Gateway (#490). */ -}}
+{{- if $musterEnabled -}}
 {{- $_ := include "agent-platform.parentRefs" (dict "ctx" . "override" .Values.ingress.parentRefs "key" "ingress.parentRefs") -}}
+{{- end -}}
 {{- /* viaMuster only matters when the mcps sub-chart is installed; with no MCP
 servers there is nothing to route, so the consistency check is scoped to the
 agent-platform-mcps component. */ -}}
@@ -320,7 +326,10 @@ agent-platform-mcps component. */ -}}
 {{- if and $isAgentgateway (not $agentgatewayEnabled) -}}
 {{- fail "components.agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
-{{- if and (eq $mode "muster-direct") $agentgatewayEnabled -}}
+{{- /* Without muster there is no muster ingress the agentgateway toggle has to
+agree with: the serving slice on a workload cluster runs agentgateway (the
+target has no controller of its own) in the default mode. */ -}}
+{{- if and (eq $mode "muster-direct") $agentgatewayEnabled $musterEnabled -}}
 {{- fail "components.agentgateway.enabled must be false in muster-direct mode; the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
 {{- /* muster-direct runs without the agentgateway component, so its CRDs are
