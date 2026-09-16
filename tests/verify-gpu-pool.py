@@ -27,6 +27,7 @@ onto the pool and published for model-manager. Each case below pins one property
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
+import glob
 import os
 import re
 import subprocess
@@ -52,7 +53,8 @@ LABEL = {"giantswarm.io/machine-pool": "ci-gpu00"}
 RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
 DISCOVERY = ("ConfigMap", "agent-platform-model-serving")
 PRESET = re.compile(r"^agent-platform-serving-preset-(.+)$")
-SHIPPED = 7
+# The presets the connectivity chart ships (one file each; #481 added two).
+SHIPPED = len(glob.glob(os.path.join(CONN, "files", "model-serving", "presets", "*.yaml")))
 # The discovery block this change adds, cut out for the byte-identity check.
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
@@ -168,7 +170,7 @@ for name, doc in shipped.items():
 gp = gpu_pool(docs)
 expect("discovery spec.gpuPool.taint", mapping(block(gp, "taint")), {"key": "nvidia.com/gpu", "value": "", "effect": "NoSchedule"})
 expect("discovery spec.gpuPool.nodeSelector", block(gp, "nodeSelector"), [])
-ok("default: the pool taint tolerated (Exists) by the runtime and all 7 presets, no selector, published as spec.gpuPool")
+ok(f"default: the pool taint tolerated (Exists) by the runtime and all {SHIPPED} presets, no selector, published as spec.gpuPool")
 
 # --- the pool selected: the label on the three sites, a preset's own kept ----
 docs = documents(helm(CONN, [*SERVING, "-f", FIXTURE]))
