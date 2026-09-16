@@ -30,6 +30,15 @@ spec:
     - fromEndpoints:
         - matchLabels:
             gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+        # Every other data plane this controller provisions — a Gateway of the
+        # platform's class in any namespace, such as the serving slice's models
+        # Gateway in the cluster's org namespace (#495). A namespaced policy
+        # matches its own namespace only unless the namespace label is named.
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-class-name: {{ .Values.gateway.gatewayClassName }}
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
       toPorts:
         - ports:
             - port: "9978"
