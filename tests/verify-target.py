@@ -221,6 +221,13 @@ def check_golden(meta: str, connectivity: str) -> None:
         # release; empty it renders no rule, so the golden side gets the same
         # empty list as a value. Drop this once GOLDEN_REF carries the key.
         mm_registered = ["--set-json", "modelManager.networkPolicy.registeredBackends=[]"]
+        # klausGateway.crd.install leaves the meta chart's defaults
+        # (giantswarm/klaus-gateway#271 drops the ChannelRoute CRD and the
+        # crd/configmap stores, and that chart's closed schema refuses the key).
+        # Held on the golden side only: there the key exists and null deletes
+        # it; on head it is absent and null would insert `crd: null`. Drop this
+        # once GOLDEN_REF carries the change.
+        golden_only = {meta: ["--set", "klausGateway.crd=null"]}
         shapes = [
             ("meta default", meta, [*mm_off, *mm_static, *mm_registered]),
             ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered]),
@@ -230,7 +237,7 @@ def check_golden(meta: str, connectivity: str) -> None:
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
-            there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
+            there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags] + golden_only.get(chart, []))
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
             else:
