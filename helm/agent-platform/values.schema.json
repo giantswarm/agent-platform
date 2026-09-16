@@ -50,6 +50,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "cluster-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "clusterCA": {
             "type": "string"
         },
@@ -61,6 +65,10 @@
         },
         "clusterID": {
             "type": "string"
+        },
+        "clusterManager": {
+            "type": "object",
+            "additionalProperties": true
         },
         "components": {
             "type": "object",
@@ -202,6 +210,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -268,12 +282,48 @@
                         }
                     }
                 },
+                "cluster-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedValues": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "dicebear": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
                         "chart": {
                             "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
                         },
                         "injectGlobal": {
                             "type": "boolean"
@@ -295,6 +345,45 @@
                     "properties": {
                         "enabled": {
                             "type": "boolean"
+                        }
+                    }
+                },
+                "gpu-operator": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "crds": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "valuesKey": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
                         }
                     }
                 },
@@ -356,6 +445,12 @@
                         "injectGlobal": {
                             "type": "boolean"
                         },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -404,6 +499,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -424,6 +525,12 @@
                         },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "repository": {
                             "type": "string"
@@ -464,6 +571,33 @@
                     }
                 },
                 "kserve-resources": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "kserve-runtime-configs": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
@@ -570,6 +704,15 @@
                                 "mode": {
                                     "type": "string"
                                 }
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
                             }
                         },
                         "repository": {
@@ -1118,6 +1261,30 @@
                 "serviceAccountName": {
                     "type": "string"
                 },
+                "target": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "kubeConfig": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "secretRef": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "name": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "targetNamespace": {
                     "type": "string"
                 }
@@ -1220,6 +1387,10 @@
                     "type": "string"
                 }
             }
+        },
+        "gpu-operator": {
+            "type": "object",
+            "additionalProperties": true
         },
         "hooks": {
             "type": "object",
@@ -1363,6 +1534,10 @@
             "additionalProperties": true
         },
         "kserve-resources": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "kserve-runtime-configs": {
             "type": "object",
             "additionalProperties": true
         },

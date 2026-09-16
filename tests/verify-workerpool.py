@@ -27,12 +27,12 @@ The one pool is also the platform's failure domain (#472):
     release and the resolved kagent chart's WorkerPool verbatim (they are unset
     by default; an installation sets them);
   - `topologySpreadConstraints` and `podAntiAffinity` are PRUNED SILENTLY by the
-    WorkerPool CRD of every Substrate release published so far (a structural
-    schema): the render refuses them naming the key and the range while
-    components.substrate.versionRange's floor is below the release that carries
-    the fields (agent-platform.substrate.workerPoolSpreadFloor in _helpers.tpl —
-    read from that file here; EMPTY until the release is out, and then the two
-    keys are refused unconditionally), and forwards them verbatim from it on;
+    WorkerPool CRD of every Substrate release before 0.0.30-gs.2 (a structural
+    schema): the render refuses them naming the key, the floor and the range
+    while components.substrate.versionRange's floor is below the release that
+    carries the fields (agent-platform.substrate.workerPoolSpreadFloor in
+    _helpers.tpl — read from that file here; an EMPTY floor would refuse the two
+    keys unconditionally), and forwards them verbatim from it on;
   - any other key WorkerPool.spec.template does not have is refused too (a typo
     would be pruned in silence);
   - the worker PodDisruptionBudget (kagent.substrateWorkerPool.podDisruptionBudget,
@@ -83,8 +83,9 @@ SPREAD = {
         {"weight": 100, "podAffinityTerm": {"topologyKey": "kubernetes.io/hostname",
                                             "labelSelector": {"matchLabels": {"ate.dev/worker-pool": "kagent-default"}}}}]},
 }
-# The Substrate line's WorkerPool.spec.template fields at v0.0.30-gs.1
-# (pkg/api/v1alpha1/workerpool_types.go); the guard names them.
+# The Substrate line's ungated WorkerPool.spec.template fields
+# (pkg/api/v1alpha1/workerpool_types.go; v0.0.30-gs.2 adds the two gated ones);
+# the guard names them.
 TEMPLATE_FIELDS = "labels, annotations, nodeSelector, tolerations, priorityClassName, nodeAffinity, resources"
 WORKER_LABEL = "ate.dev/worker-pool"
 SPREAD_FLOOR_RE = re.compile(r'^\{\{- define "agent-platform\.substrate\.workerPoolSpreadFloor" -\}\}(\S*?)\{\{- end -\}\}$', re.M)

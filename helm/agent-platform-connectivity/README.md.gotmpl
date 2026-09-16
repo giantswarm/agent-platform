@@ -472,6 +472,20 @@ selected. With in-cluster hosts alone it renders no external rule and no proxy
 clause, in either flavour; `make verify-wiring` asserts that against
 `origin/main`, the controller policies first and then the whole render.
 
+## The GPU node pool
+
+A GPU node pool created through the platform (bumblebee-plans#46, the `gpu-node-pool` chart) arrives tainted `nvidia.com/gpu` `NoSchedule` — only accelerator work lands there — and labelled `giantswarm.io/machine-pool=<cluster>-<pool>`. `modelServing.gpuPool` is the serving layer's one input for both (giantswarm/agent-platform#315): `taint` (`key`, `value`, `effect`; the default is the pool chart's taint, tolerated with `operator: Exists` because the pool sets no value — a `value` narrows the toleration to `Equal`, an empty `key` is an untainted pool and renders nothing) and `nodeSelector` (the pool's label; per pool, so the slice release's values set it, empty by default).
+
+The chart applies the input to everything it renders onto the pool and to nothing else — platform components never carry it:
+
+| Site | Toleration | Node selector |
+|---|---|---|
+| The `ClusterServingRuntime` (`modelServing.runtime`; KServe copies both onto every predictor pod of the runtime) | the pool's first, `runtime.tolerations` after it (an equal entry once) | the pool's under `runtime.nodeSelector` (the runtime's keys win) |
+| Every published preset's `scheduling` block (`agent-platform-serving-preset-<name>`) | the pool's first, the preset's own after it (an equal entry once) | the pool's under the preset's own keys |
+| The discovery ConfigMap `agent-platform-model-serving`: `spec.gpuPool.taint.{key,value,effect}`, `spec.gpuPool.nodeSelector` | published for model-manager (`>= 0.23.0`, giantswarm/model-manager#86), which schedules the `LLMInferenceService`s it composes, its download Jobs and its inventory scan pods by it; a registered backend document may override it | likewise |
+
+Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute` (empty tolerates every effect of the key), the key is a qualified name, and every selector value is a string (a label value is a string: quote a number). `make verify-gpu-pool` asserts the three sites in the default, pool-selected, valued and untainted shapes, the guards, the meta chart's forwarding of the block, and that an empty taint key leaves the serving render byte-identical to `origin/main` but for the discovery block; `ci/test-model-serving-gpu-pool-values.yaml` is the pool-selected fixture.
+
 ## Voluntary disruption
 
 Two objects of this chart guard the platform's single-replica pods against Karpenter consolidation and node drains (giantswarm/agent-platform#431), a third the muster-valkey pod (#439) and a fourth the Substrate worker pool (#472); the other components' guards travel on their own charts' knobs through the meta chart. The four budgets share one spec helper (`agent-platform.podDisruptionBudget.spec`) and its guards.

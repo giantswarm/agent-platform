@@ -54,6 +54,54 @@ else the PVC this chart renders.
 {{- end -}}
 
 {{/*
+The GPU node pool input (modelServing.gpuPool) as the scheduling it puts on a
+workload the chart renders onto the pool, as JSON:
+  { "tolerations": [<the toleration of the pool taint>] | [], "nodeSelector": {...} }
+The toleration tolerates the pool taint with operator Exists (no value — the
+gpu-node-pool chart's taint) or Equal (taint.value set); an empty taint.key
+yields none. One source for the runtime, the presets and the discovery
+ConfigMap, so the three sites never disagree.
+Usage: $pool := include "agent-platform.modelServing.gpuPool" . | fromJson
+*/}}
+{{- define "agent-platform.modelServing.gpuPool" -}}
+{{- $gp := .Values.modelServing.gpuPool | default dict -}}
+{{- $taint := get $gp "taint" | default dict -}}
+{{- $tolerations := list -}}
+{{- if get $taint "key" -}}
+{{- $tol := dict "key" (get $taint "key") "operator" "Exists" -}}
+{{- with get $taint "value" -}}
+{{- $_ := set $tol "operator" "Equal" -}}
+{{- $_ := set $tol "value" . -}}
+{{- end -}}
+{{- with get $taint "effect" -}}
+{{- $_ := set $tol "effect" . -}}
+{{- end -}}
+{{- $tolerations = list $tol -}}
+{{- end -}}
+{{- dict "tolerations" $tolerations "nodeSelector" (get $gp "nodeSelector" | default dict) | toJson -}}
+{{- end -}}
+
+{{/*
+Merges the pool's scheduling under a workload's own: the pool toleration first
+and the workload's after it (an entry equal to the pool's once), the pool
+selector under the workload's selector (the workload's keys win). Returns JSON
+  { "tolerations": [...], "nodeSelector": {...} }
+both empty when neither side has anything, so the caller renders nothing then.
+Usage: include "agent-platform.modelServing.poolScheduling" (dict "root" $ "tolerations" $list "nodeSelector" $map) | fromJson
+*/}}
+{{- define "agent-platform.modelServing.poolScheduling" -}}
+{{- $pool := include "agent-platform.modelServing.gpuPool" .root | fromJson -}}
+{{- $tolerations := $pool.tolerations -}}
+{{- range (.tolerations | default list) -}}
+{{- if not (has . $tolerations) -}}
+{{- $tolerations = append $tolerations . -}}
+{{- end -}}
+{{- end -}}
+{{- $selector := merge (deepCopy (.nodeSelector | default dict)) $pool.nodeSelector -}}
+{{- dict "tolerations" $tolerations "nodeSelector" $selector | toJson -}}
+{{- end -}}
+
+{{/*
 Labels of every object the wiring renders.
 */}}
 {{- define "agent-platform.modelServing.labels" -}}
@@ -118,7 +166,9 @@ Validates one preset and resolves it into the published form the portal and
 model-manager read: runtime defaulted to the component's, model.format to vLLM,
 resources.gpus to 1, requirements.overheadGiB to 30, and the chat template (one
 of file, content, existingConfigMap) resolved to the ConfigMap that holds it,
-with the --chat-template flag appended to args. Returns JSON:
+with the --chat-template flag appended to args, and the GPU node pool's
+toleration and selector merged under spec.scheduling (modelServing.gpuPool).
+Returns JSON:
   { "preset": <published ServingPreset>,
     "chatTemplate": { "render": bool, "name": string, "key": string, "content": string } }
 Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name" $name "entry" $entry) | fromJson
@@ -214,6 +264,23 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- $args = append $args (printf "--chat-template=%s/%s" $mountPath $key) -}}
 {{- end -}}
 {{- $_ := set $spec "args" $args -}}
+{{- /* The GPU node pool (modelServing.gpuPool): its toleration first and its
+       selector under the preset's own scheduling block; nothing when both
+       sides are empty. */ -}}
+{{- $scheduling := get $spec "scheduling" | default dict -}}
+{{- if not (kindIs "map" $scheduling) -}}
+{{- fail (printf "%s: spec.scheduling must be a mapping" $where) -}}
+{{- end -}}
+{{- $pool := include "agent-platform.modelServing.poolScheduling" (dict "root" $root "tolerations" (get $scheduling "tolerations") "nodeSelector" (get $scheduling "nodeSelector")) | fromJson -}}
+{{- with $pool.tolerations -}}
+{{- $_ := set $scheduling "tolerations" . -}}
+{{- end -}}
+{{- with $pool.nodeSelector -}}
+{{- $_ := set $scheduling "nodeSelector" . -}}
+{{- end -}}
+{{- if $scheduling -}}
+{{- $_ := set $spec "scheduling" $scheduling -}}
+{{- end -}}
 {{- $_ := set $doc "spec" $spec -}}
 {{- dict "preset" $doc "chatTemplate" $render | toJson -}}
 {{- end -}}
@@ -307,4 +374,52 @@ output through trim and nindent.
     - port: 443
       protocol: TCP
 {{- end }}
+{{- end -}}
+
+{{/*
+Truthy when the models Gateway renders (giantswarm/agent-platform#326): the
+modelServing switch and the llm-d controller component on, and
+modelServing.modelsGateway.enabled.
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.enabled" -}}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kserve.llmisvcEnabled" .) (.Values.modelServing.modelsGateway).enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/* The models Gateway's public hostname: <hostPrefix>.<global.domain>. */}}
+{{- define "agent-platform.modelServing.modelsGateway.host" -}}
+{{- printf "%s.%s" .Values.modelServing.modelsGateway.hostPrefix (include "agent-platform.domain" (dict "ctx" . "for" "modelServing.modelsGateway.hostPrefix")) -}}
+{{- end -}}
+
+{{/* The models Gateway's issuer: the block's own, else global.identity.issuerUrl (or a render failure). */}}
+{{- define "agent-platform.modelServing.modelsGateway.issuer" -}}
+{{- $issuer := .Values.modelServing.modelsGateway.jwtAuthentication.issuer -}}
+{{- if not $issuer -}}
+{{- $issuer = include "agent-platform.issuerUrl" (dict "ctx" . "for" "modelServing.modelsGateway.jwtAuthentication") -}}
+{{- end -}}
+{{- $issuer -}}
+{{- end -}}
+
+{{/*
+The models Gateway's JWKS block with the host resolved (JSON): the block's own
+host, else the issuer's hostname — the public issuer on 443.
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.jwks" -}}
+{{- $jwks := deepCopy .Values.modelServing.modelsGateway.jwtAuthentication.jwks -}}
+{{- if not $jwks.host -}}
+{{- $_ := set $jwks "host" (urlParse (include "agent-platform.modelServing.modelsGateway.issuer" .)).hostname -}}
+{{- end -}}
+{{- $jwks | toJson -}}
+{{- end -}}
+
+{{/*
+The TLS Secret of the models Gateway's listener: tls.secretName, else <name>-tls
+while a Certificate renders (tls.issuerRef.name set), else the platform's
+wildcard (gatewayApi.gateway.tls.secretName).
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.tlsSecretName" -}}
+{{- $mg := .Values.modelServing.modelsGateway -}}
+{{- if $mg.tls.secretName -}}{{- $mg.tls.secretName -}}
+{{- else if $mg.tls.issuerRef.name -}}{{- printf "%s-tls" $mg.name -}}
+{{- else -}}{{- .Values.gatewayApi.gateway.tls.secretName -}}
+{{- end -}}
 {{- end -}}

@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=0.11.0-gs.16 <0.11.1-0"
 # both following components.kagent. The pin is the line's release range, the
 # kagent entry's shape; its floor is the BOM pin and the worker image's tag.
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.30-gs.1 <0.0.31-0"
-SUBSTRATE_PIN = "0.0.30-gs.1"  # the range's floor: the BOM pin and the worker image the kagent chart (0.11.0-gs.16) stamps
+SUBSTRATE_RANGE = ">=0.0.30-gs.2 <0.0.31-0"
+SUBSTRATE_PIN = "0.0.30-gs.2"  # the range's floor and the BOM pin: the release whose WorkerPool CRD carries the spread fields (#472); the worker image the kagent chart (0.11.0-gs.16) stamps stays 0.0.30-gs.1
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
@@ -101,11 +101,15 @@ LINE = {
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
-    "model-manager": (GSOCI, ">=0.20.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+    "model-manager": (GSOCI, ">=0.23.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
     # 0.20.2 is the first vm-manager release from the generated CircleCI
     # pipeline with its guest image artifact (gsoci, the catalog). muster
     # alone: the MCPServer CR.
     "vm-manager": (GSOCI, ">=0.20.2 <1.0.0", ["muster"]),
+    # 0.4.2 is the first cluster-manager release with the muster registration and
+    # the identity contract the meta chart forwards that also tolerates a cluster
+    # without the Cluster API group. muster alone: the MCPServer CR.
+    "cluster-manager": (GSOCI, ">=0.4.2 <1.0.0", ["muster"]),
     # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
     # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
     # REST client and belongs to the 3.x meta chart. The floor is 1.10.0, the
@@ -123,7 +127,7 @@ LINE = {
 KAGENT_API_VERSION = "v1alpha3"
 MANAGERS = ["model-manager", "agent-manager"]
 # Blocks a component gates behind its own switch (components.<name>.gatedValues).
-GATED = {"vm-manager": ["vm-manager", "vmManager"]}
+GATED = {"vm-manager": ["vm-manager", "vmManager"], "cluster-manager": ["cluster-manager", "clusterManager"]}
 
 # CR consumers that come after the operator / control plane when those are on.
 CONSUMERS = {
@@ -161,7 +165,7 @@ DEV_CHANNEL: dict[str, str] = {}
 # the backslashes a real filter has (`\.`), so the quoting is exercised.
 PROBE_FILTER = ".*-dev\\.x\\..*"
 
-ON = [f"--set=components.{n}.enabled=true" for n in (*NEW, "klaus-gateway")]
+ON = [f"--set=components.{n}.enabled=true" for n in (*NEW, "klaus-gateway", "cluster-manager")]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
 # The bundled Flux engine (components.flux.enabled, default true) adds its own
 # objects to the render; its two shapes are tests/verify-engine.py's. The roster
@@ -265,13 +269,16 @@ def main(meta: str, connectivity: str) -> int:
     # --- gated blocks: a component's blocks travel only while it is on ---------------
     # (components.<name>.gatedValues; vm-manager's two blocks — a connectivity
     # chart before 4.11 refuses them, and nothing reads them while it is off.)
-    without = docs(render(meta, [*ci, "--set=components.vm-manager.enabled=false"]))
-    conn_without = hr_values(without[("HelmRelease", "agent-platform-connectivity")])
-    for name in GATED["vm-manager"]:
-        if re.search(rf"^{re.escape(name)}:", conn_without, re.M):
-            fail(f"the {name} block reached the connectivity release while components.vm-manager is off (gatedValues)")
-        if not re.search(rf"^{re.escape(name)}:", conn_off, re.M):
-            fail(f"the {name} block did not reach the connectivity release with components.vm-manager on; its wiring reads it")
+    for component, blocks in GATED.items():
+        without = docs(render(meta, [*ci, f"--set=components.{component}.enabled=false"]))
+        conn_without = hr_values(without[("HelmRelease", "agent-platform-connectivity")])
+        with_it = docs(render(meta, [*ci, f"--set=components.{component}.enabled=true"]))
+        conn_with = hr_values(with_it[("HelmRelease", "agent-platform-connectivity")])
+        for name in blocks:
+            if re.search(rf"^{re.escape(name)}:", conn_without, re.M):
+                fail(f"the {name} block reached the connectivity release while components.{component} is off (gatedValues)")
+            if not re.search(rf"^{re.escape(name)}:", conn_with, re.M):
+                fail(f"the {name} block did not reach the connectivity release with components.{component} on; its wiring reads it")
     for (kind, name), d in off.items():
         if kind == "HelmRelease":
             dangling = [x for x in depends_on(d) if x in NEW]
@@ -290,6 +297,33 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"the roster forwarded to connectivity does not say {name}: enabled: false while kagent is off")
         if ro.get(name) is not True:
             fail(f"the roster forwarded to connectivity does not say {name}: enabled: true while kagent is on (got {ro.get(name)!r})")
+    # model-manager is on by default with no backend (#329), so the meta chart
+    # derives what its release must not do without its peers
+    # (agent-platform.componentDerivedValues): kagent off → kagent.disableWiring:
+    # true (no ModelConfigs wired into a kagent the installation does not run);
+    # muster off → muster.mcpServer.enabled: false (the MCPServer CRD ships with
+    # muster). With the peer on the block's own value stands.
+    def mm_values(manifest: dict) -> dict:
+        return yaml.safe_load(hr_values(manifest[("HelmRelease", "model-manager")]))
+
+    # Likewise muster's OAuth server off (the platform's one login, the lab shape of
+    # examples/kind-lab-dex.yaml) → oauth.enabled: false: no issuer to trust.
+    no_muster = docs(render(meta, [*ci, "--set", "components.muster.enabled=false"]))
+    no_login = docs(render(meta, [*ci, "--set", "muster.muster.oauth.server.enabled=false"]))
+    for peer, manifest, path, derived, own in (
+        ("components.kagent", no_kagent, "kagent.disableWiring", True, False),
+        ("components.muster", no_muster, "muster.mcpServer.enabled", False, True),
+        ("muster.muster.oauth.server.enabled", no_login, "oauth.enabled", False, True),
+    ):
+        got_off = mm_values(manifest)
+        got_on = mm_values(off)
+        for key in path.split("."):
+            got_off, got_on = got_off[key], got_on[key]
+        if got_off is not derived:
+            fail(f"{peer} off: the model-manager release carries {path}: {got_off!r}, expected the derived {derived!r}")
+        if got_on is not own:
+            fail(f"{peer} on: the model-manager release carries {path}: {got_on!r}, expected the block's own {own!r} (nothing derived)")
+    print("ok: kagent off derives kagent.disableWiring: true, muster off muster.mcpServer.enabled: false, muster's OAuth server off oauth.enabled: false for model-manager; with the peer on the block's own value stands")
     for name in ("substrate", "substrate-crds"):
         hr = off.get(("HelmRelease", name))
         if not hr or f"\n  targetNamespace: {SUBSTRATE_NAMESPACE}\n" not in hr:
@@ -479,7 +513,7 @@ def main(meta: str, connectivity: str) -> int:
     if not SUBSTRATE_RANGE.startswith(f">={SUBSTRATE_PIN} "):
         fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
     if substrate_pins != {SUBSTRATE_PIN}:
-        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the control plane and the workers (the kagent chart's stamped workerImage) are one Substrate version")
+        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the two Substrate charts are one release of the line (the worker image the kagent chart stamps may trail it while the runtime is unchanged)")
     print("ok: the customer BOM pins the seven, the kagent line and the managers exactly, and not the wiring chart")
 
     # --- the forwarded tree validates against the connectivity chart --------------

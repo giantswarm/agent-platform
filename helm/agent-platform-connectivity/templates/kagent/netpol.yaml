@@ -103,7 +103,7 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.muster.enabled }}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: muster

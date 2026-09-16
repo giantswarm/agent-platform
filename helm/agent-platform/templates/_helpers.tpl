@@ -111,6 +111,17 @@ overwrite would hide a values file that still spells the old key.
     above: an operator's own url (an out-of-band Valkey), Secret or key wins.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation).
+  model-manager: kagent.disableWiring: true while components.kagent is off —
+    on by default with no backend (giantswarm/agent-platform#329), the release
+    must not wire ModelConfigs into a kagent the installation does not run;
+    with kagent on the block's own value stands. Likewise muster.mcpServer.enabled:
+    false while components.muster is off — the MCPServer CRD ships with muster,
+    so the MCP surface follows it (the connectivity chart's muster peer policy
+    reads the same toggle); the REST API stays. And oauth.enabled: false while
+    muster's OAuth server is off (muster.muster.oauth.server.enabled, the
+    platform's one login): a platform without a login has no issuer for a
+    resource server to trust — the lab shape of examples/kind-lab-dex.yaml —
+    the way the muster discovery label derives from the same toggle.
   substrate: atelet.serviceAccount.annotations and
     ateApiServer.serviceAccount.annotations gain eks.amazonaws.com/role-arn,
     the IRSA role the store block renders, while it does (a differing explicit
@@ -144,6 +155,18 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- end -}}
 {{- $_ := set $derived "muster" (dict "url" $url) -}}
 {{- end -}}
+{{- if eq .name "cluster-manager" -}}
+{{- /* model-manager's namespace: where the model-manager component lands — the
+platform's own namespace (gitops.targetNamespace, else the release namespace).
+create_node_pool writes the kserve backend ConfigMap of model-manager's
+runtime-registration contract there. */ -}}
+{{- $ns := .root.Values.gitops.targetNamespace | default .root.Release.Namespace -}}
+{{- $own := dig "modelManager" "namespace" "" (index .root.Values "cluster-manager" | default dict) -}}
+{{- if and $own (ne $own $ns) -}}
+{{- fail (printf "cluster-manager.modelManager.namespace (%s) differs from the platform's namespace (%s), where the model-manager component lands: cluster-manager registers a serving cluster's kserve backend through model-manager's ConfigMap there — leave cluster-manager.modelManager.namespace unset" $own $ns) -}}
+{{- end -}}
+{{- $_ := set $derived "modelManager" (dict "namespace" $ns) -}}
+{{- end -}}
 {{- if eq .name "klaus-gateway" -}}
 {{- $kg := .root.Values.klausGateway | default dict -}}
 {{- if and (eq (dig "routing" "store" "" $kg) "valkey") (include "agent-platform.componentEnabled" (dict "root" .root "name" "valkey")) -}}
@@ -157,6 +180,15 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
+{{- end -}}
+{{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
+{{- $_ := set $derived "kagent" (dict "disableWiring" true) -}}
+{{- end -}}
+{{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "muster"))) -}}
+{{- $_ := set $derived "muster" (dict "mcpServer" (dict "enabled" false)) -}}
+{{- end -}}
+{{- if and (eq .name "model-manager") (not (dig "muster" "oauth" "server" "enabled" true (.root.Values.muster | default dict))) -}}
+{{- $_ := set $derived "oauth" (dict "enabled" false) -}}
 {{- end -}}
 {{- if and (eq .name "substrate") (eq (include "agent-platform.substrateStore.crossplane" .root) "aws") -}}
 {{- $arn := include "agent-platform.substrateStore.awsRoleArn" .root -}}
@@ -190,6 +222,21 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "substrate.postgres.connectionStringSecretRef (%s/%s) differs from the Secret the connectivity release derives for postgres.databases.substrate (%s/%s): leave it unset — it follows postgres.clusterName — or name an external database in substrate.postgres.connectionString" $ownName $ownKey $ref.name $ref.key) -}}
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
+{{- end -}}
+{{- if and (eq .name "kserve-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) (include "agent-platform.componentEnabled" (dict "root" .root "name" "kserve-llmisvc-resources")) -}}
+{{- /* The models Gateway (modelServing.modelsGateway, rendered by the
+connectivity release in the platform's namespace) is the Gateway every
+LLMInferenceService route attaches to: KServe reads it from the shared
+inferenceservice-config ConfigMap kserve-resources renders. */ -}}
+{{- $mg := dig "modelsGateway" dict (.root.Values.modelServing | default dict) -}}
+{{- if $mg.enabled -}}
+{{- $gw := printf "%s/%s" (.root.Values.gitops.targetNamespace | default .root.Release.Namespace) ($mg.name | default "models") -}}
+{{- $own := dig "kserve" "controller" "gateway" "ingressGateway" "kserveGateway" "" (index .root.Values "kserve-resources" | default dict) -}}
+{{- if and $own (ne $own $gw) -}}
+{{- fail (printf "kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway (%s) differs from the models Gateway the connectivity release renders (%s): every LLMInferenceService route attaches to modelServing.modelsGateway — set modelServing.modelsGateway.name, or modelsGateway.enabled: false to bring a Gateway of your own, and leave the kserve-resources copy unset" $own $gw) -}}
+{{- end -}}
+{{- $_ := set $derived "kserve" (dict "controller" (dict "gateway" (dict "ingressGateway" (dict "kserveGateway" $gw)))) -}}
+{{- end -}}
 {{- end -}}
 {{- $derived | toJson -}}
 {{- end -}}
@@ -578,13 +625,14 @@ Usage: include "agent-platform.semverRangeFloor" "<range>"
 The first release of the Substrate line (giantswarm/substrate, the chart
 components.substrate pins) whose WorkerPool CRD carries spec.template
 .topologySpreadConstraints and spec.template.podAntiAffinity — the carried patch
-tracked as giantswarm/giantswarm#37797 (#37742 row 46). EMPTY until that release
-is out: agent-platform.validateWorkerPool then refuses the two keys
-unconditionally, because every published Substrate release prunes them silently
+tracked as giantswarm/giantswarm#37797 (#37742 row 46), released as v0.0.30-gs.2
+(2026-09-15). agent-platform.validateWorkerPool refuses the two keys while
+components.substrate.versionRange's floor is below it — every earlier release
+prunes them silently — and forwards them verbatim from it on
 (giantswarm/agent-platform#472). One line, no comment inside the define:
 tests/verify-workerpool.py reads the value from this file.
 */}}
-{{- define "agent-platform.substrate.workerPoolSpreadFloor" -}}{{- end -}}
+{{- define "agent-platform.substrate.workerPoolSpreadFloor" -}}0.0.30-gs.2{{- end -}}
 
 {{/*
 Fail the render when kagent.substrateWorkerPool.template would not reach the
@@ -600,8 +648,8 @@ at the render, instead:
     map[string]string);
   - `topologySpreadConstraints` and `podAntiAffinity`, which the Substrate line
     carries only from the release agent-platform.substrate.workerPoolSpreadFloor
-    names (none yet): refused while components.substrate.versionRange's floor is
-    below it, forwarded verbatim from it on;
+    names (0.0.30-gs.2): refused while components.substrate.versionRange's floor
+    is below it, forwarded verbatim from it on;
   - any other key WorkerPool.spec.template does not have (labels, annotations,
     nodeSelector, tolerations, priorityClassName, nodeAffinity, resources are
     the fields of the pinned line; a typo such as `nodeSelectors` would be
@@ -713,7 +761,8 @@ by anyone allowed to get HelmReleases there.
       (list "klausGateway" (list "obo" "storeKey"))
       (list "model-manager" (list "oauth" "dex" "clientSecret"))
       (list "agent-manager" (list "oauth" "dex" "clientSecret"))
-      (list "vm-manager" (list "oauth" "dex" "clientSecret")) -}}
+      (list "vm-manager" (list "oauth" "dex" "clientSecret"))
+      (list "cluster-manager" (list "oauth" "dex" "clientSecret")) -}}
 {{- range $paths -}}
 {{- $cur := index $v (first .) | default dict -}}
 {{- $ok := kindIs "map" $cur -}}
@@ -1334,10 +1383,13 @@ Whether the kagent CRDs' storage-version hooks render
 (hooks/kagent-crds-storage-version.yaml, giantswarm/agent-platform#396): whenever
 the kagent line's CRD component is on — with or without the bundled engine. A
 cluster's own Flux runs this chart's hooks too, and every installation that ran
-kagent 0.10 needs the step; the other hooks stay the engine's. Emits "true" or "".
+kagent 0.10 needs the step; the other hooks stay the engine's. Never with
+gitops.target set: a hook Job runs where the chart is installed, and there the
+kagent CRDs are another release's (the platform's own) — the target cluster
+starts on the kagent API v2 line and has no cut-over to run. Emits "true" or "".
 */}}
 {{- define "agent-platform.kagent.storageVersionHooks" -}}
-{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds") }}true{{ end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) (not (include "agent-platform.targetSecretName" .)) }}true{{ end -}}
 {{- end -}}
 
 {{/*
@@ -1424,6 +1476,133 @@ fleet's render — engine off, exempt namespace — makes no API call at all.
 {{- end -}}
 {{- with $foreign -}}
 {{- fail (printf "this cluster runs Flux; set components.flux.enabled=false or install the chart through it (found %s)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The target cluster's kubeconfig Secret (gitops.target.kubeConfig.secretRef.name,
+giantswarm/agent-platform#328): its name when this release installs its
+components into another cluster, "" otherwise. One release of this chart per
+target cluster — the slices are toggles in its values, never two releases of the
+chart on one cluster (both need the same cluster-scoped CRDs).
+*/}}
+{{- define "agent-platform.targetSecretName" -}}
+{{- dig "target" "kubeConfig" "secretRef" "name" "" (.Values.gitops | default dict) -}}
+{{- end -}}
+
+{{/*
+Render guard of the target knob: the components install into the target through
+the installation's helm-controller, so the bundled engine has no place in such a
+release — no Flux is ever installed into a workload cluster, nor into a cluster
+that runs one.
+*/}}
+{{- define "agent-platform.validateTarget" -}}
+{{- with (include "agent-platform.targetSecretName" .) -}}
+{{- if eq (include "agent-platform.engineEnabled" $) "true" -}}
+{{- fail (printf "gitops.target.kubeConfig.secretRef.name=%s cannot be combined with the bundled Flux engine: the components install into the target cluster through the installation's helm-controller, and no Flux is installed into a workload cluster or into a cluster that runs one. Set components.flux.enabled=false" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+One owner per cluster-scoped component (components.<name>.ownedCrds): a CRD the
+component installs that already exists and whose Flux labels name another
+HelmRelease than the one this render produces (<gitops.namespace | release
+namespace>/<chart>) fails the render naming that release. helm-controller stamps
+helm.toolkit.fluxcd.io/name and /namespace on every object of a release, the
+crds/ directory's CRDs included, so the labels are the owner. A CRD without them
+is left to Helm as before (adoption is not this chart's). Skipped with
+gitops.target set: the lookups see the installation while the components land
+on the target, so there the detection is the composer's. `lookup` is empty
+under `helm template`, where this guard is therefore silent.
+*/}}
+{{- define "agent-platform.validateCrdOwners" -}}
+{{- if not (include "agent-platform.targetSecretName" .) -}}
+{{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
+{{- $foreign := list -}}
+{{- range $key, $c := .Values.components -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $key)) (hasKey $c "chart") -}}
+{{- range ($c.ownedCrds | default list) -}}
+{{- with (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" .) -}}
+{{- $owner := dig "metadata" "labels" "helm.toolkit.fluxcd.io/name" "" . -}}
+{{- $ownerNs := dig "metadata" "labels" "helm.toolkit.fluxcd.io/namespace" "" . -}}
+{{- if and $owner (or (ne $owner $c.chart) (ne $ownerNs $ns)) -}}
+{{- $foreign = append $foreign (printf "%s (components.%s) belongs to HelmRelease %s/%s" .metadata.name $key $ownerNs $owner) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- with $foreign -}}
+{{- fail (printf "a cluster-scoped component has exactly one owner per cluster, and release %s (HelmReleases in %s) would be a second one: %s. Remove that release first, or set components.<name>.enabled=false here — a slice release beside the platform's own leaves the controller and its CRDs to the platform's release" $.Release.Name $ns (join "; " .)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+One GPU operator per cluster (components.gpu-operator, giantswarm/agent-platform#327).
+NVIDIA's operator owns one ClusterPolicy and one set of DaemonSets, so with the
+component on the render fails when the cluster it renders against already runs an
+operator that is not this release's: a ClusterPolicy whose owner — the Flux labels
+helm.toolkit.fluxcd.io/name + /namespace, else Helm's meta.helm.sh/release-name +
+/release-namespace annotations — is another release or none; a HelmRelease of the
+gpu-operator chart under another name or in another namespace (cluster-manager's
+<cluster>-gpu-operator, before or after its ClusterPolicy exists); an App of it.
+The message names what was seen and the handover: delete that release
+(cluster-manager's detection then sees this component and never re-creates it),
+then switch the toggle on — or leave it off. Adopting the running objects is not
+this chart's. Skipped with the target knob, as agent-platform.validateCrdOwners
+is: the lookups see the installation while the component lands on the target,
+where the detection is cluster-manager's. Each lookup is gated on its API being
+served, and `lookup` is empty under `helm template`, where the guard is silent —
+tests/fixtures/gpu-operator-foreign-owner.yaml on a cluster and --dry-run=server
+show it (README, "The GPU operator").
+*/}}
+{{- define "agent-platform.validateGpuOperatorOwner" -}}
+{{- $c := index .Values.components "gpu-operator" | default dict -}}
+{{- if and $c (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "gpu-operator")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
+{{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
+{{- $release := $c.chart -}}
+{{- $releaseNs := $c.targetNamespace | default .Values.gitops.targetNamespace | default .Release.Namespace -}}
+{{- $foreign := list -}}
+{{- if .Capabilities.APIVersions.Has "nvidia.com/v1" -}}
+{{- range ((lookup "nvidia.com/v1" "ClusterPolicy" "" "").items | default list) -}}
+{{- $fluxName := dig "metadata" "labels" "helm.toolkit.fluxcd.io/name" "" . -}}
+{{- $fluxNs := dig "metadata" "labels" "helm.toolkit.fluxcd.io/namespace" "" . -}}
+{{- $helmName := dig "metadata" "annotations" "meta.helm.sh/release-name" "" . -}}
+{{- $helmNs := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" . -}}
+{{- if $fluxName -}}
+{{- if or (ne $fluxName $release) (ne $fluxNs $ns) -}}
+{{- $foreign = append $foreign (printf "ClusterPolicy %s belongs to HelmRelease %s/%s (labels helm.toolkit.fluxcd.io/name=%s, helm.toolkit.fluxcd.io/namespace=%s)" .metadata.name $fluxNs $fluxName $fluxName $fluxNs) -}}
+{{- end -}}
+{{- else if $helmName -}}
+{{- if or (ne $helmName $release) (ne $helmNs $releaseNs) -}}
+{{- $foreign = append $foreign (printf "ClusterPolicy %s belongs to the Helm release %s in %s (annotations meta.helm.sh/release-name=%s, meta.helm.sh/release-namespace=%s — installed by hand or as an App)" .metadata.name $helmName $helmNs $helmName $helmNs) -}}
+{{- end -}}
+{{- else -}}
+{{- $foreign = append $foreign (printf "ClusterPolicy %s carries no owner (no helm.toolkit.fluxcd.io/name label, no meta.helm.sh/release-name annotation)" .metadata.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if .Capabilities.APIVersions.Has "helm.toolkit.fluxcd.io/v2" -}}
+{{- range ((lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" "" "").items | default list) -}}
+{{- $chart := dig "spec" "chart" "spec" "chart" "" . -}}
+{{- $chartRef := dig "spec" "chartRef" "name" "" . -}}
+{{- if and (or (eq $chart $release) (eq $chartRef $release) (hasSuffix "-gpu-operator" $chartRef) (hasSuffix "-gpu-operator" .metadata.name)) (not (and (eq .metadata.name $release) (eq .metadata.namespace $ns))) -}}
+{{- $foreign = append $foreign (printf "HelmRelease %s/%s installs the operator" .metadata.namespace .metadata.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if .Capabilities.APIVersions.Has "application.giantswarm.io/v1alpha1" -}}
+{{- range ((lookup "application.giantswarm.io/v1alpha1" "App" "" "").items | default list) -}}
+{{- if eq (dig "spec" "name" "" .) $release -}}
+{{- $foreign = append $foreign (printf "App %s/%s installs the operator" .metadata.namespace .metadata.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- with $foreign -}}
+{{- fail (printf "components.gpu-operator.enabled=true, but this cluster already runs a GPU operator, and NVIDIA's operator is one per cluster (one ClusterPolicy, one set of DaemonSets): %s. This release would be a second owner (HelmRelease %s/%s, the Helm release %s in %s). Hand the operator over first: delete that release — cluster-manager's <cluster>-gpu-operator, whose detection then sees this component and never re-creates it, or the operator installed by hand — then switch the toggle on; or leave components.gpu-operator.enabled=false and keep the operator where it is. Adopting the running objects is not this chart's. The component configures the operator from the gpu-operator block, one of two rows: Flatcar — driver and toolkit off (the default); nodes with a pre-installed driver — gpu-operator.toolkit.enabled=true" (join "; " .) $ns $release $release $releaseNs) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

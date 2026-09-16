@@ -50,6 +50,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "cluster-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "clusterCA": {
             "type": "string"
         },
@@ -61,6 +65,10 @@
         },
         "clusterID": {
             "type": "string"
+        },
+        "clusterManager": {
+            "type": "object",
+            "additionalProperties": true
         },
         "components": {
             "type": "object",
@@ -112,6 +120,24 @@
                     }
                 },
                 "cloudnative-pg": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "cluster-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "dicebear": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
@@ -193,6 +219,15 @@
                     }
                 },
                 "modelServing": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "muster": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {

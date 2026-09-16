@@ -56,6 +56,7 @@ The defaults carry no filter: a release selects releases. agentlab follows a bra
 | agent-sandbox | `components.agent-sandbox.enabled` | `false` |
 | model-manager | `components.model-manager.enabled` | `false` |
 | agent-manager | `components.agent-manager.enabled` | `false` |
+| cluster-manager | `components.cluster-manager.enabled` | `false` |
 | Backstage (the portal) | `components.backstage.enabled` | `false` |
 | mcp-kubernetes | `components.mcp-kubernetes.enabled` | `false` |
 | CloudNativePG operator | `components.cloudnative-pg.enabled` | `false` |
@@ -63,8 +64,10 @@ The defaults carry no filter: a release selects releases. agentlab follows a bra
 | KServe controller | `components.kserve-resources.enabled` | `false` |
 | LLMInferenceService CRDs | `components.kserve-llmisvc-crd.enabled` | `false` |
 | LLMInferenceService controller | `components.kserve-llmisvc-resources.enabled` | `false` |
+| Well-known LLMInferenceServiceConfigs | `components.kserve-runtime-configs.enabled` | `false` |
 | the bundled Flux engine (`flux-engine` subchart) | `components.flux.enabled` | `true` |
 | Model serving (KServe/vLLM runtime, presets, cache) — a feature switch, no chart | `components.modelServing.enabled` | `false` |
+| NVIDIA's GPU operator (gpu-operator-app; once per cluster, independent of model serving) | `components.gpu-operator.enabled` | `false` |
 
 A component with no `enabled` key is always installed (`muster`, `dicebear`, `agent-platform-connectivity`). `components.flux` and `components.modelServing` are feature switches, not components: an entry without a `chart` renders no release, and its flag travels in the roster forwarded to connectivity like every other entry — `components.flux` is the condition of the `flux-engine` subchart (Chart.yaml `dependencies`), `components.modelServing` gates the model serving objects the connectivity chart renders, and its values block `modelServing:` travels to the connectivity release only while the switch is on (see [Turning on the standalone's extras](#turning-on-the-standalones-extras)). The `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:`, `model-manager:`, `agent-manager:`, `backstage:`, `mcp-kubernetes:`, `cloudnative-pg:` and `kserve-*:` blocks hold that component's values and no longer hold an `enabled` key; `make verify-meta` fails if the two ever diverge again. The last seven are the components the standalone umbrella carried on top of this roster — see [Backstage, mcp-kubernetes, CloudNativePG and KServe](#backstage-mcp-kubernetes-cloudnativepg-and-kserve).
 
@@ -281,6 +284,7 @@ helm install agent-platform-connectivity \
 | `components.agent-sandbox.enabled` | `false` | Bundle the [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) controller — the Sandbox runtime kagent's `SandboxAgent` requires. See [Agent sandbox](#agent-sandbox). |
 | `components.model-manager.enabled` | `false` | Install [model-manager](https://github.com/giantswarm/model-manager), model inventory / pull / load / unload / delete and kagent `ModelConfig` wiring on an Ollama, Lemonade Server (FastFlowLM on AMD NPUs) or KServe backend, as REST and MCP (`x_model-manager_*` through muster). See [Model manager and agent manager](#model-manager-and-agent-manager). |
 | `components.agent-manager.enabled` | `false` | Install [agent-manager](https://github.com/giantswarm/agent-manager), the agent write surface: create / update / delete / inspect kagent agents as Flux `HelmRelease`s of the agent chart, as REST and MCP (`x_agent-manager_*` through muster). Needs kagent and Flux. See [Model manager and agent manager](#model-manager-and-agent-manager). |
+| `components.cluster-manager.enabled` | `false` | Install [cluster-manager](https://github.com/giantswarm/cluster-manager), the cluster write surface: the clusters and GPU node pools of the installation — list, create and delete a pool, switch model serving on a cluster — every write as the person with `dryRun` and `mode: apply\|commit`, MCP only (`x_cluster-manager_*` through muster; the portal's Clusters pages call them through muster as the signed-in user, no route). See [Cluster manager](#cluster-manager). |
 | `modelManager.route.enabled`, `agentManager.route.enabled` | `false` | Expose the service's REST API on the agentgateway data plane at `https://agentgateway.<domain>/model-manager` / `/agent-manager` (the portal's path), with an optional JWT policy in front (`…route.jwtAuthentication`). `agentgateway-*` modes only. |
 | `kagent.controllerRoute.enabled` | `false` | Expose the kagent controller's gRPC API (kagent API v2 `kagent.api.v1alpha1.*` and A2A v1 `lf.a2a.v1.A2AService`) through the agentgateway data plane as a `GRPCRoute` on `https://agentgateway.<domain>` and, in-cluster, `grpc://agentgateway.<namespace>.svc.cluster.local:8080` — one service-only match per service (`kagent.controllerRoute.grpc.services`; RPC lists as the fallback for an agentgateway chart older than 2.1.1), no path prefix, native gRPC over HTTP/2 end to end, gRPC-Web on the same route. The JWT policy (`kagent.controllerRoute.jwtAuthentication`) is **on by default**: `Strict` against `global.identity.issuerUrl`, the identity header `x-user-id` set from the verified `email` claim and any inbound copy replaced; the UI route strips the header; the controller admits agentgateway and the UI only. See [Authentication flow](docs/authentication.md#5-the-kagent-controller-route). `agentgateway-*` modes only; needs `gateway.jwksEgress`. |
 | `dicebear.route.parentRefs` | `[]` | **Required.** The public `Gateway`(s) the avatar `HTTPRoute` attaches to — typically the same as `ingress.parentRefs`. The [dicebear](https://github.com/giantswarm/dicebear) avatar renderer is a force-enabled component (deployed on every install) and its public route is on by default, so the child release fails to render if this is empty. See [giantswarm/giantswarm#37211](https://github.com/giantswarm/giantswarm/issues/37211). |
@@ -301,6 +305,14 @@ Two platform services, off by default, each a component with the same shape: a c
 Both register their MCP endpoint with muster through the chart's own `MCPServer` CR (tools appear as `x_model-manager_*` / `x_agent-manager_*`), and both **act as the user, not as a ServiceAccount**: `oauth.enabled` makes the service an OAuth 2.1 resource server in front of its MCP endpoint and REST API, muster forwards the session's IdP id_token (the CR's `auth.forwardToken`) and requests `requiredAudiences` at login — the cross-client audience the kube-apiserver trusts (`dex-k8s-authenticator` on Giant Swarm clusters) — so `oauth.downstream` presents the same token to the Kubernetes API and the user's RBAC governs; the ServiceAccount holds no permissions (the charts render no RBAC). The issuer, client, secret and base URL fall back to `global.identity` / `global.domain` inside the charts; an installation that sets no `global.*` names them in the block (`oauth.baseURL`, `oauth.dex.issuerURL`, `oauth.dex.clientID`, `oauth.existingSecret` with the key `dex-client-secret` — the same Dex client muster logs users in with — and that client in `oauth.trustedAudiences`). The guards fail the render when any of them is missing. The cilium network policies open the service's egress to that provider by name: the Dex issuer host, or for `oauth.provider: google` the three Google hosts its discovery, JWKS/userinfo and token endpoints live on (`accounts.google.com`, `www.googleapis.com`, `oauth2.googleapis.com`); further destinations go in `modelManager.networkPolicy.egress` / `agentManager.networkPolicy.egress`.
 
 `make verify-managers` covers the wiring, both flavors and every guard.
+
+### Cluster manager
+
+**[cluster-manager](https://github.com/giantswarm/cluster-manager)** is the platform's cluster write surface ([#316](https://github.com/giantswarm/agent-platform/issues/316); giantswarm/giantswarm#37637; bumblebee-plans#42 and #46; epic giantswarm/giantswarm#37639): the clusters and GPU node pools of the installation — `list_clusters`, `list_node_pools`, `create_node_pool`, `delete_node_pool`, `enable_model_serving` / `disable_model_serving`, `get_info` — every write with `dryRun` (the rendered manifests) and `mode: apply | commit` (a pool as a Flux `HelmRelease` + `OCIRepository` applied as the person, or written into the cluster's GitOps repository as a pull request as the person). It composes [the GPU operator](#the-gpu-operator) and the serving slice where a cluster has none, registers the serving cluster's `kserve` backend with model-manager, and installs neither model-manager nor Flux anywhere. **MCP is its only surface**: no REST API, no route, no JWT policy — the portal's Clusters pages call `x_cluster-manager_*` through muster as the signed-in user (giantswarm/backstage#2247) and discover the server from its `MCPServer` CR in the installation's muster.
+
+The same shape as the two managers above: `components.cluster-manager` (the catalog's `cluster-manager` chart on `>=0.4.2 <1.0.0`, `dependsOn: [muster]`, off by default until the KaaS components are on the cluster, giantswarm/giantswarm#37636) with the chart's values in the `cluster-manager:` block (forwarded verbatim; the chart renders its own `MCPServer` CR with `forwardToken` and `requiredAudiences: [dex-k8s-authenticator]`, labelled `agent-platform.giantswarm.io/tool-group: agent-platform`), and the wiring the connectivity chart renders from the `clusterManager:` block — the network policies in both flavors (ingress from muster and the kubelet's probes; egress to DNS, this installation's Kubernetes API, the identity provider, the **workload clusters' API servers** — `clusterManager.networkPolicy.workloadClusters`: names for the cilium flavor, `- matchPattern: "api.*.<base domain>"` on a Giant Swarm installation, addresses for both, on `ports: [443, 6443]` — and the extra names and blocks of `clusterManager.networkPolicy.egress` on 443) and the render-time guards (muster off with the `MCPServer` on, a missing identity input, a bad CIDR, an empty port list, `clusterManager.flux.requireApi`). It **acts as the person** exactly as model-manager and agent-manager do: an OAuth 2.1 resource server whose issuer, client, secret and base URL fall back to `global.identity` / `global.domain`, `oauth.downstream` presenting the forwarded token to the Kubernetes API of this installation and of the workload clusters it targets, the ServiceAccount without permissions (the chart renders no RBAC). Two of its inputs are the platform's: `cluster-manager.installation.name` names the installation's own `Cluster` (empty marks none), and `cluster-manager.modelManager.namespace` — where `create_node_pool` writes model-manager's backend ConfigMap — is derived from the platform's own namespace (`gitops.targetNamespace`, else the release namespace; a value set in the block must agree or the render fails, `agent-platform.componentDerivedValues`). The two blocks reach the connectivity release only while the component is on (`components.cluster-manager.gatedValues`).
+
+`make verify-cluster-manager` covers the component, the wiring in both flavors and every guard.
 
 ### The kagent line
 
@@ -349,6 +361,7 @@ The components the [agent-platform-standalone](https://github.com/giantswarm/age
 | `kserve-resources` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | `kserve-crd` |
 | `kserve-llmisvc-crd` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | — |
 | `kserve-llmisvc-resources` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | `kserve-crd`, `kserve-llmisvc-crd`, `kserve-resources` |
+| `kserve-runtime-configs` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` (into `kserve`; [The serving slice](#the-serving-slice-and-the-models-gateway)) | `kserve-llmisvc-crd` |
 
 **Turning them on.** `components.<name>.enabled: true`. Backstage and mcp-kubernetes also need `global.domain` and `global.identity` (`issuerUrl`, `clientId`, `existingSecret` — the platform credentials Secret, with the keys `dex-client-secret` and, for Backstage, `backstage-session-secret`): the same quick-start inputs muster takes. The mcp-kubernetes chart fails its render without them, by design; the Backstage values mount that Secret by name. `kserve-resources` needs cert-manager on the cluster; `kserve-llmisvc-resources` reuses the shared objects `kserve-resources` renders (`kserve.createSharedResources: false`). On a cluster without Cilium set `mcp-kubernetes.ciliumNetworkPolicy.enabled: false` (see [Prerequisites](#prerequisites)).
 
@@ -367,6 +380,31 @@ helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml \
 make verify-components          # roster, order, BOM pins, the forwarded tree against the connectivity schema
 make verify-components-charts   # renders every component chart (the roster, BOM-pinned both ways) with the forwarded values, connectivity from the working tree
 ```
+
+### The serving slice and the models Gateway
+
+Model serving on a GPU cluster is its own release of this chart (giantswarm/agent-platform#326; [bumblebee-plans#46](https://github.com/giantswarm/bumblebee-plans/pull/46), D4/D6/D8/D9): the **serving slice**, the values profile [`examples/serving-slice.yaml`](helm/agent-platform/examples/serving-slice.yaml). It renders exactly the serving component set — `kserve-crd`, `kserve-resources`, `kserve-llmisvc-crd`, `kserve-llmisvc-resources`, `kserve-runtime-configs` and the `modelServing` switch — and nothing of the platform's own (no muster, dicebear, valkey, kagent, Backstage, agent-manager, model-manager; the engine off). **One release per target cluster**, delivered by the installation's Flux like every workload-cluster app ([One release per target cluster](#one-release-per-target-cluster)): beside the platform's release on the installation's cluster with the profile as is, or onto a workload cluster with `gitops.target.kubeConfig.secretRef` and `components.agentgateway.enabled: true` — agentgateway is part of every installation and cannot be switched out, so nothing is detected; the operator sets the toggle by the target's shape (off beside the platform's release, which owns the controller and its CRDs; on for a workload cluster, which runs none). The profile sets `modelServing.serving.runtimeClassName: nvidia` — the RuntimeClass the GPU operator creates ([The GPU operator](#the-gpu-operator)). The GPU pool's taint and node selector come from `modelServing.gpuPool` (#315, the next PR of this lane); the predictors carry no `karpenter.sh/do-not-disrupt`: a scale-to-zero pool must be able to consolidate, and a drained predictor reloads its model from the cache PVC in seconds.
+
+**The well-known configs.** `components.kserve-runtime-configs` (giantswarm/kserve's `kserve-runtime-configs`, `0.2.x`, `dependsOn: [kserve-llmisvc-crd]`, into the llm-d controller's lookup namespace `kserve`) installs the `LLMInferenceServiceConfig`s an `LLMInferenceService` composes from by `baseRefs` — the mirrored `llm-d-cuda` image among them. The block `kserve-runtime-configs:` turns `kserve.llmisvcConfigs.enabled` on and `kserve.servingruntime.enabled` off (the chart's `ServingRuntime`s are the classic path, which the switch's vLLM `ClusterServingRuntime` already serves); no registry value is passed — the chart's default is gsoci (giantswarm/kserve#78), a private registry sets `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry`. The block never travels to the connectivity release (`omitKeys`).
+
+**The models Gateway.** `modelServing.modelsGateway` (the slice turns it on; off by default, so a platform release serving on the classic path renders none of it) is one agentgateway `Gateway` in the release namespace, `models` on `models.<cluster>.<base domain>` (`<hostPrefix>.<global.domain>`), TLS from the platform's wildcard Secret (`gatewayApi.gateway.tls.secretName`; or `tls.issuerRef.name` for a cert-manager `Certificate` of the host), the external-dns hostname on its infrastructure. KServe's ingress-gateway value is **derived** onto the `kserve-resources` release (`kserve.controller.gateway.ingressGateway.kserveGateway: <namespace>/models`; a differing copy of the operator's fails the render), so every `LLMInferenceService` route attaches to it, and a served model answers at
+
+```
+https://models.<cluster>.<base domain>/<namespace>/<model>/v1/chat/completions
+```
+
+**The audience rule.** One `AgentgatewayPolicy` on the Gateway (`Strict`, `strategy.inheritance: Override` — no route can weaken it) verifies the bearer against the platform's Dex (`global.identity.issuerUrl`; JWKS from the issuer's host on 443 by default, which a workload cluster reaches without `gateway.jwksEgress`) and accepts the audience `dex-k8s-authenticator` only: the installation's login client, the id_token a person holds after the Dex login (kubectl, the portal). A request with it answers 200, one without 401 at the edge; the data plane strips the `Authorization` header once verified, so the model server logs no bearer. See [docs/authentication.md](docs/authentication.md), "The models Gateway".
+
+**The presets.** Two 24 GB recipes for one L4-class GPU with tools on: `qwen3-4b-instruct` (BF16, ~8 GiB) and `qwen3-8b-fp8` (~9 GiB), `--enable-auto-tool-choice --tool-call-parser=hermes`, 16k context, `weightsGiB + overheadGiB <= 24`. Neither names an image: the predictor runs the `llm-d-cuda` the well-known config names; the preset schema's new optional `spec.template` carries `LLMInferenceService` template fields verbatim, an image there only with a stated reason.
+
+```bash
+helm template r helm/agent-platform -f helm/agent-platform/examples/serving-slice.yaml \
+  --set global.domain=wc01.example.com --set global.identity.issuerUrl=https://dex.mc.example.com \
+  --set gatewayApi.gateway.tls.secretName=wildcard-tls --set 'ingress.parentRefs[0].name=x'
+make verify-serving-slice   # the profile's component set, the derived kserveGateway, the Gateway and its policy, the presets
+```
+
+The live half — a served `LLMInferenceService` answering 200 with a person's id_token and 401 without, no bearer in the model server's log — runs on a GPU cluster.
 
 ### Turning on the standalone's extras
 
@@ -407,6 +445,40 @@ What the [agent-platform-standalone](https://github.com/giantswarm/agent-platfor
 ```bash
 helm template t helm/agent-platform-connectivity -f helm/agent-platform-connectivity/ci/test-standalone-extras-values.yaml   # every toggle on, the vanilla shape
 make verify-wiring   # off = no object; on = the objects; the guards; the meta chart forwards the blocks and omits the wiring keys
+```
+
+### The GPU operator
+
+NVIDIA's GPU operator — the device plugin, GPU feature discovery (the `nvidia.com/gpu.*` labels model-manager identifies accelerator nodes by), DCGM — runs **once per cluster** (it owns one `ClusterPolicy` and one set of DaemonSets) and reaches a cluster as a HelmRelease of Giant Swarm's [gpu-operator-app](https://github.com/giantswarm/gpu-operator-app) into `kube-system`, in one of two ways ([#327](https://github.com/giantswarm/agent-platform/issues/327); bumblebee-plans#46, the plan's D3; epic giantswarm/giantswarm#37639):
+
+- **`components.gpu-operator.enabled: true`** in the installation's GitOps values — this component: the catalog's `gpu-operator` wrapper chart on `1.x` from `oci://gsoci.azurecr.io/charts/giantswarm` (it vendors NVIDIA's chart as a subchart of the same name, so the `gpu-operator:` block is forwarded under that key), `targetNamespace: kube-system` (the release history there too, so the GPU guide's hand-installed release `gpu-operator` in `kube-system` is the same Helm release and upgrades in place), `crds: CreateReplace` (the `ClusterPolicy` and `NVIDIADriver` CRDs upgrade with the operator), no `dependsOn`, `gitops.target.kubeConfig.secretRef` honoured like every component. **Off by default and independent of model serving**: it needs neither `components.modelServing` nor the kserve components, and they do not need it — a GPU workload that is not a model needs the operator just the same.
+- **`<cluster>-gpu-operator`, rendered by cluster-manager** with the first GPU pool where no operator runs (giantswarm/giantswarm#37637) and removed with the last pool only when cluster-manager created it. cluster-manager detects this component — a HelmRelease of the chart, a `ClusterPolicy` — and then adds nothing.
+
+**Configuration: a table of two rows** — the `gpu-operator:` block; anything else is unsupported (cluster-manager refuses it naming the labels it saw and the two rows):
+
+| Nodes | `gpu-operator.driver.enabled` | `gpu-operator.toolkit.enabled` |
+|---|---|---|
+| Flatcar — every Giant Swarm CAPA / CAPZ node (the default) | `false` | `false` |
+| A pre-installed driver — nodes whose `nvidia.com/gpu.deploy.driver` label is pre-set to anything but `true` (NVIDIA's `pre-installed` convention; e.g. Ubuntu hosts) | `false` | `true` |
+
+Flatcar carries the driver and the container toolkit, and the cluster chart's containerd registers the `nvidia` runtime, so both stay off — the GPU guide's prescription and the chart's defaults. On hosts with a pre-installed driver the operator writes its `deploy.*` labels only where a node has none and its driver DaemonSet selects `=true`, so the pre-set label keeps the driver off and `toolkit.enabled: true` installs the toolkit next to it.
+
+**Cilium.** gpu-operator-app renders `CiliumNetworkPolicy` objects for the operator, node-feature-discovery and the validator without a switch, so the component needs `cilium.io/v2` served — every Giant Swarm cluster's shape. A cluster without Cilium (a bare kind cluster) refuses the install with `no matches for kind "CiliumNetworkPolicy"`; the meta chart cannot switch those policies off.
+
+**The `nvidia` RuntimeClass.** In every configuration the operator creates it — its pre-requisites state runs before the driver and toolkit states and is gated only on the CDI NRI plugin — so the GPU guide's prerequisite for GPU pods exists wherever the operator runs, and this chart adds none. GPU pods use `runtimeClassName: nvidia`; where the platform's own release serves models, its values set `modelServing.serving.runtimeClassName: nvidia` (the serving slice's profile, [#326](https://github.com/giantswarm/agent-platform/issues/326), sets it).
+
+**One owner per cluster.** With the component on, the render refuses a cluster that already runs an operator that is not this release's — a `ClusterPolicy` whose owner (the Flux labels `helm.toolkit.fluxcd.io/name` + `/namespace`, else Helm's `meta.helm.sh/release-name` + `/release-namespace` annotations) is another release or none, a HelmRelease of the chart under another name or in another namespace (cluster-manager's `<cluster>-gpu-operator`), an App of it — naming what it saw and the handover: delete that release (cluster-manager's detection then sees this component and never re-creates it; a hand-installed operator likewise), then switch the toggle on — or leave it off. Adopting the running objects is not this chart's. The `ClusterPolicy` CRD is under `ownedCrds` as the backstop. Both are `lookup` guards: silent under `helm template`, skipped with the target knob (there the detection is cluster-manager's). On a cluster:
+
+```sh
+kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml     # the ClusterPolicy CRD stub first …
+kubectl wait --for=condition=Established crd/clusterpolicies.nvidia.com && \
+  kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml   # … then the ClusterPolicy owned by HelmRelease flux-giantswarm/demo-gpu-operator
+helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server \
+  -f helm/agent-platform/ci/ci-values.yaml --set components.flux.enabled=false --set components.gpu-operator.enabled=true
+# → "components.gpu-operator.enabled=true, but this cluster already runs a GPU operator … ClusterPolicy cluster-policy belongs to
+#    HelmRelease flux-giantswarm/demo-gpu-operator … Hand the operator over first: delete that release …"
+kubectl delete -f tests/fixtures/gpu-operator-foreign-owner.yaml
+make verify-gpu-operator   # the offline half: off by default, the two rows, kube-system, CreateReplace, the target knob, the guard silent offline, the BOM pin
 ```
 
 ### Tenant identity
@@ -518,7 +590,7 @@ An agent declares a **toolset** — the selectors that say which of the gateway'
 | Preset | Selects |
 |---|---|
 | `infrastructure` | The mcp-kubernetes, mcp-capi and mcp-prometheus families (label `infrastructure`, stamped by agent-platform-mcps ≥ 0.9.0). |
-| `agent-platform` | agent-manager, model-manager and muster's `core_*` tools — the meta agent's preset (label `agent-platform`, stamped by agent-manager ≥ 0.3.0 and model-manager ≥ 0.18.0). |
+| `agent-platform` | agent-manager, model-manager, cluster-manager and muster's `core_*` tools — the meta agent's preset (label `agent-platform`, stamped by agent-manager ≥ 0.3.0, model-manager ≥ 0.18.0 and cluster-manager ≥ 0.4.0). |
 
 muster builds `read-only`, `none` and `full` in. An installation adds its own (`test-clusters`, …) next to the shipped ones in its gitops values. The `label:` rule needs muster ≥ 5.12.0, which is the floor of `components.muster.versionRange`. Details, the installation examples and the verification recipe: [docs/toolset-presets.md](./docs/toolset-presets.md); `make verify-presets` renders the real muster chart's ConfigMap from the forwarded values.
 

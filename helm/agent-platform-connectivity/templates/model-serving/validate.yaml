@@ -30,11 +30,51 @@ objects the API server rejects or a preset the portal cannot use.
   {{- if and $ms.cache.enabled (not $ms.cache.pvc.existingClaim) (not $ms.cache.pvc.name) }}
     {{- fail "modelServing.cache.pvc.name is empty: name the cache claim, or set cache.pvc.existingClaim" }}
   {{- end }}
+  {{- /* The models Gateway (#326): an issuer to verify against, a resolvable
+         JWKS source, a certificate for its listener. The GatewayClass is not
+         checked — the controller is the platform's release's or this one's
+         (components.agentgateway), and nothing is detected. */ -}}
+  {{- if (include "agent-platform.modelServing.modelsGateway.enabled" .) }}
+    {{- $mg := $ms.modelsGateway }}
+    {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $mg.name) }}
+      {{- fail (printf "modelServing.modelsGateway.name (%q) must be a lowercase DNS-1123 label" $mg.name) }}
+    {{- end }}
+    {{- if not $mg.jwtAuthentication.audiences }}
+      {{- fail "modelServing.modelsGateway.jwtAuthentication.audiences is empty: the models Gateway accepts the installation's login client only (dex-k8s-authenticator); name it, or the tokens of every client the issuer mints would open every model" }}
+    {{- end }}
+    {{- $_ := include "agent-platform.modelServing.modelsGateway.issuer" . }}
+    {{- $_ := include "agent-platform.jwks.validate" (dict "ctx" . "path" "modelServing.modelsGateway.jwtAuthentication" "jwks" (include "agent-platform.modelServing.modelsGateway.jwks" . | fromJson)) }}
+    {{- if not (include "agent-platform.modelServing.modelsGateway.tlsSecretName" .) }}
+      {{- fail "modelServing.modelsGateway.tls names no certificate: set gatewayApi.gateway.tls.secretName (the platform's wildcard), modelServing.modelsGateway.tls.secretName, or tls.issuerRef.name for a cert-manager Certificate of the models host" }}
+    {{- end }}
+  {{- end }}
   {{- /* Every preset in effect must resolve: the helpers fail on a bad name,
          a missing required field or an unresolvable chat template. */ -}}
   {{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}
   {{- range $name, $entry := $presets }}
     {{- $_ := include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name" $name "entry" $entry) }}
+  {{- end }}
+  {{- /* The GPU node pool input (gpuPool, giantswarm/agent-platform#315): the
+         taint's effect is one of the three taint effects (empty tolerates every
+         effect of the key), the key a qualified name (empty: an untainted
+         pool), the pool selector a map of string label values. */ -}}
+  {{- $gp := $ms.gpuPool }}
+  {{- if not (kindIs "map" $gp.taint) }}
+    {{- fail "modelServing.gpuPool.taint must be a mapping with key, value and effect (key empty for an untainted pool)" }}
+  {{- end }}
+  {{- if not (has (toString $gp.taint.effect) (list "" "NoSchedule" "PreferNoSchedule" "NoExecute")) }}
+    {{- fail (printf "modelServing.gpuPool.taint.effect (%q) must be NoSchedule, PreferNoSchedule or NoExecute (empty tolerates every effect of the key)" (toString $gp.taint.effect)) }}
+  {{- end }}
+  {{- if and $gp.taint.key (not (regexMatch "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$" (toString $gp.taint.key))) }}
+    {{- fail (printf "modelServing.gpuPool.taint.key (%q) must be a taint key (a qualified name such as nvidia.com/gpu), or empty for an untainted pool" (toString $gp.taint.key)) }}
+  {{- end }}
+  {{- if not (kindIs "map" $gp.nodeSelector) }}
+    {{- fail "modelServing.gpuPool.nodeSelector must be a mapping of node labels, e.g. giantswarm.io/machine-pool: <cluster>-<pool>" }}
+  {{- end }}
+  {{- range $k, $v := $gp.nodeSelector }}
+    {{- if not (kindIs "string" $v) }}
+      {{- fail (printf "modelServing.gpuPool.nodeSelector[%s] (%v) must be a string: a label value is a string, quote it" $k $v) }}
+    {{- end }}
   {{- end }}
   {{- /* The network-policy inputs, checked only while the policies render
          (networkPolicy.enabled): a typo would otherwise ship a selector that

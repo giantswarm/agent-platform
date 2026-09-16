@@ -481,6 +481,20 @@ selected. With in-cluster hosts alone it renders no external rule and no proxy
 clause, in either flavour; `make verify-wiring` asserts that against
 `origin/main`, the controller policies first and then the whole render.
 
+## The GPU node pool
+
+A GPU node pool created through the platform (bumblebee-plans#46, the `gpu-node-pool` chart) arrives tainted `nvidia.com/gpu` `NoSchedule` — only accelerator work lands there — and labelled `giantswarm.io/machine-pool=<cluster>-<pool>`. `modelServing.gpuPool` is the serving layer's one input for both (giantswarm/agent-platform#315): `taint` (`key`, `value`, `effect`; the default is the pool chart's taint, tolerated with `operator: Exists` because the pool sets no value — a `value` narrows the toleration to `Equal`, an empty `key` is an untainted pool and renders nothing) and `nodeSelector` (the pool's label; per pool, so the slice release's values set it, empty by default).
+
+The chart applies the input to everything it renders onto the pool and to nothing else — platform components never carry it:
+
+| Site | Toleration | Node selector |
+|---|---|---|
+| The `ClusterServingRuntime` (`modelServing.runtime`; KServe copies both onto every predictor pod of the runtime) | the pool's first, `runtime.tolerations` after it (an equal entry once) | the pool's under `runtime.nodeSelector` (the runtime's keys win) |
+| Every published preset's `scheduling` block (`agent-platform-serving-preset-<name>`) | the pool's first, the preset's own after it (an equal entry once) | the pool's under the preset's own keys |
+| The discovery ConfigMap `agent-platform-model-serving`: `spec.gpuPool.taint.{key,value,effect}`, `spec.gpuPool.nodeSelector` | published for model-manager (`>= 0.23.0`, giantswarm/model-manager#86), which schedules the `LLMInferenceService`s it composes, its download Jobs and its inventory scan pods by it; a registered backend document may override it | likewise |
+
+Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute` (empty tolerates every effect of the key), the key is a qualified name, and every selector value is a string (a label value is a string: quote a number). `make verify-gpu-pool` asserts the three sites in the default, pool-selected, valued and untainted shapes, the guards, the meta chart's forwarding of the block, and that an empty taint key leaves the serving render byte-identical to `origin/main` but for the discovery block; `ci/test-model-serving-gpu-pool-values.yaml` is the pool-selected fixture.
+
 ## Voluntary disruption
 
 Two objects of this chart guard the platform's single-replica pods against Karpenter consolidation and node drains (giantswarm/agent-platform#431), a third the muster-valkey pod (#439) and a fourth the Substrate worker pool (#472); the other components' guards travel on their own charts' knobs through the meta chart. The four budgets share one spec helper (`agent-platform.podDisruptionBudget.spec`) and its guards.
@@ -511,14 +525,17 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | global.observability.traces.otlp.endpoint | string | `""` |  |
 | global.observability.traces.otlp.protocol | string | `""` |  |
 | global.observability.traces.otlp.headers | object | `{}` |  |
+| components.muster.enabled | bool | `true` |  |
+| components.dicebear.enabled | bool | `true` |  |
 | components.agentgateway.enabled | bool | `false` |  |
 | components.agent-platform-mcps.enabled | bool | `false` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.enabled | bool | `false` |  |
-| components.model-manager.enabled | bool | `false` |  |
+| components.model-manager.enabled | bool | `true` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.vm-manager.enabled | bool | `false` |  |
+| components.cluster-manager.enabled | bool | `false` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
 | components.cloudnative-pg.enabled | bool | `false` |  |
@@ -1038,7 +1055,6 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | agentSandbox.podSecurity.containerSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentSandbox.podSecurity.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | model-manager.fullnameOverride | string | `"model-manager"` |  |
-| model-manager.backend | string | `"ollama"` |  |
 | model-manager.ollama.endpoint | string | `""` |  |
 | model-manager.ollama.agentHost | string | `""` |  |
 | model-manager.lemonade.endpoint | string | `""` |  |
@@ -1137,11 +1153,30 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.1.5"` |  |
+| agentManager.migration.image.tag | string | `"1.1.7"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
+| cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
+| cluster-manager.installation.name | string | `""` |  |
+| cluster-manager.mcp.enabled | bool | `true` |  |
+| cluster-manager.oauth.enabled | bool | `true` |  |
+| cluster-manager.oauth.provider | string | `"dex"` |  |
+| cluster-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| cluster-manager.oauth.downstream.enabled | bool | `true` |  |
+| cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
+| cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
+| clusterManager.flux.requireApi | bool | `false` |  |
+| clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.cidrs | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.ports[0] | int | `443` |  |
+| clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
+| clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
+| clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |
@@ -1226,6 +1261,10 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | modelServing.serving.nodeSelector | object | `{}` |  |
 | modelServing.serving.deploymentStrategyType | string | `"Recreate"` |  |
 | modelServing.serving.timeoutSeconds | int | `1800` |  |
+| modelServing.gpuPool.taint.key | string | `"nvidia.com/gpu"` |  |
+| modelServing.gpuPool.taint.value | string | `""` |  |
+| modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
+| modelServing.gpuPool.nodeSelector | object | `{}` |  |
 | modelServing.presets | list | `[]` |  |
 | modelServing.shippedPresets.enabled | bool | `true` |  |
 | modelServing.shippedPresets.exclude | list | `[]` |  |
@@ -1253,3 +1292,20 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
 | modelServing.networkPolicy.huggingFace.cidrs | list | `[]` |  |
+| modelServing.modelsGateway.enabled | bool | `false` |  |
+| modelServing.modelsGateway.name | string | `"models"` |  |
+| modelServing.modelsGateway.hostPrefix | string | `"models"` |  |
+| modelServing.modelsGateway.gatewayClassName | string | `""` |  |
+| modelServing.modelsGateway.tls.secretName | string | `""` |  |
+| modelServing.modelsGateway.tls.issuerRef.name | string | `""` |  |
+| modelServing.modelsGateway.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
+| modelServing.modelsGateway.tls.issuerRef.group | string | `"cert-manager.io"` |  |
+| modelServing.modelsGateway.externalDns.enabled | bool | `true` |  |
+| modelServing.modelsGateway.jwtAuthentication.mode | string | `"Strict"` |  |
+| modelServing.modelsGateway.jwtAuthentication.issuer | string | `""` |  |
+| modelServing.modelsGateway.jwtAuthentication.audiences[0] | string | `"dex-k8s-authenticator"` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.host | string | `""` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.port | int | `443` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.path | string | `"/keys"` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |

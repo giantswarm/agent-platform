@@ -78,6 +78,8 @@ spec:
           protocol: TCP
         - port: 443
           protocol: TCP
+    {{- /* The data plane's upstream is muster (components.muster.enabled); a slice release without muster has no rule to it. */}}
+    {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
     - to:
         - podSelector:
             matchLabels:
@@ -85,6 +87,7 @@ spec:
       ports:
         - port: 8090
           protocol: TCP
+    {{- end }}
     # xDS to the agentgateway controller (its own release; match the
     # controller-only `agentgateway: agentgateway` label, not the release name).
     - to:
