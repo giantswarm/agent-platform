@@ -2215,7 +2215,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 			helm template t $(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-jwks-new-$$flavor.out; \
 			helm template t /tmp/vw-jwks-ref/$(CONNECTIVITY_DIR) $(JWKS_INCLUSTER) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-jwks-old-$$flavor.out; \
 			$(CTRL_POLICY) /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-pol-$$flavor.out; \
-			$(CTRL_POLICY) /tmp/vw-jwks-new-$$flavor.out | python3 tests/xds_peer.py >/tmp/vw-jwks-new-pol-$$flavor.out; \
+			$(CTRL_POLICY) /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-pol-$$flavor.out; \
 			diff -u /tmp/vw-jwks-old-pol-$$flavor.out /tmp/vw-jwks-new-pol-$$flavor.out || { echo "FAIL: the $$flavor CONTROLLER POLICY changed for an in-cluster JWKS host - a regression in this slice"; git worktree remove --force /tmp/vw-jwks-ref; exit 1; }; \
 			grep -vE '^ *image:' /tmp/vw-jwks-old-$$flavor.out >/tmp/vw-jwks-old-noimg-$$flavor.out; grep -vE '^ *image:' /tmp/vw-jwks-new-$$flavor.out >/tmp/vw-jwks-new-noimg-$$flavor.out; diff -u /tmp/vw-jwks-old-noimg-$$flavor.out /tmp/vw-jwks-new-noimg-$$flavor.out || { \
 				if git merge-base --is-ancestor $(GOLDEN_REF) HEAD; then echo "note: the $$flavor render differs from $(GOLDEN_REF) outside the controller policy and the image references — this branch's own change ($(GOLDEN_REF) is an ancestor of HEAD; the policies above match)"; \
