@@ -307,6 +307,45 @@
                         }
                     }
                 },
+                "gpu-operator": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "crds": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "valuesKey": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "kagent": {
                     "type": "object",
                     "additionalProperties": true,
@@ -1245,6 +1284,10 @@
                     "type": "string"
                 }
             }
+        },
+        "gpu-operator": {
+            "type": "object",
+            "additionalProperties": true
         },
         "hooks": {
             "type": "object",

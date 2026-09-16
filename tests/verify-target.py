@@ -148,6 +148,38 @@ def check_knob(meta: str) -> None:
     ok("the target and slice fixtures each render alone")
 
 
+ROSTER = re.compile(r"(?<=\n    components:\n)((?:      [a-z0-9-]+:\n        enabled: (?:true|false)\n)+)")
+
+
+def drop_new_roster_entries(here: str, there: str) -> tuple:
+    """The two meta renders with the roster entries only one side has removed.
+
+    The component loop forwards EVERY roster entry's `enabled` to the connectivity
+    release (templates/components.yaml, the roster), so a component new to the
+    working tree is a roster line the golden ref cannot have — the one difference
+    a new component is allowed. Only the roster block of the connectivity
+    HelmRelease is touched, and only by the entries in the symmetric difference;
+    everything else stays byte for byte.
+    """
+    def entries(render: str) -> set:
+        m = ROSTER.search(render)
+        return set(re.findall(r"^      ([a-z0-9-]+):$", m.group(1), re.M)) if m else set()
+
+    new = entries(here) ^ entries(there)
+    if not new:
+        return here, there
+    def strip(render: str) -> str:
+        m = ROSTER.search(render)
+        if not m:
+            return render
+        block = m.group(1)
+        for name in new:
+            block = re.sub(rf"^      {re.escape(name)}:\n        enabled: (?:true|false)\n", "", block, flags=re.M)
+        return render[:m.start(1)] + block + render[m.end(1):]
+    print(f"note: roster entries only one side has, dropped from the golden comparison: {', '.join(sorted(new))}")
+    return strip(here), strip(there)
+
+
 def check_golden(meta: str, connectivity: str) -> None:
     ref = os.environ.get("GOLDEN_REF", "origin/main")
     if not ref:
@@ -169,6 +201,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         for label, chart, flags in shapes:
             here = helm(chart, flags)
             there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
+            if chart == meta:
+                here, there = drop_new_roster_entries(here, there)
             if here != there:
                 sys.exit(f"FAIL: the {label} render drifted from {ref}")
         ok(f"{len(shapes)} renders byte-identical to {ref}")

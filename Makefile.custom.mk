@@ -702,6 +702,12 @@ verify-target: ## Assert one release of this chart per target cluster (giantswar
 	@GOLDEN_REF="$(GOLDEN_REF)" python3 tests/verify-target.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "target cluster shapes verified."
 
+.PHONY: verify-gpu-operator
+verify-gpu-operator: ## Assert the GPU operator component (giantswarm/agent-platform#327): components.gpu-operator off by default (no release, the roster says so, the gpu-operator values block held back from connectivity); on, ONE OCIRepository (the catalog's gpu-operator wrapper chart, 1.x) + ONE HelmRelease into kube-system (release history there too, crds CreateReplace on install and upgrade, no dependsOn, no global) with the values nested under the wrapper's subchart key — the Flatcar row, driver and toolkit off — and nothing else of the render moved but the roster entry; the pre-installed-driver row (gpu-operator.toolkit.enabled=true) reaches the release with the driver off; the target knob stamps kubeConfig.secretRef on it; the one-owner guard is silent offline with the nvidia.com, Flux and App APIs served; the schema refuses a non-boolean toggle; the BOM pins the exact version and the pin reaches the OCIRepository. The lookup guard itself needs a cluster: tests/fixtures/gpu-operator-foreign-owner.yaml (README "The GPU operator"). HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-gpu-operator.py $(CHART_DIR)
+	@echo "GPU operator component verified."
+
 .PHONY: verify-self
 verify-self: ## Assert self-management's shapes: engine off renders nothing of it; engine on renders the self OCIRepository + suspended HelmRelease, the -6/-5/0 hooks, the identity and the admission policy (CLI day-0 only); engine on with self off (lab, hand-back) renders the -6/-5 hooks at pre-upgrade too and nothing else; the guards and knobs. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"

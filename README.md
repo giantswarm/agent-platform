@@ -65,6 +65,7 @@ The defaults carry no filter: a release selects releases. agentlab follows a bra
 | LLMInferenceService controller | `components.kserve-llmisvc-resources.enabled` | `false` |
 | the bundled Flux engine (`flux-engine` subchart) | `components.flux.enabled` | `true` |
 | Model serving (KServe/vLLM runtime, presets, cache) — a feature switch, no chart | `components.modelServing.enabled` | `false` |
+| NVIDIA's GPU operator (gpu-operator-app; once per cluster, independent of model serving) | `components.gpu-operator.enabled` | `false` |
 
 A component with no `enabled` key is always installed (`muster`, `dicebear`, `agent-platform-connectivity`). `components.flux` and `components.modelServing` are feature switches, not components: an entry without a `chart` renders no release, and its flag travels in the roster forwarded to connectivity like every other entry — `components.flux` is the condition of the `flux-engine` subchart (Chart.yaml `dependencies`), `components.modelServing` gates the model serving objects the connectivity chart renders, and its values block `modelServing:` travels to the connectivity release only while the switch is on (see [Turning on the standalone's extras](#turning-on-the-standalones-extras)). The `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:`, `model-manager:`, `agent-manager:`, `backstage:`, `mcp-kubernetes:`, `cloudnative-pg:` and `kserve-*:` blocks hold that component's values and no longer hold an `enabled` key; `make verify-meta` fails if the two ever diverge again. The last seven are the components the standalone umbrella carried on top of this roster — see [Backstage, mcp-kubernetes, CloudNativePG and KServe](#backstage-mcp-kubernetes-cloudnativepg-and-kserve).
 
@@ -407,6 +408,40 @@ What the [agent-platform-standalone](https://github.com/giantswarm/agent-platfor
 ```bash
 helm template t helm/agent-platform-connectivity -f helm/agent-platform-connectivity/ci/test-standalone-extras-values.yaml   # every toggle on, the vanilla shape
 make verify-wiring   # off = no object; on = the objects; the guards; the meta chart forwards the blocks and omits the wiring keys
+```
+
+### The GPU operator
+
+NVIDIA's GPU operator — the device plugin, GPU feature discovery (the `nvidia.com/gpu.*` labels model-manager identifies accelerator nodes by), DCGM — runs **once per cluster** (it owns one `ClusterPolicy` and one set of DaemonSets) and reaches a cluster as a HelmRelease of Giant Swarm's [gpu-operator-app](https://github.com/giantswarm/gpu-operator-app) into `kube-system`, in one of two ways ([#327](https://github.com/giantswarm/agent-platform/issues/327); bumblebee-plans#46, the plan's D3; epic giantswarm/giantswarm#37639):
+
+- **`components.gpu-operator.enabled: true`** in the installation's GitOps values — this component: the catalog's `gpu-operator` wrapper chart on `1.x` from `oci://gsoci.azurecr.io/charts/giantswarm` (it vendors NVIDIA's chart as a subchart of the same name, so the `gpu-operator:` block is forwarded under that key), `targetNamespace: kube-system` (the release history there too, so the GPU guide's hand-installed release `gpu-operator` in `kube-system` is the same Helm release and upgrades in place), `crds: CreateReplace` (the `ClusterPolicy` and `NVIDIADriver` CRDs upgrade with the operator), no `dependsOn`, `gitops.target.kubeConfig.secretRef` honoured like every component. **Off by default and independent of model serving**: it needs neither `components.modelServing` nor the kserve components, and they do not need it — a GPU workload that is not a model needs the operator just the same.
+- **`<cluster>-gpu-operator`, rendered by cluster-manager** with the first GPU pool where no operator runs (giantswarm/giantswarm#37637) and removed with the last pool only when cluster-manager created it. cluster-manager detects this component — a HelmRelease of the chart, a `ClusterPolicy` — and then adds nothing.
+
+**Configuration: a table of two rows** — the `gpu-operator:` block; anything else is unsupported (cluster-manager refuses it naming the labels it saw and the two rows):
+
+| Nodes | `gpu-operator.driver.enabled` | `gpu-operator.toolkit.enabled` |
+|---|---|---|
+| Flatcar — every Giant Swarm CAPA / CAPZ node (the default) | `false` | `false` |
+| A pre-installed driver — nodes whose `nvidia.com/gpu.deploy.driver` label is pre-set to anything but `true` (NVIDIA's `pre-installed` convention; e.g. Ubuntu hosts) | `false` | `true` |
+
+Flatcar carries the driver and the container toolkit, and the cluster chart's containerd registers the `nvidia` runtime, so both stay off — the GPU guide's prescription and the chart's defaults. On hosts with a pre-installed driver the operator writes its `deploy.*` labels only where a node has none and its driver DaemonSet selects `=true`, so the pre-set label keeps the driver off and `toolkit.enabled: true` installs the toolkit next to it.
+
+**Cilium.** gpu-operator-app renders `CiliumNetworkPolicy` objects for the operator, node-feature-discovery and the validator without a switch, so the component needs `cilium.io/v2` served — every Giant Swarm cluster's shape. A cluster without Cilium (a bare kind cluster) refuses the install with `no matches for kind "CiliumNetworkPolicy"`; the meta chart cannot switch those policies off.
+
+**The `nvidia` RuntimeClass.** In every configuration the operator creates it — its pre-requisites state runs before the driver and toolkit states and is gated only on the CDI NRI plugin — so the GPU guide's prerequisite for GPU pods exists wherever the operator runs, and this chart adds none. GPU pods use `runtimeClassName: nvidia`; where the platform's own release serves models, its values set `modelServing.serving.runtimeClassName: nvidia` (the serving slice's profile, [#326](https://github.com/giantswarm/agent-platform/issues/326), sets it).
+
+**One owner per cluster.** With the component on, the render refuses a cluster that already runs an operator that is not this release's — a `ClusterPolicy` whose owner (the Flux labels `helm.toolkit.fluxcd.io/name` + `/namespace`, else Helm's `meta.helm.sh/release-name` + `/release-namespace` annotations) is another release or none, a HelmRelease of the chart under another name or in another namespace (cluster-manager's `<cluster>-gpu-operator`), an App of it — naming what it saw and the handover: delete that release (cluster-manager's detection then sees this component and never re-creates it; a hand-installed operator likewise), then switch the toggle on — or leave it off. Adopting the running objects is not this chart's. The `ClusterPolicy` CRD is under `ownedCrds` as the backstop. Both are `lookup` guards: silent under `helm template`, skipped with the target knob (there the detection is cluster-manager's). On a cluster:
+
+```sh
+kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml     # the ClusterPolicy CRD stub first …
+kubectl wait --for=condition=Established crd/clusterpolicies.nvidia.com && \
+  kubectl apply -f tests/fixtures/gpu-operator-foreign-owner.yaml   # … then the ClusterPolicy owned by HelmRelease flux-giantswarm/demo-gpu-operator
+helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server \
+  -f helm/agent-platform/ci/ci-values.yaml --set components.flux.enabled=false --set components.gpu-operator.enabled=true
+# → "components.gpu-operator.enabled=true, but this cluster already runs a GPU operator … ClusterPolicy cluster-policy belongs to
+#    HelmRelease flux-giantswarm/demo-gpu-operator … Hand the operator over first: delete that release …"
+kubectl delete -f tests/fixtures/gpu-operator-foreign-owner.yaml
+make verify-gpu-operator   # the offline half: off by default, the two rows, kube-system, CreateReplace, the target knob, the guard silent offline, the BOM pin
 ```
 
 ### Tenant identity

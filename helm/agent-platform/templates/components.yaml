@@ -45,8 +45,9 @@ knowledge:
       top-level block (and every per-cluster override path and the connectivity
       chart's reads of it) stays flat — only the copy handed to this release is
       wrapped. global is injected at the wrapped top level so the subchart still
-      inherits it. No component uses it today: muster, agentgateway, kagent and
-      the GS-owned connectivity/crds charts all take their values at top level.
+      inherits it. gpu-operator uses it (Giant Swarm's wrapper of NVIDIA's
+      chart); muster, agentgateway, kagent and the GS-owned connectivity/crds
+      charts take their values at top level.
   omitKeys      — keys dropped from the forwarded block, top-level or dotted
       paths (agent-platform.omitPath; a parent emptied by the drop goes too).
       For a component whose block holds a key that belongs to THIS umbrella
@@ -215,6 +216,8 @@ and this guard refuses anything else that gets past it. */ -}}
 runs Flux, and a gitops.namespace the tenant identity cannot reach. */ -}}
 {{- include "agent-platform.validateEngine" . -}}
 {{- include "agent-platform.validateTarget" . -}}
+{{- /* The GPU operator's own guard first: it names the handover; the CRD guard below is the backstop. */ -}}
+{{- include "agent-platform.validateGpuOperatorOwner" . -}}
 {{- include "agent-platform.validateCrdOwners" . -}}
 {{- /* The target cluster's kubeconfig Secret, stamped on every HelmRelease below when set. */ -}}
 {{- $target := include "agent-platform.targetSecretName" . -}}

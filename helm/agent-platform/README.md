@@ -55,6 +55,8 @@ the platform's own release on the installation's cluster, or installs onto a wor
   render produces, the render fails naming that release: remove it first, or turn the component off in this release.
   Skipped with the target knob, where the render's lookups see the installation while the components land on the target
   (what the target already runs is the composer's to detect). A CRD without the labels is left to Helm as before.
+  `components.gpu-operator` adds its own guard on the same principle — a `ClusterPolicy`, HelmRelease or App of the
+  operator that is not this release's fails the render naming the handover (root README, "The GPU operator").
 
 `make verify-target` asserts the offline half (`tests/verify-target.py`): the knob's stamp and byte-identity, the
 toggles on both charts, the engine guard, the hooks, the serving- and runtime-shaped toggle sets alone, combined and
@@ -416,6 +418,16 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-llmisvc-resources.dependsOn[1] | string | `"kserve-llmisvc-crd"` |  |
 | components.kserve-llmisvc-resources.dependsOn[2] | string | `"kserve-resources"` |  |
 | components.modelServing.enabled | bool | `false` |  |
+| components.gpu-operator.chart | string | `"gpu-operator"` |  |
+| components.gpu-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.gpu-operator.versionRange | string | `"1.x"` |  |
+| components.gpu-operator.valuesFrom | string | `"gpu-operator"` |  |
+| components.gpu-operator.valuesKey | string | `"gpu-operator"` |  |
+| components.gpu-operator.injectGlobal | bool | `false` |  |
+| components.gpu-operator.enabled | bool | `false` |  |
+| components.gpu-operator.targetNamespace | string | `"kube-system"` |  |
+| components.gpu-operator.crds | string | `"CreateReplace"` |  |
+| components.gpu-operator.ownedCrds[0] | string | `"clusterpolicies.nvidia.com"` |  |
 | components.dicebear.chart | string | `"dicebear"` |  |
 | components.dicebear.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.dicebear.versionRange | string | `"0.x"` |  |
@@ -430,6 +442,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.disableWaitForJobs | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
 | components.agent-platform-connectivity.omitKeys[1] | string | `"scheduling"` |  |
+| components.agent-platform-connectivity.omitKeys[2] | string | `"gpu-operator"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1176,6 +1189,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kserve-resources.kserve.controller.gateway.disableIngressCreation | bool | `true` |  |
 | kserve-llmisvc-resources.kserve.createSharedResources | bool | `false` |  |
 | kserve-llmisvc-resources.kserve.llmisvc.createGIECRDs | bool | `true` |  |
+| gpu-operator.driver.enabled | bool | `false` |  |
+| gpu-operator.toolkit.enabled | bool | `false` |  |
 | modelServing.kserve.requireApi | bool | `true` |  |
 | modelServing.namespace.name | string | `"model-serving"` |  |
 | modelServing.namespace.create | bool | `true` |  |

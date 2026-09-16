@@ -68,6 +68,9 @@ components:
   kserve-resources:              { versionRange: "0.2.2" }
   kserve-llmisvc-crd:            { versionRange: "0.2.2" }
   kserve-llmisvc-resources:      { versionRange: "0.2.2" }
+  # The GPU operator (components.gpu-operator, off by default): the catalog's
+  # gpu-operator wrapper chart, 1.3.0 = operator 26.3.1.
+  gpu-operator:                  { versionRange: "1.3.0" }
 
 # The s3proxy façade in front of Azure Blob (kagent.harness.snapshotStore.s3proxy,
 # the CAPZ snapshot store): an image, not a chart — pinned here like the

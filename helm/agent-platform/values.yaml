@@ -944,6 +944,52 @@ components:  # @schema additionalProperties: true
   # KServe the cluster already runs (see modelServing.kserve.requireApi).
   modelServing:  # @schema additionalProperties: true
     enabled: false
+  # NVIDIA's GPU operator, once per cluster (giantswarm/agent-platform#327;
+  # bumblebee-plans#46, the plan's D3): the device plugin, GPU feature discovery
+  # (the nvidia.com/gpu.* labels model-manager identifies accelerator nodes
+  # by), DCGM. Giant Swarm's gpu-operator-app publishes it to the catalog as the
+  # wrapper chart `gpu-operator`, which vendors NVIDIA's chart as a subchart of
+  # the same name — hence valuesKey. Off by default and INDEPENDENT of
+  # components.modelServing and the kserve components: a GPU workload that is
+  # not a model needs the operator just the same. An installation has two ways
+  # to run it: this component in its GitOps values, or cluster-manager's
+  # <cluster>-gpu-operator, rendered with the first GPU pool where no operator
+  # runs (giantswarm/giantswarm#37637) — cluster-manager detects this component
+  # and adds nothing. The operator's configuration is the gpu-operator: block
+  # below (two rows: Flatcar — driver and toolkit off, the default; nodes with a
+  # pre-installed driver — toolkit on). In every configuration the operator
+  # creates the `nvidia` RuntimeClass GPU pods use (its pre-requisites state
+  # runs before the driver and toolkit states and is gated only on the CDI NRI
+  # plugin), so nothing here adds one.
+  gpu-operator:  # @schema additionalProperties: true
+    chart: gpu-operator
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # 1.x is the wrapper chart's line (1.3.0 ships operator 26.3.1): the
+    # wrapper moves the operator, the platform follows the line.
+    versionRange: "1.x"
+    valuesFrom: gpu-operator
+    # The wrapper takes every value under its subchart's key.
+    valuesKey: gpu-operator
+    # The operator consumes nothing of the platform's global (the wrapper pins
+    # its own image registry); keep it out of the release.
+    injectGlobal: false
+    enabled: false
+    # The GPU guide installs the operator into kube-system, by hand as release
+    # `gpu-operator`; this release keeps that name and namespace (releaseName is
+    # the chart's, storageNamespace follows targetNamespace), so a release
+    # installed that way is upgraded in place instead of installed beside it.
+    targetNamespace: kube-system
+    # The ClusterPolicy and NVIDIADriver CRDs come from the subchart's crds/
+    # directory and upgrade with the operator.
+    crds: CreateReplace
+    # One operator per cluster: a ClusterPolicy CRD another HelmRelease owns
+    # fails the render (agent-platform.validateCrdOwners), and so does a
+    # ClusterPolicy, HelmRelease or App of the operator that is not this
+    # release's (agent-platform.validateGpuOperatorOwner) — the message names
+    # the release to remove first. No dependsOn: nothing of this chart is a CR
+    # of the operator.
+    ownedCrds:
+      - clusterpolicies.nvidia.com
   dicebear:  # @schema additionalProperties: true
     chart: dicebear
     # Self-hosted DiceBear avatar API + the public avatar HTTPRoute. Lives in its
@@ -1003,6 +1049,10 @@ components:  # @schema additionalProperties: true
       # scheduling knobs before their releases render, agent-platform.scheduling.apply);
       # the connectivity chart never sees it.
       - scheduling
+      # The GPU operator's values (components.gpu-operator, nested under the
+      # wrapper's subchart key for its release); no wiring reads them, so the
+      # connectivity chart never sees the block.
+      - gpu-operator
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -4045,6 +4095,35 @@ kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties:
       # with the controller. A cluster that already has them (an inference
       # gateway installed them) sets this false: Helm cannot adopt them.
       createGIECRDs: true
+
+# === The GPU operator (components.gpu-operator) ===
+# Forwarded to the gpu-operator release under its subchart key (the wrapper
+# chart of giantswarm/gpu-operator-app vendors NVIDIA's chart as the subchart
+# `gpu-operator`; see that chart's values.yaml for the full surface). Off by
+# default and independent of model serving. The operator's configuration is a
+# table of two rows, and nothing else is supported:
+#
+#   | Nodes                                                        | driver.enabled | toolkit.enabled |
+#   |--------------------------------------------------------------|----------------|-----------------|
+#   | Flatcar (every Giant Swarm CAPA / CAPZ node; the default)    | false          | false           |
+#   | a pre-installed driver: nvidia.com/gpu.deploy.driver pre-set | false          | true            |
+#   |   to anything but `true` on the nodes (e.g. Ubuntu hosts)    |                |                 |
+#
+# Flatcar carries both the driver and the container toolkit, and the cluster
+# chart's containerd already registers the `nvidia` runtime, so both stay off —
+# the GPU guide's prescription and the defaults here. On hosts whose nodes
+# carry the driver label pre-set (NVIDIA's `pre-installed` convention: the
+# operator writes its deploy.* labels only where a node has none, and its
+# driver DaemonSet selects `=true`), the installation sets toolkit.enabled:
+# true and the operator installs the toolkit next to the host's driver. In
+# every configuration the operator creates the `nvidia` RuntimeClass; GPU pods
+# use runtimeClassName: nvidia, and where the platform's own release serves
+# models, modelServing.serving.runtimeClassName is set to nvidia in its values.
+gpu-operator:  # @schema skipProperties: true; additionalProperties: true
+  driver:
+    enabled: false
+  toolkit:
+    enabled: false
 
 # === Model serving (modelServing) ===
 # Model serving on KServe with vLLM, for installs that run local models —
