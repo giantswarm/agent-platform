@@ -151,6 +151,25 @@ def check_knob(meta: str) -> None:
 ROSTER = re.compile(r"(?<=\n    components:\n)((?:      [a-z0-9-]+:\n        enabled: (?:true|false)\n)+)")
 
 
+# The controller's second xDS peer (giantswarm/agent-platform#495): every data
+# plane of the platform's GatewayClass in any namespace, rendered unconditionally
+# by both policy flavours — the one difference to a golden ref that predates it.
+# Drop this once GOLDEN_REF carries the peer.
+XDS_CLASS_PEER = re.compile(
+    r"\n {8}# Every other data plane this controller provisions.*?gateway\.networking\.k8s\.io/gateway-class-name: [a-z0-9-]+\n"
+    r"(?: {10}matchExpressions:\n {12}- key: k8s:io\.kubernetes\.pod\.namespace\n {14}operator: Exists\n)?",
+    re.S,
+)
+
+
+def drop_new_xds_peer(here: str) -> str:
+    """The connectivity render without the controller's class-wide xDS peer (#495)."""
+    stripped, n = XDS_CLASS_PEER.subn("\n", here)
+    if n:
+        print(f"note: the controller's GatewayClass xDS peer ({n} block(s)) dropped from the golden comparison (#495)")
+    return stripped
+
+
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -223,6 +242,8 @@ def check_golden(meta: str, connectivity: str) -> None:
             there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
+            else:
+                here = drop_new_xds_peer(here)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
