@@ -47,6 +47,8 @@ import subprocess
 import sys
 import tempfile
 
+import xds_peer  # noqa: E402 — tests/ is sys.path[0] when run as a script
+
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = [
     "--api-versions", "kyverno.io/v1",
@@ -151,20 +153,9 @@ def check_knob(meta: str) -> None:
 ROSTER = re.compile(r"(?<=\n    components:\n)((?:      [a-z0-9-]+:\n        enabled: (?:true|false)\n)+)")
 
 
-# The controller's second xDS peer (giantswarm/agent-platform#495): every data
-# plane of the platform's GatewayClass in any namespace, rendered unconditionally
-# by both policy flavours — the one difference to a golden ref that predates it.
-# Drop this once GOLDEN_REF carries the peer.
-XDS_CLASS_PEER = re.compile(
-    r"\n {8}# Every other data plane this controller provisions.*?gateway\.networking\.k8s\.io/gateway-class-name: [a-z0-9-]+\n"
-    r"(?: {10}matchExpressions:\n {12}- key: k8s:io\.kubernetes\.pod\.namespace\n {14}operator: Exists\n)?",
-    re.S,
-)
-
-
 def drop_new_xds_peer(here: str) -> str:
-    """The connectivity render without the controller's class-wide xDS peer (#495)."""
-    stripped, n = XDS_CLASS_PEER.subn("\n", here)
+    """The connectivity render without the controller's class-wide xDS peer (#495; tests/xds_peer.py)."""
+    stripped, n = xds_peer.drop(here)
     if n:
         print(f"note: the controller's GatewayClass xDS peer ({n} block(s)) dropped from the golden comparison (#495)")
     return stripped
