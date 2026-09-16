@@ -136,10 +136,10 @@ def main(meta: str, connectivity: str) -> int:
         "    modelManager:\n      namespace: default\n",
         "    oauth:\n      dex:\n        allowPrivateURLs: true\n      downstream:\n        enabled: true\n      enabled: true\n      provider: dex\n",
         "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
-        "    networkPolicy:\n      enabled: false\n",
         "\n    global:\n",
     ), "the HelmRelease")
-    for absent in ("kubeConfig", "crds:", "postRenderers", "targetNamespace: kube-system"):
+    # No networkPolicy key: cluster-manager 0.4.0's schema is closed and has none (the umbrella renders the policies).
+    for absent in ("kubeConfig", "crds:", "postRenderers", "targetNamespace: kube-system", "\n    networkPolicy:"):
         if absent in hr:
             fail(f"the HelmRelease carries {absent.strip()!r}")
     conn_on = on_docs[("HelmRelease", "agent-platform-connectivity")]

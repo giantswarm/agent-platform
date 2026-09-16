@@ -2446,9 +2446,9 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
 # the caller's RBAC governs and the ServiceAccount holds no permissions (the
 # chart renders no RBAC). The issuer, client, secret and CA fall back to
 # global.identity and the OAuth base URL to global.domain inside the chart; an
-# installation that sets no global.* names them here. The chart's own
-# NetworkPolicy stays off; the connectivity chart renders the policies
-# (clusterManager below).
+# installation that sets no global.* names them here. The chart renders no
+# network policy of its own (its schema is closed: no networkPolicy key); the
+# connectivity chart renders the policies (clusterManager below).
 #
 # installation.name is the Cluster list_clusters reports as this installation's
 # own (its management cluster); empty marks none. modelManager.namespace — the
@@ -2480,8 +2480,6 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
         forwardToken: true
         requiredAudiences:
           - dex-k8s-authenticator
-  networkPolicy:
-    enabled: false
 
 # The wiring the connectivity chart renders for the cluster-manager component
 # (it reads this block, not the chart's). Inert while
