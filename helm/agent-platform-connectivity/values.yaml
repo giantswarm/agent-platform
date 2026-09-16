@@ -1052,10 +1052,28 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # The Substrate WorkerPool the platform Harness runs on. The kagent chart
   # creates it in the kagent namespace (name, replicas, pod template — the
-  # meta chart forwards them); this chart reads only .name for the Harness's
-  # namespace-local workerPoolRef.
+  # meta chart forwards them); this chart reads .name for the Harness's
+  # namespace-local workerPoolRef and for the worker budget below.
   substrateWorkerPool:
     name: kagent-default
+    # PodDisruptionBudget on the pool's worker pods, rendered by this chart in
+    # the kagent namespace, named after the pool and selecting
+    # `ate.dev/worker-pool: <name>` — the label Substrate's ate-controller puts
+    # on every worker pod (giantswarm/agent-platform#472, the #439 pattern; the
+    # kagent chart has no budget template). One worker hosts one actor at a
+    # time: with maxUnavailable: 1 a voluntary drain (Karpenter consolidation,
+    # a node roll) moves one worker at a time instead of the whole pool;
+    # AlwaysAllow keeps a worker that is not Ready evictable. Exactly one of
+    # minAvailable / maxUnavailable (int or percentage); the render refuses
+    # both, neither, and a policy outside the API's enum. `enabled: false`
+    # removes the budget. Inert while components.kagent.enabled is false. A
+    # spot reclaim is not a voluntary eviction — the pool template's
+    # capacity-type selector is the knob for that (the meta chart's values).
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: null
+      maxUnavailable: 1
+      unhealthyPodEvictionPolicy: AlwaysAllow
 
   # Keep kagent core resources in a dedicated namespace separate from the
   # umbrella release namespace. NOTE: the bundled agent subcharts each need

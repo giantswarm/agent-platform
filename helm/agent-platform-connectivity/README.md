@@ -483,13 +483,14 @@ clause, in either flavour; `make verify-wiring` asserts that against
 
 ## Voluntary disruption
 
-Two objects of this chart guard the platform's single-replica pods against Karpenter consolidation and node drains (giantswarm/agent-platform#431); the other components' guards travel on their own charts' knobs through the meta chart.
+Two objects of this chart guard the platform's single-replica pods against Karpenter consolidation and node drains (giantswarm/agent-platform#431), a third the muster-valkey pod (#439) and a fourth the Substrate worker pool (#472); the other components' guards travel on their own charts' knobs through the meta chart. The four budgets share one spec helper (`agent-platform.podDisruptionBudget.spec`) and its guards.
 
 - `gateway.parameters.podAnnotations` (default `karpenter.sh/do-not-disrupt: "true"`) is merged onto the agentgateway data-plane pod template through `AgentgatewayParameters` `deployment.spec.template.metadata` (strategic merge). Every MCP call, every A2A stream and — with `llmRouting` on — every model stream crosses those pods. Set the value to `"false"` or the map to `{}` to opt out.
 - `agentManager.podDisruptionBudget` (default `enabled: true`, `minAvailable: 1`, `unhealthyPodEvictionPolicy: AlwaysAllow`) renders a `PodDisruptionBudget agent-manager` in the release namespace, selecting the agent-manager pods by name the way the component's network policies do — the agent-manager chart has no knob of its own. Exactly one of `minAvailable` / `maxUnavailable` (int or percentage); the render refuses both, neither, and a policy outside the API's enum. Inert while `components.agent-manager.enabled` is false.
 - `valkey.podDisruptionBudget` (same defaults and guards; giantswarm/agent-platform#439) renders a `PodDisruptionBudget muster-valkey` — named after `valkey.valkey.fullnameOverride`, which the render requires — selecting the pod the way the valkey subchart labels it (`app.kubernetes.io/name: valkey` and the component's release name, `valkey`). muster's OAuth token store is that one pod on an RWO volume; neither the wrapper nor the upstream subchart has a budget knob. Inert while `components.valkey.enabled` is false; the meta chart never forwards the key to the valkey release.
+- `kagent.substrateWorkerPool.podDisruptionBudget` (default `enabled: true`, `maxUnavailable: 1`, `unhealthyPodEvictionPolicy: AlwaysAllow`; giantswarm/agent-platform#472) renders a `PodDisruptionBudget` named after the pool (`kagent.substrateWorkerPool.name`, which the render requires) in the **kagent namespace**, selecting the worker pods by the label Substrate's ate-controller puts on them, `ate.dev/worker-pool: <name>` — the same label the `substrate-workers` network policy selects. The kagent chart renders the `WorkerPool` and has no budget template. Four workers host one actor each, so `maxUnavailable: 1` lets a voluntary drain move one worker at a time instead of the pool. Inert while `components.kagent.enabled` is false; the meta chart never forwards the key to the kagent release.
 
-With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpenter reports `DisruptionBlocked`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`) — and `AlwaysAllow` keeps a pod that is not Ready evictable. `make verify-disruption` asserts the render, the knobs off and the guards. A spot reclaim is not a voluntary eviction: the placement of the stateful singletons on on-demand capacity is the meta chart's `scheduling.singletons`, which reaches the component releases as their charts' `nodeSelector` / `tolerations` and is never forwarded here.
+With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpenter reports `DisruptionBlocked`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`) — and `AlwaysAllow` keeps a pod that is not Ready evictable. `make verify-disruption` asserts the render, the knobs off and the guards; `make verify-workerpool` the worker budget. A spot reclaim is not a voluntary eviction: the placement of the stateful singletons on on-demand capacity is the meta chart's `scheduling.singletons`, which reaches the component releases as their charts' `nodeSelector` / `tolerations` and is never forwarded here.
 
 ## Values
 
@@ -773,6 +774,10 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget.enabled | bool | `true` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget.minAvailable | string | `nil` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget.maxUnavailable | int | `1` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |
 | kagent.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | kagent.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |

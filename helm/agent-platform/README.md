@@ -75,10 +75,69 @@ or `tolerations`.
   values under it (giantswarm/agent-platform#429, #457). `make
   verify-workerpool` asserts the pin reaches the WorkerPool as written.
 
-`kagent.substrateWorkerPool.template` also accepts `tolerations`, `nodeAffinity`
-and `priorityClassName` (the `WorkerPool.spec.template` fields). See UPGRADE.md,
-"the Generic chart's per-agent placement values are gone, capacity is the
-WorkerPool".
+`kagent.substrateWorkerPool.template` also accepts `labels`, `annotations`,
+`tolerations`, `nodeAffinity` and `priorityClassName` — the
+`WorkerPool.spec.template` fields of the pinned Substrate line, and nothing else:
+the CRD is a structural schema, so a key it does not know is **pruned at
+admission, silently**, and the render refuses it instead
+(`agent-platform.validateWorkerPool`). See UPGRADE.md, "the Generic chart's
+per-agent placement values are gone, capacity is the WorkerPool".
+
+### The one pool is the failure domain (giantswarm/agent-platform#472)
+
+Every agent runs on this one pool, and a worker that goes loses the turn in flight
+on it and every session paused on it (a pause checkpoint is node-local,
+giantswarm/giantswarm#37795). On a Karpenter installation all four workers may
+bin-pack onto one spot node (gazelle, 2026-09-15). The knobs, in the order they
+help:
+
+- **`kagent.substrateWorkerPool.podDisruptionBudget`** (`enabled: true`,
+  `maxUnavailable: 1`, `unhealthyPodEvictionPolicy: AlwaysAllow` — **on by
+  default**): a `PodDisruptionBudget` named after the pool in the kagent
+  namespace, rendered by the connectivity chart (the kagent chart has no budget
+  template), selecting `ate.dev/worker-pool: <name>`, the label Substrate's
+  ate-controller puts on every worker pod. A voluntary drain — Karpenter
+  consolidation, a node roll, `kubectl drain` — moves one worker at a time
+  (`ALLOWED DISRUPTIONS 1` with four Ready workers) instead of the whole pool.
+  Exactly one of `minAvailable` / `maxUnavailable`; the render refuses both,
+  neither, and a policy outside the API's enum. `enabled: false` removes it. The
+  knob never reaches the kagent release (`components.kagent.omitKeys`).
+- **`kagent.substrateWorkerPool.template.annotations`**
+  `karpenter.sh/do-not-disrupt: "true"` (**off**; an installation's choice):
+  Karpenter's consolidation, drift and expiry never drain a worker node. Caveat:
+  a drift or expiry roll then waits on that node until the NodePool's
+  `terminationGracePeriod` — the fleet's NodePools set `30m`, a NodePool without
+  one never rolls the node while a worker is on it; Substrate's own upgrade
+  runbook wants worker nodes rolled deliberately anyway. Karpenter-only, harmless
+  elsewhere (an annotation nothing reads).
+- **`kagent.substrateWorkerPool.template.nodeSelector`**
+  `karpenter.sh/capacity-type: on-demand` (**off**; the fleet template renders it
+  from an installation's `agentPlatform.workerPoolCapacityType`): the only knob
+  that covers a **spot interruption** — an involuntary disruption the budget and
+  the annotation cannot stop: the instance goes two minutes after the notice —
+  at on-demand prices for the worker nodes. Karpenter-only: **never on CAPZ,
+  on-prem or a CAPA pool that cluster-aws node pools provision** — no node
+  carries the label there and the workers stay `Pending`.
+
+**Every change to `template`** — a label, an annotation, a selector, the
+resources — rolls the pool's Deployment once (`RollingUpdate` 25 %/25 %, one
+worker at a time under the budget; about a minute per worker on a node that is
+up, about three when Karpenter has to launch one). A turn in flight on a replaced
+worker is lost, a session paused on it too; the goldens are untouched (a template
+change re-snapshots nothing). Land it in a quiet window.
+
+**Spread.** `WorkerPool.spec.template` carries no `topologySpreadConstraints` or
+`podAntiAffinity` in any published release of the Substrate line yet — the CRD
+prunes both silently. The render **refuses the two keys** naming the key and the
+range until `components.substrate.versionRange`'s floor is the release that
+carries them (the carried patch giantswarm/giantswarm#37797;
+`agent-platform.substrate.workerPoolSpreadFloor` names it once it is out), and
+forwards them verbatim from then on. Recommended once available: hostname
+`maxSkew: 1`, `minDomains: 2`, `whenUnsatisfiable: DoNotSchedule` (Karpenter
+provisions the second node) and zone `maxSkew: 1`, `ScheduleAnyway`, both with a
+`labelSelector` on `ate.dev/worker-pool: <name>`. `make verify-workerpool`
+asserts all of it: the budget, the two knobs reaching the kagent release and the
+`WorkerPool` verbatim, the refused keys, still exactly one `WorkerPool`.
 
 ## Voluntary disruption
 
@@ -90,6 +149,8 @@ The platform's core runs as single replicas — the agentgateway data plane, mus
 Two replicas are the long-term answer for the stateless components; the budgets on one replica are the interim guard. Backstage's budget is the backstage chart's (`maxUnavailable: 1` today, which protects nothing with one replica) — a change there, not here.
 
 muster-valkey — muster's OAuth token store, one replica on an RWO volume — carries the same two guards (giantswarm/agent-platform#439): `karpenter.sh/do-not-disrupt` through the valkey subchart's `valkey.valkey.podAnnotations`, and a `PodDisruptionBudget muster-valkey` (`valkey.podDisruptionBudget`, `minAvailable: 1`, `AlwaysAllow`) rendered by the connectivity chart, since neither the wrapper nor the upstream subchart has a budget knob. The budget key never reaches the valkey release (`components.valkey.omitKeys`).
+
+The Substrate worker pool — four workers, one actor each, every agent's runtime — carries a budget of a different shape (giantswarm/agent-platform#472): `kagent.substrateWorkerPool.podDisruptionBudget`, `maxUnavailable: 1`, rendered by the connectivity chart in the kagent namespace on the pods labelled `ate.dev/worker-pool: <pool>`, so a voluntary drain moves one worker at a time and the pool keeps three. No `karpenter.sh/do-not-disrupt` by default — it stays a documented knob of the pool template, with the on-demand capacity-type selector, in "The one pool is the failure domain" above.
 
 ## Placement of the stateful singletons
 
@@ -185,6 +246,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
 | components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
 | components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[8] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
@@ -562,6 +624,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.substrateWorkerPool.replicas | int | `4` |  |
 | kagent.substrateWorkerPool.workerImage | string | `""` |  |
 | kagent.substrateWorkerPool.sandboxClass | string | `"gvisor"` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget.enabled | bool | `true` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget.minAvailable | string | `nil` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget.maxUnavailable | int | `1` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.cpu | string | `"250m"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.memory | string | `"512Mi"` |  |

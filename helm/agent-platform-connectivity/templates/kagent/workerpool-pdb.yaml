@@ -1,0 +1,38 @@
+{{- /* PodDisruptionBudget on the worker pods of the Substrate WorkerPool the
+platform Harness runs on (giantswarm/agent-platform#472, the #439 pattern). The
+kagent chart renders the WorkerPool (kagent.substrateWorkerPool) in the kagent
+namespace and has no budget template; Substrate's ate-controller turns the pool
+into a Deployment of the same name whose pods it labels
+`ate.dev/worker-pool: <pool>` (workerpool_apply.go) — the label the worker
+network policy selects on too. One worker hosts one actor at a time, so a
+voluntary eviction of a worker (Karpenter consolidation, a node drain) loses the
+turn in flight on it and every session paused on it. With maxUnavailable: 1
+every voluntary drain moves one worker at a time and the pool keeps
+replicas - 1 workers; AlwaysAllow keeps a worker that is not Ready evictable, so
+a crash-looping worker never wedges a drain. An involuntary disruption (a spot
+reclaim, a node failure) is not covered: the pool's nodeSelector
+(karpenter.sh/capacity-type: on-demand) is the knob for that, and the
+`karpenter.sh/do-not-disrupt` annotation the one that keeps consolidation away
+from a worker node altogether — both documented on kagent.substrateWorkerPool
+.template, neither set by default. Inert while components.kagent is off; the
+meta chart never forwards the knob to the kagent release
+(components.kagent.omitKeys). */ -}}
+{{- $pool := .Values.kagent.substrateWorkerPool }}
+{{- $pdb := $pool.podDisruptionBudget }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) $pdb.enabled }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ required "kagent.substrateWorkerPool.name must be set — the platform Harness's workerPoolRef and this budget's selector name this exact pool" $pool.name | quote }}
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: substrate-worker-pool
+spec:
+  {{- include "agent-platform.podDisruptionBudget.spec" (dict "path" "kagent.substrateWorkerPool.podDisruptionBudget" "pdb" $pdb) | nindent 2 }}
+  selector:
+    matchLabels:
+      ate.dev/worker-pool: {{ $pool.name | quote }}
+{{- end }}
