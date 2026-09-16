@@ -735,11 +735,12 @@ components:  # @schema additionalProperties: true
     # model-manager stays on its 0.x line through the kagent API v2 change: it
     # renders its ModelConfigs at the kagent.dev version the cluster serves,
     # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74). The floor is
-    # 0.22.0 (giantswarm/model-manager#68): zero-backend start-up, the runtime
-    # backend registry and the RBAC to read its documents — a release before
-    # it refuses to start without a backend. The ceiling stays the next major,
-    # so minor releases roll on their own.
-    versionRange: ">=0.22.0 <1.0.0"
+    # 0.23.0 (giantswarm/model-manager#86): the release that reads the GPU node
+    # pool input the discovery ConfigMap publishes (spec.gpuPool, from
+    # modelServing.gpuPool; giantswarm/agent-platform#315) — and, from 0.22.0
+    # (#68), zero-backend start-up and the runtime backend registry. The
+    # ceiling stays the next major, so minor releases roll on their own.
+    versionRange: ">=0.23.0 <1.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -4454,6 +4455,36 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # reasoning turns stream for minutes; the KServe default of 60s cuts
     # them mid-response.
     timeoutSeconds: 1800
+  # The GPU node pool the served models run on (giantswarm/agent-platform#315;
+  # bumblebee-plans#46, the plan's D3). A pool created through the platform
+  # (the gpu-node-pool chart) arrives tainted nvidia.com/gpu NoSchedule — only
+  # accelerator work lands there — and labelled
+  # giantswarm.io/machine-pool=<cluster>-<pool>. The chart puts the taint as a
+  # toleration and the label as a nodeSelector on everything it renders onto
+  # the pool and on nothing else: the ClusterServingRuntime (KServe copies
+  # both onto every predictor pod of the runtime; runtime.tolerations come
+  # after it, runtime.nodeSelector keys win) and every published preset's
+  # scheduling block (the pool's entries first, the preset's own after; the
+  # preset's selector keys win), and publishes both in the discovery ConfigMap
+  # as spec.gpuPool.taint and spec.gpuPool.nodeSelector for model-manager
+  # (>= 0.23.0), which schedules the LLMInferenceServices it composes, its
+  # download Jobs and its inventory scan pods by the same input (a registered
+  # backend document may override it). Platform components never carry it.
+  gpuPool:
+    # The pool's taint. The default is the gpu-node-pool chart's — key
+    # nvidia.com/gpu, effect NoSchedule, no value — tolerated with operator
+    # Exists, so a pool whose taint carries a value is covered too; a value
+    # narrows the toleration to operator Equal. An empty key is an untainted
+    # pool: no toleration anywhere, no taint in the discovery ConfigMap.
+    taint:
+      key: nvidia.com/gpu
+      value: ""
+      effect: NoSchedule
+    # The pool's label(s), e.g. giantswarm.io/machine-pool: <cluster>-<pool>.
+    # Per pool, so the slice release's values set it (cluster-manager writes
+    # it with the pool); empty selects no pool. Label values are strings:
+    # quote a number.
+    nodeSelector: {}
   # Serving presets an install adds (ServingPreset documents, see
   # files/model-serving/serving-preset.schema.json and the README). A
   # preset with the name of a shipped one replaces it. Example:

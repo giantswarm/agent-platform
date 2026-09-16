@@ -745,6 +745,12 @@ verify-insecure: ## Assert components.<name>.insecure renders OCIRepository.spec
 	@if ! grep -q 'url: oci://registry.registry.svc.cluster.local:5000/charts/muster' /tmp/ap-insecure-on.out; then echo "FAIL: components.muster.repository did not steer the OCIRepository url"; exit 1; fi
 	@echo "components.<name>.insecure verified."
 
+.PHONY: verify-gpu-pool
+verify-gpu-pool: ## Assert the GPU node pool input of the model serving layer (giantswarm/agent-platform#315): modelServing.gpuPool.taint tolerated by the ClusterServingRuntime and every published preset (the pool's entry first, a preset's equal entry once; Exists without a value, Equal with one), modelServing.gpuPool.nodeSelector merged under the runtime's and the presets' own (their keys win), both published as spec.gpuPool in the discovery ConfigMap model-manager >= 0.23.0 reads; an empty taint key renders no toleration and no taint and leaves the serving render byte-identical to GOLDEN_REF but for the discovery block; the guards (effect, key, string label values); the meta chart forwards the block. Fixture: ci/test-model-serving-gpu-pool-values.yaml. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@GOLDEN_REF=$(GOLDEN_REF) python3 tests/verify-gpu-pool.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "GPU node pool input verified."
+
 .PHONY: verify-labels
 verify-labels: ## Assert every label value stays valid at the versions the charts are installed under: helm-controller's +digest and a branch build's long prerelease, with the 63-character cut landing on each separator. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
