@@ -3049,10 +3049,6 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # storage-initializer's uid cannot write), the storage-initializer's and
   # the runtime's /mnt/models redirected into that subdirectory, and a
   # storage-initializer memory limit that survives multi-GB downloads; the
-  # Deployment gets a progressDeadlineSeconds long enough for a first
-  # download. Nothing to do on the node by hand.
-  policies:
-    enabled: auto  # auto | true | false
   # The predictors' Kyverno PolicyException (#498), rendered with the Kyverno
   # objects on: the four restricted-PSS rules the upstream vLLM image and its
   # cache init container violate (drop ALL, privilege escalation, non-root,
@@ -3062,6 +3058,10 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # serving namespace is exempted another way.
   policyException:
     enabled: true
+  # Deployment gets a progressDeadlineSeconds long enough for a first
+  # download. Nothing to do on the node by hand.
+  policies:
+    enabled: auto  # auto | true | false
     # The init container that prepares the cache subdirectory (runs as
     # root: the PVC root is root-owned).
     cacheInit:
