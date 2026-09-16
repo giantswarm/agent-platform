@@ -106,9 +106,10 @@ LINE = {
     # pipeline with its guest image artifact (gsoci, the catalog). muster
     # alone: the MCPServer CR.
     "vm-manager": (GSOCI, ">=0.20.2 <1.0.0", ["muster"]),
-    # 0.4.0 is the first cluster-manager release with the muster registration and
-    # the identity contract the meta chart forwards. muster alone: the MCPServer CR.
-    "cluster-manager": (GSOCI, ">=0.4.0 <1.0.0", ["muster"]),
+    # 0.4.2 is the first cluster-manager release with the muster registration and
+    # the identity contract the meta chart forwards that also tolerates a cluster
+    # without the Cluster API group. muster alone: the MCPServer CR.
+    "cluster-manager": (GSOCI, ">=0.4.2 <1.0.0", ["muster"]),
     # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
     # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
     # REST client and belongs to the 3.x meta chart. The floor is 1.10.0, the

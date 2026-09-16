@@ -807,11 +807,14 @@ components:  # @schema additionalProperties: true
     # them through muster as the signed-in user. Off by default until the KaaS
     # components are on the cluster (giantswarm/giantswarm#37636).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # 0.4.0 is the first release with the muster registration, the OAuth resource
-    # server and the identity contract (global.identity, global.domain) this
-    # chart forwards; the ceiling stays the next major, so minor releases roll on
-    # their own.
-    versionRange: ">=0.4.0 <1.0.0"
+    # 0.4.2 is the first release that carries the muster registration, the OAuth
+    # resource server and the identity contract (global.identity, global.domain)
+    # this chart forwards AND tolerates a cluster without the Cluster API group
+    # (list_clusters answers an empty list with a note, a dry run on a cluster
+    # that does not exist is refused naming it, get_info reports clusterApi and
+    # the real version); the ceiling stays the next major, so minor releases
+    # roll on their own.
+    versionRange: ">=0.4.2 <1.0.0"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);

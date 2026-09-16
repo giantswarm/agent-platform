@@ -57,9 +57,10 @@ components:
   model-manager:                 { versionRange: "0.22.0" }
   agent-manager:                 { versionRange: "1.0.0" }
   vm-manager:                    { versionRange: "0.20.2" }
-  # The cluster write surface (components.cluster-manager, off by default): 0.4.0
-  # is the first release with the muster registration and the identity contract.
-  cluster-manager:               { versionRange: "0.4.0" }
+  # The cluster write surface (components.cluster-manager, off by default): 0.4.2
+  # is the first release with the muster registration and the identity contract
+  # that also tolerates a cluster without the Cluster API group.
+  cluster-manager:               { versionRange: "0.4.2" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the three kserve charts and the two

@@ -12,7 +12,7 @@ one property of that:
   `cluster-manager: enabled: false`, the two blocks (`cluster-manager:`, `clusterManager:`)
   are held back from the connectivity release (gatedValues), and the connectivity chart
   renders nothing named cluster-manager;
-- on: ONE OCIRepository (the catalog's cluster-manager chart on >=0.4.0 <1.0.0) and ONE
+- on: ONE OCIRepository (the catalog's cluster-manager chart on >=0.4.2 <1.0.0) and ONE
   HelmRelease that dependsOn muster, with the block forwarded — the pinned Service name,
   oauth on with downstream, the muster registration with forwardToken and the audience
   the kube-apiserver trusts, global injected, modelManager.namespace derived from the
@@ -44,7 +44,7 @@ HELM = os.environ.get("HELM", "helm")
 NAME = "cluster-manager"
 WIRING = "clusterManager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
-RANGE = ">=0.4.0 <1.0.0"
+RANGE = ">=0.4.2 <1.0.0"
 CI = ["--set", "components.flux.enabled=false"]
 ON = ["--set", f"components.{NAME}.enabled=true"]
 IDENTITY = [
@@ -138,7 +138,7 @@ def main(meta: str, connectivity: str) -> int:
         "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
         "\n    global:\n",
     ), "the HelmRelease")
-    # No networkPolicy key: cluster-manager 0.4.0's schema is closed and has none (the umbrella renders the policies).
+    # No networkPolicy key: cluster-manager 0.4.x's schema is closed and has none (the umbrella renders the policies).
     for absent in ("kubeConfig", "crds:", "postRenderers", "targetNamespace: kube-system", "\n    networkPolicy:"):
         if absent in hr:
             fail(f"the HelmRelease carries {absent.strip()!r}")
