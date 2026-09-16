@@ -174,8 +174,18 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
     if not gw:
         sys.exit("FAIL: no Gateway models in the connectivity render")
     for needle in ("  gatewayClassName: agentgateway", "      protocol: HTTPS", '      hostname: "models.wc01.example.com"', "            name: wildcard-tls", "          from: All",
-                   "      external-dns.alpha.kubernetes.io/hostname: models.wc01.example.com"):
+                   "      external-dns.alpha.kubernetes.io/hostname: models.wc01.example.com", "      giantswarm.io/external-dns: managed",
+                   "      kind: AgentgatewayParameters\n      name: models"):
         need(gw, needle, "the models Gateway")
+    params = docs.get(("AgentgatewayParameters", "models"))
+    if not params:
+        sys.exit("FAIL: no AgentgatewayParameters models: the controller's default Deployment carries no seccomp profile and is denied by restrict-seccomp-strict")
+    for needle in ("      replicas: 1", "      type: LoadBalancer", "    repository: giantswarm/agentgateway"):
+        need(params, needle, "the models data plane parameters")
+    if params.count("            seccompProfile:\n              type: RuntimeDefault") + params.count("                seccompProfile:\n                  type: RuntimeDefault") != 2:
+        sys.exit(f"FAIL: the models data plane lacks RuntimeDefault seccomp on pod and container:\n{params}")
+    for needle in ("            runAsNonRoot: true", "                allowPrivilegeEscalation: false", "                  drop:\n                  - ALL", "                readOnlyRootFilesystem: true"):
+        need(params, needle, "the models data plane security context")
     pol = docs.get(("AgentgatewayPolicy", "models-jwt"))
     if not pol:
         sys.exit("FAIL: no AgentgatewayPolicy models-jwt")
@@ -194,7 +204,7 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
     cm = docs[("ConfigMap", "agent-platform-model-serving")]
     for needle in ("      gateway:\n        enabled: true", "        endpoint: https://models.wc01.example.com", "        pathConvention: /<namespace>/<model>/v1"):
         need(cm, needle, "the discovery ConfigMap")
-    ok("connectivity: the models Gateway on models.<domain> with the wildcard, one Strict policy (audience, Override, issuer), the JWKS backend at the issuer on 443/TLS, the discovery entry")
+    ok("connectivity: the models Gateway on models.<domain> with the wildcard, its data plane's parameters (the platform's security contexts, one replica, LoadBalancer), the external-dns hostname and filter, one Strict policy (audience, Override, issuer), the JWKS backend at the issuer on 443/TLS, the discovery entry")
 
     cert = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.tls.issuerRef.name=platform-ca"]))
     c = cert.get(("Certificate", "models-tls"))
@@ -204,7 +214,7 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
     ok("tls.issuerRef.name renders a Certificate for the host into models-tls and the listener names it")
 
     off = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.enabled=false"]))
-    if any(name.startswith("models") for kind, name in off if kind in ("Gateway", "AgentgatewayPolicy", "AgentgatewayBackend", "Certificate")):
+    if any(name.startswith("models") for kind, name in off if kind in ("Gateway", "AgentgatewayParameters", "AgentgatewayPolicy", "AgentgatewayBackend", "Certificate")):
         sys.exit("FAIL: models Gateway objects rendered with modelsGateway.enabled=false")
     need(off[("ConfigMap", "agent-platform-model-serving")], "      gateway:\n        enabled: false", "the discovery ConfigMap with the Gateway off")
     ok("modelsGateway.enabled: false renders none of it")

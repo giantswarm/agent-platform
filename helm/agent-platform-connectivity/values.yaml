@@ -3166,10 +3166,18 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
         name: ""
         kind: ClusterIssuer
         group: cert-manager.io
+    # Replicas of the models data plane (its own agentgateway Deployment,
+    # shaped like the platform's edge: gateway.parameters.podSecurityContext,
+    # containerSecurityContext, dataPlaneResources, agentgateway.proxy.image).
+    replicas: 1
     # external-dns: the hostname annotation on the Gateway's infrastructure,
-    # which the data plane's LoadBalancer Service inherits.
+    # which the data plane's LoadBalancer Service inherits, plus the
+    # annotations the installation's external-dns selects Services by —
+    # Giant Swarm's runs with --annotation-filter=giantswarm.io/external-dns=managed.
     externalDns:
       enabled: true
+      annotations:
+        giantswarm.io/external-dns: managed
     jwtAuthentication:
       # Strict: a request without a valid token is answered 401 at the edge.
       mode: Strict
