@@ -47,7 +47,6 @@ import subprocess
 import sys
 import tempfile
 
-import xds_peer  # noqa: E402 — tests/ is sys.path[0] when run as a script
 
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = [
@@ -153,14 +152,6 @@ def check_knob(meta: str) -> None:
 ROSTER = re.compile(r"(?<=\n    components:\n)((?:      [a-z0-9-]+:\n        enabled: (?:true|false)\n)+)")
 
 
-def drop_new_xds_peer(here: str) -> str:
-    """The connectivity render without the controller's class-wide xDS peer (#495; tests/xds_peer.py)."""
-    stripped, n = xds_peer.drop(here)
-    if n:
-        print(f"note: the controller's GatewayClass xDS peer ({n} block(s)) dropped from the golden comparison (#495)")
-    return stripped
-
-
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -221,20 +212,23 @@ def check_golden(meta: str, connectivity: str) -> None:
         # release; empty it renders no rule, so the golden side gets the same
         # empty list as a value. Drop this once GOLDEN_REF carries the key.
         mm_registered = ["--set-json", "modelManager.networkPolicy.registeredBackends=[]"]
+        # The predictors' PolicyException (giantswarm/agent-platform#498) is a
+        # new default of the serving slice; its knob is under the open
+        # modelServing block, which the golden chart accepts, so both sides
+        # render without it. Drop this once GOLDEN_REF carries the exception.
+        ms_polex_off = ["--set", "modelServing.policyException.enabled=false"]
         shapes = [
             ("meta default", meta, [*mm_off, *mm_static, *mm_registered]),
             ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered]),
-            ("connectivity default", connectivity, [*VM, *mm_off]),
-            ("connectivity full", connectivity, [*CONN_FULL, *mm_off]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off]),
+            ("connectivity default", connectivity, [*VM, *mm_off, *ms_polex_off]),
+            ("connectivity full", connectivity, [*CONN_FULL, *mm_off, *ms_polex_off]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off, *ms_polex_off]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
             there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
-            else:
-                here = drop_new_xds_peer(here)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

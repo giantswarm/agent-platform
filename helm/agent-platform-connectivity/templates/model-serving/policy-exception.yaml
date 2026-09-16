@@ -1,0 +1,50 @@
+{{- /*
+Kyverno PolicyException for the serving predictors (giantswarm/agent-platform#498).
+Giant Swarm clusters enforce the restricted Pod Security Standard through
+Kyverno on every namespace; the predictor pods the llmisvc controller creates
+from an LLMInferenceService — the upstream vLLM image runs as root, so does
+the storage-initializer / cache init container that creates the per-model cache
+directory — declare none of the four fields the restricted profile checks:
+no drop ALL, no allowPrivilegeEscalation: false, no runAsNonRoot, no
+seccompProfile. Without this exception admission denies the Deployment and no
+model is ever served. Named: exactly those four rules (kyvernoPolicies.rules),
+each with its autogen copy for the controller kinds.
+Matched in the serving namespace: the Pods and ReplicaSets by the
+serving.kserve.io/inferenceservice label every predictor pod carries, and the
+Deployment — evaluated at its own admission against its own labels — by the
+name the controller gives it (<inferenceservice>-kserve[-<role>]).
+*/ -}}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled }}
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: model-serving-predictors
+  namespace: {{ .Values.kyvernoPolicies.policyExceptionNamespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  exceptions:
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "require-drop-all" "privilege-escalation" "run-as-non-root" "check-seccomp-strict")) | nindent 2 }}
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - ReplicaSet
+        - Deployment
+        namespaces:
+        - {{ include "agent-platform.modelServing.namespace" . }}
+        selector:
+          matchExpressions:
+          - key: serving.kserve.io/inferenceservice
+            operator: Exists
+    - resources:
+        kinds:
+        - Deployment
+        - ReplicaSet
+        - Pod
+        namespaces:
+        - {{ include "agent-platform.modelServing.namespace" . }}
+        names:
+        - "*-kserve*"
+{{- end }}
