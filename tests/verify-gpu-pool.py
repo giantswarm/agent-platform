@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""Assert the GPU node pool input of the model serving layer (modelServing.gpuPool, giantswarm/agent-platform#315).
+
+A GPU node pool created through the platform (bumblebee-plans#46, the plan's D3)
+arrives tainted nvidia.com/gpu NoSchedule and labelled
+giantswarm.io/machine-pool=<cluster>-<pool>. modelServing.gpuPool is the serving
+layer's one input for both, applied to everything the connectivity chart renders
+onto the pool and published for model-manager. Each case below pins one property:
+
+- default (taint nvidia.com/gpu NoSchedule, no value; no selector): the
+  ClusterServingRuntime and every published preset carry the one toleration
+  (operator Exists) and no node selector; the discovery ConfigMap publishes
+  spec.gpuPool.taint.{key,value,effect} and spec.gpuPool.nodeSelector: {};
+- the pool selected (ci/test-model-serving-gpu-pool-values.yaml): the label on
+  the runtime, on every preset and in the discovery ConfigMap; a preset's own
+  scheduling block keeps its keys, its equal toleration appears once, the pool's
+  first;
+- a taint value: operator Equal with the value, in the runtime and the
+  discovery ConfigMap;
+- an empty taint key (an untainted pool): no toleration anywhere, no taint in
+  the discovery ConfigMap, and the serving render byte-identical to GOLDEN_REF
+  (origin/main; GOLDEN_REF= opts out) but for the discovery block itself;
+- the guards: the effect, the key, string label values (a number must be
+  quoted; --set-string passes);
+- the meta chart forwards the block to the connectivity release.
+
+Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
+"""
+
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+HELM = os.environ.get("HELM", "helm")
+META, CONN = sys.argv[1], sys.argv[2]
+FIXTURE = f"{CONN}/ci/test-model-serving-gpu-pool-values.yaml"
+# The serving shape of the connectivity chart: the switch and the KServe
+# components on (the prerequisite guard), one Gateway parent.
+SERVING = [
+    "--namespace", "agent-platform",
+    "--set", "global.gatewayApi.parentRefs[0].name=giantswarm-default",
+    "--set", "global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system",
+    "--set", "components.kserve-crd.enabled=true",
+    "--set", "components.kserve-resources.enabled=true",
+    "--set", "components.modelServing.enabled=true",
+]
+UNTAINTED = ["--set", "modelServing.gpuPool.taint.key="]
+POOL_TOL = {"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}
+LABEL = {"giantswarm.io/machine-pool": "ci-gpu00"}
+RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
+DISCOVERY = ("ConfigMap", "agent-platform-model-serving")
+PRESET = re.compile(r"^agent-platform-serving-preset-(.+)$")
+SHIPPED = 7
+# The discovery block this change adds, cut out for the byte-identity check.
+GPU_POOL_BLOCK = re.compile(
+    r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
+)
+
+
+def fail(msg: str) -> None:
+    sys.exit(f"FAIL: {msg}")
+
+
+def ok(msg: str) -> None:
+    print(f"ok: {msg}")
+
+
+def helm(chart: str, flags: list, expect_fail: bool = False) -> str:
+    r = subprocess.run([HELM, "template", "t", chart, *flags], capture_output=True, text=True)
+    if expect_fail:
+        if r.returncode == 0:
+            fail(f"the render passed but had to fail: {' '.join(flags)}")
+        return r.stderr
+    if r.returncode != 0:
+        fail(f"the render failed: {' '.join(flags)}\n{r.stderr}")
+    return r.stdout
+
+
+def documents(render: str) -> dict:
+    """(kind, metadata.name) -> the document, each ending in exactly one newline."""
+    out = {}
+    for doc in render.split("\n---\n"):
+        kind = re.search(r"^kind: (\S+)", doc, re.M)
+        name = re.search(r"^  name: (\S+)", doc, re.M)
+        if kind and name:
+            out[(kind.group(1), name.group(1))] = doc.rstrip("\n") + "\n"
+    return out
+
+
+def block(text: str, key: str) -> list | None:
+    """The lines nested under the first `key:` line, dedented to it; [] for an
+    inline `{}` / `[]`; None when the key is absent (comments never match)."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if not re.match(rf"^\s*{re.escape(key)}:\s*(\{{\}}|\[\])?\s*$", line):
+            continue
+        if line.rstrip().endswith(("{}", "[]")):
+            return []
+        indent = len(line) - len(line.lstrip())
+        out = []
+        for nxt in lines[i + 1:]:
+            deeper = len(nxt) - len(nxt.lstrip()) > indent
+            # toYaml puts a list's dashes at the parent key's indent.
+            sibling_item = len(nxt) - len(nxt.lstrip()) == indent and nxt.lstrip().startswith("- ")
+            if nxt.strip() == "" or not (deeper or sibling_item):
+                break
+            out.append(nxt[indent:])
+        return out
+    return None
+
+
+def pairs(line: str) -> tuple:
+    k, _, v = line.strip().lstrip("- ").partition(":")
+    return k.strip(), v.strip().strip('"')
+
+
+def items(lines: list | None) -> list:
+    """A YAML list of flat mappings -> list of dicts (quotes stripped)."""
+    res: list = []
+    for line in lines or []:
+        if line.strip().startswith("- "):
+            res.append({})
+        k, v = pairs(line)
+        res[-1][k] = v
+    return res
+
+
+def mapping(lines: list | None) -> dict:
+    return dict(pairs(line) for line in lines or [])
+
+
+def scheduling(doc: str) -> tuple:
+    """(tolerations, nodeSelector) of a document's first tolerations:/nodeSelector: keys."""
+    return items(block(doc, "tolerations")), mapping(block(doc, "nodeSelector"))
+
+
+def presets(docs: dict) -> dict:
+    return {PRESET.match(name).group(1): doc for (kind, name), doc in docs.items() if kind == "ConfigMap" and PRESET.match(name)}
+
+
+def gpu_pool(docs: dict) -> str:
+    lines = block(docs[DISCOVERY], "gpuPool")
+    if lines is None:
+        fail("the discovery ConfigMap publishes no spec.gpuPool")
+    return "\n".join(lines) + "\n"
+
+
+def expect(what: str, got, want) -> None:
+    if got != want:
+        fail(f"{what}: got {got!r}, expected {want!r}")
+
+
+# --- default: the taint tolerated everywhere, no selector, published ---------
+docs = documents(helm(CONN, SERVING))
+tol, sel = scheduling(docs[RUNTIME])
+expect("runtime tolerations", tol, [POOL_TOL])
+expect("runtime nodeSelector", sel, {})
+shipped = presets(docs)
+expect("shipped presets", len(shipped), SHIPPED)
+for name, doc in shipped.items():
+    sched = block(doc, "scheduling")
+    if sched is None:
+        fail(f"preset {name} publishes no scheduling block")
+    expect(f"preset {name} tolerations", items(block("\n".join(sched), "tolerations")), [POOL_TOL])
+    expect(f"preset {name} nodeSelector", block("\n".join(sched), "nodeSelector"), None)
+gp = gpu_pool(docs)
+expect("discovery spec.gpuPool.taint", mapping(block(gp, "taint")), {"key": "nvidia.com/gpu", "value": "", "effect": "NoSchedule"})
+expect("discovery spec.gpuPool.nodeSelector", block(gp, "nodeSelector"), [])
+ok("default: the pool taint tolerated (Exists) by the runtime and all 7 presets, no selector, published as spec.gpuPool")
+
+# --- the pool selected: the label on the three sites, a preset's own kept ----
+docs = documents(helm(CONN, [*SERVING, "-f", FIXTURE]))
+tol, sel = scheduling(docs[RUNTIME])
+expect("runtime tolerations (pool selected)", tol, [POOL_TOL])
+expect("runtime nodeSelector (pool selected)", sel, LABEL)
+all_presets = presets(docs)
+expect("presets with the fixture's own", len(all_presets), SHIPPED + 1)
+for name, doc in all_presets.items():
+    sched = "\n".join(block(doc, "scheduling") or [])
+    tol, sel = items(block(sched, "tolerations")), mapping(block(sched, "nodeSelector"))
+    if name == "pinned-model":
+        expect("pinned-model tolerations (the pool's first, its equal entry once, its own after)", tol,
+               [POOL_TOL, {"effect": "NoSchedule", "key": "example.com/dedicated", "operator": "Equal", "value": "serving"}])
+        expect("pinned-model nodeSelector (its keys and the pool's)", sel, {**LABEL, "nvidia.com/gpu.product": "NVIDIA-L4"})
+    else:
+        expect(f"preset {name} tolerations (pool selected)", tol, [POOL_TOL])
+        expect(f"preset {name} nodeSelector (pool selected)", sel, LABEL)
+gp = gpu_pool(docs)
+expect("discovery spec.gpuPool.nodeSelector (pool selected)", mapping(block(gp, "nodeSelector")), LABEL)
+ok("pool selected: the label on the runtime, every preset and the discovery ConfigMap; a preset's own scheduling kept, the pool's toleration once")
+
+# --- a taint value: operator Equal -------------------------------------------
+docs = documents(helm(CONN, [*SERVING, "--set", "modelServing.gpuPool.taint.value=present"]))
+tol, _ = scheduling(docs[RUNTIME])
+expect("runtime tolerations (value)", tol, [{**POOL_TOL, "operator": "Equal", "value": "present"}])
+expect("discovery taint (value)", mapping(block(gpu_pool(docs), "taint")), {"key": "nvidia.com/gpu", "value": "present", "effect": "NoSchedule"})
+ok("a taint value narrows the toleration to Equal and is published")
+
+# --- untainted: nothing rendered, byte-identical to GOLDEN_REF but for the block
+untainted = helm(CONN, [*SERVING, *UNTAINTED])
+docs = documents(untainted)
+if block(docs[RUNTIME], "tolerations") is not None:
+    fail("an empty taint key still renders runtime tolerations")
+for name, doc in presets(docs).items():
+    if block(doc, "scheduling") is not None:
+        fail(f"an empty taint key still renders a scheduling block on preset {name}")
+gp = gpu_pool(docs)
+expect("discovery taint (untainted)", block(gp, "taint"), None)
+expect("discovery nodeSelector (untainted)", block(gp, "nodeSelector"), [])
+ok("an empty taint key renders no toleration and no taint")
+
+ref = os.environ.get("GOLDEN_REF", "origin/main")
+if ref == "":
+    print("skip: GOLDEN_REF is empty (explicit opt-out)")
+elif subprocess.run(["git", "rev-parse", "--verify", "-q", ref], capture_output=True).returncode != 0:
+    fail(f"GOLDEN_REF={ref} does not resolve; fetch it, point GOLDEN_REF at another ref, or run with GOLDEN_REF= to opt out")
+else:
+    tree = tempfile.mkdtemp(prefix="ap-gpu-pool-golden-")
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, ref], check=True)
+    try:
+        golden = documents(helm(f"{tree}/{CONN}", SERVING))
+    finally:
+        subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
+    head = dict(docs)
+    head[DISCOVERY], cuts = GPU_POOL_BLOCK.subn("", head[DISCOVERY])
+    expect("the discovery block cut out once", cuts, 1)
+    if set(head) != set(golden):
+        fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
+    for key in sorted(head):
+        if head[key] != golden[key]:
+            fail(f"untainted render vs {ref}: {key[0]}/{key[1]} differs:\n{head[key]}\n--- {ref}:\n{golden[key]}")
+    ok(f"an empty taint key leaves the serving render byte-identical to {ref} but for the discovery block")
+
+# --- the guards --------------------------------------------------------------
+for flags, needle in [
+    (["--set", "modelServing.gpuPool.taint.effect=Sometimes"], "must be NoSchedule, PreferNoSchedule or NoExecute"),
+    (["--set", "modelServing.gpuPool.taint.key=bad key"], "must be a taint key"),
+    (["--set", "modelServing.gpuPool.nodeSelector.generation=6"], "must be a string"),
+]:
+    err = helm(CONN, [*SERVING, *flags], expect_fail=True)
+    if needle not in err:
+        fail(f"{' '.join(flags)} failed for the wrong reason:\n{err}")
+docs = documents(helm(CONN, [*SERVING, "--set-string", "modelServing.gpuPool.nodeSelector.generation=6"]))
+expect("a quoted number as a label value", scheduling(docs[RUNTIME])[1], {"generation": "6"})
+ok("guards: the effect, the key and string label values")
+
+# --- the meta chart forwards the block --------------------------------------
+meta = helm(META, [
+    "-f", f"{META}/ci/ci-values.yaml", "--set", "components.flux.enabled=false",
+    "--set", "components.kserve-crd.enabled=true", "--set", "components.kserve-resources.enabled=true",
+    "--set", "components.modelServing.enabled=true",
+    "--set-json", 'modelServing.gpuPool.nodeSelector={"giantswarm.io/machine-pool":"ci-gpu00"}',
+])
+conn = documents(meta).get(("HelmRelease", "agent-platform-connectivity"))
+if conn is None:
+    fail("the meta chart renders no connectivity HelmRelease")
+gp = block(conn, "gpuPool")
+if gp is None:
+    fail("the meta chart does not forward modelServing.gpuPool to the connectivity release")
+expect("forwarded taint", mapping(block("\n".join(gp), "taint")), {"key": "nvidia.com/gpu", "value": "", "effect": "NoSchedule"})
+expect("forwarded nodeSelector", mapping(block("\n".join(gp), "nodeSelector")), LABEL)
+ok("the meta chart forwards modelServing.gpuPool to the connectivity release")

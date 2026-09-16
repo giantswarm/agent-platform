@@ -33,6 +33,24 @@ data:
         {{- end }}
       deploymentStrategyType: {{ $ms.serving.deploymentStrategyType }}
       timeoutSeconds: {{ $ms.serving.timeoutSeconds }}
+      # The GPU node pool (modelServing.gpuPool): the taint every serving
+      # workload tolerates and the pool's label(s). The runtime and the
+      # presets carry both already; model-manager schedules the
+      # LLMInferenceServices it composes, its download Jobs and its inventory
+      # scan pods by the same input (a registered backend document may
+      # override it). No taint means an untainted pool.
+      gpuPool:
+        {{- with $ms.gpuPool.taint.key }}
+        taint:
+          key: {{ . | quote }}
+          value: {{ $ms.gpuPool.taint.value | default "" | quote }}
+          effect: {{ $ms.gpuPool.taint.effect | default "" | quote }}
+        {{- end }}
+        nodeSelector:
+          {{- if $ms.gpuPool.nodeSelector }}
+          {{- toYaml $ms.gpuPool.nodeSelector | nindent 10 }}
+          {{- else }} {}
+          {{- end }}
       # Whether this chart renders network policies for the serving namespace
       # (networkPolicy.enabled), and in which flavor (kubernetes | cilium).
       networkPolicy:

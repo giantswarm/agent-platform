@@ -342,7 +342,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=0.22.0 <1.0.0"` |  |
+| components.model-manager.versionRange | string | `">=0.23.0 <1.0.0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
@@ -1265,6 +1265,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.serving.nodeSelector | object | `{}` |  |
 | modelServing.serving.deploymentStrategyType | string | `"Recreate"` |  |
 | modelServing.serving.timeoutSeconds | int | `1800` |  |
+| modelServing.gpuPool.taint.key | string | `"nvidia.com/gpu"` |  |
+| modelServing.gpuPool.taint.value | string | `""` |  |
+| modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
+| modelServing.gpuPool.nodeSelector | object | `{}` |  |
 | modelServing.presets | list | `[]` |  |
 | modelServing.shippedPresets.enabled | bool | `true` |  |
 | modelServing.shippedPresets.exclude | list | `[]` |  |
