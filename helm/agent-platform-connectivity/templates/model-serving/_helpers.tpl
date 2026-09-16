@@ -45,8 +45,18 @@ to the release namespace.
 {{- end -}}
 
 {{/*
+Truthy when this chart manages the Hugging Face cache claim: model serving on,
+modelServing.cache.enabled and no existingClaim. The claim is applied by the
+hook Job of templates/model-serving/cache-pvc.yaml, never rendered as a release
+resource (giantswarm/agent-platform#483).
+*/}}
+{{- define "agent-platform.modelServing.cacheClaimManaged" -}}
+{{- if and (include "agent-platform.modelServing.enabled" .) .Values.modelServing.cache.enabled (not .Values.modelServing.cache.pvc.existingClaim) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 The cache claim every predictor pod mounts: the pre-existing claim when named,
-else the PVC this chart renders.
+else the claim this chart applies (cache-pvc.yaml).
 */}}
 {{- define "agent-platform.modelServing.claimName" -}}
 {{- $pvc := .Values.modelServing.cache.pvc -}}

@@ -4,10 +4,12 @@ ServiceAccount in the release namespace bound to a ClusterRole on secrets,
 configmaps and namespaces, and on the podcert signers' cluster-scoped
 ClusterTrustBundles the bootstrap publishes — get, list, watch, create and
 patch (server-side apply), never delete — plus `attest` on the two podcert
-signers, which the apiserver demands of whoever writes a bundle naming them. Cluster-scoped because the bootstrap
-writes into two namespaces the substrate release has not created yet (a Role
-there cannot precede its namespace), publishes cluster-scoped objects, and the
-databases hook writes into every namespace of
+signers, which the apiserver demands of whoever writes a bundle naming them,
+and on persistentvolumeclaims while this chart applies model serving's cache
+claim (templates/model-serving/cache-pvc.yaml). Cluster-scoped because the
+bootstrap writes into two namespaces the substrate release has not created yet
+(a Role there cannot precede its namespace), publishes cluster-scoped objects,
+and the databases hook writes into every namespace of
 postgres.databases.*.secretNamespaces. Created for each hook event at weight
 -5, ahead of the Jobs at 0, and removed once the event's hooks succeeded.
 */ -}}
@@ -45,6 +47,15 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "create"]
+  {{- if include "agent-platform.modelServing.cacheClaimManaged" . }}
+  # The cache claim hook (templates/model-serving/cache-pvc.yaml) server-side
+  # applies the claim into the serving namespace: get says created or present
+  # and reads the phase, create + patch are what an apply of a missing and of
+  # an existing object need. Never delete: the claim outlives the release.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "create", "patch"]
+  {{- end }}
   - apiGroups: ["certificates.k8s.io"]
     resources: ["clustertrustbundles"]
     verbs: ["get", "list", "watch", "create", "patch"]

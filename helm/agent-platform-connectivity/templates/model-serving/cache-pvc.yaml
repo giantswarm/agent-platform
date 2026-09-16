@@ -1,10 +1,43 @@
-{{- if (include "agent-platform.modelServing.enabled" .) }}
+{{- /*
+The Hugging Face model cache claim (modelServing.cache.pvc): one claim in the
+serving namespace, one subdirectory per InferenceService (its name). The Kyverno
+policies (policies.yaml) mount it into the KServe storage-initializer and the
+runtime; model-manager's pre-warm downloads land in the same layout.
+
+The claim is APPLIED BY A HOOK JOB (post-install, post-upgrade), never rendered
+as a release resource. It has no consumer of its own — the first predictor or
+download Job that mounts it is what Binds it — and under a StorageClass with
+volumeBindingMode WaitForFirstConsumer (kind's `standard`, the fleet's `gp3`) it
+stays Pending until then. Helm's wait counts a Pending claim as not ready, so as
+a release resource it failed every install and upgrade with the switch on and
+held back every release that depends on this one
+(giantswarm/agent-platform#483). Hook objects are outside that wait: the Job
+server-side-applies the claim with a fixed field manager and exits — `created`
+or `present` — and nothing waits for the claim to Bind. So the claim binds where
+its first consumer schedules, which is what a zonal volume (gp3) needs: the GPU
+pool's zone, not the zone of whatever pod would have claimed it first.
+
+What follows from the claim not being Helm's: an uninstall or a cache.enabled
+flip leaves it — the intent of the helm.sh/resource-policy: keep it carries
+(hundreds of gigabytes of downloads outlive the release), now by construction;
+a size change is applied by the next upgrade's hook (the StorageClass has to
+allow expansion); a change to an immutable field (storageClassName,
+accessModes, volumeName) fails the hook — and with it the release — naming the
+field. An installation upgrading from a chart that rendered the claim as a
+release resource keeps it (the keep policy) and the hook takes its fields over
+(--force-conflicts).
+*/ -}}
+{{- if (include "agent-platform.modelServing.cacheClaimManaged" .) }}
 {{- $pvc := .Values.modelServing.cache.pvc }}
-{{- if and .Values.modelServing.cache.enabled (not $pvc.existingClaim) }}
-# The Hugging Face model cache: one claim in the serving namespace, one
-# subdirectory per InferenceService (its name). The Kyverno policies
-# (policies.yaml) mount it into the KServe storage-initializer and the
-# runtime; model-manager's pre-warm downloads land in the same layout.
+{{- $ns := include "agent-platform.modelServing.namespace" . }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "model-serving-cache" "hook" "post-install,post-upgrade"
+      "about" (printf "apply the Hugging Face cache claim %s/%s (it Binds with its first consumer; nothing waits for it)" $ns $pvc.name)
+      "script" (include "agent-platform.modelServing.cacheClaim.script" .)) }}
+{{- end }}
+
+{{- /* The claim as YAML — the manifest the hook applies. */ -}}
+{{- define "agent-platform.modelServing.cacheClaim" -}}
+{{- $pvc := .Values.modelServing.cache.pvc -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -13,8 +46,6 @@ metadata:
   labels:
     {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
   annotations:
-    # Hundreds of gigabytes of downloads outlive the release: an uninstall or a
-    # cache.enabled flip must not delete them.
     helm.sh/resource-policy: keep
 spec:
   accessModes:
@@ -30,5 +61,20 @@ spec:
   {{- with $pvc.volumeName }}
   volumeName: {{ . | quote }}
   {{- end }}
-{{- end }}
-{{- end }}
+{{- end -}}
+
+{{- /*
+The hook's script: the claim as one JSON line (single-quoted for the shell, a
+quote in a value escaped), server-side applied under this chart's field
+manager; the log says created or present and the claim's phase.
+*/ -}}
+{{- define "agent-platform.modelServing.cacheClaim.script" -}}
+{{- $pvc := .Values.modelServing.cache.pvc -}}
+{{- $claim := include "agent-platform.modelServing.cacheClaim" . | fromYaml | toJson -}}
+ns={{ include "agent-platform.modelServing.namespace" . | quote }}
+name={{ $pvc.name | quote }}
+if kubectl -n "$ns" get pvc "$name" >/dev/null 2>&1; then state=present; else state=created; fi
+printf '%s' '{{ $claim | replace "'" "'\\''" }}' \
+  | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
+echo "cache claim $ns/$name $state, $(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.status.phase}') (it Binds with its first consumer; nothing waits for it)"
+{{- end -}}

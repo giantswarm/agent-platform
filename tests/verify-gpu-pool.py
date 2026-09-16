@@ -50,6 +50,10 @@ SERVING = [
     "--set", "components.modelServing.enabled=true",
 ]
 UNTAINTED = ["--set", "modelServing.gpuPool.taint.key="]
+# The cache claim is applied by a hook Job since #483 (a chart from before
+# rendered a PersistentVolumeClaim, and no hook identity); the byte-identity
+# check is about the pool input, so both sides render without the claim.
+NO_CACHE = ["--set", "modelServing.cache.enabled=false"]
 POOL_TOL = {"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}
 LABEL = {"giantswarm.io/machine-pool": "ci-gpu00"}
 RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
@@ -203,7 +207,7 @@ expect("discovery taint (value)", mapping(block(gpu_pool(docs), "taint")), {"key
 ok("a taint value narrows the toleration to Equal and is published")
 
 # --- untainted: nothing rendered, byte-identical to GOLDEN_REF but for the block
-untainted = helm(CONN, [*SERVING, *UNTAINTED])
+untainted = helm(CONN, [*SERVING, *UNTAINTED, *NO_CACHE])
 docs = documents(untainted)
 if block(docs[RUNTIME], "tolerations") is not None:
     fail("an empty taint key still renders runtime tolerations")
@@ -231,7 +235,7 @@ else:
         # UNTAINTED override and the discovery block comes out of both sides.
         # A golden from before the change has neither the flag nor the block.
         carries = "gpuPool:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        golden = documents(helm(f"{tree}/{CONN}", [*SERVING, *UNTAINTED] if carries else SERVING))
+        golden = documents(helm(f"{tree}/{CONN}", [*SERVING, *UNTAINTED, *NO_CACHE] if carries else [*SERVING, *NO_CACHE]))
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -245,7 +249,7 @@ else:
     for key in sorted(head):
         if head[key] != golden[key]:
             fail(f"untainted render vs {ref}: {key[0]}/{key[1]} differs:\n{head[key]}\n--- {ref}:\n{golden[key]}")
-    ok(f"an empty taint key leaves the serving render byte-identical to {ref} but for the discovery block")
+    ok(f"an empty taint key leaves the serving render (cache claim off on both sides) byte-identical to {ref} but for the discovery block")
 
 # --- the guards --------------------------------------------------------------
 for flags, needle in [
