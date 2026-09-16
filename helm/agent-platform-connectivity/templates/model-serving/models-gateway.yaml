@@ -1,0 +1,133 @@
+{{- /*
+The models Gateway (giantswarm/agent-platform#326; bumblebee-plans#46, D6): the
+agentgateway Gateway every LLMInferenceService route attaches to (KServe's
+ingress-gateway value on the kserve-resources release is derived from it by the
+meta chart) and its one JWT policy against the platform's Dex. A served model
+answers at https://<host>/<namespace>/<model>/v1/chat/completions with a
+person's id_token and 401 without one. The data plane strips the Authorization
+header once the token verified: the model server logs no bearer.
+*/ -}}
+{{- if (include "agent-platform.modelServing.modelsGateway.enabled" .) }}
+{{- $mg := .Values.modelServing.modelsGateway }}
+{{- $host := include "agent-platform.modelServing.modelsGateway.host" . }}
+{{- $secret := include "agent-platform.modelServing.modelsGateway.tlsSecretName" . }}
+{{- $jwks := include "agent-platform.modelServing.modelsGateway.jwks" . | fromJson }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ $mg.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: {{ $mg.gatewayClassName | default .Values.gateway.gatewayClassName }}
+  listeners:
+    # One HTTPS listener for the models host. Routes from every namespace
+    # attach: KServe renders an LLMInferenceService's HTTPRoute in the
+    # model's namespace.
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: {{ $host | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: {{ $secret }}
+      allowedRoutes:
+        namespaces:
+          from: All
+  {{- if $mg.externalDns.enabled }}
+  infrastructure:
+    # Inherited by the data plane's LoadBalancer Service, where external-dns
+    # reads it.
+    annotations:
+      external-dns.alpha.kubernetes.io/hostname: {{ $host }}
+  {{- end }}
+{{- if $mg.tls.issuerRef.name }}
+---
+# The listener's certificate from the platform's issuer, when one is named;
+# without it the platform's wildcard Secret serves the host.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $mg.name }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $secret }}
+  dnsNames:
+    - {{ $host }}
+  issuerRef:
+    name: {{ $mg.tls.issuerRef.name }}
+    kind: {{ $mg.tls.issuerRef.kind }}
+    group: {{ $mg.tls.issuerRef.group }}
+{{- end }}
+---
+# AgentgatewayBackend — static backend for the issuer's JWKS endpoint, in the
+# release namespace so the policy's backendRef needs no ReferenceGrant. The
+# default is the public issuer on 443 (TLS implied by the port, the system
+# trust), which a workload cluster reaches like any client.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: {{ $mg.name }}-jwks
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  {{- if include "agent-platform.jwks.tlsEnabled" $jwks }}
+  policies:
+    tls:
+      {{- $ca := include "agent-platform.jwks.caSecretName" (dict "ctx" . "jwks" $jwks) }}
+      {{- if $ca }}
+      caCertificateRefs:
+        - kind: Secret
+          name: {{ $ca }}
+      {{- else }}
+      {}
+      {{- end }}
+  {{- end }}
+  static:
+    host: {{ $jwks.host }}
+    port: {{ $jwks.port }}
+---
+# AgentgatewayPolicy — the one boundary of every model served here: verifies
+# the bearer (signature, issuer, expiry, audience) on the Gateway itself, so
+# every LLMInferenceService route inherits it and no route can weaken it
+# (strategy.inheritance Override). Without a valid token the gateway answers
+# 401; the verified header is stripped before the request reaches the model.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $mg.name }}-jwt
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $mg.name }}
+  strategy:
+    inheritance: Override
+  traffic:
+    jwtAuthentication:
+      mode: {{ $mg.jwtAuthentication.mode | default "Strict" }}
+      providers:
+        - issuer: {{ include "agent-platform.modelServing.modelsGateway.issuer" . | quote }}
+          # The installation's login client: a person's id_token. Unlike the
+          # agent-manager route, which the portal and the CLIs reach with
+          # tokens of their own clients, a model is called by people (and by
+          # the platform on their behalf) with the login token.
+          audiences:
+            {{- toYaml $mg.jwtAuthentication.audiences | nindent 12 }}
+          jwks:
+            remote:
+              backendRef:
+                group: agentgateway.dev
+                kind: AgentgatewayBackend
+                name: {{ $mg.name }}-jwks
+              jwksPath: {{ $jwks.path | quote }}
+{{- end }}

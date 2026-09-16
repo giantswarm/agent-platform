@@ -1,0 +1,45 @@
+# Qwen3 8B, FP8. The larger small-GPU generalist: one 24 GB GPU (an L4),
+# thinking off by default, tools on. No image: the predictor runs the mirrored
+# llm-d-cuda the well-known LLMInferenceServiceConfig names
+# (components.kserve-runtime-configs).
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-8b-fp8
+spec:
+  displayName: Qwen3 8B FP8
+  description: |
+    Dense 8B general model at FP8 (~9 GiB of weights), thinking disabled by
+    default, tool calling on (hermes parser — agents always send tools, and
+    vLLM answers 400 without --enable-auto-tool-choice). Tuned for one 24 GB
+    GPU of the L4 class (--gpu-memory-utilization=0.90, 16k context) under
+    the nvidia RuntimeClass the serving slice sets
+    (modelServing.serving.runtimeClassName).
+  model:
+    id: Qwen/Qwen3-8B-FP8
+    storageUri: hf://Qwen/Qwen3-8B-FP8
+    format: vLLM
+    contextLength: 16384
+    capabilities: [chat, tools]
+    license: apache-2.0
+  args:
+    - --gpu-memory-utilization=0.90
+    - --max-model-len=16384
+    - --no-enable-log-requests
+    - --default-chat-template-kwargs
+    - '{"enable_thinking": false}'
+    # kagent agents call /v1/chat/completions with tools and tool_choice auto;
+    # without a parser vLLM rejects every agent request (400).
+    - --enable-auto-tool-choice
+    - --tool-call-parser=hermes
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 16Gi
+    limits:
+      cpu: "8"
+      memory: 24Gi
+  requirements:
+    weightsGiB: 9
+    overheadGiB: 12

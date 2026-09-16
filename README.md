@@ -63,6 +63,7 @@ The defaults carry no filter: a release selects releases. agentlab follows a bra
 | KServe controller | `components.kserve-resources.enabled` | `false` |
 | LLMInferenceService CRDs | `components.kserve-llmisvc-crd.enabled` | `false` |
 | LLMInferenceService controller | `components.kserve-llmisvc-resources.enabled` | `false` |
+| Well-known LLMInferenceServiceConfigs | `components.kserve-runtime-configs.enabled` | `false` |
 | the bundled Flux engine (`flux-engine` subchart) | `components.flux.enabled` | `true` |
 | Model serving (KServe/vLLM runtime, presets, cache) — a feature switch, no chart | `components.modelServing.enabled` | `false` |
 | NVIDIA's GPU operator (gpu-operator-app; once per cluster, independent of model serving) | `components.gpu-operator.enabled` | `false` |
@@ -350,6 +351,7 @@ The components the [agent-platform-standalone](https://github.com/giantswarm/age
 | `kserve-resources` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | `kserve-crd` |
 | `kserve-llmisvc-crd` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | — |
 | `kserve-llmisvc-resources` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | `kserve-crd`, `kserve-llmisvc-crd`, `kserve-resources` |
+| `kserve-runtime-configs` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` (into `kserve`; [The serving slice](#the-serving-slice-and-the-models-gateway)) | `kserve-llmisvc-crd` |
 
 **Turning them on.** `components.<name>.enabled: true`. Backstage and mcp-kubernetes also need `global.domain` and `global.identity` (`issuerUrl`, `clientId`, `existingSecret` — the platform credentials Secret, with the keys `dex-client-secret` and, for Backstage, `backstage-session-secret`): the same quick-start inputs muster takes. The mcp-kubernetes chart fails its render without them, by design; the Backstage values mount that Secret by name. `kserve-resources` needs cert-manager on the cluster; `kserve-llmisvc-resources` reuses the shared objects `kserve-resources` renders (`kserve.createSharedResources: false`). On a cluster without Cilium set `mcp-kubernetes.ciliumNetworkPolicy.enabled: false` (see [Prerequisites](#prerequisites)).
 
@@ -368,6 +370,31 @@ helm template r helm/agent-platform -f helm/agent-platform/ci/ci-values.yaml \
 make verify-components          # roster, order, BOM pins, the forwarded tree against the connectivity schema
 make verify-components-charts   # renders every component chart (the roster, BOM-pinned both ways) with the forwarded values, connectivity from the working tree
 ```
+
+### The serving slice and the models Gateway
+
+Model serving on a GPU cluster is its own release of this chart (giantswarm/agent-platform#326; [bumblebee-plans#46](https://github.com/giantswarm/bumblebee-plans/pull/46), D4/D6/D8/D9): the **serving slice**, the values profile [`examples/serving-slice.yaml`](helm/agent-platform/examples/serving-slice.yaml). It renders exactly the serving component set — `kserve-crd`, `kserve-resources`, `kserve-llmisvc-crd`, `kserve-llmisvc-resources`, `kserve-runtime-configs` and the `modelServing` switch — and nothing of the platform's own (no muster, dicebear, valkey, kagent, Backstage, agent-manager, model-manager; the engine off). **One release per target cluster**, delivered by the installation's Flux like every workload-cluster app ([One release per target cluster](#one-release-per-target-cluster)): beside the platform's release on the installation's cluster with the profile as is, or onto a workload cluster with `gitops.target.kubeConfig.secretRef` and `components.agentgateway.enabled: true` — agentgateway is part of every installation and cannot be switched out, so nothing is detected; the operator sets the toggle by the target's shape (off beside the platform's release, which owns the controller and its CRDs; on for a workload cluster, which runs none). The profile sets `modelServing.serving.runtimeClassName: nvidia` — the RuntimeClass the GPU operator creates ([The GPU operator](#the-gpu-operator)). The GPU pool's taint and node selector come from `modelServing.gpuPool` (#315, the next PR of this lane); the predictors carry no `karpenter.sh/do-not-disrupt`: a scale-to-zero pool must be able to consolidate, and a drained predictor reloads its model from the cache PVC in seconds.
+
+**The well-known configs.** `components.kserve-runtime-configs` (giantswarm/kserve's `kserve-runtime-configs`, `0.2.x`, `dependsOn: [kserve-llmisvc-crd]`, into the llm-d controller's lookup namespace `kserve`) installs the `LLMInferenceServiceConfig`s an `LLMInferenceService` composes from by `baseRefs` — the mirrored `llm-d-cuda` image among them. The block `kserve-runtime-configs:` turns `kserve.llmisvcConfigs.enabled` on and `kserve.servingruntime.enabled` off (the chart's `ServingRuntime`s are the classic path, which the switch's vLLM `ClusterServingRuntime` already serves); no registry value is passed — the chart's default is gsoci (giantswarm/kserve#78), a private registry sets `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry`. The block never travels to the connectivity release (`omitKeys`).
+
+**The models Gateway.** `modelServing.modelsGateway` (the slice turns it on; off by default, so a platform release serving on the classic path renders none of it) is one agentgateway `Gateway` in the release namespace, `models` on `models.<cluster>.<base domain>` (`<hostPrefix>.<global.domain>`), TLS from the platform's wildcard Secret (`gatewayApi.gateway.tls.secretName`; or `tls.issuerRef.name` for a cert-manager `Certificate` of the host), the external-dns hostname on its infrastructure. KServe's ingress-gateway value is **derived** onto the `kserve-resources` release (`kserve.controller.gateway.ingressGateway.kserveGateway: <namespace>/models`; a differing copy of the operator's fails the render), so every `LLMInferenceService` route attaches to it, and a served model answers at
+
+```
+https://models.<cluster>.<base domain>/<namespace>/<model>/v1/chat/completions
+```
+
+**The audience rule.** One `AgentgatewayPolicy` on the Gateway (`Strict`, `strategy.inheritance: Override` — no route can weaken it) verifies the bearer against the platform's Dex (`global.identity.issuerUrl`; JWKS from the issuer's host on 443 by default, which a workload cluster reaches without `gateway.jwksEgress`) and accepts the audience `dex-k8s-authenticator` only: the installation's login client, the id_token a person holds after the Dex login (kubectl, the portal). A request with it answers 200, one without 401 at the edge; the data plane strips the `Authorization` header once verified, so the model server logs no bearer. See [docs/authentication.md](docs/authentication.md), "The models Gateway".
+
+**The presets.** Two 24 GB recipes for one L4-class GPU with tools on: `qwen3-4b-instruct` (BF16, ~8 GiB) and `qwen3-8b-fp8` (~9 GiB), `--enable-auto-tool-choice --tool-call-parser=hermes`, 16k context, `weightsGiB + overheadGiB <= 24`. Neither names an image: the predictor runs the `llm-d-cuda` the well-known config names; the preset schema's new optional `spec.template` carries `LLMInferenceService` template fields verbatim, an image there only with a stated reason.
+
+```bash
+helm template r helm/agent-platform -f helm/agent-platform/examples/serving-slice.yaml \
+  --set global.domain=wc01.example.com --set global.identity.issuerUrl=https://dex.mc.example.com \
+  --set gatewayApi.gateway.tls.secretName=wildcard-tls --set 'ingress.parentRefs[0].name=x'
+make verify-serving-slice   # the profile's component set, the derived kserveGateway, the Gateway and its policy, the presets
+```
+
+The live half — a served `LLMInferenceService` answering 200 with a person's id_token and 401 without, no bearer in the model server's log — runs on a GPU cluster.
 
 ### Turning on the standalone's extras
 

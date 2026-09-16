@@ -49,6 +49,18 @@ data:
         # into that claim at admission (no InferenceService change needed).
         redirectPolicy: {{ if (include "agent-platform.modelServingPolicies" .) }}true{{ else }}false{{ end }}
         {{- end }}
+      # The models Gateway every LLMInferenceService route attaches to, and the
+      # path convention a served model answers on (#326).
+      gateway:
+        {{- if (include "agent-platform.modelServing.modelsGateway.enabled" .) }}
+        enabled: true
+        name: {{ $ms.modelsGateway.name }}
+        namespace: {{ .Release.Namespace }}
+        endpoint: https://{{ include "agent-platform.modelServing.modelsGateway.host" . }}
+        pathConvention: /<namespace>/<model>/v1
+        {{- else }}
+        enabled: false
+        {{- end }}
       presets:
         namespace: {{ .Release.Namespace }}
         labelSelector: agent-platform.giantswarm.io/serving-preset=true

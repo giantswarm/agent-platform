@@ -1,0 +1,94 @@
+# The serving slice (giantswarm/agent-platform#326; bumblebee-plans#46, D4/D6/D8):
+# the values profile of ONE `<cluster>-agent-platform` release that serves
+# models on a GPU cluster and nothing else — the KServe control plane, the
+# well-known LLMInferenceServiceConfigs, the model serving switch and the
+# models Gateway with its Dex JWT policy. Delivered by the installation's Flux
+# like every workload-cluster app: beside the platform's own release on the
+# installation's cluster (this file as is), or onto a workload cluster with
+# gitops.target.kubeConfig.secretRef set (the target's `<cluster>-kubeconfig`,
+# #328) and components.agentgateway on — agentgateway is part of every
+# installation and cannot be switched out, so nothing is detected: the
+# operator sets the toggle by the target's shape. Layer this file over the
+# installation's platform inputs (global.domain, global.identity, ingress.mode
+# agentgateway-*, gatewayApi.gateway.tls.secretName) and a BOM
+# (examples/customer-bom.yaml).
+#
+# A served LLMInferenceService answers at
+#   https://models.<cluster>.<base domain>/<namespace>/<model>/v1/chat/completions
+# with a person's Dex id_token (audience dex-k8s-authenticator) and 401
+# without one.
+#
+# GPU pool placement: the predictors' toleration of the pool's taint and their
+# node selector come from modelServing.gpuPool (giantswarm/agent-platform#315,
+# the next PR of this lane); until then a preset's scheduling block or
+# modelServing.serving.nodeSelector place them, and an untainted pool needs
+# nothing. The predictors carry NO karpenter.sh/do-not-disrupt marking: a
+# scale-to-zero pool must be able to consolidate, and a predictor that is
+# drained reloads its model from the cache PVC in seconds.
+components:
+  # The engine is never this release's: the installation's Flux delivers it.
+  flux:
+    enabled: false
+  # The platform's own components stay with the platform's release.
+  muster:
+    enabled: false
+  dicebear:
+    enabled: false
+  valkey:
+    enabled: false
+  kagent-crds:
+    enabled: false
+  kagent:
+    enabled: false
+  substrate-crds:
+    enabled: false
+  substrate:
+    enabled: false
+  klaus-gateway:
+    enabled: false
+  backstage:
+    enabled: false
+  agent-manager:
+    enabled: false
+  model-manager:
+    enabled: false
+  agent-platform-mcps:
+    enabled: false
+  mcp-kubernetes:
+    enabled: false
+  # false beside the platform's release (its controller owns the Gateway API
+  # data plane and the agentgateway.dev CRDs of this cluster); true for a
+  # workload cluster, together with gitops.target.kubeConfig.secretRef — the
+  # target runs no controller of its own.
+  agentgateway:
+    enabled: false
+  # The serving component set: the KServe control plane, the llm-d controller
+  # and its CRDs, the well-known configs, the serving switch.
+  kserve-crd:
+    enabled: true
+  kserve-resources:
+    enabled: true
+  kserve-llmisvc-crd:
+    enabled: true
+  kserve-llmisvc-resources:
+    enabled: true
+  kserve-runtime-configs:
+    enabled: true
+  modelServing:
+    enabled: true
+
+modelServing:
+  serving:
+    # The GPU operator's RuntimeClass (components.gpu-operator or
+    # cluster-manager's <cluster>-gpu-operator): GPU pods run under it.
+    runtimeClassName: nvidia
+  # The models Gateway is this slice's: host models.<global.domain>, the
+  # platform's wildcard certificate (gatewayApi.gateway.tls.secretName, or
+  # tls.issuerRef.name for a Certificate of the host), the public issuer's
+  # JWKS on 443, the login client's audience.
+  modelsGateway:
+    enabled: true
+  # cache:
+  #   pvc:
+  #     # The cluster's block storage class (AWS: gp3); empty takes the default.
+  #     storageClassName: ""

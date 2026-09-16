@@ -211,6 +211,21 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
 {{- end -}}
+{{- if and (eq .name "kserve-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) (include "agent-platform.componentEnabled" (dict "root" .root "name" "kserve-llmisvc-resources")) -}}
+{{- /* The models Gateway (modelServing.modelsGateway, rendered by the
+connectivity release in the platform's namespace) is the Gateway every
+LLMInferenceService route attaches to: KServe reads it from the shared
+inferenceservice-config ConfigMap kserve-resources renders. */ -}}
+{{- $mg := dig "modelsGateway" dict (.root.Values.modelServing | default dict) -}}
+{{- if $mg.enabled -}}
+{{- $gw := printf "%s/%s" (.root.Values.gitops.targetNamespace | default .root.Release.Namespace) ($mg.name | default "models") -}}
+{{- $own := dig "kserve" "controller" "gateway" "ingressGateway" "kserveGateway" "" (index .root.Values "kserve-resources" | default dict) -}}
+{{- if and $own (ne $own $gw) -}}
+{{- fail (printf "kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway (%s) differs from the models Gateway the connectivity release renders (%s): every LLMInferenceService route attaches to modelServing.modelsGateway — set modelServing.modelsGateway.name, or modelsGateway.enabled: false to bring a Gateway of your own, and leave the kserve-resources copy unset" $own $gw) -}}
+{{- end -}}
+{{- $_ := set $derived "kserve" (dict "controller" (dict "gateway" (dict "ingressGateway" (dict "kserveGateway" $gw)))) -}}
+{{- end -}}
+{{- end -}}
 {{- $derived | toJson -}}
 {{- end -}}
 

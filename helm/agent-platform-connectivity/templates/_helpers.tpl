@@ -1196,6 +1196,9 @@ matched in.
 {{- if and (include "agent-platform.agentManager.enabled" .) (.Values.agentManager.route).enabled (.Values.agentManager.route.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.agentManager.route.jwtAuthentication.jwks -}}
 {{- end -}}
+{{- if (include "agent-platform.modelServing.modelsGateway.enabled" .) -}}
+{{- $sources = append $sources (include "agent-platform.modelServing.modelsGateway.jwks" . | fromJson) -}}
+{{- end -}}
 {{- range $sources -}}
 {{- $host := include "agent-platform.jwks.normalizeHost" (.host | default "") -}}
 {{- $port := .port | default 443 | int -}}

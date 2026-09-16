@@ -308,3 +308,51 @@ output through trim and nindent.
       protocol: TCP
 {{- end }}
 {{- end -}}
+
+{{/*
+Truthy when the models Gateway renders (giantswarm/agent-platform#326): the
+modelServing switch and the llm-d controller component on, and
+modelServing.modelsGateway.enabled.
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.enabled" -}}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kserve.llmisvcEnabled" .) (.Values.modelServing.modelsGateway).enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/* The models Gateway's public hostname: <hostPrefix>.<global.domain>. */}}
+{{- define "agent-platform.modelServing.modelsGateway.host" -}}
+{{- printf "%s.%s" .Values.modelServing.modelsGateway.hostPrefix (include "agent-platform.domain" (dict "ctx" . "for" "modelServing.modelsGateway.hostPrefix")) -}}
+{{- end -}}
+
+{{/* The models Gateway's issuer: the block's own, else global.identity.issuerUrl (or a render failure). */}}
+{{- define "agent-platform.modelServing.modelsGateway.issuer" -}}
+{{- $issuer := .Values.modelServing.modelsGateway.jwtAuthentication.issuer -}}
+{{- if not $issuer -}}
+{{- $issuer = include "agent-platform.issuerUrl" (dict "ctx" . "for" "modelServing.modelsGateway.jwtAuthentication") -}}
+{{- end -}}
+{{- $issuer -}}
+{{- end -}}
+
+{{/*
+The models Gateway's JWKS block with the host resolved (JSON): the block's own
+host, else the issuer's hostname — the public issuer on 443.
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.jwks" -}}
+{{- $jwks := deepCopy .Values.modelServing.modelsGateway.jwtAuthentication.jwks -}}
+{{- if not $jwks.host -}}
+{{- $_ := set $jwks "host" (urlParse (include "agent-platform.modelServing.modelsGateway.issuer" .)).hostname -}}
+{{- end -}}
+{{- $jwks | toJson -}}
+{{- end -}}
+
+{{/*
+The TLS Secret of the models Gateway's listener: tls.secretName, else <name>-tls
+while a Certificate renders (tls.issuerRef.name set), else the platform's
+wildcard (gatewayApi.gateway.tls.secretName).
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.tlsSecretName" -}}
+{{- $mg := .Values.modelServing.modelsGateway -}}
+{{- if $mg.tls.secretName -}}{{- $mg.tls.secretName -}}
+{{- else if $mg.tls.issuerRef.name -}}{{- printf "%s-tls" $mg.name -}}
+{{- else -}}{{- .Values.gatewayApi.gateway.tls.secretName -}}
+{{- end -}}
+{{- end -}}

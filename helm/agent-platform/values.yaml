@@ -938,6 +938,26 @@ components:  # @schema additionalProperties: true
     valuesFrom: kserve-llmisvc-resources
     enabled: false
     dependsOn: [kserve-crd, kserve-llmisvc-crd, kserve-resources]
+  kserve-runtime-configs:  # @schema additionalProperties: true
+    chart: kserve-runtime-configs
+    # The well-known LLMInferenceServiceConfigs (giantswarm/kserve;
+    # giantswarm/agent-platform#326, bumblebee-plans#46's D8): the templates an
+    # LLMInferenceService composes from by baseRefs — the mirrored llm-d-cuda
+    # image among them — installed into the llm-d controller's lookup
+    # namespace `kserve` (targetNamespace; the chart replaces upstream's
+    # namespace). Its images come from gsoci by default (the chart's own
+    # kserve.llmisvcConfigs.imageRegistry, giantswarm/kserve#78), so no
+    # registry value is passed here; a private registry sets it in the
+    # kserve-runtime-configs: block below. Its ServingRuntimes stay off: they
+    # are the classic InferenceService path, which the modelServing switch's
+    # vLLM ClusterServingRuntime already is. Needs the LLMInferenceService
+    # CRDs only (the configs are CRs of theirs), not the controller.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: "0.2.x"
+    valuesFrom: kserve-runtime-configs
+    enabled: false
+    dependsOn: [kserve-llmisvc-crd]
+    targetNamespace: kserve
   # Model serving on KServe with vLLM (the standalone umbrella's modelServing
   # component): a feature switch, not a component — no chart, so the loop
   # renders no release for it; the flag is forwarded to the connectivity
@@ -1060,6 +1080,9 @@ components:  # @schema additionalProperties: true
       # wrapper's subchart key for its release); no wiring reads them, so the
       # connectivity chart never sees the block.
       - gpu-operator
+      # The well-known configs' values (components.kserve-runtime-configs); no
+      # wiring reads them, so the connectivity chart never sees the block.
+      - kserve-runtime-configs
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -4108,6 +4131,21 @@ kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties:
       # gateway installed them) sets this false: Helm cannot adopt them.
       createGIECRDs: true
 
+# === The well-known LLMInferenceServiceConfigs (components.kserve-runtime-configs) ===
+# Forwarded to the kserve-runtime-configs release. llmisvcConfigs on: the
+# templates an LLMInferenceService names by baseRefs, their image references
+# from gsoci by default (the chart's kserve.llmisvcConfigs.imageRegistry,
+# giantswarm/kserve#78 — set it here for a private registry, nothing else names
+# one). servingruntime off: the chart's ServingRuntimes are the classic
+# InferenceService path, which the modelServing switch's vLLM
+# ClusterServingRuntime serves.
+kserve-runtime-configs:  # @schema skipProperties: true; additionalProperties: true
+  kserve:
+    llmisvcConfigs:
+      enabled: true
+    servingruntime:
+      enabled: false
+
 # === The GPU operator (components.gpu-operator) ===
 # Forwarded to the gpu-operator release under its subchart key (the wrapper
 # chart of giantswarm/gpu-operator-app vendors NVIDIA's chart as the subchart
@@ -4411,3 +4449,66 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.additionalEgressCIDRs and additionalEgressFQDNs apply to
       # both flavors as well.
       cidrs: []
+  # The models Gateway (giantswarm/agent-platform#326; bumblebee-plans#46, D6):
+  # one agentgateway Gateway per serving cluster that every LLMInferenceService
+  # route attaches to — KServe's ingress-gateway value on the kserve-resources
+  # release is derived from it (kserve.controller.gateway.ingressGateway.kserveGateway,
+  # `<release namespace>/<name>`; leave the block's own copy unset) — with one
+  # JWT policy against the platform's Dex. A served model answers at
+  #   https://<hostPrefix>.<global.domain>/<namespace>/<model>/v1/chat/completions
+  # with a person's id_token (200) and 401 without one; the data plane strips
+  # the bearer before the model server sees the request. The Gateway is the
+  # serving slice's (examples/serving-slice.yaml turns it on): off by default,
+  # so a platform release that serves models on the classic path renders no
+  # Gateway and needs none of its inputs. Renders while enabled is true and
+  # components.modelServing and components.kserve-llmisvc-resources are on.
+  # The GatewayClass it names is the agentgateway controller's — the
+  # platform's release's beside this one, or this release's own
+  # (components.agentgateway) on a workload cluster; nothing is detected, the
+  # operator sets the toggle by the target's shape.
+  modelsGateway:
+    enabled: false
+    # Name of the Gateway (release namespace); the policy objects are
+    # <name>-jwks and <name>-jwt, the Certificate <name>-tls.
+    name: models
+    # Public hostname <hostPrefix>.<global.domain>; global.domain is already
+    # <cluster>.<base domain>.
+    hostPrefix: models
+    # Empty takes gateway.gatewayClassName.
+    gatewayClassName: ""
+    tls:
+      # The TLS Secret of the HTTPS listener. Empty takes
+      # gatewayApi.gateway.tls.secretName — the platform's wildcard covers
+      # <hostPrefix>.<global.domain> — unless issuerRef.name is set, in which
+      # case a cert-manager Certificate for the hostname renders from that
+      # issuer into <name>-tls (or secretName when set).
+      secretName: ""
+      issuerRef:
+        name: ""
+        kind: ClusterIssuer
+        group: cert-manager.io
+    # external-dns: the hostname annotation on the Gateway's infrastructure,
+    # which the data plane's LoadBalancer Service inherits.
+    externalDns:
+      enabled: true
+    jwtAuthentication:
+      # Strict: a request without a valid token is answered 401 at the edge.
+      mode: Strict
+      # The issuer exactly as in the token's iss claim; empty takes
+      # global.identity.issuerUrl.
+      issuer: ""
+      # The audiences accepted: the installation's login client, which mints
+      # the id_token a person holds after the Dex login (kubectl, the portal).
+      # A token for another client (an agent's, a service's) is refused.
+      audiences: [dex-k8s-authenticator]
+      # JWKS source. An empty host takes the issuer's host on 443 — the public
+      # issuer, which a workload cluster reaches without gateway.jwksEgress
+      # (443 needs none; the port implies TLS). An in-cluster host and port
+      # work as in the other policies' jwks blocks.
+      jwks:
+        host: ""
+        port: 443
+        path: /keys
+        tls:
+          enabled: false
+          caSecretName: ""
