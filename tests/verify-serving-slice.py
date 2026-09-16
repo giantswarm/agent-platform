@@ -167,6 +167,20 @@ def check_ingress_guard(connectivity: str, base: list[str]) -> None:
     ok("ingress guard: the slice needs no edge Gateway; with muster on the Gateway and the mode/agentgateway agreement are still required; agentgateway-* modes still need the component")
 
 
+def check_controller_xds(connectivity: str, base: list[str]) -> None:
+    """The controller admits xDS from every data plane of its GatewayClass in any namespace (#495)."""
+    on = [*base, "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "ingress.parentRefs[0].name=x"]
+    cil = documents(helm(connectivity, [*on, "--set", "networkPolicy.flavor=cilium"])).get(("CiliumNetworkPolicy", "agent-platform-connectivity-controller"))
+    if not cil:
+        sys.exit("FAIL: no CiliumNetworkPolicy agent-platform-connectivity-controller with agentgateway on")
+    need(cil, "            gateway.networking.k8s.io/gateway-class-name: agentgateway\n          matchExpressions:\n            - key: k8s:io.kubernetes.pod.namespace\n              operator: Exists", "the controller's xDS peers (cilium)")
+    k8s = documents(helm(connectivity, [*on, "--set", "networkPolicy.flavor=kubernetes"])).get(("NetworkPolicy", "agent-platform-connectivity-controller"))
+    if not k8s:
+        sys.exit("FAIL: no NetworkPolicy agent-platform-connectivity-controller with agentgateway on")
+    need(k8s, "        - namespaceSelector: {}\n          podSelector:\n            matchLabels:\n              gateway.networking.k8s.io/gateway-class-name: agentgateway", "the controller's xDS peers (kubernetes)")
+    ok("the controller admits xDS from every data plane of its GatewayClass in any namespace, both flavours")
+
+
 def check_gateway(connectivity: str, base: list[str]) -> None:
     render = helm(connectivity, base)
     docs = documents(render)
@@ -318,6 +332,7 @@ def main(meta: str, connectivity: str) -> int:
     try:
         base = ["-f", values, "--namespace", "agent-platform", *FLEET_APIS]
         check_ingress_guard(connectivity, base)
+        check_controller_xds(connectivity, base)
         check_gateway(connectivity, base)
         check_cache(connectivity, base)
     finally:
