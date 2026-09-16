@@ -299,20 +299,24 @@ def main(meta: str, connectivity: str) -> int:
     def mm_values(manifest: dict) -> dict:
         return yaml.safe_load(hr_values(manifest[("HelmRelease", "model-manager")]))
 
+    # Likewise muster's OAuth server off (the platform's one login, the lab shape of
+    # examples/kind-lab-dex.yaml) → oauth.enabled: false: no issuer to trust.
     no_muster = docs(render(meta, [*ci, "--set", "components.muster.enabled=false"]))
+    no_login = docs(render(meta, [*ci, "--set", "muster.muster.oauth.server.enabled=false"]))
     for peer, manifest, path, derived, own in (
-        ("kagent", no_kagent, "kagent.disableWiring", True, False),
-        ("muster", no_muster, "muster.mcpServer.enabled", False, True),
+        ("components.kagent", no_kagent, "kagent.disableWiring", True, False),
+        ("components.muster", no_muster, "muster.mcpServer.enabled", False, True),
+        ("muster.muster.oauth.server.enabled", no_login, "oauth.enabled", False, True),
     ):
         got_off = mm_values(manifest)
         got_on = mm_values(off)
         for key in path.split("."):
             got_off, got_on = got_off[key], got_on[key]
         if got_off is not derived:
-            fail(f"components.{peer} off: the model-manager release carries {path}: {got_off!r}, expected the derived {derived!r}")
+            fail(f"{peer} off: the model-manager release carries {path}: {got_off!r}, expected the derived {derived!r}")
         if got_on is not own:
-            fail(f"components.{peer} on: the model-manager release carries {path}: {got_on!r}, expected the block's own {own!r} (nothing derived)")
-    print("ok: kagent off derives kagent.disableWiring: true and muster off muster.mcpServer.enabled: false for model-manager; with the peer on the block's own value stands")
+            fail(f"{peer} on: the model-manager release carries {path}: {got_on!r}, expected the block's own {own!r} (nothing derived)")
+    print("ok: kagent off derives kagent.disableWiring: true, muster off muster.mcpServer.enabled: false, muster's OAuth server off oauth.enabled: false for model-manager; with the peer on the block's own value stands")
     for name in ("substrate", "substrate-crds"):
         hr = off.get(("HelmRelease", name))
         if not hr or f"\n  targetNamespace: {SUBSTRATE_NAMESPACE}\n" not in hr:
