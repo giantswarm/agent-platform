@@ -1316,7 +1316,9 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | modelServing.modelsGateway.tls.issuerRef.name | string | `""` |  |
 | modelServing.modelsGateway.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
 | modelServing.modelsGateway.tls.issuerRef.group | string | `"cert-manager.io"` |  |
+| modelServing.modelsGateway.replicas | int | `1` |  |
 | modelServing.modelsGateway.externalDns.enabled | bool | `true` |  |
+| modelServing.modelsGateway.externalDns.annotations."giantswarm.io/external-dns" | string | `"managed"` |  |
 | modelServing.modelsGateway.jwtAuthentication.mode | string | `"Strict"` |  |
 | modelServing.modelsGateway.jwtAuthentication.issuer | string | `""` |  |
 | modelServing.modelsGateway.jwtAuthentication.audiences[0] | string | `"dex-k8s-authenticator"` |  |

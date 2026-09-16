@@ -37,13 +37,65 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
-  {{- if $mg.externalDns.enabled }}
   infrastructure:
+    # The data plane's shape (#492): the platform's pod and container security
+    # contexts (seccomp RuntimeDefault, non-root, no capabilities — what the
+    # fleet's Kyverno policies demand of every Deployment), image, resources
+    # and replicas, rendered below; without it the controller's default
+    # Deployment is denied at admission.
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: {{ $mg.name }}
+    {{- if $mg.externalDns.enabled }}
     # Inherited by the data plane's LoadBalancer Service, where external-dns
-    # reads it.
+    # reads them: the hostname, and the filter annotation the installation's
+    # external-dns selects Services by.
     annotations:
       external-dns.alpha.kubernetes.io/hostname: {{ $host }}
+      {{- with $mg.externalDns.annotations }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+    {{- end }}
+---
+# The models data plane: one agentgateway Deployment per Gateway, shaped like
+# the platform's edge (gateway.parameters.*) so it passes the same admission
+# policies, exposed as the LoadBalancer the models host resolves to.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: {{ $mg.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  {{- with .Values.agentgateway.proxy.image }}
+  image:
+    registry: {{ .registry }}
+    repository: {{ .repository }}
+    {{- with .tag }}
+    tag: {{ . }}
+    {{- end }}
   {{- end }}
+  service:
+    spec:
+      type: LoadBalancer
+  deployment:
+    spec:
+      replicas: {{ $mg.replicas | int }}
+      template:
+        spec:
+          automountServiceAccountToken: true
+          securityContext:
+            {{- toYaml .Values.gateway.parameters.podSecurityContext | nindent 12 }}
+          containers:
+            - name: agentgateway
+              securityContext:
+                {{- toYaml .Values.gateway.parameters.containerSecurityContext | nindent 16 }}
+              {{- with .Values.gateway.parameters.dataPlaneResources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
 {{- if $mg.tls.issuerRef.name }}
 ---
 # The listener's certificate from the platform's issuer, when one is named;
