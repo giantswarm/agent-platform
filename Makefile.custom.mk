@@ -85,6 +85,11 @@ KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
+# The postgres golden of verify-wiring (both flavours against GOLDEN_REF): model-manager
+# is on by default with no backend (giantswarm/agent-platform#329), an intended difference
+# held equal on both sides — a chart that predates the default accepts the key. Empty this
+# once GOLDEN_REF carries the line.
+WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
 # PolicyException is gone with them, the kagent controller's ingress policy
@@ -920,7 +925,7 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes >/tmp/vkn-sub-k8s.out 2>&1 || { cat /tmp/vkn-sub-k8s.out; exit 1; }
 	@for n in substrate-ate-api-server-ingress substrate-atenet-router-ingress substrate-atenet-egress-ingress substrate-dns-ingress substrate-workers-ingress substrate-actors-to-kagent-controller; do grep -q "^  name: $$n$$" /tmp/vkn-sub-k8s.out || { echo "FAIL: kubernetes flavour: no policy $$n"; exit 1; }; done
 	@if grep -q 'cilium.io' /tmp/vkn-sub-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavour"; exit 1; fi
-	@if grep -q 'policyTypes: \[Egress\]' /tmp/vkn-sub-k8s.out; then echo "FAIL: the kubernetes flavour renders an egress policy for Substrate; it renders ingress only, as for kagent"; exit 1; fi
+	@if awk '/^---/{p=0} /^  name: substrate-/{p=1} p' /tmp/vkn-sub-k8s.out | grep -q 'policyTypes: \[Egress\]'; then echo "FAIL: the kubernetes flavour renders an egress policy for Substrate; it renders ingress only, as for kagent (model-manager, on by default, has its own egress policy in this flavour)"; exit 1; fi
 	@echo "ok: Substrate hops (kubernetes)"
 	@echo "--> Substrate off: none of its policies renders"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set muster.enabled=true --set networkPolicy.flavor=cilium >/tmp/vkn-nosub.out 2>&1 || { cat /tmp/vkn-nosub.out; exit 1; }
@@ -1359,7 +1364,6 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	$(call managers_must_fail,backends list kserve API required,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=kserve',serving.kserve.io/v1beta1 API)
 	$(call managers_must_pass,backends list kserve API present,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set 'model-manager.backends[0]=ollama' --set 'model-manager.backends[1]=kserve' --api-versions serving.kserve.io/v1beta1)
 	$(call managers_must_pass,kserve API present,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.backend=kserve --api-versions serving.kserve.io/v1beta1)
-	$(call managers_must_fail,model-manager wiring needs kagent,$(VM) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=s --set global.domain=ci.example.com,model-manager wires kagent ModelConfigs but components.kagent.enabled is false)
 	$(call managers_must_pass,model-manager without kagent when wiring is off,$(VM) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set model-manager.kagent.disableWiring=true --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=s --set global.domain=ci.example.com)
 	$(call managers_must_fail,model-manager kagent namespace mismatch,$(MANAGERS_MIN) --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set model-manager.kagent.namespace=other,must equal the kagent component's namespace)
 	$(call managers_must_fail,agent-manager needs kagent,$(VM) --set components.agent-manager.enabled=true,agent-manager manages kagent agents)
@@ -1914,8 +1918,8 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if [ -n "$(GOLDEN_REF)" ] && git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
 		rm -rf /tmp/vw-pg-ref && git worktree add -q --detach /tmp/vw-pg-ref $(GOLDEN_REF) && \
 		for flavor in cilium kubernetes; do \
-			helm template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-pg-new-$$flavor.out; \
-			helm template t /tmp/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-pg-old-$$flavor.out; \
+			helm template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-pg-new-$$flavor.out; \
+			helm template t /tmp/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-pg-old-$$flavor.out; \
 			diff -u /tmp/vw-pg-old-$$flavor.out /tmp/vw-pg-new-$$flavor.out || { echo "FAIL: the $$flavor render changed with postgres.imagePullSecrets and .affinity unset"; git worktree remove --force /tmp/vw-pg-ref; exit 1; }; \
 		done; \
 		git worktree remove --force /tmp/vw-pg-ref; \

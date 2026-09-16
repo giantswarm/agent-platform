@@ -1,8 +1,8 @@
 {{- /*
 Render-time guards of the model-manager component. They fail `helm template`
 (and therefore CI lint + install) with an actionable message instead of
-shipping a service that cannot reach its backend or its identity provider, a
-route the API server rejects, or an MCPServer CR without its CRD.
+shipping a service that cannot reach a statically listed backend, a second
+login provider beside global.identity, or a route the API server rejects.
 */ -}}
 {{- if (include "agent-platform.modelManager.enabled" .) }}
   {{- $mm := .Values.modelManager }}
@@ -114,28 +114,33 @@ route the API server rejects, or an MCPServer CR without its CRD.
     {{- end }}
   {{- end }}
 
-  {{- /* The MCPServer CRD ships with the muster component. */ -}}
-  {{- if and (dig "muster" "mcpServer" "enabled" false $chart) (not (include "agent-platform.componentEnabled" (dict "root" . "name" "muster"))) }}
-    {{- fail "model-manager.muster.mcpServer.enabled is true but components.muster.enabled is false: the MCPServer CRD ships with muster, so the CR has no API to map to. Turn on muster or set model-manager.muster.mcpServer.enabled: false" }}
-  {{- end }}
+  {{- /* The MCPServer CRD ships with the muster component, so the MCP surface
+         follows it: with components.muster off the meta chart forwards
+         muster.mcpServer.enabled: false to the model-manager release
+         (agent-platform.componentDerivedValues) — model-manager is on by
+         default and an installation may run without muster — and the muster
+         peer policy (netpol.yaml) reads the same toggle. Nothing to guard. */ -}}
 
   {{- /* The component release resolves its OAuth inputs through the chart's
-         global.identity / global.domain fallbacks; a missing one fails inside
-         the child release, out of sight. Fail here, naming both keys. */ -}}
-  {{- if (include "agent-platform.modelManager.oauthEnabled" .) }}
+         global.identity / global.domain fallbacks. model-manager is on by
+         default (giantswarm/agent-platform#329), so this guard follows the
+         muster guard's convention exactly: a value in the component block
+         that disagrees with global.identity would give two components two
+         different logins — checked only where both sides are set, so a render
+         that sets no global.identity (a bare `helm template`, global.domain or
+         global.identity.issuerUrl alone for hostnames or a JWT issuer, an
+         install that configures the component block itself) is untouched and
+         a missing input is reported by the child release, as for muster. The
+         opt-in managers (agent-manager, vm-manager) keep their absence guards,
+         the way kagent's fire only with its route on. */ -}}
+  {{- if and (include "agent-platform.modelManager.oauthEnabled" .) (eq (include "agent-platform.modelManager.oauthProvider" .) "dex") }}
     {{- $oauth := dig "oauth" dict $chart }}
-    {{- if and (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
-      {{- fail "model-manager.oauth.enabled is true but model-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL (the gateway route, e.g. https://agentgateway.<domain>/model-manager)" }}
-    {{- end }}
-    {{- if eq (dig "provider" "dex" $oauth) "dex" }}
-      {{- if not (include "agent-platform.modelManager.issuerUrl" .) }}
-        {{- fail "model-manager.oauth.enabled is true but model-manager.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set: the resource server needs the login issuer" }}
-      {{- end }}
-      {{- if and (not (dig "dex" "clientID" "" $oauth)) (not .Values.global.identity.clientId) }}
-        {{- fail "model-manager.oauth.enabled is true but model-manager.oauth.dex.clientID is empty and global.identity.clientId is not set: the resource server needs the platform OAuth client" }}
-      {{- end }}
-      {{- if and (not (dig "existingSecret" "" $oauth)) (not (dig "dex" "clientSecret" "" $oauth)) (not .Values.global.identity.existingSecret) }}
-        {{- fail "model-manager.oauth.enabled is true but none of model-manager.oauth.existingSecret, model-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: the resource server needs the platform client's secret (key dex-client-secret)" }}
+    {{- $dex := dig "dex" dict $oauth }}
+    {{- $identity := .Values.global.identity }}
+    {{- range $pair := list (list "dex.issuerURL" (dig "issuerURL" "" $dex) "issuerUrl" $identity.issuerUrl) (list "dex.clientID" (dig "clientID" "" $dex) "clientId" $identity.clientId) (list "existingSecret" (dig "existingSecret" "" $oauth) "existingSecret" $identity.existingSecret) }}
+      {{- $own := index $pair 1 }}{{- $global := index $pair 3 }}
+      {{- if and $own $global (ne (toString $own) (toString $global)) }}
+        {{- fail (printf "model-manager.oauth.%s (%s) differs from global.identity.%s (%s); the platform has one login provider" (index $pair 0) $own (index $pair 2) $global) }}
       {{- end }}
     {{- end }}
   {{- end }}
