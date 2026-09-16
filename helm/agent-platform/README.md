@@ -363,6 +363,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
 | components.vm-manager.gatedValues[0] | string | `"vm-manager"` |  |
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
+| components.cluster-manager.chart | string | `"cluster-manager"` |  |
+| components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.cluster-manager.versionRange | string | `">=0.4.0 <1.0.0"` |  |
+| components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
+| components.cluster-manager.enabled | bool | `false` |  |
+| components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
+| components.cluster-manager.gatedValues[0] | string | `"cluster-manager"` |  |
+| components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.backstage.versionRange | string | `">=1.0.0 <3.0.0"` |  |
@@ -1114,6 +1122,26 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
+| cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
+| cluster-manager.installation.name | string | `""` |  |
+| cluster-manager.mcp.enabled | bool | `true` |  |
+| cluster-manager.oauth.enabled | bool | `true` |  |
+| cluster-manager.oauth.provider | string | `"dex"` |  |
+| cluster-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| cluster-manager.oauth.downstream.enabled | bool | `true` |  |
+| cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
+| cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
+| cluster-manager.networkPolicy.enabled | bool | `false` |  |
+| clusterManager.flux.requireApi | bool | `false` |  |
+| clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.cidrs | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.ports[0] | int | `443` |  |
+| clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
+| clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
+| clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |
