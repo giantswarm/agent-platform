@@ -180,6 +180,50 @@ def drop_new_roster_entries(here: str, there: str) -> tuple:
     return strip(here), strip(there)
 
 
+# giantswarm/agent-platform#373 gives the agentgateway data plane two replicas
+# behind a PodDisruptionBudget, spread across nodes. Held at the previous shape
+# (replicas 1, the budget and the spread off, the annotation back on) the render
+# is the golden's again but for two differences no value can undo: the overlay
+# states deployment.spec.replicas whatever it is, and the meta chart forwards
+# the three new keys to the connectivity release whatever they are set to. Both
+# are cut from BOTH sides, the way a new roster entry is, so everything else
+# still has to match byte for byte. Drop all of it, and the holds below, once
+# GOLDEN_REF carries the line.
+HA_KEYS = ("replicas", "podDisruptionBudget", "spread")
+HA_OVERLAY = re.compile(r"(?<=\n  deployment:\n    spec:\n)      replicas: \d+\n")
+
+
+def drop_ha_overlay(render: str) -> str:
+    """The connectivity render without the data plane's replica count."""
+    return HA_OVERLAY.sub("", render)
+
+
+def drop_ha_forwarded(render: str) -> str:
+    """The meta render without HA_KEYS in the forwarded gateway.parameters block.
+
+    Scoped to that block: `podDisruptionBudget` is a key of other components'
+    forwarded values too (kagent.substrateWorkerPool's, muster's), and those
+    must still be compared.
+    """
+    out, lines, i = [], render.split("\n"), 0
+    while i < len(lines):
+        out.append(lines[i])
+        if lines[i] != "      parameters:":
+            i += 1
+            continue
+        i += 1
+        while i < len(lines) and lines[i].startswith("        "):
+            key = re.match(r"^        ([A-Za-z0-9_-]+):", lines[i])
+            if key and key.group(1) in HA_KEYS:
+                i += 1
+                while i < len(lines) and lines[i].startswith("          "):
+                    i += 1
+                continue
+            out.append(lines[i])
+            i += 1
+    return "\n".join(out)
+
+
 def check_golden(meta: str, connectivity: str) -> None:
     ref = os.environ.get("GOLDEN_REF", "origin/main")
     if not ref:
@@ -206,18 +250,33 @@ def check_golden(meta: str, connectivity: str) -> None:
         # the range as a value (components.<name>.versionRange is one). Drop
         # this once GOLDEN_REF carries the line.
         mm_range = ["--set", "components.model-manager.versionRange=>=0.22.0 <1.0.0"]
+        # #373's holds (see HA_KEYS above). The three new keys reach THIS side
+        # alone -- GOLDEN_REF's gateway.parameters is closed and declares none
+        # of them -- while the annotation this change empties and the
+        # controller's replica count are declared on both and held there, where
+        # they are the golden's own defaults.
+        ha_here = [
+            "--set", "gateway.parameters.replicas=1",
+            "--set", "gateway.parameters.podDisruptionBudget.enabled=false",
+            "--set", "gateway.parameters.spread.enabled=false",
+        ]
+        ha_hold = ["--set-string", "gateway.parameters.podAnnotations.karpenter\\.sh/do-not-disrupt=true"]
+        ha_hold_meta = [*ha_hold, "--set", "agentgateway.controller.replicaCount=1"]
         shapes = [
-            ("meta default", meta, [*mm_off, *mm_static]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range]),
-            ("connectivity default", connectivity, [*VM, *mm_off]),
-            ("connectivity full", connectivity, [*CONN_FULL, *mm_off]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off]),
+            ("meta default", meta, [*mm_off, *mm_static, *ha_hold_meta]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *ha_hold_meta]),
+            ("connectivity default", connectivity, [*VM, *mm_off, *ha_hold]),
+            ("connectivity full", connectivity, [*CONN_FULL, *mm_off, *ha_hold]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off, *ha_hold]),
         ]
         for label, chart, flags in shapes:
-            here = helm(chart, flags)
+            here = helm(chart, [*flags, *ha_here])
             there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
+                here, there = drop_ha_forwarded(here), drop_ha_forwarded(there)
+            else:
+                here, there = drop_ha_overlay(here), drop_ha_overlay(there)
             if here != there:
                 sys.exit(f"FAIL: the {label} render drifted from {ref}")
         ok(f"{len(shapes)} renders byte-identical to {ref}")
