@@ -1,0 +1,57 @@
+# Exercises klaus-gateway's egress to the kube-apiserver for its team-review
+# endpoint (templates/klausgateway/netpol.yaml, giantswarm/agent-platform#511)
+# on the bolt link store: reviews.enabled renders the -klausgateway-store-egress
+# policy with the kube-apiserver rule although obo.store is left at the
+# klaus-gateway chart's default (bolt on a PVC, the shape an installation keeps
+# its links in), next to the a2a and OBO egress policies. The flavor is
+# explicit: `ct lint` renders without cilium.io/v2 served, and `auto` would pick
+# the kubernetes flavor (that one is linted through
+# test-netpol-kubernetes-values.yaml). agentgateway-* mode with the agentgateway
+# component on, as the a2a egress targets the data plane; parentRefs is required
+# in every mode.
+components:
+  agentgateway:
+    enabled: true
+  klaus-gateway:
+    enabled: true
+
+ingress:
+  mode: agentgateway-muster
+  parentRefs:
+    - name: giantswarm-default
+      namespace: envoy-gateway-system
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - muster.ci.example.com
+
+networkPolicy:
+  enabled: true
+  flavor: cilium
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory
+
+klausGateway:
+  a2a:
+    enabled: true
+  slack:
+    enabled: true
+    mode: events
+    secretName: slack-credentials
+  obo:
+    enabled: true
+    musterUrl: https://muster.ci.example.com
+    callbackBaseUrl: https://agentgateway.ci.example.com
+    storePath: /var/lib/klaus-gateway/obo/links.bolt
+    persistence:
+      enabled: true
+  reviews:
+    enabled: true
+    allowedCallers:
+      - system:serviceaccount:giantswarm:giantswarm-repo-manager

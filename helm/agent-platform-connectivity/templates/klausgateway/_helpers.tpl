@@ -25,16 +25,22 @@ uses this, so a renamed release moves them all.
 Truthy (emits "true") when the gateway pod reads or writes the Kubernetes API,
 so its egress needs the kube-apiserver: the Secret link store
 (klausGateway.obo.store: secret with OBO on — the gateway's own gate,
-klaus-gateway's obo.secretStore helper) only. The routing stores that reached
-the API (configmap, crd) and the embedded ChannelRoute controller are gone from
-klaus-gateway (giantswarm/klaus-gateway#271). Empty otherwise: the default
-shape — memory routing, the bolt link store — never touches the API and gets
-no rule. The store keys are the klaus-gateway chart's; when the block leaves
-one unset its chart default applies (bolt, memory).
+klaus-gateway's obo.secretStore helper), and the team-review endpoint
+(klausGateway.reviews.enabled; giantswarm/klaus-gateway#273), which verifies
+every caller of POST /reviews and POST /notices with an
+authentication.k8s.io/v1 TokenReview — whatever the link store, so an
+installation on the bolt store gets the rule too (giantswarm/agent-platform#511;
+without it every review times out at the API and the endpoint answers 503).
+The routing stores that reached the API (configmap, crd) and the embedded
+ChannelRoute controller are gone from klaus-gateway (giantswarm/klaus-gateway#271).
+Empty otherwise: the default shape — memory routing, the bolt link store, no
+reviews — never touches the API and gets no rule. The keys are the
+klaus-gateway chart's; when the block leaves one unset its chart default
+applies (bolt, memory, reviews off).
 */}}
 {{- define "agent-platform.klausGateway.apiServerEgress" -}}
 {{- $kg := .Values.klausGateway -}}
-{{- if and (dig "obo" "enabled" false $kg) (eq (dig "obo" "store" "bolt" $kg) "secret") -}}true{{- end -}}
+{{- if or (dig "reviews" "enabled" false $kg) (and (dig "obo" "enabled" false $kg) (eq (dig "obo" "store" "bolt" $kg) "secret")) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -59,7 +65,8 @@ default 6379) — the one the meta chart puts into the gateway's routing.valkey.
 {{/*
 Truthy (emits "true") when the gateway pod reaches any store beyond its own
 process — the gate of the -klausgateway-store-egress policy: the Valkey
-routing store or anything on the Kubernetes API.
+routing store or anything on the Kubernetes API (the Secret link store, the
+team-review endpoint's TokenReview).
 */}}
 {{- define "agent-platform.klausGateway.storeEgress" -}}
 {{- if or (include "agent-platform.klausGateway.valkeyEgress" .) (include "agent-platform.klausGateway.apiServerEgress" .) -}}true{{- end -}}

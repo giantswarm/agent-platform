@@ -2921,7 +2921,7 @@ verify-actor-telemetry-egress: ## Assert the OTLP egress of the actors (Substrat
 	@echo "ok: $@"
 
 .PHONY: verify-klausgateway-netpol
-verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443): the -klausgateway-store-egress policy renders exactly while a store reaches beyond the pod — the platform's Valkey pods on their Service port with klausGateway.routing.store valkey (and the valkey component on; off = an out-of-band Valkey, no rule) and the kube-apiserver with klausGateway.obo.store secret and OBO on — as DNS + the rules in the cilium flavour and DNS + the pod selector / networkPolicy.kubernetes.apiServerCIDR (Egress only) in the kubernetes one, each rule only with its store, selecting the pod by klausGateway.fullnameOverride; the default shape (memory routing, the bolt link store) renders none of it next to the unchanged a2a and OBO policies; none with the Secret store but OBO off, with networkPolicy off, or with the component off.
+verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443) and to the API server for its team-review endpoint (#511): the -klausgateway-store-egress policy renders exactly while a store reaches beyond the pod — the platform's Valkey pods on their Service port with klausGateway.routing.store valkey (and the valkey component on; off = an out-of-band Valkey, no rule) and the kube-apiserver with klausGateway.obo.store secret and OBO on — or while klausGateway.reviews.enabled (a TokenReview per POST; the kube-apiserver whatever the link store, the rule rendered once next to the Secret store's) — as DNS + the rules in the cilium flavour and DNS + the pod selector / networkPolicy.kubernetes.apiServerCIDR (Egress only) in the kubernetes one, each rule only with its store, selecting the pod by klausGateway.fullnameOverride; the default shape (memory routing, the bolt link store, reviews off) renders none of it next to the unchanged a2a and OBO policies; none with the Secret store but OBO off, with networkPolicy off, or with the component off.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> default stores (memory routing, bolt links): the a2a and OBO policies, no store policy"
 	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) >/tmp/vkg-default.out 2>&1 || { cat /tmp/vkg-default.out; exit 1; }
@@ -2975,6 +2975,27 @@ verify-klausgateway-netpol: ## Assert klaus-gateway's egress to its stores (#443
 	@grep -q 'policyTypes: \[Egress\]' /tmp/vkg-k8s-np.out || { echo "FAIL: the NetworkPolicy is not Egress only"; exit 1; }
 	@grep -q 'cidr: "10.9.0.1/32"' /tmp/vkg-k8s-np.out || { echo "FAIL: the NetworkPolicy does not use networkPolicy.kubernetes.apiServerCIDR"; grep cidr /tmp/vkg-k8s-np.out; exit 1; }
 	@grep -q 'values: \[kube-dns, coredns, k8s-dns-node-cache\]' /tmp/vkg-k8s-np.out || { echo "FAIL: the NetworkPolicy carries no DNS rule"; exit 1; }
+	@echo "--> cilium, the team-review endpoint on the bolt link store (#511): DNS + the kube-apiserver entity, one policy, no Valkey rule"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.reviews.enabled=true --set klausGateway.obo.storePath=/var/lib/klaus-gateway/obo/links.bolt >/tmp/vkg-reviews.out 2>&1 || { cat /tmp/vkg-reviews.out; exit 1; }
+	@$(PICK) /tmp/vkg-reviews.out CiliumNetworkPolicy $(KG_STORE_POLICY) >/tmp/vkg-reviews-cnp.out || { echo "FAIL: no CiliumNetworkPolicy $(KG_STORE_POLICY) with klausGateway.reviews.enabled=true on the bolt store (every TokenReview would time out, the endpoint answer 503)"; exit 1; }
+	@[ "$$(grep -c '^  name: $(KG_STORE_POLICY)$$' /tmp/vkg-reviews.out)" = "1" ] || { echo "FAIL: expected exactly one store egress policy with reviews on"; exit 1; }
+	@grep -q 'app.kubernetes.io/name: "klaus-gateway"' /tmp/vkg-reviews-cnp.out || { echo "FAIL: the reviews policy does not select the klaus-gateway pod"; exit 1; }
+	@grep -q 'toEntities: \["kube-apiserver"\]' /tmp/vkg-reviews-cnp.out || { echo "FAIL: the cilium policy does not admit egress to the kube-apiserver entity with reviews on"; cat /tmp/vkg-reviews-cnp.out; exit 1; }
+	@grep -q 'k8s-app: kube-dns' /tmp/vkg-reviews-cnp.out || { echo "FAIL: the reviews policy carries no DNS rule"; exit 1; }
+	@if grep -q 'ingress:\|toFQDNs\|toCIDR\|world\|toServices\|app.kubernetes.io/name: valkey' /tmp/vkg-reviews-cnp.out; then echo "FAIL: the reviews policy admits more than DNS and the apiserver"; cat /tmp/vkg-reviews-cnp.out; exit 1; fi
+	@echo "--> reviews on next to the Secret link store: the kube-apiserver rule renders once"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.reviews.enabled=true --set klausGateway.obo.store=secret >/tmp/vkg-reviews-secret.out 2>&1 || { cat /tmp/vkg-reviews-secret.out; exit 1; }
+	@$(PICK) /tmp/vkg-reviews-secret.out CiliumNetworkPolicy $(KG_STORE_POLICY) >/tmp/vkg-reviews-secret-cnp.out || { echo "FAIL: no store policy with reviews on and the Secret store"; exit 1; }
+	@[ "$$(grep -c 'toEntities: \["kube-apiserver"\]' /tmp/vkg-reviews-secret-cnp.out)" = "1" ] || { echo "FAIL: expected exactly one kube-apiserver rule with reviews on and the Secret store"; grep -c kube-apiserver /tmp/vkg-reviews-secret-cnp.out; exit 1; }
+	@echo "--> reviews off (the chart default, the key declared): the bolt store renders no policy"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.reviews.enabled=false --set klausGateway.obo.storePath=/var/lib/klaus-gateway/obo/links.bolt >/tmp/vkg-reviews-off.out 2>&1 || { cat /tmp/vkg-reviews-off.out; exit 1; }
+	@if grep -q '$(KG_STORE_POLICY)' /tmp/vkg-reviews-off.out; then echo "FAIL: the store egress policy renders with reviews off on the bolt store"; exit 1; fi
+	@echo "--> kubernetes flavour, reviews on: a NetworkPolicy, Egress only, networkPolicy.kubernetes.apiServerCIDR + DNS"
+	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.reviews.enabled=true --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vkg-k8s-reviews.out 2>&1 || { cat /tmp/vkg-k8s-reviews.out; exit 1; }
+	@$(PICK) /tmp/vkg-k8s-reviews.out NetworkPolicy $(KG_STORE_POLICY) >/tmp/vkg-k8s-reviews-np.out || { echo "FAIL: no NetworkPolicy $(KG_STORE_POLICY) with reviews on in the kubernetes flavour"; exit 1; }
+	@grep -q 'policyTypes: \[Egress\]' /tmp/vkg-k8s-reviews-np.out || { echo "FAIL: the reviews NetworkPolicy is not Egress only"; exit 1; }
+	@grep -q 'cidr: "10.9.0.1/32"' /tmp/vkg-k8s-reviews-np.out || { echo "FAIL: the reviews NetworkPolicy does not use networkPolicy.kubernetes.apiServerCIDR"; grep cidr /tmp/vkg-k8s-reviews-np.out; exit 1; }
+	@grep -q 'values: \[kube-dns, coredns, k8s-dns-node-cache\]' /tmp/vkg-k8s-reviews-np.out || { echo "FAIL: the reviews NetworkPolicy carries no DNS rule"; exit 1; }
 	@echo "--> the selector follows klausGateway.fullnameOverride"
 	@helm template t $(CONNECTIVITY_DIR) $(KG_NETPOL) --set klausGateway.obo.store=secret --set klausGateway.fullnameOverride=kg-renamed >/tmp/vkg-renamed.out 2>&1 || { cat /tmp/vkg-renamed.out; exit 1; }
 	@$(PICK) /tmp/vkg-renamed.out CiliumNetworkPolicy $(KG_STORE_POLICY) | grep -q 'app.kubernetes.io/name: "kg-renamed"' || { echo "FAIL: the store egress policy does not select the renamed pod"; exit 1; }
