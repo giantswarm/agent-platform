@@ -468,10 +468,22 @@ public IPv4 destinations only. A private identity provider inside one of
 `worldExcludedCIDRs`, and an issuer the cluster resolves over IPv6, belong
 there.
 
+The platform's identity provider is always among the controller's external
+targets: `global.identity.issuerUrl`'s host on 443 (the URL's port when it
+carries one) is opened by name in the cilium flavour and as port 443 of the
+wide rule in the kubernetes flavour, in every release that runs the controller
+and whatever the routes name. The controller serves the JWT policies of every
+release in the cluster, and the serving slice's models Gateway beside the
+platform's release takes the issuer's public host on 443 by default — a policy
+the platform's release cannot see (giantswarm/agent-platform#505). An
+in-cluster issuer URL adds nothing: `gateway.jwksEgress` covers it.
+
 The cilium controller policy renders the DNS proxy clause only while a name is
-selected. With in-cluster hosts alone it renders no external rule and no proxy
-clause, in either flavour; `make verify-wiring` asserts that against
-`origin/main`, the controller policies first and then the whole render.
+selected. With an in-cluster issuer and in-cluster route hosts alone it renders
+no external rule and no proxy clause, in either flavour; `make verify-wiring`
+asserts that against `origin/main`, the controller policies first and then the
+whole render, and that a public issuer is opened on 443 with the proxy clause
+while every route's host is in-cluster.
 
 ## The GPU node pool
 

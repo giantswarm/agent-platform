@@ -1,4 +1,4 @@
-{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
+{{- if and (include "agent-platform.agentgateway.controller" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
 {{- $externalPorts := include "agent-platform.jwks.externalPorts" . | fromJsonArray }}
 {{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
 {{- $extraCidrs := $extra.cidrs | default list }}
@@ -66,9 +66,11 @@ spec:
     {{- end }}
     {{- end }}
     {{- /* Vanilla NetworkPolicy selects addresses, never names: an external
-    issuer the routes name reaches the controller as every public destination on
-    its JWKS port, minus networkPolicy.kubernetes.worldExcludedCIDRs — the
-    pattern the manager policies use. */}}
+    issuer the routes name, and the platform's identity provider on 443 (the
+    models Gateway's default JWKS source), reach the controller as every public
+    destination on their JWKS ports, minus
+    networkPolicy.kubernetes.worldExcludedCIDRs — the pattern the manager
+    policies use. */}}
     {{- if $externalPorts }}
     - to:
         - ipBlock:

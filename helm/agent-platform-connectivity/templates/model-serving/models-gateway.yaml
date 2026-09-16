@@ -119,8 +119,18 @@ spec:
 ---
 # AgentgatewayBackend — static backend for the issuer's JWKS endpoint, in the
 # release namespace so the policy's backendRef needs no ReferenceGrant. The
-# default is the public issuer on 443 (TLS implied by the port, the system
-# trust), which a workload cluster reaches like any client.
+# default is the public issuer on 443, TLS implied by the port. The fetch is
+# the agentgateway CONTROLLER's, not the data plane's: the controller resolves
+# this backend, fetches the key set (verified against its system trust, or
+# policies.tls.caCertificateRefs below) and pushes the keys to the data plane
+# over xDS — a failed fetch pushes an empty set and every token is refused as
+# "unknown key". So the controller's network policy must admit this host on
+# this port (agent-platform.jwks.externalTargets: the platform's release
+# renders that policy beside this slice on the installation's own cluster,
+# the slice's own on a workload cluster), and the fetch's state is this
+# policy's Accepted condition (reason Valid; PartiallyValid names the URL) and
+# the controller's `error fetching jwks` line — never the data plane's log
+# (giantswarm/agent-platform#505; tests/verify-serving-slice-live.py).
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
 metadata:

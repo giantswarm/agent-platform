@@ -1,4 +1,4 @@
-{{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
+{{- if and (include "agent-platform.agentgateway.controller" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
 {{- $external := include "agent-platform.jwks.externalTargets" . | fromJsonArray }}
 {{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
 {{- $extraCidrs := $extra.cidrs | default list }}
@@ -78,7 +78,9 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
-    {{- /* Each external issuer the routes name, by name on its own JWKS port. */}}
+    {{- /* Each external issuer the routes name, and the platform's identity
+    provider on 443 (the models Gateway's default JWKS source, whichever
+    release renders that policy), by name on its own JWKS port. */}}
     {{- range $external }}
     - toFQDNs:
         - matchName: {{ .host | quote }}

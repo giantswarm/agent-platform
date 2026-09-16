@@ -1235,9 +1235,10 @@ gateway:
       allowedRoutes:
         namespaces:
           from: Same
-  # Allow the data-plane to reach the JWKS endpoint for JWT validation
-  # (oauthMode: validate). Required when the JWKS service runs on a port not
-  # covered by the default cluster egress rules (80/443) — typically Dex on 5556.
+  # Let the agentgateway controller (which fetches every JWKS and pushes the
+  # keys to the data plane over xDS) and the data plane reach an in-cluster
+  # JWKS endpoint. Required when the JWKS service runs on a port not covered
+  # by the default cluster egress rules (80/443) — typically Dex on 5556.
   jwksEgress:                  # any agentgateway-* mode with a non-muster JWKS source
     enabled: false
     namespace: giantswarm
@@ -4806,9 +4807,17 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # A token for another client (an agent's, a service's) is refused.
       audiences: [dex-k8s-authenticator]
       # JWKS source. An empty host takes the issuer's host on 443 — the public
-      # issuer, which a workload cluster reaches without gateway.jwksEgress
-      # (443 needs none; the port implies TLS). An in-cluster host and port
-      # work as in the other policies' jwks blocks.
+      # issuer, which needs no gateway.jwksEgress (the port implies TLS). The
+      # agentgateway CONTROLLER fetches the key set and pushes it to the data
+      # plane over xDS, so the controller's network policy must reach this
+      # host on this port: it admits global.identity.issuerUrl's host on 443
+      # by name in every release that runs the controller (the platform's
+      # beside this slice, the slice's own on a workload cluster) and this
+      # host when it differs. A failed fetch is the <name>-jwt policy's
+      # Accepted condition (reason PartiallyValid, the message names the URL)
+      # and the controller's `error fetching jwks` line; the data plane then
+      # refuses every token as "unknown key". An in-cluster host and port work
+      # as in the other policies' jwks blocks.
       jwks:
         host: ""
         port: 443
