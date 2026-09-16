@@ -575,9 +575,6 @@
                         "repository": {
                             "type": "string"
                         },
-                        "targetNamespace": {
-                            "type": "string"
-                        },
                         "valuesFrom": {
                             "type": "string"
                         },
