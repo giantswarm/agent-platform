@@ -28,7 +28,13 @@ property the slice relies on:
   nothing of it with modelsGateway.enabled: false; the guards (no issuer, no
   certificate, no audience, a host carrying a port) fail naming the key;
 - the two 24 GB presets pass the preset schema's required keys, name no image,
-  enable tools with a parser, request one GPU and fit 24 GB.
+  enable tools with a parser, request one GPU and fit 24 GB;
+- the cache claim (giantswarm/agent-platform#483): no PersistentVolumeClaim object
+  in the connectivity render -- a post-install,post-upgrade hook Job server-side
+  applies hf-cache into the serving namespace (keep, the access modes, the size,
+  the class knob incl. "-", volumeName) as <release>-hooks, whose ClusterRole
+  carries get/create/patch on claims; cache.enabled: false and an existing claim
+  render neither the hook nor the identity, and the existing claim is published.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
@@ -147,63 +153,113 @@ def check_profile(meta: str) -> str:
     return values_block(conn)
 
 
-def check_gateway(connectivity: str, forwarded: str) -> None:
-    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-        f.write(forwarded)
-        values = f.name
-    try:
-        base = ["-f", values, "--namespace", "agent-platform", *FLEET_APIS]
-        render = helm(connectivity, base)
-        docs = documents(render)
-        gw = docs.get(("Gateway", "models"))
-        if not gw:
-            sys.exit("FAIL: no Gateway models in the connectivity render")
-        for needle in ("  gatewayClassName: agentgateway", "      protocol: HTTPS", '      hostname: "models.wc01.example.com"', "            name: wildcard-tls", "          from: All",
-                       "      external-dns.alpha.kubernetes.io/hostname: models.wc01.example.com"):
-            need(gw, needle, "the models Gateway")
-        pol = docs.get(("AgentgatewayPolicy", "models-jwt"))
-        if not pol:
-            sys.exit("FAIL: no AgentgatewayPolicy models-jwt")
-        for needle in ("      kind: Gateway\n      name: models", "    inheritance: Override", "      mode: Strict", f"            - {AUDIENCE}", '        - issuer: "https://dex.mc.example.com"',
-                       "                name: models-jwks", '              jwksPath: "/keys"'):
-            need(pol, needle, "the models JWT policy")
-        if sum(1 for (kind, name) in docs if kind == "AgentgatewayPolicy" and name.startswith("models")) != 1:
-            sys.exit("FAIL: more than one models policy")
-        be = docs.get(("AgentgatewayBackend", "models-jwks"))
-        if not be:
-            sys.exit("FAIL: no AgentgatewayBackend models-jwks")
-        for needle in ("    host: dex.mc.example.com", "    port: 443", "    tls:"):
-            need(be, needle, "the JWKS backend")
-        if ("Certificate", "models-tls") in docs:
-            sys.exit("FAIL: a Certificate rendered without tls.issuerRef.name")
-        cm = docs[("ConfigMap", "agent-platform-model-serving")]
-        for needle in ("      gateway:\n        enabled: true", "        endpoint: https://models.wc01.example.com", "        pathConvention: /<namespace>/<model>/v1"):
-            need(cm, needle, "the discovery ConfigMap")
-        ok("connectivity: the models Gateway on models.<domain> with the wildcard, one Strict policy (audience, Override, issuer), the JWKS backend at the issuer on 443/TLS, the discovery entry")
+def check_gateway(connectivity: str, base: list[str]) -> None:
+    render = helm(connectivity, base)
+    docs = documents(render)
+    gw = docs.get(("Gateway", "models"))
+    if not gw:
+        sys.exit("FAIL: no Gateway models in the connectivity render")
+    for needle in ("  gatewayClassName: agentgateway", "      protocol: HTTPS", '      hostname: "models.wc01.example.com"', "            name: wildcard-tls", "          from: All",
+                   "      external-dns.alpha.kubernetes.io/hostname: models.wc01.example.com"):
+        need(gw, needle, "the models Gateway")
+    pol = docs.get(("AgentgatewayPolicy", "models-jwt"))
+    if not pol:
+        sys.exit("FAIL: no AgentgatewayPolicy models-jwt")
+    for needle in ("      kind: Gateway\n      name: models", "    inheritance: Override", "      mode: Strict", f"            - {AUDIENCE}", '        - issuer: "https://dex.mc.example.com"',
+                   "                name: models-jwks", '              jwksPath: "/keys"'):
+        need(pol, needle, "the models JWT policy")
+    if sum(1 for (kind, name) in docs if kind == "AgentgatewayPolicy" and name.startswith("models")) != 1:
+        sys.exit("FAIL: more than one models policy")
+    be = docs.get(("AgentgatewayBackend", "models-jwks"))
+    if not be:
+        sys.exit("FAIL: no AgentgatewayBackend models-jwks")
+    for needle in ("    host: dex.mc.example.com", "    port: 443", "    tls:"):
+        need(be, needle, "the JWKS backend")
+    if ("Certificate", "models-tls") in docs:
+        sys.exit("FAIL: a Certificate rendered without tls.issuerRef.name")
+    cm = docs[("ConfigMap", "agent-platform-model-serving")]
+    for needle in ("      gateway:\n        enabled: true", "        endpoint: https://models.wc01.example.com", "        pathConvention: /<namespace>/<model>/v1"):
+        need(cm, needle, "the discovery ConfigMap")
+    ok("connectivity: the models Gateway on models.<domain> with the wildcard, one Strict policy (audience, Override, issuer), the JWKS backend at the issuer on 443/TLS, the discovery entry")
 
-        cert = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.tls.issuerRef.name=platform-ca"]))
-        c = cert.get(("Certificate", "models-tls"))
-        if not c or "  secretName: models-tls" not in c or "    - models.wc01.example.com" not in c or "    name: platform-ca\n    kind: ClusterIssuer" not in c:
-            sys.exit(f"FAIL: the Certificate from tls.issuerRef is wrong:\n{c}")
-        need(cert[("Gateway", "models")], "            name: models-tls", "the Gateway with a Certificate")
-        ok("tls.issuerRef.name renders a Certificate for the host into models-tls and the listener names it")
+    cert = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.tls.issuerRef.name=platform-ca"]))
+    c = cert.get(("Certificate", "models-tls"))
+    if not c or "  secretName: models-tls" not in c or "    - models.wc01.example.com" not in c or "    name: platform-ca\n    kind: ClusterIssuer" not in c:
+        sys.exit(f"FAIL: the Certificate from tls.issuerRef is wrong:\n{c}")
+    need(cert[("Gateway", "models")], "            name: models-tls", "the Gateway with a Certificate")
+    ok("tls.issuerRef.name renders a Certificate for the host into models-tls and the listener names it")
 
-        off = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.enabled=false"]))
-        if any(name.startswith("models") for kind, name in off if kind in ("Gateway", "AgentgatewayPolicy", "AgentgatewayBackend", "Certificate")):
-            sys.exit("FAIL: models Gateway objects rendered with modelsGateway.enabled=false")
-        need(off[("ConfigMap", "agent-platform-model-serving")], "      gateway:\n        enabled: false", "the discovery ConfigMap with the Gateway off")
-        ok("modelsGateway.enabled: false renders none of it")
+    off = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.enabled=false"]))
+    if any(name.startswith("models") for kind, name in off if kind in ("Gateway", "AgentgatewayPolicy", "AgentgatewayBackend", "Certificate")):
+        sys.exit("FAIL: models Gateway objects rendered with modelsGateway.enabled=false")
+    need(off[("ConfigMap", "agent-platform-model-serving")], "      gateway:\n        enabled: false", "the discovery ConfigMap with the Gateway off")
+    ok("modelsGateway.enabled: false renders none of it")
 
-        for flags, message in (
-            (["--set", "global.identity.issuerUrl="], "global.identity.issuerUrl is empty but modelServing.modelsGateway.jwtAuthentication"),
-            (["--set", "gatewayApi.gateway.tls.secretName="], "modelServing.modelsGateway.tls names no certificate"),
-            (["--set", "modelServing.modelsGateway.jwtAuthentication.audiences=null"], "modelServing.modelsGateway.jwtAuthentication.audiences is empty"),
-            (["--set", "modelServing.modelsGateway.jwtAuthentication.jwks.host=dex.example.com:443"], "modelServing.modelsGateway.jwtAuthentication.jwks.host is"),
-        ):
-            helm(connectivity, [*base, *flags], expect_failure=message)
-        ok("the guards fail naming the key: issuer, certificate, audiences, a host carrying a port")
-    finally:
-        os.unlink(values)
+    for flags, message in (
+        (["--set", "global.identity.issuerUrl="], "global.identity.issuerUrl is empty but modelServing.modelsGateway.jwtAuthentication"),
+        (["--set", "gatewayApi.gateway.tls.secretName="], "modelServing.modelsGateway.tls names no certificate"),
+        (["--set", "modelServing.modelsGateway.jwtAuthentication.audiences=null"], "modelServing.modelsGateway.jwtAuthentication.audiences is empty"),
+        (["--set", "modelServing.modelsGateway.jwtAuthentication.jwks.host=dex.example.com:443"], "modelServing.modelsGateway.jwtAuthentication.jwks.host is"),
+    ):
+        helm(connectivity, [*base, *flags], expect_failure=message)
+    ok("the guards fail naming the key: issuer, certificate, audiences, a host carrying a port")
+
+
+CACHE_JOB = ("Job", "t-model-serving-cache")
+HOOK_IDENTITY = "t-hooks"
+
+
+def applied_claim(job: str) -> dict:
+    """The claim the hook applies: the one JSON line the script pipes into kubectl."""
+    m = re.search(r"printf '%s' '(\{.*\})' \\$", job, re.M)
+    if not m:
+        sys.exit(f"FAIL: the cache claim hook pipes no JSON claim into kubectl:\n{job}")
+    return json.loads(m.group(1))
+
+
+def check_cache(connectivity: str, base: list[str]) -> None:
+    render = helm(connectivity, base)
+    docs = documents(render)
+    if any(kind == "PersistentVolumeClaim" for kind, _ in docs):
+        sys.exit("FAIL: the cache claim rendered as a release resource; Helm's wait would wait for a Bind only the first predictor brings (#483)")
+    job = docs.get(CACHE_JOB)
+    if not job:
+        sys.exit(f"FAIL: no hook Job {CACHE_JOB[1]} in the connectivity render")
+    for needle in ("    helm.sh/hook: post-install,post-upgrade", "    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded", f"      serviceAccountName: {HOOK_IDENTITY}",
+                   "kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f -", 'then state=present; else state=created; fi'):
+        need(job, needle, "the cache claim hook")
+    claim = applied_claim(job)
+    meta, spec = claim["metadata"], claim["spec"]
+    if (claim["kind"], meta["name"], meta["namespace"]) != ("PersistentVolumeClaim", "hf-cache", "model-serving"):
+        sys.exit(f"FAIL: the hook applies {claim['kind']} {meta.get('namespace')}/{meta.get('name')}, not the claim hf-cache in model-serving")
+    if meta["annotations"].get("helm.sh/resource-policy") != "keep" or meta["labels"].get("app.kubernetes.io/component") != "model-serving":
+        sys.exit(f"FAIL: the applied claim lacks the keep policy or the model-serving component label:\n{json.dumps(meta, indent=1)}")
+    if spec != {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "500Gi"}}}:
+        sys.exit(f"FAIL: the applied claim's default spec is off (RWO, 500Gi, the cluster's default class, no volumeName expected):\n{json.dumps(spec, indent=1)}")
+    role = docs.get(("ClusterRole", HOOK_IDENTITY))
+    if not role or ("ServiceAccount", HOOK_IDENTITY) not in docs or ("ClusterRoleBinding", HOOK_IDENTITY) not in docs:
+        sys.exit(f"FAIL: the hook identity {HOOK_IDENTITY} (ServiceAccount, ClusterRole, ClusterRoleBinding) is incomplete")
+    need(role, '    resources: ["persistentvolumeclaims"]\n    verbs: ["get", "create", "patch"]', "the hook identity's ClusterRole")
+    ok("the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 500Gi, the default class) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete")
+
+    knobs = documents(helm(connectivity, [*base, "--set", "modelServing.cache.pvc.storageClassName=gp3", "--set", "modelServing.cache.pvc.size=1Ti", "--set", "modelServing.cache.pvc.volumeName=nvme-0",
+                                          "--set", "modelServing.cache.pvc.accessModes[0]=ReadWriteMany"]))
+    spec = applied_claim(knobs[CACHE_JOB])["spec"]
+    if spec != {"accessModes": ["ReadWriteMany"], "resources": {"requests": {"storage": "1Ti"}}, "storageClassName": "gp3", "volumeName": "nvme-0"}:
+        sys.exit(f"FAIL: the class, size, volumeName and access-mode knobs did not reach the applied claim:\n{json.dumps(spec, indent=1)}")
+    dash = applied_claim(documents(helm(connectivity, [*base, "--set", "modelServing.cache.pvc.storageClassName=-"]))[CACHE_JOB])["spec"]
+    if dash.get("storageClassName") != "":
+        sys.exit(f"FAIL: storageClassName \"-\" should apply the empty class (static binding):\n{json.dumps(dash, indent=1)}")
+    ok('storageClassName, size, volumeName and accessModes reach the applied claim; "-" is the empty class')
+
+    for flags, label in ((["--set", "modelServing.cache.enabled=false"], "cache.enabled: false"), (["--set", "modelServing.cache.pvc.existingClaim=models"], "an existing claim")):
+        text = helm(connectivity, [*base, *flags])
+        off = documents(text)
+        if "PersistentVolumeClaim" in text or CACHE_JOB in off or any(name == HOOK_IDENTITY for _, name in off):
+            sys.exit(f"FAIL: with {label} the render still carries the claim, its hook or the hook identity (the slice has no other hook): {sorted(k for k in off if k == CACHE_JOB or k[1] == HOOK_IDENTITY)}")
+        if label == "an existing claim" and "claimName: models" not in text:
+            sys.exit("FAIL: the existing claim is not published")
+    ok("cache.enabled: false and an existing claim render no claim, no hook and no hook identity; the existing claim is published")
 
 
 def check_presets(connectivity: str) -> None:
@@ -232,7 +288,15 @@ def check_presets(connectivity: str) -> None:
 
 def main(meta: str, connectivity: str) -> int:
     forwarded = check_profile(meta)
-    check_gateway(connectivity, forwarded)
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write(forwarded)
+        values = f.name
+    try:
+        base = ["-f", values, "--namespace", "agent-platform", *FLEET_APIS]
+        check_gateway(connectivity, base)
+        check_cache(connectivity, base)
+    finally:
+        os.unlink(values)
     check_presets(connectivity)
     return 0
 

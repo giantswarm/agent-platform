@@ -3007,11 +3007,19 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     exclude: []
   # Hugging Face model cache: one PVC in the serving namespace with one
   # subdirectory per InferenceService, so a model downloads once and every
-  # restart finds it (hours to seconds). The PVC is kept on uninstall
-  # (helm.sh/resource-policy: keep). Without the Kyverno policies below the
-  # PVC is still created and published for model-manager's pre-warm
-  # downloads, but the KServe storage-initializer downloads into its
-  # ephemeral volume on every start.
+  # restart finds it (hours to seconds). The claim is applied by a
+  # post-install/post-upgrade hook Job, not rendered as a release resource:
+  # it has no consumer of its own and Binds with the first predictor that
+  # mounts it, so under a WaitForFirstConsumer StorageClass (kind's standard,
+  # AWS gp3) it stays Pending until then — as a release resource Helm's wait
+  # failed the release on it (#483). Nothing waits for it, and it outlives the
+  # release: an uninstall or a cache.enabled flip leaves it (it carries
+  # helm.sh/resource-policy: keep to say so). A size change is applied by the
+  # next upgrade's hook; an immutable field (storageClassName, accessModes,
+  # volumeName) cannot change once the claim exists. Without the Kyverno
+  # policies below the claim is still applied and published for
+  # model-manager's pre-warm downloads, but the KServe storage-initializer
+  # downloads into its ephemeral volume on every start.
   cache:
     enabled: true
     pvc:
@@ -3019,7 +3027,7 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # model-manager.
       name: hf-cache
       # A pre-existing claim in the serving namespace to use instead;
-      # set, no PVC is rendered.
+      # set, no claim is applied.
       existingClaim: ""
       size: 500Gi
       # Empty uses the cluster's default StorageClass; "-" sets an empty

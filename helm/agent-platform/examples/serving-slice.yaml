@@ -106,4 +106,6 @@ modelServing:
   # cache:
   #   pvc:
   #     # The cluster's block storage class (AWS: gp3); empty takes the default.
+  #     # A WaitForFirstConsumer class is fine: the claim is applied by a hook
+  #     # outside Helm's wait and Binds with the first predictor (#483).
   #     storageClassName: ""

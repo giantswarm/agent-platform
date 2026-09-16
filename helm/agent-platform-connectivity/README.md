@@ -291,7 +291,9 @@ platform needs:
   install never reaches a pod with roots the current pools do not have
   (giantswarm/agent-platform#384; a re-run says `present`, `created` or
   `republished`). Identity: `<release>-hooks`, a ClusterRole on secrets,
-  configmaps, namespaces and clustertrustbundles, with `attest` on the two
+  configmaps, namespaces and clustertrustbundles (and on persistentvolumeclaims
+  while model serving's cache claim is this chart's, [The Hugging Face cache
+  claim](#the-hugging-face-cache-claim)), with `attest` on the two
   podcert signers (the apiserver's condition for writing a bundle that names a
   signer), for the hook's lifetime
   (`templates/substrate/hooks-rbac.yaml`; the hook Job include is
@@ -494,6 +496,19 @@ The chart applies the input to everything it renders onto the pool and to nothin
 | The discovery ConfigMap `agent-platform-model-serving`: `spec.gpuPool.taint.{key,value,effect}`, `spec.gpuPool.nodeSelector` | published for model-manager (`>= 0.23.0`, giantswarm/model-manager#86), which schedules the `LLMInferenceService`s it composes, its download Jobs and its inventory scan pods by it; a registered backend document may override it | likewise |
 
 Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute` (empty tolerates every effect of the key), the key is a qualified name, and every selector value is a string (a label value is a string: quote a number). `make verify-gpu-pool` asserts the three sites in the default, pool-selected, valued and untainted shapes, the guards, the meta chart's forwarding of the block, and that an empty taint key leaves the serving render byte-identical to `origin/main` but for the discovery block; `ci/test-model-serving-gpu-pool-values.yaml` is the pool-selected fixture.
+
+## The Hugging Face cache claim
+
+`modelServing.cache.pvc` (`hf-cache`, `500Gi`, the cluster's default StorageClass unless `storageClassName` names one — `"-"` is the empty class for a pre-provisioned volume, `volumeName` binds one) is one claim in the serving namespace with one subdirectory per InferenceService; the Kyverno policies mount it into every predictor's storage-initializer and runtime, model-manager's pre-warm downloads land in the same layout. The claim has **no consumer of its own** — the first predictor (or download Job) that mounts it is what Binds it — and under a StorageClass with `volumeBindingMode: WaitForFirstConsumer` (kind's `standard`, the fleet's default `gp3`) it stays `Pending` until then. Helm's wait counts a Pending claim as not ready, so as a release resource it failed every install and upgrade with the switch on (giantswarm/agent-platform#483).
+
+The claim is therefore **applied by a `post-install,post-upgrade` hook Job** (`templates/model-serving/cache-pvc.yaml`; the hook include `agent-platform.hooks.job`, the identity `<release>-hooks` with `get`, `create`, `patch` on `persistentvolumeclaims` while the claim is the chart's, never `delete`), not rendered as a release resource: `kubectl apply --server-side --force-conflicts` under the field manager `agent-platform-connectivity`, the log says `created` or `present` and the claim's phase, nothing waits for a Bind. It binds where its first consumer schedules — the GPU pool's zone, which is what a zonal volume needs. What follows from the claim not being Helm's:
+
+- an uninstall or a `cache.enabled` flip leaves it — the intent of the `helm.sh/resource-policy: keep` it carries (hundreds of gigabytes of downloads outlive the release), now by construction;
+- a `size` change is applied by the next upgrade's hook (the StorageClass has to allow expansion); a change to an immutable field (`storageClassName`, `accessModes`, `volumeName`) fails the hook — and the release — naming the field;
+- an installation upgrading from a chart that rendered the claim as a release resource keeps it (the keep policy) and the hook takes its fields over;
+- `existingClaim` names a claim of the operator's instead: nothing is applied, the name is published to model-manager and the portal.
+
+`make verify-serving-slice` asserts the hook, its claim, the identity and the knobs, and that `cache.enabled: false` or an `existingClaim` render none of it; `make verify-wiring` the serving shape without a `PersistentVolumeClaim` object.
 
 ## Voluntary disruption
 
