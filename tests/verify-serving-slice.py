@@ -49,7 +49,9 @@ import tempfile
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2", "--api-versions", "monitoring.coreos.com/v1",
               "--api-versions", "gateway.networking.k8s.io/v1", "--api-versions", "gateway.envoyproxy.io/v1alpha1"]
-VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", *FLEET_APIS]
+# No ingress.parentRefs: the slice runs no muster, so it needs no edge Gateway
+# (#490) — its Gateway is the models Gateway.
+VM = ["--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", *FLEET_APIS]
 # The installation's platform inputs the profile is layered over.
 INSTALLATION = ["--namespace", "agent-platform", "--set", "global.domain=wc01.example.com", "--set", "global.identity.issuerUrl=https://dex.mc.example.com",
                 "--set", "gatewayApi.gateway.tls.secretName=wildcard-tls"]
@@ -151,6 +153,18 @@ def check_profile(meta: str) -> str:
         sys.exit("FAIL: not every HelmRelease of the targeted profile carries the kubeConfig")
     ok("with the target knob: agentgateway on, every HelmRelease carries the kubeConfig")
     return values_block(conn)
+
+
+def check_ingress_guard(connectivity: str, base: list[str]) -> None:
+    """The slice renders without an edge Gateway; muster on keeps the guard (#490)."""
+    if ("HTTPRoute", "muster") in documents(helm(connectivity, base)):
+        sys.exit("FAIL: the slice renders a muster route")
+    helm(connectivity, [*base, "--set", "components.muster.enabled=true"], expect_failure="no public Gateway for ingress.parentRefs")
+    helm(connectivity, [*base, "--set", "components.muster.enabled=true", "--set", "components.agentgateway.enabled=true", "--set", "ingress.parentRefs[0].name=x"],
+         expect_failure="components.agentgateway.enabled must be false in muster-direct mode")
+    helm(connectivity, [*base, "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster"])
+    helm(connectivity, [*base, "--set", "ingress.mode=agentgateway-muster"], expect_failure="components.agentgateway.enabled must be true in agentgateway-* modes")
+    ok("ingress guard: the slice needs no edge Gateway; with muster on the Gateway and the mode/agentgateway agreement are still required; agentgateway-* modes still need the component")
 
 
 def check_gateway(connectivity: str, base: list[str]) -> None:
@@ -293,6 +307,7 @@ def main(meta: str, connectivity: str) -> int:
         values = f.name
     try:
         base = ["-f", values, "--namespace", "agent-platform", *FLEET_APIS]
+        check_ingress_guard(connectivity, base)
         check_gateway(connectivity, base)
         check_cache(connectivity, base)
     finally:
