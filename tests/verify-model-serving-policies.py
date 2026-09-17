@@ -18,10 +18,14 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     name as subPath on the storage-initializer and on the shape's runtime
     container (the classic one stays read-only), no container is added or
     lost, the original volumes stay, the initializer's memory limit is raised,
-    and hf-cache-init runs first with MODEL_DIR set. A pod of the shape
-    without a storage-initializer, and a model-manager download-Job pod, are
-    untouched; a workload pod without a model name gets the limit but no
-    cache (the mount would otherwise land on the claim's root).
+    and hf-cache-init runs first with MODEL_DIR set. The policy over its own
+    output is a no-op: the API server reinvokes Kyverno's webhook whenever
+    another mutating webhook changed the pod after Kyverno ran, and a rule
+    that is not idempotent then adds its init container twice (#514). A pod
+    of the shape without a storage-initializer, and a model-manager
+    download-Job pod, are untouched; a workload pod without a model name gets
+    the limit but no cache (the mount would otherwise land on the claim's
+    root).
   * The Deployments' progress-deadline rule applies to both shapes' Deployments.
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
@@ -166,6 +170,13 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
         fail(f"{shape}: the mutation dropped volumes {missing}")
     ok(f"{shape}: {CLAIM}/{model} mounted at /mnt/models on storage-initializer and {runtime}, the limit {MEMORY}, hf-cache-init first, containers and volumes kept")
 
+    again = apply([pods_policy], out)
+    if again is not None and again["spec"] != spec:
+        fail(f"{shape}: the policy over its own output changed the pod again, as a reinvoked webhook would: "
+             f"initContainers {[c['name'] for c in again['spec']['initContainers']]}, "
+             f"{sum(v['name'] == CLAIM for v in again['spec']['volumes'])} {CLAIM} volume(s)")
+    ok(f"{shape}: the policy over its own output is a no-op (one hf-cache-init, one {CLAIM} volume under webhook reinvocation)")
+
     plain = copy.deepcopy(pod)
     del plain["spec"]["initContainers"]
     out = apply([pods_policy], plain)
@@ -247,7 +258,7 @@ def main(connectivity: str) -> int:
     deployments_policy = one(docs, "ClusterPolicy", "-model-serving-deployments")
     rules = [r["name"] for r in pods_policy["spec"]["rules"]]
     if rules != [f"redirect-model-storage-{s}" for s in SHAPES] + ["storage-initializer-memory", "add-cache-init"]:
-        fail(f"the pods policy's rules are {rules}; add-cache-init must be last (a later strategic merge would reorder its insert)")
+        fail(f"the pods policy's rules are {rules}; add-cache-init must be last (a later strategic merge on the storage-initializer would move it ahead of hf-cache-init)")
     for shape in SHAPES:
         check_mutations(pods_policy, shape)
     check_deployments(deployments_policy)
