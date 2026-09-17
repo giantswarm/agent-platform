@@ -1245,7 +1245,7 @@ VPA_ON := $(VM) --set components.kagent.enabled=true
 VPA_VANILLA := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --set components.kagent.enabled=true
 
 .PHONY: verify-kagent-vpa
-verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with autoscaling.k8s.io/v1 served the connectivity chart renders it on Deployment kagent-controller in the kagent namespace (InPlaceOrRecreate, RequestsOnly, minAllowed the chart's requests, maxAllowed a step under its limits, minReplicas 1); a vanilla render none; an explicit true / false wins both ways; inert with kagent off; the enum guards, the spelling guard (VPA off too) and the unset wording fire; the meta chart forwards the knob resolved to the connectivity release and never to the kagent release, and a meta-layer override reaches the rendered object.
+verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with autoscaling.k8s.io/v1 served the connectivity chart renders it on Deployment kagent-controller in the kagent namespace (InPlaceOrRecreate, RequestsOnly, minAllowed the chart's requests, maxAllowed a step under its limits, minReplicas 1); a vanilla render none; an explicit true / false wins both ways; inert with kagent off; a deleted kagent.controller.vpa or kagent.controller renders nothing in both charts rather than dying on a nil pointer; the enum guards, the spelling guard (VPA off too) and the unset wording fire; the meta chart forwards the knob resolved to the connectivity release and never to the kagent release, and a meta-layer override reaches the rendered object.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, autoscaling.k8s.io/v1 served (the fleet): the VPA renders"
 	@helm template t $(CONNECTIVITY_DIR) $(VPA_ON) >/tmp/vk-on.out 2>&1 || { cat /tmp/vk-on.out; exit 1; }
@@ -1278,6 +1278,13 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set kagent.controller.vpa.enabled=true >/tmp/vk-kagent-off.out 2>&1 || { cat /tmp/vk-kagent-off.out; exit 1; }
 	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-kagent-off.out; then echo "FAIL: the VPA renders while kagent is off"; exit 1; fi
 	@echo "ok: inert while kagent is off"
+	@echo "--> the block is the switch: a deleted kagent.controller.vpa — or a deleted kagent.controller around it — renders nothing and never dereferences a key that is gone"
+	@for deleted in kagent.controller.vpa kagent.controller; do \
+		helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set $$deleted=null >/tmp/vk-deleted.out 2>&1 || { echo "FAIL: the render died with $$deleted deleted"; tail -3 /tmp/vk-deleted.out; exit 1; }; \
+		if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-deleted.out; then echo "FAIL: the VPA renders with $$deleted deleted"; exit 1; fi; \
+		helm template t $(CHART_DIR) $(VPA_ON) --set $$deleted=null >/tmp/vk-deleted-meta.out 2>&1 || { echo "FAIL: the meta render died with $$deleted deleted"; tail -3 /tmp/vk-deleted-meta.out; exit 1; }; \
+	done
+	@echo "ok: a deleted block renders nothing, in both charts"
 	@echo "--> the guards"
 	@if helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.updateMode=Sometimes >/tmp/vk-mode.out 2>&1; then echo "FAIL: an unknown updateMode accepted"; exit 1; fi
 	@grep -q 'is not a VerticalPodAutoscaler update mode' /tmp/vk-mode.out || { echo "FAIL: wrong error for the updateMode enum"; tail -3 /tmp/vk-mode.out; exit 1; }

@@ -1231,8 +1231,17 @@ conformance; an explicit true / false wins. The key is the connectivity
 chart's (components.kagent.omitKeys holds it back from the kagent release).
 */}}
 {{- define "agent-platform.shape.kagentControllerVpa" -}}
-{{- $v := dig "controller" "vpa" "enabled" "auto" (.Values.kagent | default dict) -}}
-{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kagent.controller.vpa.enabled" "value" $v "api" "autoscaling.k8s.io/v1") -}}
+{{- $vpa := dig "controller" "vpa" nil (.Values.kagent | default dict) -}}
+{{- /* The block itself is the switch: an installation that deletes
+kagent.controller.vpa — or the whole kagent.controller block — has no knob to
+resolve and gets no object, the same answer as enabled: false. A null set at
+either layer deletes the key rather than passing it on, so this is the shape
+the chart sees, and reading .enabled off it would dereference nothing. */ -}}
+{{- if not (kindIs "map" $vpa) -}}
+false
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kagent.controller.vpa.enabled" "value" (dig "enabled" "auto" $vpa) "api" "autoscaling.k8s.io/v1") -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
