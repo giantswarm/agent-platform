@@ -860,6 +860,12 @@ live-serving-slice: ## Against the current kubeconfig (KUBE_CONTEXT= selects a c
 	@echo "====> $@ (namespace $(NAMESPACE), gateway $(GATEWAY), controller in $(CONTROLLER_NAMESPACE))"
 	@python3 tests/verify-serving-slice-live.py --namespace "$(NAMESPACE)" --gateway "$(GATEWAY)" --controller-namespace "$(CONTROLLER_NAMESPACE)" $(if $(KUBE_CONTEXT),--context "$(KUBE_CONTEXT)")
 
+.PHONY: verify-serving-slice-store
+verify-serving-slice-store: ## Assert tests/verify-serving-slice-live.py reads the agentgateway controller's jwks-store ConfigMaps in the shape the controller writes them (giantswarm/agent-platform#515): over tests/fixtures/jwks-store-configmaps.json (a copied store — the models issuer with two keys, an issuer with an empty key set, a labelled ConfigMap without the entry) the entries carry the writer's fields ({requestKey, url, fetchedAt, jwks}, no count field), the key count comes from the `jwks` JSON string, the live check passes for the issuer's URL naming the ConfigMap and the kids, fails naming the URL for the empty set and for a URL the store does not hold, and fails naming the ConfigMap when `jwks` is not a JWKS document. Offline, stdlib-only.
+	@echo "====> $@"
+	@python3 tests/verify-serving-slice-store.py
+	@echo "serving slice live check's store reader verified."
+
 .PHONY: verify-gpu-operator
 verify-gpu-operator: ## Assert the GPU operator component (giantswarm/agent-platform#327): components.gpu-operator off by default (no release, the roster says so, the gpu-operator values block held back from connectivity); on, ONE OCIRepository (the catalog's gpu-operator wrapper chart, 1.x) + ONE HelmRelease into kube-system (release history there too, crds CreateReplace on install and upgrade, no dependsOn, no global) with the values nested under the wrapper's subchart key — the Flatcar row, driver and toolkit off — and nothing else of the render moved but the roster entry; the pre-installed-driver row (gpu-operator.toolkit.enabled=true) reaches the release with the driver off; the target knob stamps kubeConfig.secretRef on it; the one-owner guard is silent offline with the nvidia.com, Flux and App APIs served; the schema refuses a non-boolean toggle; the BOM pins the exact version and the pin reaches the OCIRepository. The lookup guard itself needs a cluster: tests/fixtures/gpu-operator-foreign-owner.yaml (README "The GPU operator"). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
