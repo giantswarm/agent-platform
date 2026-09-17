@@ -2170,14 +2170,18 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) for the
       # kserve backend's Hub calls (search, fit checks, revision lookups),
       # resolved through the DNS proxy rule the policy renders; the defaults
-      # cover huggingface.co, its API redirects and the LFS / Xet download
-      # fronts under hf.co. A mirror (HF_ENDPOINT) replaces the list. Ignored
-      # by the kubernetes flavor (see cidrs).
+      # cover huggingface.co, its API redirects and the download fronts under
+      # hf.co at every label depth the download path uses — Cilium's * never
+      # crosses a dot, so one pattern per depth, the same list as
+      # modelServing.networkPolicy.huggingFace.fqdns (giantswarm/agent-platform#522).
+      # A mirror (HF_ENDPOINT) replaces the list. Ignored by the kubernetes
+      # flavor (see cidrs).
       fqdns:
         - matchName: huggingface.co
         - matchPattern: "*.huggingface.co"
         - matchPattern: "*.hf.co"
         - matchPattern: "*.*.hf.co"
+        - matchPattern: "*.*.*.hf.co"
       # IP blocks of the Hub. kubernetes flavor: vanilla NetworkPolicy selects
       # addresses, never names, so an empty list (the default) opens 443 to
       # every public destination — 0.0.0.0/0 minus
@@ -3105,25 +3109,24 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # storage-initializer is untouched): the entries are added to, or
     # overwrite by name, the containers' own env; everything else stays. An
     # empty list renders no rule. The default takes the Hugging Face client
-    # off the Xet path (giantswarm/agent-platform#520). huggingface_hub >= 0.32
-    # with hf_xet installed — the KServe storage-initializer, the vLLM images —
-    # fetches the weights as Xet shards, one connection per range-GET to the
-    # Xet CDN (us.aws.cdn.hf.co, CloudFront), whose ~30 s TTLs and rotating
-    # address sets the client's own resolver cache outlives. The cilium
-    # networkPolicy below is a toFQDNs allow-list: it admits exactly the
-    # addresses the Cilium DNS proxy saw resolved for an allowed name, for
-    # the answer's TTL, so the shards' SYNs are dropped and the
-    # storage-initializer hangs after the repository's small files — no
-    # error, no restart, 0 CPU. With Xet off, huggingface_hub downloads the
-    # shards with hf_transfer (left on) from the LFS fronts (cdn-lfs*.hf.co,
-    # cdn-lfs.huggingface.co, within the FQDN patterns) through the system
-    # resolver: every connection is a DNS query the proxy sees, and its
-    # address is admitted. Widening the egress instead — world on 443, the
-    # CDN's address blocks — is not the fix. The long-term alternative is a
-    # setting of the cluster's Cilium agent the chart does not own, a
-    # tofqdns-min-ttl long enough for the client's cache; an installation
-    # whose cluster has it may set env: [] to have Xet back. A mirror
-    # (HF_ENDPOINT) belongs here too, next to the fqdns that name it.
+    # off the Xet path (giantswarm/agent-platform#520, its rationale
+    # corrected in #522). What it buys is a deterministic download:
+    # huggingface_hub >= 0.32 with hf_xet installed — the KServe
+    # storage-initializer, the vLLM images — fetches the weights as Xet
+    # shards, and on a policy drop that client hangs silently after the
+    # repository's small files (no error, no restart, 0 CPU); with Xet off,
+    # huggingface_hub downloads the shards with hf_transfer (left on) over
+    # one host path and fails fast on a drop, so a gap in the allow-list
+    # shows as a CrashLoopBackOff naming the host, not as a stuck pod. It is
+    # not what makes the download reachable: the Hub answers every shard
+    # request of a Xet-backed repository, Xet client or not, with a 302 to
+    # the download CDN (us.aws.cdn.hf.co, three labels under hf.co), and the
+    # CDN is admitted by the three-label pattern of the cilium networkPolicy
+    # below — a toFQDNs allow-list that admits exactly the addresses the
+    # Cilium DNS proxy saw resolved for an allowed name. Widening the egress
+    # instead — world on 443, the CDN's address blocks — is not the fix. An
+    # installation may set env: [] to have Xet back. A mirror (HF_ENDPOINT)
+    # belongs here too, next to the fqdns that name it.
     env:
       - name: HF_HUB_DISABLE_XET
         value: "1"
@@ -3159,13 +3162,19 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     huggingFace:
       # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
       # enforced through the DNS proxy rule the policies render on their DNS
-      # egress; the defaults cover huggingface.co, its API redirects and the
-      # LFS / Xet download fronts under hf.co (Cilium's * matches one label,
-      # hence the two-level pattern for cas-bridge.xethub.hf.co). The model
-      # pods download from the LFS fronts — policies.env above takes their
-      # client off the Xet path, whose CDN an allow-list by name cannot
-      # follow (#520); the Xet names stay for an installation that has it
-      # back. A mirror (HF_ENDPOINT) or an internal proxy replaces the list.
+      # egress. Cilium's * matches one label — [-a-zA-Z0-9_]*, never a dot —
+      # and there is no multi-label wildcard, so every depth under hf.co the
+      # download path uses is its own pattern: one label (the LFS fronts,
+      # cdn-lfs-us-1.hf.co), two (the Xet fronts, cas-server.xethub.hf.co,
+      # transfer.xethub.hf.co, cas-bridge.xethub.hf.co), three (the download
+      # CDN every shard request of a Xet-backed repository is redirected to,
+      # Xet client or not: us.aws.cdn.hf.co and its regional siblings,
+      # giantswarm/agent-platform#522). The Hub itself and its API redirects
+      # are huggingface.co and *.huggingface.co.
+      # tests/verify-model-serving-policies.py matches the names of the
+      # download path against the rendered patterns with Cilium's rule, so a
+      # new host shape fails the render, not a download on an installation.
+      # A mirror (HF_ENDPOINT) or an internal proxy replaces the list.
       # Ignored by the kubernetes flavor, which cannot select names (see
       # cidrs).
       fqdns:
@@ -3173,6 +3182,7 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
         - matchPattern: "*.huggingface.co"
         - matchPattern: "*.hf.co"
         - matchPattern: "*.*.hf.co"
+        - matchPattern: "*.*.*.hf.co"
       # IP blocks of the download endpoints. kubernetes flavor: vanilla
       # NetworkPolicy selects addresses, never names, so an empty list (the
       # default) opens 443 to every public destination — 0.0.0.0/0 minus

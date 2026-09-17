@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Assert the connectivity chart's model-serving policies over both pod shapes
-KServe creates (giantswarm/agent-platform#506, #518, #520).
+KServe creates (giantswarm/agent-platform#506, #518, #520, #522).
 
 A served model runs as one of two pods, and their labels share nothing: the
 classic InferenceService predictor (serving.kserve.io/inferenceservice=<name>,
@@ -44,6 +44,18 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
     never the download Job's pod.
+  * The model pods' and the download Job's cilium egress admits every name of
+    the Hugging Face download path (HUB_HOSTS: the Hub and its API redirects,
+    the LFS fronts one label under hf.co, the Xet fronts two, the download
+    CDN three — us.aws.cdn.hf.co, where the Hub redirects every shard request
+    of a Xet-backed repository, Xet client or not; #522) under Cilium's rule
+    for a matchPattern — `*` is [-a-zA-Z0-9_]*, DNS label characters and
+    never a dot, so a pattern admits exactly one label per `*` and there is no
+    multi-label wildcard — keeps out a deeper name and a look-alike domain,
+    and stays a toFQDNs allow-list (no toCIDR, no toEntities world). The
+    kubernetes flavour, which selects no names, admits 443 to every public
+    block. A new host shape of the download path fails here, not a download
+    on an installation.
 
 Needs PyYAML and the kyverno CLI (the CI job installs both).
 """
@@ -52,6 +64,7 @@ import copy
 import glob
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -87,6 +100,15 @@ SHAPES = {
     "llmisvc-workload": ("model-serving-llmisvc-workload-pod.yaml", "main", "app.kubernetes.io/name"),
 }
 DOWNLOAD_LABELS = {"app.kubernetes.io/managed-by": "model-manager", "model-manager.giantswarm.io/component": "download", "job-name": "pull-qwen3-4b"}
+# The names the Hugging Face download path uses (#522): the Hub and its API redirects, the LFS fronts one label
+# under hf.co, the Xet fronts two, and the download CDN three — the Hub redirects every shard request of a
+# Xet-backed repository there, Xet client or not (us.aws.cdn.hf.co; the regional siblings share the shape). A new
+# host shape is added here, and modelServing.networkPolicy.huggingFace.fqdns gains its depth.
+CDN = "us.aws.cdn.hf.co"
+HUB_HOSTS = ["huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs-us-1.hf.co", "cas-server.xethub.hf.co",
+             "transfer.xethub.hf.co", "cas-bridge.xethub.hf.co", CDN, "eu.aws.cdn.hf.co"]
+# What the allow-list keeps out: a depth no name of the download path has, the bare apex, look-alike domains.
+NOT_HUB_HOSTS = ["a.b.c.d.hf.co", "hf.co", "huggingface.co.example.com", "hf.co.example.com", "example.com"]
 BASE = [
     "--namespace", "agent-platform",
     "--set", "ingress.parentRefs[0].name=x",
@@ -332,8 +354,7 @@ def check_deployments(deployments_policy: dict) -> None:
     ok(f"both shapes' Deployments get progressDeadlineSeconds {DEADLINE}")
 
 
-def check_selectors(connectivity: str, k8s: list[dict]) -> None:
-    cilium = render(connectivity, CILIUM)
+def check_selectors(cilium: list[dict], k8s: list[dict]) -> None:
     exception = one(k8s, "PolicyException", "model-serving-predictors")
     exception_selectors = [m["resources"]["selector"] for m in exception["spec"]["match"]["any"]
                            if "selector" in m["resources"] and "Pod" in m["resources"]["kinds"] and NS in m["resources"]["namespaces"]]
@@ -362,6 +383,38 @@ def check_selectors(connectivity: str, k8s: list[dict]) -> None:
     ok("each shape's pod is selected by exactly its own network policies (both flavours), the agents' egress and the PolicyException; the download Job's pod by none")
 
 
+def cilium_regex(entry: dict) -> re.Pattern:
+    """A toFQDNs entry as Cilium's DNS proxy compiles it (pkg/fqdn/matchpattern): lower-cased and anchored; in a
+    matchPattern `*` is [-a-zA-Z0-9_]* — DNS label characters, never a dot — so a `*` admits exactly one label."""
+    if "matchName" in entry:
+        return re.compile("^" + re.escape(entry["matchName"].lower().rstrip(".")) + "$")
+    return re.compile("^" + re.escape(entry["matchPattern"].lower().rstrip(".")).replace(r"\*", "[-a-zA-Z0-9_]*") + "$")
+
+
+def check_fqdns(cilium: list[dict], k8s: list[dict]) -> None:
+    """The model pods' and the download Job's egress admits every name of the Hugging Face download path (#522) and stays an allow-list."""
+    if cilium_regex({"matchPattern": "*.*.hf.co"}).match(CDN) or not cilium_regex({"matchPattern": "*.*.*.hf.co"}).match(CDN):
+        fail(f"this check's Cilium pattern rule is wrong: *.*.hf.co must not, *.*.*.hf.co must match {CDN}")
+    for suffix in [f"-model-serving-{s}" for s in SHAPES] + ["-model-serving-download"]:
+        egress = one(cilium, "CiliumNetworkPolicy", suffix)["spec"]["egress"]
+        if widened := [k for r in egress for k in ("toCIDR", "toCIDRSet") if k in r] + [e for r in egress for e in r.get("toEntities") or [] if e == "world"]:
+            fail(f"{suffix}: the egress is no longer a toFQDNs allow-list: {widened}")
+        entries = [e for r in egress for e in r.get("toFQDNs") or []]
+        rendered = [e.get("matchName") or e.get("matchPattern") for e in entries]
+        patterns = [cilium_regex(e) for e in entries]
+        if denied := [h for h in HUB_HOSTS if not any(p.match(h) for p in patterns)]:
+            fail(f"{suffix}: toFQDNs {rendered} admit none of {denied} under Cilium's rule (a * never crosses a dot)")
+        if admitted := [h for h in NOT_HUB_HOSTS if any(p.match(h) for p in patterns)]:
+            fail(f"{suffix}: toFQDNs {rendered} admit {admitted}")
+        ok(f"{suffix}: toFQDNs {rendered} admit every name of the download path ({', '.join(HUB_HOSTS)}), none of {NOT_HUB_HOSTS}; no toCIDR, no world")
+    for suffix in [f"-model-serving-{s}-egress" for s in SHAPES] + ["-model-serving-download-egress"]:
+        egress = one(k8s, "NetworkPolicy", suffix)["spec"]["egress"]
+        blocks = [(t["ipBlock"]["cidr"], [p["port"] for p in r.get("ports") or []]) for r in egress for t in r.get("to") or [] if "ipBlock" in t]
+        if ("0.0.0.0/0", [443]) not in blocks:
+            fail(f"{suffix}: the kubernetes flavour admits {blocks}; it selects no names, so 443 to every public block is what reaches the CDN")
+    ok("kubernetes flavour: each model pod's and the download Job's egress admits 443 to every public block (no name to get wrong)")
+
+
 def main(connectivity: str) -> int:
     if shutil.which(KYVERNO) is None:
         fail(f"the kyverno CLI ({KYVERNO}) is not installed; the mutations are asserted with `kyverno apply`")
@@ -381,7 +434,9 @@ def main(connectivity: str) -> int:
         check_mutations(pods_policy, shape)
         check_pod_security(pods_policy, exception, shape)
     check_deployments(deployments_policy)
-    check_selectors(connectivity, docs)
+    cilium = render(connectivity, CILIUM)
+    check_selectors(cilium, docs)
+    check_fqdns(cilium, docs)
     return 0
 
 
