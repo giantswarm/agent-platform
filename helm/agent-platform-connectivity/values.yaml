@@ -3052,46 +3052,44 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       volumeName: ""
       accessModes:
         - ReadWriteOnce
-  # Kyverno ClusterPolicies for the InferenceService pods and Deployments
-  # in the serving namespace. `auto` (the default) follows the resolved
-  # kyvernoPolicies.enabled — they render where kyverno.io/v1 is served and
-  # nowhere else; `true` / `false` force them (an explicit true with Kyverno
-  # off fails the render). On, every model pod — an InferenceService
-  # predictor or an LLMInferenceService workload pod — gets: an init container
-  # that creates the pod's cache subdirectory (<claim>/<model>)
-  # world-writable before the KServe storage-initializer runs (the kubelet
-  # creates a missing subPath directory root-owned 0750, which the
-  # storage-initializer's uid cannot write), the storage-initializer's and
-  # the runtime's /mnt/models redirected into that subdirectory, and a
-  # storage-initializer memory limit that survives multi-GB downloads; the
-  # The predictors' Kyverno PolicyException (#498), rendered with the Kyverno
-  # objects on: the four restricted-PSS rules the upstream vLLM image and its
-  # cache init container violate (drop ALL, privilege escalation, non-root,
-  # seccomp), for the serving namespace's predictor Pods, ReplicaSets and
-  # Deployments — a Giant Swarm cluster enforces the restricted profile on
-  # every namespace and denies the predictor without it. Off only where the
+    # The group every pod that mounts the claim carries as its fsGroup: the
+    # Kyverno policies below set it on the model pods; model-manager's cache
+    # pods (the download Job, the scan and removal pods) run as uid 1000 with
+    # the same fsGroup — keep the two in step. The kubelet makes the claim's
+    # contents group-owned, group-writable and setgid on every mount (the CSI
+    # driver's fsGroupPolicy permitting: EBS gp3 and Azure Disk apply it) and
+    # creates a missing subPath directory with the claim root's mode and
+    # group, so the KServe storage-initializer (uid 1000), the runtime and the
+    # download Job write <claim>/<model> without root or a capability — no
+    # init container prepares it (#518). A claim whose driver does not apply
+    # the fsGroup (a hostPath-backed local-path claim) keeps a root-owned
+    # root, and the first download fails on its first write naming the
+    # directory; nothing here works around that.
+    fsGroup: 1000
+  # The serving pods' Kyverno PolicyException (#498), rendered with the Kyverno
+  # objects on: the four restricted-PSS rules the upstream vLLM image and the
+  # KServe storage-initializer violate (drop ALL, privilege escalation,
+  # non-root, seccomp), for the serving namespace's model Pods, ReplicaSets
+  # and Deployments — a Giant Swarm cluster enforces the restricted profile on
+  # every namespace and denies the pods without it. Nothing the chart adds to
+  # a model pod needs an exception of its own (#518). Off only where the
   # serving namespace is exempted another way.
   policyException:
     enabled: true
-  # Deployment gets a progressDeadlineSeconds long enough for a first
-  # download. Nothing to do on the node by hand.
+  # Kyverno ClusterPolicies for the model pods and Deployments in the serving
+  # namespace. `auto` (the default) follows the resolved
+  # kyvernoPolicies.enabled — they render where kyverno.io/v1 is served and
+  # nowhere else; `true` / `false` force them (an explicit true with Kyverno
+  # off fails the render). On, every model pod — an InferenceService
+  # predictor or an LLMInferenceService workload pod — gets the
+  # storage-initializer's and the runtime's /mnt/models redirected into the
+  # pod's cache subdirectory (<claim>/<model>; the kubelet creates it at mount
+  # time, writable for the claim's fsGroup the pod carries, cache.fsGroup
+  # above) and a storage-initializer memory limit that survives multi-GB
+  # downloads; the Deployment gets a progressDeadlineSeconds long enough for a
+  # first download. Nothing to do on the node by hand.
   policies:
     enabled: auto  # auto | true | false
-    # The init container that prepares the cache subdirectory (runs as
-    # root: the PVC root is root-owned).
-    cacheInit:
-      image:
-        registry: gsoci.azurecr.io
-        name: giantswarm/alpine
-        # registry: gsoci.azurecr.io/giantswarm/alpine
-        version: "3.24.1"
-      resources:
-        requests:
-          cpu: 10m
-          memory: 16Mi
-        limits:
-          cpu: 100m
-          memory: 64Mi
     # Memory limit of the KServe storage-initializer init container. The
     # KServe default (1Gi) is OOM-killed by the Hugging Face download of a
     # large model. Empty leaves KServe's default.
