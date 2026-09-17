@@ -40,12 +40,15 @@ property that shape relies on:
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+
+import yaml
 
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = [
@@ -225,9 +228,19 @@ def check_golden(meta: str, connectivity: str) -> None:
         substrate = ["--set", "components.substrate.versionRange=>=0.0.30-gs.4 <0.0.31-0",
                      "--set", "components.substrate-crds.versionRange=>=0.0.30-gs.4 <0.0.31-0",
                      "--set", "kagent.substrateWorkerPool.workerImage=ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.30-gs.4"]
+        # The Hugging Face download CDN's pattern *.*.*.hf.co (giantswarm/agent-platform#522,
+        # round 2) joins both mirrored huggingFace.fqdns lists of the meta chart —
+        # values it forwards to the connectivity release, whose own default
+        # (equal on both sides, held so by verify-meta) already carries it — so
+        # both sides get the connectivity list as a value. Drop this once
+        # GOLDEN_REF carries the entry.
+        with open(f"{connectivity}/values.yaml") as f:
+            hf_cdn = json.dumps(yaml.safe_load(f)["modelServing"]["networkPolicy"]["huggingFace"]["fqdns"])
+        hf = ["--set-json", f"modelServing.networkPolicy.huggingFace.fqdns={hf_cdn}",
+              "--set-json", f"modelManager.networkPolicy.huggingFace.fqdns={hf_cdn}"]
         shapes = [
-            ("meta default", meta, [*mm_off, *mm_static, *mm_registered, *substrate]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered, *substrate]),
+            ("meta default", meta, [*mm_off, *mm_static, *mm_registered, *substrate, *hf]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered, *substrate, *hf]),
             ("connectivity default", connectivity, [*VM, *mm_off, *ms_polex_off]),
             ("connectivity full", connectivity, [*CONN_FULL, *mm_off, *ms_polex_off]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off, *ms_polex_off]),
