@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Assert the connectivity chart's model-serving policies over both pod shapes
-KServe creates (giantswarm/agent-platform#506, #518).
+KServe creates (giantswarm/agent-platform#506, #518, #520).
 
 A served model runs as one of two pods, and their labels share nothing: the
 classic InferenceService predictor (serving.kserve.io/inferenceservice=<name>,
@@ -18,14 +18,19 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     name as subPath on the storage-initializer and on the shape's runtime
     container (the classic one stays read-only), the pod carries the claim's
     fsGroup (also when it declared another: one claim, one group), no
-    container is added or lost, the original volumes stay, and the
-    initializer's memory limit is raised. The policy over its own output is a
+    container is added or lost, the original volumes stay, the initializer's
+    memory limit is raised, and the storage-initializer and the runtime carry
+    modelServing.policies.env (HF_HUB_DISABLE_XET=1: the Hugging Face client
+    off the Xet path, whose CDN a toFQDNs allow-list cannot follow, #520) next
+    to their own env — KServe's HF_HUB_ENABLE_HF_TRANSFER and HF_XET_* on the
+    initializer, the runtime's on the classic predictor — and added where a
+    container has none; an empty list renders no env rule. The policy over its own output is a
     no-op: the API server reinvokes Kyverno's webhook whenever another
     mutating webhook changed the pod after Kyverno ran, and a rule that is not
     idempotent then adds its patch twice (#514). A pod of the shape without a
     storage-initializer, and a model-manager download-Job pod, are untouched;
-    a workload pod without a model name gets the limit but no cache and no
-    fsGroup (the mount would otherwise land on the claim's root).
+    a workload pod without a model name gets the limit and the env but no
+    cache and no fsGroup (the mount would otherwise land on the claim's root).
   * The mutated pod of each shape passes the fleet's restricted Pod Security
     Standard with the chart's PolicyException and nothing else
     (tests/fixtures/restricted-pss-clusterpolicies.yaml, the five
@@ -61,6 +66,8 @@ NS = "model-serving"
 CLAIM = "hf-cache"
 FSGROUP = 1000
 MEMORY = "4Gi"
+# modelServing.policies.env, as the chart ships it (#520).
+ENV = {"HF_HUB_DISABLE_XET": "1"}
 DEADLINE = 3600
 PSS = HERE / "fixtures" / "restricted-pss-clusterpolicies.yaml"
 # The rules the chart's PolicyException names, as (policy, rule).
@@ -188,6 +195,14 @@ def fs_group(spec: dict) -> int | None:
     return (spec.get("securityContext") or {}).get("fsGroup")
 
 
+def env_of(container: dict) -> dict[str, str | None]:
+    return {e["name"]: e.get("value") for e in container.get("env") or []}
+
+
+def runtime_of(spec: dict, runtime: str) -> dict:
+    return next(c for c in spec["containers"] if c["name"] == runtime)
+
+
 def check_mutations(pods_policy: dict, shape: str) -> None:
     _, runtime, name_label = SHAPES[shape]
     pod = fixture(shape)
@@ -208,18 +223,23 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
         fail(f"{shape}: the storage-initializer's /mnt/models is not {CLAIM}/{model}: {sm}")
     if [c["name"] for c in spec["containers"]] != [c["name"] for c in pod["spec"]["containers"]]:
         fail(f"{shape}: the mutation changed the container list: {[c['name'] for c in spec['containers']]}")
-    rm = mounts(next(c for c in spec["containers"] if c["name"] == runtime)).get("/mnt/models", {})
+    rm = mounts(runtime_of(spec, runtime)).get("/mnt/models", {})
     if rm.get("name") != CLAIM or rm.get("subPath") != model:
         fail(f"{shape}: {runtime}'s /mnt/models is not {CLAIM}/{model}: {rm}")
-    original = mounts(next(c for c in pod["spec"]["containers"] if c["name"] == runtime))["/mnt/models"]
+    original = mounts(runtime_of(pod["spec"], runtime))["/mnt/models"]
     if rm.get("readOnly") != original.get("readOnly"):
         fail(f"{shape}: {runtime}'s /mnt/models readOnly changed from {original.get('readOnly')} to {rm.get('readOnly')}")
+    for label, before, after in (("storage-initializer", pod["spec"]["initContainers"][0], storage),
+                                 (runtime, runtime_of(pod["spec"], runtime), runtime_of(spec, runtime))):
+        if env_of(after) != {**env_of(before), **ENV}:
+            fail(f"{shape}: {label}'s env is {env_of(after)}; expected its own {env_of(before)} plus {ENV}")
     volumes = {v["name"]: v for v in spec["volumes"]}
     if volumes.get(CLAIM) != {"name": CLAIM, "persistentVolumeClaim": {"claimName": CLAIM}}:
         fail(f"{shape}: no {CLAIM} claim volume: {volumes.get(CLAIM)}")
     if missing := [v["name"] for v in pod["spec"]["volumes"] if v["name"] not in volumes]:
         fail(f"{shape}: the mutation dropped volumes {missing}")
-    ok(f"{shape}: {CLAIM}/{model} mounted at /mnt/models on storage-initializer and {runtime}, fsGroup {FSGROUP}, the limit {MEMORY}, no container added, containers and volumes kept")
+    ok(f"{shape}: {CLAIM}/{model} mounted at /mnt/models on storage-initializer and {runtime}, fsGroup {FSGROUP}, the limit {MEMORY}, "
+       f"{ENV} next to both containers' own env, no container added, containers and volumes kept")
 
     again = apply([pods_policy], out)
     if again is not None and again["spec"] != spec:
@@ -234,6 +254,15 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
     if out is None or fs_group(out["spec"]) != FSGROUP or out["spec"]["securityContext"].get("runAsNonRoot") is not True:
         fail(f"{shape}: a pod declaring fsGroup {FSGROUP + 1} did not get the claim's {FSGROUP} with its other fields kept: {out and out['spec'].get('securityContext')}")
     ok(f"{shape}: a pod declaring another fsGroup gets the claim's, its other securityContext fields kept")
+
+    bare = copy.deepcopy(pod)
+    for c in bare["spec"]["initContainers"] + bare["spec"]["containers"]:
+        c.pop("env", None)
+    out = apply([pods_policy], bare)
+    if out is None or env_of(out["spec"]["initContainers"][0]) != ENV or env_of(runtime_of(out["spec"], runtime)) != ENV:
+        fail(f"{shape}: containers without env did not get exactly {ENV}: "
+             f"{out and (env_of(out['spec']['initContainers'][0]), env_of(runtime_of(out['spec'], runtime)))}")
+    ok(f"{shape}: a storage-initializer and a {runtime} without env get exactly {ENV}")
 
     plain = copy.deepcopy(pod)
     del plain["spec"]["initContainers"]
@@ -257,7 +286,9 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
             fail(f"{shape}: a pod without {name_label} got the claim's fsGroup without the claim")
         if out["spec"]["initContainers"][0]["resources"]["limits"]["memory"] != MEMORY:
             fail(f"{shape}: a pod without {name_label} kept the initializer's default limit")
-        ok(f"{shape}: a pod without {name_label} gets the limit and no cache mount, no fsGroup")
+        if env_of(out["spec"]["initContainers"][0]) != {**env_of(pod["spec"]["initContainers"][0]), **ENV}:
+            fail(f"{shape}: a pod without {name_label} did not get {ENV}: {env_of(out['spec']['initContainers'][0])}")
+        ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, no fsGroup")
 
 
 def selector_of(shape: str, policy: dict) -> list[dict]:
@@ -339,8 +370,13 @@ def main(connectivity: str) -> int:
     deployments_policy = one(docs, "ClusterPolicy", "-model-serving-deployments")
     exception = one(docs, "PolicyException", "model-serving-predictors")
     rules = [r["name"] for r in pods_policy["spec"]["rules"]]
-    if rules != [f"redirect-model-storage-{s}" for s in SHAPES] + ["storage-initializer-memory"]:
-        fail(f"the pods policy's rules are {rules}; expected the redirect rules and the limit, no rule adding a container (#518)")
+    expected = [f"redirect-model-storage-{s}" for s in SHAPES] + [f"model-pod-env-{s}" for s in SHAPES] + ["storage-initializer-memory"]
+    if rules != expected:
+        fail(f"the pods policy's rules are {rules}; expected the redirect rules, the env rules and the limit, no rule adding a container (#518)")
+    without = one(render(connectivity, ["--set", "modelServing.policies.env=null"]), "ClusterPolicy", "-model-serving-pods")
+    if [r["name"] for r in without["spec"]["rules"]] != [r for r in expected if not r.startswith("model-pod-env-")]:
+        fail(f"an empty modelServing.policies.env renders {[r['name'] for r in without['spec']['rules']]}; expected no env rule")
+    ok("the pods policy's rules: the redirect rules, the env rules, the limit; an empty modelServing.policies.env renders no env rule")
     for shape in SHAPES:
         check_mutations(pods_policy, shape)
         check_pod_security(pods_policy, exception, shape)

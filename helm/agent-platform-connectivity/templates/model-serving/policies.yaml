@@ -41,6 +41,18 @@
 #                              was denied by the fleet's restricted Pod
 #                              Security Standard on two rules the chart's
 #                              PolicyException does not name (#518).
+#   model-pod-env-*            (one per pod shape, naming its runtime
+#                              container) modelServing.policies.env merged by
+#                              name onto the storage-initializer's and the
+#                              runtime's env — by default HF_HUB_DISABLE_XET=1,
+#                              which takes the Hugging Face client off the Xet
+#                              path: its shard range-GETs go to a CDN whose
+#                              addresses the Cilium DNS proxy never saw
+#                              resolved (30 s TTLs, the client's own resolver
+#                              cache), so a toFQDNs allow-list drops them and
+#                              the download hangs after the repository's
+#                              small files (#520). The containers' other env
+#                              stays; the egress allow-list is not widened.
 #   storage-initializer-memory a memory limit that survives multi-GB downloads
 #                              (KServe's default 1Gi is OOM-killed).
 # The rules mutate at CREATE only: a pod's init containers are immutable, and
@@ -64,7 +76,9 @@ metadata:
       Mounts the Hugging Face cache claim into every KServe model pod in the
       {{ $ns }} namespace — InferenceService predictors and LLMInferenceService
       workload pods (one subdirectory per model, the pod carrying the claim's
-      fsGroup) — and raises the storage-initializer memory limit.
+      fsGroup) — sets the Hugging Face client's environment on the
+      storage-initializer and the runtime container, and raises the
+      storage-initializer memory limit.
 spec:
   background: false
   rules:
@@ -112,6 +126,35 @@ spec:
                   - name: hf-cache
                     mountPath: /mnt/models
                     subPath: {{ $shapeName | quote }}
+    {{- end }}
+    {{- end }}
+    {{- with $ms.policies.env }}
+    {{- /* One env rule per pod shape, for the same reason: the rule names the
+           shape's runtime container. Every model pod with a storage-initializer
+           gets it, named model or not. */ -}}
+    {{- range $shape := $shapes }}
+    - name: model-pod-env-{{ $shape.name }}
+      match:
+        any:
+          {{- include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "shapes" (list $shape)) | trim | nindent 10 }}
+      preconditions:
+        all:
+          - key: {{ $hasStorageInitializer | quote }}
+            operator: GreaterThan
+            value: 0
+      mutate:
+        patchStrategicMerge:
+          spec:
+            # env merges on name: these entries are added to (or overwrite
+            # by name) the containers' own; everything else they carry stays.
+            initContainers:
+              - name: storage-initializer
+                env:
+                  {{- toYaml $ms.policies.env | nindent 18 }}
+            containers:
+              - name: {{ $shape.runtimeContainer }}
+                env:
+                  {{- toYaml $ms.policies.env | nindent 18 }}
     {{- end }}
     {{- end }}
     {{- with $ms.policies.storageInitializerMemoryLimit }}

@@ -1326,6 +1326,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.policies.enabled | string | `"auto"` |  |
 | modelServing.policies.storageInitializerMemoryLimit | string | `"4Gi"` |  |
 | modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
+| modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
+| modelServing.policies.env[0].value | string | `"1"` |  |
 | modelServing.networkPolicy.predictor.port | int | `8080` |  |
 | modelServing.networkPolicy.predictor.additionalIngressNamespaces | list | `[]` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |

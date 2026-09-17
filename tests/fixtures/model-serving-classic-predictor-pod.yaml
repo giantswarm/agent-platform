@@ -24,6 +24,13 @@ spec:
       args:
         - hf://Qwen/Qwen3-8B-FP8
         - /mnt/models
+      env:
+        - name: HF_HUB_ENABLE_HF_TRANSFER
+          value: "1"
+        - name: HF_XET_HIGH_PERFORMANCE
+          value: "1"
+        - name: HF_XET_NUM_CONCURRENT_RANGE_GETS
+          value: "8"
       resources:
         limits:
           cpu: "1"
@@ -41,6 +48,11 @@ spec:
         - --model=/mnt/models
         - --served-model-name=qwen3-8b-fp8
         - --port=8080
+      env:
+        - name: HF_HUB_ENABLE_HF_TRANSFER
+          value: "1"
+        - name: VLLM_CONFIG_ROOT
+          value: /tmp
       ports:
         - containerPort: 8080
           protocol: TCP

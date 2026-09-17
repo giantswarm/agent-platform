@@ -3085,9 +3085,11 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # storage-initializer's and the runtime's /mnt/models redirected into the
   # pod's cache subdirectory (<claim>/<model>; the kubelet creates it at mount
   # time, writable for the claim's fsGroup the pod carries, cache.fsGroup
-  # above) and a storage-initializer memory limit that survives multi-GB
-  # downloads; the Deployment gets a progressDeadlineSeconds long enough for a
-  # first download. Nothing to do on the node by hand.
+  # above), the Hugging Face client's environment (Xet off, env below: a
+  # toFQDNs allow-list cannot follow the Xet CDN) and a storage-initializer
+  # memory limit that survives multi-GB downloads; the Deployment gets a
+  # progressDeadlineSeconds long enough for a first download. Nothing to do
+  # on the node by hand.
   policies:
     enabled: auto  # auto | true | false
     # Memory limit of the KServe storage-initializer init container. The
@@ -3098,6 +3100,33 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Kubernetes default (600) is shorter than a first model download and
     # fires rollout-stuck alerts; 0 leaves the default.
     progressDeadlineSeconds: 3600
+    # Environment merged, by name, onto the storage-initializer and the
+    # runtime container of every model pod of both shapes (a pod without a
+    # storage-initializer is untouched): the entries are added to, or
+    # overwrite by name, the containers' own env; everything else stays. An
+    # empty list renders no rule. The default takes the Hugging Face client
+    # off the Xet path (giantswarm/agent-platform#520). huggingface_hub >= 0.32
+    # with hf_xet installed — the KServe storage-initializer, the vLLM images —
+    # fetches the weights as Xet shards, one connection per range-GET to the
+    # Xet CDN (us.aws.cdn.hf.co, CloudFront), whose ~30 s TTLs and rotating
+    # address sets the client's own resolver cache outlives. The cilium
+    # networkPolicy below is a toFQDNs allow-list: it admits exactly the
+    # addresses the Cilium DNS proxy saw resolved for an allowed name, for
+    # the answer's TTL, so the shards' SYNs are dropped and the
+    # storage-initializer hangs after the repository's small files — no
+    # error, no restart, 0 CPU. With Xet off, huggingface_hub downloads the
+    # shards with hf_transfer (left on) from the LFS fronts (cdn-lfs*.hf.co,
+    # cdn-lfs.huggingface.co, within the FQDN patterns) through the system
+    # resolver: every connection is a DNS query the proxy sees, and its
+    # address is admitted. Widening the egress instead — world on 443, the
+    # CDN's address blocks — is not the fix. The long-term alternative is a
+    # setting of the cluster's Cilium agent the chart does not own, a
+    # tofqdns-min-ttl long enough for the client's cache; an installation
+    # whose cluster has it may set env: [] to have Xet back. A mirror
+    # (HF_ENDPOINT) belongs here too, next to the fqdns that name it.
+    env:
+      - name: HF_HUB_DISABLE_XET
+        value: "1"
   # Network policies of the serving namespace, rendered under networkPolicy
   # (enabled + the resolved flavor) like every other component's wiring:
   # nothing renders while networkPolicy.enabled is false. On, both flavors
@@ -3132,9 +3161,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # enforced through the DNS proxy rule the policies render on their DNS
       # egress; the defaults cover huggingface.co, its API redirects and the
       # LFS / Xet download fronts under hf.co (Cilium's * matches one label,
-      # hence the two-level pattern for cas-bridge.xethub.hf.co). A mirror
-      # (HF_ENDPOINT) or an internal proxy replaces the list. Ignored by the
-      # kubernetes flavor, which cannot select names (see cidrs).
+      # hence the two-level pattern for cas-bridge.xethub.hf.co). The model
+      # pods download from the LFS fronts — policies.env above takes their
+      # client off the Xet path, whose CDN an allow-list by name cannot
+      # follow (#520); the Xet names stay for an installation that has it
+      # back. A mirror (HF_ENDPOINT) or an internal proxy replaces the list.
+      # Ignored by the kubernetes flavor, which cannot select names (see
+      # cidrs).
       fqdns:
         - matchName: huggingface.co
         - matchPattern: "*.huggingface.co"
