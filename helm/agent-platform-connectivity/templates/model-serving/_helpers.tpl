@@ -448,13 +448,15 @@ renders from this list, one entry per shape, so they never disagree. JSON:
       "kind": "InferenceService" | "LLMInferenceService",
       "nameLabel": <the label that carries the served model's name>,
       "runtimeContainer": <the container that serves>,
+      "port": <the port the pod is reached on, its Service's target: modelServing.networkPolicy.<shape>.port>,
       "matchExpressions": [<the label selector of the shape>] } ]
 Usage: $shapes := include "agent-platform.modelServing.podShapes" . | fromJsonArray
 */}}
 {{- define "agent-platform.modelServing.podShapes" -}}
-{{- $classic := dict "name" "predictor" "kind" "InferenceService" "nameLabel" "serving.kserve.io/inferenceservice" "runtimeContainer" "kserve-container" -}}
+{{- $np := .Values.modelServing.networkPolicy -}}
+{{- $classic := dict "name" "predictor" "kind" "InferenceService" "nameLabel" "serving.kserve.io/inferenceservice" "runtimeContainer" "kserve-container" "port" (int $np.predictor.port) -}}
 {{- $_ := set $classic "matchExpressions" (list (dict "key" "serving.kserve.io/inferenceservice" "operator" "Exists")) -}}
-{{- $llmisvc := dict "name" "llmisvc-workload" "kind" "LLMInferenceService" "nameLabel" "app.kubernetes.io/name" "runtimeContainer" "main" -}}
+{{- $llmisvc := dict "name" "llmisvc-workload" "kind" "LLMInferenceService" "nameLabel" "app.kubernetes.io/name" "runtimeContainer" "main" "port" (int $np.llmisvcWorkload.port) -}}
 {{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "kserve.io/component" "operator" "In" "values" (list "workload")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
 {{- list $classic $llmisvc | toJson -}}
 {{- end -}}

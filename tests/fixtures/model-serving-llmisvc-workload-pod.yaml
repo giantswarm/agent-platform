@@ -5,8 +5,15 @@
 # serving.kserve.io/inferenceservice —, the runtime container is `main`, the
 # storage-initializer KServe injects for an hf:// model URI downloads into the
 # template's model-cache emptyDir at /mnt/models, where the runtime reads, at
-# KServe's default 1Gi memory limit. Reduced to what the model-serving policies
-# read and patch (tests/verify-model-serving-policies.py).
+# KServe's default 1Gi memory limit. The pod is reached on 8000 — the port
+# KServe's `<name>-kserve-workload-svc` targets and the rendered HTTPRoute's
+# backendRef names, where the models Gateway's requests arrive (the hubble drop
+# of giantswarm/agent-platform#525) — which is the template's llm-d routing
+# sidecar (a native sidecar: an init container with restartPolicy Always,
+# `--port=8000 --vllm-port=8001`); vLLM's `main` listens on 8001 behind it. The
+# network policies admit exactly the sidecar's container port. Reduced to what
+# the model-serving policies read and patch
+# (tests/verify-model-serving-policies.py).
 apiVersion: v1
 kind: Pod
 metadata:
@@ -43,6 +50,22 @@ spec:
       volumeMounts:
         - name: model-cache
           mountPath: /mnt/models
+    - name: llm-d-routing-sidecar
+      image: ghcr.io/llm-d/llm-d-router-disagg-sidecar:v0.9.0
+      restartPolicy: Always
+      command:
+        - /app/pd-sidecar
+        - --port=8000
+        - --vllm-port=8001
+      ports:
+        - containerPort: 8000
+          protocol: TCP
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        runAsNonRoot: true
   containers:
     - name: main
       image: docker.io/vllm/vllm-openai:v0.11.0

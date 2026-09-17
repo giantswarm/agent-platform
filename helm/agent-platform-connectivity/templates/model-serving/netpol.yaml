@@ -3,7 +3,6 @@
 {{- $np := $ms.networkPolicy }}
 {{- $ns := include "agent-platform.modelServing.namespace" . }}
 {{- $name := include "name" . }}
-{{- $port := int $np.predictor.port }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $shapes := include "agent-platform.modelServing.podShapes" . | fromJsonArray }}
@@ -12,7 +11,9 @@
        every pod KServe runs for a served model, in either of its shapes — the
        classic InferenceService predictor and the LLMInferenceService workload
        pod (_helpers.tpl, agent-platform.modelServing.podShapes; the two share
-       no label, so a policy renders per shape) — whatever the runtime; the
+       no label and listen on different ports — the classic predictor's 8080,
+       the llm-d workload's 8000, the port its Service targets — so a policy
+       renders per shape with that shape's port, #525) — whatever the runtime; the
        storage-initializer is an init container of that pod, so one egress
        rule covers the download and the runtime. model-manager's pre-warm
        download Jobs (kserve backend) run in the same namespace under their
@@ -20,6 +21,7 @@
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 {{- range $shape := $shapes }}
+{{- $port := int $shape.port }}
 ---
 # {{ $shape.kind }} pods: ingress on the runtime port from the callers of the
 # OpenAI-compatible API, egress to DNS and the model download endpoints.
@@ -90,10 +92,11 @@ spec:
     {{- include "agent-platform.modelServing.huggingFaceEgress.cilium" . | trim | nindent 4 }}
 {{- if $kagentOn }}
 ---
-# Egress from kagent agent pods to the model pods of either shape. The chart's
-# agent egress (templates/kagent/netpol.yaml) admits world and cluster on 443
-# only; Cilium evaluates after service translation, so the predictor pod port
-# is what must be allowed (Cilium policies are additive to the agents' own).
+# Egress from kagent agent pods to the model pods of either shape, on that
+# shape's port. The chart's agent egress (templates/kagent/netpol.yaml) admits
+# world and cluster on 443 only; Cilium evaluates after service translation, so
+# the model pod's own port is what must be allowed (Cilium policies are
+# additive to the agents' own).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -106,21 +109,22 @@ spec:
     matchLabels:
       app: atenet-egress
   egress:
+    {{- range $shapes }}
     - toEndpoints:
-        {{- range $shapes }}
         - matchExpressions:
             {{- toYaml .matchExpressions | nindent 12 }}
           matchLabels:
             io.kubernetes.pod.namespace: {{ $ns }}
-        {{- end }}
       toPorts:
         - ports:
-            - port: {{ $port | quote }}
+            - port: {{ int .port | quote }}
               protocol: TCP
+    {{- end }}
 {{- end }}
 
 {{- else }}
 {{- range $shape := $shapes }}
+{{- $port := int $shape.port }}
 ---
 # {{ $shape.kind }} pods: ingress on the runtime port from the callers of the
 # OpenAI-compatible API. The kubelet's probes are not subject to

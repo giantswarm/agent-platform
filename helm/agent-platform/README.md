@@ -1331,6 +1331,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.policies.env[0].value | string | `"1"` |  |
 | modelServing.networkPolicy.predictor.port | int | `8080` |  |
 | modelServing.networkPolicy.predictor.additionalIngressNamespaces | list | `[]` |  |
+| modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |

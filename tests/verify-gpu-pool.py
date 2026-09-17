@@ -238,6 +238,7 @@ else:
         golden = documents(helm(f"{tree}/{CONN}", [*SERVING, *UNTAINTED, *NO_CACHE] if carries else [*SERVING, *NO_CACHE]))
         resized = "g6.xlarge" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-4b-instruct.yaml", encoding="utf-8").read()
         shaped = "podShapes" in open(f"{tree}/{CONN}/templates/model-serving/_helpers.tpl", encoding="utf-8").read()
+        ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -266,6 +267,16 @@ else:
             for key in [k for k in side if k[0] in policies and "model-serving" in k[1]]:
                 side.pop(key)
         print(f"note: the serving policies select both pod shapes on this side (#506) and not on {ref}: they are left out of the comparison")
+    # The llm-d workload's ingress admits the workload's own port, 8000, instead
+    # of the classic predictor's 8080 (giantswarm/agent-platform#525); a golden
+    # from before renders the old port, so that one policy is left out of the
+    # comparison on both sides. Drop this once GOLDEN_REF carries #525.
+    if not ported:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy")
+                        and k[1].endswith(("-model-serving-llmisvc-workload", "-model-serving-llmisvc-workload-ingress"))]:
+                side.pop(key)
+        print(f"note: the llm-d workload's ingress admits the workload's port on this side (#525) and not on {ref}: that policy is left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):
