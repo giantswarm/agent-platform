@@ -3155,6 +3155,19 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # namespace of the KServe ingress Gateway (envoy-gateway-system) or of
       # Prometheus (KServe's scrape annotations point at the same port).
       additionalIngressNamespaces: []
+    # The LLMInferenceService workload pod the llm-d controller creates is
+    # reached on its own port — the one KServe's `<name>-kserve-workload-svc`
+    # targets and the rendered HTTPRoute's backendRef names: 8000, the
+    # template's llm-d routing sidecar (`--port=8000 --vllm-port=8001`; vLLM's
+    # `main` listens on 8001 behind it), not the classic predictor's 8080 — so
+    # its policy admits that port from the same callers (the kagent agent pods,
+    # the release namespace, predictor.additionalIngressNamespaces) and for the
+    # kubelet's probes (giantswarm/agent-platform#525).
+    # tests/verify-model-serving-policies.py holds each shape's admitted port to
+    # the port of the container its fixture pod is reached on, so the two
+    # cannot drift again.
+    llmisvcWorkload:
+      port: 8000
     # Where the weights come from, TCP 443: the KServe storage-initializer
     # (hf:// presets), the runtime's own Hub lookups, model-manager's
     # pre-warm download Jobs and — on the kserve backend — model-manager

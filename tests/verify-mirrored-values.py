@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Assert the meta chart's copy of every mirrored egress default equals the
-connectivity chart's own (giantswarm/agent-platform#522).
+"""Assert the meta chart's copy of every mirrored network-policy default equals
+the connectivity chart's own (giantswarm/agent-platform#522, #525).
 
 The meta chart forwards its whole values tree to the connectivity release
 (templates/components.yaml, forwardAllValues), so every default it declares
@@ -15,11 +15,15 @@ the old lists (gazelle, 4.28.17: Helm storage's supplied `.config` with four
 entries beside the chart's five).
 
 The check walks the connectivity chart's values for every `fqdns` and `cidrs`
-list under a `networkPolicy` block — the egress allow-lists whose defaults the
-meta chart mirrors — and holds the meta chart's value at the same path equal
-to it, naming the path and both lists when they differ or the meta chart lacks
-the path. It refuses to pass vacuously: the two `huggingFace.fqdns` lists must
-be among the paths it compared. `--meta-values FILE` compares another meta
+list and every `port` under a `networkPolicy` block — the egress allow-lists
+and the admitted ports whose defaults the meta chart mirrors (#525 gave the
+llm-d workload shape its own `modelServing.networkPolicy.llmisvcWorkload.port`,
+a value the meta chart had to carry too or its forwarded tree would have kept
+the connectivity release on the old port) — and holds the meta chart's value
+at the same path equal to it, naming the path and both values when they differ
+or the meta chart lacks the path. It refuses to pass vacuously: the two
+`huggingFace.fqdns` lists and the two model-serving ports must be among the
+paths it compared. `--meta-values FILE` compares another meta
 values file (the negative control in `make verify-meta`).
 """
 
@@ -28,8 +32,9 @@ import sys
 
 import yaml
 
-REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networkPolicy.huggingFace.fqdns"}
-MIRRORED = ("fqdns", "cidrs")
+REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networkPolicy.huggingFace.fqdns",
+            "modelServing.networkPolicy.predictor.port", "modelServing.networkPolicy.llmisvcWorkload.port"}
+MIRRORED = ("fqdns", "cidrs", "port")
 
 
 def leaves(tree: dict, path: tuple[str, ...] = ()):
@@ -74,8 +79,8 @@ def main() -> int:
     if missing := REQUIRED - compared:
         sys.exit(f"FAIL: the connectivity chart no longer declares {sorted(missing)}; this check would pass vacuously")
     if drift:
-        sys.exit("FAIL: a mirrored egress default differs between the charts — the meta chart forwards its copy, which shadows the connectivity default:\n  " + "\n  ".join(drift))
-    print(f"ok: {len(compared)} mirrored networkPolicy fqdns/cidrs lists are equal in both charts ({', '.join(sorted(compared))})")
+        sys.exit("FAIL: a mirrored networkPolicy default differs between the charts — the meta chart forwards its copy, which shadows the connectivity default:\n  " + "\n  ".join(drift))
+    print(f"ok: {len(compared)} mirrored networkPolicy fqdns/cidrs lists and ports are equal in both charts ({', '.join(sorted(compared))})")
     return 0
 
 

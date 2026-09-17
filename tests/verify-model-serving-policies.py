@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Assert the connectivity chart's model-serving policies over both pod shapes
-KServe creates (giantswarm/agent-platform#506, #518, #520, #522).
+KServe creates (giantswarm/agent-platform#506, #518, #520, #522, #525).
 
 A served model runs as one of two pods, and their labels share nothing: the
 classic InferenceService predictor (serving.kserve.io/inferenceservice=<name>,
@@ -44,6 +44,18 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
     never the download Job's pod.
+  * Each shape's policies admit exactly the port its fixture pod is reached
+    on — the container port KServe's Service targets: the classic predictor's
+    kserve-container on 8080, the llm-d workload's routing sidecar on 8000
+    (`<name>-kserve-workload-svc` and the HTTPRoute's backendRef name it;
+    vLLM's main listens on 8001 behind the sidecar; #525) — the ingress from the callers and
+    from the kubelet (cilium), the kubernetes-flavour ingress and the kagent
+    agents' egress rule that selects the shape; the two fixtures listen on
+    different ports, so one shared value could not pass. Both renders below
+    (the connectivity defaults and the meta chart's forwarded values) are
+    held to it, and a render whose llm-d value is the classic port (the
+    4.28.18 shape, every request through the models Gateway a 503) fails
+    naming the shape.
   * The model pods' and the download Job's cilium egress admits every name of
     the Hugging Face download path (HUB_HOSTS: the Hub and its API redirects,
     the LFS fronts one label under hf.co, the Xet fronts two, the download
@@ -102,10 +114,11 @@ ROOT_INIT = {"name": "hf-cache-init", "image": "gsoci.azurecr.io/giantswarm/alpi
              "securityContext": {"runAsUser": 0, "runAsNonRoot": False, "allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
                                  "capabilities": {"drop": ["ALL"], "add": ["CHOWN", "DAC_OVERRIDE", "FOWNER"]}},
              "volumeMounts": [{"name": CLAIM, "mountPath": "/cache"}]}
-# shape -> (fixture, runtime container, the label carrying the model's name)
+# shape -> (fixture, runtime container, the label carrying the model's name, the container the pod is reached on — the
+# one KServe's Service targets: the runtime itself, or the llm-d routing sidecar in front of it)
 SHAPES = {
-    "predictor": ("model-serving-classic-predictor-pod.yaml", "kserve-container", "serving.kserve.io/inferenceservice"),
-    "llmisvc-workload": ("model-serving-llmisvc-workload-pod.yaml", "main", "app.kubernetes.io/name"),
+    "predictor": ("model-serving-classic-predictor-pod.yaml", "kserve-container", "serving.kserve.io/inferenceservice", "kserve-container"),
+    "llmisvc-workload": ("model-serving-llmisvc-workload-pod.yaml", "main", "app.kubernetes.io/name", "llm-d-routing-sidecar"),
 }
 DOWNLOAD_LABELS = {"app.kubernetes.io/managed-by": "model-manager", "model-manager.giantswarm.io/component": "download", "job-name": "pull-qwen3-4b"}
 # The names the Hugging Face download path uses (#522): the Hub and its API redirects, the LFS fronts one label
@@ -246,8 +259,12 @@ def runtime_of(spec: dict, runtime: str) -> dict:
     return next(c for c in spec["containers"] if c["name"] == runtime)
 
 
+def init_of(spec: dict, name: str) -> dict:
+    return next(c for c in spec["initContainers"] if c["name"] == name)
+
+
 def check_mutations(pods_policy: dict, shape: str) -> None:
-    _, runtime, name_label = SHAPES[shape]
+    _, runtime, name_label, _ = SHAPES[shape]
     pod = fixture(shape)
     model = pod["metadata"]["labels"][name_label]
     out = apply([pods_policy], pod)
@@ -258,7 +275,7 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
         fail(f"{shape}: initContainers are {[c['name'] for c in spec['initContainers']]}; the chart adds no container to a model pod (#518)")
     if fs_group(spec) != FSGROUP:
         fail(f"{shape}: the pod does not carry the claim's fsGroup {FSGROUP}: {spec.get('securityContext')}")
-    storage = spec["initContainers"][0]
+    storage = init_of(spec, "storage-initializer")
     if storage["resources"]["limits"]["memory"] != MEMORY:
         fail(f"{shape}: the storage-initializer's memory limit is {storage['resources']['limits'].get('memory')}, expected {MEMORY}")
     sm = mounts(storage).get("/mnt/models", {})
@@ -272,7 +289,7 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
     original = mounts(runtime_of(pod["spec"], runtime))["/mnt/models"]
     if rm.get("readOnly") != original.get("readOnly"):
         fail(f"{shape}: {runtime}'s /mnt/models readOnly changed from {original.get('readOnly')} to {rm.get('readOnly')}")
-    for label, before, after in (("storage-initializer", pod["spec"]["initContainers"][0], storage),
+    for label, before, after in (("storage-initializer", init_of(pod["spec"], "storage-initializer"), storage),
                                  (runtime, runtime_of(pod["spec"], runtime), runtime_of(spec, runtime))):
         if env_of(after) != {**env_of(before), **ENV}:
             fail(f"{shape}: {label}'s env is {env_of(after)}; expected its own {env_of(before)} plus {ENV}")
@@ -302,13 +319,13 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
     for c in bare["spec"]["initContainers"] + bare["spec"]["containers"]:
         c.pop("env", None)
     out = apply([pods_policy], bare)
-    if out is None or env_of(out["spec"]["initContainers"][0]) != ENV or env_of(runtime_of(out["spec"], runtime)) != ENV:
+    if out is None or env_of(init_of(out["spec"], "storage-initializer")) != ENV or env_of(runtime_of(out["spec"], runtime)) != ENV:
         fail(f"{shape}: containers without env did not get exactly {ENV}: "
-             f"{out and (env_of(out['spec']['initContainers'][0]), env_of(runtime_of(out['spec'], runtime)))}")
+             f"{out and (env_of(init_of(out['spec'], 'storage-initializer')), env_of(runtime_of(out['spec'], runtime)))}")
     ok(f"{shape}: a storage-initializer and a {runtime} without env get exactly {ENV}")
 
     plain = copy.deepcopy(pod)
-    del plain["spec"]["initContainers"]
+    plain["spec"]["initContainers"] = [c for c in plain["spec"]["initContainers"] if c["name"] != "storage-initializer"]
     out = apply([pods_policy], plain)
     if out is not None and out["spec"] != plain["spec"]:
         fail(f"{shape}: a pod without a storage-initializer was mutated")
@@ -323,14 +340,15 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
         nameless = copy.deepcopy(pod)
         del nameless["metadata"]["labels"][name_label]
         out = apply([pods_policy], nameless)
-        if out is None or [c["name"] for c in out["spec"]["initContainers"]] != ["storage-initializer"] or CLAIM in {v["name"] for v in out["spec"]["volumes"]}:
+        if out is None or [c["name"] for c in out["spec"]["initContainers"]] != [c["name"] for c in pod["spec"]["initContainers"]] \
+                or CLAIM in {v["name"] for v in out["spec"]["volumes"]}:
             fail(f"{shape}: a pod without {name_label} got the cache (it would mount the claim's root)")
         if fs_group(out["spec"]) is not None:
             fail(f"{shape}: a pod without {name_label} got the claim's fsGroup without the claim")
-        if out["spec"]["initContainers"][0]["resources"]["limits"]["memory"] != MEMORY:
+        if init_of(out["spec"], "storage-initializer")["resources"]["limits"]["memory"] != MEMORY:
             fail(f"{shape}: a pod without {name_label} kept the initializer's default limit")
-        if env_of(out["spec"]["initContainers"][0]) != {**env_of(pod["spec"]["initContainers"][0]), **ENV}:
-            fail(f"{shape}: a pod without {name_label} did not get {ENV}: {env_of(out['spec']['initContainers'][0])}")
+        if env_of(init_of(out["spec"], "storage-initializer")) != {**env_of(init_of(pod["spec"], "storage-initializer")), **ENV}:
+            fail(f"{shape}: a pod without {name_label} did not get {ENV}: {env_of(init_of(out['spec'], 'storage-initializer'))}")
         ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, no fsGroup")
 
 
@@ -404,6 +422,47 @@ def check_selectors(cilium: list[dict], k8s: list[dict]) -> None:
     ok("each shape's pod is selected by exactly its own network policies (both flavours), the agents' egress and the PolicyException; the download Job's pod by none")
 
 
+def container_port(shape: str) -> int:
+    """The one port of the fixture container the shape's pod is reached on (SHAPES; an init container for a native sidecar)."""
+    spec, entry = fixture(shape)["spec"], SHAPES[shape][3]
+    container = next(c for c in spec["containers"] + spec.get("initContainers", []) if c["name"] == entry)
+    ports = container.get("ports") or []
+    if len(ports) != 1:
+        fail(f"{shape}: the fixture's {entry} declares {len(ports)} container ports; this check reads exactly one")
+    return int(ports[0]["containerPort"])
+
+
+def cilium_ports(rules: list[dict]) -> set[int]:
+    return {int(p["port"]) for r in rules for tp in r.get("toPorts") or [] for p in tp["ports"]}
+
+
+def check_ports(cilium: list[dict], k8s: list[dict], via: str) -> None:
+    """Each shape's policies admit exactly the port its fixture pod's runtime container listens on (#525): every ingress
+    rule of its CiliumNetworkPolicy (the callers and the kubelet), its kubernetes-flavour ingress, and the kagent agents'
+    egress rule that selects the shape — over the policies as rendered `via` the connectivity defaults or the meta chart's
+    forwarded values."""
+    agents = one(cilium, "CiliumNetworkPolicy", "-kagent-agents-to-model-serving")
+    ports: dict[str, int] = {}
+    for shape in SHAPES:
+        want, runtime = container_port(shape), SHAPES[shape][3]
+        for rule in one(cilium, "CiliumNetworkPolicy", f"-model-serving-{shape}")["spec"]["ingress"]:
+            if (got := cilium_ports([rule])) != {want}:
+                fail(f"-model-serving-{shape} ({via}): the ingress rule from {next(k for k in rule if k.startswith('from'))} admits {sorted(got)}; "
+                     f"the fixture's {runtime} is reached on {want}")
+        ingress = one(k8s, "NetworkPolicy", f"-model-serving-{shape}-ingress")["spec"]["ingress"]
+        if (got := {int(p["port"]) for r in ingress for p in r["ports"]}) != {want}:
+            fail(f"-model-serving-{shape}-ingress ({via}): admits {sorted(got)}; the fixture's {runtime} is reached on {want}")
+        labels = {**fixture(shape)["metadata"]["labels"], "io.kubernetes.pod.namespace": NS}
+        to_shape = [r for r in agents["spec"]["egress"] if any(selects(p, labels) for p in r.get("toEndpoints") or [])]
+        if not to_shape or (got := cilium_ports(to_shape)) != {want}:
+            fail(f"-kagent-agents-to-model-serving ({via}): the egress to the {shape} pods admits {sorted(cilium_ports(to_shape))}; "
+                 f"the fixture's {runtime} is reached on {want}")
+        ports[shape] = want
+    if len(set(ports.values())) != len(ports):
+        fail(f"the fixtures are reached on the same port ({ports}); the check could not tell one shape's value from the other's")
+    ok(f"{via}: each shape's ingress (both flavours, the kubelet's rule too) and the agents' egress admit exactly the port its fixture is reached on: {ports}")
+
+
 def cilium_regex(entry: dict) -> re.Pattern:
     """A toFQDNs entry as Cilium's DNS proxy compiles it (pkg/fqdn/matchpattern): lower-cased and anchored; in a
     matchPattern `*` is [-a-zA-Z0-9_]* — DNS label characters, never a dot — so a `*` admits exactly one label."""
@@ -459,6 +518,16 @@ def main(connectivity: str, meta: str) -> int:
     cilium = render(connectivity, CILIUM)
     check_selectors(cilium, docs)
     check_fqdns(cilium, docs, "the connectivity chart's defaults")
+    check_ports(cilium, docs, "the connectivity chart's defaults")
+    regressed = render(connectivity, [*CILIUM, "--set", f"modelServing.networkPolicy.llmisvcWorkload.port={container_port('predictor')}"])
+    try:
+        check_ports(regressed, docs, "the negative control")
+    except SystemExit as e:
+        if "-model-serving-llmisvc-workload (" not in str(e):
+            fail(f"the port check failed the 4.28.18 shape for the wrong reason: {e}")
+    else:
+        fail("the port check passed a render whose llmisvc-workload policy admits the classic predictor's port (the 4.28.18 shape)")
+    ok("a render whose llm-d value is the classic port fails the port check naming -model-serving-llmisvc-workload")
     with tempfile.TemporaryDirectory() as tmp:
         through_meta = []
         for flavour, apis in (("cilium", CILIUM), ("kubernetes", [])):
@@ -467,6 +536,7 @@ def main(connectivity: str, meta: str) -> int:
                 yaml.safe_dump(forwarded_values(meta, apis), f)
             through_meta.append(render(connectivity, ["-f", forwarded, *apis]))
         check_fqdns(*through_meta, "the meta chart's forwarded values")
+        check_ports(*through_meta, "the meta chart's forwarded values")
     return 0
 
 
