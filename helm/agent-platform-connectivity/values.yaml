@@ -347,6 +347,66 @@ gateway:
     # the 55 s deadline) rather than carried over. Set
     # `karpenter.sh/do-not-disrupt: "true"` here to trade node churn for them again.
     podAnnotations: {}  # @schema additionalProperties: true
+  # === Metric labels ===
+  # Custom Prometheus labels on every metric the data plane emits — the HTTP,
+  # MCP and GenAI families alike, whatever route the request took: ONE
+  # Gateway-scoped AgentgatewayPolicy, <release>-metrics
+  # (templates/agentgateway/metrics-policy.yaml, frontend.metrics), rendered
+  # whenever the data plane is (an agentgateway-* ingress.mode with the
+  # component on) and the list below is not empty; in muster-direct there is no
+  # data plane and the knobs are inert. agentgateway honours one metrics policy
+  # per Gateway: labels replace, they never merge, and of two policies one is
+  # kept and the other dropped in silence (which one has changed between
+  # agentgateway releases) — so every label the platform wants lives in this
+  # one list, whichever route it means to describe. Each entry is a one-line
+  # CEL expression evaluated when the request completes; a failed or empty
+  # expression renders the value `unknown` and keeps the series. At most 16
+  # entries (the CRD's limit); names are unique Prometheus label names, none of
+  # the data plane's own (gateway, listener, route, backend, status, gen_ai_*,
+  # ...) — which would break the scrape — and none the scrape adds (namespace,
+  # pod, instance, job, ...), which Prometheus would store as exported_<name>.
+  #
+  # The defaults name the calling workload — which agent made the call. The
+  # expression resolves the caller by source IP against the agentgateway
+  # controller's own workload store (built from cluster Pods, no Istio). The
+  # identity is NOT cryptographic — it is adequate for accounting and must never
+  # be used for authorization. Cardinality equals the number of agents; pod name
+  # is deliberately absent. On the LLM listener (llmRouting) this is the agent
+  # whose inference the metric counts — the LLM usage dashboard reads `agent`
+  # and `agent_namespace`; on the kagent controller route it is the caller,
+  # klaus-gateway or the portal.
+  metricLabels:
+    - name: agent
+      expression: source.unverifiedWorkload.serviceAccount
+    - name: agent_namespace
+      expression: source.unverifiedWorkload.namespace
+  # The person behind the call as a label. The expression is `jwt.<claim>` for
+  # the identity claim the kagent controller route verifies in Strict mode and
+  # writes into x-user-id (kagent.controller.auth.userIdClaim, `email`), so the
+  # metrics attribute a turn to the same person the controller acts as.
+  # klaus-gateway makes every controller call with the linked person's Dex
+  # id_token and never as itself (its pkg/a2a; Slack is a forwarded-only
+  # channel), so on that route every series carries a verified person — a
+  # Slack turn is one lf.a2a.v1.A2AService/SendStreamingMessage stream, its
+  # duration the turn's; the portal and a CLI ride the same route and are
+  # labelled the same way, and so is every other route of the Gateway that
+  # verifies a bearer (agent-manager's and model-manager's JWT policies). A
+  # route without a JWT policy — the MCP path under oauthMode passthrough, the
+  # LLM listener, whose calls carry the ModelConfig's API key and no person —
+  # renders `unknown`: one extra label value there, no series per person.
+  # On by default, and rendered only while such a route exists (the kagent
+  # controller route with its JWT policy, agent-manager's, model-manager's):
+  # without one the label would read `unknown` on every series, so the knob
+  # stays on and the label appears with the first verifying route. Know what
+  # it costs: an email address in Mimir is personal data, and the label
+  # multiplies those routes' HTTP series by the number of people (tens to a few
+  # hundred on an installation). `enabled: false` drops the label and its
+  # series. Another claim (a team, say) is an ordinary gateway.metricLabels
+  # entry, `expression: jwt.<claim>`; only a string-valued claim labels — a
+  # list-valued one renders `unknown`.
+  userMetricLabel:
+    enabled: true
+    name: user
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -426,19 +486,6 @@ llmRouting:
     "/v1/messages": Messages
     "/v1/messages/count_tokens": AnthropicTokenCount
     "*": Passthrough
-  # Custom Prometheus labels on every metric the data plane emits: which agent
-  # made the call. The expression resolves the caller by source IP against the
-  # agentgateway controller's own workload store (built from cluster Pods, no
-  # Istio). The identity is NOT cryptographic — it is adequate for accounting
-  # and must never be used for authorization. An unknown caller IP, or a failed
-  # expression, renders the label value `unknown` and keeps the series.
-  # Cardinality equals the number of agents; pod name is deliberately absent.
-  # At most 16 entries (the CRD's limit).
-  metricLabels:
-    - name: agent
-      expression: source.unverifiedWorkload.serviceAccount
-    - name: agent_namespace
-      expression: source.unverifiedWorkload.namespace
   # A MutatingAdmissionPolicy that sends a ModelConfig this chart does NOT
   # render through the LLM listener — one created by Backstage, agent-manager or
   # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs

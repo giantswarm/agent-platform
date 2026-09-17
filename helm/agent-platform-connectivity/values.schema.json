@@ -346,6 +346,21 @@
                         }
                     }
                 },
+                "metricLabels": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "expression": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
                 "name": {
                     "type": "string"
                 },
@@ -504,6 +519,18 @@
                                     ]
                                 }
                             }
+                        }
+                    }
+                },
+                "userMetricLabel": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "name": {
+                            "type": "string"
                         }
                     }
                 }
@@ -888,21 +915,6 @@
                         },
                         "port": {
                             "type": "integer"
-                        }
-                    }
-                },
-                "metricLabels": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "properties": {
-                            "expression": {
-                                "type": "string"
-                            },
-                            "name": {
-                                "type": "string"
-                            }
                         }
                     }
                 },

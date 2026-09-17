@@ -1,0 +1,51 @@
+{{- /* The ONE metrics policy of the data-plane Gateway: the custom Prometheus
+labels every metric the data plane emits carries — the HTTP, MCP and GenAI
+families alike, whatever route the request took (gateway.metricLabels, plus the
+person label gateway.userMetricLabel; agent-platform.metricLabels builds and
+guards the list).
+
+Gateway-scoped because agentgateway's `frontend.metrics` may target only a
+Gateway. Rendered here, apart from the LLM path's policy (templates/llm/policy.yaml),
+because the data plane honours ONE metrics policy per Gateway: custom labels
+replace rather than merge, and of two policies on the same Gateway one is kept
+and the other dropped in silence — which one has changed between agentgateway
+releases (arbitrary on v1.4, the lowest policy key on v1.5, the oldest on later
+builds; crates/agentgateway/src/store/binds.rs), so nothing may rely on it. The
+labels therefore cannot depend on llmRouting.enabled, and no other policy of
+this chart carries a frontend.metrics section (verify-metric-labels asserts
+both).
+
+Every label is a CEL expression evaluated when the request completes, against
+the request as the route policies left it: a JWT policy's verified claims
+(`jwt.<claim>`) are there for the kagent controller route, the calling workload
+(`source.unverifiedWorkload.*`) for every route. A failed or empty expression
+renders `unknown` and keeps the series. Not rendered without a data plane, or
+with nothing to add — the person label counts only while a route of the Gateway
+verifies a bearer (agent-platform.jwtRouteRendered). Name and expression go
+through toYaml: a name YAML 1.1 would read as a boolean (`on`, `yes`) is quoted,
+and the helper refuses a value spanning more than one line. */ -}}
+{{- if (include "agent-platform.ingress.agentgateway" .) }}
+{{- $labels := include "agent-platform.metricLabels" . | fromYamlArray }}
+{{- if $labels }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}
+  frontend:
+    metrics:
+      attributes:
+        add:
+          {{- range $labels }}
+          - name: {{ .name | toYaml }}
+            expression: {{ .expression | toYaml }}
+          {{- end }}
+{{- end }}
+{{- end }}

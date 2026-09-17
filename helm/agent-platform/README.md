@@ -556,6 +556,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
+| gateway.metricLabels[0].name | string | `"agent"` |  |
+| gateway.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
+| gateway.metricLabels[1].name | string | `"agent_namespace"` |  |
+| gateway.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| gateway.userMetricLabel.enabled | bool | `true` |  |
+| gateway.userMetricLabel.name | string | `"user"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -568,10 +574,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
 | llmRouting.routes.* | string | `"Passthrough"` |  |
-| llmRouting.metricLabels[0].name | string | `"agent"` |  |
-| llmRouting.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
-| llmRouting.metricLabels[1].name | string | `"agent_namespace"` |  |
-| llmRouting.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
 | llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
