@@ -687,15 +687,10 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
-Truthy (emits "true") when this chart renders a policy that verifies a bearer
-JWT on a route of the data-plane Gateway: the kagent controller route
-(templates/kagent/controller-jwt-policy.yaml), agent-manager's and
-model-manager's (templates/agent-manager/jwt-policy.yaml,
-templates/model-manager/jwt-policy.yaml) — each template's own gate, repeated
-here. Only a request through such a route carries `jwt.<claim>` when the data
-plane evaluates the metric labels; without one the person label
-(gateway.userMetricLabel) would read `unknown` on every series, so it is
-rendered only while this is true.
+Truthy (emits "true") when a policy of this chart verifies a bearer JWT on a
+route of the data-plane Gateway: the kagent controller route's, agent-manager's
+or model-manager's (each template's own gate, repeated here). Only such a
+request carries `jwt.<claim>` when the metric labels are evaluated.
 */}}
 {{- define "agent-platform.jwtRouteRendered" -}}
 {{- $k := dig "controllerRoute" dict (.Values.kagent | default dict) -}}
@@ -705,85 +700,63 @@ rendered only while this is true.
 {{- end -}}
 
 {{/*
-The custom metric labels of the data plane: the `add` list of the ONE
-frontend.metrics policy on the Gateway (templates/agentgateway/metrics-policy.yaml),
-as a YAML list of {name, expression}. gateway.metricLabels as written, then —
-with gateway.userMetricLabel.enabled, while a route of the Gateway verifies a
-bearer (agent-platform.jwtRouteRendered) — the person label, `jwt.<claim>` for
-the identity claim the kagent controller route verifies and writes into
-x-user-id (agent-platform.kagent.userIdClaim), so the metrics and the
-controller attribute a call to the same person. Empty (no entries, the person
-label off or inert) renders no policy.
-
-Guards, each failing the render naming the entry: a name or an expression that
-is empty or spans more than one line (the policy is one YAML document; a block
-scalar there is a parse error with no name on it); a name that is not a
-Prometheus label name, one of the labels the data plane already puts on its
-series (a duplicate label name makes Prometheus refuse the whole scrape, every
-metric of the data plane with it), one the scrape itself adds (Prometheus keeps
-its own and stores the policy's as exported_<name>), or one starting with __
-(Prometheus internals, dropped after relabeling); two entries of one name — the
-person label counts — since the CRD keys the list by name and the API server
-refuses the policy; more than 16 entries, the CRD's limit; an identity claim
-that is not a CEL identifier, whose `jwt.<claim>` would not compile and take
-the whole policy — the agent labels with it — down.
+The `add` list of the Gateway's one frontend.metrics policy
+(templates/agentgateway/metrics-policy.yaml), as YAML, from gateway.metricLabels:
+a map keyed by label name, each entry {expression, enabled}, in name order. The
+expression goes through tpl (the default `user` entry includes
+agent-platform.kagent.userIdClaim, which refuses a claim that is no CEL
+identifier). An entry whose expression reads `jwt` — `jwt.<claim>` or
+`jwt["<claim>"]` — is kept only while a route of the Gateway verifies a bearer
+(agent-platform.jwtRouteRendered). The schema holds every entry's shape; the
+guards here fail the render naming the entry: a missing, empty or multi-line
+expression, a name that is not a Prometheus label name, one the data plane's
+own series carry (a duplicate label name fails the whole scrape), one the
+scrape adds (stored as exported_<name>) or one starting with __ — checked on
+held entries too — and more than 16 enabled entries (the CRD's limit).
 Usage: include "agent-platform.metricLabels" . | fromYamlArray
 */}}
 {{- define "agent-platform.metricLabels" -}}
-{{- $labels := list -}}
-{{- range $i, $l := (.Values.gateway.metricLabels | default list) -}}
-{{- $name := toString (dig "name" "" ($l | default dict)) -}}
-{{- $expr := toString (dig "expression" "" ($l | default dict)) -}}
-{{- if not $name -}}
-{{- fail (printf "gateway.metricLabels[%d] has no name; every entry is {name: <Prometheus label name>, expression: <CEL>}" $i) -}}
-{{- end -}}
-{{- if not $expr -}}
-{{- fail (printf "gateway.metricLabels[%d] (%s) has no expression; every entry is {name: <Prometheus label name>, expression: <CEL>}" $i $name) -}}
-{{- end -}}
-{{- if or (contains "\n" $name) (contains "\n" $expr) -}}
-{{- fail (printf "gateway.metricLabels[%d] (%s) spans more than one line; write the name and the CEL expression on one line each" $i $name) -}}
-{{- end -}}
-{{- $labels = append $labels (dict "name" $name "expression" $expr) -}}
-{{- end -}}
-{{- $user := .Values.gateway.userMetricLabel | default dict -}}
-{{- if and (dig "enabled" false $user) (include "agent-platform.jwtRouteRendered" .) -}}
-{{- $name := toString (dig "name" "" $user) -}}
-{{- if not $name -}}
-{{- fail "gateway.userMetricLabel.name is empty; the person label needs a Prometheus label name (the chart's default is user)" -}}
-{{- end -}}
-{{- $claim := include "agent-platform.kagent.userIdClaim" . -}}
-{{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $claim) -}}
-{{- fail (printf "kagent.controller.auth.userIdClaim %q is not a CEL identifier ([A-Za-z_][A-Za-z0-9_]*); the person label's expression jwt.%s would not compile and the metrics policy — the agent labels with it — would be refused" $claim $claim) -}}
-{{- end -}}
-{{- $labels = append $labels (dict "name" $name "expression" (printf "jwt.%s" $claim)) -}}
-{{- end -}}
-{{- /* The labels the data plane's own series carry (agentgateway
-crates/agentgateway/src/telemetry/metrics.rs: RouteIdentifier, HTTPLabels,
-GenAILabels, GenAILabelsTokenUsage, CostCatalogLookupLabels, MCPCall), and
-the ones the scrape adds (the PodMonitor's target labels). */ -}}
+{{- $root := . -}}
+{{- $jwtRoute := include "agent-platform.jwtRouteRendered" . -}}
+{{- /* The data plane's own labels (agentgateway telemetry/metrics.rs) and the scrape's. */ -}}
 {{- $reserved := list "bind" "gateway" "listener" "route" "route_rule" "backend" "protocol" "method" "status" "reason" "gen_ai_operation_name" "gen_ai_system" "gen_ai_request_model" "gen_ai_response_model" "gen_ai_token_type" "resource_type" "server" "resource" -}}
 {{- $scrape := list "namespace" "pod" "instance" "job" "container" "service" "endpoint" -}}
-{{- $seen := dict -}}
-{{- range $labels -}}
-{{- if not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" .name) -}}
-{{- fail (printf "metric label %q is not a Prometheus label name ([a-zA-Z_][a-zA-Z0-9_]*); the scrape of the data plane would fail and every metric of it be lost" .name) -}}
+{{- $labels := list -}}
+{{- $enabled := 0 -}}
+{{- range $name, $entry := (.Values.gateway.metricLabels | default dict) -}}
+{{- $entry = $entry | default dict -}}
+{{- if dig "enabled" true $entry -}}
+{{- $enabled = add1 $enabled -}}
+{{- if not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" $name) -}}
+{{- fail (printf "metric label %q (gateway.metricLabels) is not a Prometheus label name ([a-zA-Z_][a-zA-Z0-9_]*); the scrape of the data plane would fail and every metric of it be lost" $name) -}}
 {{- end -}}
-{{- if hasPrefix "__" .name -}}
-{{- fail (printf "metric label %q starts with __, which Prometheus reserves for its internals and drops after relabeling; the label would never be stored" .name) -}}
+{{- if hasPrefix "__" $name -}}
+{{- fail (printf "metric label %q (gateway.metricLabels) starts with __, which Prometheus reserves for its internals and drops after relabeling; the label would never be stored" $name) -}}
 {{- end -}}
-{{- if has .name $reserved -}}
-{{- fail (printf "metric label %q is one the data plane already puts on its series (%s); a duplicate label name fails the whole scrape and every metric of the data plane is lost" .name (join ", " $reserved)) -}}
+{{- if has $name $reserved -}}
+{{- fail (printf "metric label %q (gateway.metricLabels) is one the data plane already puts on its series (%s); a duplicate label name fails the whole scrape and every metric of the data plane is lost" $name (join ", " $reserved)) -}}
 {{- end -}}
-{{- if has .name $scrape -}}
-{{- fail (printf "metric label %q is one the scrape adds to every series (%s); Prometheus would keep its own and store the policy's as exported_%s" .name (join ", " $scrape) .name) -}}
+{{- if has $name $scrape -}}
+{{- fail (printf "metric label %q (gateway.metricLabels) is one the scrape adds to every series (%s); Prometheus would keep its own and store the policy's as exported_%s" $name (join ", " $scrape) $name) -}}
 {{- end -}}
-{{- if hasKey $seen .name -}}
-{{- fail (printf "metric label %q is defined twice (gateway.metricLabels, or gateway.userMetricLabel.name); the policy's add list is keyed by name and the API server refuses the policy" .name) -}}
+{{- $raw := toString (dig "expression" "" $entry) -}}
+{{- if not $raw -}}
+{{- fail (printf "gateway.metricLabels.%s has no expression; every entry is {expression: <one-line CEL>, enabled: <bool>}" $name) -}}
 {{- end -}}
-{{- $_ := set $seen .name true -}}
+{{- $expr := tpl $raw $root -}}
+{{- if not $expr -}}
+{{- fail (printf "gateway.metricLabels.%s: the expression %q renders empty (it goes through tpl); every entry is {expression: <one-line CEL>, enabled: <bool>}" $name $raw) -}}
 {{- end -}}
-{{- if gt (len $labels) 16 -}}
-{{- fail (printf "%d metric labels (gateway.metricLabels plus the person label); the AgentgatewayPolicy CRD takes at most 16" (len $labels)) -}}
+{{- if contains "\n" $expr -}}
+{{- fail (printf "gateway.metricLabels.%s spans more than one line; write the CEL expression on one line" $name) -}}
+{{- end -}}
+{{- if or (not (regexMatch "(^|[^A-Za-z0-9_.])jwt\\s*[.\\[]" $expr)) $jwtRoute -}}
+{{- $labels = append $labels (dict "name" $name "expression" $expr) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if gt $enabled 16 -}}
+{{- fail (printf "%d metric labels enabled (gateway.metricLabels; a held jwt entry counts — it renders with the first route that verifies a bearer); the AgentgatewayPolicy CRD takes at most 16" $enabled) -}}
 {{- end -}}
 {{- toYaml $labels -}}
 {{- end -}}
@@ -1747,10 +1720,16 @@ The JWT claim the caller's identity is taken from — kagent.controller.auth.use
 (default email), the ONE value both authentication layers read: the controller's
 AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation
 (templates/kagent/controller-jwt-policy.yaml), so the two cannot disagree.
+Fails the render on a claim that is not a bare identifier: every reader puts it
+into CEL as jwt.<claim>, so the guard fires exactly where the claim is consumed.
 Usage: include "agent-platform.kagent.userIdClaim" .
 */}}
 {{- define "agent-platform.kagent.userIdClaim" -}}
-{{- dig "controller" "auth" "userIdClaim" "email" (.Values.kagent | default dict) -}}
+{{- $claim := dig "controller" "auth" "userIdClaim" "email" (.Values.kagent | default dict) -}}
+{{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $claim) -}}
+{{- fail (printf "kagent.controller.auth.userIdClaim %q is not a plain claim name ([A-Za-z_][A-Za-z0-9_]*); it is read as jwt.<claim> in CEL — the controller route's identity header, the user metric label — and a CEL expression that does not compile takes its whole policy down" $claim) -}}
+{{- end -}}
+{{- $claim -}}
 {{- end -}}
 
 {{/*

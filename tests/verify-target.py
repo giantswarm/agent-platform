@@ -244,15 +244,16 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the key.
         ms_port = ["--set", "modelServing.networkPolicy.llmisvcWorkload.port=8000"]
         # The data plane's metric labels moved from the LLM path's policy
-        # (llmRouting.metricLabels, golden) to the Gateway's own -metrics policy
-        # (gateway.metricLabels + gateway.userMetricLabel, head), rendered
-        # whenever the data plane is — a new object of the full connectivity
-        # shape, and new default keys the meta chart forwards. Each side renders
-        # with ITS keys deleted (a null deletes a key the chart declares; one the
-        # schema does not know it refuses, so the holds cannot be shared): no
-        # labels, no policy, the same forwarded tree on both. verify-metric-labels
-        # asserts the policy. Drop this once GOLDEN_REF carries the move.
-        labels_here = ["--set", "gateway.metricLabels=null", "--set", "gateway.userMetricLabel=null"]
+        # (llmRouting.metricLabels, a list, golden) to the Gateway's own -metrics
+        # policy (gateway.metricLabels, a map keyed by name with the `user`
+        # entry among its defaults, head), rendered whenever the data plane is —
+        # a new object of the full connectivity shape, and a new default key
+        # the meta chart forwards. Each side renders with ITS key deleted (a
+        # null deletes a key the chart declares; one the schema does not know
+        # it refuses, so the holds cannot be shared): no labels, no policy, the
+        # same forwarded tree on both. verify-metric-labels asserts the policy.
+        # Drop this once GOLDEN_REF carries the move.
+        labels_here = ["--set", "gateway.metricLabels=null"]
         labels_there = ["--set", "llmRouting.metricLabels=null"]
         shapes = [
             ("meta default", meta, [*mm_off, *mm_static, *mm_registered, *substrate, *hf, *ms_port]),

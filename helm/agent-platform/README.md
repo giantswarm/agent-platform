@@ -556,12 +556,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
-| gateway.metricLabels[0].name | string | `"agent"` |  |
-| gateway.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
-| gateway.metricLabels[1].name | string | `"agent_namespace"` |  |
-| gateway.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
-| gateway.userMetricLabel.enabled | bool | `true` |  |
-| gateway.userMetricLabel.name | string | `"user"` |  |
+| gateway.metricLabels.agent.enabled | bool | `true` |  |
+| gateway.metricLabels.agent.expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
+| gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |
+| gateway.metricLabels.agent_namespace.expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| gateway.metricLabels.user.enabled | bool | `true` |  |
+| gateway.metricLabels.user.expression | string | `"jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |

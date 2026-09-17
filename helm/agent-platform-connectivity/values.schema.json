@@ -347,15 +347,53 @@
                     }
                 },
                 "metricLabels": {
-                    "type": "array",
-                    "items": {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "agent_namespace": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "user": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "additionalProperties": {
                         "type": "object",
                         "additionalProperties": false,
                         "properties": {
-                            "expression": {
-                                "type": "string"
+                            "enabled": {
+                                "type": "boolean"
                             },
-                            "name": {
+                            "expression": {
                                 "type": "string"
                             }
                         }
@@ -519,18 +557,6 @@
                                     ]
                                 }
                             }
-                        }
-                    }
-                },
-                "userMetricLabel": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean"
-                        },
-                        "name": {
-                            "type": "string"
                         }
                     }
                 }

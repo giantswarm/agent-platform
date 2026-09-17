@@ -132,53 +132,57 @@ The data plane puts custom Prometheus labels on every metric it emits — the
 HTTP, MCP and GenAI families alike, whatever route the request took — from one
 Gateway-scoped `AgentgatewayPolicy`, `<release>-metrics`
 (`templates/agentgateway/metrics-policy.yaml`, `frontend.metrics`), rendered
-whenever the data plane is (an `agentgateway-*` `ingress.mode` with the
-component on) and there is a label to add. Each label is a CEL expression the
-data plane evaluates when the request completes; a failed or empty expression
-renders `unknown` and keeps the series.
+whenever the data plane is and an entry of `gateway.metricLabels` is enabled.
+Each label is a CEL expression evaluated when the request completes; a failed
+or empty expression renders `unknown` and keeps the series.
 
 **One policy per Gateway.** agentgateway honours one metrics policy per
 Gateway: custom labels replace, they never merge, and of two policies one is
-kept and the other dropped in silence — which one has changed between
-agentgateway releases (arbitrary on v1.4, the lowest policy key on v1.5, the
-oldest on later builds), so nothing may rely on it. Every label the platform
-wants therefore lives in one list, `gateway.metricLabels`,
-whichever route it means to describe — which is why the labels are not the LLM
-path's (`llmRouting.metricLabels` is gone; the chart's schema refuses it) and
-render without LLM routing. `make verify-metric-labels` asserts that no other
-policy of the chart carries a `frontend.metrics` section.
+dropped in silence — which one has changed between agentgateway releases, so
+nothing may rely on it. Every label the platform wants therefore lives in
+`gateway.metricLabels`, whichever route it describes; the labels are not the
+LLM path's (`llmRouting.metricLabels` is gone; the schema refuses it) and
+render without LLM routing.
 
-**The defaults: which agent.** `agent` and `agent_namespace` name the calling
-workload (`source.unverifiedWorkload.serviceAccount` / `.namespace`): the data
-plane resolves the caller by source IP against the agentgateway controller's
-workload store, built from cluster Pods — not cryptographic, adequate for
-accounting, never for authorization. On the LLM listener that is the agent
-whose inference the metric counts (the LLM usage dashboard reads both); on the
-kagent controller route it is the caller, klaus-gateway or the portal.
-Cardinality equals the number of agents.
+**One map, keyed by label name.** Helm merges maps and replaces lists, so an
+installation turns one default entry off or adds one without restating the
+rest. Each entry is `{expression: <one-line CEL>, enabled: <bool, absent =
+true>}`; the expression goes through `tpl`. An entry whose expression reads
+`jwt` — `jwt.<claim>` or `jwt["<claim>"]` — is rendered only while a route of
+the Gateway verifies a bearer (the kagent controller route with its JWT
+policy, agent-manager's, model-manager's); without one it would read `unknown`
+on every series.
 
-**The person: `gateway.userMetricLabel`.** On by default. One more label
-(`name`, default `user`) carries the identity claim of the bearer the kagent
-controller route verifies in `Strict` mode and writes into `x-user-id`
-(`kagent.controller.auth.userIdClaim`, `email`; `docs/authentication.md`,
-"The kagent controller route") — `jwt.email` — so the metrics attribute a call
-to the same person the controller acts as. klaus-gateway makes every
-controller call with the linked person's Dex id_token and never as itself (its
-`pkg/a2a` client; Slack is a forwarded-only channel, a turn without a person's
-token is refused rather than run as the gateway), so on that route every
-series carries a verified person: a Slack turn is one
-`lf.a2a.v1.A2AService/SendStreamingMessage` stream, its duration the turn's.
-The portal and a CLI ride the same route and are labelled the same way, and so
-is every other route of the Gateway that verifies a bearer — agent-manager's
-and model-manager's, when their JWT policies are on. The label is rendered
-only while one such route exists (the controller route with its JWT policy,
-agent-manager's, model-manager's); without one it would read `unknown` on every
-series, so the knob stays on and the label appears with the first verifying
-route. What it does not give: a route without a JWT policy — the MCP path under
-`oauthMode: passthrough`, and the LLM listener, whose calls carry the
-ModelConfig's API key and no person — renders `unknown`, one extra label value
-there and no series per person, so tokens and cost stay attributed to the
-agent, not the person.
+```yaml
+gateway:
+  metricLabels:
+    user:
+      enabled: false          # no person label, no series per person
+    team:
+      expression: jwt.groups  # one more claim; string-valued claims only
+```
+
+**The defaults.** `agent` and `agent_namespace` name the calling workload
+(`source.unverifiedWorkload.serviceAccount` / `.namespace`), resolved by source
+IP against the agentgateway controller's workload store — not cryptographic,
+adequate for accounting, never for authorization. On the LLM listener that is
+the agent whose inference the metric counts (the LLM usage dashboard reads
+both); on the kagent controller route it is the caller, klaus-gateway or the
+portal.
+
+`user` (on by default) carries the identity claim the kagent controller route
+verifies in `Strict` mode and writes into `x-user-id`
+(`kagent.controller.auth.userIdClaim`, `email`; `docs/authentication.md`),
+read through `tpl` so the label follows the knob — and the same knob names the
+claim on agent-manager's and model-manager's routes, kagent on or off.
+klaus-gateway makes every controller call with the linked person's Dex
+id_token and never as itself, so on that route every series carries a verified
+person: a Slack turn is one `lf.a2a.v1.A2AService/SendStreamingMessage`
+stream, its duration the turn's. The portal, a CLI and every other route that
+verifies a bearer are labelled the same way. A route without a JWT policy —
+the MCP path under `oauthMode: passthrough`, the LLM listener, whose calls
+carry the ModelConfig's API key — renders `unknown`: tokens and cost stay
+attributed to the agent, not the person.
 
 On the installation (`route` is `<namespace>/<name>`):
 
@@ -188,22 +192,19 @@ histogram_quantile(0.95, sum by (le, user) (rate(agentgateway_request_duration_s
 ```
 
 Know what it costs: an email address in Mimir is personal data, and the label
-multiplies those routes' HTTP series by the number of people (tens to a few
-hundred on an installation). `gateway.userMetricLabel.enabled: false` drops
-the label and its series. Another claim — a team, an audience that tells the
-door the call came through — is an ordinary `gateway.metricLabels` entry,
-`expression: jwt.<claim>`; only a string-valued claim labels, a list-valued one
-renders `unknown`.
+multiplies the verifying routes' HTTP series by the number of people.
+`gateway.metricLabels.user.enabled: false` drops the label and its series.
 
-**Guards.** The render fails, naming the entry, on an empty name or
-expression, one spanning more than one line, a name that is not a Prometheus
-label name, one the data plane's own series already carry (a duplicate label
-name fails the whole scrape), one the scrape adds (`namespace`, `pod`, `job`,
-... — Prometheus would store the policy's as `exported_<name>`), one starting
-with `__`, two entries of one name (the person label counts; the CRD keys the
-list by name), more than 16 entries (the CRD's limit), and an identity claim
-that is not a CEL identifier. In `muster-direct` there is no data plane and
-the knobs are inert.
+**Guards.** The schema holds every entry to `{expression, enabled}`. The
+render fails, naming the entry, on a missing, empty or multi-line expression,
+a name that is not a Prometheus label name, one the data plane's own series
+carry or the scrape adds, one starting with `__`, and more than 16 enabled
+entries. `kagent.controller.auth.userIdClaim` must be a bare identifier
+wherever it is read as CEL — the controller route's identity header, the
+`user` entry on any verifying route — since an expression that does not
+compile takes the whole policy down. `make verify-metric-labels` asserts all
+of it, and that no other policy of the chart carries a `frontend.metrics`
+section.
 
 ## Data-plane availability
 
@@ -704,12 +705,12 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
-| gateway.metricLabels[0].name | string | `"agent"` |  |
-| gateway.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
-| gateway.metricLabels[1].name | string | `"agent_namespace"` |  |
-| gateway.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
-| gateway.userMetricLabel.enabled | bool | `true` |  |
-| gateway.userMetricLabel.name | string | `"user"` |  |
+| gateway.metricLabels.agent.enabled | bool | `true` |  |
+| gateway.metricLabels.agent.expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
+| gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |
+| gateway.metricLabels.agent_namespace.expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| gateway.metricLabels.user.enabled | bool | `true` |  |
+| gateway.metricLabels.user.expression | string | `"jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |

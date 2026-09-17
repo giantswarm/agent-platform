@@ -1387,65 +1387,37 @@ gateway:
     # gateway.parameters.podDisruptionBudget above.
     podAnnotations: {}  # @schema additionalProperties: true
   # === Metric labels ===
-  # Custom Prometheus labels on every metric the data plane emits — the HTTP,
-  # MCP and GenAI families alike, whatever route the request took: ONE
+  # Custom Prometheus labels on every metric the data plane emits, from ONE
   # Gateway-scoped AgentgatewayPolicy, <release>-metrics
-  # (templates/agentgateway/metrics-policy.yaml, frontend.metrics), rendered
-  # whenever the data plane is (an agentgateway-* ingress.mode with the
-  # component on) and the list below is not empty; in muster-direct there is no
-  # data plane and the knobs are inert. agentgateway honours one metrics policy
-  # per Gateway: labels replace, they never merge, and of two policies one is
-  # kept and the other dropped in silence (which one has changed between
-  # agentgateway releases) — so every label the platform wants lives in this
-  # one list, whichever route it means to describe. Each entry is a one-line
-  # CEL expression evaluated when the request completes; a failed or empty
-  # expression renders the value `unknown` and keeps the series. At most 16
-  # entries (the CRD's limit); names are unique Prometheus label names, none of
-  # the data plane's own (gateway, listener, route, backend, status, gen_ai_*,
-  # ...) — which would break the scrape — and none the scrape adds (namespace,
-  # pod, instance, job, ...), which Prometheus would store as exported_<name>.
-  #
-  # The defaults name the calling workload — which agent made the call. The
-  # expression resolves the caller by source IP against the agentgateway
-  # controller's own workload store (built from cluster Pods, no Istio). The
-  # identity is NOT cryptographic — it is adequate for accounting and must never
-  # be used for authorization. Cardinality equals the number of agents; pod name
-  # is deliberately absent. On the LLM listener (llmRouting) this is the agent
-  # whose inference the metric counts — the LLM usage dashboard reads `agent`
-  # and `agent_namespace`; on the kagent controller route it is the caller,
-  # klaus-gateway or the portal.
-  metricLabels:
-    - name: agent
+  # (templates/agentgateway/metrics-policy.yaml). agentgateway honours one
+  # metrics policy per Gateway — labels replace, they never merge — so every
+  # label the platform wants lives here, whichever route it describes. A map
+  # keyed by label name (Helm merges maps: one entry off, or one more, without
+  # restating the rest); each entry is {expression: <one-line CEL>,
+  # enabled: <bool, absent = true>}. The expression goes through tpl ({{ is
+  # Helm's). An entry that reads `jwt` renders only while a route of the
+  # Gateway verifies a bearer (it would read `unknown` otherwise). At most 16
+  # enabled; a name the data plane or the scrape already sets is refused.
+  # README "Metric labels".
+  metricLabels:  # @schema additionalProperties: {"type": "object", "additionalProperties": false, "properties": {"expression": {"type": "string"}, "enabled": {"type": "boolean"}}}
+    # Which agent made the call: the caller resolved by source IP against the
+    # agentgateway controller's workload store — not cryptographic, for
+    # accounting, never authorization. The LLM usage dashboard reads both.
+    agent:
+      enabled: true
       expression: source.unverifiedWorkload.serviceAccount
-    - name: agent_namespace
+    agent_namespace:
+      enabled: true
       expression: source.unverifiedWorkload.namespace
-  # The person behind the call as a label. The expression is `jwt.<claim>` for
-  # the identity claim the kagent controller route verifies in Strict mode and
-  # writes into x-user-id (kagent.controller.auth.userIdClaim, `email`), so the
-  # metrics attribute a turn to the same person the controller acts as.
-  # klaus-gateway makes every controller call with the linked person's Dex
-  # id_token and never as itself (its pkg/a2a; Slack is a forwarded-only
-  # channel), so on that route every series carries a verified person — a
-  # Slack turn is one lf.a2a.v1.A2AService/SendStreamingMessage stream, its
-  # duration the turn's; the portal and a CLI ride the same route and are
-  # labelled the same way, and so is every other route of the Gateway that
-  # verifies a bearer (agent-manager's and model-manager's JWT policies). A
-  # route without a JWT policy — the MCP path under oauthMode passthrough, the
-  # LLM listener, whose calls carry the ModelConfig's API key and no person —
-  # renders `unknown`: one extra label value there, no series per person.
-  # On by default, and rendered only while such a route exists (the kagent
-  # controller route with its JWT policy, agent-manager's, model-manager's):
-  # without one the label would read `unknown` on every series, so the knob
-  # stays on and the label appears with the first verifying route. Know what
-  # it costs: an email address in Mimir is personal data, and the label
-  # multiplies those routes' HTTP series by the number of people (tens to a few
-  # hundred on an installation). `enabled: false` drops the label and its
-  # series. Another claim (a team, say) is an ordinary gateway.metricLabels
-  # entry, `expression: jwt.<claim>`; only a string-valued claim labels — a
-  # list-valued one renders `unknown`.
-  userMetricLabel:
-    enabled: true
-    name: user
+    # The person behind the call: the identity claim the kagent controller route
+    # verifies and writes into x-user-id (kagent.controller.auth.userIdClaim, a
+    # bare identifier — the same knob names the claim on the managers' routes,
+    # kagent on or off).
+    # An email address in Mimir is personal data, and the label multiplies the
+    # verifying routes' series by the number of people: `enabled: false` drops it.
+    user:
+      enabled: true
+      expression: 'jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
