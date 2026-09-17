@@ -13,8 +13,11 @@ lives in two places this script reads, against the current kubeconfig:
   Valid` is a fetched key set; `PartiallyValid` names the JWKS URL the controller
   could not fetch;
 - the controller's `jwks-store-<hash>` ConfigMap for the backend's URL (built from
-  `<gateway>-jwks`'s static host and port and the policy's jwksPath): `fetchedAt`
-  and `nkeys`, which must be positive.
+  `<gateway>-jwks`'s static host and port and the policy's jwksPath): its
+  `jwks-store` entry is `{requestKey, url, fetchedAt, jwks}` as the controller's
+  `jwks` package persists it, `jwks` the fetched JWKS document as a JSON string
+  whose `keys` must be non-empty. Their `kid`s are printed: a `401 token uses the
+  unknown key "<kid>"` names the one to compare with.
 
 On a failure the controller's `error fetching jwks` lines are printed: their
 `error=` is the root cause (`dial tcp ... i/o timeout` = the controller's egress,
@@ -29,6 +32,7 @@ import subprocess
 import sys
 
 STORE_LABEL = "app.kubernetes.io/component=jwks-store"
+STORE_KEY = "jwks-store"
 
 
 def kubectl(args: list[str], context: str) -> str:
@@ -91,23 +95,42 @@ def jwks_url(args: argparse.Namespace, path: str) -> str:
     return f"{scheme}://{static['host']}:{static['port']}{path}"
 
 
-def check_store(args: argparse.Namespace, url: str) -> None:
-    stores = json.loads(kubectl(["get", "configmap", "-n", args.controller_namespace, "-l", STORE_LABEL, "-o", "json"], args.context))
+def store_entries(items: list[dict]) -> list[dict]:
+    """The controller's persisted key sets: one per jwks-store ConfigMap carrying the
+    `jwks-store` key -- `{requestKey, url, fetchedAt, jwks}` as the controller's `jwks`
+    package writes it -- with the ConfigMap's name as `_name`."""
     entries = []
-    for item in stores.get("items", []):
-        raw = item.get("data", {}).get("jwks-store")
+    for item in items:
+        raw = item.get("data", {}).get(STORE_KEY)
         if raw:
             entry = json.loads(raw)
             entry["_name"] = item["metadata"]["name"]
             entries.append(entry)
+    return entries
+
+
+def keyset_kids(entry: dict) -> list[str]:
+    """The `kid`s of an entry's key set. `jwks` is the fetched JWKS document as a JSON
+    string, `{"keys": [...]}`; an empty list is the empty key set that refuses every token."""
+    try:
+        keys = json.loads(entry.get("jwks") or "{}").get("keys", [])
+    except (json.JSONDecodeError, AttributeError) as exc:
+        sys.exit(f"FAIL: {entry.get('_name', '?')}: jwks is not a JWKS document ({exc}); the controller's store is not in the shape this check reads")
+    return [key.get("kid", "?") for key in keys]
+
+
+def check_store(args: argparse.Namespace, url: str) -> None:
+    stores = json.loads(kubectl(["get", "configmap", "-n", args.controller_namespace, "-l", STORE_LABEL, "-o", "json"], args.context))
+    entries = store_entries(stores.get("items", []))
     mine = [e for e in entries if e.get("url") == url]
     if not mine:
         known = ", ".join(sorted(e.get("url", "?") for e in entries)) or "none"
         sys.exit(f"FAIL: the controller holds no key set for {url} (jwks-store ConfigMaps in {args.controller_namespace}: {known}). The controller's fetch errors:\n{controller_errors(args)}")
     entry = mine[0]
-    if int(entry.get("nkeys", 0)) < 1:
+    kids = keyset_kids(entry)
+    if not kids:
         sys.exit(f"FAIL: the controller's key set for {url} is empty ({entry['_name']}, fetchedAt {entry.get('fetchedAt')}); every token is refused as 'unknown key'.\n{controller_errors(args)}")
-    ok(f"{entry['_name']}: {entry['nkeys']} key(s) for {url}, fetched {entry.get('fetchedAt')}")
+    ok(f"{entry['_name']}: {len(kids)} key(s) for {url} (kid {', '.join(kids)}), fetched {entry.get('fetchedAt')}")
 
 
 def main() -> int:
