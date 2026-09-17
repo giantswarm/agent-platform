@@ -41,7 +41,7 @@
           }
         },
         "runtime": {"type": "string", "description": "ClusterServingRuntime to run on. Empty or absent: modelServing.runtime.name; published presets always carry it."},
-        "args": {"type": "array", "items": {"type": "string"}, "description": "vLLM server arguments appended to the runtime's, complete and literal. Do not pass --chat-template: publishing appends it from chatTemplate."},
+        "args": {"type": "array", "items": {"type": "string"}, "description": "vLLM server arguments appended to the runtime's, complete and literal. The runtime template re-parses every argument through a shell (eval \"… $@\"), so outside single quotes an argument carries no whitespace, quote or shell metacharacter; a value that needs them is single-quoted inside one argument: --default-chat-template-kwargs='{\"enable_thinking\": false}'. Do not pass --chat-template: publishing appends it from chatTemplate."},
         "env": {
           "type": "array",
           "description": "Extra environment of the runtime container (Kubernetes EnvVar).",
