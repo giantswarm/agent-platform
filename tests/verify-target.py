@@ -255,6 +255,16 @@ def check_golden(meta: str, connectivity: str) -> None:
         # Drop this once GOLDEN_REF carries the move.
         labels_here = ["--set", "gateway.metricLabels=null"]
         labels_there = ["--set", "llmRouting.metricLabels=null"]
+        # The kagent controller's VerticalPodAutoscaler knob
+        # (kagent.controller.vpa, giantswarm/agent-platform#455): a new default
+        # block this chart declares, forwards to the connectivity release and
+        # renders an object from wherever autoscaling.k8s.io/v1 is served.
+        # GOLDEN_REF declares none of it, so the block is deleted on THIS side
+        # only — nulling it there would insert `vpa: null` into a tree that has
+        # no such key (the kagent block is open) and make the renders drift the
+        # other way. verify-kagent-vpa asserts the object, the guards and the
+        # forward. Drop this once GOLDEN_REF carries the key.
+        vpa_here = ["--set", "kagent.controller.vpa=null"]
         shapes = [
             ("meta default", meta, [*mm_off, *mm_static, *mm_registered, *substrate, *hf, *ms_port]),
             ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered, *substrate, *hf, *ms_port]),
@@ -263,7 +273,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off, *ms_polex_off]),
         ]
         for label, chart, flags in shapes:
-            here = helm(chart, [*flags, *labels_here])
+            here = helm(chart, [*flags, *labels_here, *vpa_here])
             there = helm(os.path.join(tree, chart), [*[f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags], *labels_there])
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
