@@ -2,19 +2,14 @@
 {{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.modelServingPolicies" .) }}
 {{- $ns := include "agent-platform.modelServing.namespace" . }}
 {{- $name := include "name" . }}
-{{- $init := $ms.policies.cacheInit }}
 {{- $shapes := include "agent-platform.modelServing.podShapes" . | fromJsonArray }}
-{{- /* Kyverno variables, kept out of Helm's way: the served model's name as
-       the pod's labels carry it, whatever the pod's shape (the shapes, their
-       name labels and their runtime containers: _helpers.tpl,
-       agent-platform.modelServing.podShapes), a count of that name for the
-       precondition, and the JMESPath that counts the storage-initializer init
-       containers KServe injected (a pod without one — a custom container
-       without a model URI — is left alone). The backtick JMESPath literal
-       cannot sit inside a Go raw string, hence printf. */ -}}
-{{- $modelNamePath := include "agent-platform.modelServing.modelNamePath" . }}
-{{- $modelName := printf "{{ %s }}" $modelNamePath }}
-{{- $hasModelName := printf "{{ length(%s || '') }}" $modelNamePath }}
+{{- /* Kyverno variables, kept out of Helm's way: the JMESPath that counts the
+       storage-initializer init containers KServe injected (a pod without one
+       — a custom container without a model URI — is left alone). The
+       backtick JMESPath literal cannot sit inside a Go raw string, hence
+       printf. The served model's name comes from the pod's labels, whatever
+       the pod's shape (the shapes, their name labels and their runtime
+       containers: _helpers.tpl, agent-platform.modelServing.podShapes). */ -}}
 {{- $backtick := "`" }}
 {{- $hasStorageInitializer := printf "{{ length(request.object.spec.initContainers[?name=='storage-initializer'] || %s[]%s) }}" $backtick $backtick }}
 {{- $podMatch := include "agent-platform.modelServing.kyvernoMatch" (dict "root" .) | trim }}
@@ -25,20 +20,27 @@
 # served — modelServing.policies.enabled follows the resolved
 # kyvernoPolicies.enabled).
 # Per rule:
-#   add-cache-init             an init container ahead of the KServe
-#                              storage-initializer creates the pod's cache
-#                              subdirectory (<claim>/<model>) world-writable —
-#                              the kubelet would create a missing subPath
-#                              directory root-owned 0750, which the
-#                              storage-initializer's uid cannot write, so a
-#                              download would need someone with node access
-#                              to mkdir first.
 #   redirect-model-storage-*   (one per pod shape, naming its runtime
 #                              container) the storage-initializer's and the
-#                              runtime's /mnt/models become that subdirectory instead of
-#                              the ephemeral emptyDir KServe mounts: a model
+#                              runtime's /mnt/models become the pod's cache
+#                              subdirectory (<claim>/<model>) instead of the
+#                              ephemeral emptyDir KServe mounts: a model
 #                              downloads once, a restart skips the download
 #                              (the storage-initializer detects the files).
+#                              The pod carries the claim's fsGroup
+#                              (modelServing.cache.fsGroup): the kubelet makes
+#                              the claim's contents group-owned, group-writable
+#                              and setgid on every mount and creates a missing
+#                              subPath directory with the claim root's mode and
+#                              group, so the storage-initializer (uid 1000),
+#                              the runtime and model-manager's download Job
+#                              (uid 1000, the same fsGroup) write
+#                              <claim>/<model> without root or a capability.
+#                              The chart adds no container to a model pod: a
+#                              root init container that prepared the directory
+#                              was denied by the fleet's restricted Pod
+#                              Security Standard on two rules the chart's
+#                              PolicyException does not name (#518).
 #   storage-initializer-memory a memory limit that survives multi-GB downloads
 #                              (KServe's default 1Gi is OOM-killed).
 # The rules mutate at CREATE only: a pod's init containers are immutable, and
@@ -46,13 +48,10 @@
 # strategic merge keyed by name (containers, volumes) or mountPath (mounts):
 # the API server reinvokes the webhook whenever another mutating webhook
 # changed the pod after Kyverno ran, and a merge finds what it added the first
-# time where a JSON-patch insert would add it again (#514). Kyverno's strategic
-# merge moves the entries it patched to the front of a list, so add-cache-init
-# is the LAST rule on purpose: it leaves hf-cache-init ahead of the
-# storage-initializer, and a later merge on the storage-initializer would move
-# that one ahead again (verified with `kyverno apply`, which
-# tests/verify-model-serving-policies.py runs over both pod shapes and over
-# the policy's own output).
+# time where a JSON-patch insert would add it again (#514). Verified with
+# `kyverno apply` in tests/verify-model-serving-policies.py: over both pod
+# shapes, over the policy's own output, and — the mutated pod with the chart's
+# PolicyException — against the fleet's restricted-PSS ClusterPolicies.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -64,8 +63,8 @@ metadata:
     policies.kyverno.io/description: >-
       Mounts the Hugging Face cache claim into every KServe model pod in the
       {{ $ns }} namespace — InferenceService predictors and LLMInferenceService
-      workload pods (one subdirectory per model, created by an init container)
-      — and raises the storage-initializer memory limit.
+      workload pods (one subdirectory per model, the pod carrying the claim's
+      fsGroup) — and raises the storage-initializer memory limit.
 spec:
   background: false
   rules:
@@ -90,6 +89,11 @@ spec:
       mutate:
         patchStrategicMerge:
           spec:
+            # One claim, one group: a pod that mounts the claim carries its
+            # fsGroup, whatever it declared (the other securityContext fields
+            # stay).
+            securityContext:
+              fsGroup: {{ int $ms.cache.fsGroup }}
             volumes:
               - name: hf-cache
                 persistentVolumeClaim:
@@ -128,54 +132,6 @@ spec:
                 resources:
                   limits:
                     memory: {{ . | quote }}
-    {{- end }}
-    {{- if $ms.cache.enabled }}
-    - name: add-cache-init
-      match:
-        any:
-          {{- $podMatch | nindent 10 }}
-      preconditions:
-        all:
-          - key: {{ $hasStorageInitializer | quote }}
-            operator: GreaterThan
-            value: 0
-          - key: {{ $hasModelName | quote }}
-            operator: GreaterThan
-            value: 0
-      mutate:
-        # The container merges by name: added the first time, found on a
-        # reinvocation, and at the front of the list either way (see above).
-        patchStrategicMerge:
-          spec:
-            initContainers:
-              - name: hf-cache-init
-                image: {{ printf "%s/%s:%s" $init.image.registry $init.image.name $init.image.version | quote }}
-                command:
-                  - sh
-                  - -ec
-                  - mkdir -p "/cache/$MODEL_DIR" && chmod 0777 "/cache/$MODEL_DIR"
-                env:
-                  - name: MODEL_DIR
-                    value: {{ $modelName | quote }}
-                securityContext:
-                  # The claim's root directory is root-owned: creating the
-                  # per-model directory needs root; nothing else does.
-                  runAsUser: 0
-                  runAsNonRoot: false
-                  allowPrivilegeEscalation: false
-                  readOnlyRootFilesystem: true
-                  capabilities:
-                    drop:
-                      - ALL
-                    add:
-                      - CHOWN
-                      - DAC_OVERRIDE
-                      - FOWNER
-                resources:
-                  {{- toYaml $init.resources | nindent 18 }}
-                volumeMounts:
-                  - name: hf-cache
-                    mountPath: /cache
     {{- end }}
 {{- if gt (int $ms.policies.progressDeadlineSeconds) 0 }}
 ---

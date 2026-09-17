@@ -2,12 +2,16 @@
 Kyverno PolicyException for the serving model pods (giantswarm/agent-platform#498).
 Giant Swarm clusters enforce the restricted Pod Security Standard through
 Kyverno on every namespace; the model pods KServe creates — the upstream vLLM
-image runs as root, so does the storage-initializer / cache init container that
-creates the per-model cache directory — declare none of the four fields the
-restricted profile checks: no drop ALL, no allowPrivilegeEscalation: false, no
-runAsNonRoot, no seccompProfile. Without this exception admission denies the
-Deployment and no model is ever served. Named: exactly those four rules
-(kyvernoPolicies.rules), each with its autogen copy for the controller kinds.
+image runs as root, and neither it nor the KServe storage-initializer declares
+the four fields the restricted profile checks: no drop ALL, no
+allowPrivilegeEscalation: false, no runAsNonRoot, no seccompProfile. Without
+this exception admission denies the Deployment and no model is ever served.
+Named: exactly those four rules (kyvernoPolicies.rules), each with its autogen
+copy for the controller kinds — and nothing the chart's own mutations add to
+the pod needs one: they add the cache claim's fsGroup and mounts, no container
+(giantswarm/agent-platform#518; tests/verify-model-serving-policies.py holds
+the mutated pod of both shapes to the fleet's restricted-PSS policies with this
+exception).
 Matched in the serving namespace: the Pods, ReplicaSets and Deployments of
 every pod shape by the labels they carry (the classic InferenceService
 predictor and the LLMInferenceService workload pod: _helpers.tpl,

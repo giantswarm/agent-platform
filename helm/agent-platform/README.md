@@ -1322,14 +1322,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.cache.pvc.storageClassName | string | `""` |  |
 | modelServing.cache.pvc.volumeName | string | `""` |  |
 | modelServing.cache.pvc.accessModes[0] | string | `"ReadWriteOnce"` |  |
+| modelServing.cache.fsGroup | int | `1000` |  |
 | modelServing.policies.enabled | string | `"auto"` |  |
-| modelServing.policies.cacheInit.image.registry | string | `"gsoci.azurecr.io"` |  |
-| modelServing.policies.cacheInit.image.name | string | `"giantswarm/alpine"` |  |
-| modelServing.policies.cacheInit.image.version | string | `"3.24.1"` |  |
-| modelServing.policies.cacheInit.resources.requests.cpu | string | `"10m"` |  |
-| modelServing.policies.cacheInit.resources.requests.memory | string | `"16Mi"` |  |
-| modelServing.policies.cacheInit.resources.limits.cpu | string | `"100m"` |  |
-| modelServing.policies.cacheInit.resources.limits.memory | string | `"64Mi"` |  |
 | modelServing.policies.storageInitializerMemoryLimit | string | `"4Gi"` |  |
 | modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
 | modelServing.networkPolicy.predictor.port | int | `8080` |  |
