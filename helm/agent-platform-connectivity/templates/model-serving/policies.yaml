@@ -42,11 +42,17 @@
 #   storage-initializer-memory a memory limit that survives multi-GB downloads
 #                              (KServe's default 1Gi is OOM-killed).
 # The rules mutate at CREATE only: a pod's init containers are immutable, and
-# the operation filter keeps later pod updates untouched. add-cache-init is the
-# LAST rule on purpose: Kyverno's strategic merge moves the init containers it
-# patched to the front of the list, so an insert at index 0 survives only when
-# no strategic merge runs after it (verified with `kyverno apply`, which
-# tests/verify-model-serving-policies.py runs over both pod shapes).
+# the operation filter keeps later pod updates untouched. Every rule is a
+# strategic merge keyed by name (containers, volumes) or mountPath (mounts):
+# the API server reinvokes the webhook whenever another mutating webhook
+# changed the pod after Kyverno ran, and a merge finds what it added the first
+# time where a JSON-patch insert would add it again (#514). Kyverno's strategic
+# merge moves the entries it patched to the front of a list, so add-cache-init
+# is the LAST rule on purpose: it leaves hf-cache-init ahead of the
+# storage-initializer, and a later merge on the storage-initializer would move
+# that one ahead again (verified with `kyverno apply`, which
+# tests/verify-model-serving-policies.py runs over both pod shapes and over
+# the policy's own output).
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -137,41 +143,39 @@ spec:
             operator: GreaterThan
             value: 0
       mutate:
-        patchesJson6902: |-
-          - op: add
-            path: /spec/initContainers/0
-            value:
-              name: hf-cache-init
-              image: {{ printf "%s/%s:%s" $init.image.registry $init.image.name $init.image.version | quote }}
-              command:
-                - sh
-                - -ec
-                - mkdir -p "/cache/$MODEL_DIR" && chmod 0777 "/cache/$MODEL_DIR"
-              env:
-                - name: MODEL_DIR
-                  # squote, not quote: this block scalar is YAML that Kyverno
-                  # parses later, and an escaped inner quote is a JMESPath
-                  # syntax error there.
-                  value: {{ $modelName | squote }}
-              securityContext:
-                # The claim's root directory is root-owned: creating the
-                # per-model directory needs root; nothing else does.
-                runAsUser: 0
-                runAsNonRoot: false
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                capabilities:
-                  drop:
-                    - ALL
-                  add:
-                    - CHOWN
-                    - DAC_OVERRIDE
-                    - FOWNER
-              resources:
-                {{- toYaml $init.resources | nindent 16 }}
-              volumeMounts:
-                - name: hf-cache
-                  mountPath: /cache
+        # The container merges by name: added the first time, found on a
+        # reinvocation, and at the front of the list either way (see above).
+        patchStrategicMerge:
+          spec:
+            initContainers:
+              - name: hf-cache-init
+                image: {{ printf "%s/%s:%s" $init.image.registry $init.image.name $init.image.version | quote }}
+                command:
+                  - sh
+                  - -ec
+                  - mkdir -p "/cache/$MODEL_DIR" && chmod 0777 "/cache/$MODEL_DIR"
+                env:
+                  - name: MODEL_DIR
+                    value: {{ $modelName | quote }}
+                securityContext:
+                  # The claim's root directory is root-owned: creating the
+                  # per-model directory needs root; nothing else does.
+                  runAsUser: 0
+                  runAsNonRoot: false
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop:
+                      - ALL
+                    add:
+                      - CHOWN
+                      - DAC_OVERRIDE
+                      - FOWNER
+                resources:
+                  {{- toYaml $init.resources | nindent 18 }}
+                volumeMounts:
+                  - name: hf-cache
+                    mountPath: /cache
     {{- end }}
 {{- if gt (int $ms.policies.progressDeadlineSeconds) 0 }}
 ---
