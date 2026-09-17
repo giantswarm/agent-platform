@@ -516,8 +516,15 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	elif ! grep -q 'gateway.parameters.dataPlaneEnv' /tmp/ap-sym-neg-conn.out; then \
 		echo "FAIL: the symmetry check failed for the wrong reason"; cat /tmp/ap-sym-neg-conn.out; exit 1; \
 	else echo "ok: a nested meta key the connectivity schema lacks fails, naming gateway.parameters.dataPlaneEnv"; fi
-	@echo "--> mirrored network-policy defaults: the meta chart's copy of every networkPolicy fqdns / cidrs list and port equals the connectivity chart's default — the forwarded copy shadows the child's (#522, #525)"
+	@echo "--> mirrored defaults: the meta chart's copy of every networkPolicy fqdns / cidrs list and port, and of every leaf of the modelServing cache and policies blocks, equals the connectivity chart's default — the forwarded copy shadows the child's (#522, #525, #537)"
 	@python3 tests/verify-mirrored-values.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "--> the mirrored-defaults check has teeth: a meta env list short of the VLLM_CACHE_ROOT entry fails it, naming the path"
+	@python3 -c 'import yaml; v=yaml.safe_load(open("$(CHART_DIR)/values.yaml")); v["modelServing"]["policies"]["env"].pop(); yaml.safe_dump(v, open("/tmp/ap-mirror-meta-env.yaml", "w"))'
+	@if python3 tests/verify-mirrored-values.py $(CHART_DIR) $(CONNECTIVITY_DIR) --meta-values /tmp/ap-mirror-meta-env.yaml >/tmp/ap-mirror-neg-env.out 2>&1; then \
+		echo "FAIL: the mirrored-defaults check passed a meta chart whose modelServing.policies.env lacks the VLLM_CACHE_ROOT entry (the connectivity release would render without it)"; exit 1; \
+	elif ! grep -q 'modelServing.policies.env' /tmp/ap-mirror-neg-env.out; then \
+		echo "FAIL: the mirrored-defaults check failed for the wrong reason"; cat /tmp/ap-mirror-neg-env.out; exit 1; \
+	else echo "ok: a mirrored env list short of one entry fails, naming modelServing.policies.env"; fi
 	@echo "--> the mirrored-defaults check has teeth: a meta list short of one entry fails it, naming the path"
 	@python3 -c 'import yaml; v=yaml.safe_load(open("$(CHART_DIR)/values.yaml")); v["modelServing"]["networkPolicy"]["huggingFace"]["fqdns"].pop(); yaml.safe_dump(v, open("/tmp/ap-mirror-meta.yaml", "w"))'
 	@if python3 tests/verify-mirrored-values.py $(CHART_DIR) $(CONNECTIVITY_DIR) --meta-values /tmp/ap-mirror-meta.yaml >/tmp/ap-mirror-neg.out 2>&1; then \

@@ -19,12 +19,17 @@ list and every `port` under a `networkPolicy` block — the egress allow-lists
 and the admitted ports whose defaults the meta chart mirrors (#525 gave the
 llm-d workload shape its own `modelServing.networkPolicy.llmisvcWorkload.port`,
 a value the meta chart had to carry too or its forwarded tree would have kept
-the connectivity release on the old port) — and holds the meta chart's value
-at the same path equal to it, naming the path and both values when they differ
-or the meta chart lacks the path. It refuses to pass vacuously: the two
-`huggingFace.fqdns` lists and the two model-serving ports must be among the
-paths it compared. `--meta-values FILE` compares another meta
-values file (the negative control in `make verify-meta`).
+the connectivity release on the old port) — and for every leaf of the
+model-serving cache and policy blocks (`modelServing.cache`,
+`modelServing.policies`; #537 gave the claim its StorageClass block and the
+model pods' env a second entry, `VLLM_CACHE_ROOT`, and a forwarded `env` list
+without it would drop the entry from every installation's render) — and holds
+the meta chart's value at the same path equal to it, naming the path and both
+values when they differ or the meta chart lacks the path. It refuses to pass
+vacuously: the two `huggingFace.fqdns` lists, the two model-serving ports, the
+StorageClass provisioner and the policies' env must be among the paths it
+compared. `--meta-values FILE` compares another meta values file (the negative
+controls in `make verify-meta`).
 """
 
 import argparse
@@ -33,8 +38,11 @@ import sys
 import yaml
 
 REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networkPolicy.huggingFace.fqdns",
-            "modelServing.networkPolicy.predictor.port", "modelServing.networkPolicy.llmisvcWorkload.port"}
+            "modelServing.networkPolicy.predictor.port", "modelServing.networkPolicy.llmisvcWorkload.port",
+            "modelServing.cache.storageClass.provisioner", "modelServing.policies.env"}
 MIRRORED = ("fqdns", "cidrs", "port")
+# Blocks the meta chart mirrors leaf for leaf (#537).
+SUBTREES = (("modelServing", "cache"), ("modelServing", "policies"))
 
 
 def leaves(tree: dict, path: tuple[str, ...] = ()):
@@ -67,7 +75,7 @@ def main() -> int:
     compared: set[str] = set()
     drift: list[str] = []
     for path, default in leaves(connectivity):
-        if path[-1] not in MIRRORED or "networkPolicy" not in path[:-1]:
+        if not ((path[-1] in MIRRORED and "networkPolicy" in path[:-1]) or any(path[:len(s)] == s for s in SUBTREES)):
             continue
         dotted = ".".join(path)
         compared.add(dotted)
@@ -79,8 +87,8 @@ def main() -> int:
     if missing := REQUIRED - compared:
         sys.exit(f"FAIL: the connectivity chart no longer declares {sorted(missing)}; this check would pass vacuously")
     if drift:
-        sys.exit("FAIL: a mirrored networkPolicy default differs between the charts — the meta chart forwards its copy, which shadows the connectivity default:\n  " + "\n  ".join(drift))
-    print(f"ok: {len(compared)} mirrored networkPolicy fqdns/cidrs lists and ports are equal in both charts ({', '.join(sorted(compared))})")
+        sys.exit("FAIL: a mirrored default differs between the charts — the meta chart forwards its copy, which shadows the connectivity default:\n  " + "\n  ".join(drift))
+    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing cache and policies blocks) are equal in both charts ({', '.join(sorted(compared))})")
     return 0
 
 

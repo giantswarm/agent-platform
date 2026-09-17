@@ -64,6 +64,48 @@ else the claim this chart applies (cache-pvc.yaml).
 {{- end -}}
 
 {{/*
+Truthy when this chart renders the cache claim's StorageClass
+(templates/model-serving/storageclass.yaml): the claim is this chart's
+(cacheClaimManaged) and modelServing.cache.storageClass.create. Refuses a
+pvc.storageClassName next to it — two values would name the claim's class.
+*/}}
+{{- define "agent-platform.modelServing.cacheStorageClassManaged" -}}
+{{- $cache := .Values.modelServing.cache -}}
+{{- if and (include "agent-platform.modelServing.cacheClaimManaged" .) $cache.storageClass.create -}}
+{{- with $cache.pvc.storageClassName -}}
+{{- fail (printf "modelServing.cache.pvc.storageClassName (%q) and modelServing.cache.storageClass.create: true both name the cache claim's class; set storageClass.create: false to keep the named class (\"-\" is the empty class), or drop pvc.storageClassName for the class the chart renders" .) -}}
+{{- end -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+The name of the cache claim's StorageClass, rendered or referenced:
+modelServing.cache.storageClass.name, else <chart>-<claim>
+(agent-platform-connectivity-hf-cache) — cluster-scoped, so named after the
+chart like the serving ClusterPolicies.
+*/}}
+{{- define "agent-platform.modelServing.cacheStorageClass.name" -}}
+{{- $cache := .Values.modelServing.cache -}}
+{{- $cache.storageClass.name | default (printf "%s-%s" (include "name" .) $cache.pvc.name) -}}
+{{- end -}}
+
+{{/*
+The storageClassName the applied claim carries: pvc.storageClassName when set
+("-" included — the caller renders it as the empty class), else the chart's
+class when it renders one or storageClass.name names an existing one, else
+nothing (empty string = falsy): the cluster's default class.
+*/}}
+{{- define "agent-platform.modelServing.cacheClaim.storageClassName" -}}
+{{- $cache := .Values.modelServing.cache -}}
+{{- if $cache.pvc.storageClassName -}}
+{{- $cache.pvc.storageClassName -}}
+{{- else if or (include "agent-platform.modelServing.cacheStorageClassManaged" .) $cache.storageClass.name -}}
+{{- include "agent-platform.modelServing.cacheStorageClass.name" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The GPU node pool input (modelServing.gpuPool) as the scheduling it puts on a
 workload the chart renders onto the pool, as JSON:
   { "tolerations": [<the toleration of the pool taint>] | [], "nodeSelector": {...} }
