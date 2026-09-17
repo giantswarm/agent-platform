@@ -32,8 +32,10 @@ spec:
     - --gpu-memory-utilization=0.90
     - --max-model-len=16384
     - --no-enable-log-requests
-    - --default-chat-template-kwargs
-    - '{"enable_thinking": false}'
+    # One argument, the JSON single-quoted inside it: the well-known runtime
+    # template re-parses every argument through a shell (eval "… $@"), which
+    # would split a bare JSON at its whitespace and eat its double quotes.
+    - "--default-chat-template-kwargs='{\"enable_thinking\": false}'"
     # kagent agents call /v1/chat/completions with tools and tool_choice auto;
     # without a parser vLLM rejects every agent request (400).
     - --enable-auto-tool-choice

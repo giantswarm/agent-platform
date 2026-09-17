@@ -3059,7 +3059,9 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   #         model:
   #           id: org/My-Model
   #           storageUri: hf://org/My-Model
-  #         args: [--max-model-len=8192]
+  #         # The runtime re-parses each argument through a shell: a value with
+  #         # whitespace or quotes is single-quoted inside one argument.
+  #         args: [--max-model-len=8192, "--default-chat-template-kwargs='{\"enable_thinking\": false}'"]
   #         resources:
   #           gpus: 1
   #         requirements:

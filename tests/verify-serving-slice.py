@@ -31,6 +31,11 @@ property the slice relies on:
   ConfigMap's gateway entry; a cert-manager Certificate only with tls.issuerRef.name;
   nothing of it with modelsGateway.enabled: false; the guards (no issuer, no
   certificate, no audience, a host carrying a port) fail naming the key;
+- every shipped preset's arguments survive the runtime template's entrypoint
+  (eval "… $@" re-parses them through a shell): the exact eval, run over each
+  preset's args, yields one word per argument, a JSON value parses; a values
+  preset with a bare JSON, a space, a stray quote or a metacharacter fails the
+  render naming the guard (giantswarm/agent-platform#532)
 - the two 24 GB presets pass the preset schema's required keys, name no image,
   enable tools with a parser, request one GPU, fit 24 GB, and request no more
   CPU and memory than the smallest L4 instance (a g6.xlarge: 4 vCPU, 16 GiB)
@@ -47,12 +52,16 @@ property the slice relies on:
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
+import glob
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
+
+import yaml
 
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2", "--api-versions", "monitoring.coreos.com/v1",
@@ -376,6 +385,60 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     ok("cache.enabled: false and an existing claim render no claim, no hook and no hook identity; the existing claim is published")
 
 
+# The tail of the well-known runtime template's entrypoint (kserve-runtime-configs,
+# kserve-config-llm-template): `bash -c <script> -- <args>` ends in an eval with an
+# unquoted $@, so every argument is re-parsed by the shell — a bare JSON splits at
+# its whitespace and loses its double quotes (giantswarm/agent-platform#532). The
+# check runs that eval, with argv dumped instead of vLLM, over each preset's args.
+ENTRYPOINT_EVAL = 'eval "exec {dump} serve /mnt/models --served-model-name "m" "publishers/ns/models/m" --port 8000 ${{VLLM_ADDITIONAL_ARGS}} $@"'
+ARGV_DUMP = "import json, sys; print(json.dumps(sys.argv[1:]))"
+
+
+def eval_argv(args: list[str]) -> list[str]:
+    """What vLLM's argv would be after the entrypoint's eval of args: the dumped
+    argv from `serve` on, without the fixed prefix the template puts first."""
+    script = ENTRYPOINT_EVAL.format(dump=f"python3 -c {shlex.quote(ARGV_DUMP)}")
+    result = subprocess.run(["bash", "-c", script, "--", *args], capture_output=True, text=True, check=False, env={"PATH": os.environ["PATH"]})
+    if result.returncode != 0:
+        sys.exit(f"FAIL: the entrypoint's eval fails over {args!r}:\n{result.stderr}")
+    return json.loads(result.stdout)[7:]
+
+
+def check_preset_args(connectivity: str, base: list[str]) -> None:
+    files = sorted(glob.glob(f"{connectivity}/files/model-serving/presets/*.yaml"))
+    if len(files) < 2:
+        sys.exit(f"FAIL: expected the shipped presets under {connectivity}/files/model-serving/presets/, found {files}")
+    checked = 0
+    for path in files:
+        preset = yaml.safe_load(open(path))
+        name = preset["metadata"]["name"]
+        args = [str(a) for a in preset["spec"].get("args") or []]
+        expected = [shlex.split(a)[0] for a in args]
+        got = eval_argv(args)
+        if got != expected:
+            sys.exit(f"FAIL: preset {name}: after the entrypoint's eval vLLM would see {got!r}, not one word per argument {expected!r}")
+        for word in got:
+            flag, sep, value = word.partition("=")
+            if sep and value[:1] in "{[":
+                try:
+                    json.loads(value)
+                except ValueError as err:
+                    sys.exit(f"FAIL: preset {name}: {flag}'s value {value!r} is not JSON after the eval: {err}")
+                checked += 1
+    if checked == 0:
+        sys.exit("FAIL: no shipped preset carries a JSON-valued argument; the eval check has nothing to prove")
+    bad = {"bare JSON in two arguments": ["--default-chat-template-kwargs", '{"enable_thinking": false}'],
+           "a space": ["--x=a b"], "a stray single quote": ["--x=it's"], "a double quote": ['--x="a"'],
+           "a brace expansion": ["--x={a,b}"], "a variable": ["--x=$HOME"], "a glob": ["--x=*"]}
+    for what, args in bad.items():
+        doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "bad"},
+               "spec": {"displayName": "Bad", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "args": args}}
+        err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="outside single quotes")
+        need(err, 'serving preset "bad" (values): spec.args', f"the guard's message for {what}")
+    ok(f"{len(files)} shipped presets' arguments survive the runtime template's eval ({checked} JSON values parse); "
+       f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
+
+
 def check_presets(connectivity: str) -> None:
     schema = json.load(open(f"{connectivity}/files/model-serving/serving-preset.schema.json"))
     spec_keys = set(schema["properties"]["spec"]["properties"])
@@ -438,6 +501,7 @@ def main(meta: str, connectivity: str) -> int:
         check_controller_jwks_egress(connectivity, base)
         check_gateway(connectivity, base)
         check_cache(connectivity, base)
+        check_preset_args(connectivity, base)
     finally:
         os.unlink(values)
     check_presets(connectivity)

@@ -238,6 +238,19 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- end -}}
 {{- $_ := set $spec "requirements" $requirements -}}
 {{- $args := get $spec "args" | default list -}}
+{{- /* Every argument reaches vLLM through the well-known runtime template's
+       entrypoint, which re-parses the arguments with a shell (eval "… $@"):
+       a bare JSON is split at its whitespace and loses its double quotes, an
+       unbalanced quote fails the whole command, a metacharacter expands.
+       Outside single-quoted spans an argument therefore carries none of them;
+       a value that needs them is single-quoted inside one argument
+       (--default-chat-template-kwargs='{"enable_thinking": false}'). */ -}}
+{{- range $args -}}
+{{- $arg := toString . -}}
+{{- if regexMatch "[[:space:]\"'$`\\\\;&|<>(){}\\[\\]*?]" (regexReplaceAll "'[^']*'" $arg "") -}}
+{{- fail (printf "%s: spec.args %s carries whitespace, a quote or a shell metacharacter outside single quotes; the runtime template re-parses every argument through a shell (eval \"… $@\"), which splits it there and eats the quotes — write the value single-quoted inside one argument, e.g. --default-chat-template-kwargs='{\"enable_thinking\": false}'" $where (quote $arg)) -}}
+{{- end -}}
+{{- end -}}
 {{- $chatTemplate := get $spec "chatTemplate" | default dict -}}
 {{- $render := dict "render" false "name" "" "key" "" "content" "" -}}
 {{- if $chatTemplate -}}
