@@ -688,6 +688,16 @@ define vml_must_fail
 		echo "FAIL: $(1): failed for the wrong reason"; cat /tmp/vml-fail.out; exit 1; \
 	else echo "ok: $(1)"; fi
 endef
+# $(call vml_must_fail_schema,<description>,<NAME of a variable holding the flags>,<case-insensitive regex, no commas>): a refusal by the
+# schema. Its wording differs between Helm 3 (gojsonschema: "Additional property x is not allowed", "Invalid type. Expected: object, given:
+# string") and Helm 4 ("additional properties 'x' not allowed", "got string, want object"); CI runs one, a laptop may run the other.
+define vml_must_fail_schema
+	@if helm template t $(CONNECTIVITY_DIR) $($(2)) >/tmp/vml-fail.out 2>&1; then \
+		echo "FAIL: $(1): the render succeeded"; exit 1; \
+	elif ! grep -q "values don't meet the specifications of the schema" /tmp/vml-fail.out || ! grep -qiE -- "$(3)" /tmp/vml-fail.out; then \
+		echo "FAIL: $(1): failed for the wrong reason"; cat /tmp/vml-fail.out; exit 1; \
+	else echo "ok: $(1)"; fi
+endef
 # Recursive (=): KAGENT_ROUTE and MANAGERS_ON are defined further down. A --set-json on one key merges with the three defaults.
 VML_NO_EXPR = $(AGW_VM) --set-json 'gateway.metricLabels.channel={}'
 # The schema holds every entry's shape, a custom one (admitted by any name) like a default: a misspelt key, a scalar entry, a string for enabled.
@@ -771,10 +781,10 @@ verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scop
 	@echo "ok: boolean-looking name and brace-leading expression quoted"
 	@echo "--> guards"
 	$(call vml_must_fail,an entry without an expression,VML_NO_EXPR,gateway.metricLabels.channel has no expression)
-	$(call vml_must_fail,a misspelt enabled on a default entry (the schema),VML_BAD_KEY_DEFAULT,additional properties 'enable' not allowed)
-	$(call vml_must_fail,a misspelt enabled on a custom entry (the schema too),VML_BAD_KEY,additional properties 'enable' not allowed)
-	$(call vml_must_fail,a scalar in place of an entry,VML_SCALAR,got string, want object)
-	$(call vml_must_fail,a string for enabled,VML_ENABLED_STRING,got string, want boolean)
+	$(call vml_must_fail_schema,a misspelt enabled on a default entry (the schema),VML_BAD_KEY_DEFAULT,additional propert(y|ies) .?enable.? (is )?not allowed)
+	$(call vml_must_fail_schema,a misspelt enabled on a custom entry (the schema too),VML_BAD_KEY,additional propert(y|ies) .?enable.? (is )?not allowed)
+	$(call vml_must_fail_schema,a scalar in place of an entry,VML_SCALAR,got string. want object|Expected: object. given: string)
+	$(call vml_must_fail_schema,a string for enabled,VML_ENABLED_STRING,got string. want boolean|Expected: boolean. given: string)
 	$(call vml_must_fail,an expression that renders empty,VML_EMPTY_TPL,gateway.metricLabels.channel: the expression)
 	$(call vml_must_fail,a multi-line expression,VML_MULTILINE,gateway.metricLabels.channel spans more than one line)
 	$(call vml_must_fail,a name that is not a Prometheus label name — on an entry the gate holds,VML_BAD_NAME,is not a Prometheus label name)
