@@ -55,9 +55,17 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     and stays a toFQDNs allow-list (no toCIDR, no toEntities world). The
     kubernetes flavour, which selects no names, admits 443 to every public
     block. A new host shape of the download path fails here, not a download
-    on an installation.
+    on an installation. The same names are matched a second time against the
+    policies rendered from the values the META chart forwards to its
+    connectivity release (templates/components.yaml, forwardAllValues, the
+    render an installation gets): a forwarded copy of a default shadows the
+    child's own, and 4.28.17 shipped the CDN pattern in the connectivity
+    defaults while the meta chart's mirrored lists kept the four old entries,
+    so every installation still rendered the drop (#522, round 2).
 
 Needs PyYAML and the kyverno CLI (the CI job installs both).
+
+usage: verify-model-serving-policies.py <connectivity chart dir> <meta chart dir>
 """
 
 import copy
@@ -137,6 +145,19 @@ def render(chart: str, flags: list[str]) -> list[dict]:
     if result.returncode != 0:
         fail(f"render of {chart} {' '.join(flags)} failed:\n{result.stderr}")
     return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+
+
+def forwarded_values(meta: str, apis: list[str]) -> dict:
+    """The values an installation's connectivity release receives: the meta chart's defaults with the model serving switch
+    on (BASE) and the one input every render needs (global.domain — the CI values would trip the wiring's ingress-mode
+    guards, as tests/verify-components.py notes), rendered with the engine off; the connectivity HelmRelease's spec.values.
+    The meta chart resolves the cluster-shape knobs from the API groups before it forwards (the child never sees `auto`),
+    so the tree carries the flavour of the `apis` it was rendered with: with CILIUM the cilium one, without it kubernetes."""
+    docs = render(meta, ["--set", "components.flux.enabled=false", "--set", "global.domain=example.com", *apis])
+    releases = [d for d in docs if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "agent-platform-connectivity"]
+    if len(releases) != 1:
+        fail(f"the meta chart rendered {len(releases)} connectivity HelmReleases; expected exactly one")
+    return releases[0]["spec"]["values"]
 
 
 def one(docs: list[dict], kind: str, suffix: str) -> dict:
@@ -391,8 +412,9 @@ def cilium_regex(entry: dict) -> re.Pattern:
     return re.compile("^" + re.escape(entry["matchPattern"].lower().rstrip(".")).replace(r"\*", "[-a-zA-Z0-9_]*") + "$")
 
 
-def check_fqdns(cilium: list[dict], k8s: list[dict]) -> None:
-    """The model pods' and the download Job's egress admits every name of the Hugging Face download path (#522) and stays an allow-list."""
+def check_fqdns(cilium: list[dict], k8s: list[dict], via: str) -> None:
+    """The model pods' and the download Job's egress admits every name of the Hugging Face download path (#522) and stays an
+    allow-list — over the policies as rendered `via` the connectivity defaults or the meta chart's forwarded values."""
     if cilium_regex({"matchPattern": "*.*.hf.co"}).match(CDN) or not cilium_regex({"matchPattern": "*.*.*.hf.co"}).match(CDN):
         fail(f"this check's Cilium pattern rule is wrong: *.*.hf.co must not, *.*.*.hf.co must match {CDN}")
     for suffix in [f"-model-serving-{s}" for s in SHAPES] + ["-model-serving-download"]:
@@ -403,19 +425,19 @@ def check_fqdns(cilium: list[dict], k8s: list[dict]) -> None:
         rendered = [e.get("matchName") or e.get("matchPattern") for e in entries]
         patterns = [cilium_regex(e) for e in entries]
         if denied := [h for h in HUB_HOSTS if not any(p.match(h) for p in patterns)]:
-            fail(f"{suffix}: toFQDNs {rendered} admit none of {denied} under Cilium's rule (a * never crosses a dot)")
+            fail(f"{suffix} ({via}): toFQDNs {rendered} admit none of {denied} under Cilium's rule (a * never crosses a dot)")
         if admitted := [h for h in NOT_HUB_HOSTS if any(p.match(h) for p in patterns)]:
-            fail(f"{suffix}: toFQDNs {rendered} admit {admitted}")
-        ok(f"{suffix}: toFQDNs {rendered} admit every name of the download path ({', '.join(HUB_HOSTS)}), none of {NOT_HUB_HOSTS}; no toCIDR, no world")
+            fail(f"{suffix} ({via}): toFQDNs {rendered} admit {admitted}")
+        ok(f"{suffix} ({via}): toFQDNs {rendered} admit every name of the download path ({', '.join(HUB_HOSTS)}), none of {NOT_HUB_HOSTS}; no toCIDR, no world")
     for suffix in [f"-model-serving-{s}-egress" for s in SHAPES] + ["-model-serving-download-egress"]:
         egress = one(k8s, "NetworkPolicy", suffix)["spec"]["egress"]
         blocks = [(t["ipBlock"]["cidr"], [p["port"] for p in r.get("ports") or []]) for r in egress for t in r.get("to") or [] if "ipBlock" in t]
         if ("0.0.0.0/0", [443]) not in blocks:
             fail(f"{suffix}: the kubernetes flavour admits {blocks}; it selects no names, so 443 to every public block is what reaches the CDN")
-    ok("kubernetes flavour: each model pod's and the download Job's egress admits 443 to every public block (no name to get wrong)")
+    ok(f"kubernetes flavour ({via}): each model pod's and the download Job's egress admits 443 to every public block (no name to get wrong)")
 
 
-def main(connectivity: str) -> int:
+def main(connectivity: str, meta: str) -> int:
     if shutil.which(KYVERNO) is None:
         fail(f"the kyverno CLI ({KYVERNO}) is not installed; the mutations are asserted with `kyverno apply`")
     docs = render(connectivity, [])
@@ -436,11 +458,19 @@ def main(connectivity: str) -> int:
     check_deployments(deployments_policy)
     cilium = render(connectivity, CILIUM)
     check_selectors(cilium, docs)
-    check_fqdns(cilium, docs)
+    check_fqdns(cilium, docs, "the connectivity chart's defaults")
+    with tempfile.TemporaryDirectory() as tmp:
+        through_meta = []
+        for flavour, apis in (("cilium", CILIUM), ("kubernetes", [])):
+            forwarded = os.path.join(tmp, f"forwarded-{flavour}.yaml")
+            with open(forwarded, "w") as f:
+                yaml.safe_dump(forwarded_values(meta, apis), f)
+            through_meta.append(render(connectivity, ["-f", forwarded, *apis]))
+        check_fqdns(*through_meta, "the meta chart's forwarded values")
     return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("usage: verify-model-serving-policies.py <connectivity chart dir>")
-    sys.exit(main(sys.argv[1]))
+    if len(sys.argv) != 3:
+        sys.exit("usage: verify-model-serving-policies.py <connectivity chart dir> <meta chart dir>")
+    sys.exit(main(sys.argv[1], sys.argv[2]))

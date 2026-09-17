@@ -1097,6 +1097,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelManager.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
+| modelManager.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
@@ -1334,6 +1335,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
+| modelServing.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelServing.networkPolicy.huggingFace.cidrs | list | `[]` |  |
 | modelServing.modelsGateway.enabled | bool | `false` |  |
 | modelServing.modelsGateway.name | string | `"models"` |  |
