@@ -3,9 +3,8 @@
 # routing store (routing.store: valkey, the platform's muster-valkey on 6379)
 # and the Secret link store (obo.store: secret, the kube-apiserver) each carry
 # a rule of the -klausgateway-store-egress policy next to the a2a and OBO
-# egress policies (the crd / configmap stores and the controller are the
-# verify-klausgateway-netpol target's). The flavor is explicit: `ct lint`
-# renders without cilium.io/v2 served, and `auto` would pick the kubernetes
+# egress policies. The flavor is explicit: `ct lint` renders without
+# cilium.io/v2 served, and `auto` would pick the kubernetes
 # flavor (that one is linted through test-netpol-kubernetes-values.yaml).
 # agentgateway-* mode with the agentgateway component on, as the a2a egress
 # targets the data plane; parentRefs is required in every mode.

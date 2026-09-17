@@ -1,0 +1,123 @@
+# The workload pod the llm-d controller (KServe's LLMInferenceService, the
+# kserve-runtime-configs single-node template) creates in the serving
+# namespace for the preset qwen3-4b-instruct, as observed on a GPU cluster
+# (giantswarm/agent-platform#506): the labels are the controller's — no
+# serving.kserve.io/inferenceservice —, the runtime container is `main`, the
+# storage-initializer KServe injects for an hf:// model URI downloads into the
+# template's model-cache emptyDir at /mnt/models, where the runtime reads, at
+# KServe's default 1Gi memory limit. The pod is reached on 8000 — the port
+# KServe's `<name>-kserve-workload-svc` targets and the rendered HTTPRoute's
+# backendRef names, where the models Gateway's requests arrive (the hubble drop
+# of giantswarm/agent-platform#525) — which is the template's llm-d routing
+# sidecar (a native sidecar: an init container with restartPolicy Always,
+# `--port=8000 --vllm-port=8001`); vLLM's `main` listens on 8001 behind it. The
+# network policies admit exactly the sidecar's container port. Reduced to what
+# the model-serving policies read and patch
+# (tests/verify-model-serving-policies.py).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qwen3-4b-instruct-kserve-7d9f8c6b5d-x2k9q
+  namespace: model-serving
+  labels:
+    app.kubernetes.io/name: qwen3-4b-instruct
+    app.kubernetes.io/part-of: llminferenceservice
+    kserve.io/component: workload
+    llm-d.ai/role: both
+    pod-template-hash: 7d9f8c6b5d
+spec:
+  runtimeClassName: nvidia
+  initContainers:
+    - name: storage-initializer
+      image: gsoci.azurecr.io/giantswarm/kserve-storage-initializer:v0.20.0
+      args:
+        - hf://Qwen/Qwen3-4B-Instruct-2507
+        - /mnt/models
+      env:
+        - name: HF_HUB_ENABLE_HF_TRANSFER
+          value: "1"
+        - name: HF_XET_HIGH_PERFORMANCE
+          value: "1"
+        - name: HF_XET_NUM_CONCURRENT_RANGE_GETS
+          value: "8"
+      resources:
+        limits:
+          cpu: "1"
+          memory: 1Gi
+        requests:
+          cpu: 100m
+          memory: 100Mi
+      volumeMounts:
+        - name: model-cache
+          mountPath: /mnt/models
+    - name: llm-d-routing-sidecar
+      image: ghcr.io/llm-d/llm-d-router-disagg-sidecar:v0.9.0
+      restartPolicy: Always
+      command:
+        - /app/pd-sidecar
+        - --port=8000
+        - --vllm-port=8001
+      ports:
+        - containerPort: 8000
+          protocol: TCP
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        runAsNonRoot: true
+  containers:
+    - name: main
+      image: docker.io/vllm/vllm-openai:v0.11.0
+      command:
+        - /bin/sh
+        - -c
+        - exec vllm serve /mnt/models --served-model-name qwen3-4b-instruct --port 8001
+      ports:
+        - containerPort: 8001
+          protocol: TCP
+      resources:
+        limits:
+          cpu: "4"
+          memory: 12Gi
+          nvidia.com/gpu: "1"
+        requests:
+          cpu: "2"
+          memory: 10Gi
+          nvidia.com/gpu: "1"
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: home
+          mountPath: /home
+        - name: tmp-dir
+          mountPath: /tmp
+        - name: dshm
+          mountPath: /dev/shm
+        - name: model-cache
+          mountPath: /models
+        - name: model-cache
+          mountPath: /mnt/models
+        - name: tls-certs
+          mountPath: /var/run/kserve/tls
+          readOnly: true
+  volumes:
+    - name: home
+      emptyDir: {}
+    - name: tmp-dir
+      emptyDir: {}
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+    - name: model-cache
+      emptyDir: {}
+    - name: tls-certs
+      secret:
+        secretName: qwen3-4b-instruct-kserve-self-signed-certs

@@ -101,7 +101,8 @@ FLUX_FIELD_MANAGER = "flux"
 GUARD_MESSAGE = "this cluster runs Flux; set components.flux.enabled=false or install the chart through it"
 # The component HelmReleases the smoke's base + kagent values turn on (no
 # agent-manager here: it belongs to the round-trips values of the smoke).
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds")
+# model-manager is on by default with no backend (giantswarm/agent-platform#329).
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "model-manager")
 AGENT = "ats-flux-agent"
 # The way back's bound: helm-controller uninstalls the seven releases
 # concurrently and the meta release's uninstall waits for their HelmRelease

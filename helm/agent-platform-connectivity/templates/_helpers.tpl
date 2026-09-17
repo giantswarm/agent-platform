@@ -214,6 +214,21 @@ emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
+Truthy when the agentgateway controller runs in this release: an agentgateway-*
+ingress mode, or the component on with muster off — the serving slice on a
+workload cluster (components.agentgateway.enabled: true, ingress.mode at its
+muster-direct default, no edge Gateway), whose controller serves the models
+Gateway and fetches its JWKS. The controller's network policies follow this,
+not the ingress mode: a controller without its policy has no egress rule for
+the issuer, and one with the edge's policy alone has no route to the public
+issuer either. Usage:
+  {{- if (include "agent-platform.agentgateway.controller" .) }}
+*/}}
+{{- define "agent-platform.agentgateway.controller" -}}
+{{- if or (include "agent-platform.ingress.agentgateway" .) (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Fully-qualified name of the muster service. Single source of truth: the umbrella
 pins muster.fullnameOverride (see values.yaml), which the muster sub-chart uses
 verbatim for its Service name. Reading that same key here — rather than
@@ -295,11 +310,17 @@ inconsistent. Rendered exactly once via templates/validate.yaml.
 {{- fail "ingress.mode=agentgateway-direct requires a DCR-capable IdP (RFC 7591/8707), e.g. Zitadel; not yet supported" -}}
 {{- end -}}
 {{- $isAgentgateway := or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct") -}}
+{{- $musterEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
 {{- /* The muster `/` route needs a Gateway in every mode; the helper fails the
 render when neither ingress.parentRefs, the chart-owned edge nor
 global.gatewayApi.parentRefs names one — an empty result would render a route
-bound to no Gateway, leaving muster unreachable while install reports success. */ -}}
+bound to no Gateway, leaving muster unreachable while install reports success.
+Only while muster is on: a release without muster (the serving slice,
+examples/serving-slice.yaml) renders no route that could be left unbound and
+has no edge of its own — its Gateway is the models Gateway (#490). */ -}}
+{{- if $musterEnabled -}}
 {{- $_ := include "agent-platform.parentRefs" (dict "ctx" . "override" .Values.ingress.parentRefs "key" "ingress.parentRefs") -}}
+{{- end -}}
 {{- /* viaMuster only matters when the mcps sub-chart is installed; with no MCP
 servers there is nothing to route, so the consistency check is scoped to the
 agent-platform-mcps component. */ -}}
@@ -320,7 +341,10 @@ agent-platform-mcps component. */ -}}
 {{- if and $isAgentgateway (not $agentgatewayEnabled) -}}
 {{- fail "components.agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
-{{- if and (eq $mode "muster-direct") $agentgatewayEnabled -}}
+{{- /* Without muster there is no muster ingress the agentgateway toggle has to
+agree with: the serving slice on a workload cluster runs agentgateway (the
+target has no controller of its own) in the default mode. */ -}}
+{{- if and (eq $mode "muster-direct") $agentgatewayEnabled $musterEnabled -}}
 {{- fail "components.agentgateway.enabled must be false in muster-direct mode; the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
 {{- /* muster-direct runs without the agentgateway component, so its CRDs are
@@ -679,6 +703,81 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 */}}
 {{- define "agent-platform.llmRouting" -}}
 {{- if .Values.llmRouting.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy (emits "true") when a policy of this chart verifies a bearer JWT on a
+route of the data-plane Gateway: the kagent controller route's, agent-manager's
+or model-manager's (each template's own gate, repeated here). Only such a
+request carries `jwt.<claim>` when the metric labels are evaluated.
+*/}}
+{{- define "agent-platform.jwtRouteRendered" -}}
+{{- $k := dig "controllerRoute" dict (.Values.kagent | default dict) -}}
+{{- $a := dig "route" dict (.Values.agentManager | default dict) -}}
+{{- $m := dig "route" dict (.Values.modelManager | default dict) -}}
+{{- if or (and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (dig "enabled" false $k) (dig "jwtAuthentication" "enabled" false $k)) (and (include "agent-platform.agentManager.enabled" .) (dig "enabled" false $a) (dig "jwtAuthentication" "enabled" false $a)) (and (include "agent-platform.modelManager.enabled" .) (dig "enabled" false $m) (dig "jwtAuthentication" "enabled" false $m)) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The `add` list of the Gateway's one frontend.metrics policy
+(templates/agentgateway/metrics-policy.yaml), as YAML, from gateway.metricLabels:
+a map keyed by label name, each entry {expression, enabled}, in name order. The
+expression goes through tpl (the default `user` entry includes
+agent-platform.kagent.userIdClaim, which refuses a claim that is no CEL
+identifier). An entry whose expression reads `jwt` — `jwt.<claim>` or
+`jwt["<claim>"]` — is kept only while a route of the Gateway verifies a bearer
+(agent-platform.jwtRouteRendered). The schema holds every entry's shape; the
+guards here fail the render naming the entry: a missing, empty or multi-line
+expression, a name that is not a Prometheus label name, one the data plane's
+own series carry (a duplicate label name fails the whole scrape), one the
+scrape adds (stored as exported_<name>) or one starting with __ — checked on
+held entries too — and more than 16 enabled entries (the CRD's limit).
+Usage: include "agent-platform.metricLabels" . | fromYamlArray
+*/}}
+{{- define "agent-platform.metricLabels" -}}
+{{- $root := . -}}
+{{- $jwtRoute := include "agent-platform.jwtRouteRendered" . -}}
+{{- /* The data plane's own labels (agentgateway telemetry/metrics.rs) and the scrape's. */ -}}
+{{- $reserved := list "bind" "gateway" "listener" "route" "route_rule" "backend" "protocol" "method" "status" "reason" "gen_ai_operation_name" "gen_ai_system" "gen_ai_request_model" "gen_ai_response_model" "gen_ai_token_type" "resource_type" "server" "resource" -}}
+{{- $scrape := list "namespace" "pod" "instance" "job" "container" "service" "endpoint" -}}
+{{- $labels := list -}}
+{{- $enabled := 0 -}}
+{{- range $name, $entry := (.Values.gateway.metricLabels | default dict) -}}
+{{- $entry = $entry | default dict -}}
+{{- if dig "enabled" true $entry -}}
+{{- $enabled = add1 $enabled -}}
+{{- if not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" $name) -}}
+{{- fail (printf "metric label %q (gateway.metricLabels) is not a Prometheus label name ([a-zA-Z_][a-zA-Z0-9_]*); the scrape of the data plane would fail and every metric of it be lost" $name) -}}
+{{- end -}}
+{{- if hasPrefix "__" $name -}}
+{{- fail (printf "metric label %q (gateway.metricLabels) starts with __, which Prometheus reserves for its internals and drops after relabeling; the label would never be stored" $name) -}}
+{{- end -}}
+{{- if has $name $reserved -}}
+{{- fail (printf "metric label %q (gateway.metricLabels) is one the data plane already puts on its series (%s); a duplicate label name fails the whole scrape and every metric of the data plane is lost" $name (join ", " $reserved)) -}}
+{{- end -}}
+{{- if has $name $scrape -}}
+{{- fail (printf "metric label %q (gateway.metricLabels) is one the scrape adds to every series (%s); Prometheus would keep its own and store the policy's as exported_%s" $name (join ", " $scrape) $name) -}}
+{{- end -}}
+{{- $raw := toString (dig "expression" "" $entry) -}}
+{{- if not $raw -}}
+{{- fail (printf "gateway.metricLabels.%s has no expression; every entry is {expression: <one-line CEL>, enabled: <bool>}" $name) -}}
+{{- end -}}
+{{- $expr := tpl $raw $root -}}
+{{- if not $expr -}}
+{{- fail (printf "gateway.metricLabels.%s: the expression %q renders empty (it goes through tpl); every entry is {expression: <one-line CEL>, enabled: <bool>}" $name $raw) -}}
+{{- end -}}
+{{- if contains "\n" $expr -}}
+{{- fail (printf "gateway.metricLabels.%s spans more than one line; write the CEL expression on one line" $name) -}}
+{{- end -}}
+{{- if or (not (regexMatch "(^|[^A-Za-z0-9_.])jwt\\s*[.\\[]" $expr)) $jwtRoute -}}
+{{- $labels = append $labels (dict "name" $name "expression" $expr) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if gt $enabled 16 -}}
+{{- fail (printf "%d metric labels enabled (gateway.metricLabels; a held jwt entry counts — it renders with the first route that verifies a bearer); the AgentgatewayPolicy CRD takes at most 16" $enabled) -}}
+{{- end -}}
+{{- toYaml $labels -}}
 {{- end -}}
 
 {{/*
@@ -1101,8 +1200,9 @@ Usage: include "agent-platform.jwks.tlsEnabled" $jwks
 
 {{/*
 The CA Secret the JWKS backend verifies the issuer's certificate against, empty
-for the data plane's system trust. jwks.tls.caSecretName when set; otherwise
-global.identity.ca.secretName, but only while jwks.tls.enabled asks for TLS.
+for the system trust of the agentgateway controller, which fetches the key set.
+jwks.tls.caSecretName when set; otherwise global.identity.ca.secretName, but
+only while jwks.tls.enabled asks for TLS.
 The global key is the CA of ONE identity provider — the platform's — so it is
 the right default only for a route pointed at that provider deliberately. TLS
 implied by port 443 carries no such statement: a public issuer verified against
@@ -1192,20 +1292,45 @@ aside. */ -}}
 {{- end -}}
 
 {{/*
+The platform's identity provider as a JWKS target, { "host": "<host>", "port":
+<int> } from global.identity.issuerUrl (the URL's port, else 443 — the port the
+models Gateway's default JWKS source dials); empty while the URL is unset.
+Usage: include "agent-platform.jwks.issuerTarget" .
+*/}}
+{{- define "agent-platform.jwks.issuerTarget" -}}
+{{- with .Values.global.identity.issuerUrl -}}
+{{- $u := urlParse . -}}
+{{- $port := regexFind ":[0-9]+$" ($u.host | default "") | trimPrefix ":" | default "443" | int -}}
+{{- with $u.hostname -}}
+{{- dict "host" . "port" $port | toJson -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The external JWKS endpoints the agentgateway controller fetches, as a JSON list
 of { "host": "<host>", "port": <int> }, deduplicated on host and port. The
-controller fetches the JWKS of every jwtAuthentication policy the chart renders
-and pushes the keys to the data plane over xDS, so its egress needs each of
-them; the routes already name host and port, and no second knob restates them.
-Only a rendered policy contributes: the component, its route and its
-jwtAuthentication are all on. In-cluster hosts are absent — gateway.jwksEgress
-covers those. Each host is normalized, the form a Cilium toFQDNs matchName is
-matched in.
+controller fetches the JWKS of every jwtAuthentication policy of its
+GatewayClass and pushes the keys to the data plane over xDS (a failed fetch
+pushes an empty key set: every token is refused as "unknown key"), so its
+egress needs each of them; the routes already name host and port, and no
+second knob restates them. A route contributes while its policy renders: the
+component, its route and its jwtAuthentication are all on. The platform's
+identity provider (global.identity.issuerUrl on 443) contributes whatever the
+routes name: the controller serves the JWT policies of every release in the
+cluster, and the serving slice's models policy beside the platform's release
+(giantswarm/agent-platform#505) takes the issuer's public host on 443 by
+default — a release the platform's controller policy cannot see. In-cluster
+hosts are absent — gateway.jwksEgress covers those. Each host is normalized,
+the form a Cilium toFQDNs matchName is matched in.
 */}}
 {{- define "agent-platform.jwks.externalTargets" -}}
 {{- $out := list -}}
 {{- $seen := dict -}}
 {{- $sources := list -}}
+{{- with (include "agent-platform.jwks.issuerTarget" .) -}}
+{{- $sources = append $sources (. | fromJson) -}}
+{{- end -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (.Values.kagent.controllerRoute).enabled (.Values.kagent.controllerRoute.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.kagent.controllerRoute.jwtAuthentication.jwks -}}
 {{- end -}}
@@ -1214,6 +1339,9 @@ matched in.
 {{- end -}}
 {{- if and (include "agent-platform.agentManager.enabled" .) (.Values.agentManager.route).enabled (.Values.agentManager.route.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.agentManager.route.jwtAuthentication.jwks -}}
+{{- end -}}
+{{- if (include "agent-platform.modelServing.modelsGateway.enabled" .) -}}
+{{- $sources = append $sources (include "agent-platform.modelServing.modelsGateway.jwks" . | fromJson) -}}
 {{- end -}}
 {{- range $sources -}}
 {{- $host := include "agent-platform.jwks.normalizeHost" (.host | default "") -}}
@@ -1611,10 +1739,16 @@ The JWT claim the caller's identity is taken from — kagent.controller.auth.use
 (default email), the ONE value both authentication layers read: the controller's
 AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation
 (templates/kagent/controller-jwt-policy.yaml), so the two cannot disagree.
+Fails the render on a claim that is not a bare identifier: every reader puts it
+into CEL as jwt.<claim>, so the guard fires exactly where the claim is consumed.
 Usage: include "agent-platform.kagent.userIdClaim" .
 */}}
 {{- define "agent-platform.kagent.userIdClaim" -}}
-{{- dig "controller" "auth" "userIdClaim" "email" (.Values.kagent | default dict) -}}
+{{- $claim := dig "controller" "auth" "userIdClaim" "email" (.Values.kagent | default dict) -}}
+{{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $claim) -}}
+{{- fail (printf "kagent.controller.auth.userIdClaim %q is not a plain claim name ([A-Za-z_][A-Za-z0-9_]*); it is read as jwt.<claim> in CEL — the controller route's identity header, the user metric label — and a CEL expression that does not compile takes its whole policy down" $claim) -}}
+{{- end -}}
+{{- $claim -}}
 {{- end -}}
 
 {{/*

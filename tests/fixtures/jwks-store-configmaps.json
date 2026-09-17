@@ -1,0 +1,49 @@
+{
+  "apiVersion": "v1",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "jwks-store-246d7fa17251b26c3495a2b5d8a86d4b3affa5dabb8f5e5fbffc6b4f9b38c80a",
+        "namespace": "agent-platform",
+        "labels": {
+          "app.kubernetes.io/component": "jwks-store"
+        }
+      },
+      "data": {
+        "jwks-store": "{\"requestKey\":\"c82d551728d1950cc0c9d1a4a523c8154ed6bcc959be6f478ce52d2fc13c877c\",\"url\":\"http://dex.giantswarm.svc.cluster.local:5556/keys\",\"fetchedAt\":\"2026-09-16T23:41:02.318476091Z\",\"jwks\":\"{\\\"keys\\\":[{\\\"use\\\":\\\"sig\\\",\\\"kty\\\":\\\"RSA\\\",\\\"kid\\\":\\\"6f1c2d9a0b4e8f7c3a5d1e2b9c8d7e6f5a4b3c2d\\\",\\\"alg\\\":\\\"RS256\\\",\\\"n\\\":\\\"xGqXo7bT0qN9zJZ0l8V4m8y2Uo6rcN0QhjKk3nG6jHqa5A2Hq2tW9b7Ck8S3b6tT4lW9Q1xO3pE2rU5vY8zA1bC3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9dE1fG3hI5jK7lM9nO1pQ3rS5tU7vW9xY1zA3bC5dE7fG9hI1jK3lM5nO7pQ9rS1tU3vW5xY7zA9bC1dE3fG5hI7jK9lM1nO3pQ5rS7tU9vW1xY3zA5bC7dE9fG1hI3jK5lM7nO9pQ1rS3tU5vW7xY9zA1bC3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9dE1fG3hI5jK7lM9nO1pQ3rS5tU7vW9xY1zA3bC5dE7fG9hI1jK3lM5nO7pQ9rS1tU3vW5xY7zA9bC1dE3fG5hI7jK9lM1nO3pQ5rS7tU9vW1xY3zA5bC7dE9fG1hI3jK5lM7nO9pQ1rS3tU5vW7xY9zQ\\\",\\\"e\\\":\\\"AQAB\\\"},{\\\"use\\\":\\\"sig\\\",\\\"kty\\\":\\\"RSA\\\",\\\"kid\\\":\\\"a3e5b7c9d1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1\\\",\\\"alg\\\":\\\"RS256\\\",\\\"n\\\":\\\"tK3mW9pR2sV5xZ8bD1fH4jL7nQ0tW3yA6cF9hK2mP5rU8wZ1bE4gJ7lO0qT3vY6zC9eH2kN5pS8uX1aD4fI7jM0oR3tW6yB9dG2iL5nQ8sV1xA4cF7hK0mP3rU6wZ9bE2gJ5lO8qT1vY4zC7eH0kN3pS6uX9aD2fI5jM8oR1tW4yB7dG0iL3nQ6sV9xA2cF5hK8mP1rU4wZ7bE0gJ3lO6qT9vY2zC5eH8kN1pS4uX7aD0fI3jM6oR9tW2yB5dG8iL1nQ4sV7xA0cF3hK6mP9rU2wZ5bE8gJ1lO4qT7vY0zC3eH6kN9pS2uX5aD8fI1jM4oR7tW0yB3dG6iL9nQ2sV5xA8cF1hK4mP7rU0wZ3bE6gJ9lO2qT5vY8zC1eH4kN7pS0uX3aD6fI9jM2oR5tW8yB1dG4iL7nQ0sV3xA6cF9hK2mP5rU8wZ1bE4gJ7lO0qT3vY6zC9eH2kN5pS8uX1aD4fI7jM0oR3tW6yB9dG2iL5nQ8sV1xA4cF7hK0mP3rU6wZ9bE2gJ5lO8qT1vY4zC7eH0kN3pS6uX9aD2fI5jM8oR1tW4yB7dG0iL3nQ6sV9xA2cF5hK8mP1rU4wZ7bE0gJ3lO6qT9vY2zC5eH8kN1pS4uX7Q\\\",\\\"e\\\":\\\"AQAB\\\"}]}\"}"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "jwks-store-18e19dd047b219dec3788bf5305cf42e1fe71a36e42cc873ac10abfbd16f4abf",
+        "namespace": "agent-platform",
+        "labels": {
+          "app.kubernetes.io/component": "jwks-store"
+        }
+      },
+      "data": {
+        "jwks-store": "{\"requestKey\":\"9929fe32228f931c9166fad5329a9d5fec3075012f18288f31e0f9c2df0bb002\",\"url\":\"https://idp.example.invalid/keys\",\"fetchedAt\":\"2026-09-16T23:39:47.902114670Z\",\"jwks\":\"{\\\"keys\\\":[]}\"}"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "jwks-store-0000000000000000000000000000000000000000000000000000000000000000",
+        "namespace": "agent-platform",
+        "labels": {
+          "app.kubernetes.io/component": "jwks-store"
+        }
+      },
+      "data": {}
+    }
+  ],
+  "kind": "List",
+  "metadata": {
+    "resourceVersion": ""
+  }
+}

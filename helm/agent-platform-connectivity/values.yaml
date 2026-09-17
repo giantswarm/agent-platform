@@ -76,6 +76,14 @@ global:
 # for; the meta chart forwards an entry for every component it knows, so the map
 # stays open. Set them directly only when you install this chart on its own.
 components:  # @schema additionalProperties: true
+  # muster and dicebear are on unless the meta chart says otherwise: a slice
+  # release of one target cluster turns them off (giantswarm/agent-platform#328),
+  # and this chart then renders none of their wiring (muster's /mcp route and the
+  # policy rules that select its pods, the avatars host in the portal's CSP).
+  muster:  # @schema additionalProperties: true
+    enabled: true
+  dicebear:  # @schema additionalProperties: true
+    enabled: true
   agentgateway:  # @schema additionalProperties: true
     enabled: false
   agent-platform-mcps:  # @schema additionalProperties: true
@@ -87,10 +95,12 @@ components:  # @schema additionalProperties: true
   agent-sandbox:  # @schema additionalProperties: true
     enabled: false
   model-manager:  # @schema additionalProperties: true
-    enabled: false
+    enabled: true
   agent-manager:  # @schema additionalProperties: true
     enabled: false
   vm-manager:  # @schema additionalProperties: true
+    enabled: false
+  cluster-manager:  # @schema additionalProperties: true
     enabled: false
   # The components the agent-platform-standalone umbrella carried on top of the
   # fleet's roster, forwarded by the meta chart like the rest so the wiring this
@@ -174,9 +184,10 @@ gateway:
       allowedRoutes:
         namespaces:
           from: Same
-  # Allow the data-plane to reach the JWKS endpoint for JWT validation
-  # (oauthMode: validate). Required when the JWKS service runs on a port not
-  # covered by the default cluster egress rules (80/443) — typically Dex on 5556.
+  # Let the agentgateway controller (which fetches every JWKS and pushes the
+  # keys to the data plane over xDS) and the data plane reach an in-cluster
+  # JWKS endpoint. Required when the JWKS service runs on a port not covered
+  # by the default cluster egress rules (80/443) — typically Dex on 5556.
   jwksEgress:                  # any agentgateway-* mode with a non-muster JWKS source
     enabled: false
     # The namespace and the port of the in-cluster issuer a route names. Under
@@ -266,18 +277,108 @@ gateway:
         ephemeral-storage: 50Mi
       limits:
         ephemeral-storage: 512Mi
+    # === Availability ===
+    # Every MCP call and, with llmRouting on, every model call of the platform
+    # crosses this Deployment: one pod is one node reboot away from an outage
+    # for every agent. The controller reconciles the Deployment from the
+    # Gateway; the three knobs below reach it through AgentgatewayParameters
+    # (deployment.spec and podDisruptionBudget, strategic merge). A pod's exit
+    # on a drain or a rollout runs inside the data-plane shutdown window the
+    # controller's chart defaults to. Both ends of it are deadlines measured
+    # from SIGTERM, not phases that add up: 10 s still accepting so the
+    # endpoint is gone first, and draining until the 55 s deadline, inside a
+    # 60 s grace period.
+    #
+    # Data-plane pods. Two survive a node reboot or drain; the Deployment's
+    # default RollingUpdate surges first, so a rollout keeps one serving.
+    replicas: 2  # @schema minimum: 1
+    # PodDisruptionBudget on the data-plane pods: a drain evicts one pod at a
+    # time, never both. The keys other than `enabled` are the PDB spec as
+    # written (minAvailable, maxUnavailable, unhealthyPodEvictionPolicy); with
+    # neither minAvailable nor maxUnavailable set the template emits
+    # `maxUnavailable: 1` — maxUnavailable rather than minAvailable so a lone
+    # replica stays evictable, and set in the template rather than here so an
+    # installation can choose minAvailable through the meta chart (a null set
+    # there never reaches this chart's defaults) — and it fills the missing
+    # field in rather than replacing the spec, so an unhealthyPodEvictionPolicy
+    # set on its own survives it. The render refuses a key that is not one of
+    # those three (keeping the two budget fields out of the values is what
+    # leaves the block open in the schema, so a typo would otherwise be dropped
+    # in silence), a spec with both fields, a string that is not a percentage
+    # from 0% to 100%, a fractional or negative number, an
+    # unhealthyPodEvictionPolicy outside the API's enum, and a budget that
+    # allows no eviction (an integer minAvailable at or above replicas, a
+    # percentage minAvailable that rounds up to every replica, a zero
+    # maxUnavailable): that budget would hang every node drain.
+    podDisruptionBudget:  # @schema additionalProperties: true
+      enabled: true
+    # Spread the replicas across nodes: one topologySpreadConstraint per key,
+    # selecting the data-plane pods by gateway.name. Add
+    # topology.kubernetes.io/zone on a multi-zone node pool. ScheduleAnyway:
+    # two pods on one node beat one pod, and a single-node lab still schedules
+    # both (a drain of that one node then waits on the budget above; turn the
+    # budget off there). matchLabelKeys adds the revision hash to the
+    # selector, so a rollout spreads the new ReplicaSet against itself: without
+    # it the surge pod is balanced against the pods of the revision it is
+    # replacing, and once those drain both survivors can be left on one node.
+    #
+    # replicas, spread.maxSkew and spread.whenUnsatisfiable are each refused
+    # when unset: a null set through the meta chart does not travel — Helm
+    # deletes the key at that layer — so it arrives as a missing key, which no
+    # schema keyword can floor. Unguarded, replicas alone would render 0 and
+    # scale the data plane to zero.
+    spread:
+      enabled: true
+      topologyKeys:  # @schema minItems: 1; item: string
+        - kubernetes.io/hostname
+      maxSkew: 1  # @schema minimum: 1
+      whenUnsatisfiable: ScheduleAnyway  # @schema enum: [ScheduleAnyway, DoNotSchedule]
     # === Voluntary disruption (giantswarm/agent-platform#431) ===
     # Annotations on the data-plane pods, merged onto the generated Deployment's
     # pod template through AgentgatewayParameters (deployment.spec.template.metadata,
-    # strategic merge). Every MCP call, every A2A stream and — with llmRouting on —
-    # every model stream crosses these pods, and a voluntary eviction cuts the
-    # streams that are open: the default asks Karpenter to work around the node
-    # instead (`karpenter.sh/do-not-disrupt`; consolidation, drift and expiry
-    # honour it until the NodePool's terminationGracePeriod, an involuntary
-    # disruption — spot interruption, node failure — is not affected). Set the
-    # value to "false", or the map to {}, to opt out.
-    podAnnotations:  # @schema additionalProperties: true
-      karpenter.sh/do-not-disrupt: "true"
+    # strategic merge). EMPTY by default since #431's `karpenter.sh/do-not-disrupt`
+    # was the answer to a SINGLE data-plane pod: with the two replicas, the budget
+    # and the spread above, a voluntary disruption takes one pod at a time and the
+    # other keeps serving, so the annotation would only pin both of the pods' nodes
+    # against Karpenter's consolidation, drift and expiry for nothing — and the
+    # budget, which is what actually holds a drain to one pod, would never be
+    # consulted. What it still bought is the streams open on the evicted pod: those
+    # are cut at the data-plane shutdown window (10 s still accepting, draining to
+    # the 55 s deadline) rather than carried over. Set
+    # `karpenter.sh/do-not-disrupt: "true"` here to trade node churn for them again.
+    podAnnotations: {}  # @schema additionalProperties: true
+  # === Metric labels ===
+  # Custom Prometheus labels on every metric the data plane emits, from ONE
+  # Gateway-scoped AgentgatewayPolicy, <release>-metrics
+  # (templates/agentgateway/metrics-policy.yaml). agentgateway honours one
+  # metrics policy per Gateway — labels replace, they never merge — so every
+  # label the platform wants lives here, whichever route it describes. A map
+  # keyed by label name (Helm merges maps: one entry off, or one more, without
+  # restating the rest); each entry is {expression: <one-line CEL>,
+  # enabled: <bool, absent = true>}. The expression goes through tpl ({{ is
+  # Helm's). An entry that reads `jwt` renders only while a route of the
+  # Gateway verifies a bearer (it would read `unknown` otherwise). At most 16
+  # enabled; a name the data plane or the scrape already sets is refused.
+  # README "Metric labels".
+  metricLabels:  # @schema additionalProperties: {"type": "object", "additionalProperties": false, "properties": {"expression": {"type": "string"}, "enabled": {"type": "boolean"}}}
+    # Which agent made the call: the caller resolved by source IP against the
+    # agentgateway controller's workload store — not cryptographic, for
+    # accounting, never authorization. The LLM usage dashboard reads both.
+    agent:
+      enabled: true
+      expression: source.unverifiedWorkload.serviceAccount
+    agent_namespace:
+      enabled: true
+      expression: source.unverifiedWorkload.namespace
+    # The person behind the call: the identity claim the kagent controller route
+    # verifies and writes into x-user-id (kagent.controller.auth.userIdClaim, a
+    # bare identifier — the same knob names the claim on the managers' routes,
+    # kagent on or off).
+    # An email address in Mimir is personal data, and the label multiplies the
+    # verifying routes' series by the number of people: `enabled: false` drops it.
+    user:
+      enabled: true
+      expression: 'jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -357,19 +458,6 @@ llmRouting:
     "/v1/messages": Messages
     "/v1/messages/count_tokens": AnthropicTokenCount
     "*": Passthrough
-  # Custom Prometheus labels on every metric the data plane emits: which agent
-  # made the call. The expression resolves the caller by source IP against the
-  # agentgateway controller's own workload store (built from cluster Pods, no
-  # Istio). The identity is NOT cryptographic — it is adequate for accounting
-  # and must never be used for authorization. An unknown caller IP, or a failed
-  # expression, renders the label value `unknown` and keeps the series.
-  # Cardinality equals the number of agents; pod name is deliberately absent.
-  # At most 16 entries (the CRD's limit).
-  metricLabels:
-    - name: agent
-      expression: source.unverifiedWorkload.serviceAccount
-    - name: agent_namespace
-      expression: source.unverifiedWorkload.namespace
   # A MutatingAdmissionPolicy that sends a ModelConfig this chart does NOT
   # render through the LLM listener — one created by Backstage, agent-manager or
   # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs
@@ -1770,19 +1858,14 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   agentgateway:
     enabled: false
 
-  # ChannelRoute CRD managed inline by the sub-chart.
-  crd:
-    install: true
-
   # Routing store (klaus-gateway 1.6.0): "memory" loses the thread bindings on
   # a gateway restart; "valkey" keeps them in the platform's own Valkey
-  # (components.valkey; the meta chart fills routing.valkey from that release);
-  # "crd" + controller.enabled: true is the store for a platform without
-  # Valkey. This chart renders the gateway pod's egress to its stores from
-  # these keys (templates/klausgateway/netpol.yaml, -klausgateway-store-egress):
-  # the platform's Valkey pods on their Service port with store: valkey; the
-  # kube-apiserver for configmap / crd, the controller and the Secret link
-  # store (obo.store: secret).
+  # (components.valkey; the meta chart fills routing.valkey from that release).
+  # This chart renders the gateway pod's egress to its stores from these keys
+  # (templates/klausgateway/netpol.yaml, -klausgateway-store-egress): the
+  # platform's Valkey pods on their Service port with store: valkey; the
+  # kube-apiserver for the Secret link store (obo.store: secret) and for the
+  # team-review endpoint's TokenReview (reviews.enabled).
   routing:
     store: memory
     defaultTTL: "24h"
@@ -1854,6 +1937,24 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # klaus-gateway subchart.
     connectors:
       enabled: false
+
+  # Team-review endpoint (klaus-gateway >= 1.11.0, giantswarm/klaus-gateway#273):
+  # POST /reviews and POST /notices for managers authenticated as a Kubernetes
+  # ServiceAccount. The gateway verifies every caller with an
+  # authentication.k8s.io/v1 TokenReview at the kube-apiserver, so while
+  # enabled this chart renders the gateway's egress to the API server in
+  # -klausgateway-store-egress (the kube-apiserver entity; the Kubernetes
+  # flavor's networkPolicy.kubernetes.apiServerCIDR) whatever the link store —
+  # without it every review times out and the endpoint answers 503. Requires
+  # slack.enabled and obo.enabled (the gateway's own gate). Forwarded to the
+  # klaus-gateway subchart; the defaults are that chart's.
+  reviews:
+    enabled: false
+    # The token audience the API server checks; callers project their
+    # ServiceAccount token for it.
+    audience: klaus-gateway
+    # The ServiceAccounts that may post, as system:serviceaccount:<namespace>:<name>.
+    allowedCallers: []
 
   # CLI channel adapter (remote klausctl users). Off by default.
   cli:
@@ -2000,7 +2101,9 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # off; the connectivity chart renders the policies (modelManager below).
 model-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: model-manager
-  backend: ollama
+  # No static backend by default (model-manager >= 0.22.0 starts with none;
+  # backends are registered at runtime as labelled ConfigMaps). `backend` or
+  # `backends` set here is a static backend the guards and policies apply to.
   ollama:
     endpoint: ""
     agentHost: ""
@@ -2114,14 +2217,18 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) for the
       # kserve backend's Hub calls (search, fit checks, revision lookups),
       # resolved through the DNS proxy rule the policy renders; the defaults
-      # cover huggingface.co, its API redirects and the LFS / Xet download
-      # fronts under hf.co. A mirror (HF_ENDPOINT) replaces the list. Ignored
-      # by the kubernetes flavor (see cidrs).
+      # cover huggingface.co, its API redirects and the download fronts under
+      # hf.co at every label depth the download path uses — Cilium's * never
+      # crosses a dot, so one pattern per depth, the same list as
+      # modelServing.networkPolicy.huggingFace.fqdns (giantswarm/agent-platform#522).
+      # A mirror (HF_ENDPOINT) replaces the list. Ignored by the kubernetes
+      # flavor (see cidrs).
       fqdns:
         - matchName: huggingface.co
         - matchPattern: "*.huggingface.co"
         - matchPattern: "*.hf.co"
         - matchPattern: "*.*.hf.co"
+        - matchPattern: "*.*.*.hf.co"
       # IP blocks of the Hub. kubernetes flavor: vanilla NetworkPolicy selects
       # addresses, never names, so an empty list (the default) opens 443 to
       # every public destination — 0.0.0.0/0 minus
@@ -2142,6 +2249,32 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # this is where a private address (one of
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
+    # Egress to backends registered at runtime. model-manager starts with no
+    # backend; a backend — an in-cluster Ollama, an LM Studio on a node, a
+    # Lemonade Server — is registered while it runs (the add_backend tool, the
+    # portal's Serving page, cluster-manager for a GPU node pool) as a
+    # labelled ConfigMap the chart never sees, so nothing above opens its
+    # endpoint: under an enforcing policy the registration succeeds and every
+    # model call is dropped. List the destinations the installation allows
+    # here, one entry per backend — its address block or its hostname, and its
+    # port — and the egress policy opens exactly those, in both flavors,
+    # next to the static-backend rules (which are unchanged). Empty, the
+    # default, renders nothing. The guards fail the render on a cidr that is
+    # not an IPv4 CIDR, a missing or non-TCP port, an entry with both or
+    # neither of cidr and fqdn, and an fqdn under the kubernetes flavor
+    # (vanilla NetworkPolicy has no FQDN selector: list the backend's address
+    # as cidr there). cilium flavor: a cidr selects destinations outside the
+    # cluster — Cilium's CIDR rules match neither pods nor nodes — and a name
+    # is opened through the DNS proxy rule and, for an in-cluster Service, the
+    # cluster entity on that port, as the static hostname rule does; so an
+    # in-cluster Ollama is listed by its Service name there, and by its
+    # Service's or pods' block under the kubernetes flavor.
+    #   registeredBackends:
+    #     - fqdn: ollama.models.svc.cluster.local   # an in-cluster Ollama (cilium flavor)
+    #       port: 11434
+    #     - cidr: 192.0.2.7/32                     # an LM Studio on the LAN
+    #       port: 1234
+    registeredBackends: []
 
 # === VM manager (vm-manager) ===
 # Values forwarded verbatim to the vm-manager component release
@@ -2426,7 +2559,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.1.5
+      tag: 1.1.7
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -2444,6 +2577,121 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     # the fleet's flux-giantswarm): the Job reads them there (get, list; a Role
     # per namespace) and emits their rewrite as a diff, never writes them.
     gitopsNamespaces: []
+
+# === Cluster manager (cluster-manager) ===
+# Values forwarded verbatim to the cluster-manager component release
+# (giantswarm/cluster-manager, the cluster write surface of the Agent
+# Platform): the clusters and GPU node pools of this installation — list them,
+# create and delete a pool, switch model serving on a cluster — every write with
+# dryRun and mode apply|commit, MCP only (tools appear as x_cluster-manager_<tool>
+# through the chart's own MCPServer CR, labelled for the agent-platform tool
+# group; no REST API, the portal's Clusters pages call the tools through muster
+# as the signed-in user). The pinned Service name is what the wiring below
+# (network policies) targets, like model-manager.fullnameOverride.
+#
+# Identity as for model-manager above: an OAuth 2.1 resource server acting as
+# the caller — muster forwards the session's id_token (the MCPServer CR's auth
+# block) and requests requiredAudiences at login, the cross-client audience the
+# kube-apiserver trusts, so oauth.downstream presents the same token to the
+# Kubernetes API of this installation and of the workload clusters it targets;
+# the caller's RBAC governs and the ServiceAccount holds no permissions (the
+# chart renders no RBAC). The issuer, client, secret and CA fall back to
+# global.identity and the OAuth base URL to global.domain inside the chart; an
+# installation that sets no global.* names them here. The chart renders no
+# network policy of its own (its schema is closed: no networkPolicy key); the
+# connectivity chart renders the policies (clusterManager below).
+#
+# installation.name is the Cluster list_clusters reports as this installation's
+# own (its management cluster); empty marks none. modelManager.namespace — the
+# namespace create_node_pool registers a serving cluster's kserve backend in,
+# through model-manager's runtime-registration ConfigMap — is NOT set here:
+# templates/components.yaml derives it from the platform's own namespace
+# (gitops.targetNamespace, else the release namespace), where the model-manager
+# component lands, so the two can never disagree (a value set here must equal
+# it or the render fails).
+cluster-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: cluster-manager
+  installation:
+    name: ""
+  mcp:
+    enabled: true
+  oauth:
+    enabled: true
+    provider: dex
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+    downstream:
+      enabled: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+        requiredAudiences:
+          - dex-k8s-authenticator
+
+# The wiring the connectivity chart renders for the cluster-manager component
+# (it reads this block, not the chart's). Inert while
+# components.cluster-manager.enabled is false. No route: the tools reach
+# muster in-cluster without one, and cluster-manager has no REST API.
+clusterManager:  # @schema skipProperties: true; additionalProperties: true
+  flux:
+    # Fail the render when the Flux APIs cluster-manager writes in apply mode
+    # (helm.toolkit.fluxcd.io/v2 HelmRelease, source.toolkit.fluxcd.io/v1
+    # OCIRepository — the pool, operator and slice releases) are not on the
+    # cluster. Off by default: an offline `helm template` (lint, the catalog
+    # build) never sees cluster APIs; turn it on for installs that want a
+    # missing Flux to fail the upgrade instead of leaving pools "progressing".
+    requireApi: false
+  # Network policy inputs; the policies render under networkPolicy (enabled +
+  # flavor). Ingress: muster (MCPServer on) and the kubelet's probes. Egress:
+  # DNS, this installation's Kubernetes API (the Cluster API objects, the Flux
+  # objects it writes, model-manager's backend ConfigMap — as the caller), the
+  # identity provider (oauth on: the Dex issuer by name, or for
+  # cluster-manager.oauth.provider google its discovery, JWKS/userinfo and
+  # token hosts), the workload clusters' API servers (workloadClusters below —
+  # detection of the operator and the serving layer, the pool's target) and
+  # the names and blocks of egress.
+  networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to muster: a list of pod
+      # label maps (matchLabels), every one a workload in the release
+      # namespace. Empty, the default, admits no one else — the portal calls
+      # the tools through muster, not the Service.
+      additionalPeers: []
+    # The workload clusters' API servers cluster-manager reads and writes as
+    # the caller: a cluster's operator and serving layer are detected through
+    # its own apiserver, and a pool is targeted there. On Giant Swarm
+    # installations that is api.<cluster>.<base domain> on 443.
+    workloadClusters:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders — for a Giant
+      # Swarm installation `- matchPattern: "api.*.<base domain>"`. Ignored by
+      # the kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks of the workload clusters' API servers. kubernetes flavor:
+      # vanilla NetworkPolicy selects addresses, never names, so an empty list
+      # (the default) opens the ports below to every public destination —
+      # 0.0.0.0/0 minus networkPolicy.kubernetes.worldExcludedCIDRs. A list
+      # here narrows the egress to exactly these blocks. The cilium flavor adds
+      # them next to the names.
+      cidrs: []
+      # The API server ports the rules open, both flavors.
+      ports: [443, 6443]
+    # Further destinations of the service on 443 — the same knob as
+    # agentManager.networkPolicy.egress: a private identity provider.
+    egress:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders. Ignored by the
+      # kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks, opened on 443 in both flavors. In the kubernetes flavor the
+      # policy already opens every public destination while oauth is on, so
+      # this is where a private address (one of
+      # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
+      cidrs: []
 
 # === The standalone chart's extras: component chart values and their wiring ===
 # Values of the backstage, mcp-kubernetes, cloudnative-pg and kserve component
@@ -2768,6 +3016,36 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # reasoning turns stream for minutes; the KServe default of 60s cuts
     # them mid-response.
     timeoutSeconds: 1800
+  # The GPU node pool the served models run on (giantswarm/agent-platform#315;
+  # bumblebee-plans#46, the plan's D3). A pool created through the platform
+  # (the gpu-node-pool chart) arrives tainted nvidia.com/gpu NoSchedule — only
+  # accelerator work lands there — and labelled
+  # giantswarm.io/machine-pool=<cluster>-<pool>. The chart puts the taint as a
+  # toleration and the label as a nodeSelector on everything it renders onto
+  # the pool and on nothing else: the ClusterServingRuntime (KServe copies
+  # both onto every predictor pod of the runtime; runtime.tolerations come
+  # after it, runtime.nodeSelector keys win) and every published preset's
+  # scheduling block (the pool's entries first, the preset's own after; the
+  # preset's selector keys win), and publishes both in the discovery ConfigMap
+  # as spec.gpuPool.taint and spec.gpuPool.nodeSelector for model-manager
+  # (>= 0.23.0), which schedules the LLMInferenceServices it composes, its
+  # download Jobs and its inventory scan pods by the same input (a registered
+  # backend document may override it). Platform components never carry it.
+  gpuPool:
+    # The pool's taint. The default is the gpu-node-pool chart's — key
+    # nvidia.com/gpu, effect NoSchedule, no value — tolerated with operator
+    # Exists, so a pool whose taint carries a value is covered too; a value
+    # narrows the toleration to operator Equal. An empty key is an untainted
+    # pool: no toleration anywhere, no taint in the discovery ConfigMap.
+    taint:
+      key: nvidia.com/gpu
+      value: ""
+      effect: NoSchedule
+    # The pool's label(s), e.g. giantswarm.io/machine-pool: <cluster>-<pool>.
+    # Per pool, so the slice release's values set it (cluster-manager writes
+    # it with the pool); empty selects no pool. Label values are strings:
+    # quote a number.
+    nodeSelector: {}
   # Serving presets an install adds (ServingPreset documents, see
   # files/model-serving/serving-preset.schema.json and the README). A
   # preset with the name of a shipped one replaces it. Example:
@@ -2794,11 +3072,19 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     exclude: []
   # Hugging Face model cache: one PVC in the serving namespace with one
   # subdirectory per InferenceService, so a model downloads once and every
-  # restart finds it (hours to seconds). The PVC is kept on uninstall
-  # (helm.sh/resource-policy: keep). Without the Kyverno policies below the
-  # PVC is still created and published for model-manager's pre-warm
-  # downloads, but the KServe storage-initializer downloads into its
-  # ephemeral volume on every start.
+  # restart finds it (hours to seconds). The claim is applied by a
+  # post-install/post-upgrade hook Job, not rendered as a release resource:
+  # it has no consumer of its own and Binds with the first predictor that
+  # mounts it, so under a WaitForFirstConsumer StorageClass (kind's standard,
+  # AWS gp3) it stays Pending until then — as a release resource Helm's wait
+  # failed the release on it (#483). Nothing waits for it, and it outlives the
+  # release: an uninstall or a cache.enabled flip leaves it (it carries
+  # helm.sh/resource-policy: keep to say so). A size change is applied by the
+  # next upgrade's hook; an immutable field (storageClassName, accessModes,
+  # volumeName) cannot change once the claim exists. Without the Kyverno
+  # policies below the claim is still applied and published for
+  # model-manager's pre-warm downloads, but the KServe storage-initializer
+  # downloads into its ephemeral volume on every start.
   cache:
     enabled: true
     pvc:
@@ -2806,7 +3092,7 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # model-manager.
       name: hf-cache
       # A pre-existing claim in the serving namespace to use instead;
-      # set, no PVC is rendered.
+      # set, no claim is applied.
       existingClaim: ""
       size: 500Gi
       # Empty uses the cluster's default StorageClass; "-" sets an empty
@@ -2817,36 +3103,46 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       volumeName: ""
       accessModes:
         - ReadWriteOnce
-  # Kyverno ClusterPolicies for the InferenceService pods and Deployments
-  # in the serving namespace. `auto` (the default) follows the resolved
+    # The group every pod that mounts the claim carries as its fsGroup: the
+    # Kyverno policies below set it on the model pods; model-manager's cache
+    # pods (the download Job, the scan and removal pods) run as uid 1000 with
+    # the same fsGroup — keep the two in step. The kubelet makes the claim's
+    # contents group-owned, group-writable and setgid on every mount (the CSI
+    # driver's fsGroupPolicy permitting: EBS gp3 and Azure Disk apply it) and
+    # creates a missing subPath directory with the claim root's mode and
+    # group, so the KServe storage-initializer (uid 1000), the runtime and the
+    # download Job write <claim>/<model> without root or a capability — no
+    # init container prepares it (#518). A claim whose driver does not apply
+    # the fsGroup (a hostPath-backed local-path claim) keeps a root-owned
+    # root, and the first download fails on its first write naming the
+    # directory; nothing here works around that.
+    fsGroup: 1000
+  # The serving pods' Kyverno PolicyException (#498), rendered with the Kyverno
+  # objects on: the four restricted-PSS rules the upstream vLLM image and the
+  # KServe storage-initializer violate (drop ALL, privilege escalation,
+  # non-root, seccomp), for the serving namespace's model Pods, ReplicaSets
+  # and Deployments — a Giant Swarm cluster enforces the restricted profile on
+  # every namespace and denies the pods without it. Nothing the chart adds to
+  # a model pod needs an exception of its own (#518). Off only where the
+  # serving namespace is exempted another way.
+  policyException:
+    enabled: true
+  # Kyverno ClusterPolicies for the model pods and Deployments in the serving
+  # namespace. `auto` (the default) follows the resolved
   # kyvernoPolicies.enabled — they render where kyverno.io/v1 is served and
   # nowhere else; `true` / `false` force them (an explicit true with Kyverno
-  # off fails the render). On, every predictor pod gets: an init container
-  # that creates the pod's cache subdirectory (<claim>/<inferenceservice>)
-  # world-writable before the KServe storage-initializer runs (the kubelet
-  # creates a missing subPath directory root-owned 0750, which the
-  # storage-initializer's uid cannot write), the storage-initializer's and
-  # the runtime's /mnt/models redirected into that subdirectory, and a
-  # storage-initializer memory limit that survives multi-GB downloads; the
-  # Deployment gets a progressDeadlineSeconds long enough for a first
-  # download. Nothing to do on the node by hand.
+  # off fails the render). On, every model pod — an InferenceService
+  # predictor or an LLMInferenceService workload pod — gets the
+  # storage-initializer's and the runtime's /mnt/models redirected into the
+  # pod's cache subdirectory (<claim>/<model>; the kubelet creates it at mount
+  # time, writable for the claim's fsGroup the pod carries, cache.fsGroup
+  # above), the Hugging Face client's environment (Xet off, env below: a
+  # toFQDNs allow-list cannot follow the Xet CDN) and a storage-initializer
+  # memory limit that survives multi-GB downloads; the Deployment gets a
+  # progressDeadlineSeconds long enough for a first download. Nothing to do
+  # on the node by hand.
   policies:
     enabled: auto  # auto | true | false
-    # The init container that prepares the cache subdirectory (runs as
-    # root: the PVC root is root-owned).
-    cacheInit:
-      image:
-        registry: gsoci.azurecr.io
-        name: giantswarm/alpine
-        # registry: gsoci.azurecr.io/giantswarm/alpine
-        version: "3.24.1"
-      resources:
-        requests:
-          cpu: 10m
-          memory: 16Mi
-        limits:
-          cpu: 100m
-          memory: 64Mi
     # Memory limit of the KServe storage-initializer init container. The
     # KServe default (1Gi) is OOM-killed by the Hugging Face download of a
     # large model. Empty leaves KServe's default.
@@ -2855,11 +3151,38 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Kubernetes default (600) is shorter than a first model download and
     # fires rollout-stuck alerts; 0 leaves the default.
     progressDeadlineSeconds: 3600
+    # Environment merged, by name, onto the storage-initializer and the
+    # runtime container of every model pod of both shapes (a pod without a
+    # storage-initializer is untouched): the entries are added to, or
+    # overwrite by name, the containers' own env; everything else stays. An
+    # empty list renders no rule. The default takes the Hugging Face client
+    # off the Xet path (giantswarm/agent-platform#520, its rationale
+    # corrected in #522). What it buys is a deterministic download:
+    # huggingface_hub >= 0.32 with hf_xet installed — the KServe
+    # storage-initializer, the vLLM images — fetches the weights as Xet
+    # shards, and on a policy drop that client hangs silently after the
+    # repository's small files (no error, no restart, 0 CPU); with Xet off,
+    # huggingface_hub downloads the shards with hf_transfer (left on) over
+    # one host path and fails fast on a drop, so a gap in the allow-list
+    # shows as a CrashLoopBackOff naming the host, not as a stuck pod. It is
+    # not what makes the download reachable: the Hub answers every shard
+    # request of a Xet-backed repository, Xet client or not, with a 302 to
+    # the download CDN (us.aws.cdn.hf.co, three labels under hf.co), and the
+    # CDN is admitted by the three-label pattern of the cilium networkPolicy
+    # below — a toFQDNs allow-list that admits exactly the addresses the
+    # Cilium DNS proxy saw resolved for an allowed name. Widening the egress
+    # instead — world on 443, the CDN's address blocks — is not the fix. An
+    # installation may set env: [] to have Xet back. A mirror (HF_ENDPOINT)
+    # belongs here too, next to the fqdns that name it.
+    env:
+      - name: HF_HUB_DISABLE_XET
+        value: "1"
   # Network policies of the serving namespace, rendered under networkPolicy
   # (enabled + the resolved flavor) like every other component's wiring:
   # nothing renders while networkPolicy.enabled is false. On, both flavors
-  # get: ingress to the predictor pods (every pod KServe runs for an
-  # InferenceService, label serving.kserve.io/inferenceservice) on the
+  # get: ingress to the model pods (every pod KServe runs for an
+  # InferenceService or an LLMInferenceService — the two shapes share no
+  # label, so a policy renders per shape) on the
   # runtime port from the kagent agent pods, the release namespace and
   # predictor.additionalIngressNamespaces; egress from the predictor pods
   # (the storage-initializer download, the runtime) and from model-manager's
@@ -2879,6 +3202,19 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # namespace of the KServe ingress Gateway (envoy-gateway-system) or of
       # Prometheus (KServe's scrape annotations point at the same port).
       additionalIngressNamespaces: []
+    # The LLMInferenceService workload pod the llm-d controller creates is
+    # reached on its own port — the one KServe's `<name>-kserve-workload-svc`
+    # targets and the rendered HTTPRoute's backendRef names: 8000, the
+    # template's llm-d routing sidecar (`--port=8000 --vllm-port=8001`; vLLM's
+    # `main` listens on 8001 behind it), not the classic predictor's 8080 — so
+    # its policy admits that port from the same callers (the kagent agent pods,
+    # the release namespace, predictor.additionalIngressNamespaces) and for the
+    # kubelet's probes (giantswarm/agent-platform#525).
+    # tests/verify-model-serving-policies.py holds each shape's admitted port to
+    # the port of the container its fixture pod is reached on, so the two
+    # cannot drift again.
+    llmisvcWorkload:
+      port: 8000
     # Where the weights come from, TCP 443: the KServe storage-initializer
     # (hf:// presets), the runtime's own Hub lookups, model-manager's
     # pre-warm download Jobs and — on the kserve backend — model-manager
@@ -2886,16 +3222,27 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     huggingFace:
       # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
       # enforced through the DNS proxy rule the policies render on their DNS
-      # egress; the defaults cover huggingface.co, its API redirects and the
-      # LFS / Xet download fronts under hf.co (Cilium's * matches one label,
-      # hence the two-level pattern for cas-bridge.xethub.hf.co). A mirror
-      # (HF_ENDPOINT) or an internal proxy replaces the list. Ignored by the
-      # kubernetes flavor, which cannot select names (see cidrs).
+      # egress. Cilium's * matches one label — [-a-zA-Z0-9_]*, never a dot —
+      # and there is no multi-label wildcard, so every depth under hf.co the
+      # download path uses is its own pattern: one label (the LFS fronts,
+      # cdn-lfs-us-1.hf.co), two (the Xet fronts, cas-server.xethub.hf.co,
+      # transfer.xethub.hf.co, cas-bridge.xethub.hf.co), three (the download
+      # CDN every shard request of a Xet-backed repository is redirected to,
+      # Xet client or not: us.aws.cdn.hf.co and its regional siblings,
+      # giantswarm/agent-platform#522). The Hub itself and its API redirects
+      # are huggingface.co and *.huggingface.co.
+      # tests/verify-model-serving-policies.py matches the names of the
+      # download path against the rendered patterns with Cilium's rule, so a
+      # new host shape fails the render, not a download on an installation.
+      # A mirror (HF_ENDPOINT) or an internal proxy replaces the list.
+      # Ignored by the kubernetes flavor, which cannot select names (see
+      # cidrs).
       fqdns:
         - matchName: huggingface.co
         - matchPattern: "*.huggingface.co"
         - matchPattern: "*.hf.co"
         - matchPattern: "*.*.hf.co"
+        - matchPattern: "*.*.*.hf.co"
       # IP blocks of the download endpoints. kubernetes flavor: vanilla
       # NetworkPolicy selects addresses, never names, so an empty list (the
       # default) opens 443 to every public destination — 0.0.0.0/0 minus
@@ -2907,3 +3254,82 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.additionalEgressCIDRs and additionalEgressFQDNs apply to
       # both flavors as well.
       cidrs: []
+  # The models Gateway (giantswarm/agent-platform#326; bumblebee-plans#46, D6):
+  # one agentgateway Gateway per serving cluster that every LLMInferenceService
+  # route attaches to — KServe's ingress-gateway value on the kserve-resources
+  # release is derived from it (kserve.controller.gateway.ingressGateway.kserveGateway,
+  # `<release namespace>/<name>`; leave the block's own copy unset) — with one
+  # JWT policy against the platform's Dex. A served model answers at
+  #   https://<hostPrefix>.<global.domain>/<namespace>/<model>/v1/chat/completions
+  # with a person's id_token (200) and 401 without one; the data plane strips
+  # the bearer before the model server sees the request. The Gateway is the
+  # serving slice's (examples/serving-slice.yaml turns it on): off by default,
+  # so a platform release that serves models on the classic path renders no
+  # Gateway and needs none of its inputs. Renders while enabled is true and
+  # components.modelServing and components.kserve-llmisvc-resources are on.
+  # The GatewayClass it names is the agentgateway controller's — the
+  # platform's release's beside this one, or this release's own
+  # (components.agentgateway) on a workload cluster; nothing is detected, the
+  # operator sets the toggle by the target's shape.
+  modelsGateway:
+    enabled: false
+    # Name of the Gateway (release namespace); the policy objects are
+    # <name>-jwks and <name>-jwt, the Certificate <name>-tls.
+    name: models
+    # Public hostname <hostPrefix>.<global.domain>; global.domain is already
+    # <cluster>.<base domain>.
+    hostPrefix: models
+    # Empty takes gateway.gatewayClassName.
+    gatewayClassName: ""
+    tls:
+      # The TLS Secret of the HTTPS listener. Empty takes
+      # gatewayApi.gateway.tls.secretName — the platform's wildcard covers
+      # <hostPrefix>.<global.domain> — unless issuerRef.name is set, in which
+      # case a cert-manager Certificate for the hostname renders from that
+      # issuer into <name>-tls (or secretName when set).
+      secretName: ""
+      issuerRef:
+        name: ""
+        kind: ClusterIssuer
+        group: cert-manager.io
+    # Replicas of the models data plane (its own agentgateway Deployment,
+    # shaped like the platform's edge: gateway.parameters.podSecurityContext,
+    # containerSecurityContext, dataPlaneResources, agentgateway.proxy.image).
+    replicas: 1
+    # external-dns: the hostname annotation on the Gateway's infrastructure,
+    # which the data plane's LoadBalancer Service inherits, plus the
+    # annotations the installation's external-dns selects Services by —
+    # Giant Swarm's runs with --annotation-filter=giantswarm.io/external-dns=managed.
+    externalDns:
+      enabled: true
+      annotations:
+        giantswarm.io/external-dns: managed
+    jwtAuthentication:
+      # Strict: a request without a valid token is answered 401 at the edge.
+      mode: Strict
+      # The issuer exactly as in the token's iss claim; empty takes
+      # global.identity.issuerUrl.
+      issuer: ""
+      # The audiences accepted: the installation's login client, which mints
+      # the id_token a person holds after the Dex login (kubectl, the portal).
+      # A token for another client (an agent's, a service's) is refused.
+      audiences: [dex-k8s-authenticator]
+      # JWKS source. An empty host takes the issuer's host on 443 — the public
+      # issuer, which needs no gateway.jwksEgress (the port implies TLS). The
+      # agentgateway CONTROLLER fetches the key set and pushes it to the data
+      # plane over xDS, so the controller's network policy must reach this
+      # host on this port: it admits global.identity.issuerUrl's host on 443
+      # by name in every release that runs the controller (the platform's
+      # beside this slice, the slice's own on a workload cluster) and this
+      # host when it differs. A failed fetch is the <name>-jwt policy's
+      # Accepted condition (reason PartiallyValid, the message names the URL)
+      # and the controller's `error fetching jwks` line; the data plane then
+      # refuses every token as "unknown key". An in-cluster host and port work
+      # as in the other policies' jwks blocks.
+      jwks:
+        host: ""
+        port: 443
+        path: /keys
+        tls:
+          enabled: false
+          caSecretName: ""

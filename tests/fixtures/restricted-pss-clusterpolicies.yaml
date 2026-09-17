@@ -1,0 +1,292 @@
+# The restricted Pod Security Standard as a Giant Swarm cluster enforces it:
+# the five Kyverno ClusterPolicies of the upstream pod-security/restricted set
+# that the serving pods meet (kyverno-policies chart 3.7.2, exported from a
+# management cluster and reduced to name, upstream annotations and spec; every
+# rule is `failureAction: Enforce`), the rules the model-serving PolicyException
+# names (require-drop-all, privilege-escalation, run-as-non-root,
+# check-seccomp-strict) and the two it does not (adding-capabilities-strict,
+# run-as-non-root-user) — the two that denied every LLMInferenceService
+# workload pod while the chart injected a root init container
+# (giantswarm/agent-platform#518). tests/verify-model-serving-policies.py
+# applies them with the chart's PolicyException over each pod shape after the
+# chart's mutations: the mutated pod must pass every rule the exception does
+# not skip.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-capabilities-strict
+  annotations:
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/description: Adding capabilities other than `NET_BIND_SERVICE` is disallowed.
+      In addition, all containers must explicitly drop `ALL` capabilities.
+    policies.kyverno.io/minversion: 1.6.0
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/title: Disallow Capabilities (Strict)
+spec:
+  admission: true
+  background: true
+  emitWarning: false
+  failurePolicy: Fail
+  rules:
+  - match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    name: require-drop-all
+    preconditions:
+      all:
+      - key: '{{ request.operation || ''BACKGROUND'' }}'
+        operator: NotEquals
+        value: DELETE
+    skipBackgroundRequests: true
+    validate:
+      allowExistingViolations: true
+      failureAction: Enforce
+      foreach:
+      - deny:
+          conditions:
+            all:
+            - key: ALL
+              operator: AnyNotIn
+              value: '{{ element.securityContext.capabilities.drop[] || `[]` }}'
+        list: request.object.spec.[ephemeralContainers, initContainers, containers][]
+      message: Containers must drop `ALL` capabilities.
+  - match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    name: adding-capabilities-strict
+    preconditions:
+      all:
+      - key: '{{ request.operation || ''BACKGROUND'' }}'
+        operator: NotEquals
+        value: DELETE
+    skipBackgroundRequests: true
+    validate:
+      allowExistingViolations: true
+      failureAction: Enforce
+      foreach:
+      - deny:
+          conditions:
+            all:
+            - key: '{{ element.securityContext.capabilities.add[] || `[]` }}'
+              operator: AnyNotIn
+              value:
+              - NET_BIND_SERVICE
+              - ''
+        list: request.object.spec.[ephemeralContainers, initContainers, containers][]
+      message: Any capabilities added other than NET_BIND_SERVICE are disallowed.
+  validationFailureAction: Audit
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-non-root-user
+  annotations:
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/description: Containers must be required to run as non-root users. This policy
+      ensures `runAsUser` is either unset or set to a number greater than zero.
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/title: Require Run As Non-Root User
+spec:
+  admission: true
+  background: true
+  emitWarning: false
+  failurePolicy: Fail
+  rules:
+  - match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    name: run-as-non-root-user
+    skipBackgroundRequests: true
+    validate:
+      allowExistingViolations: true
+      failureAction: Enforce
+      message: Running as root is not allowed. The fields spec.securityContext.runAsUser, spec.containers[*].securityContext.runAsUser,
+        spec.initContainers[*].securityContext.runAsUser, and spec.ephemeralContainers[*].securityContext.runAsUser
+        must be unset or set to a number greater than zero.
+      pattern:
+        spec:
+          =(ephemeralContainers):
+          - =(securityContext):
+              =(runAsUser): '>0'
+          =(initContainers):
+          - =(securityContext):
+              =(runAsUser): '>0'
+          =(securityContext):
+            =(runAsUser): '>0'
+          containers:
+          - =(securityContext):
+              =(runAsUser): '>0'
+  validationFailureAction: Audit
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-nonroot
+  annotations:
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/description: Containers must be required to run as non-root users. This policy
+      ensures `runAsNonRoot` is set to `true`. A known issue prevents a policy such as this using `anyPattern`
+      from being persisted properly in Kubernetes 1.23.0-1.23.2.
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/title: Require runAsNonRoot
+spec:
+  admission: true
+  background: true
+  emitWarning: false
+  failurePolicy: Fail
+  rules:
+  - match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    name: run-as-non-root
+    skipBackgroundRequests: true
+    validate:
+      allowExistingViolations: true
+      anyPattern:
+      - spec:
+          =(ephemeralContainers):
+          - =(securityContext):
+              =(runAsNonRoot): true
+          =(initContainers):
+          - =(securityContext):
+              =(runAsNonRoot): true
+          containers:
+          - =(securityContext):
+              =(runAsNonRoot): true
+          securityContext:
+            runAsNonRoot: true
+      - spec:
+          =(ephemeralContainers):
+          - securityContext:
+              runAsNonRoot: true
+          =(initContainers):
+          - securityContext:
+              runAsNonRoot: true
+          containers:
+          - securityContext:
+              runAsNonRoot: true
+      failureAction: Enforce
+      message: Running as root is not allowed. Either the field spec.securityContext.runAsNonRoot must
+        be set to `true`, or the fields spec.containers[*].securityContext.runAsNonRoot, spec.initContainers[*].securityContext.runAsNonRoot,
+        and spec.ephemeralContainers[*].securityContext.runAsNonRoot must be set to `true`.
+  validationFailureAction: Audit
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privilege-escalation
+  annotations:
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/description: Privilege escalation, such as via set-user-ID or set-group-ID file
+      mode, should not be allowed. This policy ensures the `allowPrivilegeEscalation` field is set to
+      `false`.
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/title: Disallow Privilege Escalation
+spec:
+  admission: true
+  background: true
+  emitWarning: false
+  failurePolicy: Fail
+  rules:
+  - match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    name: privilege-escalation
+    skipBackgroundRequests: true
+    validate:
+      allowExistingViolations: true
+      failureAction: Enforce
+      message: Privilege escalation is disallowed. The fields spec.containers[*].securityContext.allowPrivilegeEscalation,
+        spec.initContainers[*].securityContext.allowPrivilegeEscalation, and spec.ephemeralContainers[*].securityContext.allowPrivilegeEscalation
+        must be set to `false`.
+      pattern:
+        spec:
+          =(ephemeralContainers):
+          - securityContext:
+              allowPrivilegeEscalation: 'false'
+          =(initContainers):
+          - securityContext:
+              allowPrivilegeEscalation: 'false'
+          containers:
+          - securityContext:
+              allowPrivilegeEscalation: 'false'
+  validationFailureAction: Audit
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-seccomp-strict
+  annotations:
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/description: The seccomp profile in the Restricted group must not be explicitly
+      set to Unconfined but additionally must also not allow an unset value. This policy, requiring Kubernetes
+      v1.19 or later, ensures that seccomp is set to `RuntimeDefault` or `Localhost`. A known issue prevents
+      a policy such as this using `anyPattern` from being persisted properly in Kubernetes 1.23.0-1.23.2.
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/title: Restrict Seccomp (Strict)
+spec:
+  admission: true
+  background: true
+  emitWarning: false
+  failurePolicy: Fail
+  rules:
+  - match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    name: check-seccomp-strict
+    skipBackgroundRequests: true
+    validate:
+      allowExistingViolations: true
+      anyPattern:
+      - spec:
+          =(ephemeralContainers):
+          - =(securityContext):
+              =(seccompProfile):
+                =(type): RuntimeDefault | Localhost
+          =(initContainers):
+          - =(securityContext):
+              =(seccompProfile):
+                =(type): RuntimeDefault | Localhost
+          containers:
+          - =(securityContext):
+              =(seccompProfile):
+                =(type): RuntimeDefault | Localhost
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault | Localhost
+      - spec:
+          =(ephemeralContainers):
+          - securityContext:
+              seccompProfile:
+                type: RuntimeDefault | Localhost
+          =(initContainers):
+          - securityContext:
+              seccompProfile:
+                type: RuntimeDefault | Localhost
+          containers:
+          - securityContext:
+              seccompProfile:
+                type: RuntimeDefault | Localhost
+      failureAction: Enforce
+      message: Use of custom Seccomp profiles is disallowed. The fields spec.securityContext.seccompProfile.type,
+        spec.containers[*].securityContext.seccompProfile.type, spec.initContainers[*].securityContext.seccompProfile.type,
+        and spec.ephemeralContainers[*].securityContext.seccompProfile.type must be set to `RuntimeDefault`
+        or `Localhost`.
+  validationFailureAction: Audit

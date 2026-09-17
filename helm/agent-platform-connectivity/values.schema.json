@@ -50,6 +50,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "cluster-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "clusterCA": {
             "type": "string"
         },
@@ -61,6 +65,10 @@
         },
         "clusterID": {
             "type": "string"
+        },
+        "clusterManager": {
+            "type": "object",
+            "additionalProperties": true
         },
         "components": {
             "type": "object",
@@ -112,6 +120,24 @@
                     }
                 },
                 "cloudnative-pg": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "cluster-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "dicebear": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
@@ -193,6 +219,15 @@
                     }
                 },
                 "modelServing": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "muster": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
@@ -311,6 +346,59 @@
                         }
                     }
                 },
+                "metricLabels": {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "agent_namespace": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "user": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "enabled": {
+                                "type": "boolean"
+                            },
+                            "expression": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
                 "name": {
                     "type": "string"
                 },
@@ -407,10 +495,14 @@
                         },
                         "podAnnotations": {
                             "type": "object",
+                            "additionalProperties": true
+                        },
+                        "podDisruptionBudget": {
+                            "type": "object",
                             "additionalProperties": true,
                             "properties": {
-                                "karpenter.sh/do-not-disrupt": {
-                                    "type": "string"
+                                "enabled": {
+                                    "type": "boolean"
                                 }
                             }
                         },
@@ -432,8 +524,39 @@
                                 }
                             }
                         },
+                        "replicas": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
                         "serviceType": {
                             "type": "string"
+                        },
+                        "spread": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "maxSkew": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "topologyKeys": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "minItems": 1
+                                },
+                                "whenUnsatisfiable": {
+                                    "type": "string",
+                                    "enum": [
+                                        "ScheduleAnyway",
+                                        "DoNotSchedule"
+                                    ]
+                                }
+                            }
                         }
                     }
                 }
@@ -818,21 +941,6 @@
                         },
                         "port": {
                             "type": "integer"
-                        }
-                    }
-                },
-                "metricLabels": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "properties": {
-                            "expression": {
-                                "type": "string"
-                            },
-                            "name": {
-                                "type": "string"
-                            }
                         }
                     }
                 },

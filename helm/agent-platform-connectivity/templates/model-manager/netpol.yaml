@@ -3,7 +3,12 @@
 {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson }}
 {{- $port := include "agent-platform.modelManager.servicePort" . }}
 {{- $backends := include "agent-platform.modelManager.backends" . | fromJsonArray }}
-{{- $kserveOn := has "kserve" $backends }}
+{{- /* A kserve backend exists as a static entry of modelManager.backends, or
+is registered at runtime by cluster-manager (its model-backend-kserve
+ConfigMap, invisible to the chart): either way model-manager calls the Hugging
+Face Hub for it (search, fit checks, revision lookups), so the hub egress
+renders whenever components.cluster-manager is on (#494). */ -}}
+{{- $kserveOn := or (has "kserve" $backends) (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "cluster-manager")) "true") }}
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.modelManager.oauthEnabled" . }}
@@ -18,6 +23,15 @@ rendered as one more ingress peer in the flavor's own dialect. */ -}}
 {{- end }}
 {{- $hf := $mm.networkPolicy.huggingFace }}
 {{- $egress := $mm.networkPolicy.egress }}
+{{- /* Backends registered at runtime (modelManager.networkPolicy.registeredBackends):
+{cidr | fqdn, port} entries, each one more egress rule on its port in the
+flavor's dialect, after the static-backend rules of both policies below — the
+chart cannot see the ConfigMap a backend is registered with, so the
+installation lists the destinations it allows. validate.yaml owns their guards
+(shape, cidr, port, fqdn under the kubernetes flavor). Empty, nothing renders:
+the header comments of the two policies stay as they are so the default render
+holds byte for byte. */ -}}
+{{- $registered := $mm.networkPolicy.registeredBackends | default list }}
 {{- /* The host-proxying backends (ollama, lemonade, lmstudio) among the backends need
 egress to their servers: every endpoint split into host, port and whether it
 is an address — one model-manager may front several. */ -}}
@@ -182,6 +196,33 @@ spec:
       toPorts:
         - ports:
             - port: {{ $server.port | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- end }}
+    {{- range $registered }}
+    {{- if .cidr }}
+    # A backend registered at runtime (modelManager.networkPolicy.registeredBackends): this block, this port.
+    - toCIDR:
+        - {{ .cidr }}
+      toPorts:
+        - ports:
+            - port: {{ .port | int | quote }}
+              protocol: TCP
+    {{- else }}
+    # A backend registered at runtime (modelManager.networkPolicy.registeredBackends),
+    # named by hostname: by name outside the cluster (through the DNS proxy
+    # rule above) and, for an in-cluster Service, the cluster entity, on its port.
+    - toFQDNs:
+        - matchName: {{ .fqdn }}
+      toPorts:
+        - ports:
+            - port: {{ .port | int | quote }}
+              protocol: TCP
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ .port | int | quote }}
               protocol: TCP
     {{- end }}
     {{- end }}
@@ -387,6 +428,15 @@ spec:
         - port: {{ $server.port | int }}
           protocol: TCP
     {{- end }}
+    {{- end }}
+    {{- range $registered }}
+    # A backend registered at runtime (modelManager.networkPolicy.registeredBackends): this block, this port.
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+      ports:
+        - port: {{ .port | int }}
+          protocol: TCP
     {{- end }}
 {{- if $mm.route.enabled }}
 ---

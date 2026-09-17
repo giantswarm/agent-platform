@@ -118,17 +118,21 @@ spec:
 # of the turn in flight; the valkey release's own policy admits clients from
 # the cluster, so the client side is what is missing) and the Kubernetes API
 # (the Secret link store, klausGateway.obo.store: secret — one Secret read at
-# start and updated on every link; the configmap / crd routing stores; the
-# embedded ChannelRoute controller). The a2a-egress and obo-egress policies
-# above put this pod in Cilium default-deny egress and neither carries the
-# Valkey pods or the kube-apiserver entity (the API is reached by its Service
-# address, which Cilium's socket-LB resolves to the control plane before the
-# policy applies, so a port rule on `cluster` never matches it): with the
-# Secret store on and no rule here the gateway crash-loops at start — `read
-# secret …: context deadline exceeded`, not `forbidden`; on the Valkey store
-# every binding write and the readiness probe would hang the same way. Each
-# rule renders only while its store is on (agent-platform.klausGateway.*Egress);
-# the default shape — memory routing, the bolt link store — gets no policy.
+# start and updated on every link — and the team-review endpoint,
+# klausGateway.reviews.enabled — a TokenReview per POST /reviews or /notices,
+# whatever the link store; giantswarm/agent-platform#511). The a2a-egress and obo-egress
+# policies above put this pod in Cilium default-deny egress and neither carries
+# the Valkey pods or the kube-apiserver entity (the API is reached by its
+# Service address, which Cilium's socket-LB resolves to the control plane
+# before the policy applies, so a port rule on `cluster` never matches it):
+# with the Secret store on and no rule here the gateway crash-loops at start —
+# `read secret …: context deadline exceeded`, not `forbidden`; on the Valkey
+# store every binding write and the readiness probe would hang the same way;
+# with reviews on every TokenReview times out and the endpoint answers 503 to
+# every caller.
+# Each rule renders only while its store is on
+# (agent-platform.klausGateway.*Egress); the default shape — memory routing,
+# the bolt link store — gets no policy.
 # DNS as in the siblings, so this policy alone leaves the pod resolving names.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

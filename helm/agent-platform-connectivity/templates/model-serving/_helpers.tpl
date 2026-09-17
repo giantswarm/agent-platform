@@ -45,12 +45,70 @@ to the release namespace.
 {{- end -}}
 
 {{/*
+Truthy when this chart manages the Hugging Face cache claim: model serving on,
+modelServing.cache.enabled and no existingClaim. The claim is applied by the
+hook Job of templates/model-serving/cache-pvc.yaml, never rendered as a release
+resource (giantswarm/agent-platform#483).
+*/}}
+{{- define "agent-platform.modelServing.cacheClaimManaged" -}}
+{{- if and (include "agent-platform.modelServing.enabled" .) .Values.modelServing.cache.enabled (not .Values.modelServing.cache.pvc.existingClaim) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 The cache claim every predictor pod mounts: the pre-existing claim when named,
-else the PVC this chart renders.
+else the claim this chart applies (cache-pvc.yaml).
 */}}
 {{- define "agent-platform.modelServing.claimName" -}}
 {{- $pvc := .Values.modelServing.cache.pvc -}}
 {{- $pvc.existingClaim | default $pvc.name -}}
+{{- end -}}
+
+{{/*
+The GPU node pool input (modelServing.gpuPool) as the scheduling it puts on a
+workload the chart renders onto the pool, as JSON:
+  { "tolerations": [<the toleration of the pool taint>] | [], "nodeSelector": {...} }
+The toleration tolerates the pool taint with operator Exists (no value — the
+gpu-node-pool chart's taint) or Equal (taint.value set); an empty taint.key
+yields none. One source for the runtime, the presets and the discovery
+ConfigMap, so the three sites never disagree.
+Usage: $pool := include "agent-platform.modelServing.gpuPool" . | fromJson
+*/}}
+{{- define "agent-platform.modelServing.gpuPool" -}}
+{{- $gp := .Values.modelServing.gpuPool | default dict -}}
+{{- $taint := get $gp "taint" | default dict -}}
+{{- $tolerations := list -}}
+{{- if get $taint "key" -}}
+{{- $tol := dict "key" (get $taint "key") "operator" "Exists" -}}
+{{- with get $taint "value" -}}
+{{- $_ := set $tol "operator" "Equal" -}}
+{{- $_ := set $tol "value" . -}}
+{{- end -}}
+{{- with get $taint "effect" -}}
+{{- $_ := set $tol "effect" . -}}
+{{- end -}}
+{{- $tolerations = list $tol -}}
+{{- end -}}
+{{- dict "tolerations" $tolerations "nodeSelector" (get $gp "nodeSelector" | default dict) | toJson -}}
+{{- end -}}
+
+{{/*
+Merges the pool's scheduling under a workload's own: the pool toleration first
+and the workload's after it (an entry equal to the pool's once), the pool
+selector under the workload's selector (the workload's keys win). Returns JSON
+  { "tolerations": [...], "nodeSelector": {...} }
+both empty when neither side has anything, so the caller renders nothing then.
+Usage: include "agent-platform.modelServing.poolScheduling" (dict "root" $ "tolerations" $list "nodeSelector" $map) | fromJson
+*/}}
+{{- define "agent-platform.modelServing.poolScheduling" -}}
+{{- $pool := include "agent-platform.modelServing.gpuPool" .root | fromJson -}}
+{{- $tolerations := $pool.tolerations -}}
+{{- range (.tolerations | default list) -}}
+{{- if not (has . $tolerations) -}}
+{{- $tolerations = append $tolerations . -}}
+{{- end -}}
+{{- end -}}
+{{- $selector := merge (deepCopy (.nodeSelector | default dict)) $pool.nodeSelector -}}
+{{- dict "tolerations" $tolerations "nodeSelector" $selector | toJson -}}
 {{- end -}}
 
 {{/*
@@ -118,7 +176,9 @@ Validates one preset and resolves it into the published form the portal and
 model-manager read: runtime defaulted to the component's, model.format to vLLM,
 resources.gpus to 1, requirements.overheadGiB to 30, and the chat template (one
 of file, content, existingConfigMap) resolved to the ConfigMap that holds it,
-with the --chat-template flag appended to args. Returns JSON:
+with the --chat-template flag appended to args, and the GPU node pool's
+toleration and selector merged under spec.scheduling (modelServing.gpuPool).
+Returns JSON:
   { "preset": <published ServingPreset>,
     "chatTemplate": { "render": bool, "name": string, "key": string, "content": string } }
 Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name" $name "entry" $entry) | fromJson
@@ -214,6 +274,23 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- $args = append $args (printf "--chat-template=%s/%s" $mountPath $key) -}}
 {{- end -}}
 {{- $_ := set $spec "args" $args -}}
+{{- /* The GPU node pool (modelServing.gpuPool): its toleration first and its
+       selector under the preset's own scheduling block; nothing when both
+       sides are empty. */ -}}
+{{- $scheduling := get $spec "scheduling" | default dict -}}
+{{- if not (kindIs "map" $scheduling) -}}
+{{- fail (printf "%s: spec.scheduling must be a mapping" $where) -}}
+{{- end -}}
+{{- $pool := include "agent-platform.modelServing.poolScheduling" (dict "root" $root "tolerations" (get $scheduling "tolerations") "nodeSelector" (get $scheduling "nodeSelector")) | fromJson -}}
+{{- with $pool.tolerations -}}
+{{- $_ := set $scheduling "tolerations" . -}}
+{{- end -}}
+{{- with $pool.nodeSelector -}}
+{{- $_ := set $scheduling "nodeSelector" . -}}
+{{- end -}}
+{{- if $scheduling -}}
+{{- $_ := set $spec "scheduling" $scheduling -}}
+{{- end -}}
 {{- $_ := set $doc "spec" $spec -}}
 {{- dict "preset" $doc "chatTemplate" $render | toJson -}}
 {{- end -}}
@@ -307,4 +384,120 @@ output through trim and nindent.
     - port: 443
       protocol: TCP
 {{- end }}
+{{- end -}}
+
+{{/*
+Truthy when the models Gateway renders (giantswarm/agent-platform#326): the
+modelServing switch and the llm-d controller component on, and
+modelServing.modelsGateway.enabled.
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.enabled" -}}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kserve.llmisvcEnabled" .) (.Values.modelServing.modelsGateway).enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/* The models Gateway's public hostname: <hostPrefix>.<global.domain>. */}}
+{{- define "agent-platform.modelServing.modelsGateway.host" -}}
+{{- printf "%s.%s" .Values.modelServing.modelsGateway.hostPrefix (include "agent-platform.domain" (dict "ctx" . "for" "modelServing.modelsGateway.hostPrefix")) -}}
+{{- end -}}
+
+{{/* The models Gateway's issuer: the block's own, else global.identity.issuerUrl (or a render failure). */}}
+{{- define "agent-platform.modelServing.modelsGateway.issuer" -}}
+{{- $issuer := .Values.modelServing.modelsGateway.jwtAuthentication.issuer -}}
+{{- if not $issuer -}}
+{{- $issuer = include "agent-platform.issuerUrl" (dict "ctx" . "for" "modelServing.modelsGateway.jwtAuthentication") -}}
+{{- end -}}
+{{- $issuer -}}
+{{- end -}}
+
+{{/*
+The models Gateway's JWKS block with the host resolved (JSON): the block's own
+host, else the issuer's hostname — the public issuer on 443.
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.jwks" -}}
+{{- $jwks := deepCopy .Values.modelServing.modelsGateway.jwtAuthentication.jwks -}}
+{{- if not $jwks.host -}}
+{{- $_ := set $jwks "host" (urlParse (include "agent-platform.modelServing.modelsGateway.issuer" .)).hostname -}}
+{{- end -}}
+{{- $jwks | toJson -}}
+{{- end -}}
+
+{{/*
+The TLS Secret of the models Gateway's listener: tls.secretName, else <name>-tls
+while a Certificate renders (tls.issuerRef.name set), else the platform's
+wildcard (gatewayApi.gateway.tls.secretName).
+*/}}
+{{- define "agent-platform.modelServing.modelsGateway.tlsSecretName" -}}
+{{- $mg := .Values.modelServing.modelsGateway -}}
+{{- if $mg.tls.secretName -}}{{- $mg.tls.secretName -}}
+{{- else if $mg.tls.issuerRef.name -}}{{- printf "%s-tls" $mg.name -}}
+{{- else -}}{{- .Values.gatewayApi.gateway.tls.secretName -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The pods KServe runs for a served model come in two shapes, and their labels
+share nothing: the classic InferenceService predictor carries
+serving.kserve.io/inferenceservice=<name> and serves from kserve-container; the
+LLMInferenceService workload pod the llm-d controller creates carries
+kserve.io/component=workload with app.kubernetes.io/part-of=llminferenceservice
+and app.kubernetes.io/name=<name>, and serves from main
+(giantswarm/agent-platform#506). Every selector of the serving namespace's
+model pods — the Kyverno mutations, the network policies, the PolicyException —
+renders from this list, one entry per shape, so they never disagree. JSON:
+  [ { "name": "predictor" | "llmisvc-workload",   the object name suffix
+      "kind": "InferenceService" | "LLMInferenceService",
+      "nameLabel": <the label that carries the served model's name>,
+      "runtimeContainer": <the container that serves>,
+      "port": <the port the pod is reached on, its Service's target: modelServing.networkPolicy.<shape>.port>,
+      "matchExpressions": [<the label selector of the shape>] } ]
+Usage: $shapes := include "agent-platform.modelServing.podShapes" . | fromJsonArray
+*/}}
+{{- define "agent-platform.modelServing.podShapes" -}}
+{{- $np := .Values.modelServing.networkPolicy -}}
+{{- $classic := dict "name" "predictor" "kind" "InferenceService" "nameLabel" "serving.kserve.io/inferenceservice" "runtimeContainer" "kserve-container" "port" (int $np.predictor.port) -}}
+{{- $_ := set $classic "matchExpressions" (list (dict "key" "serving.kserve.io/inferenceservice" "operator" "Exists")) -}}
+{{- $llmisvc := dict "name" "llmisvc-workload" "kind" "LLMInferenceService" "nameLabel" "app.kubernetes.io/name" "runtimeContainer" "main" "port" (int $np.llmisvcWorkload.port) -}}
+{{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "kserve.io/component" "operator" "In" "values" (list "workload")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
+{{- list $classic $llmisvc | toJson -}}
+{{- end -}}
+
+{{/*
+The Kyverno `match` entries selecting the model pods of the serving namespace
+at CREATE, one per pod shape (agent-platform.modelServing.podShapes, or the
+`shapes` subset given); the caller nests them under `match.any`. Kinds default
+to Pod; the operations to CREATE (a pod's init containers are immutable, and
+the filter keeps later updates untouched).
+Usage: include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "kinds" (list "Deployment") "operations" (list "CREATE" "UPDATE"))
+       include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "shapes" (list $shape))
+*/}}
+{{- define "agent-platform.modelServing.kyvernoMatch" -}}
+{{- $ns := include "agent-platform.modelServing.namespace" .root -}}
+{{- range (.shapes | default (include "agent-platform.modelServing.podShapes" .root | fromJsonArray)) }}
+# {{ .kind }}
+- resources:
+    kinds:
+      {{- toYaml ($.kinds | default (list "Pod")) | nindent 6 }}
+    namespaces:
+      - {{ $ns }}
+    operations:
+      {{- toYaml ($.operations | default (list "CREATE")) | nindent 6 }}
+    selector:
+      matchExpressions:
+        {{- toYaml .matchExpressions | nindent 8 }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The JMESPath (bare, no delimiters) of the served model's name on a model pod,
+whatever its shape: the first of the shapes' name labels the pod carries. It
+names the pod's cache subdirectory (<claim>/<model>). Kyverno evaluates it at
+admission; the caller wraps it in its delimiters (and `length(... || '')` for a
+precondition that the pod carries one at all).
+*/}}
+{{- define "agent-platform.modelServing.modelNamePath" -}}
+{{- $labels := list -}}
+{{- range (include "agent-platform.modelServing.podShapes" . | fromJsonArray) -}}
+{{- $labels = append $labels (printf "request.object.metadata.labels.%q" .nameLabel) -}}
+{{- end -}}
+{{- join " || " $labels -}}
 {{- end -}}

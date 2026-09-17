@@ -3,11 +3,11 @@
 Helpers of the klaus-gateway component's wiring (templates/klausgateway/).
 
 One values block feeds these templates: klausGateway — the klaus-gateway
-chart's own values as the meta chart forwards them (the routing store, the
-controller, Slack, OBO and A2A knobs) plus the umbrella's wiring keys
-(agentgatewayRoute). A component release's values cannot be derived at render
-time, so the wiring reads what the chart will see; a knob the block does not
-declare is read with the klaus-gateway chart's own default. The Valkey store's
+chart's own values as the meta chart forwards them (the routing store, Slack,
+OBO and A2A knobs) plus the umbrella's wiring keys (agentgatewayRoute). A
+component release's values cannot be derived at render time, so the wiring
+reads what the chart will see; a knob the block does not declare is read with
+the klaus-gateway chart's own default. The Valkey store's
 target is the platform's own Valkey (components.valkey, the valkey block), the
 way the meta chart fills routing.valkey from it.
 */}}
@@ -25,19 +25,22 @@ uses this, so a renamed release moves them all.
 Truthy (emits "true") when the gateway pod reads or writes the Kubernetes API,
 so its egress needs the kube-apiserver: the Secret link store
 (klausGateway.obo.store: secret with OBO on — the gateway's own gate,
-klaus-gateway's obo.secretStore helper), a cluster-backed routing store
-(klausGateway.routing.store: configmap or crd) or the embedded ChannelRoute
-controller (klausGateway.controller.enabled). Empty otherwise: the default
-shape — memory routing, the bolt link store, no controller — never touches
-the API and gets no rule. The store and controller keys are the klaus-gateway
-chart's; when the block leaves one unset its chart default applies (bolt,
-memory, off).
+klaus-gateway's obo.secretStore helper), and the team-review endpoint
+(klausGateway.reviews.enabled; giantswarm/klaus-gateway#273), which verifies
+every caller of POST /reviews and POST /notices with an
+authentication.k8s.io/v1 TokenReview — whatever the link store, so an
+installation on the bolt store gets the rule too (giantswarm/agent-platform#511;
+without it every review times out at the API and the endpoint answers 503).
+The routing stores that reached the API (configmap, crd) and the embedded
+ChannelRoute controller are gone from klaus-gateway (giantswarm/klaus-gateway#271).
+Empty otherwise: the default shape — memory routing, the bolt link store, no
+reviews — never touches the API and gets no rule. The keys are the
+klaus-gateway chart's; when the block leaves one unset its chart default
+applies (bolt, memory, reviews off).
 */}}
 {{- define "agent-platform.klausGateway.apiServerEgress" -}}
 {{- $kg := .Values.klausGateway -}}
-{{- $secretLinks := and (dig "obo" "enabled" false $kg) (eq (dig "obo" "store" "bolt" $kg) "secret") -}}
-{{- $clusterRoutes := has (dig "routing" "store" "memory" $kg) (list "configmap" "crd") -}}
-{{- if or $secretLinks $clusterRoutes (dig "controller" "enabled" false $kg) -}}true{{- end -}}
+{{- if or (dig "reviews" "enabled" false $kg) (and (dig "obo" "enabled" false $kg) (eq (dig "obo" "store" "bolt" $kg) "secret")) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -62,7 +65,8 @@ default 6379) — the one the meta chart puts into the gateway's routing.valkey.
 {{/*
 Truthy (emits "true") when the gateway pod reaches any store beyond its own
 process — the gate of the -klausgateway-store-egress policy: the Valkey
-routing store or anything on the Kubernetes API.
+routing store or anything on the Kubernetes API (the Secret link store, the
+team-review endpoint's TokenReview).
 */}}
 {{- define "agent-platform.klausGateway.storeEgress" -}}
 {{- if or (include "agent-platform.klausGateway.valkeyEgress" .) (include "agent-platform.klausGateway.apiServerEgress" .) -}}true{{- end -}}

@@ -1,0 +1,20 @@
+# A release of this chart that installs its components into ANOTHER cluster
+# (giantswarm/agent-platform#328): gitops.target.kubeConfig.secretRef names the
+# kubeconfig Secret of the target in the release namespace — the fleet's
+# `<cluster>-kubeconfig` — and every component HelmRelease carries it as
+# spec.kubeConfig.secretRef, so the installation's helm-controller installs each
+# component into the target from the OCIRepositories on the installation. No
+# Flux on the target: the bundled engine is off (the render refuses the knob
+# with it on). Layered over a slice shape (ci/test-slice-*-values.yaml) it is
+# the workload-cluster case, where agentgateway is on — the target owns no
+# controller of its own.
+gitops:
+  target:
+    kubeConfig:
+      secretRef:
+        name: wc01-kubeconfig
+components:
+  flux:
+    enabled: false
+  agentgateway:
+    enabled: true

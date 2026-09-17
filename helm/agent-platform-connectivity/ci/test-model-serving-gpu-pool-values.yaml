@@ -1,0 +1,50 @@
+# The model serving layer on a GPU node pool created through the platform
+# (giantswarm/agent-platform#315; bumblebee-plans#46, the plan's D3): the
+# pool's taint tolerated (the default) and the pool selected by its label —
+# modelServing.gpuPool.nodeSelector, the value the serving slice sets per
+# pool. One preset of its own carries a scheduling block, to show the pool's
+# entries merged under it (its equal toleration once, its selector keys kept).
+# Render-valid for `ct lint` (the modelServing guard is satisfied by the kserve
+# components being on); tests/verify-gpu-pool.py asserts the render.
+global:
+  domain: ci.example.com
+  gatewayApi:
+    parentRefs:
+      - name: giantswarm-default
+        namespace: envoy-gateway-system
+
+components:
+  kserve-crd:
+    enabled: true
+  kserve-resources:
+    enabled: true
+  modelServing:
+    enabled: true
+
+modelServing:
+  gpuPool:
+    nodeSelector:
+      giantswarm.io/machine-pool: ci-gpu00
+  presets:
+    - apiVersion: agent-platform.giantswarm.io/v1alpha1
+      kind: ServingPreset
+      metadata:
+        name: pinned-model
+      spec:
+        displayName: A preset with a scheduling block of its own
+        model:
+          id: org/Pinned-Model
+          storageUri: hf://org/Pinned-Model
+        requirements:
+          weightsGiB: 16
+        scheduling:
+          nodeSelector:
+            nvidia.com/gpu.product: NVIDIA-L4
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+            - key: example.com/dedicated
+              operator: Equal
+              value: serving
+              effect: NoSchedule

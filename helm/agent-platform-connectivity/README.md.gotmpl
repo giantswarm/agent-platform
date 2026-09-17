@@ -16,8 +16,9 @@
 All agent inference traffic can go through the installation's agentgateway, so
 that one component observes every model call. The data plane then emits GenAI
 metrics for each request — tokens by type, cost in USD, request duration and
-time to first token — with the calling agent as a label. The `agent-platform`
-Grafana dashboard in `giantswarm/dashboards` reads them.
+time to first token — with the calling agent as a label (`gateway.metricLabels`,
+the Gateway's one metrics policy; see [Metric labels](#metric-labels)). The
+`agent-platform` Grafana dashboard in `giantswarm/dashboards` reads them.
 
 The gateway holds no provider credential. Agent pods keep their own
 `ANTHROPIC_API_KEY`, and the client `x-api-key` header passes through
@@ -40,9 +41,10 @@ Two values turn the path on, and the order matters.
 
    This adds an `llm` listener to the data-plane Gateway, an
    `AgentgatewayBackend` for the provider, an `HTTPRoute` pinned to that
-   listener, one Gateway-scoped `AgentgatewayPolicy` (the route-type map and
-   the metric labels), and the model-price ConfigMap the cost counter reads.
-   Nothing routes through it yet.
+   listener, one Gateway-scoped `AgentgatewayPolicy` (the route-type map), and
+   the model-price ConfigMap the cost counter reads. Nothing routes through it
+   yet. The metric labels are not this path's: the Gateway's own `-metrics`
+   policy carries them whether or not LLM routing is on (below).
 
    Verify the listener answers before you continue. From a pod in the release
    namespace:
@@ -100,9 +102,9 @@ On the installation, after the cutover:
 - Agent pods keep their `world:443` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
-- Only one metrics policy may target a Gateway: custom labels replace rather
-  than merge, and when two policies target the same Gateway the one with the
-  lexicographically lowest policy key wins while the other is silently dropped.
+- The LLM policy carries no `frontend.metrics`: the data plane honours one
+  metrics policy per Gateway, and the labels describe every route, so they live
+  in the Gateway's own `-metrics` policy — see [Metric labels](#metric-labels).
 - An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
   own `baseUrl` or names a provider other than `llmRouting.backend.provider`.
   The `baseUrl` lands under the CRD's block for the entry's provider —
@@ -114,6 +116,153 @@ On the installation, after the cutover:
 - The data-plane `PodMonitor` is gated on the agentgateway component, not on
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
+
+## Metric labels
+
+The data plane puts custom Prometheus labels on every metric it emits — the
+HTTP, MCP and GenAI families alike, whatever route the request took — from one
+Gateway-scoped `AgentgatewayPolicy`, `<release>-metrics`
+(`templates/agentgateway/metrics-policy.yaml`, `frontend.metrics`), rendered
+whenever the data plane is and an entry of `gateway.metricLabels` is enabled.
+Each label is a CEL expression evaluated when the request completes; a failed
+or empty expression renders `unknown` and keeps the series.
+
+**One policy per Gateway.** agentgateway honours one metrics policy per
+Gateway: custom labels replace, they never merge, and of two policies one is
+dropped in silence — which one has changed between agentgateway releases, so
+nothing may rely on it. Every label the platform wants therefore lives in
+`gateway.metricLabels`, whichever route it describes; the labels are not the
+LLM path's (`llmRouting.metricLabels` is gone; the schema refuses it) and
+render without LLM routing.
+
+**One map, keyed by label name.** Helm merges maps and replaces lists, so an
+installation turns one default entry off or adds one without restating the
+rest. Each entry is `{expression: <one-line CEL>, enabled: <bool, absent =
+true>}`; the expression goes through `tpl`. An entry whose expression reads
+`jwt` — `jwt.<claim>` or `jwt["<claim>"]` — is rendered only while a route of
+the Gateway verifies a bearer (the kagent controller route with its JWT
+policy, agent-manager's, model-manager's); without one it would read `unknown`
+on every series.
+
+```yaml
+gateway:
+  metricLabels:
+    user:
+      enabled: false          # no person label, no series per person
+    team:
+      expression: jwt.groups  # one more claim; string-valued claims only
+```
+
+**The defaults.** `agent` and `agent_namespace` name the calling workload
+(`source.unverifiedWorkload.serviceAccount` / `.namespace`), resolved by source
+IP against the agentgateway controller's workload store — not cryptographic,
+adequate for accounting, never for authorization. On the LLM listener that is
+the agent whose inference the metric counts (the LLM usage dashboard reads
+both); on the kagent controller route it is the caller, klaus-gateway or the
+portal.
+
+`user` (on by default) carries the identity claim the kagent controller route
+verifies in `Strict` mode and writes into `x-user-id`
+(`kagent.controller.auth.userIdClaim`, `email`; `docs/authentication.md`),
+read through `tpl` so the label follows the knob — and the same knob names the
+claim on agent-manager's and model-manager's routes, kagent on or off.
+klaus-gateway makes every controller call with the linked person's Dex
+id_token and never as itself, so on that route every series carries a verified
+person: a Slack turn is one `lf.a2a.v1.A2AService/SendStreamingMessage`
+stream, its duration the turn's. The portal, a CLI and every other route that
+verifies a bearer are labelled the same way. A route without a JWT policy —
+the MCP path under `oauthMode: passthrough`, the LLM listener, whose calls
+carry the ModelConfig's API key — renders `unknown`: tokens and cost stay
+attributed to the agent, not the person.
+
+On the installation (`route` is `<namespace>/<name>`):
+
+```promql
+sum by (user) (rate(agentgateway_requests_total{route=~".*/kagent-controller"}[1h]))
+histogram_quantile(0.95, sum by (le, user) (rate(agentgateway_request_duration_seconds_bucket{route=~".*/kagent-controller"}[1h])))
+```
+
+Know what it costs: an email address in Mimir is personal data, and the label
+multiplies the verifying routes' HTTP series by the number of people.
+`gateway.metricLabels.user.enabled: false` drops the label and its series.
+
+**Guards.** The schema holds every entry to `{expression, enabled}`. The
+render fails, naming the entry, on a missing, empty or multi-line expression,
+a name that is not a Prometheus label name, one the data plane's own series
+carry or the scrape adds, one starting with `__`, and more than 16 enabled
+entries. `kagent.controller.auth.userIdClaim` must be a bare identifier
+wherever it is read as CEL — the controller route's identity header, the
+`user` entry on any verifying route — since an expression that does not
+compile takes the whole policy down. `make verify-metric-labels` asserts all
+of it, and that no other policy of the chart carries a `frontend.metrics`
+section.
+
+## Data-plane availability
+
+Every MCP call and, with LLM routing on, every model call crosses the
+agentgateway data plane, a `Deployment` the agentgateway controller reconciles
+from the `Gateway`. This chart shapes it through `AgentgatewayParameters`
+(`gateway.parameters`):
+
+- `replicas: 2` — two pods survive a node reboot or drain.
+- `podDisruptionBudget` (`enabled: true`) — a drain evicts one pod at a time.
+  The keys other than `enabled` are the PDB spec as written (`minAvailable`,
+  `maxUnavailable`, `unhealthyPodEvictionPolicy`); with neither `minAvailable`
+  nor `maxUnavailable` set, the template fills in `maxUnavailable: 1` (that
+  default lives in the template so `minAvailable` can be chosen through the
+  meta chart, where a null never reaches this chart's defaults — and it fills
+  the missing field in rather than replacing the spec, so an
+  `unhealthyPodEvictionPolicy` set on its own survives it). The render refuses
+  a key that is not one of those three (keeping the two budget fields out of
+  `values.yaml` is what leaves the block open in the schema, so a typo would
+  otherwise be dropped in silence), both fields together, a string that is not
+  a percentage from `0%` to `100%`, a fractional or negative number, an
+  `unhealthyPodEvictionPolicy` outside the API's enum, and any budget that
+  allows no eviction — an integer `minAvailable` at or above `replicas`, a
+  percentage `minAvailable` that rounds up to every replica, a zero
+  `maxUnavailable` — since it would hang every node drain.
+- `spread` — one `topologySpreadConstraint` per `topologyKeys` entry
+  (`kubernetes.io/hostname`; add `topology.kubernetes.io/zone` on a multi-zone
+  pool), `whenUnsatisfiable: ScheduleAnyway` so a single-node lab still
+  schedules both pods, and `matchLabelKeys: [pod-template-hash]` so a rollout
+  spreads the new ReplicaSet against itself instead of against the revision it
+  is replacing — without it, once the old pods drain both survivors can be
+  left on one node and `ScheduleAnyway` never moves them back. A drain of that
+  single node then waits on the budget (the replacement pod cannot schedule);
+  turn `podDisruptionBudget.enabled` off there.
+
+`gateway.parameters.podAnnotations` is empty by default. The
+`karpenter.sh/do-not-disrupt: "true"` of giantswarm/agent-platform#431 was the
+answer to a single data-plane pod; next to the three knobs above it would pin
+both pods' nodes against Karpenter's consolidation, drift and expiry and the
+budget would never be reached. Set it back on an installation that would rather
+keep the streams open on a pod than let Karpenter churn its node.
+
+`replicas`, `spread.maxSkew` and `spread.whenUnsatisfiable` are each refused
+when unset. A `null` set through the meta chart does not travel — Helm deletes
+the key at that layer — so it arrives here as a missing key, which no schema
+keyword can floor; unguarded, `replicas` alone would render `0` and scale the
+data plane to zero.
+
+A pod's exit runs inside the data-plane shutdown window the controller's chart
+defaults to. Both ends of it are deadlines measured from `SIGTERM`, not phases
+that add up: 10 s still accepting so the endpoint is gone first, and draining
+until the 55 s deadline, inside a 60 s grace period. Streamable-HTTP MCP
+sessions survive a pod change (the session id carries the state, encoded with
+the per-Gateway session key both pods share). Legacy SSE sessions are
+pod-local, and pod-local costs more at two replicas than it did at one: the
+session lives on the pod that answered `/sse`, the ClusterIP Service balances
+each later POST on its own, and a POST that lands on the other pod finds no
+session — so a legacy SSE client fails against a two-pod data plane whether or
+not a pod ever changes. Use streamable-HTTP.
+The meta chart forwards `agentgateway.controller.replicaCount: 2`. Leader
+election is on (the controller's manager defaults `DisableLeaderElection` to
+false), so the two pods do not fight: the status syncer runs on the leader
+alone and the xDS syncer on every replica. What the second pod buys is a
+pod-level failure and a rolling restart -- xDS keeps being served while one is
+gone. It is **not** node redundancy: the packaging chart's schema admits no
+`podDisruptionBudget`, no `affinity` and no `topologySpreadConstraints` for the
+controller, so the two pods often land on the same node.
 
 ## The Backstage component on a default-deny cluster
 
@@ -215,7 +364,9 @@ platform needs:
   install never reaches a pod with roots the current pools do not have
   (giantswarm/agent-platform#384; a re-run says `present`, `created` or
   `republished`). Identity: `<release>-hooks`, a ClusterRole on secrets,
-  configmaps, namespaces and clustertrustbundles, with `attest` on the two
+  configmaps, namespaces and clustertrustbundles (and on persistentvolumeclaims
+  while model serving's cache claim is this chart's, [The Hugging Face cache
+  claim](#the-hugging-face-cache-claim)), with `attest` on the two
   podcert signers (the apiserver's condition for writing a bundle that names a
   signer), for the hook's lifetime
   (`templates/substrate/hooks-rbac.yaml`; the hook Job include is
@@ -270,11 +421,11 @@ while the gateway reaches a store beyond its own process:
 |---|---|---|
 | The Valkey routing store | `klausGateway.routing.store: valkey`, the valkey component on | the platform's Valkey pods (`agent-platform.valkey.podSelector`, the release namespace) on `valkey.valkey.service.port` |
 | The Secret link store | `klausGateway.obo.store: secret`, OBO on | the kube-apiserver (`kube-apiserver` entity; `networkPolicy.kubernetes.apiServerCIDR`) |
-| The configmap / crd routing stores, the embedded ChannelRoute controller | `klausGateway.routing.store: configmap` / `crd`, `klausGateway.controller.enabled` | the kube-apiserver, as above |
+| The team-review endpoint's TokenReview (giantswarm/klaus-gateway#273) | `klausGateway.reviews.enabled`, whatever the link store | the kube-apiserver (the same rule, rendered once) |
 
 The keys are the klaus-gateway chart's, forwarded by the meta chart; one left
-unset is read with that chart's default (memory, bolt, off), so the default
-shape gets no policy. An out-of-band Valkey (`routing.valkey.url` outside the
+unset is read with that chart's default (memory, bolt, reviews off), so the
+default shape gets no policy. An out-of-band Valkey (`routing.valkey.url` outside the
 platform, the component off) gets no rule: nothing in the namespace to select,
 the installation adds that egress itself. The valkey release's own policy
 admits clients from the whole cluster on 6379, so the client side is the only
@@ -400,10 +551,49 @@ public IPv4 destinations only. A private identity provider inside one of
 `worldExcludedCIDRs`, and an issuer the cluster resolves over IPv6, belong
 there.
 
+The platform's identity provider is always among the controller's external
+targets: `global.identity.issuerUrl`'s host on 443 (the URL's port when it
+carries one) is opened by name in the cilium flavour and as port 443 of the
+wide rule in the kubernetes flavour, in every release that runs the controller
+and whatever the routes name. The controller serves the JWT policies of every
+release in the cluster, and the serving slice's models Gateway beside the
+platform's release takes the issuer's public host on 443 by default — a policy
+the platform's release cannot see (giantswarm/agent-platform#505). An
+in-cluster issuer URL adds nothing: `gateway.jwksEgress` covers it.
+
 The cilium controller policy renders the DNS proxy clause only while a name is
-selected. With in-cluster hosts alone it renders no external rule and no proxy
-clause, in either flavour; `make verify-wiring` asserts that against
-`origin/main`, the controller policies first and then the whole render.
+selected. With an in-cluster issuer and in-cluster route hosts alone it renders
+no external rule and no proxy clause, in either flavour; `make verify-wiring`
+asserts that against `origin/main`, the controller policies first and then the
+whole render, and that a public issuer is opened on 443 with the proxy clause
+while every route's host is in-cluster.
+
+## The GPU node pool
+
+A GPU node pool created through the platform (bumblebee-plans#46, the `gpu-node-pool` chart) arrives tainted `nvidia.com/gpu` `NoSchedule` — only accelerator work lands there — and labelled `giantswarm.io/machine-pool=<cluster>-<pool>`. `modelServing.gpuPool` is the serving layer's one input for both (giantswarm/agent-platform#315): `taint` (`key`, `value`, `effect`; the default is the pool chart's taint, tolerated with `operator: Exists` because the pool sets no value — a `value` narrows the toleration to `Equal`, an empty `key` is an untainted pool and renders nothing) and `nodeSelector` (the pool's label; per pool, so the slice release's values set it, empty by default).
+
+The chart applies the input to everything it renders onto the pool and to nothing else — platform components never carry it:
+
+| Site | Toleration | Node selector |
+|---|---|---|
+| The `ClusterServingRuntime` (`modelServing.runtime`; KServe copies both onto every predictor pod of the runtime) | the pool's first, `runtime.tolerations` after it (an equal entry once) | the pool's under `runtime.nodeSelector` (the runtime's keys win) |
+| Every published preset's `scheduling` block (`agent-platform-serving-preset-<name>`) | the pool's first, the preset's own after it (an equal entry once) | the pool's under the preset's own keys |
+| The discovery ConfigMap `agent-platform-model-serving`: `spec.gpuPool.taint.{key,value,effect}`, `spec.gpuPool.nodeSelector` | published for model-manager (`>= 0.23.0`, giantswarm/model-manager#86), which schedules the `LLMInferenceService`s it composes, its download Jobs and its inventory scan pods by it; a registered backend document may override it | likewise |
+
+Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute` (empty tolerates every effect of the key), the key is a qualified name, and every selector value is a string (a label value is a string: quote a number). `make verify-gpu-pool` asserts the three sites in the default, pool-selected, valued and untainted shapes, the guards, the meta chart's forwarding of the block, and that an empty taint key leaves the serving render byte-identical to `origin/main` but for the discovery block; `ci/test-model-serving-gpu-pool-values.yaml` is the pool-selected fixture.
+
+## The Hugging Face cache claim
+
+`modelServing.cache.pvc` (`hf-cache`, `500Gi`, the cluster's default StorageClass unless `storageClassName` names one — `"-"` is the empty class for a pre-provisioned volume, `volumeName` binds one) is one claim in the serving namespace with one subdirectory per InferenceService; the Kyverno policies mount it into every predictor's storage-initializer and runtime, model-manager's pre-warm downloads land in the same layout. The claim has **no consumer of its own** — the first predictor (or download Job) that mounts it is what Binds it — and under a StorageClass with `volumeBindingMode: WaitForFirstConsumer` (kind's `standard`, the fleet's default `gp3`) it stays `Pending` until then. Helm's wait counts a Pending claim as not ready, so as a release resource it failed every install and upgrade with the switch on (giantswarm/agent-platform#483).
+
+The claim is therefore **applied by a `post-install,post-upgrade` hook Job** (`templates/model-serving/cache-pvc.yaml`; the hook include `agent-platform.hooks.job`, the identity `<release>-hooks` with `get`, `create`, `patch` on `persistentvolumeclaims` while the claim is the chart's, never `delete`), not rendered as a release resource: `kubectl apply --server-side --force-conflicts` under the field manager `agent-platform-connectivity`, the log says `created` or `present` and the claim's phase, nothing waits for a Bind. It binds where its first consumer schedules — the GPU pool's zone, which is what a zonal volume needs. What follows from the claim not being Helm's:
+
+- an uninstall or a `cache.enabled` flip leaves it — the intent of the `helm.sh/resource-policy: keep` it carries (hundreds of gigabytes of downloads outlive the release), now by construction;
+- a `size` change is applied by the next upgrade's hook (the StorageClass has to allow expansion); a change to an immutable field (`storageClassName`, `accessModes`, `volumeName`) fails the hook — and the release — naming the field;
+- an installation upgrading from a chart that rendered the claim as a release resource keeps it (the keep policy) and the hook takes its fields over;
+- `existingClaim` names a claim of the operator's instead: nothing is applied, the name is published to model-manager and the portal.
+
+`make verify-serving-slice` asserts the hook, its claim, the identity and the knobs, and that `cache.enabled: false` or an `existingClaim` render none of it; `make verify-wiring` the serving shape without a `PersistentVolumeClaim` object.
 
 ## Voluntary disruption
 

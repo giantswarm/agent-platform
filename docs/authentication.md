@@ -470,3 +470,13 @@ route. An installation whose issuer is external to the cluster points
 `kagent.controllerRoute.jwtAuthentication.enabled: false` is the off switch for
 local development without a front proxy: no policy, no transformation, the
 controller trusts `x-user-id` as sent — never the fleet shape.
+
+## 6. The models Gateway
+
+A model served by the serving slice (`examples/serving-slice.yaml`, giantswarm/agent-platform#326) is reached through its own edge, the `models` Gateway on `models.<cluster>.<base domain>`, never through muster or the platform's edge. Its one boundary is the `AgentgatewayPolicy` `models-jwt` on the Gateway itself — `Strict`, `strategy.inheritance: Override`, so every `LLMInferenceService` route KServe attaches inherits it and none can weaken it:
+
+- **Issuer**: the platform's Dex (`global.identity.issuerUrl`), the JWKS fetched from the issuer's public host on 443 by default (`modelServing.modelsGateway.jwtAuthentication.jwks`; TLS implied by the port, no `gateway.jwksEgress` needed). The fetch is the **agentgateway controller's**, not the data plane's: the controller resolves the `models-jwks` backend, fetches the key set and pushes the keys to the data plane over xDS, so the controller's network policy admits the issuer's host on 443 by name in every release that runs the controller — the platform's release beside the slice on the installation's own cluster, the slice's own on a workload cluster (giantswarm/agent-platform#505). A failed fetch pushes an empty key set and every token is refused `401 token uses the unknown key`; the signal is the `models-jwt` policy's `Accepted` condition (`reason: Valid`; `PartiallyValid` names the JWKS URL) and the controller's `error fetching jwks` line — `make live-serving-slice` reads both. An in-cluster host and port follow the rules of section 4.
+- **Audience**: `dex-k8s-authenticator` only — the installation's login client, whose id_token a person holds after the Dex login (kubectl, the portal). Unlike the agent-manager route (section 5), which accepts any audience because its callers hold tokens of their own clients, a model is called by people and by the platform on their behalf with the login token; a token minted for another client is refused.
+- **Outcome**: `200` with a valid id_token, `401` without one or with an expired, foreign-issuer or wrong-audience token — at the edge, before the request reaches the predictor. The data plane strips the `Authorization` header once verified: the model server logs no bearer.
+
+`POST https://models.<cluster>.<base domain>/<namespace>/<model>/v1/chat/completions` with `Authorization: Bearer <id_token>` is the whole contract.

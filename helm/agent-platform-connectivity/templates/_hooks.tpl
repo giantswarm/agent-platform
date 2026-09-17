@@ -1,21 +1,26 @@
 {{/*
 The hook Jobs of this release, and their one identity.
 
-Two hooks: the Agent Substrate bootstrap (templates/substrate/bootstrap.yaml,
+Three hooks: the Agent Substrate bootstrap (templates/substrate/bootstrap.yaml,
 pre-install + pre-upgrade — mints the CA and JWT pools, the actor-identity trust
 anchor and ate-api-server's authentication config the Substrate pods mount and
-cannot start without, once, and keeps them) and the derived Postgres connection
+cannot start without, once, and keeps them), the derived Postgres connection
 Secrets of postgres.databases (templates/postgres/databases-hook.yaml,
 post-install + post-upgrade — copies the CNPG <cluster>-app Secret per database,
-which the operator mints for the initdb database only). Both run under the
+which the operator mints for the initdb database only) and the Hugging Face
+cache claim of model serving (templates/model-serving/cache-pvc.yaml,
+post-install + post-upgrade — applies the consumer-less claim outside Helm's
+wait, which would otherwise wait for a Bind that only the first predictor brings;
+#483). All run under the
 restricted pod security profile (this chart's Jobs have to be admitted where
 restricted PSS is enforced — the hook pods themselves violate nothing) as the
 ServiceAccount <release>-hooks (templates/substrate/hooks-rbac.yaml): a
-ClusterRole on secrets, configmaps and namespaces — the bootstrap writes into
-two namespaces the substrate release has not created yet and the databases
-hook into the namespaces of postgres.databases.*.secretNamespaces, none of
-which exist when a pre-install hook's Roles would have to — created for each
-hook event and removed with it (hook-succeeded).
+ClusterRole on secrets, configmaps and namespaces (and on persistentvolumeclaims
+while the cache claim is this chart's) — the bootstrap writes into two
+namespaces the substrate release has not created yet and the databases hook
+into the namespaces of postgres.databases.*.secretNamespaces, none of which
+exist when a pre-install hook's Roles would have to — created for each hook
+event and removed with it (hook-succeeded).
 
 Weights: -5 the identity, 0 the Jobs. before-hook-creation clears a previous
 run's Job (a failed one is left for inspection until the next attempt),
@@ -47,7 +52,7 @@ Usage of the Job include (a dict):
 Whether this release renders any hook Job — and with it the hook identity.
 */}}
 {{- define "agent-platform.hooks.enabled" -}}
-{{- if or (include "agent-platform.substrate.enabled" .) (include "agent-platform.postgres.databases" . | fromJsonArray) -}}true{{- end -}}
+{{- if or (include "agent-platform.substrate.enabled" .) (include "agent-platform.postgres.databases" . | fromJsonArray) (include "agent-platform.modelServing.cacheClaimManaged" .) -}}true{{- end -}}
 {{- end -}}
 
 {{- define "agent-platform.hooks.job" -}}

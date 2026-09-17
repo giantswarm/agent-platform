@@ -1,0 +1,35 @@
+{{- /* The ONE metrics policy of the data-plane Gateway: the custom Prometheus
+labels on every metric the data plane emits (gateway.metricLabels;
+agent-platform.metricLabels builds and guards the list). Gateway-scoped because
+frontend.metrics may target only a Gateway, and apart from the LLM path's policy
+because the data plane honours one metrics policy per Gateway — labels replace
+rather than merge, and of two policies one is dropped in silence (which one has
+changed between agentgateway releases) — so no other policy of this chart
+carries a frontend.metrics section (verify-metric-labels asserts it). Not
+rendered without a data plane or with nothing to add. Name and expression go
+through toYaml, so a boolean-looking name (`on`) is quoted. */ -}}
+{{- if (include "agent-platform.ingress.agentgateway" .) }}
+{{- $labels := include "agent-platform.metricLabels" . | fromYamlArray }}
+{{- if $labels }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}
+  frontend:
+    metrics:
+      attributes:
+        add:
+          {{- range $labels }}
+          - name: {{ .name | toYaml }}
+            expression: {{ .expression | toYaml }}
+          {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,47 @@
+# Qwen3 4B Instruct, BF16. The small-GPU generalist: one 24 GB GPU (an L4),
+# tools on. No image: the predictor runs the mirrored llm-d-cuda the
+# well-known LLMInferenceServiceConfig names (components.kserve-runtime-configs).
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-4b-instruct
+spec:
+  displayName: Qwen3 4B Instruct
+  description: |
+    Dense 4B instruct model at BF16 (~8 GiB of weights), non-thinking, tool
+    calling on (hermes parser — agents always send tools, and vLLM answers
+    400 without --enable-auto-tool-choice). Tuned for one 24 GB GPU of the
+    L4 class (--gpu-memory-utilization=0.90, 16k context) under the nvidia
+    RuntimeClass the serving slice sets (modelServing.serving.runtimeClassName).
+    Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+    node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+    follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+    requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+    its host memory is the runtime and the weights passing through the page
+    cache; the KV cache lives on the GPU.
+  model:
+    id: Qwen/Qwen3-4B-Instruct-2507
+    storageUri: hf://Qwen/Qwen3-4B-Instruct-2507
+    format: vLLM
+    contextLength: 16384
+    capabilities: [chat, tools]
+    license: apache-2.0
+  args:
+    - --gpu-memory-utilization=0.90
+    - --max-model-len=16384
+    - --no-enable-log-requests
+    # kagent agents call /v1/chat/completions with tools and tool_choice auto;
+    # without a parser vLLM rejects every agent request (400).
+    - --enable-auto-tool-choice
+    - --tool-call-parser=hermes
+  resources:
+    gpus: 1
+    requests:
+      cpu: "2"
+      memory: 10Gi
+    limits:
+      cpu: "4"
+      memory: 12Gi
+  requirements:
+    weightsGiB: 8
+    overheadGiB: 12

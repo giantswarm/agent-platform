@@ -25,6 +25,51 @@ README.
 |------------|------|---------|
 |  | flux-engine | 0.1.0 |
 
+## One release per target cluster
+
+The serving slice ([#326](https://github.com/giantswarm/agent-platform/issues/326)) and the runtime slice
+([#317](https://github.com/giantswarm/agent-platform/issues/317)) are values profiles of this chart that cluster-manager
+installs as **one `<cluster>-agent-platform` release per target cluster**, the slices as toggles in its values — created
+with the first slice, its values updated in place when the second is switched on, never two releases of the chart on one
+cluster (both slices need agentgateway's cluster-scoped CRDs, which have exactly one owner). Such a release runs beside
+the platform's own release on the installation's cluster, or installs onto a workload cluster that runs no Flux
+([#328](https://github.com/giantswarm/agent-platform/issues/328), bumblebee-plans#46). Four knobs serve that shape:
+
+- **`gitops.target.kubeConfig.secretRef`** — the target cluster. Set `name` (and `key` when the Secret's key is not
+  helm-controller's default) to the kubeconfig Secret of the target in the release namespace — the fleet's
+  `<cluster>-kubeconfig` — and every component HelmRelease this chart renders carries `spec.kubeConfig.secretRef`
+  verbatim, the connectivity release included: the installation's helm-controller installs each component into the
+  target from the OCIRepositories in the release namespace, `dependsOn` intact, `install.createNamespace` creating the
+  target namespaces there, the connectivity chart's `lookup` / Capabilities guards evaluated against the target. Unset,
+  the render is byte-identical to a chart without the key. The bundled engine is refused with it (`components.flux.enabled`
+  must be `false`: no Flux is installed into a workload cluster, nor into a cluster that runs one), and no Helm hook of
+  this chart renders with it (a hook Job runs where the chart is installed, not on the target).
+- **`components.muster.enabled`, `components.dicebear.enabled`** (default `true`) — a slice release turns them off: the
+  installation's muster serves every agent, the avatars are the portal's. The connectivity chart reads the same roster
+  and renders none of their wiring while they are off (muster's `/mcp` route and egress policy, every policy rule that
+  selects its pods, the avatars host in the portal's CSP). `components.agentgateway.enabled` follows the target: **on**
+  for a workload cluster, **off** beside the platform's release, which owns the controller and its CRDs.
+- **`components.<name>.ownedCrds`** — one owner per cluster-scoped component. When a CRD a component installs already
+  exists on the cluster the chart renders against and its Flux labels (`helm.toolkit.fluxcd.io/name`, `/namespace` —
+  helm-controller stamps them on every object of a release, `crds/` included) name another HelmRelease than the one this
+  render produces, the render fails naming that release: remove it first, or turn the component off in this release.
+  Skipped with the target knob, where the render's lookups see the installation while the components land on the target
+  (what the target already runs is the composer's to detect). A CRD without the labels is left to Helm as before.
+  `components.gpu-operator` adds its own guard on the same principle — a `ClusterPolicy`, HelmRelease or App of the
+  operator that is not this release's fails the render naming the handover (root README, "The GPU operator").
+
+`make verify-target` asserts the offline half (`tests/verify-target.py`): the knob's stamp and byte-identity, the
+toggles on both charts, the engine guard, the hooks, the serving- and runtime-shaped toggle sets alone, combined and
+targeted (`ci/test-slice-*-values.yaml`, `ci/test-target-values.yaml`). The two `lookup` guards need a cluster — on one
+that runs Flux (the agentlab, an installation), from a checkout:
+
+```sh
+# a foreign helm-controller with the bundled engine on → "this cluster runs Flux; set components.flux.enabled=false …"
+helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server -f helm/agent-platform/ci/ci-values.yaml
+# a second owner of a component's CRDs → "… has exactly one owner per cluster … belongs to HelmRelease <ns>/<name>. Remove that release first …"
+helm install t helm/agent-platform -n ap-guard --create-namespace --dry-run=server -f helm/agent-platform/ci/test-slice-serving-values.yaml --set components.agentgateway.enabled=true
+```
+
 ## Agent Substrate: worker capacity
 
 On kagent API v2 an agent runs as an Agent Substrate actor inside a gVisor worker
@@ -83,6 +128,42 @@ admission, silently**, and the render refuses it instead
 (`agent-platform.validateWorkerPool`). See UPGRADE.md, "the Generic chart's
 per-agent placement values are gone, capacity is the WorkerPool".
 
+### The worker image follows the chart's Substrate pin (giantswarm/agent-platform#466)
+
+The pool's `workerImage` — the gVisor worker every actor runs in — is **derived by
+this chart** from `components.substrate.versionRange`'s floor:
+`<substrate.image.registry>/ateom-gvisor:<floor>` (`ghcr.io/giantswarm/substrate/
+ateom-gvisor:0.0.30-gs.4` today), merged over the kagent block the chart forwards.
+The kagent chart stamps a worker of its own at publish (the Substrate its build was
+published against), and that stamp never reaches the cluster: the atelet the
+substrate release installs and the worker the WorkerPool runs are one Substrate
+release **whatever kagent build the kagent range admits**. Chart 4.15.2 showed
+why — its open kagent range admitted 0.11.0-gs.14, which stamped a 0.0.30 worker
+under the chart's 0.0.27 atelet; Substrate 0.0.30 had renamed the pause bundle,
+every golden boot failed on `bundles/_pause/config.json`, every AgentTemplate
+stayed `Ready=False … compiling`, and nothing on any hop named the skew.
+
+What follows from it:
+
+- **`kagent.substrateWorkerPool.workerImage` stays empty.** An installation that
+  sets it names an `ateom-gvisor` image **tagged with the pinned release** (a mirror
+  by a path other than `substrate.image.registry`, which the derived image already
+  follows); another tag, or a digest alone, fails the render naming the key, the
+  release and the derived image.
+- **The Substrate range confines one release**: an exact version (the BOM's
+  `0.0.30-gs.4`) or `>=X.Y.Z-gs.N <X.Y.(Z+1)-0`. The worker follows the floor and
+  the atelet follows what Flux resolves, so a later `gs.N` of the pinned release may
+  reach the control plane ahead of the worker (the line moves the pin when a patch
+  changes the runtime) and a `0.0.31` never does. `0.x`, `~`, `^`, a `<=` ceiling
+  or a floor alone fail the render (`agent-platform.substrate.validateRange`).
+- **A Substrate re-pin is one values change**, `components.substrate.versionRange`
+  and `components.substrate-crds.versionRange` together; it **rolls the pool once**
+  (the WorkerPool's `workerImage` changes; one worker at a time under the budget, a
+  turn in flight on a replaced worker is lost). The kagent range moves on its own,
+  when the kagent line's pin moves — `make verify-worker-image` fails the day the
+  kagent build the range admits was published against another Substrate release
+  than the chart pins (its `Chart.yaml` names it), so the two are moved together.
+
 ### The one pool is the failure domain (giantswarm/agent-platform#472)
 
 Every agent runs on this one pool, and a worker that goes loses the turn in flight
@@ -126,18 +207,20 @@ up, about three when Karpenter has to launch one). A turn in flight on a replace
 worker is lost, a session paused on it too; the goldens are untouched (a template
 change re-snapshots nothing). Land it in a quiet window.
 
-**Spread.** `WorkerPool.spec.template` carries no `topologySpreadConstraints` or
-`podAntiAffinity` in any published release of the Substrate line yet — the CRD
-prunes both silently. The render **refuses the two keys** naming the key and the
-range until `components.substrate.versionRange`'s floor is the release that
-carries them (the carried patch giantswarm/giantswarm#37797;
-`agent-platform.substrate.workerPoolSpreadFloor` names it once it is out), and
-forwards them verbatim from then on. Recommended once available: hostname
-`maxSkew: 1`, `minDomains: 2`, `whenUnsatisfiable: DoNotSchedule` (Karpenter
-provisions the second node) and zone `maxSkew: 1`, `ScheduleAnyway`, both with a
-`labelSelector` on `ate.dev/worker-pool: <name>`. `make verify-workerpool`
-asserts all of it: the budget, the two knobs reaching the kagent release and the
-`WorkerPool` verbatim, the refused keys, still exactly one `WorkerPool`.
+**Spread.** `WorkerPool.spec.template` carries `topologySpreadConstraints` and
+`podAntiAffinity` from Substrate `0.0.30-gs.2` (the carried patch
+giantswarm/giantswarm#37797) — every release before it prunes both silently. The
+render **refuses the two keys** naming the key, the floor and the range while
+`components.substrate.versionRange`'s floor is below that release
+(`agent-platform.substrate.workerPoolSpreadFloor` names it), and forwards them
+verbatim from it on. Recommended: hostname `maxSkew: 1`, `minDomains: 2`,
+`whenUnsatisfiable: DoNotSchedule` (the provisioner adds the second node) and
+zone `maxSkew: 1`, `ScheduleAnyway`, both with a `labelSelector` on
+`ate.dev/worker-pool: <name>` — what the fleet template renders behind its knob.
+A spread is a template change and rolls the pool's Deployment once (above).
+`make verify-workerpool` asserts all of it: the budget, the two knobs reaching the
+kagent release and the `WorkerPool` verbatim, the spread refused below the floor
+and forwarded at it, still exactly one `WorkerPool`.
 
 ## Voluntary disruption
 
@@ -191,6 +274,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gitops.namespace | string | `""` |  |
 | gitops.targetNamespace | string | `""` |  |
 | gitops.serviceAccountName | string | `""` |  |
+| gitops.target.kubeConfig.secretRef.name | string | `""` |  |
+| gitops.target.kubeConfig.secretRef.key | string | `""` |  |
 | gitops.hooks.image.registry | string | `"registry.k8s.io"` |  |
 | gitops.hooks.image.repository | string | `"kubectl"` |  |
 | gitops.hooks.image.tag | string | `"v1.37.0"` |  |
@@ -213,11 +298,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.driftDetection.mode | string | `"enabled"` |  |
+| components.muster.enabled | bool | `true` |  |
+| components.muster.ownedCrds[0] | string | `"mcpservers.muster.giantswarm.io"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agentgateway.versionRange | string | `"2.x"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
 | components.agentgateway.enabled | bool | `false` |  |
+| components.agentgateway.ownedCrds[0] | string | `"agentgatewaypolicies.agentgateway.dev"` |  |
 | components.agentgateway.crds | string | `"CreateReplace"` |  |
 | components.valkey.chart | string | `"valkey"` |  |
 | components.valkey.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
@@ -260,15 +348,16 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.versionRange | string | `">=0.11.0-gs.16 <0.11.1-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
+| components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.30-gs.4 <0.0.31-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://ghcr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.30-gs.1 <0.0.31-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.30-gs.4 <0.0.31-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -294,9 +383,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=0.20.0 <1.0.0"` |  |
+| components.model-manager.versionRange | string | `">=0.23.0 <1.0.0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
-| components.model-manager.enabled | bool | `false` |  |
+| components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
 | components.model-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.model-manager.dependsOn[2] | string | `"kserve-resources"` |  |
@@ -315,6 +404,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
 | components.vm-manager.gatedValues[0] | string | `"vm-manager"` |  |
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
+| components.cluster-manager.chart | string | `"cluster-manager"` |  |
+| components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.cluster-manager.versionRange | string | `">=0.4.2 <1.0.0"` |  |
+| components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
+| components.cluster-manager.enabled | bool | `false` |  |
+| components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
+| components.cluster-manager.gatedValues[0] | string | `"cluster-manager"` |  |
+| components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.backstage.versionRange | string | `">=1.0.0 <3.0.0"` |  |
@@ -348,6 +445,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-crd.versionRange | string | `"0.2.x"` |  |
 | components.kserve-crd.valuesFrom | string | `"kserve-crd"` |  |
 | components.kserve-crd.enabled | bool | `false` |  |
+| components.kserve-crd.ownedCrds[0] | string | `"inferenceservices.serving.kserve.io"` |  |
 | components.kserve-resources.chart | string | `"kserve-resources"` |  |
 | components.kserve-resources.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.kserve-resources.versionRange | string | `"0.2.x"` |  |
@@ -359,6 +457,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-llmisvc-crd.versionRange | string | `"0.2.x"` |  |
 | components.kserve-llmisvc-crd.valuesFrom | string | `"kserve-llmisvc-crd"` |  |
 | components.kserve-llmisvc-crd.enabled | bool | `false` |  |
+| components.kserve-llmisvc-crd.ownedCrds[0] | string | `"llminferenceservices.serving.kserve.io"` |  |
 | components.kserve-llmisvc-resources.chart | string | `"kserve-llmisvc-resources"` |  |
 | components.kserve-llmisvc-resources.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.kserve-llmisvc-resources.versionRange | string | `"0.2.x"` |  |
@@ -367,12 +466,29 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-llmisvc-resources.dependsOn[0] | string | `"kserve-crd"` |  |
 | components.kserve-llmisvc-resources.dependsOn[1] | string | `"kserve-llmisvc-crd"` |  |
 | components.kserve-llmisvc-resources.dependsOn[2] | string | `"kserve-resources"` |  |
+| components.kserve-runtime-configs.chart | string | `"kserve-runtime-configs"` |  |
+| components.kserve-runtime-configs.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.kserve-runtime-configs.versionRange | string | `"0.2.x"` |  |
+| components.kserve-runtime-configs.valuesFrom | string | `"kserve-runtime-configs"` |  |
+| components.kserve-runtime-configs.enabled | bool | `false` |  |
+| components.kserve-runtime-configs.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
 | components.modelServing.enabled | bool | `false` |  |
+| components.gpu-operator.chart | string | `"gpu-operator"` |  |
+| components.gpu-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.gpu-operator.versionRange | string | `"1.x"` |  |
+| components.gpu-operator.valuesFrom | string | `"gpu-operator"` |  |
+| components.gpu-operator.valuesKey | string | `"gpu-operator"` |  |
+| components.gpu-operator.injectGlobal | bool | `false` |  |
+| components.gpu-operator.enabled | bool | `false` |  |
+| components.gpu-operator.targetNamespace | string | `"kube-system"` |  |
+| components.gpu-operator.crds | string | `"CreateReplace"` |  |
+| components.gpu-operator.ownedCrds[0] | string | `"clusterpolicies.nvidia.com"` |  |
 | components.dicebear.chart | string | `"dicebear"` |  |
 | components.dicebear.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.dicebear.versionRange | string | `"0.x"` |  |
 | components.dicebear.valuesFrom | string | `"dicebear"` |  |
 | components.dicebear.injectGlobal | bool | `false` |  |
+| components.dicebear.enabled | bool | `true` |  |
 | components.agent-platform-connectivity.chart | string | `"agent-platform-connectivity"` |  |
 | components.agent-platform-connectivity.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agent-platform-connectivity.releasedWithChart | bool | `true` |  |
@@ -381,6 +497,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.disableWaitForJobs | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
 | components.agent-platform-connectivity.omitKeys[1] | string | `"scheduling"` |  |
+| components.agent-platform-connectivity.omitKeys[2] | string | `"gpu-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[3] | string | `"kserve-runtime-configs"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -436,7 +554,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
-| gateway.parameters.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| gateway.parameters.replicas | int | `2` |  |
+| gateway.parameters.podDisruptionBudget.enabled | bool | `true` |  |
+| gateway.parameters.spread.enabled | bool | `true` |  |
+| gateway.parameters.spread.topologyKeys[0] | string | `"kubernetes.io/hostname"` |  |
+| gateway.parameters.spread.maxSkew | int | `1` |  |
+| gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
+| gateway.parameters.podAnnotations | object | `{}` |  |
+| gateway.metricLabels.agent.enabled | bool | `true` |  |
+| gateway.metricLabels.agent.expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
+| gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |
+| gateway.metricLabels.agent_namespace.expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| gateway.metricLabels.user.enabled | bool | `true` |  |
+| gateway.metricLabels.user.expression | string | `"jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -449,10 +579,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
 | llmRouting.routes.* | string | `"Passthrough"` |  |
-| llmRouting.metricLabels[0].name | string | `"agent"` |  |
-| llmRouting.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
-| llmRouting.metricLabels[1].name | string | `"agent_namespace"` |  |
-| llmRouting.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
 | llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
@@ -884,7 +1010,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
 | klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.agentgateway.enabled | bool | `false` |  |
-| klausGateway.crd.install | bool | `true` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
 | klausGateway.routing.defaultTTL | string | `"24h"` |  |
 | klausGateway.lifecycle.driver | string | `"static"` |  |
@@ -924,6 +1049,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
+| agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
@@ -947,7 +1073,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentSandbox.podSecurity.containerSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentSandbox.podSecurity.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | model-manager.fullnameOverride | string | `"model-manager"` |  |
-| model-manager.backend | string | `"ollama"` |  |
 | model-manager.ollama.endpoint | string | `""` |  |
 | model-manager.ollama.agentHost | string | `""` |  |
 | model-manager.lemonade.endpoint | string | `""` |  |
@@ -986,9 +1111,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelManager.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
+| modelManager.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.registeredBackends | list | `[]` |  |
 | vm-manager.fullnameOverride | string | `"vm-manager"` |  |
 | vm-manager.persistence.existingClaim | string | `""` |  |
 | vm-manager.persistence.create | bool | `false` |  |
@@ -1048,11 +1175,30 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.1.5"` |  |
+| agentManager.migration.image.tag | string | `"1.1.7"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
 | agentManager.migration.githubToken.key | string | `"token"` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
+| cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
+| cluster-manager.installation.name | string | `""` |  |
+| cluster-manager.mcp.enabled | bool | `true` |  |
+| cluster-manager.oauth.enabled | bool | `true` |  |
+| cluster-manager.oauth.provider | string | `"dex"` |  |
+| cluster-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| cluster-manager.oauth.downstream.enabled | bool | `true` |  |
+| cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
+| cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
+| clusterManager.flux.requireApi | bool | `false` |  |
+| clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.cidrs | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.ports[0] | int | `443` |  |
+| clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
+| clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
+| clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |
@@ -1134,6 +1280,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kserve-resources.kserve.controller.gateway.disableIngressCreation | bool | `true` |  |
 | kserve-llmisvc-resources.kserve.createSharedResources | bool | `false` |  |
 | kserve-llmisvc-resources.kserve.llmisvc.createGIECRDs | bool | `true` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.enabled | bool | `true` |  |
+| kserve-runtime-configs.kserve.servingruntime.enabled | bool | `false` |  |
+| gpu-operator.driver.enabled | bool | `false` |  |
+| gpu-operator.toolkit.enabled | bool | `false` |  |
 | modelServing.kserve.requireApi | bool | `true` |  |
 | modelServing.namespace.name | string | `"model-serving"` |  |
 | modelServing.namespace.create | bool | `true` |  |
@@ -1173,6 +1323,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.serving.nodeSelector | object | `{}` |  |
 | modelServing.serving.deploymentStrategyType | string | `"Recreate"` |  |
 | modelServing.serving.timeoutSeconds | int | `1800` |  |
+| modelServing.gpuPool.taint.key | string | `"nvidia.com/gpu"` |  |
+| modelServing.gpuPool.taint.value | string | `""` |  |
+| modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
+| modelServing.gpuPool.nodeSelector | object | `{}` |  |
 | modelServing.presets | list | `[]` |  |
 | modelServing.shippedPresets.enabled | bool | `true` |  |
 | modelServing.shippedPresets.exclude | list | `[]` |  |
@@ -1183,20 +1337,35 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.cache.pvc.storageClassName | string | `""` |  |
 | modelServing.cache.pvc.volumeName | string | `""` |  |
 | modelServing.cache.pvc.accessModes[0] | string | `"ReadWriteOnce"` |  |
+| modelServing.cache.fsGroup | int | `1000` |  |
 | modelServing.policies.enabled | string | `"auto"` |  |
-| modelServing.policies.cacheInit.image.registry | string | `"gsoci.azurecr.io"` |  |
-| modelServing.policies.cacheInit.image.name | string | `"giantswarm/alpine"` |  |
-| modelServing.policies.cacheInit.image.version | string | `"3.24.1"` |  |
-| modelServing.policies.cacheInit.resources.requests.cpu | string | `"10m"` |  |
-| modelServing.policies.cacheInit.resources.requests.memory | string | `"16Mi"` |  |
-| modelServing.policies.cacheInit.resources.limits.cpu | string | `"100m"` |  |
-| modelServing.policies.cacheInit.resources.limits.memory | string | `"64Mi"` |  |
 | modelServing.policies.storageInitializerMemoryLimit | string | `"4Gi"` |  |
 | modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
+| modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
+| modelServing.policies.env[0].value | string | `"1"` |  |
 | modelServing.networkPolicy.predictor.port | int | `8080` |  |
 | modelServing.networkPolicy.predictor.additionalIngressNamespaces | list | `[]` |  |
+| modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
+| modelServing.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelServing.networkPolicy.huggingFace.cidrs | list | `[]` |  |
+| modelServing.modelsGateway.enabled | bool | `false` |  |
+| modelServing.modelsGateway.name | string | `"models"` |  |
+| modelServing.modelsGateway.hostPrefix | string | `"models"` |  |
+| modelServing.modelsGateway.gatewayClassName | string | `""` |  |
+| modelServing.modelsGateway.tls.secretName | string | `""` |  |
+| modelServing.modelsGateway.tls.issuerRef.name | string | `""` |  |
+| modelServing.modelsGateway.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
+| modelServing.modelsGateway.tls.issuerRef.group | string | `"cert-manager.io"` |  |
+| modelServing.modelsGateway.externalDns.enabled | bool | `true` |  |
+| modelServing.modelsGateway.jwtAuthentication.mode | string | `"Strict"` |  |
+| modelServing.modelsGateway.jwtAuthentication.issuer | string | `""` |  |
+| modelServing.modelsGateway.jwtAuthentication.audiences[0] | string | `"dex-k8s-authenticator"` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.host | string | `""` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.port | int | `443` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.path | string | `"/keys"` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
+| modelServing.modelsGateway.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |

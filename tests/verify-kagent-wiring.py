@@ -209,7 +209,7 @@ def check_forwarded_block(values: dict[str, list[str]], omitted: set[str]) -> No
     print("ok: forwarded kagent values are flat, carry no umbrella-only key, keep the shared keys")
 
 
-def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent: str) -> None:
+def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent: str, substrate_range: str) -> None:
     if scalar(values.get("registry", []), "registry") != "ghcr.io":
         fail("kagent.registry is not ghcr.io (the line's images live under ghcr.io/giantswarm/kagent)")
     controller = values.get("controller", [])
@@ -226,9 +226,16 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
              "label (the stamps — tag, controller.agentImage.digest, harness.create, the kagent-images ConfigMap — came with "
              "0.11.0-gs.6; the empty-value drop that removes kagent.dev/harness from the platform Harness's selector with 0.11.0-gs.9, "
              "giantswarm/agent-platform#418); the floor is 0.11.0-gs.9")
-    if re.search(r"^workerImage:", "\n".join(values.get("substrateWorkerPool", [])), re.M):
-        fail("kagent.substrateWorkerPool.workerImage forwarded by default; the chart stamps the gVisor worker of the Substrate "
-             "version it was built against — the key travels only when an installation sets it (components.kagent.omitEmptyKeys)")
+    # The worker image is the meta chart's derivation from its own Substrate pin
+    # (giantswarm/agent-platform#466; tests/verify-worker-image.py holds the rule).
+    worker = re.search(r"^workerImage: ghcr\.io/giantswarm/substrate/ateom-gvisor:(\S+)$", "\n".join(values.get("substrateWorkerPool", [])), re.M)
+    if not worker:
+        fail("kagent.substrateWorkerPool.workerImage is not forwarded as ghcr.io/giantswarm/substrate/ateom-gvisor:<the floor of "
+             "components.substrate.versionRange>; the chart derives the worker from its own Substrate pin so the worker and the atelet "
+             "are one Substrate release whatever kagent build the range admits (giantswarm/agent-platform#466)")
+    if worker.group(1) != substrate_range.split()[0].lstrip(">="):
+        fail(f"kagent.substrateWorkerPool.workerImage tag {worker.group(1)!r} is not the floor of the substrate OCIRepository's range "
+             f"{substrate_range!r}; the worker follows the chart's Substrate pin (giantswarm/agent-platform#466)")
     harness = "\n".join(values.get("harness", []))
     if not re.search(r"^create: true$", harness, re.M):
         fail("kagent.harness.create is not true; since 4.8.0 the kagent chart renders the platform Harness")
@@ -378,16 +385,18 @@ def check_drift_detection(docs) -> None:
 def main(path: str) -> int:
     docs = documents(open(path, encoding="utf-8").read())
     for kind, name in (("HelmRelease", "kagent"), ("HelmRelease", "kagent-crds"), ("OCIRepository", "kagent"),
-                       ("OCIRepository", "kagent-crds"), ("HelmRelease", "agent-platform-connectivity"), ("HelmRelease", "substrate")):
+                       ("OCIRepository", "kagent-crds"), ("HelmRelease", "agent-platform-connectivity"), ("HelmRelease", "substrate"),
+                       ("OCIRepository", "substrate")):
         if (kind, name) not in docs:
             fail(f"no {name} {kind} in the render")
     values = forwarded_values(docs[("HelmRelease", "kagent")])
     _, kagent_range, _ = source(docs[("OCIRepository", "kagent")])
+    _, substrate_range, _ = source(docs[("OCIRepository", "substrate")])
     conn = docs[("HelmRelease", "agent-platform-connectivity")]
     conn_kagent = connectivity_block(conn, "kagent")
     check_forwarded_block(values, omit_keys())
     check_sources(docs, kagent_range)
-    check_one_build(values, kagent_range, conn_kagent)
+    check_one_build(values, kagent_range, conn_kagent, substrate_range)
     check_retired_keys(values, conn_kagent)
     check_substrate_pins(docs)
     check_take_ownership(docs)
