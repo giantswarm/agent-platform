@@ -347,6 +347,38 @@ gateway:
     # the 55 s deadline) rather than carried over. Set
     # `karpenter.sh/do-not-disrupt: "true"` here to trade node churn for them again.
     podAnnotations: {}  # @schema additionalProperties: true
+  # === Metric labels ===
+  # Custom Prometheus labels on every metric the data plane emits, from ONE
+  # Gateway-scoped AgentgatewayPolicy, <release>-metrics
+  # (templates/agentgateway/metrics-policy.yaml). agentgateway honours one
+  # metrics policy per Gateway — labels replace, they never merge — so every
+  # label the platform wants lives here, whichever route it describes. A map
+  # keyed by label name (Helm merges maps: one entry off, or one more, without
+  # restating the rest); each entry is {expression: <one-line CEL>,
+  # enabled: <bool, absent = true>}. The expression goes through tpl ({{ is
+  # Helm's). An entry that reads `jwt` renders only while a route of the
+  # Gateway verifies a bearer (it would read `unknown` otherwise). At most 16
+  # enabled; a name the data plane or the scrape already sets is refused.
+  # README "Metric labels".
+  metricLabels:  # @schema additionalProperties: {"type": "object", "additionalProperties": false, "properties": {"expression": {"type": "string"}, "enabled": {"type": "boolean"}}}
+    # Which agent made the call: the caller resolved by source IP against the
+    # agentgateway controller's workload store — not cryptographic, for
+    # accounting, never authorization. The LLM usage dashboard reads both.
+    agent:
+      enabled: true
+      expression: source.unverifiedWorkload.serviceAccount
+    agent_namespace:
+      enabled: true
+      expression: source.unverifiedWorkload.namespace
+    # The person behind the call: the identity claim the kagent controller route
+    # verifies and writes into x-user-id (kagent.controller.auth.userIdClaim, a
+    # bare identifier — the same knob names the claim on the managers' routes,
+    # kagent on or off).
+    # An email address in Mimir is personal data, and the label multiplies the
+    # verifying routes' series by the number of people: `enabled: false` drops it.
+    user:
+      enabled: true
+      expression: 'jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -426,19 +458,6 @@ llmRouting:
     "/v1/messages": Messages
     "/v1/messages/count_tokens": AnthropicTokenCount
     "*": Passthrough
-  # Custom Prometheus labels on every metric the data plane emits: which agent
-  # made the call. The expression resolves the caller by source IP against the
-  # agentgateway controller's own workload store (built from cluster Pods, no
-  # Istio). The identity is NOT cryptographic — it is adequate for accounting
-  # and must never be used for authorization. An unknown caller IP, or a failed
-  # expression, renders the label value `unknown` and keeps the series.
-  # Cardinality equals the number of agents; pod name is deliberately absent.
-  # At most 16 entries (the CRD's limit).
-  metricLabels:
-    - name: agent
-      expression: source.unverifiedWorkload.serviceAccount
-    - name: agent_namespace
-      expression: source.unverifiedWorkload.namespace
   # A MutatingAdmissionPolicy that sends a ModelConfig this chart does NOT
   # render through the LLM listener — one created by Backstage, agent-manager or
   # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs
@@ -1053,6 +1072,34 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         value: "false"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: "X-Scope-OrgID=giantswarm"
+    # VerticalPodAutoscaler on the controller Deployment (templates/kagent/
+    # controller-vpa.yaml), THIS chart's object in the kagent namespace: the
+    # kagent chart has no VPA knob (the #439 pattern of the muster-valkey
+    # budget). `auto` (the default) renders it where the cluster serves
+    # autoscaling.k8s.io/v1 — the VPA CRD is not part of Kubernetes
+    # conformance; an explicit true / false wins. The controller is one
+    # replica behind a budget with minAvailable: 1, so an evicting update mode
+    # could never apply: InPlaceOrRecreate (VPA 1.5+ on Kubernetes 1.33+ with
+    # in-place pod resize) resizes the running pod's requests without an
+    # eviction, and a resize that cannot apply in place falls back to an
+    # eviction the budget refuses — the pod keeps its requests until its next
+    # roll. RequestsOnly leaves the chart's limits alone; minAllowed is the
+    # chart's requests (100m / 128Mi) and maxAllowed stays a step under its
+    # limits (2 / 512Mi): a Burstable pod whose requests reach its limits on
+    # both resources would become Guaranteed, and Kubernetes refuses a resize
+    # that changes the QoS class — so maxAllowed must never equal the limits.
+    # The render refuses an updateMode or controlledValues outside the API's
+    # enum. Inert while components.kagent.enabled is false.
+    vpa:
+      enabled: auto  # auto | true | false
+      updateMode: InPlaceOrRecreate  # Off | Initial | Recreate | InPlaceOrRecreate | Auto
+      controlledValues: RequestsOnly  # RequestsOnly | RequestsAndLimits
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 1900m
+        memory: 480Mi
 
   ui:
     image:
@@ -3012,7 +3059,9 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   #         model:
   #           id: org/My-Model
   #           storageUri: hf://org/My-Model
-  #         args: [--max-model-len=8192]
+  #         # The runtime re-parses each argument through a shell: a value with
+  #         # whitespace or quotes is single-quoted inside one argument.
+  #         args: [--max-model-len=8192, "--default-chat-template-kwargs='{\"enable_thinking\": false}'"]
   #         resources:
   #           gpus: 1
   #         requirements:

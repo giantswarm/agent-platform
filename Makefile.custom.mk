@@ -14,7 +14,7 @@ CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 # prometheus-operator, Gateway API, Envoy Gateway. `helm template` alone serves
 # Helm's built-in set, i.e. renders the vanilla shape; the assertions below that
 # expect the fleet shape pass these. verify-auto covers the resolution itself.
-FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1
+FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1 --api-versions autoscaling.k8s.io/v1
 # parentRefs[0].name satisfies the all-modes ingress guard so a single guard is
 # isolated under test, and the fleet's API groups are served so the fleet shape
 # renders. Neither chart has subcharts anymore, so no `helm dependency build`
@@ -81,7 +81,13 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # default with no backend, so the default render carries its wiring. Both sides
 # render with the component off (a chart that predates the default accepts the
 # key), and verify-managers asserts the default shape and the static forms.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false
+# The tenth intended change (giantswarm/agent-platform#455): the kagent
+# controller VerticalPodAutoscaler this chart renders by default with
+# autoscaling.k8s.io/v1 served (templates/kagent/controller-vpa.yaml). Both
+# sides render with kagent.controller.vpa.enabled=false (a chart that predates
+# the key ignores it, the kagent block is additionalProperties: true), and
+# verify-kagent-vpa asserts the object on, off and inert.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -532,15 +538,18 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 LLM_VM := $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set llmRouting.enabled=true
 
 .PHONY: verify-llm-routing
-verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on renders the listener + routing + metrics, and the guards fire.
+verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the LLM path (the Gateway's metrics policy is not its — verify-metric-labels), on renders the listener + routing, and the guards fire.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> off (default): no LLM listener, route, backend, policy or price ConfigMap"
+	@echo "--> off (default): no LLM listener, route, backend, LLM policy or price ConfigMap"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true >/tmp/vl-off.out 2>&1 || { cat /tmp/vl-off.out; exit 1; }
-	@for pattern in 'AgentgatewayBackend' 'AgentgatewayPolicy' 'sectionName: llm' 'model-catalog' 'modelCatalog'; do \
-		if grep -q "$$pattern" /tmp/vl-off.out; then echo "FAIL: llmRouting is off but the render still contains $$pattern"; exit 1; fi; \
+	@for pattern in 'AgentgatewayBackend' 'name: agent-platform-connectivity-llm$$' '^  backend:$$' 'sectionName: llm' 'model-catalog' 'modelCatalog'; do \
+		if grep -qE -- "$$pattern" /tmp/vl-off.out; then echo "FAIL: llmRouting is off but the render still contains $$pattern"; exit 1; fi; \
 	done
 	@if grep -qE '^      port: 8081$$' /tmp/vl-off.out; then echo "FAIL: the LLM listener renders with llmRouting off"; exit 1; fi
-	@echo "ok: nothing renders"
+	@echo "ok: nothing of the LLM path renders"
+	@echo "--> off, agentgateway on: the Gateway's metrics policy renders all the same (the labels are not the LLM path's)"
+	@grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vl-off.out || { echo "FAIL: the -metrics policy is gated on llmRouting; the controller route's metrics would carry no agent label without LLM routing"; exit 1; }
+	@echo "ok: metrics policy independent of llmRouting"
 	@echo "--> off, agentgateway on: the data-plane PodMonitor still renders (the MCP path is scraped too)"
 	@grep -q 'kind: PodMonitor' /tmp/vl-off.out || { echo "FAIL: the data-plane PodMonitor is gated on llmRouting; the MCP path would never be scraped"; exit 1; }
 	@grep -A12 'agentgateway-dataplane' /tmp/vl-off.out | grep -q 'observability.giantswarm.io/tenant: giantswarm' || { echo "FAIL: the PodMonitor lost the tenant label; alloy-metrics would ignore it"; exit 1; }
@@ -573,15 +582,16 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	elif ! grep -q "must list at least one prefix" /tmp/vl-empty.out; then \
 		echo "FAIL: the empty-prefix-list guard failed for the wrong reason"; cat /tmp/vl-empty.out; exit 1; \
 	else echo "ok: empty-prefix-list guard"; fi
-	@echo "--> the Gateway policy carries the route-type map INCLUDING the wildcard, and both metric labels"
+	@echo "--> the LLM policy carries the route-type map INCLUDING the wildcard, and no metrics section (the Gateway's -metrics policy is the one)"
 	@grep -q '"/v1/messages": Messages' /tmp/vl-on.out || { echo "FAIL: no Messages route type; the gateway would parse Anthropic bodies as OpenAI Completions"; exit 1; }
 	@grep -q '"/v1/messages/count_tokens": AnthropicTokenCount' /tmp/vl-on.out || { echo "FAIL: no AnthropicTokenCount route type"; exit 1; }
 	@grep -q '"\*": Passthrough' /tmp/vl-on.out || { echo "FAIL: no wildcard route type; any other path would fall back to Completions parsing"; exit 1; }
+	@$(METRICS_POLICIES) /tmp/vl-on.out >/tmp/vl-on-metrics.out
+	@[ "$$(cat /tmp/vl-on-metrics.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: the policies with a frontend.metrics section are [$$(tr '\n' ' ' </tmp/vl-on-metrics.out)], not agent-platform-connectivity-metrics alone; the data plane keeps one per Gateway and drops the rest in silence"; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-llm$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out | grep -q 'frontend:' && { echo "FAIL: the LLM policy carries a frontend section; the labels moved to the -metrics policy"; exit 1; } || true
 	@grep -q 'expression: source.unverifiedWorkload.serviceAccount' /tmp/vl-on.out || { echo "FAIL: no agent attribution label"; exit 1; }
 	@grep -q 'expression: source.unverifiedWorkload.namespace' /tmp/vl-on.out || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
-	@if [ "$$(grep -c 'kind: AgentgatewayPolicy' /tmp/vl-on.out)" != "1" ]; then \
-		echo "FAIL: more than one AgentgatewayPolicy targets the Gateway; the loser is silently dropped"; exit 1; \
-	else echo "ok: one policy, route-type map + metric labels"; fi
+	@echo "ok: route-type map on the LLM policy, the labels on the metrics policy"
 	@echo "--> the price ConfigMap renders and the AgentgatewayParameters references it"
 	@grep -q 'name: t-model-catalog' /tmp/vl-on.out || { echo "FAIL: no model-price ConfigMap; every cost lookup would report NoCatalog"; exit 1; }
 	@grep -A4 '^  modelCatalog:' /tmp/vl-on.out | grep -q 'key: catalog.json' || { echo "FAIL: AgentgatewayParameters does not reference the price ConfigMap"; exit 1; }
@@ -663,6 +673,148 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@grep -A8 '^    providers:$$' /tmp/vl-meta-kagent.out | grep -q 'baseUrl: http://agentgateway.default.svc:8081' || { echo "FAIL: the cutover value never reaches the kagent HelmRelease (flat, kagent 0.2.0+: providers.anthropic.config.baseUrl at the values root); the default ModelConfig would stay direct"; exit 1; }
 	@echo "ok: cutover forwarded"
 	@echo "All llmRouting behaviors verified."
+
+# The names of the AgentgatewayPolicy documents of a render that carry a
+# frontend.metrics section, one per line. The data plane honours ONE metrics
+# policy per Gateway (custom labels replace rather than merge; of two policies
+# one is kept and the other dropped in silence, and which one has changed
+# between agentgateway releases), so the platform renders exactly one,
+# <release>-metrics, and no other policy of the chart may carry the section.
+METRICS_POLICIES := python3 -c 'import re,sys; docs=open(sys.argv[1]).read().split("\n---\n"); [print(re.search(r"^  name: (\S+)", d, re.M).group(1)) for d in docs if "kind: AgentgatewayPolicy\n" in d and re.search(r"^  frontend:\n(?:.*\n)*?    metrics:", d, re.M)]'
+# The document of the -metrics policy, from a render.
+METRICS_DOC := awk '/^  name: agent-platform-connectivity-metrics$$/{f=1} f&&/^---/{exit} f'
+# The data plane on, no route verifying a bearer: jwt. entries are held here;
+# KAGENT_ROUTE and MANAGERS_ON + MANAGERS_ROUTES render them.
+AGW_VM := $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true
+# $(call vml_must_fail,<description>,<NAME of a variable holding the flags — JSON has commas, which call would split on>,<message fragment>)
+define vml_must_fail
+	@if helm template t $(CONNECTIVITY_DIR) $($(2)) >/tmp/vml-fail.out 2>&1; then \
+		echo "FAIL: $(1): the render succeeded"; exit 1; \
+	elif ! grep -qF -- "$(3)" /tmp/vml-fail.out; then \
+		echo "FAIL: $(1): failed for the wrong reason"; cat /tmp/vml-fail.out; exit 1; \
+	else echo "ok: $(1)"; fi
+endef
+# $(call vml_must_fail_schema,<description>,<NAME of a variable holding the flags>,<case-insensitive regex, no commas>): a refusal by the
+# schema. Its wording differs between Helm 3 (gojsonschema: "Additional property x is not allowed", "Invalid type. Expected: object, given:
+# string") and Helm 4 ("additional properties 'x' not allowed", "got string, want object"); CI runs one, a laptop may run the other.
+define vml_must_fail_schema
+	@if helm template t $(CONNECTIVITY_DIR) $($(2)) >/tmp/vml-fail.out 2>&1; then \
+		echo "FAIL: $(1): the render succeeded"; exit 1; \
+	elif ! grep -q "values don't meet the specifications of the schema" /tmp/vml-fail.out || ! grep -qiE -- "$(3)" /tmp/vml-fail.out; then \
+		echo "FAIL: $(1): failed for the wrong reason"; cat /tmp/vml-fail.out; exit 1; \
+	else echo "ok: $(1)"; fi
+endef
+# Recursive (=): KAGENT_ROUTE and MANAGERS_ON are defined further down. A --set-json on one key merges with the three defaults.
+VML_NO_EXPR = $(AGW_VM) --set-json 'gateway.metricLabels.channel={}'
+# The schema holds every entry's shape, a custom one (admitted by any name) like a default: a misspelt key, a scalar entry, a string for enabled.
+VML_BAD_KEY_DEFAULT = $(AGW_VM) --set-json 'gateway.metricLabels.user={"enable":false}'
+VML_BAD_KEY = $(AGW_VM) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups","enable":false}'
+VML_SCALAR = $(AGW_VM) --set gateway.metricLabels.team=foo
+VML_ENABLED_STRING = $(AGW_VM) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups","enabled":"false"}'
+VML_EMPTY_TPL = $(AGW_VM) --set-json 'gateway.metricLabels.channel={"expression":"{{ \"\" }}"}'
+VML_MULTILINE = $(AGW_VM) --set-json 'gateway.metricLabels.channel={"expression":"has(jwt.aud)\n? jwt.aud : 1"}'
+# jwt.* entries the gate holds: the name guards run on them all the same.
+VML_BAD_NAME = $(AGW_VM) --set-json 'gateway.metricLabels.agent-name={"expression":"jwt.aud"}'
+VML_EMPTY_NAME = $(AGW_VM) --set-json 'gateway.metricLabels={"":{"expression":"jwt.aud"}}'
+VML_RESERVED = $(AGW_VM) --set-json 'gateway.metricLabels.route={"expression":"jwt.aud"}'
+VML_SCRAPE = $(AGW_VM) --set-json 'gateway.metricLabels.pod={"expression":"jwt.aud"}'
+VML_DUNDER = $(AGW_VM) --set-json 'gateway.metricLabels.__meta_team={"expression":"jwt.aud"}'
+# The claim is checked where it is read as CEL: the user entry on the managers' routes, controller route off — and kagent off altogether.
+VML_BAD_CLAIM = $(MANAGERS_ON) $(MANAGERS_ROUTES) --set kagent.controller.auth.userIdClaim=https://example.com/email
+VML_BAD_CLAIM_NO_KAGENT = $(MANAGERS_ON) $(MANAGERS_ROUTES) --set components.kagent.enabled=false --set components.agent-manager.enabled=false --set kagent.controller.auth.userIdClaim=https://example.com/email
+# Fourteen plus the three defaults: seventeen.
+VML_SEVENTEEN = $(KAGENT_ROUTE) --set-json 'gateway.metricLabels=$(shell python3 -c 'import json; print(json.dumps({"l%d" % i: {"expression": "jwt.aud"} for i in range(14)}))')'
+# A boolean-looking name, on a non-jwt expression so it renders with the data plane alone.
+VML_ON = $(AGW_VM) --set-json 'gateway.metricLabels.on={"expression":"source.unverifiedWorkload.name"}'
+.PHONY: verify-metric-labels
+verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scoped -metrics policy from gateway.metricLabels (a map — one entry off or one more without restating the rest; tpl; an entry that reads jwt. held until a route verifies a bearer), no policy with nothing enabled or in muster-direct, one template with a frontend section, the meta chart's forwarding, the retired llmRouting.metricLabels refused, the schema holding every entry's shape, the claim guard where the claim is read and silent elsewhere, and the guards.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> the data plane on, no route verifying a bearer: one -metrics policy on the Gateway, the two agent labels, nothing that reads jwt. — the default user entry and a custom claim are held (they would read unknown on every series)"
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups"}' --set-json 'gateway.metricLabels.org={"expression":"jwt[\"https://example.com/org\"]"}' >/tmp/vml-on.out 2>&1 || { cat /tmp/vml-on.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-on.out >/tmp/vml-pol.out
+	@[ -s /tmp/vml-pol.out ] || { echo "FAIL: no agent-platform-connectivity-metrics policy with the data plane on"; exit 1; }
+	@grep -q 'kind: Gateway' /tmp/vml-pol.out && grep -q 'name: agentgateway' /tmp/vml-pol.out || { echo "FAIL: the metrics policy does not target the data-plane Gateway (frontend.metrics may target nothing else)"; exit 1; }
+	@grep -A1 '^          - name: agent$$' /tmp/vml-pol.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: no agent label"; exit 1; }
+	@grep -A1 '^          - name: agent_namespace$$' /tmp/vml-pol.out | grep -q 'expression: source.unverifiedWorkload.namespace' || { echo "FAIL: no agent_namespace label"; exit 1; }
+	@if grep -qE 'jwt[.[]' /tmp/vml-pol.out; then echo "FAIL: a jwt label rendered with no route verifying a bearer; it would read unknown on every series"; exit 1; fi
+	@[ "$$(grep -c '^          - name: ' /tmp/vml-pol.out)" = "2" ] || { echo "FAIL: the policy does not carry exactly the two agent labels"; exit 1; }
+	@[ "$$($(METRICS_POLICIES) /tmp/vml-on.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: the policies with a frontend.metrics section are not agent-platform-connectivity-metrics alone"; exit 1; }
+	@echo "ok: data plane alone"
+	@echo "--> the controller route with its JWT policy: user = jwt.email and both custom claims with it — five labels, in name order"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups"}' --set-json 'gateway.metricLabels.org={"expression":"jwt[\"https://example.com/org\"]"}' >/tmp/vml-route.out 2>&1 || { cat /tmp/vml-route.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-route.out >/tmp/vml-route-pol.out
+	@grep -A1 '^          - name: user$$' /tmp/vml-route-pol.out | grep -q 'expression: jwt.email' || { echo "FAIL: the person label is not user = jwt.email with the controller route on"; exit 1; }
+	@grep -A1 '^          - name: team$$' /tmp/vml-route-pol.out | grep -q 'expression: jwt.groups' || { echo "FAIL: a custom jwt entry does not render with the controller route on"; exit 1; }
+	@grep -A1 '^          - name: org$$' /tmp/vml-route-pol.out | grep -qF 'jwt["https://example.com/org"]' || { echo "FAIL: an indexed claim entry (jwt[...]) does not render with the controller route on"; exit 1; }
+	@[ "$$(awk '/^          - name: /{printf "%s ", $$3}' /tmp/vml-route-pol.out)" = "agent agent_namespace org team user " ] || { echo "FAIL: the policy does not carry exactly agent, agent_namespace, org, team, user in name order: $$(awk '/^          - name: /{printf "%s ", $$3}' /tmp/vml-route-pol.out)"; exit 1; }
+	@[ "$$($(METRICS_POLICIES) /tmp/vml-route.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: with the controller route on, the policies with a frontend.metrics section are [$$($(METRICS_POLICIES) /tmp/vml-route.out | tr '\n' ' ')], not the metrics policy alone (the route's JWT policy is a traffic policy)"; exit 1; }
+	@echo "ok: jwt entries with the controller route"
+	@echo "--> the managers' routes with their JWT policies gate it too; the expression follows the claim knob through tpl; enabled false drops an entry and keeps the rest; a renamed person label is user off plus one more entry"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) >/tmp/vml-managers.out 2>&1 || { cat /tmp/vml-managers.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-managers.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: the managers' JWT routes do not render the person label; their series carry the claim too"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=sub >/tmp/vml-claim.out 2>&1 || { cat /tmp/vml-claim.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-claim.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.sub' || { echo "FAIL: the user entry does not follow kagent.controller.auth.userIdClaim (its expression is a tpl of the knob)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set kagent.controller=null >/tmp/vml-nocontroller.out 2>&1 || { cat /tmp/vml-nocontroller.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-nocontroller.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: with the kagent.controller block deleted the user entry does not fall back to jwt.email (the expression includes the claim helper, which carries the default)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.user.enabled=false >/tmp/vml-user-off.out 2>&1 || { cat /tmp/vml-user-off.out; exit 1; }
+	@if $(METRICS_DOC) /tmp/vml-user-off.out | grep -q 'jwt\.'; then echo "FAIL: gateway.metricLabels.user.enabled=false still rendered a jwt label"; exit 1; fi
+	@$(METRICS_DOC) /tmp/vml-user-off.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: turning the person label off lost the agent labels (a map merges; the other defaults must stay)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.user.enabled=false --set-json 'gateway.metricLabels.person={"expression":"jwt.{{ .Values.kagent.controller.auth.userIdClaim }}"}' >/tmp/vml-person.out 2>&1 || { cat /tmp/vml-person.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-person.out | grep -A1 '^          - name: person$$' | grep -q 'expression: jwt.email' || { echo "FAIL: a renamed person label (user off, person with the same tpl expression) does not render"; exit 1; }
+	@if $(METRICS_DOC) /tmp/vml-person.out | grep -q '^          - name: user$$'; then echo "FAIL: user still renders beside person"; exit 1; fi
+	@echo "ok: gate, tpl, toggle, rename"
+	@echo "--> nothing enabled, no policy — the map deleted, or the agent entries off with the user entry held; the person label alone is a policy; nothing in muster-direct"
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set gateway.metricLabels=null >/tmp/vml-none.out 2>&1 || { cat /tmp/vml-none.out; exit 1; }
+	@if grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vml-none.out; then echo "FAIL: a metrics policy with nothing to add rendered; the API server refuses an empty add list"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set gateway.metricLabels.agent.enabled=false --set gateway.metricLabels.agent_namespace.enabled=false >/tmp/vml-gated.out 2>&1 || { cat /tmp/vml-gated.out; exit 1; }
+	@if grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vml-gated.out; then echo "FAIL: a metrics policy rendered with only the held user entry left and no route verifying a bearer"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.agent.enabled=false --set gateway.metricLabels.agent_namespace.enabled=false >/tmp/vml-useronly.out 2>&1 || { cat /tmp/vml-useronly.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-useronly.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: the person label alone renders no policy"; exit 1; }
+	@[ "$$($(METRICS_DOC) /tmp/vml-useronly.out | grep -c '^          - name: ')" = "1" ] || { echo "FAIL: the agent entries rendered although disabled"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vml-direct.out 2>&1 || { cat /tmp/vml-direct.out; exit 1; }
+	@if grep -q 'frontend:' /tmp/vml-direct.out; then echo "FAIL: a metrics policy rendered in muster-direct, where there is no data plane"; exit 1; fi
+	@echo "ok: empty, held-only, person-only, muster-direct"
+	@echo "--> with llmRouting on the labels stay on the -metrics policy and the LLM policy carries none; one template of the chart carries a frontend section"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) >/tmp/vml-llm.out 2>&1 || { cat /tmp/vml-llm.out; exit 1; }
+	@[ "$$($(METRICS_POLICIES) /tmp/vml-llm.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: with llmRouting on, the policies with a frontend.metrics section are [$$($(METRICS_POLICIES) /tmp/vml-llm.out | tr '\n' ' ')], not the metrics policy alone"; exit 1; }
+	@[ "$$(grep -lE '^  frontend:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: more than one template of the chart carries a frontend section: $$(grep -lE '^  frontend:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | tr '\n' ' '); a second metrics policy is dropped in silence by the data plane"; exit 1; }
+	@echo "ok: one metrics policy, one template"
+	@echo "--> a name YAML 1.1 reads as a boolean is rendered quoted"
+	@helm template t $(CONNECTIVITY_DIR) $(VML_ON) >/tmp/vml-quoted.out 2>&1 || { cat /tmp/vml-quoted.out; exit 1; }
+	@grep -q '^          - name: "on"$$' /tmp/vml-quoted.out || { echo "FAIL: the label name on is not quoted; a YAML 1.1 reader makes it a boolean and the API server refuses the policy"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set-json 'gateway.metricLabels.m={"expression":"{\"a\": 1}[\"a\"]"}' >/tmp/vml-brace.out 2>&1 || { cat /tmp/vml-brace.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-brace.out | grep -A1 '^          - name: m$$' | grep -qE "expression: ['\"]\{" || { echo "FAIL: an expression starting with { is not quoted; a YAML reader takes it for a flow mapping"; $(METRICS_DOC) /tmp/vml-brace.out | grep -A1 'name: m$$'; exit 1; }
+	@echo "ok: boolean-looking name and brace-leading expression quoted"
+	@echo "--> guards"
+	$(call vml_must_fail,an entry without an expression,VML_NO_EXPR,gateway.metricLabels.channel has no expression)
+	$(call vml_must_fail_schema,a misspelt enabled on a default entry (the schema),VML_BAD_KEY_DEFAULT,additional propert(y|ies) .?enable.? (is )?not allowed)
+	$(call vml_must_fail_schema,a misspelt enabled on a custom entry (the schema too),VML_BAD_KEY,additional propert(y|ies) .?enable.? (is )?not allowed)
+	$(call vml_must_fail_schema,a scalar in place of an entry,VML_SCALAR,got string. want object|Expected: object. given: string)
+	$(call vml_must_fail_schema,a string for enabled,VML_ENABLED_STRING,got string. want boolean|Expected: boolean. given: string)
+	$(call vml_must_fail,an expression that renders empty,VML_EMPTY_TPL,gateway.metricLabels.channel: the expression)
+	$(call vml_must_fail,a multi-line expression,VML_MULTILINE,gateway.metricLabels.channel spans more than one line)
+	$(call vml_must_fail,a name that is not a Prometheus label name — on an entry the gate holds,VML_BAD_NAME,is not a Prometheus label name)
+	$(call vml_must_fail,an empty name,VML_EMPTY_NAME,metric label \"\" (gateway.metricLabels) is not a Prometheus label name)
+	$(call vml_must_fail,a name the data plane already emits,VML_RESERVED,already puts on its series)
+	$(call vml_must_fail,a name the scrape adds,VML_SCRAPE,store the policy's as exported_pod)
+	$(call vml_must_fail,a __ name,VML_DUNDER,starts with __)
+	$(call vml_must_fail,an identity claim that is no CEL identifier with the controller route off,VML_BAD_CLAIM,is not a plain claim name)
+	$(call vml_must_fail,the same with kagent off (model-manager's route alone reads it),VML_BAD_CLAIM_NO_KAGENT,is not a plain claim name)
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set kagent.controller.auth.userIdClaim=https://example.com/email >/tmp/vml-claim-inert.out 2>&1 || { echo "FAIL: a non-identifier claim fails the render in muster-direct, where nothing reads it as CEL"; cat /tmp/vml-claim-inert.out; exit 1; }
+	@echo "ok: the claim guard is silent where nothing reads the claim"
+	$(call vml_must_fail,more than 16 enabled entries,VML_SEVENTEEN,the AgentgatewayPolicy CRD takes at most 16)
+	@echo "--> the meta chart forwards the map — one entry off, the tpl expression as written for the connectivity release to render — and its schema refuses the retired llmRouting.metricLabels"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gateway.metricLabels.user.enabled=false >/tmp/vml-meta.out 2>&1 || { cat /tmp/vml-meta.out; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vml-meta.out >/tmp/vml-meta-conn.out
+	@grep -A2 '^        user:$$' /tmp/vml-meta-conn.out | grep -q 'enabled: false' || { echo "FAIL: gateway.metricLabels.user.enabled does not reach the connectivity HelmRelease"; exit 1; }
+	@grep -A2 '^        user:$$' /tmp/vml-meta-conn.out | grep -qF 'include "agent-platform.kagent.userIdClaim"' || { echo "FAIL: the user entry's tpl expression does not reach the connectivity HelmRelease as written (the meta chart must not render it)"; exit 1; }
+	@grep -A2 '^        agent:$$' /tmp/vml-meta-conn.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: gateway.metricLabels.agent does not reach the connectivity HelmRelease"; exit 1; }
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set 'llmRouting.metricLabels[0].name=agent' --set 'llmRouting.metricLabels[0].expression=x' >/tmp/vml-retired.out 2>&1; then \
+		echo "FAIL: the meta chart accepted llmRouting.metricLabels; the value would reach the connectivity release and be refused there on every installation"; exit 1; \
+	elif ! grep -q "values don't meet the specifications of the schema" /tmp/vml-retired.out || ! grep -q "metricLabels" /tmp/vml-retired.out; then \
+		echo "FAIL: llmRouting.metricLabels was refused, but not by the schema naming the key"; cat /tmp/vml-retired.out; exit 1; \
+	else echo "ok: forwarded map, retired key refused"; fi
+	@echo "All metric-label behaviors verified."
 
 # The agentgateway data plane is the platform's critical path: every MCP call
 # and, with llmRouting on, every model call crosses the Deployment the
@@ -854,7 +1006,7 @@ verify-target: ## Assert one release of this chart per target cluster (giantswar
 	@echo "target cluster shapes verified."
 
 .PHONY: verify-serving-slice
-verify-serving-slice: ## Assert the serving slice (giantswarm/agent-platform#326): examples/serving-slice.yaml renders exactly the five kserve releases and connectivity (no muster, dicebear, valkey, kagent, Backstage, agent-manager, model-manager, agentgateway; the engine off) — kserve-runtime-configs after kserve-llmisvc-crd into the kserve namespace with the well-known configs on, the runtimes off, no registry value and its block held back from connectivity; KServe's ingress-gateway value derived onto kserve-resources (a differing copy fails, an equal one is a no-op, none with the Gateway off); runtimeClassName nvidia forwarded; the target knob adds agentgateway and stamps every kubeConfig. The connectivity chart with the forwarded values: the models Gateway on models.<global.domain> with the wildcard Secret and the external-dns hostname, ONE Strict AgentgatewayPolicy on the Gateway (audience dex-k8s-authenticator, inheritance Override, the issuer), the JWKS backend at the issuer's host on 443 with TLS, the discovery ConfigMap's gateway entry; a Certificate only with tls.issuerRef.name; nothing with modelsGateway.enabled false (the default: the Gateway is the slice's, the profile turns it on); the guards name their key. The two 24 GB presets: schema keys, no image, tools on with a parser, one GPU, <= 24 GiB, requests within what a g6.xlarge leaves a predictor after the kubelet's reservations and the daemonsets (#502), the description naming the instance. The cache claim (#483): no PersistentVolumeClaim object — a post-install,post-upgrade hook Job server-side applies hf-cache (keep, RWO, 500Gi; the class incl. "-", size, volumeName and access-mode knobs) as <release>-hooks with get/create/patch on claims; cache.enabled false or an existing claim render neither hook nor identity. The live half (a served LLMInferenceService answers 200 with a person's id_token and 401 without; no bearer in the model server's log) runs on a GPU cluster: README "The serving slice and the models Gateway". HELM selects the binary.
+verify-serving-slice: ## Assert the serving slice (giantswarm/agent-platform#326): examples/serving-slice.yaml renders exactly the five kserve releases and connectivity (no muster, dicebear, valkey, kagent, Backstage, agent-manager, model-manager, agentgateway; the engine off) — kserve-runtime-configs after kserve-llmisvc-crd into the kserve namespace with the well-known configs on, the runtimes off, no registry value and its block held back from connectivity; KServe's ingress-gateway value derived onto kserve-resources (a differing copy fails, an equal one is a no-op, none with the Gateway off); runtimeClassName nvidia forwarded; the target knob adds agentgateway and stamps every kubeConfig. The connectivity chart with the forwarded values: the models Gateway on models.<global.domain> with the wildcard Secret and the external-dns hostname, ONE Strict AgentgatewayPolicy on the Gateway (audience dex-k8s-authenticator, inheritance Override, the issuer), the JWKS backend at the issuer's host on 443 with TLS, the discovery ConfigMap's gateway entry; a Certificate only with tls.issuerRef.name; nothing with modelsGateway.enabled false (the default: the Gateway is the slice's, the profile turns it on); the guards name their key. The two 24 GB presets: schema keys, no image, tools on with a parser, one GPU, <= 24 GiB, requests within what a g6.xlarge leaves a predictor after the kubelet's reservations and the daemonsets (#502), the description naming the instance. Every shipped preset's arguments survive the runtime template's entrypoint (#532): the template's exact eval "… $@", run over each preset's args with argv dumped, yields one word per argument and every JSON value parses; a values preset whose argument carries whitespace, a quote or a shell metacharacter outside single quotes fails the render naming the guard. The cache claim (#483): no PersistentVolumeClaim object — a post-install,post-upgrade hook Job server-side applies hf-cache (keep, RWO, 500Gi; the class incl. "-", size, volumeName and access-mode knobs) as <release>-hooks with get/create/patch on claims; cache.enabled false or an existing claim render neither hook nor identity. The live half (a served LLMInferenceService answers 200 with a person's id_token and 401 without; no bearer in the model server's log) runs on a GPU cluster: README "The serving slice and the models Gateway". HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-serving-slice.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "serving slice verified."
@@ -1086,6 +1238,92 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@echo "ok: a stray key under scheduling.singletons is refused by the schema"
 	@echo "$@: all passed"
 
+# The kagent controller's VerticalPodAutoscaler (templates/kagent/controller-vpa.yaml):
+# kagent on under the fleet's API groups; VPA_VANILLA serves no group at all, so
+# the `auto` knob resolves off.
+VPA_ON := $(VM) --set components.kagent.enabled=true
+VPA_VANILLA := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --set components.kagent.enabled=true
+
+.PHONY: verify-kagent-vpa
+verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with autoscaling.k8s.io/v1 served the connectivity chart renders it on Deployment kagent-controller in the kagent namespace (InPlaceOrRecreate, RequestsOnly, minAllowed the chart's requests, maxAllowed a step under its limits, minReplicas 1); a vanilla render none; an explicit true / false wins both ways; inert with kagent off; a deleted kagent.controller.vpa or kagent.controller renders nothing in both charts rather than dying on a nil pointer; the enum guards, the spelling guard (VPA off too) and the unset wording fire; the meta chart forwards the knob resolved to the connectivity release and never to the kagent release, and a meta-layer override reaches the rendered object.
+	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
+	@echo "--> connectivity, autoscaling.k8s.io/v1 served (the fleet): the VPA renders"
+	@helm template t $(CONNECTIVITY_DIR) $(VPA_ON) >/tmp/vk-on.out 2>&1 || { cat /tmp/vk-on.out; exit 1; }
+	@awk '/^kind: VerticalPodAutoscaler/,/^---/' /tmp/vk-on.out >/tmp/vk-vpa.out
+	@[ "$$(grep -c '^kind: VerticalPodAutoscaler' /tmp/vk-on.out)" = "1" ] || { echo "FAIL: expected exactly one VerticalPodAutoscaler"; exit 1; }
+	@grep -q '^  name: kagent-controller$$' /tmp/vk-vpa.out || { echo "FAIL: the VPA is not named kagent-controller"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^  namespace: kagent$$' /tmp/vk-vpa.out || { echo "FAIL: the VPA is not in the kagent namespace"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A3 '^  targetRef:$$' /tmp/vk-vpa.out | grep -q '^    kind: Deployment$$' || { echo "FAIL: the VPA does not target a Deployment"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A3 '^  targetRef:$$' /tmp/vk-vpa.out | grep -q '^    name: kagent-controller$$' || { echo "FAIL: the VPA does not target kagent-controller"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^    updateMode: InPlaceOrRecreate$$' /tmp/vk-vpa.out || { echo "FAIL: updateMode is not InPlaceOrRecreate"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^    minReplicas: 1$$' /tmp/vk-vpa.out || { echo "FAIL: minReplicas: 1 missing"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^      - containerName: controller$$' /tmp/vk-vpa.out || { echo "FAIL: the container policy does not name the controller container"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -q '^        controlledValues: RequestsOnly$$' /tmp/vk-vpa.out || { echo "FAIL: controlledValues is not RequestsOnly"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 100m' || { echo "FAIL: minAllowed.cpu is not the chart's request (100m)"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 128Mi' || { echo "FAIL: minAllowed.memory is not the chart's request (128Mi)"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 1900m' || { echo "FAIL: maxAllowed.cpu is not a step under the chart's limit (1900m)"; cat /tmp/vk-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 480Mi' || { echo "FAIL: maxAllowed.memory is not a step under the chart's limit (480Mi)"; cat /tmp/vk-vpa.out; exit 1; }
+	@echo "ok: VerticalPodAutoscaler kagent-controller on Deployment kagent-controller — InPlaceOrRecreate, RequestsOnly, 100m/128Mi to 1900m/480Mi"
+	@echo "--> vanilla (no autoscaling.k8s.io/v1): auto resolves off"
+	@helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) >/tmp/vk-vanilla.out 2>&1 || { cat /tmp/vk-vanilla.out; exit 1; }
+	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-vanilla.out; then echo "FAIL: a VerticalPodAutoscaler renders without autoscaling.k8s.io/v1 served"; exit 1; fi
+	@echo "ok: nothing on a vanilla cluster"
+	@echo "--> explicit values win over detection, both ways"
+	@helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) --set kagent.controller.vpa.enabled=true >/tmp/vk-force-on.out 2>&1 || { cat /tmp/vk-force-on.out; exit 1; }
+	@grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-force-on.out || { echo "FAIL: kagent.controller.vpa.enabled=true renders nothing without the API served"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.enabled=false >/tmp/vk-force-off.out 2>&1 || { cat /tmp/vk-force-off.out; exit 1; }
+	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-force-off.out; then echo "FAIL: kagent.controller.vpa.enabled=false still renders the VPA"; exit 1; fi
+	@echo "ok: explicit true / false win"
+	@echo "--> kagent off: inert"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set kagent.controller.vpa.enabled=true >/tmp/vk-kagent-off.out 2>&1 || { cat /tmp/vk-kagent-off.out; exit 1; }
+	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-kagent-off.out; then echo "FAIL: the VPA renders while kagent is off"; exit 1; fi
+	@echo "ok: inert while kagent is off"
+	@echo "--> the block is the switch: a deleted kagent.controller.vpa — or a deleted kagent.controller around it — renders nothing and never dereferences a key that is gone"
+	@for deleted in kagent.controller.vpa kagent.controller; do \
+		helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set $$deleted=null >/tmp/vk-deleted.out 2>&1 || { echo "FAIL: the render died with $$deleted deleted"; tail -3 /tmp/vk-deleted.out; exit 1; }; \
+		if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-deleted.out; then echo "FAIL: the VPA renders with $$deleted deleted"; exit 1; fi; \
+		helm template t $(CHART_DIR) $(VPA_ON) --set $$deleted=null >/tmp/vk-deleted-meta.out 2>&1 || { echo "FAIL: the meta render died with $$deleted deleted"; tail -3 /tmp/vk-deleted-meta.out; exit 1; }; \
+	done
+	@echo "ok: a deleted block renders nothing, in both charts"
+	@echo "--> the guards"
+	@if helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.updateMode=Sometimes >/tmp/vk-mode.out 2>&1; then echo "FAIL: an unknown updateMode accepted"; exit 1; fi
+	@grep -q 'is not a VerticalPodAutoscaler update mode' /tmp/vk-mode.out || { echo "FAIL: wrong error for the updateMode enum"; tail -3 /tmp/vk-mode.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.controlledValues=Nothing >/tmp/vk-cv.out 2>&1; then echo "FAIL: an unknown controlledValues accepted"; exit 1; fi
+	@grep -q 'is not a VerticalPodAutoscaler controlledValues' /tmp/vk-cv.out || { echo "FAIL: wrong error for the controlledValues enum"; tail -3 /tmp/vk-cv.out; exit 1; }
+	@for chart in $(CONNECTIVITY_DIR) $(CHART_DIR); do \
+		if helm template t $$chart $(VPA_ON) --set kagent.controller.vpa.enabled=maybe >/tmp/vk-maybe.out 2>&1; then echo "FAIL: $$chart: kagent.controller.vpa.enabled=maybe accepted"; exit 1; fi; \
+		grep -q 'kagent.controller.vpa.enabled' /tmp/vk-maybe.out || { echo "FAIL: $$chart: wrong error for kagent.controller.vpa.enabled=maybe"; tail -3 /tmp/vk-maybe.out; exit 1; }; \
+	done
+	@echo "ok: the enum guards fire in both charts"
+	@echo "--> a misspelt key is refused, VPA on or off (the kagent block is open in the schema); an unset updateMode is named as unset"
+	@if helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) --set kagent.controller.vpa.maxAllowd.cpu=5 >/tmp/vk-typo.out 2>&1; then echo "FAIL: kagent.controller.vpa.maxAllowd (a typo) rendered with the VPA off"; exit 1; fi
+	@grep -q 'kagent.controller.vpa.maxAllowd is not a key' /tmp/vk-typo.out || { echo "FAIL: wrong error for the misspelt key"; tail -3 /tmp/vk-typo.out; exit 1; }
+	@if helm template t $(CONNECTIVITY_DIR) $(VPA_ON) --set kagent.controller.vpa.updateMode=null >/tmp/vk-unset.out 2>&1; then echo "FAIL: an unset updateMode rendered"; exit 1; fi
+	@grep -q 'kagent.controller.vpa.updateMode is unset' /tmp/vk-unset.out || { echo "FAIL: an unset updateMode is not named as unset"; tail -3 /tmp/vk-unset.out; exit 1; }
+	@echo "ok: the spelling guard and the unset wording"
+	@echo "--> meta chart: the resolved knob reaches the connectivity release, never the kagent release"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_ON) >/tmp/vk-meta.out 2>&1 || { cat /tmp/vk-meta.out; exit 1; }
+	@$(PICK) /tmp/vk-meta.out HelmRelease kagent >/tmp/vk-meta-kagent.out || { echo "FAIL: no kagent HelmRelease in the meta render"; exit 1; }
+	@if grep -q 'vpa:' /tmp/vk-meta-kagent.out; then echo "FAIL: kagent.controller.vpa travels on the kagent HelmRelease (components.kagent.omitKeys)"; exit 1; fi
+	@grep -q '^      pdb:$$' /tmp/vk-meta-kagent.out || { echo "FAIL: the rest of kagent.controller vanished from the kagent HelmRelease with the vpa hold-back"; exit 1; }
+	@$(PICK) /tmp/vk-meta.out HelmRelease agent-platform-connectivity >/tmp/vk-meta-conn.out || { echo "FAIL: no agent-platform-connectivity HelmRelease in the meta render"; exit 1; }
+	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn.out | grep -q '^          enabled: true$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to true with the API served"; exit 1; }
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_VANILLA) >/tmp/vk-meta-vanilla.out 2>&1 || { cat /tmp/vk-meta-vanilla.out; exit 1; }
+	@$(PICK) /tmp/vk-meta-vanilla.out HelmRelease agent-platform-connectivity >/tmp/vk-meta-conn-vanilla.out || { echo "FAIL: no agent-platform-connectivity HelmRelease in the vanilla meta render"; exit 1; }
+	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn-vanilla.out | grep -q '^          enabled: false$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to false without the API"; exit 1; }
+	@if grep -q 'enabled: auto' /tmp/vk-meta.out /tmp/vk-meta-vanilla.out; then echo "FAIL: an unresolved auto reached a HelmRelease"; exit 1; fi
+	@echo "ok: resolved once, forwarded to connectivity only"
+	@echo "--> meta chart: an override set at the meta layer (updateMode, maxAllowed.memory) reaches the rendered VPA through the connectivity HelmRelease's values"
+	@helm template t $(CHART_DIR) $(VPA_ON) --set kagent.controller.vpa.updateMode=Initial --set kagent.controller.vpa.maxAllowed.memory=400Mi >/tmp/vk-meta-over.out 2>&1 || { cat /tmp/vk-meta-over.out; exit 1; }
+	@$(PICK) /tmp/vk-meta-over.out HelmRelease agent-platform-connectivity | sed -n '/^  values:$$/,$$p' | sed '1d; s/^    //' | sed '/^---$$/,$$d' >/tmp/vk-meta-over-values.yaml
+	@helm template t $(CONNECTIVITY_DIR) -n default -f /tmp/vk-meta-over-values.yaml $(FLEET_APIS) >/tmp/vk-conn-over.out 2>&1 || { echo "FAIL: the connectivity chart rejects the values the meta chart forwards"; tail -3 /tmp/vk-conn-over.out; exit 1; }
+	@awk '/^kind: VerticalPodAutoscaler/,/^---/' /tmp/vk-conn-over.out >/tmp/vk-conn-over-vpa.out
+	@grep -q '^    updateMode: Initial$$' /tmp/vk-conn-over-vpa.out || { echo "FAIL: kagent.controller.vpa.updateMode set at the meta layer did not reach the rendered VPA"; cat /tmp/vk-conn-over-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-conn-over-vpa.out | grep -q 'memory: 400Mi' || { echo "FAIL: kagent.controller.vpa.maxAllowed.memory set at the meta layer did not reach the rendered VPA"; cat /tmp/vk-conn-over-vpa.out; exit 1; }
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-conn-over-vpa.out | grep -q 'cpu: 1900m' || { echo "FAIL: the untouched maxAllowed.cpu default did not survive a sibling override at the meta layer"; cat /tmp/vk-conn-over-vpa.out; exit 1; }
+	@echo "ok: meta-layer overrides reach the object, siblings keep their defaults"
+	@echo "$@: all passed"
+
 verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: ghcr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); that the egress gateway opens every host model server model-manager fronts, at its agentHost, with the DNS proxy on where one is named by hostname; and the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> Agent Substrate on, cilium: the worker pods' egress is the egress gateway, the dns and the cluster DNS — nothing else"
@@ -1137,7 +1375,7 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@helm template t $(CONNECTIVITY_DIR) --namespace agent-platform $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true >/tmp/vkn-release-ns.out 2>&1 || { cat /tmp/vkn-release-ns.out; exit 1; }
 	@[ "$$(grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-release-ns.out | grep -c 'io.kubernetes.pod.namespace: agent-platform$$')" = "2" ] || { echo "FAIL: without kagent.kagent-tools.namespaceOverride the tool-server egress does not name the release namespace (where the kagent chart renders the server)"; grep -A1 'app.kubernetes.io/name: kagent-tools' /tmp/vkn-release-ns.out; exit 1; }
 	@echo "ok: the rules follow the subchart's fallback, the release namespace"
-	@echo "--> the rules' namespace and port are the kagent chart's: its rendered kagent-tools Deployment and RemoteMCPServer URL, with the values the meta chart forwards (network: ghcr.io)"
+	@echo "--> the rules' namespace and port are the kagent chart's: its rendered kagent-tools Deployment and RemoteMCPServer URL, with the values the meta chart forwards (network: ghcr.io); the controller VPA's targetRef and containerName are its rendered controller Deployment's"
 	@python3 tests/verify-kagent-tools-namespace.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "--> an explicit kagent.kagent-tools.namespaceOverride / service.ports.tools.targetPort follows into the rules"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true --set kagent.kagent-tools.namespaceOverride=tools-ns --set kagent.kagent-tools.service.ports.tools.targetPort=9084 >/tmp/vkn-override.out 2>&1 || { cat /tmp/vkn-override.out; exit 1; }

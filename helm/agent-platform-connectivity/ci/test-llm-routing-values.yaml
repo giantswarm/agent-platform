@@ -1,7 +1,8 @@
 # LLM routing on: the `llm` listener, the Anthropic AgentgatewayBackend, the
-# pinned HTTPRoute, the Gateway-scoped AgentgatewayPolicy (route-type map +
-# metric labels), the model-price ConfigMap and its AgentgatewayParameters
-# reference, and the data-plane PodMonitor.
+# pinned HTTPRoute, the Gateway-scoped AgentgatewayPolicy (the route-type map;
+# the metric labels are the Gateway's own -metrics policy, gateway.metricLabels,
+# rendered with or without this), the model-price ConfigMap and its
+# AgentgatewayParameters reference, and the data-plane PodMonitor.
 #
 # Both cutover values are set, so this scenario renders the whole path: the
 # listener AND kagent's default ModelConfig pointing at it. A real rollout sets

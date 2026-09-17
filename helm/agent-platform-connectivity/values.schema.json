@@ -346,6 +346,59 @@
                         }
                     }
                 },
+                "metricLabels": {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "agent_namespace": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "user": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "enabled": {
+                                "type": "boolean"
+                            },
+                            "expression": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
                 "name": {
                     "type": "string"
                 },
@@ -888,21 +941,6 @@
                         },
                         "port": {
                             "type": "integer"
-                        }
-                    }
-                },
-                "metricLabels": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "properties": {
-                            "expression": {
-                                "type": "string"
-                            },
-                            "name": {
-                                "type": "string"
-                            }
                         }
                     }
                 },

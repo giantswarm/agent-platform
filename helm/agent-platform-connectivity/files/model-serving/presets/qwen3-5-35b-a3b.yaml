@@ -23,8 +23,10 @@ spec:
     - --max-model-len=8192
     - --enforce-eager
     - --no-enable-log-requests
-    - --default-chat-template-kwargs
-    - '{"enable_thinking": false}'
+    # One argument, the JSON single-quoted inside it: the well-known runtime
+    # template re-parses every argument through a shell (eval "… $@"), which
+    # would split a bare JSON at its whitespace and eat its double quotes.
+    - "--default-chat-template-kwargs='{\"enable_thinking\": false}'"
   resources:
     gpus: 1
     requests:

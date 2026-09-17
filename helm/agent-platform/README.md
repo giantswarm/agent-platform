@@ -248,6 +248,10 @@ scheduling:
 
 The map is merged into each component's own `nodeSelector` (`muster.nodeSelector`, `valkey.valkey.nodeSelector`, `kagent.controller.nodeSelector`, `klausGateway.nodeSelector`; a key a component sets itself wins) and `scheduling.singletons.tolerations` is appended to each one's `tolerations` (for a dedicated, tainted pool). Karpenter launches one small on-demand node for them from a NodePool that admits `on-demand` in the volumes' zone — the fleet's NodePools admit both capacity types and carry no taint — and, with the guards above, leaves it alone. Cost: one `xlarge`-class on-demand instance per such installation. Empty (the default) forwards nothing and every installation renders as before; set it only where nodes carry the label (a cluster without Karpenter — CAPZ, on-prem — would leave the four pods Pending). Enabling rolls each of the four pods once; the two with a `Recreate` strategy (muster-valkey, klaus-gateway) are down until the node is up, about two minutes on AWS. klaus-gateway takes the keys from chart 1.3.3 on (giantswarm/klaus-gateway#253; earlier 1.x schemas refused every key under `nodeSelector`), which the `1.x` range resolves. The block is the meta chart's alone: it is merged before any release renders and held back from the connectivity release. `make verify-disruption` asserts the merge, the precedence and the default.
 
+## The kagent controller's requests follow a VerticalPodAutoscaler
+
+`kagent.controller.vpa` (giantswarm/agent-platform#455) puts a `VerticalPodAutoscaler` on the kagent controller, rendered by the connectivity chart in the kagent namespace (the kagent chart has no VPA knob; the same pattern as the muster-valkey budget). `enabled: auto` renders it where the cluster serves `autoscaling.k8s.io/v1` — resolved once here with the other cluster-shape knobs, an explicit `true` / `false` wins. The mode is `InPlaceOrRecreate`: with one replica behind the budget above an evicting mode could never apply, so the running pod's requests are resized in place, with no eviction and no roll; a resize that cannot apply in place falls back to an eviction the budget refuses, and the pod keeps its requests until its next roll. Only requests move (`controlledValues: RequestsOnly`), between the chart's requests (`minAllowed` 100m / 128Mi) and a step under its limits (`maxAllowed` 1900m / 480Mi — requests equal to the limits would change the pod's QoS class, which no resize may do). The key is held back from the kagent release (`components.kagent.omitKeys`); the connectivity chart's README carries the guards and the opt-outs.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -327,14 +331,15 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.dependsOn[3] | string | `"agent-platform-connectivity"` |  |
 | components.kagent.driftDetection.mode | string | `"enabled"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
-| components.kagent.omitKeys[1] | string | `"fluxServiceAccountName"` |  |
-| components.kagent.omitKeys[2] | string | `"harness.snapshotStore"` |  |
-| components.kagent.omitKeys[3] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[4] | string | `"oauth2ProxyIngress"` |  |
-| components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[6] | string | `"serviceMonitor"` |  |
-| components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
-| components.kagent.omitKeys[8] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[1] | string | `"controller.vpa"` |  |
+| components.kagent.omitKeys[2] | string | `"fluxServiceAccountName"` |  |
+| components.kagent.omitKeys[3] | string | `"harness.snapshotStore"` |  |
+| components.kagent.omitKeys[4] | string | `"modelConfigs"` |  |
+| components.kagent.omitKeys[5] | string | `"oauth2ProxyIngress"` |  |
+| components.kagent.omitKeys[6] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[7] | string | `"serviceMonitor"` |  |
+| components.kagent.omitKeys[8] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
@@ -556,6 +561,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
+| gateway.metricLabels.agent.enabled | bool | `true` |  |
+| gateway.metricLabels.agent.expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
+| gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |
+| gateway.metricLabels.agent_namespace.expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| gateway.metricLabels.user.enabled | bool | `true` |  |
+| gateway.metricLabels.user.expression | string | `"jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -568,10 +579,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
 | llmRouting.routes.* | string | `"Passthrough"` |  |
-| llmRouting.metricLabels[0].name | string | `"agent"` |  |
-| llmRouting.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
-| llmRouting.metricLabels[1].name | string | `"agent_namespace"` |  |
-| llmRouting.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
 | llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
@@ -733,6 +740,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.pdb.minAvailable | int | `1` |  |
 | kagent.controller.pdb.maxUnavailable | string | `""` |  |
 | kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
+| kagent.controller.vpa.enabled | string | `"auto"` |  |
+| kagent.controller.vpa.updateMode | string | `"InPlaceOrRecreate"` |  |
+| kagent.controller.vpa.controlledValues | string | `"RequestsOnly"` |  |
+| kagent.controller.vpa.minAllowed.cpu | string | `"100m"` |  |
+| kagent.controller.vpa.minAllowed.memory | string | `"128Mi"` |  |
+| kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
+| kagent.controller.vpa.maxAllowed.memory | string | `"480Mi"` |  |
 | kagent.controller.metrics.enabled | bool | `false` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |

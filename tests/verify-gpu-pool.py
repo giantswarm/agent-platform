@@ -239,6 +239,7 @@ else:
         resized = "g6.xlarge" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-4b-instruct.yaml", encoding="utf-8").read()
         shaped = "podShapes" in open(f"{tree}/{CONN}/templates/model-serving/_helpers.tpl", encoding="utf-8").read()
         ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
+        quoted = "--default-chat-template-kwargs='" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8b-fp8.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -256,6 +257,16 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: the two L4 presets are resized on this side (#502) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # Six presets write their JSON-valued vLLM arguments as one single-quoted
+    # argument, the form the llm-d runtime template's eval keeps intact
+    # (giantswarm/agent-platform#532); a golden from before carries the bare
+    # two-argument form, so those preset documents are left out of the
+    # comparison on both sides. Drop this once GOLDEN_REF carries #532.
+    if not quoted:
+        for name in ("nemotron-3-super-nvfp4", "qwen3-14b", "qwen3-5-27b", "qwen3-5-35b-a3b", "qwen3-8-27b", "qwen3-8b-fp8"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: six presets quote their JSON arguments on this side (#532) and not on {ref}: their ConfigMaps are left out of the comparison")
     # The serving namespace's policies select both pod shapes — the classic
     # predictor and the LLMInferenceService workload pod — and render per shape
     # (giantswarm/agent-platform#506); a golden from before knows the classic

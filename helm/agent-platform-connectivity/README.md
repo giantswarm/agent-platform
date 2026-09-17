@@ -25,8 +25,9 @@ dependsOn those CRD-owning component releases.
 All agent inference traffic can go through the installation's agentgateway, so
 that one component observes every model call. The data plane then emits GenAI
 metrics for each request — tokens by type, cost in USD, request duration and
-time to first token — with the calling agent as a label. The `agent-platform`
-Grafana dashboard in `giantswarm/dashboards` reads them.
+time to first token — with the calling agent as a label (`gateway.metricLabels`,
+the Gateway's one metrics policy; see [Metric labels](#metric-labels)). The
+`agent-platform` Grafana dashboard in `giantswarm/dashboards` reads them.
 
 The gateway holds no provider credential. Agent pods keep their own
 `ANTHROPIC_API_KEY`, and the client `x-api-key` header passes through
@@ -49,9 +50,10 @@ Two values turn the path on, and the order matters.
 
    This adds an `llm` listener to the data-plane Gateway, an
    `AgentgatewayBackend` for the provider, an `HTTPRoute` pinned to that
-   listener, one Gateway-scoped `AgentgatewayPolicy` (the route-type map and
-   the metric labels), and the model-price ConfigMap the cost counter reads.
-   Nothing routes through it yet.
+   listener, one Gateway-scoped `AgentgatewayPolicy` (the route-type map), and
+   the model-price ConfigMap the cost counter reads. Nothing routes through it
+   yet. The metric labels are not this path's: the Gateway's own `-metrics`
+   policy carries them whether or not LLM routing is on (below).
 
    Verify the listener answers before you continue. From a pod in the release
    namespace:
@@ -109,9 +111,9 @@ On the installation, after the cutover:
 - Agent pods keep their `world:443` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
-- Only one metrics policy may target a Gateway: custom labels replace rather
-  than merge, and when two policies target the same Gateway the one with the
-  lexicographically lowest policy key wins while the other is silently dropped.
+- The LLM policy carries no `frontend.metrics`: the data plane honours one
+  metrics policy per Gateway, and the labels describe every route, so they live
+  in the Gateway's own `-metrics` policy — see [Metric labels](#metric-labels).
 - An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
   own `baseUrl` or names a provider other than `llmRouting.backend.provider`.
   The `baseUrl` lands under the CRD's block for the entry's provider —
@@ -123,6 +125,86 @@ On the installation, after the cutover:
 - The data-plane `PodMonitor` is gated on the agentgateway component, not on
   `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
   before the cutover.
+
+## Metric labels
+
+The data plane puts custom Prometheus labels on every metric it emits — the
+HTTP, MCP and GenAI families alike, whatever route the request took — from one
+Gateway-scoped `AgentgatewayPolicy`, `<release>-metrics`
+(`templates/agentgateway/metrics-policy.yaml`, `frontend.metrics`), rendered
+whenever the data plane is and an entry of `gateway.metricLabels` is enabled.
+Each label is a CEL expression evaluated when the request completes; a failed
+or empty expression renders `unknown` and keeps the series.
+
+**One policy per Gateway.** agentgateway honours one metrics policy per
+Gateway: custom labels replace, they never merge, and of two policies one is
+dropped in silence — which one has changed between agentgateway releases, so
+nothing may rely on it. Every label the platform wants therefore lives in
+`gateway.metricLabels`, whichever route it describes; the labels are not the
+LLM path's (`llmRouting.metricLabels` is gone; the schema refuses it) and
+render without LLM routing.
+
+**One map, keyed by label name.** Helm merges maps and replaces lists, so an
+installation turns one default entry off or adds one without restating the
+rest. Each entry is `{expression: <one-line CEL>, enabled: <bool, absent =
+true>}`; the expression goes through `tpl`. An entry whose expression reads
+`jwt` — `jwt.<claim>` or `jwt["<claim>"]` — is rendered only while a route of
+the Gateway verifies a bearer (the kagent controller route with its JWT
+policy, agent-manager's, model-manager's); without one it would read `unknown`
+on every series.
+
+```yaml
+gateway:
+  metricLabels:
+    user:
+      enabled: false          # no person label, no series per person
+    team:
+      expression: jwt.groups  # one more claim; string-valued claims only
+```
+
+**The defaults.** `agent` and `agent_namespace` name the calling workload
+(`source.unverifiedWorkload.serviceAccount` / `.namespace`), resolved by source
+IP against the agentgateway controller's workload store — not cryptographic,
+adequate for accounting, never for authorization. On the LLM listener that is
+the agent whose inference the metric counts (the LLM usage dashboard reads
+both); on the kagent controller route it is the caller, klaus-gateway or the
+portal.
+
+`user` (on by default) carries the identity claim the kagent controller route
+verifies in `Strict` mode and writes into `x-user-id`
+(`kagent.controller.auth.userIdClaim`, `email`; `docs/authentication.md`),
+read through `tpl` so the label follows the knob — and the same knob names the
+claim on agent-manager's and model-manager's routes, kagent on or off.
+klaus-gateway makes every controller call with the linked person's Dex
+id_token and never as itself, so on that route every series carries a verified
+person: a Slack turn is one `lf.a2a.v1.A2AService/SendStreamingMessage`
+stream, its duration the turn's. The portal, a CLI and every other route that
+verifies a bearer are labelled the same way. A route without a JWT policy —
+the MCP path under `oauthMode: passthrough`, the LLM listener, whose calls
+carry the ModelConfig's API key — renders `unknown`: tokens and cost stay
+attributed to the agent, not the person.
+
+On the installation (`route` is `<namespace>/<name>`):
+
+```promql
+sum by (user) (rate(agentgateway_requests_total{route=~".*/kagent-controller"}[1h]))
+histogram_quantile(0.95, sum by (le, user) (rate(agentgateway_request_duration_seconds_bucket{route=~".*/kagent-controller"}[1h])))
+```
+
+Know what it costs: an email address in Mimir is personal data, and the label
+multiplies the verifying routes' HTTP series by the number of people.
+`gateway.metricLabels.user.enabled: false` drops the label and its series.
+
+**Guards.** The schema holds every entry to `{expression, enabled}`. The
+render fails, naming the entry, on a missing, empty or multi-line expression,
+a name that is not a Prometheus label name, one the data plane's own series
+carry or the scrape adds, one starting with `__`, and more than 16 enabled
+entries. `kagent.controller.auth.userIdClaim` must be a bare identifier
+wherever it is read as CEL — the controller route's identity header, the
+`user` entry on any verifying route — since an expression that does not
+compile takes the whole policy down. `make verify-metric-labels` asserts all
+of it, and that no other policy of the chart carries a `frontend.metrics`
+section.
 
 ## Data-plane availability
 
@@ -533,6 +615,16 @@ Two objects of this chart guard the platform's single-replica pods against Karpe
 
 With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpenter reports `DisruptionBlocked`, a node drain waits for its drain timeout (the fleet's Karpenter NodePools force-terminate after `terminationGracePeriod: 30m`) — and `AlwaysAllow` keeps a pod that is not Ready evictable. `make verify-disruption` asserts the render, the knobs off and the guards; `make verify-workerpool` the worker budget. A spot reclaim is not a voluntary eviction: the placement of the stateful singletons on on-demand capacity is the meta chart's `scheduling.singletons`, which reaches the component releases as their charts' `nodeSelector` / `tolerations` and is never forwarded here.
 
+## The kagent controller's VerticalPodAutoscaler
+
+The kagent chart has no VPA knob, so this chart renders one for the controller the way it renders the muster-valkey budget (giantswarm/agent-platform#455): `VerticalPodAutoscaler kagent-controller` in the kagent namespace, on the Deployment and the container the kagent chart names (`templates/kagent/controller-vpa.yaml`; `make verify-kagent-netpol` ties both names to the kagent chart the range resolves to). The knob is `kagent.controller.vpa`:
+
+- `enabled: auto` — the object renders where the cluster serves `autoscaling.k8s.io/v1`; the VPA CRD is not part of Kubernetes conformance. An explicit `true` / `false` wins. Under the meta chart the knob is resolved once with the other cluster-shape knobs and arrives here as a boolean.
+- `updateMode: InPlaceOrRecreate` (VPA 1.5+ on Kubernetes 1.33+ with in-place pod resize). The controller is one replica behind a `PodDisruptionBudget minAvailable: 1`, so an evicting mode (`Auto`, `Recreate`) could never apply. In place, the running pod's requests change with no eviction and no roll; a resize the cluster cannot apply in place falls back to an eviction the budget refuses, and the pod keeps its requests until its next roll. `minReplicas: 1` keeps the single replica eligible whatever the updater's `--min-replicas` says.
+- `controlledValues: RequestsOnly` — the chart's limits stay. `minAllowed` is the chart's requests (`100m` / `128Mi`); `maxAllowed` is a step under its limits (`1900m` / `480Mi`) and must stay there: requests equal to the limits on both resources would turn the Burstable pod Guaranteed, and Kubernetes refuses a resize that changes the QoS class.
+
+The kagent block is open in the schema, so the template refuses a key under `kagent.controller.vpa` that is not one of the five above (VPA on or off), an `updateMode` or `controlledValues` outside the API's enum, and names a key that arrives unset — a `null` set through the meta chart deletes the key at that layer rather than passing it on. The knob never reaches the kagent release (`components.kagent.omitKeys`). `kagent.controller.vpa.enabled: false` opts out; a cluster whose VPA predates 1.5 takes `updateMode: Initial` or `Off`.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -623,6 +715,12 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
+| gateway.metricLabels.agent.enabled | bool | `true` |  |
+| gateway.metricLabels.agent.expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
+| gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |
+| gateway.metricLabels.agent_namespace.expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| gateway.metricLabels.user.enabled | bool | `true` |  |
+| gateway.metricLabels.user.expression | string | `"jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -635,10 +733,6 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
 | llmRouting.routes.* | string | `"Passthrough"` |  |
-| llmRouting.metricLabels[0].name | string | `"agent"` |  |
-| llmRouting.metricLabels[0].expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
-| llmRouting.metricLabels[1].name | string | `"agent_namespace"` |  |
-| llmRouting.metricLabels[1].expression | string | `"source.unverifiedWorkload.namespace"` |  |
 | llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
@@ -816,6 +910,13 @@ With one replica, `minAvailable: 1` refuses every voluntary eviction — Karpent
 | kagent.controller.env[1].value | string | `"false"` |  |
 | kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
+| kagent.controller.vpa.enabled | string | `"auto"` |  |
+| kagent.controller.vpa.updateMode | string | `"InPlaceOrRecreate"` |  |
+| kagent.controller.vpa.controlledValues | string | `"RequestsOnly"` |  |
+| kagent.controller.vpa.minAllowed.cpu | string | `"100m"` |  |
+| kagent.controller.vpa.minAllowed.memory | string | `"128Mi"` |  |
+| kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
+| kagent.controller.vpa.maxAllowed.memory | string | `"480Mi"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.substrateWorkerPool.podDisruptionBudget.enabled | bool | `true` |  |
