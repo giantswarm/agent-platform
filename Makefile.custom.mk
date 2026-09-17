@@ -532,15 +532,18 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 LLM_VM := $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set llmRouting.enabled=true
 
 .PHONY: verify-llm-routing
-verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on renders the listener + routing + metrics, and the guards fire.
+verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the LLM path (the Gateway's metrics policy is not its — verify-metric-labels), on renders the listener + routing, and the guards fire.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> off (default): no LLM listener, route, backend, policy or price ConfigMap"
+	@echo "--> off (default): no LLM listener, route, backend, LLM policy or price ConfigMap"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true >/tmp/vl-off.out 2>&1 || { cat /tmp/vl-off.out; exit 1; }
-	@for pattern in 'AgentgatewayBackend' 'AgentgatewayPolicy' 'sectionName: llm' 'model-catalog' 'modelCatalog'; do \
-		if grep -q "$$pattern" /tmp/vl-off.out; then echo "FAIL: llmRouting is off but the render still contains $$pattern"; exit 1; fi; \
+	@for pattern in 'AgentgatewayBackend' 'name: agent-platform-connectivity-llm$$' '^  backend:$$' 'sectionName: llm' 'model-catalog' 'modelCatalog'; do \
+		if grep -qE -- "$$pattern" /tmp/vl-off.out; then echo "FAIL: llmRouting is off but the render still contains $$pattern"; exit 1; fi; \
 	done
 	@if grep -qE '^      port: 8081$$' /tmp/vl-off.out; then echo "FAIL: the LLM listener renders with llmRouting off"; exit 1; fi
-	@echo "ok: nothing renders"
+	@echo "ok: nothing of the LLM path renders"
+	@echo "--> off, agentgateway on: the Gateway's metrics policy renders all the same (the labels are not the LLM path's)"
+	@grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vl-off.out || { echo "FAIL: the -metrics policy is gated on llmRouting; the controller route's metrics would carry no agent label without LLM routing"; exit 1; }
+	@echo "ok: metrics policy independent of llmRouting"
 	@echo "--> off, agentgateway on: the data-plane PodMonitor still renders (the MCP path is scraped too)"
 	@grep -q 'kind: PodMonitor' /tmp/vl-off.out || { echo "FAIL: the data-plane PodMonitor is gated on llmRouting; the MCP path would never be scraped"; exit 1; }
 	@grep -A12 'agentgateway-dataplane' /tmp/vl-off.out | grep -q 'observability.giantswarm.io/tenant: giantswarm' || { echo "FAIL: the PodMonitor lost the tenant label; alloy-metrics would ignore it"; exit 1; }
@@ -573,15 +576,16 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	elif ! grep -q "must list at least one prefix" /tmp/vl-empty.out; then \
 		echo "FAIL: the empty-prefix-list guard failed for the wrong reason"; cat /tmp/vl-empty.out; exit 1; \
 	else echo "ok: empty-prefix-list guard"; fi
-	@echo "--> the Gateway policy carries the route-type map INCLUDING the wildcard, and both metric labels"
+	@echo "--> the LLM policy carries the route-type map INCLUDING the wildcard, and no metrics section (the Gateway's -metrics policy is the one)"
 	@grep -q '"/v1/messages": Messages' /tmp/vl-on.out || { echo "FAIL: no Messages route type; the gateway would parse Anthropic bodies as OpenAI Completions"; exit 1; }
 	@grep -q '"/v1/messages/count_tokens": AnthropicTokenCount' /tmp/vl-on.out || { echo "FAIL: no AnthropicTokenCount route type"; exit 1; }
 	@grep -q '"\*": Passthrough' /tmp/vl-on.out || { echo "FAIL: no wildcard route type; any other path would fall back to Completions parsing"; exit 1; }
+	@$(METRICS_POLICIES) /tmp/vl-on.out >/tmp/vl-on-metrics.out
+	@[ "$$(cat /tmp/vl-on-metrics.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: the policies with a frontend.metrics section are [$$(tr '\n' ' ' </tmp/vl-on-metrics.out)], not agent-platform-connectivity-metrics alone; the data plane keeps one per Gateway and drops the rest in silence"; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-llm$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out | grep -q 'frontend:' && { echo "FAIL: the LLM policy carries a frontend section; the labels moved to the -metrics policy"; exit 1; } || true
 	@grep -q 'expression: source.unverifiedWorkload.serviceAccount' /tmp/vl-on.out || { echo "FAIL: no agent attribution label"; exit 1; }
 	@grep -q 'expression: source.unverifiedWorkload.namespace' /tmp/vl-on.out || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
-	@if [ "$$(grep -c 'kind: AgentgatewayPolicy' /tmp/vl-on.out)" != "1" ]; then \
-		echo "FAIL: more than one AgentgatewayPolicy targets the Gateway; the loser is silently dropped"; exit 1; \
-	else echo "ok: one policy, route-type map + metric labels"; fi
+	@echo "ok: route-type map on the LLM policy, the labels on the metrics policy"
 	@echo "--> the price ConfigMap renders and the AgentgatewayParameters references it"
 	@grep -q 'name: t-model-catalog' /tmp/vl-on.out || { echo "FAIL: no model-price ConfigMap; every cost lookup would report NoCatalog"; exit 1; }
 	@grep -A4 '^  modelCatalog:' /tmp/vl-on.out | grep -q 'key: catalog.json' || { echo "FAIL: AgentgatewayParameters does not reference the price ConfigMap"; exit 1; }
@@ -663,6 +667,148 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing, on ren
 	@grep -A8 '^    providers:$$' /tmp/vl-meta-kagent.out | grep -q 'baseUrl: http://agentgateway.default.svc:8081' || { echo "FAIL: the cutover value never reaches the kagent HelmRelease (flat, kagent 0.2.0+: providers.anthropic.config.baseUrl at the values root); the default ModelConfig would stay direct"; exit 1; }
 	@echo "ok: cutover forwarded"
 	@echo "All llmRouting behaviors verified."
+
+# The names of the AgentgatewayPolicy documents of a render that carry a
+# frontend.metrics section, one per line. The data plane honours ONE metrics
+# policy per Gateway (custom labels replace rather than merge; of two policies
+# one is kept and the other dropped in silence, and which one has changed
+# between agentgateway releases), so the platform renders exactly one,
+# <release>-metrics, and no other policy of the chart may carry the section.
+METRICS_POLICIES := python3 -c 'import re,sys; docs=open(sys.argv[1]).read().split("\n---\n"); [print(re.search(r"^  name: (\S+)", d, re.M).group(1)) for d in docs if "kind: AgentgatewayPolicy\n" in d and re.search(r"^  frontend:\n(?:.*\n)*?    metrics:", d, re.M)]'
+# The document of the -metrics policy, from a render.
+METRICS_DOC := awk '/^  name: agent-platform-connectivity-metrics$$/{f=1} f&&/^---/{exit} f'
+# The data plane on, no route verifying a bearer: jwt. entries are held here;
+# KAGENT_ROUTE and MANAGERS_ON + MANAGERS_ROUTES render them.
+AGW_VM := $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true
+# $(call vml_must_fail,<description>,<NAME of a variable holding the flags — JSON has commas, which call would split on>,<message fragment>)
+define vml_must_fail
+	@if helm template t $(CONNECTIVITY_DIR) $($(2)) >/tmp/vml-fail.out 2>&1; then \
+		echo "FAIL: $(1): the render succeeded"; exit 1; \
+	elif ! grep -qF -- "$(3)" /tmp/vml-fail.out; then \
+		echo "FAIL: $(1): failed for the wrong reason"; cat /tmp/vml-fail.out; exit 1; \
+	else echo "ok: $(1)"; fi
+endef
+# $(call vml_must_fail_schema,<description>,<NAME of a variable holding the flags>,<case-insensitive regex, no commas>): a refusal by the
+# schema. Its wording differs between Helm 3 (gojsonschema: "Additional property x is not allowed", "Invalid type. Expected: object, given:
+# string") and Helm 4 ("additional properties 'x' not allowed", "got string, want object"); CI runs one, a laptop may run the other.
+define vml_must_fail_schema
+	@if helm template t $(CONNECTIVITY_DIR) $($(2)) >/tmp/vml-fail.out 2>&1; then \
+		echo "FAIL: $(1): the render succeeded"; exit 1; \
+	elif ! grep -q "values don't meet the specifications of the schema" /tmp/vml-fail.out || ! grep -qiE -- "$(3)" /tmp/vml-fail.out; then \
+		echo "FAIL: $(1): failed for the wrong reason"; cat /tmp/vml-fail.out; exit 1; \
+	else echo "ok: $(1)"; fi
+endef
+# Recursive (=): KAGENT_ROUTE and MANAGERS_ON are defined further down. A --set-json on one key merges with the three defaults.
+VML_NO_EXPR = $(AGW_VM) --set-json 'gateway.metricLabels.channel={}'
+# The schema holds every entry's shape, a custom one (admitted by any name) like a default: a misspelt key, a scalar entry, a string for enabled.
+VML_BAD_KEY_DEFAULT = $(AGW_VM) --set-json 'gateway.metricLabels.user={"enable":false}'
+VML_BAD_KEY = $(AGW_VM) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups","enable":false}'
+VML_SCALAR = $(AGW_VM) --set gateway.metricLabels.team=foo
+VML_ENABLED_STRING = $(AGW_VM) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups","enabled":"false"}'
+VML_EMPTY_TPL = $(AGW_VM) --set-json 'gateway.metricLabels.channel={"expression":"{{ \"\" }}"}'
+VML_MULTILINE = $(AGW_VM) --set-json 'gateway.metricLabels.channel={"expression":"has(jwt.aud)\n? jwt.aud : 1"}'
+# jwt.* entries the gate holds: the name guards run on them all the same.
+VML_BAD_NAME = $(AGW_VM) --set-json 'gateway.metricLabels.agent-name={"expression":"jwt.aud"}'
+VML_EMPTY_NAME = $(AGW_VM) --set-json 'gateway.metricLabels={"":{"expression":"jwt.aud"}}'
+VML_RESERVED = $(AGW_VM) --set-json 'gateway.metricLabels.route={"expression":"jwt.aud"}'
+VML_SCRAPE = $(AGW_VM) --set-json 'gateway.metricLabels.pod={"expression":"jwt.aud"}'
+VML_DUNDER = $(AGW_VM) --set-json 'gateway.metricLabels.__meta_team={"expression":"jwt.aud"}'
+# The claim is checked where it is read as CEL: the user entry on the managers' routes, controller route off — and kagent off altogether.
+VML_BAD_CLAIM = $(MANAGERS_ON) $(MANAGERS_ROUTES) --set kagent.controller.auth.userIdClaim=https://example.com/email
+VML_BAD_CLAIM_NO_KAGENT = $(MANAGERS_ON) $(MANAGERS_ROUTES) --set components.kagent.enabled=false --set components.agent-manager.enabled=false --set kagent.controller.auth.userIdClaim=https://example.com/email
+# Fourteen plus the three defaults: seventeen.
+VML_SEVENTEEN = $(KAGENT_ROUTE) --set-json 'gateway.metricLabels=$(shell python3 -c 'import json; print(json.dumps({"l%d" % i: {"expression": "jwt.aud"} for i in range(14)}))')'
+# A boolean-looking name, on a non-jwt expression so it renders with the data plane alone.
+VML_ON = $(AGW_VM) --set-json 'gateway.metricLabels.on={"expression":"source.unverifiedWorkload.name"}'
+.PHONY: verify-metric-labels
+verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scoped -metrics policy from gateway.metricLabels (a map — one entry off or one more without restating the rest; tpl; an entry that reads jwt. held until a route verifies a bearer), no policy with nothing enabled or in muster-direct, one template with a frontend section, the meta chart's forwarding, the retired llmRouting.metricLabels refused, the schema holding every entry's shape, the claim guard where the claim is read and silent elsewhere, and the guards.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@echo "--> the data plane on, no route verifying a bearer: one -metrics policy on the Gateway, the two agent labels, nothing that reads jwt. — the default user entry and a custom claim are held (they would read unknown on every series)"
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups"}' --set-json 'gateway.metricLabels.org={"expression":"jwt[\"https://example.com/org\"]"}' >/tmp/vml-on.out 2>&1 || { cat /tmp/vml-on.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-on.out >/tmp/vml-pol.out
+	@[ -s /tmp/vml-pol.out ] || { echo "FAIL: no agent-platform-connectivity-metrics policy with the data plane on"; exit 1; }
+	@grep -q 'kind: Gateway' /tmp/vml-pol.out && grep -q 'name: agentgateway' /tmp/vml-pol.out || { echo "FAIL: the metrics policy does not target the data-plane Gateway (frontend.metrics may target nothing else)"; exit 1; }
+	@grep -A1 '^          - name: agent$$' /tmp/vml-pol.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: no agent label"; exit 1; }
+	@grep -A1 '^          - name: agent_namespace$$' /tmp/vml-pol.out | grep -q 'expression: source.unverifiedWorkload.namespace' || { echo "FAIL: no agent_namespace label"; exit 1; }
+	@if grep -qE 'jwt[.[]' /tmp/vml-pol.out; then echo "FAIL: a jwt label rendered with no route verifying a bearer; it would read unknown on every series"; exit 1; fi
+	@[ "$$(grep -c '^          - name: ' /tmp/vml-pol.out)" = "2" ] || { echo "FAIL: the policy does not carry exactly the two agent labels"; exit 1; }
+	@[ "$$($(METRICS_POLICIES) /tmp/vml-on.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: the policies with a frontend.metrics section are not agent-platform-connectivity-metrics alone"; exit 1; }
+	@echo "ok: data plane alone"
+	@echo "--> the controller route with its JWT policy: user = jwt.email and both custom claims with it — five labels, in name order"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups"}' --set-json 'gateway.metricLabels.org={"expression":"jwt[\"https://example.com/org\"]"}' >/tmp/vml-route.out 2>&1 || { cat /tmp/vml-route.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-route.out >/tmp/vml-route-pol.out
+	@grep -A1 '^          - name: user$$' /tmp/vml-route-pol.out | grep -q 'expression: jwt.email' || { echo "FAIL: the person label is not user = jwt.email with the controller route on"; exit 1; }
+	@grep -A1 '^          - name: team$$' /tmp/vml-route-pol.out | grep -q 'expression: jwt.groups' || { echo "FAIL: a custom jwt entry does not render with the controller route on"; exit 1; }
+	@grep -A1 '^          - name: org$$' /tmp/vml-route-pol.out | grep -qF 'jwt["https://example.com/org"]' || { echo "FAIL: an indexed claim entry (jwt[...]) does not render with the controller route on"; exit 1; }
+	@[ "$$(awk '/^          - name: /{printf "%s ", $$3}' /tmp/vml-route-pol.out)" = "agent agent_namespace org team user " ] || { echo "FAIL: the policy does not carry exactly agent, agent_namespace, org, team, user in name order: $$(awk '/^          - name: /{printf "%s ", $$3}' /tmp/vml-route-pol.out)"; exit 1; }
+	@[ "$$($(METRICS_POLICIES) /tmp/vml-route.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: with the controller route on, the policies with a frontend.metrics section are [$$($(METRICS_POLICIES) /tmp/vml-route.out | tr '\n' ' ')], not the metrics policy alone (the route's JWT policy is a traffic policy)"; exit 1; }
+	@echo "ok: jwt entries with the controller route"
+	@echo "--> the managers' routes with their JWT policies gate it too; the expression follows the claim knob through tpl; enabled false drops an entry and keeps the rest; a renamed person label is user off plus one more entry"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) >/tmp/vml-managers.out 2>&1 || { cat /tmp/vml-managers.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-managers.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: the managers' JWT routes do not render the person label; their series carry the claim too"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=sub >/tmp/vml-claim.out 2>&1 || { cat /tmp/vml-claim.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-claim.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.sub' || { echo "FAIL: the user entry does not follow kagent.controller.auth.userIdClaim (its expression is a tpl of the knob)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set kagent.controller=null >/tmp/vml-nocontroller.out 2>&1 || { cat /tmp/vml-nocontroller.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-nocontroller.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: with the kagent.controller block deleted the user entry does not fall back to jwt.email (the expression includes the claim helper, which carries the default)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.user.enabled=false >/tmp/vml-user-off.out 2>&1 || { cat /tmp/vml-user-off.out; exit 1; }
+	@if $(METRICS_DOC) /tmp/vml-user-off.out | grep -q 'jwt\.'; then echo "FAIL: gateway.metricLabels.user.enabled=false still rendered a jwt label"; exit 1; fi
+	@$(METRICS_DOC) /tmp/vml-user-off.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: turning the person label off lost the agent labels (a map merges; the other defaults must stay)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.user.enabled=false --set-json 'gateway.metricLabels.person={"expression":"jwt.{{ .Values.kagent.controller.auth.userIdClaim }}"}' >/tmp/vml-person.out 2>&1 || { cat /tmp/vml-person.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-person.out | grep -A1 '^          - name: person$$' | grep -q 'expression: jwt.email' || { echo "FAIL: a renamed person label (user off, person with the same tpl expression) does not render"; exit 1; }
+	@if $(METRICS_DOC) /tmp/vml-person.out | grep -q '^          - name: user$$'; then echo "FAIL: user still renders beside person"; exit 1; fi
+	@echo "ok: gate, tpl, toggle, rename"
+	@echo "--> nothing enabled, no policy — the map deleted, or the agent entries off with the user entry held; the person label alone is a policy; nothing in muster-direct"
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set gateway.metricLabels=null >/tmp/vml-none.out 2>&1 || { cat /tmp/vml-none.out; exit 1; }
+	@if grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vml-none.out; then echo "FAIL: a metrics policy with nothing to add rendered; the API server refuses an empty add list"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set gateway.metricLabels.agent.enabled=false --set gateway.metricLabels.agent_namespace.enabled=false >/tmp/vml-gated.out 2>&1 || { cat /tmp/vml-gated.out; exit 1; }
+	@if grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vml-gated.out; then echo "FAIL: a metrics policy rendered with only the held user entry left and no route verifying a bearer"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.agent.enabled=false --set gateway.metricLabels.agent_namespace.enabled=false >/tmp/vml-useronly.out 2>&1 || { cat /tmp/vml-useronly.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-useronly.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: the person label alone renders no policy"; exit 1; }
+	@[ "$$($(METRICS_DOC) /tmp/vml-useronly.out | grep -c '^          - name: ')" = "1" ] || { echo "FAIL: the agent entries rendered although disabled"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vml-direct.out 2>&1 || { cat /tmp/vml-direct.out; exit 1; }
+	@if grep -q 'frontend:' /tmp/vml-direct.out; then echo "FAIL: a metrics policy rendered in muster-direct, where there is no data plane"; exit 1; fi
+	@echo "ok: empty, held-only, person-only, muster-direct"
+	@echo "--> with llmRouting on the labels stay on the -metrics policy and the LLM policy carries none; one template of the chart carries a frontend section"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) >/tmp/vml-llm.out 2>&1 || { cat /tmp/vml-llm.out; exit 1; }
+	@[ "$$($(METRICS_POLICIES) /tmp/vml-llm.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: with llmRouting on, the policies with a frontend.metrics section are [$$($(METRICS_POLICIES) /tmp/vml-llm.out | tr '\n' ' ')], not the metrics policy alone"; exit 1; }
+	@[ "$$(grep -lE '^  frontend:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: more than one template of the chart carries a frontend section: $$(grep -lE '^  frontend:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | tr '\n' ' '); a second metrics policy is dropped in silence by the data plane"; exit 1; }
+	@echo "ok: one metrics policy, one template"
+	@echo "--> a name YAML 1.1 reads as a boolean is rendered quoted"
+	@helm template t $(CONNECTIVITY_DIR) $(VML_ON) >/tmp/vml-quoted.out 2>&1 || { cat /tmp/vml-quoted.out; exit 1; }
+	@grep -q '^          - name: "on"$$' /tmp/vml-quoted.out || { echo "FAIL: the label name on is not quoted; a YAML 1.1 reader makes it a boolean and the API server refuses the policy"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set-json 'gateway.metricLabels.m={"expression":"{\"a\": 1}[\"a\"]"}' >/tmp/vml-brace.out 2>&1 || { cat /tmp/vml-brace.out; exit 1; }
+	@$(METRICS_DOC) /tmp/vml-brace.out | grep -A1 '^          - name: m$$' | grep -qE "expression: ['\"]\{" || { echo "FAIL: an expression starting with { is not quoted; a YAML reader takes it for a flow mapping"; $(METRICS_DOC) /tmp/vml-brace.out | grep -A1 'name: m$$'; exit 1; }
+	@echo "ok: boolean-looking name and brace-leading expression quoted"
+	@echo "--> guards"
+	$(call vml_must_fail,an entry without an expression,VML_NO_EXPR,gateway.metricLabels.channel has no expression)
+	$(call vml_must_fail_schema,a misspelt enabled on a default entry (the schema),VML_BAD_KEY_DEFAULT,additional propert(y|ies) .?enable.? (is )?not allowed)
+	$(call vml_must_fail_schema,a misspelt enabled on a custom entry (the schema too),VML_BAD_KEY,additional propert(y|ies) .?enable.? (is )?not allowed)
+	$(call vml_must_fail_schema,a scalar in place of an entry,VML_SCALAR,got string. want object|Expected: object. given: string)
+	$(call vml_must_fail_schema,a string for enabled,VML_ENABLED_STRING,got string. want boolean|Expected: boolean. given: string)
+	$(call vml_must_fail,an expression that renders empty,VML_EMPTY_TPL,gateway.metricLabels.channel: the expression)
+	$(call vml_must_fail,a multi-line expression,VML_MULTILINE,gateway.metricLabels.channel spans more than one line)
+	$(call vml_must_fail,a name that is not a Prometheus label name — on an entry the gate holds,VML_BAD_NAME,is not a Prometheus label name)
+	$(call vml_must_fail,an empty name,VML_EMPTY_NAME,metric label \"\" (gateway.metricLabels) is not a Prometheus label name)
+	$(call vml_must_fail,a name the data plane already emits,VML_RESERVED,already puts on its series)
+	$(call vml_must_fail,a name the scrape adds,VML_SCRAPE,store the policy's as exported_pod)
+	$(call vml_must_fail,a __ name,VML_DUNDER,starts with __)
+	$(call vml_must_fail,an identity claim that is no CEL identifier with the controller route off,VML_BAD_CLAIM,is not a plain claim name)
+	$(call vml_must_fail,the same with kagent off (model-manager's route alone reads it),VML_BAD_CLAIM_NO_KAGENT,is not a plain claim name)
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set kagent.controller.auth.userIdClaim=https://example.com/email >/tmp/vml-claim-inert.out 2>&1 || { echo "FAIL: a non-identifier claim fails the render in muster-direct, where nothing reads it as CEL"; cat /tmp/vml-claim-inert.out; exit 1; }
+	@echo "ok: the claim guard is silent where nothing reads the claim"
+	$(call vml_must_fail,more than 16 enabled entries,VML_SEVENTEEN,the AgentgatewayPolicy CRD takes at most 16)
+	@echo "--> the meta chart forwards the map — one entry off, the tpl expression as written for the connectivity release to render — and its schema refuses the retired llmRouting.metricLabels"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gateway.metricLabels.user.enabled=false >/tmp/vml-meta.out 2>&1 || { cat /tmp/vml-meta.out; exit 1; }
+	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vml-meta.out >/tmp/vml-meta-conn.out
+	@grep -A2 '^        user:$$' /tmp/vml-meta-conn.out | grep -q 'enabled: false' || { echo "FAIL: gateway.metricLabels.user.enabled does not reach the connectivity HelmRelease"; exit 1; }
+	@grep -A2 '^        user:$$' /tmp/vml-meta-conn.out | grep -qF 'include "agent-platform.kagent.userIdClaim"' || { echo "FAIL: the user entry's tpl expression does not reach the connectivity HelmRelease as written (the meta chart must not render it)"; exit 1; }
+	@grep -A2 '^        agent:$$' /tmp/vml-meta-conn.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: gateway.metricLabels.agent does not reach the connectivity HelmRelease"; exit 1; }
+	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set 'llmRouting.metricLabels[0].name=agent' --set 'llmRouting.metricLabels[0].expression=x' >/tmp/vml-retired.out 2>&1; then \
+		echo "FAIL: the meta chart accepted llmRouting.metricLabels; the value would reach the connectivity release and be refused there on every installation"; exit 1; \
+	elif ! grep -q "values don't meet the specifications of the schema" /tmp/vml-retired.out || ! grep -q "metricLabels" /tmp/vml-retired.out; then \
+		echo "FAIL: llmRouting.metricLabels was refused, but not by the schema naming the key"; cat /tmp/vml-retired.out; exit 1; \
+	else echo "ok: forwarded map, retired key refused"; fi
+	@echo "All metric-label behaviors verified."
 
 # The agentgateway data plane is the platform's critical path: every MCP call
 # and, with llmRouting on, every model call crosses the Deployment the
