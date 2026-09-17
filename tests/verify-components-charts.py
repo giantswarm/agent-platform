@@ -148,6 +148,7 @@ API_VERSIONS = [
     "--api-versions", "monitoring.coreos.com/v1",
     "--api-versions", "cert-manager.io/v1",
     "--api-versions", "gateway.networking.k8s.io/v1",
+    "--api-versions", "autoscaling.k8s.io/v1",
 ]
 
 

@@ -545,6 +545,10 @@ components:  # @schema additionalProperties: true
     # they are forwarded.
     omitKeys:
       - controllerRoute
+      # The controller's VerticalPodAutoscaler is the connectivity chart's
+      # object (kagent.controller.vpa); the rest of the controller block is
+      # the kagent chart's.
+      - controller.vpa
       - fluxServiceAccountName
       # The store block is this chart's and the connectivity chart's: the kagent
       # chart gets the derived harness.snapshotLocation, never the block.
@@ -2185,6 +2189,34 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       minAvailable: 1
       maxUnavailable: ""
       unhealthyPodEvictionPolicy: AlwaysAllow
+    # VerticalPodAutoscaler on the controller Deployment, rendered by the
+    # connectivity chart in the kagent namespace (the kagent chart has no VPA
+    # knob; the #439 pattern of the muster-valkey budget). `auto` (the
+    # default) renders it where the cluster serves autoscaling.k8s.io/v1 — the
+    # VPA CRD is not part of Kubernetes conformance — resolved ONCE here with
+    # the other cluster-shape knobs (agent-platform.shape.apply); an explicit
+    # true / false wins. With one replica behind the budget above an evicting
+    # update mode could never apply: InPlaceOrRecreate (VPA 1.5+ on
+    # Kubernetes 1.33+ with in-place pod resize) resizes the running pod's
+    # requests without an eviction, and a resize that cannot apply in place
+    # falls back to an eviction the budget refuses — the pod keeps its
+    # requests until its next roll. RequestsOnly leaves the chart's limits
+    # alone; minAllowed is the chart's requests (100m / 128Mi) and maxAllowed
+    # stays a step under its limits (2 / 512Mi): a Burstable pod whose
+    # requests reach its limits on both resources would become Guaranteed,
+    # and Kubernetes refuses a resize that changes the QoS class — so
+    # maxAllowed must never equal the limits. Never forwarded to the kagent
+    # release (components.kagent.omitKeys).
+    vpa:
+      enabled: auto  # auto | true | false
+      updateMode: InPlaceOrRecreate  # Off | Initial | Recreate | InPlaceOrRecreate | Auto
+      controlledValues: RequestsOnly  # RequestsOnly | RequestsAndLimits
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 1900m
+        memory: 480Mi
     # The kagent line serves no Prometheus /metrics: the controller binds its
     # metrics server to "0", and the upstream chart's controller.metrics knob
     # renders a Service and the METRICS_* env to that dead port. Explicitly

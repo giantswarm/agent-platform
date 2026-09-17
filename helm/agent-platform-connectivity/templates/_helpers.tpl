@@ -538,6 +538,26 @@ an explicit true with kyvernoPolicies.enabled false fails the render
 {{- end -}}
 
 {{/*
+kagent.controller.vpa.enabled resolved: "true" when the kagent controller's
+VerticalPodAutoscaler renders (templates/kagent/controller-vpa.yaml). `auto`
+follows whether autoscaling.k8s.io/v1 is served — the VPA CRD is not part of
+Kubernetes conformance; an explicit true / false wins.
+*/}}
+{{- define "agent-platform.shape.kagentControllerVpa" -}}
+{{- $vpa := dig "controller" "vpa" nil (.Values.kagent | default dict) -}}
+{{- /* The block itself is the switch: an installation that deletes
+kagent.controller.vpa — or the whole kagent.controller block — has no knob to
+resolve and gets no object, the same answer as enabled: false. A null set at
+either layer deletes the key rather than passing it on, so this is the shape
+the chart sees, and reading .enabled off it would dereference nothing. */ -}}
+{{- if not (kindIs "map" $vpa) -}}
+false
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kagent.controller.vpa.enabled" "value" (dig "enabled" "auto" $vpa) "api" "autoscaling.k8s.io/v1") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Truthy (emits "true") when the kyverno.io objects render. Gated templates use:
   {{- if (include "agent-platform.kyvernoPolicies" .) }}
 */}}
@@ -577,6 +597,14 @@ Truthy when the model-serving Kyverno cache policies render
 */}}
 {{- define "agent-platform.modelServingPolicies" -}}
 {{- if eq (include "agent-platform.shape.modelServingPolicies" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the kagent controller's VerticalPodAutoscaler renders
+(kagent.controller.vpa.enabled, default auto).
+*/}}
+{{- define "agent-platform.kagentControllerVpa" -}}
+{{- if eq (include "agent-platform.shape.kagentControllerVpa" .) "true" -}}true{{- end -}}
 {{- end -}}
 
 {{/*
