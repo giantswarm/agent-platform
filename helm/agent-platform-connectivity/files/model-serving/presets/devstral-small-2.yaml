@@ -1,4 +1,4 @@
-# Devstral Small 2 (24B), BF16. Mistral's agentic coding model (Mistral3
+# Devstral Small 2 (24B), FP8. Mistral's agentic coding model (Mistral3
 # architecture with vision), served language-only.
 apiVersion: agent-platform.giantswarm.io/v1alpha1
 kind: ServingPreset
@@ -7,9 +7,11 @@ metadata:
 spec:
   displayName: Devstral Small 2 24B
   description: |
-    Dense 24B agentic coding model (SWE-bench Verified 68.0%) at BF16
-    (~48 GiB of weights), served language-only. Tuned on a single-GPU
-    128 GB unified-memory node (--gpu-memory-utilization=0.50).
+    Dense 24B agentic coding model (SWE-bench Verified 68.0%) served from
+    the repository's FP8 checkpoint (fp8_e4m3 weights, BF16 vision tower
+    and lm_head; ~24 GiB of weights by its safetensors index, the
+    consolidated-* files are a second copy), language-only. Tuned on a
+    single-GPU 128 GB unified-memory node (--gpu-memory-utilization=0.50).
   model:
     id: mistralai/Devstral-Small-2-24B-Instruct-2512
     storageUri: hf://mistralai/Devstral-Small-2-24B-Instruct-2512
@@ -32,5 +34,5 @@ spec:
       cpu: "8"
       memory: 64Gi
   requirements:
-    weightsGiB: 48
+    weightsGiB: 25
     overheadGiB: 30

@@ -240,6 +240,7 @@ else:
         shaped = "podShapes" in open(f"{tree}/{CONN}/templates/model-serving/_helpers.tpl", encoding="utf-8").read()
         ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         quoted = "--default-chat-template-kwargs='" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8b-fp8.yaml", encoding="utf-8").read()
+        sized = "weightsGiB: 25" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -257,6 +258,16 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: the two L4 presets are resized on this side (#502) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # Two presets declare the Hub's weight size (giantswarm/agent-platform#535:
+    # qwen3-8-27b 25 GiB, devstral-small-2 25 GiB, their descriptions say so); a
+    # golden from before carries 15 and 48, so those two preset documents are
+    # left out of the comparison on both sides. Drop this once GOLDEN_REF
+    # carries #535.
+    if not sized:
+        for name in ("qwen3-8-27b", "devstral-small-2"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: two presets declare the Hub's weight size on this side (#535) and not on {ref}: their ConfigMaps are left out of the comparison")
     # Six presets write their JSON-valued vLLM arguments as one single-quoted
     # argument, the form the llm-d runtime template's eval keeps intact
     # (giantswarm/agent-platform#532); a golden from before carries the bare

@@ -1,0 +1,15 @@
+# Negative control for tests/verify-preset-weights.py (giantswarm/agent-platform#535):
+# a preset declaring less than the Hub holds. Qwen/Qwen3-4B-Instruct-2507 is
+# 7.49 GiB by its safetensors index; 4 GiB understates it. Not a shipped preset.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: weights-understated
+spec:
+  displayName: Weights understated (negative control)
+  model:
+    id: Qwen/Qwen3-4B-Instruct-2507
+    storageUri: hf://Qwen/Qwen3-4B-Instruct-2507
+  requirements:
+    weightsGiB: 4
+    overheadGiB: 12

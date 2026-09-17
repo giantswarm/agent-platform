@@ -13,12 +13,15 @@ spec:
     Dense 27B coding and agent model with 256k native context, tool calling
     (Claude Code compatible) and vision. Served as the Inferact NVFP4 repack
     (BF16 lm_head, required by the DFlash2 draft model), which cuts the
-    weights from ~52 GiB to ~15 GiB and, with the 1.9B DFlash2 draft
-    proposing 7 tokens per target pass, lifts single-request decode from
-    ~4 to ~29 tok/s on a bandwidth-bound node. Tuned on a single-GPU
-    128 GB unified-memory Blackwell node (the CUTE_DSL_ARCH pin and
-    --gpu-memory-utilization=0.60 belong to that hardware; adjust both
-    elsewhere). The chat template maps the Anthropic reasoning effort
+    weights from ~52 GiB to ~25 GiB (six shards plus the MTP experts file)
+    and, with the 1.9B DFlash2 draft proposing 7 tokens per target pass,
+    lifts single-request decode from ~4 to ~29 tok/s on a bandwidth-bound
+    node. Target hardware: a single-GPU 128 GB unified-memory Blackwell node
+    (the CUTE_DSL_ARCH pin, --gpu-memory-utilization=0.60 and the 30 GiB of
+    overhead belong to that hardware; adjust all three elsewhere). As tuned,
+    the recipe needs 55 GiB (25 GiB of weights + 30 GiB of overhead): no
+    size of the curated AWS accelerator families (24 GiB L4/A10G, 16 GiB T4,
+    48 GiB L40S) hosts it. The chat template maps the Anthropic reasoning effort
     "high" to the model's "xhigh", which the stock template rejects.
     Known ceiling: the DFlash kernel can wedge at >100k-token prefill with
     concurrency >= 2, hence --max-num-seqs=4.
@@ -61,7 +64,7 @@ spec:
       cpu: "8"
       memory: 64Gi
   requirements:
-    weightsGiB: 15
+    weightsGiB: 25
     overheadGiB: 30
   predictor:
     # KServe writes this into the predictor route as the request timeout; the
