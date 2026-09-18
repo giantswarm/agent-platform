@@ -143,7 +143,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 NS = "model-serving"
 CLAIM = "hf-cache"
 FSGROUP = 1000
-MEMORY = "4Gi"
+MEMORY = "8Gi"
 # modelServing.policies.env, as the chart ships it (#520).
 ENV = {"HF_HUB_DISABLE_XET": "1"}
 MODEL_DIR = "/mnt/models"
