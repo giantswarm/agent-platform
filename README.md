@@ -407,6 +407,24 @@ https://models.<cluster>.<base domain>/<namespace>/<model>/v1/chat/completions
 
 **The classic runtime.** The chart's `kserve-vllm` `ClusterServingRuntime` serves the classic `InferenceService` path — where the `LLMInferenceService` API is not served, model-manager composes into it — with the llm-d template's argument grammar: its container's command is `/bin/sh -c 'eval "exec vllm serve $@"' --`, followed by the base arguments `modelServing.runtime.args` (`--model /mnt/models --port 8080 --served-model-name {{.Name}}` by default; KServe expands `{{.Name}}` to the InferenceService name before the container starts) and, appended by KServe, the preset's arguments. The eval re-parses `$@` — base and preset arguments alike — so a preset's JSON-valued flag written single-quoted inside one argument (`--limit-mm-per-prompt='{"image": 1, "video": 0}'`) reaches vLLM as one word with the quotes gone on either path; the render refuses a preset argument with whitespace, a quote or a shell metacharacter outside single quotes. The runtime image must carry `/bin/sh` and `vllm` on `PATH` — the upstream vLLM images do, and so must an installation's own `modelServing.runtime.image`. `make verify-serving-slice` runs both entrypoints over every shipped preset's arguments (giantswarm/agent-platform#532, #549).
 
+**Verifying model images.** A model pod runs whatever the registry serves under its references — the modelcar sidecar that carries the weights, the pre-fetch init container KServe runs from the same image, the runtime container — and an installation that curates its models as signed OCI images can have admission refuse an unsigned or tampered one: `modelServing.imageVerification` (off by default; giantswarm/agent-platform#552) renders one Kyverno `verifyImages` ClusterPolicy, `<release>-model-serving-image-verification`, over the model pods of the serving namespace — one rule per pod shape, Pods at CREATE and UPDATE (a pod's container images are mutable, so a CREATE-only rule would admit an image swapped into a running pod; Kyverno records the verified images in an annotation and skips an unchanged one) — where the cache policies render (`modelServing.policies.enabled` resolved: Kyverno served) and nowhere else. Kyverno verifies every container image of the pod that matches `images` (its `imageReferences`: a full reference or a wildcard, `*` any run of characters across path segments, tags and digests, `?` one character — `gsoci.azurecr.io/giantswarm/models/*` covers every curated model image; the runtime image only when a pattern names its path too) against `attestors`, one entry per trusted signer, passed through as written into one attestor set with `count: 1` (a signature of any one signer admits the image): keyless (`issuer` + `subject` or `subjectRegExp`, `rekor.url`), a public key (`keys.publicKeys`, a PEM) or `certificates`. `mutateDigest: true` replaces the verified tag with its digest, so the kubelet runs exactly what was verified (Kyverno requires a digest on a verified image; with it `false`, the preset pins one); `required: true` denies an image without a signature; `failureAction: Enforce` denies, `Audit` admits and reports. Enabled with an empty `images` list, no attestor, an entry that is no Kyverno attestor entry, a `failureAction` outside the two or an unknown key fails the render naming the key. Verifying the curated models signed by the fleet's CircleCI identity, keyless:
+
+```yaml
+modelServing:
+  imageVerification:
+    enabled: true
+    images:
+      - gsoci.azurecr.io/giantswarm/models/*
+    attestors:
+      - keyless:
+          issuer: https://oidc.circleci.com
+          subjectRegExp: ^https://circleci\.com/api/v2/projects/.+$
+          rekor:
+            url: https://rekor.sigstore.dev
+```
+
+The meta chart mirrors the block (`make verify-meta` holds every leaf equal); `make verify-model-serving-policies` asserts the rendered rule of both shapes — the match, the references and the attestor entries verbatim, the knobs —, runs the policy through `kyverno apply` over both fixture pods (none of whose images match: every rule skipped, the policy accepted by Kyverno's schema, a misspelt field refused), nothing while disabled or without Kyverno, the guards, and the meta chart's forwarded render equal. A signature itself cannot be checked offline; that proof is a served `oci://` preset admitted and a re-tagged unsigned image denied, on a GPU cluster.
+
 ```bash
 helm template r helm/agent-platform -f helm/agent-platform/examples/serving-slice.yaml \
   --set global.domain=wc01.example.com --set global.identity.issuerUrl=https://dex.mc.example.com \

@@ -69,6 +69,20 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
     never the download Job's pod.
+  * Image verification (modelServing.imageVerification, #552) is off by
+    default and renders nothing without kyverno.io/v1. On, one verifyImages
+    ClusterPolicy with one rule per pod shape selects exactly its shape's
+    Pods in the serving namespace at CREATE and UPDATE, carrying the image
+    references and the attestor entries verbatim — a keyless CircleCI
+    identity and a public key, as one attestor set of count 1 — with
+    mutateDigest, required and failureAction as set; `kyverno apply` accepts
+    the policy and skips both fixture pods, none of whose images match the
+    references (a signature cannot be checked offline), and drops a policy
+    with a misspelt verifyImages field, so that acceptance has teeth; enabled
+    with an empty images list, no attestor, an entry that is no Kyverno
+    attestor entry, a failureAction outside Enforce | Audit or an unknown key
+    fails the render naming the key; the values the meta chart forwards
+    render the same policy.
   * Each shape's policies admit exactly the port its fixture pod is reached
     on — the container port KServe's Service targets: the classic predictor's
     kserve-container on 8080, the llm-d workload's routing sidecar on 8000
@@ -165,6 +179,17 @@ HUB_HOSTS = ["huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs-us-1.hf.co", "
              "transfer.xethub.hf.co", "cas-bridge.xethub.hf.co", CDN, "eu.aws.cdn.hf.co"]
 # What the allow-list keeps out: a depth no name of the download path has, the bare apex, look-alike domains.
 NOT_HUB_HOSTS = ["a.b.c.d.hf.co", "hf.co", "huggingface.co.example.com", "hf.co.example.com", "example.com"]
+# modelServing.imageVerification (#552): the on-render's values — every curated model image; the fleet's CircleCI
+# identity as a keyless attestor entry and a public key (Kyverno's documentation key) beside it, passed through as written.
+IV_SUFFIX = "-model-serving-image-verification"
+IV_IMAGES = ["gsoci.azurecr.io/giantswarm/models/*"]
+IV_ATTESTORS = [
+    {"keyless": {"issuer": "https://oidc.circleci.com", "subjectRegExp": r"^https://circleci\.com/api/v2/projects/.+$",
+                 "rekor": {"url": "https://rekor.sigstore.dev"}}},
+    {"keys": {"publicKeys": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPZrfM\n"
+                            "5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==\n-----END PUBLIC KEY-----"}},
+]
+IV_ON = {"enabled": True, "images": IV_IMAGES, "attestors": IV_ATTESTORS}
 BASE = [
     "--namespace", "agent-platform",
     "--set", "ingress.parentRefs[0].name=x",
@@ -188,8 +213,8 @@ def ok(msg: str) -> None:
     print(f"ok: {msg}")
 
 
-def render(chart: str, flags: list[str]) -> list[dict]:
-    result = subprocess.run([HELM, "template", "t", chart, *BASE, *flags], capture_output=True, text=True, check=False)
+def render(chart: str, flags: list[str], base: list[str] = BASE) -> list[dict]:
+    result = subprocess.run([HELM, "template", "t", chart, *base, *flags], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         fail(f"render of {chart} {' '.join(flags)} failed:\n{result.stderr}")
     return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
@@ -641,6 +666,106 @@ def check_fqdns(cilium: list[dict], k8s: list[dict], via: str) -> None:
     ok(f"kubernetes flavour ({via}): each model pod's and the download Job's egress admits 443 to every public block (no name to get wrong)")
 
 
+def loaded_rules(policies: list[dict], resource: dict) -> int:
+    """How many rules `kyverno apply` loaded from the policies: the CLI drops a policy its schema refuses and applies the rest."""
+    with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-") as tmp:
+        pathlib.Path(tmp, "policies.yaml").write_text(yaml.safe_dump_all(policies), encoding="utf-8")
+        pathlib.Path(tmp, "resource.yaml").write_text(yaml.safe_dump(resource), encoding="utf-8")
+        result = subprocess.run([KYVERNO, "apply", f"{tmp}/policies.yaml", "--resource", f"{tmp}/resource.yaml"], capture_output=True, text=True, check=False)
+    if not (m := re.search(r"Applying (\d+) policy rule", result.stdout)):
+        fail(f"kyverno apply did not report how many rules it loaded:\n{result.stdout}\n{result.stderr}")
+    return int(m.group(1))
+
+
+def image_verification_values(tmp: str, block: dict, *extra: str) -> str:
+    """A values file turning modelServing.imageVerification on with `block` merged over IV_ON."""
+    path = os.path.join(tmp, f"iv-{len(os.listdir(tmp))}.yaml")
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump({"modelServing": {"imageVerification": {**IV_ON, **block}}}, f)
+    return path
+
+
+def check_image_verification(connectivity: str, docs: list[dict]) -> None:
+    """modelServing.imageVerification (#552): off by default and without Kyverno; on, one verifyImages rule per shape with the
+    references and the attestor entries verbatim and the knobs as set, accepted by Kyverno's schema and skipping a pod none of
+    whose images match; the guards name their key."""
+    if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in docs):
+        fail("modelServing.imageVerification is off by default, yet the default render carries the image-verification policy")
+    with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-") as tmp:
+        on = image_verification_values(tmp, {})
+        policy = one(render(connectivity, ["-f", on]), "ClusterPolicy", IV_SUFFIX)
+        spec = policy["spec"]
+        if spec.get("background") is not False or spec.get("webhookTimeoutSeconds") != 30:
+            fail(f"the image-verification policy is admission-only with a 30 s webhook timeout; got background={spec.get('background')} "
+                 f"webhookTimeoutSeconds={spec.get('webhookTimeoutSeconds')}")
+        if [r["name"] for r in spec["rules"]] != [f"verify-model-images-{s}" for s in SHAPES]:
+            fail(f"the image-verification policy's rules are {[r['name'] for r in spec['rules']]}; expected one per pod shape")
+        expected = {"imageReferences": IV_IMAGES, "mutateDigest": True, "required": True, "failureAction": "Enforce",
+                    "attestors": [{"count": 1, "entries": IV_ATTESTORS}]}
+        for rule, shape in zip(spec["rules"], SHAPES):
+            matches = rule["match"]["any"]
+            resources = matches[0]["resources"] if len(matches) == 1 else {}
+            if resources.get("kinds") != ["Pod"] or resources.get("namespaces") != [NS] or sorted(resources.get("operations") or []) != ["CREATE", "UPDATE"]:
+                fail(f"{rule['name']}: matches {matches}; expected the shape's Pods in {NS} at CREATE and UPDATE (a pod's images are mutable)")
+            selector = resources["selector"]
+            if not selects(selector, fixture(shape)["metadata"]["labels"]) or selects(selector, DOWNLOAD_LABELS) \
+                    or any(selects(selector, fixture(other)["metadata"]["labels"]) for other in SHAPES if other != shape):
+                fail(f"{rule['name']}: the selector {selector} does not select exactly its own shape's fixture pod")
+            if rule.get("verifyImages") != [expected]:
+                fail(f"{rule['name']}: verifyImages is\n{yaml.safe_dump(rule.get('verifyImages'))}--- expected one entry:\n{yaml.safe_dump(expected)}")
+        ok("on, one verifyImages rule per pod shape selects exactly its shape's Pods in the serving namespace at CREATE and UPDATE, with the "
+           "references and the attestor entries (the keyless CircleCI identity, a public key) verbatim in one attestor set of count 1, "
+           "mutateDigest, required and Enforce")
+        knobs = one(render(connectivity, ["-f", image_verification_values(tmp, {"mutateDigest": False, "required": False, "failureAction": "Audit"})]),
+                    "ClusterPolicy", IV_SUFFIX)
+        for rule in knobs["spec"]["rules"]:
+            v = rule["verifyImages"][0]
+            if v["mutateDigest"] is not False or v["required"] is not False or v["failureAction"] != "Audit":
+                fail(f"{rule['name']}: mutateDigest false, required false and Audit did not reach the rule: {v}")
+        ok("mutateDigest, required and failureAction reach every rule as set")
+        for shape in SHAPES:
+            if apply([policy], fixture(shape)) is not None:
+                fail(f"{shape}: the image-verification policy changed a fixture pod none of whose images match the references")
+        bogus = copy.deepcopy(policy)
+        for rule in bogus["spec"]["rules"]:
+            rule["verifyImages"][0]["mutateDigst"] = rule["verifyImages"][0].pop("mutateDigest")
+        if loaded_rules([policy], fixture("predictor")) != len(SHAPES) or loaded_rules([bogus], fixture("predictor")) != 0:
+            fail("kyverno apply must load every rule of the rendered policy and none of a policy with a misspelt verifyImages field")
+        ok("kyverno apply accepts the policy (every rule loaded; a misspelt verifyImages field drops it) and skips both fixture pods, "
+           "none of whose images match the references")
+        no_kyverno = [flag for i, flag in enumerate(BASE) if flag != "kyverno.io/v1" and not (flag == "--api-versions" and BASE[i + 1] == "kyverno.io/v1")]
+        if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["-f", on], no_kyverno)):
+            fail("without kyverno.io/v1 served, the image-verification policy still renders")
+        if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["-f", on, "--set", "modelServing.imageVerification.enabled=false"])):
+            fail("modelServing.imageVerification.enabled=false still renders the image-verification policy")
+        ok("nothing renders while disabled or without kyverno.io/v1")
+        for description, block, needle in (
+            ("an empty images list", {"images": []}, "modelServing.imageVerification.images is empty"),
+            ("no attestor", {"attestors": []}, "modelServing.imageVerification.attestors is empty"),
+            ("an entry that is no Kyverno attestor entry", {"attestors": [{"issuer": "https://oidc.circleci.com"}]}, "modelServing.imageVerification.attestors[0]"),
+            ("a failureAction outside Enforce | Audit", {"failureAction": "Deny"}, "modelServing.imageVerification.failureAction"),
+            ("an unknown key", {"imageRefrences": IV_IMAGES}, "modelServing.imageVerification.imageRefrences"),
+        ):
+            result = subprocess.run([HELM, "template", "t", connectivity, *BASE, "-f", image_verification_values(tmp, block)],
+                                    capture_output=True, text=True, check=False)
+            if result.returncode == 0 or needle not in result.stderr:
+                fail(f"{description} must fail the render naming the key ({needle}); got rc={result.returncode}:\n{result.stderr}")
+        ok("enabled with an empty images list, no attestor, an entry that is no Kyverno attestor entry, a failureAction outside "
+           "Enforce | Audit or an unknown key fails the render naming the key")
+
+
+def check_image_verification_forwarded(connectivity: str, forwarded: str) -> None:
+    """The values the meta chart forwards render the same image-verification policy as the connectivity defaults with the block on (#552)."""
+    with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-") as tmp:
+        on = image_verification_values(tmp, {})
+        own = one(render(connectivity, ["-f", on]), "ClusterPolicy", IV_SUFFIX)["spec"]
+        through = one(render(connectivity, ["-f", forwarded, "-f", on]), "ClusterPolicy", IV_SUFFIX)["spec"]
+        if through != own:
+            fail(f"the image-verification policy the meta chart's forwarded values render differs from the connectivity default:\n"
+                 f"{yaml.safe_dump(through)}\n--- connectivity:\n{yaml.safe_dump(own)}")
+    ok("the meta chart's forwarded values render the image-verification policy as the connectivity default does")
+
+
 def main(connectivity: str, meta: str) -> int:
     if shutil.which(KYVERNO) is None:
         fail(f"the kyverno CLI ({KYVERNO}) is not installed; the mutations are asserted with `kyverno apply`")
@@ -660,6 +785,7 @@ def main(connectivity: str, meta: str) -> int:
         check_mutations(pods_policy, shape)
         check_pod_security(pods_policy, exception, shape)
     check_deployments(deployments_policy)
+    check_image_verification(connectivity, docs)
     cilium = render(connectivity, CILIUM)
     check_prepull(connectivity, docs, cilium, pods_policy, exception)
     check_selectors(cilium, docs)
@@ -684,6 +810,7 @@ def main(connectivity: str, meta: str) -> int:
         check_fqdns(*through_meta, "the meta chart's forwarded values")
         check_ports(*through_meta, "the meta chart's forwarded values")
         check_prepull_forwarded(connectivity, through_meta[1])
+        check_image_verification_forwarded(connectivity, forwarded)
     return 0
 
 
