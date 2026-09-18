@@ -24,7 +24,8 @@
   //   gsoci copy of registry.k8s.io/kubectl) and
   //   the kubectl+helm image of the hooks that need helm or a shell — the
   //   self-management values hook, its resumer and the suspend hook (values.yaml,
-  //   gitops.hooks.helmImage: alpine/k8s, whose tags follow the kubectl minor).
+  //   gitops.hooks.helmImage: the gsoci copy of alpine/k8s, whose tags follow
+  //   the kubectl minor).
   // - The `# registry:` hint regexes of the giantswarm preset read the plain
   //   `version:` keys (vllm-openai, backstage-catalogs, agentgateway).
   //

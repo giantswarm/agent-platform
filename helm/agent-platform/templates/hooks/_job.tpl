@@ -1,7 +1,7 @@
 {{/*
 The Helm hook Jobs of this chart. A hook is either ONE plain kubectl command in
 the gsoci copy of registry.k8s.io/kubectl (gitops.hooks.image; the image is distroless, there is
-no shell) or a small shell script in alpine/k8s (gitops.hooks.helmImage: kubectl,
+no shell) or a small shell script in the gsoci copy of alpine/k8s (gitops.hooks.helmImage: kubectl,
 helm, jq, /bin/sh) where the hook needs helm or has to tolerate a missing
 object. Every hook runs under the restricted pod security profile (the
 namespace the FluxInstance labels warns on anything less), as the hook

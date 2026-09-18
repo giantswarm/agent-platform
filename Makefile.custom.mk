@@ -2921,7 +2921,7 @@ verify-postgres-kagent-v2: ## Assert the kagent_v2 database entry (#346): the CN
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set postgres.enabled=true >/tmp/vpv2-meta.out 2>&1 || { cat /tmp/vpv2-meta.out; exit 1; }
 	@$(PICK) /tmp/vpv2-meta.out HelmRelease agent-platform-connectivity >/tmp/vpv2-meta-conn.out || { echo "FAIL: no connectivity HelmRelease"; exit 1; }
 	@grep -A8 '^        kagent-v2:$$' /tmp/vpv2-meta-conn.out | grep -q 'name: kagent_v2' || { echo "FAIL: postgres.databases.kagent-v2 is not forwarded to the connectivity release"; grep -n -A8 'kagent-v2:' /tmp/vpv2-meta-conn.out | head -12; exit 1; }
-	@grep -q 'repository: alpine/k8s' /tmp/vpv2-meta-conn.out || { echo "FAIL: hooks.kubectlImage is not forwarded to the connectivity release"; exit 1; }
+	@grep -q 'repository: giantswarm/alpine-k8s' /tmp/vpv2-meta-conn.out || { echo "FAIL: hooks.kubectlImage is not forwarded to the connectivity release"; exit 1; }
 	@echo "ok: forwarded"
 	@echo "--> the kagent-v2 entry drops with a disabled entry, its component off, or postgres off (the map mechanism itself is verify-postgres' own)"
 	@helm template t $(CONNECTIVITY_DIR) $(PG_ON) --set 'postgres.databases.kagent-v2.enabled=false' >/tmp/vpv2-disabled.out 2>&1 || { cat /tmp/vpv2-disabled.out; exit 1; }
@@ -3362,7 +3362,7 @@ verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks 
 	@for f in /tmp/vsv-backup.out /tmp/vsv-restore.out; do \
 		grep -q 'helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded' $$f || { echo "FAIL: $$f: the hook delete policy is not before-hook-creation,hook-succeeded"; exit 1; }; \
 		grep -q 'serviceAccountName: t-hooks' $$f || { echo "FAIL: $$f: the Job does not run as the hook identity t-hooks"; exit 1; }; \
-		grep -q 'image: "docker.io/alpine/k8s:' $$f || { echo "FAIL: $$f: the Job does not run the helm image (a script needs sh, kubectl and jq)"; exit 1; }; \
+		grep -q 'image: "gsoci.azurecr.io/giantswarm/alpine-k8s:' $$f || { echo "FAIL: $$f: the Job does not run the helm image (a script needs sh, kubectl and jq)"; exit 1; }; \
 		grep -q 'command: \["/bin/sh", "-eu", "-c"\]' $$f || { echo "FAIL: $$f: the Job is not a script under sh -eu"; exit 1; }; \
 		grep -q 'ns="kagent"' $$f || { echo "FAIL: $$f: the script does not name the kagent namespace"; exit 1; }; \
 		grep -q 'cm="$(STORAGE_CM)"' $$f || { echo "FAIL: $$f: the script does not name the ConfigMap $(STORAGE_CM)"; exit 1; }; \

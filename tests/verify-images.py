@@ -93,13 +93,6 @@ PENDING = {
         "the CloudNativePG operator chart from gsoci (giantswarm/agent-platform#580)",
     r"FluxInstance/flux\.spec\.distribution\.registry=ghcr\.io/fluxcd":
         "the Flux controllers from gsoci (giantswarm/agent-platform#580, giantswarm/retagger#1229)",
-    # The hook Jobs' kubectl+helm image and the Substrate bootstrap's openssl
-    # image: mirrored by giantswarm/retagger#1228; the defaults switch once
-    # the copies resolve.
-    r"Job/.+\.containers\[\d+\]\.image=docker\.io/alpine/k8s:.+":
-        "the hook Jobs' kubectl+helm image mirrored (giantswarm/retagger#1228)",
-    r"HelmRelease/agent-platform-connectivity\.spec\.values\.hooks\.(kubectlImage|opensslImage)\.registry=docker\.io":
-        "the hook Jobs' images mirrored (giantswarm/retagger#1228)",
     # The classic ClusterServingRuntime's upstream vLLM image; the runtime goes
     # with the classic serving path (giantswarm/agent-platform#574).
     r"ClusterServingRuntime/.+\.containers\[\d+\]\.image=docker\.io/vllm/vllm-openai:.+":

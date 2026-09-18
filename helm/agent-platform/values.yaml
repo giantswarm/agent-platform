@@ -137,16 +137,16 @@ gitops:
   # a shell, in a distroless kubectl image. `helmImage` runs the hooks that need
   # helm and a shell — the values hook (`helm get values` into the values
   # Secret), the detached resumer and the tolerant suspend hook: alpine/k8s
-  # carries kubectl, helm, jq and /bin/sh. Renovate tracks both tags as docker
-  # image pins.
+  # carries kubectl, helm, jq and /bin/sh. Both are the gsoci copies
+  # (giantswarm/retagger); Renovate tracks both tags as docker image pins.
   hooks:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/kubectl
       tag: v1.37.0
     helmImage:
-      registry: docker.io
-      repository: alpine/k8s
+      registry: gsoci.azurecr.io
+      repository: giantswarm/alpine-k8s
       tag: 1.37.0
   # === Self-management (the chart holds its own release) ===
   # Where the chart brings the engine, the engine also holds the chart: the
@@ -4425,16 +4425,16 @@ substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
 # === Hook Jobs of the connectivity release ===
 # The images of the connectivity chart's hook Jobs (read there): kubectl with
 # a shell and jq for the Substrate bootstrap and the derived Postgres
-# connection Secrets; openssl for the key material the bootstrap mints. A
-# cluster that reaches no public registry mirrors both.
+# connection Secrets; openssl for the key material the bootstrap mints — the
+# gsoci copies of alpine/k8s and alpine/openssl (giantswarm/retagger).
 hooks:
   kubectlImage:
-    registry: docker.io
-    repository: alpine/k8s
+    registry: gsoci.azurecr.io
+    repository: giantswarm/alpine-k8s
     tag: 1.37.0
   opensslImage:
-    registry: docker.io
-    repository: alpine/openssl
+    registry: gsoci.azurecr.io
+    repository: giantswarm/alpine-openssl
     tag: 3.5.8
 
 # === KServe (kserve-crd, kserve-resources, kserve-llmisvc-crd, kserve-llmisvc-resources) ===

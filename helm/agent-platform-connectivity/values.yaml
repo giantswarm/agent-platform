@@ -612,18 +612,18 @@ kyvernoPolicies:
 # anchor and ate-api-server's authentication config, minted once and kept) and
 # the derived Postgres connection Secrets of postgres.databases (post-install,
 # post-upgrade). kubectlImage carries kubectl, a shell and jq; opensslImage the
-# openssl the bootstrap mints its key material with. A cluster that reaches no
-# public registry mirrors both. Both run under the restricted pod security
-# profile as the hook ServiceAccount <release>-hooks (secrets, configmaps and
-# namespaces only, for the hook's lifetime).
+# openssl the bootstrap mints its key material with — the gsoci copies of
+# alpine/k8s and alpine/openssl (giantswarm/retagger). Both run under the
+# restricted pod security profile as the hook ServiceAccount <release>-hooks
+# (secrets, configmaps and namespaces only, for the hook's lifetime).
 hooks:
   kubectlImage:
-    registry: docker.io
-    repository: alpine/k8s
+    registry: gsoci.azurecr.io
+    repository: giantswarm/alpine-k8s
     tag: 1.37.0
   opensslImage:
-    registry: docker.io
-    repository: alpine/openssl
+    registry: gsoci.azurecr.io
+    repository: giantswarm/alpine-openssl
     tag: 3.5.8
 
 # Arbitrary manifests rendered through `tpl` alongside the chart. Useful for
