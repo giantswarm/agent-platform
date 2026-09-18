@@ -244,6 +244,7 @@ else:
         kept = "helm.sh/resource-policy: keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
         added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
         prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
+        evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -329,6 +330,15 @@ else:
             for key in [k for k in side if k[1].endswith("-model-serving-prepull")]:
                 side.pop(key)
         print(f"note: the pre-pull DaemonSet and its policy render on this side (#545) and not on {ref}: they are left out of the comparison")
+    # The classic runtime's container runs through the shell entrypoint with the
+    # llm-d template's argument grammar (giantswarm/agent-platform#549); a golden
+    # from before renders the container without a command, so the runtime
+    # document is left out of the comparison on both sides. Drop this once
+    # GOLDEN_REF carries #549.
+    if not evaled:
+        for side in (head, golden):
+            side.pop(RUNTIME, None)
+        print(f"note: the classic runtime carries the shell entrypoint on this side (#549) and not on {ref}: its document is left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):

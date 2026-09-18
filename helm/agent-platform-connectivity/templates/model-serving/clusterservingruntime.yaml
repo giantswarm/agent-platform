@@ -10,6 +10,16 @@
 # and {{ "{{.Name}}" }} in args expands to the InferenceService name. The image
 # is the upstream x86-64 CUDA build by default; an install with other
 # hardware points modelServing.runtime.image at its own build.
+#
+# The container runs through a shell entrypoint with the well-known llm-d
+# runtime template's argument grammar: `sh -c 'eval "exec vllm serve $@"' --`
+# followed by the runtime's base arguments and, appended by KServe, the
+# preset's. The eval re-parses every argument, so a JSON-valued flag written
+# single-quoted inside one argument (--limit-mm-per-prompt='{"image": 1}')
+# reaches vLLM as one word with the quotes gone on this path exactly as on
+# the llm-d template; straight into argv the quotes stayed and vLLM refused
+# the value (giantswarm/agent-platform#549). The image must carry /bin/sh and
+# `vllm` on PATH (the upstream vLLM images do).
 apiVersion: serving.kserve.io/v1alpha1
 kind: ClusterServingRuntime
 metadata:
@@ -32,6 +42,11 @@ spec:
   containers:
     - name: kserve-container
       image: {{ printf "%s/%s:%s" $rt.image.registry $rt.image.name $rt.image.version | quote }}
+      command:
+        - /bin/sh
+        - -c
+        - 'eval "exec vllm serve $@"'
+        - "--"
       {{- with $rt.args }}
       args:
         {{- toYaml . | nindent 8 }}

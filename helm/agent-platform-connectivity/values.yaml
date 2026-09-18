@@ -2968,10 +2968,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       name: vllm/vllm-openai
       # registry: docker.io/vllm/vllm-openai
       version: "v0.29.0"
-    # Server arguments common to every model. KServe expands {{.Name}} to
-    # the InferenceService name; a preset's args are appended by KServe.
-    # The port must stay 8080 (the probe, the metrics annotations and
-    # KServe's predictor Service assume it).
+    # Server arguments common to every model, after `vllm serve` in the
+    # container's shell entrypoint (sh -c 'eval "exec vllm serve $@"' --).
+    # KServe expands {{.Name}} to the InferenceService name and appends a
+    # preset's args; the eval re-parses them all, so a value with whitespace
+    # or JSON is single-quoted inside one argument. The port must stay 8080
+    # (the probe, the metrics annotations and KServe's predictor Service
+    # assume it).
     args:
       - --model
       - /mnt/models
