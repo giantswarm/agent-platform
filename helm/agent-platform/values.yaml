@@ -4534,9 +4534,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # the cache PVC, the chat-template ConfigMaps and the Kyverno policies
   # target this namespace, and the portal creates InferenceServices here.
   # Created by the chart (Helm-owned) when create is true and the name
-  # differs from the release namespace. labels: e.g. a Pod Security
-  # admission level — the upstream vLLM image runs as root, and the cache
-  # init container needs root to create the per-model directory.
+  # differs from the release namespace, and KEPT (helm.sh/resource-policy:
+  # keep) while cache.enabled is on: the cache claim in it outlives the
+  # release by design, and a namespace Helm deleted took the claim and its
+  # volume down with it (#537); with the cache off the namespace goes with
+  # the release. labels: e.g. a Pod Security admission level (the upstream
+  # vLLM image runs as root; a Giant Swarm cluster's restricted profile is
+  # the policyException below).
   namespace:
     name: model-serving
     create: true
@@ -4688,14 +4692,20 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # restart finds it (hours to seconds). The claim is applied by a
   # post-install/post-upgrade hook Job, not rendered as a release resource:
   # it has no consumer of its own and Binds with the first predictor that
-  # mounts it, so under a WaitForFirstConsumer StorageClass (kind's standard,
-  # AWS gp3) it stays Pending until then — as a release resource Helm's wait
-  # failed the release on it (#483). Nothing waits for it, and it outlives the
-  # release: an uninstall or a cache.enabled flip leaves it (it carries
-  # helm.sh/resource-policy: keep to say so). A size change is applied by the
-  # next upgrade's hook; an immutable field (storageClassName, accessModes,
-  # volumeName) cannot change once the claim exists. Without the Kyverno
-  # policies below the claim is still applied and published for
+  # mounts it, so under a WaitForFirstConsumer StorageClass it stays Pending
+  # until then — as a release resource Helm's wait failed the release on it
+  # (#483). Nothing waits for it, and it outlives the release: an uninstall
+  # or a cache.enabled flip leaves it (it carries helm.sh/resource-policy:
+  # keep to say so) — and the serving namespace with it, which carries the
+  # same policy while the cache is on (a Helm-owned namespace took the claim
+  # down with it, #537). An uninstall leaves the namespace, the claim and its
+  # volume (the downloads) behind, nothing else; a re-install adopts both,
+  # and the claim binds the next pool's node to the volume's zone. To remove
+  # the cache for good, delete the claim (the volume goes with it, the class
+  # below reclaims with Delete) and then the namespace. A size change is
+  # applied by the next upgrade's hook; an immutable field (storageClassName,
+  # accessModes, volumeName) cannot change once the claim exists. Without the
+  # Kyverno policies below the claim is still applied and published for
   # model-manager's pre-warm downloads, but the KServe storage-initializer
   # downloads into its ephemeral volume on every start.
   cache:
@@ -4708,14 +4718,46 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # set, no claim is applied.
       existingClaim: ""
       size: 500Gi
-      # Empty uses the cluster's default StorageClass; "-" sets an empty
-      # class (static binding to a pre-provisioned PersistentVolume, e.g.
-      # local NVMe on the GPU node).
+      # The claim's class is the StorageClass below (storageClass.create, or
+      # storageClass.name without it). Set, this names a class of the
+      # operator's instead — "-" is the empty class (static binding to a
+      # pre-provisioned PersistentVolume, e.g. local NVMe on the GPU node) —
+      # and requires storageClass.create: false; the render refuses both.
       storageClassName: ""
       # Bind this claim to a specific pre-provisioned PersistentVolume.
       volumeName: ""
       accessModes:
         - ReadWriteOnce
+    # The claim's StorageClass. The cluster's default class is the slowest
+    # tier of its kind — the fleet's gp3 at its baseline (125 MiB/s, 3000
+    # IOPS), and a served model reads its weights at exactly that rate (8.8
+    # GiB in 71 s, #537), the storage-initializer's download writes into the
+    # same cap — so the chart renders a class of the claim's own:
+    # cluster-scoped, named <chart>-<claim> (agent-platform-connectivity-hf-cache)
+    # unless name says otherwise, volumeBindingMode WaitForFirstConsumer (the
+    # volume is provisioned in the zone of the pod that first mounts the
+    # claim, the GPU pool's), allowVolumeExpansion (a size change reaches the
+    # volume), reclaimPolicy Delete (the claim is the durable object: it
+    # outlives the release, the volume goes when the claim does). The class
+    # is Helm-owned, unlike the claim: an uninstall removes it and leaves the
+    # claim; a bound volume works on without its class, a claim still
+    # Pending binds once the next install renders the class again. The
+    # default is AWS's EBS CSI driver with a gp3 volume at 1000 MiB/s and
+    # 4000 IOPS (the driver's parameters, strings); another cloud sets
+    # provisioner and parameters to its own driver's (a per-provider default
+    # is a follow-up), create: false with name references an existing class
+    # instead and renders none, create: false without a name leaves the
+    # claim on the cluster's default class. An existing claim keeps the
+    # class it has (the field is immutable; the hook would fail naming it):
+    # create: false, name: <its class>.
+    storageClass:
+      create: true
+      name: ""
+      provisioner: ebs.csi.aws.com
+      parameters:
+        type: gp3
+        iops: "4000"
+        throughput: "1000"
     # The group every pod that mounts the claim carries as its fsGroup: the
     # Kyverno policies below set it on the model pods; model-manager's cache
     # pods (the download Job, the scan and removal pods) run as uid 1000 with
@@ -4777,10 +4819,19 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Cilium DNS proxy saw resolved for an allowed name. Widening the egress
     # instead — world on 443, the CDN's address blocks — is not the fix. An
     # installation may set env: [] to have Xet back. A mirror (HF_ENDPOINT)
-    # belongs here too, next to the fqdns that name it.
+    # belongs here too, next to the fqdns that name it. VLLM_CACHE_ROOT puts
+    # vLLM's cache — the torch.compile artifacts of a model, tens of seconds
+    # of work per pod — on the claim under the model's own directory: the
+    # runtime's /mnt/models is the pod's cache subdirectory, mounted
+    # read-write for it (the redirect rule; the fsGroup makes the directory
+    # writable), so a model's next pod skips the compile (#537) instead of
+    # writing into an emptyDir that dies with the pod. The path is the mount
+    # path as the runtime sees it, so one value holds for both pod shapes.
     env:
       - name: HF_HUB_DISABLE_XET
         value: "1"
+      - name: VLLM_CACHE_ROOT
+        value: /mnt/models/.cache/vllm
   # Network policies of the serving namespace, rendered under networkPolicy
   # (enabled + the resolved flavor) like every other component's wiring:
   # nothing renders while networkPolicy.enabled is false. On, both flavors

@@ -1,0 +1,35 @@
+{{- if (include "agent-platform.modelServing.cacheStorageClassManaged" .) }}
+{{- $sc := .Values.modelServing.cache.storageClass }}
+# The cache claim's StorageClass (modelServing.cache.storageClass). The
+# cluster's default class is the slowest tier of its kind — the fleet's gp3 at
+# its baseline reads a model's weights at 124 MiB/s, and the
+# storage-initializer's download writes into the same cap (#537) — so the claim
+# gets a class of its own: cluster-scoped, named after the chart like the
+# serving ClusterPolicies. WaitForFirstConsumer: the volume is provisioned in
+# the zone of the pod that first mounts the claim, the GPU pool's — a zonal
+# volume anywhere else would strand the predictors. allowVolumeExpansion: a
+# size change on the claim (the next upgrade's hook, cache-pvc.yaml) reaches the
+# volume. Delete: the claim is the durable object — it outlives the release —
+# and the volume goes when the claim does. Helm-owned, unlike the claim: an
+# uninstall removes the class and leaves the claim; a bound volume works on
+# without its class, a claim still Pending binds once the next install renders
+# the class again. The parameters are the provisioner's (AWS EBS CSI by
+# default: a gp3 volume at 1000 MiB/s and 4000 IOPS), rendered as the strings
+# a StorageClass takes.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ include "agent-platform.modelServing.cacheStorageClass.name" . }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+provisioner: {{ required "modelServing.cache.storageClass.provisioner is required with storageClass.create: true (the CSI driver that provisions the claim's volume, e.g. ebs.csi.aws.com)" $sc.provisioner | quote }}
+{{- with $sc.parameters }}
+parameters:
+  {{- range $key, $value := . }}
+  {{ $key }}: {{ $value | toString | quote }}
+  {{- end }}
+{{- end }}
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+{{- end }}

@@ -235,17 +235,25 @@ def check_golden(meta: str, connectivity: str) -> None:
         # both sides get the connectivity list as a value. Drop this once
         # GOLDEN_REF carries the entry.
         with open(f"{connectivity}/values.yaml") as f:
-            hf_cdn = json.dumps(yaml.safe_load(f)["modelServing"]["networkPolicy"]["huggingFace"]["fqdns"])
+            conn_serving = yaml.safe_load(f)["modelServing"]
+        hf_cdn = json.dumps(conn_serving["networkPolicy"]["huggingFace"]["fqdns"])
         hf = ["--set-json", f"modelServing.networkPolicy.huggingFace.fqdns={hf_cdn}",
               "--set-json", f"modelManager.networkPolicy.huggingFace.fqdns={hf_cdn}"]
+        # The cache claim's StorageClass block and the VLLM_CACHE_ROOT entry of
+        # the model pods' env (giantswarm/agent-platform#537) are new mirrored
+        # defaults the meta chart forwards to the connectivity release (held
+        # equal to the connectivity chart's by verify-meta), so both sides get
+        # the connectivity values. Drop this once GOLDEN_REF carries them.
+        ms_cache = ["--set-json", f"modelServing.cache.storageClass={json.dumps(conn_serving['cache']['storageClass'])}",
+                    "--set-json", f"modelServing.policies.env={json.dumps(conn_serving['policies']['env'])}"]
         # The llm-d workload shape's own port (giantswarm/agent-platform#525) is a
         # new default key the meta chart forwards to the connectivity release,
         # so the golden side gets the same value. Drop this once GOLDEN_REF
         # carries the key.
         ms_port = ["--set", "modelServing.networkPolicy.llmisvcWorkload.port=8000"]
         shapes = [
-            ("meta default", meta, [*mm_off, *mm_static, *mm_registered, *substrate, *hf, *ms_port]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered, *substrate, *hf, *ms_port]),
+            ("meta default", meta, [*mm_off, *mm_static, *mm_registered, *substrate, *hf, *ms_port, *ms_cache]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered, *substrate, *hf, *ms_port, *ms_cache]),
             ("connectivity default", connectivity, [*VM, *mm_off, *ms_polex_off]),
             ("connectivity full", connectivity, [*CONN_FULL, *mm_off, *ms_polex_off]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off, *ms_polex_off]),

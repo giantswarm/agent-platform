@@ -593,16 +593,28 @@ Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecut
 
 ## The Hugging Face cache claim
 
-`modelServing.cache.pvc` (`hf-cache`, `500Gi`, the cluster's default StorageClass unless `storageClassName` names one — `"-"` is the empty class for a pre-provisioned volume, `volumeName` binds one) is one claim in the serving namespace with one subdirectory per InferenceService; the Kyverno policies mount it into every predictor's storage-initializer and runtime, model-manager's pre-warm downloads land in the same layout. The claim has **no consumer of its own** — the first predictor (or download Job) that mounts it is what Binds it — and under a StorageClass with `volumeBindingMode: WaitForFirstConsumer` (kind's `standard`, the fleet's default `gp3`) it stays `Pending` until then. Helm's wait counts a Pending claim as not ready, so as a release resource it failed every install and upgrade with the switch on (giantswarm/agent-platform#483).
+`modelServing.cache.pvc` (`hf-cache`, `500Gi`, on the chart's own StorageClass — below — unless `storageClassName` names a class of the operator's, `"-"` the empty class for a pre-provisioned volume; `volumeName` binds one) is one claim in the serving namespace with one subdirectory per InferenceService; the Kyverno policies mount it into every predictor's storage-initializer and runtime, model-manager's pre-warm downloads land in the same layout. The claim has **no consumer of its own** — the first predictor (or download Job) that mounts it is what Binds it — and under a StorageClass with `volumeBindingMode: WaitForFirstConsumer` (kind's `standard`, the fleet's default `gp3`, the chart's own) it stays `Pending` until then. Helm's wait counts a Pending claim as not ready, so as a release resource it failed every install and upgrade with the switch on (giantswarm/agent-platform#483).
 
 The claim is therefore **applied by a `post-install,post-upgrade` hook Job** (`templates/model-serving/cache-pvc.yaml`; the hook include `agent-platform.hooks.job`, the identity `<release>-hooks` with `get`, `create`, `patch` on `persistentvolumeclaims` while the claim is the chart's, never `delete`), not rendered as a release resource: `kubectl apply --server-side --force-conflicts` under the field manager `agent-platform-connectivity`, the log says `created` or `present` and the claim's phase, nothing waits for a Bind. It binds where its first consumer schedules — the GPU pool's zone, which is what a zonal volume needs. What follows from the claim not being Helm's:
 
-- an uninstall or a `cache.enabled` flip leaves it — the intent of the `helm.sh/resource-policy: keep` it carries (hundreds of gigabytes of downloads outlive the release), now by construction;
-- a `size` change is applied by the next upgrade's hook (the StorageClass has to allow expansion); a change to an immutable field (`storageClassName`, `accessModes`, `volumeName`) fails the hook — and the release — naming the field;
+- an uninstall or a `cache.enabled` flip leaves it — the intent of the `helm.sh/resource-policy: keep` it carries (hundreds of gigabytes of downloads outlive the release), now by construction — and the serving namespace with it (below);
+- a `size` change is applied by the next upgrade's hook (the StorageClass has to allow expansion; the chart's own does); a change to an immutable field (`storageClassName`, `accessModes`, `volumeName`) fails the hook — and the release — naming the field;
 - an installation upgrading from a chart that rendered the claim as a release resource keeps it (the keep policy) and the hook takes its fields over;
 - `existingClaim` names a claim of the operator's instead: nothing is applied, the name is published to model-manager and the portal.
 
-`make verify-serving-slice` asserts the hook, its claim, the identity and the knobs, and that `cache.enabled: false` or an `existingClaim` render none of it; `make verify-wiring` the serving shape without a `PersistentVolumeClaim` object.
+### What an uninstall leaves behind
+
+A namespace Helm deletes takes every object in it along, the claim's `keep` notwithstanding — so a Helm-owned serving namespace took the claim and its volume down with every pool teardown, and the next pool downloaded the weights again (giantswarm/agent-platform#537). While `cache.enabled` is on, the serving namespace therefore carries `helm.sh/resource-policy: keep` too (`templates/model-serving/namespace.yaml`), and `helm uninstall` leaves exactly **the namespace, the claim and its volume** behind; the chat-template ConfigMaps, the presets, the policies and the StorageClass go with the release. A re-install adopts the namespace (its Helm annotations are unchanged) and the hook finds the claim `present`. A GPU pool that comes and goes downloads a model once: the claim's volume is zonal, and a bound claim places the next pool's node in its zone (Karpenter reads the claim's topology). To remove the cache for good: delete the claim (`kubectl delete pvc -n <serving namespace> hf-cache`; the volume goes with it, the class reclaims with `Delete`), then the namespace. With `cache.enabled: false` the namespace is an ordinary Helm-owned object again. `namespace.create: false` leaves a namespace of the operator's alone either way.
+
+### The claim's StorageClass
+
+The cluster's default class is the slowest tier of its kind: the fleet's `gp3` at its baseline (125 MiB/s, 3000 IOPS) reads a served model's weights at exactly that rate — 8.8 GiB in 71 s — and the storage-initializer's download writes into the same cap (giantswarm/agent-platform#537). `modelServing.cache.storageClass` (default `create: true`) renders a class of the claim's own (`templates/model-serving/storageclass.yaml`): cluster-scoped, named `<chart>-<claim>` (`agent-platform-connectivity-hf-cache`) unless `name` says otherwise, `provisioner: ebs.csi.aws.com` with the EBS CSI driver's `parameters` (`type: gp3`, `iops: "4000"`, `throughput: "1000"` — a StorageClass takes strings), `volumeBindingMode: WaitForFirstConsumer` (the volume is provisioned in the zone of the pod that first mounts the claim, the GPU pool's), `allowVolumeExpansion: true` (a `size` change reaches the volume), `reclaimPolicy: Delete` — the claim is the durable object, the volume goes when the claim does. The applied claim references it. The class is Helm-owned, unlike the claim: an uninstall removes it and leaves the claim; a bound volume works on without its class, a claim still Pending binds once the next install renders the class again. The default is AWS's; another cloud sets `provisioner` and `parameters` to its own driver's (a per-provider default is a follow-up), `create: false` with `name` references an existing class and renders none, `create: false` without a name leaves the claim on the cluster's default class. `pvc.storageClassName` still names a class of the operator's (`"-"` the empty class for a pre-provisioned volume) and requires `storageClass.create: false`; the render refuses both. An installation whose claim already exists on another class keeps it — `storageClassName` is immutable, the hook would fail naming it: `storageClass.create: false`, `name: <the claim's class>`.
+
+### vLLM's compile cache on the claim
+
+`modelServing.policies.env` carries `VLLM_CACHE_ROOT=/mnt/models/.cache/vllm` next to `HF_HUB_DISABLE_XET`: the runtime container's `/mnt/models` is the pod's cache subdirectory (`<claim>/<model>`), mounted read-write for it by the redirect rule (KServe mounts the classic predictor's read-only; the subPath confines what the runtime writes to the model's own directory), so vLLM's torch.compile artifacts — tens of seconds per pod — land on the claim and a model's next pod finds them; in an emptyDir they died with the pod. The path is the mount path as the runtime sees it, so one value holds for both pod shapes.
+
+`make verify-serving-slice` asserts the hook, its claim, the identity, the kept namespace, the StorageClass and the class knobs, and that `cache.enabled: false` or an `existingClaim` render none of it; `make verify-model-serving-policies` the env and the read-write runtime mount over both pod shapes; `make verify-wiring` the serving shape without a `PersistentVolumeClaim` object; `make verify-meta` that the meta chart mirrors the cache and policy defaults it forwards.
 
 ## Voluntary disruption
 
@@ -1407,6 +1419,12 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.cache.pvc.storageClassName | string | `""` |  |
 | modelServing.cache.pvc.volumeName | string | `""` |  |
 | modelServing.cache.pvc.accessModes[0] | string | `"ReadWriteOnce"` |  |
+| modelServing.cache.storageClass.create | bool | `true` |  |
+| modelServing.cache.storageClass.name | string | `""` |  |
+| modelServing.cache.storageClass.provisioner | string | `"ebs.csi.aws.com"` |  |
+| modelServing.cache.storageClass.parameters.type | string | `"gp3"` |  |
+| modelServing.cache.storageClass.parameters.iops | string | `"4000"` |  |
+| modelServing.cache.storageClass.parameters.throughput | string | `"1000"` |  |
 | modelServing.cache.fsGroup | int | `1000` |  |
 | modelServing.policyException.enabled | bool | `true` |  |
 | modelServing.policies.enabled | string | `"auto"` |  |
@@ -1414,6 +1432,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
 | modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
 | modelServing.policies.env[0].value | string | `"1"` |  |
+| modelServing.policies.env[1].name | string | `"VLLM_CACHE_ROOT"` |  |
+| modelServing.policies.env[1].value | string | `"/mnt/models/.cache/vllm"` |  |
 | modelServing.networkPolicy.predictor.port | int | `8080` |  |
 | modelServing.networkPolicy.predictor.additionalIngressNamespaces | list | `[]` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |

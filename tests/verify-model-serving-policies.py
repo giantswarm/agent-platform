@@ -16,12 +16,15 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     on a GPU cluster, with the storage-initializer KServe injects for an hf://
     model URI): the hf-cache claim is mounted at /mnt/models with the model's
     name as subPath on the storage-initializer and on the shape's runtime
-    container (the classic one stays read-only), the pod carries the claim's
+    container — read-write on both, where KServe mounts the classic
+    predictor's read-only: vLLM's cache root is under it (#537) — the pod carries the claim's
     fsGroup (also when it declared another: one claim, one group), no
     container is added or lost, the original volumes stay, the initializer's
     memory limit is raised, and the storage-initializer and the runtime carry
     modelServing.policies.env (HF_HUB_DISABLE_XET=1: the Hugging Face client
-    off the Xet path, whose CDN a toFQDNs allow-list cannot follow, #520) next
+    off the Xet path, whose CDN a toFQDNs allow-list cannot follow, #520;
+    VLLM_CACHE_ROOT=/mnt/models/.cache/vllm: vLLM's torch.compile artifacts on
+    the claim in the model's directory, #537) next
     to their own env — KServe's HF_HUB_ENABLE_HF_TRANSFER and HF_XET_* on the
     initializer, the runtime's on the classic predictor — and added where a
     container has none; an empty list renders no env rule. The policy over its own output is a
@@ -99,8 +102,8 @@ NS = "model-serving"
 CLAIM = "hf-cache"
 FSGROUP = 1000
 MEMORY = "4Gi"
-# modelServing.policies.env, as the chart ships it (#520).
-ENV = {"HF_HUB_DISABLE_XET": "1"}
+# modelServing.policies.env, as the chart ships it (#520, #537).
+ENV = {"HF_HUB_DISABLE_XET": "1", "VLLM_CACHE_ROOT": "/mnt/models/.cache/vllm"}
 DEADLINE = 3600
 PSS = HERE / "fixtures" / "restricted-pss-clusterpolicies.yaml"
 # The rules the chart's PolicyException names, as (policy, rule).
@@ -286,9 +289,8 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
     rm = mounts(runtime_of(spec, runtime)).get("/mnt/models", {})
     if rm.get("name") != CLAIM or rm.get("subPath") != model:
         fail(f"{shape}: {runtime}'s /mnt/models is not {CLAIM}/{model}: {rm}")
-    original = mounts(runtime_of(pod["spec"], runtime))["/mnt/models"]
-    if rm.get("readOnly") != original.get("readOnly"):
-        fail(f"{shape}: {runtime}'s /mnt/models readOnly changed from {original.get('readOnly')} to {rm.get('readOnly')}")
+    if rm.get("readOnly"):
+        fail(f"{shape}: {runtime}'s /mnt/models is read-only; vLLM's cache root ({ENV['VLLM_CACHE_ROOT']}) is under it and the runtime writes there (#537)")
     for label, before, after in (("storage-initializer", init_of(pod["spec"], "storage-initializer"), storage),
                                  (runtime, runtime_of(pod["spec"], runtime), runtime_of(spec, runtime))):
         if env_of(after) != {**env_of(before), **ENV}:

@@ -51,7 +51,11 @@
 #                              resolved (30 s TTLs, the client's own resolver
 #                              cache), so a toFQDNs allow-list drops them and
 #                              the download hangs after the repository's
-#                              small files (#520). The containers' other env
+#                              small files (#520); and VLLM_CACHE_ROOT under
+#                              the runtime's /mnt/models, so vLLM's
+#                              torch.compile artifacts land on the claim in
+#                              the model's directory and its next pod skips
+#                              the compile (#537). The containers' other env
 #                              stays; the egress allow-list is not widened.
 #   storage-initializer-memory a memory limit that survives multi-GB downloads
 #                              (KServe's default 1Gi is OOM-killed).
@@ -113,7 +117,10 @@ spec:
                 persistentVolumeClaim:
                   claimName: {{ include "agent-platform.modelServing.claimName" $ }}
             # volumeMounts merge on mountPath: these replace KServe's emptyDir
-            # mounts at /mnt/models (the runtime's stays read-only).
+            # mounts at /mnt/models. The runtime's is read-write (KServe mounts
+            # the classic predictor's read-only): vLLM's cache root is under
+            # it (VLLM_CACHE_ROOT, modelServing.policies.env), and the subPath
+            # confines what it writes to the model's own directory.
             initContainers:
               - name: storage-initializer
                 volumeMounts:
@@ -126,6 +133,7 @@ spec:
                   - name: hf-cache
                     mountPath: /mnt/models
                     subPath: {{ $shapeName | quote }}
+                    readOnly: false
     {{- end }}
     {{- end }}
     {{- with $ms.policies.env }}

@@ -241,6 +241,7 @@ else:
         ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         quoted = "--default-chat-template-kwargs='" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8b-fp8.yaml", encoding="utf-8").read()
         sized = "weightsGiB: 25" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b.yaml", encoding="utf-8").read()
+        kept = "helm.sh/resource-policy: keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -289,6 +290,15 @@ else:
             for key in [k for k in side if k[0] in policies and "model-serving" in k[1]]:
                 side.pop(key)
         print(f"note: the serving policies select both pod shapes on this side (#506) and not on {ref}: they are left out of the comparison")
+    # The serving namespace is kept while the cache is on
+    # (giantswarm/agent-platform#537) and its template's comment says so; the
+    # untainted render has the cache off, so only the comment differs, but a
+    # golden from before renders the old one — the namespace document is left
+    # out of the comparison on both sides. Drop this once GOLDEN_REF carries #537.
+    if not kept:
+        for side in (head, golden):
+            side.pop(("Namespace", "model-serving"), None)
+        print(f"note: the serving namespace is kept with the cache on this side (#537) and not on {ref}: its document is left out of the comparison")
     # The llm-d workload's ingress admits the workload's own port, 8000, instead
     # of the classic predictor's 8080 (giantswarm/agent-platform#525); a golden
     # from before renders the old port, so that one policy is left out of the

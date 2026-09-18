@@ -45,9 +45,19 @@ property the slice relies on:
 - the cache claim (giantswarm/agent-platform#483): no PersistentVolumeClaim object
   in the connectivity render -- a post-install,post-upgrade hook Job server-side
   applies hf-cache into the serving namespace (keep, the access modes, the size,
-  the class knob incl. "-", volumeName) as <release>-hooks, whose ClusterRole
-  carries get/create/patch on claims; cache.enabled: false and an existing claim
-  render neither the hook nor the identity, and the existing claim is published.
+  the class, volumeName) as <release>-hooks, whose ClusterRole carries
+  get/create/patch on claims; cache.enabled: false and an existing claim render
+  neither the hook nor the identity, and the existing claim is published.
+- what outlives the release (giantswarm/agent-platform#537): the serving
+  namespace carries helm.sh/resource-policy: keep while the cache is on and not
+  with it off; the claim references the chart's own StorageClass
+  (<chart>-<claim>: the EBS CSI provisioner, gp3 at 1000 MiB/s / 4000 IOPS as
+  strings, WaitForFirstConsumer, expansion allowed, Delete, no keep policy);
+  storageClass.create: false with a name references that name and renders no
+  class, without a name leaves the claim on the cluster's default; a name and
+  parameters reach the rendered class; pvc.storageClassName next to
+  storageClass.create: true is refused naming both; cache.enabled: false and an
+  existing claim render no class.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
@@ -330,6 +340,12 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
 
 CACHE_JOB = ("Job", "t-model-serving-cache")
 HOOK_IDENTITY = "t-hooks"
+SERVING_NS = ("Namespace", "model-serving")
+# The claim's StorageClass, named after the chart (cluster-scoped) and the claim (#537).
+CACHE_CLASS = ("StorageClass", "agent-platform-connectivity-hf-cache")
+NO_CLASS = ["--set", "modelServing.cache.storageClass.create=false"]
+# The keep annotation as rendered (the templates' comments name the policy too).
+KEEP = "    helm.sh/resource-policy: keep"
 
 
 def applied_claim(job: str) -> dict:
@@ -357,32 +373,66 @@ def check_cache(connectivity: str, base: list[str]) -> None:
         sys.exit(f"FAIL: the hook applies {claim['kind']} {meta.get('namespace')}/{meta.get('name')}, not the claim hf-cache in model-serving")
     if meta["annotations"].get("helm.sh/resource-policy") != "keep" or meta["labels"].get("app.kubernetes.io/component") != "model-serving":
         sys.exit(f"FAIL: the applied claim lacks the keep policy or the model-serving component label:\n{json.dumps(meta, indent=1)}")
-    if spec != {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "500Gi"}}}:
-        sys.exit(f"FAIL: the applied claim's default spec is off (RWO, 500Gi, the cluster's default class, no volumeName expected):\n{json.dumps(spec, indent=1)}")
+    if spec != {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "500Gi"}}, "storageClassName": CACHE_CLASS[1]}:
+        sys.exit(f"FAIL: the applied claim's default spec is off (RWO, 500Gi, the chart's class {CACHE_CLASS[1]}, no volumeName expected):\n{json.dumps(spec, indent=1)}")
     role = docs.get(("ClusterRole", HOOK_IDENTITY))
     if not role or ("ServiceAccount", HOOK_IDENTITY) not in docs or ("ClusterRoleBinding", HOOK_IDENTITY) not in docs:
         sys.exit(f"FAIL: the hook identity {HOOK_IDENTITY} (ServiceAccount, ClusterRole, ClusterRoleBinding) is incomplete")
     need(role, '    resources: ["persistentvolumeclaims"]\n    verbs: ["get", "create", "patch"]', "the hook identity's ClusterRole")
-    ok("the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 500Gi, the default class) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete")
+    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 500Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete")
 
-    knobs = documents(helm(connectivity, [*base, "--set", "modelServing.cache.pvc.storageClassName=gp3", "--set", "modelServing.cache.pvc.size=1Ti", "--set", "modelServing.cache.pvc.volumeName=nvme-0",
-                                          "--set", "modelServing.cache.pvc.accessModes[0]=ReadWriteMany"]))
+    ns = docs.get(SERVING_NS)
+    if not ns:
+        sys.exit("FAIL: no serving namespace in the connectivity render")
+    need(ns, KEEP, "the serving namespace with the cache on")
+    cls = docs.get(CACHE_CLASS)
+    if not cls:
+        sys.exit(f"FAIL: no StorageClass {CACHE_CLASS[1]} in the connectivity render; the claim references it")
+    for needle in ('provisioner: "ebs.csi.aws.com"', '  type: "gp3"', '  iops: "4000"', '  throughput: "1000"', "volumeBindingMode: WaitForFirstConsumer",
+                   "allowVolumeExpansion: true", "reclaimPolicy: Delete", "app.kubernetes.io/component: model-serving"):
+        need(cls, needle, "the claim's StorageClass")
+    if KEEP in cls:
+        sys.exit(f"FAIL: the claim's StorageClass carries a resource policy; the claim is the durable object, the class goes with the release:\n{cls}")
+    ok(f"with the cache on the serving namespace is kept (helm.sh/resource-policy: keep) and the claim's StorageClass {CACHE_CLASS[1]} renders: ebs.csi.aws.com, gp3 at 1000 MiB/s / 4000 IOPS as strings, WaitForFirstConsumer, expansion allowed, Delete, Helm-owned")
+
+    knobs = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.pvc.storageClassName=gp3", "--set", "modelServing.cache.pvc.size=1Ti",
+                                          "--set", "modelServing.cache.pvc.volumeName=nvme-0", "--set", "modelServing.cache.pvc.accessModes[0]=ReadWriteMany"]))
     spec = applied_claim(knobs[CACHE_JOB])["spec"]
     if spec != {"accessModes": ["ReadWriteMany"], "resources": {"requests": {"storage": "1Ti"}}, "storageClassName": "gp3", "volumeName": "nvme-0"}:
         sys.exit(f"FAIL: the class, size, volumeName and access-mode knobs did not reach the applied claim:\n{json.dumps(spec, indent=1)}")
-    dash = applied_claim(documents(helm(connectivity, [*base, "--set", "modelServing.cache.pvc.storageClassName=-"]))[CACHE_JOB])["spec"]
+    dash = applied_claim(documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.pvc.storageClassName=-"]))[CACHE_JOB])["spec"]
     if dash.get("storageClassName") != "":
         sys.exit(f"FAIL: storageClassName \"-\" should apply the empty class (static binding):\n{json.dumps(dash, indent=1)}")
-    ok('storageClassName, size, volumeName and accessModes reach the applied claim; "-" is the empty class')
+    ok('with storageClass.create: false, pvc.storageClassName, size, volumeName and accessModes reach the applied claim; "-" is the empty class')
+
+    helm(connectivity, [*base, "--set", "modelServing.cache.pvc.storageClassName=gp3"], expect_failure="both name the cache claim's class")
+    named = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.storageClass.name=io2-fast"]))
+    if any(kind == "StorageClass" for kind, _ in named) or applied_claim(named[CACHE_JOB])["spec"].get("storageClassName") != "io2-fast":
+        sys.exit(f"FAIL: storageClass.create: false with a name should render no class and reference io2-fast: {sorted(k for k in named if k[0] == 'StorageClass')}, {applied_claim(named[CACHE_JOB])['spec']}")
+    default_class = documents(helm(connectivity, [*base, *NO_CLASS]))
+    if any(kind == "StorageClass" for kind, _ in default_class) or "storageClassName" in applied_claim(default_class[CACHE_JOB])["spec"]:
+        sys.exit(f"FAIL: storageClass.create: false without a name should render no class and leave the claim on the cluster's default: {applied_claim(default_class[CACHE_JOB])['spec']}")
+    own = documents(helm(connectivity, [*base, "--set", "modelServing.cache.storageClass.name=fast", "--set", "modelServing.cache.storageClass.parameters.iops=16000",
+                                        "--set", "modelServing.cache.storageClass.provisioner=disk.csi.azure.com"]))
+    fast = own.get(("StorageClass", "fast"))
+    if not fast or CACHE_CLASS in own or applied_claim(own[CACHE_JOB])["spec"].get("storageClassName") != "fast":
+        sys.exit(f"FAIL: storageClass.name should name the rendered class and the claim's reference: {sorted(k for k in own if k[0] == 'StorageClass')}, {applied_claim(own[CACHE_JOB])['spec']}")
+    for needle in ('provisioner: "disk.csi.azure.com"', '  iops: "16000"', '  type: "gp3"'):
+        need(fast, needle, "the renamed StorageClass")
+    ok("storageClass.create: false with a name references it and renders no class, without a name leaves the claim on the cluster's default; a name, the provisioner and a parameter (as a string) reach the rendered class; pvc.storageClassName next to create: true is refused naming both")
 
     for flags, label in ((["--set", "modelServing.cache.enabled=false"], "cache.enabled: false"), (["--set", "modelServing.cache.pvc.existingClaim=models"], "an existing claim")):
         text = helm(connectivity, [*base, *flags])
         off = documents(text)
         if "PersistentVolumeClaim" in text or CACHE_JOB in off or any(name == HOOK_IDENTITY for _, name in off):
             sys.exit(f"FAIL: with {label} the render still carries the claim, its hook or the hook identity (the slice has no other hook): {sorted(k for k in off if k == CACHE_JOB or k[1] == HOOK_IDENTITY)}")
+        if any(kind == "StorageClass" for kind, _ in off):
+            sys.exit(f"FAIL: with {label} the render still carries a StorageClass; the class is the chart's claim's")
         if label == "an existing claim" and "claimName: models" not in text:
             sys.exit("FAIL: the existing claim is not published")
-    ok("cache.enabled: false and an existing claim render no claim, no hook and no hook identity; the existing claim is published")
+        if label == "cache.enabled: false" and KEEP in off.get(SERVING_NS, ""):
+            sys.exit(f"FAIL: with the cache off the serving namespace is still kept; it is an ordinary Helm-owned object then:\n{off[SERVING_NS]}")
+    ok("cache.enabled: false and an existing claim render no claim, no hook, no hook identity and no StorageClass; with the cache off the namespace is not kept; the existing claim is published")
 
 
 # The tail of the well-known runtime template's entrypoint (kserve-runtime-configs,
