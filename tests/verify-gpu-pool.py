@@ -243,6 +243,7 @@ else:
         sized = "weightsGiB: 25" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b.yaml", encoding="utf-8").read()
         kept = "helm.sh/resource-policy: keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
         added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
+        prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -319,6 +320,15 @@ else:
                         and k[1].endswith(("-model-serving-llmisvc-workload", "-model-serving-llmisvc-workload-ingress"))]:
                 side.pop(key)
         print(f"note: the llm-d workload's ingress admits the workload's port on this side (#525) and not on {ref}: that policy is left out of the comparison")
+    # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
+    # are new documents of the serving render; a golden from before has neither,
+    # so both are left out of the comparison on both sides. Drop this once
+    # GOLDEN_REF carries #545.
+    if not prepulled:
+        for side in (head, golden):
+            for key in [k for k in side if k[1].endswith("-model-serving-prepull")]:
+                side.pop(key)
+        print(f"note: the pre-pull DaemonSet and its policy render on this side (#545) and not on {ref}: they are left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):

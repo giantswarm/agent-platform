@@ -162,6 +162,17 @@ app.kubernetes.io/component: model-serving
 {{- end -}}
 
 {{/*
+The selector label of the pre-pull DaemonSet's pods (templates/model-serving/
+prepull.yaml, giantswarm/agent-platform#545): the DaemonSet's selector and its
+deny-all network policy match it; no model pod shape (podShapes below) and no
+policy of a shape carries it, so the pods stay outside every rule written for
+a served model.
+*/}}
+{{- define "agent-platform.modelServing.prepull.selectorLabels" -}}
+agent-platform.giantswarm.io/model-serving-prepull: "true"
+{{- end -}}
+
+{{/*
 The serving presets in effect, as a JSON object keyed by preset name:
   { "<name>": { "source": "shipped" | "values", "preset": <ServingPreset> } }
 The shipped set (files/model-serving/presets/*.yaml, unless

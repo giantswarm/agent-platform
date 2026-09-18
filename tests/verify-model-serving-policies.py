@@ -50,6 +50,22 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     hf-cache-init of chart 4.28.14 fails exactly the two rules that denied
     every LLMInferenceService workload pod on a Giant Swarm cluster (#518).
   * The Deployments' progress-deadline rule applies to both shapes' Deployments.
+  * The pre-pull DaemonSet (modelServing.prepull, #545) renders in the serving
+    namespace by default: one init container per image of
+    modelServing.prepull.images — the first the llm-d runtime image the
+    well-known LLMInferenceServiceConfig names — running /bin/true, a pause
+    main container, the pool's taint tolerated first and every taint after it,
+    the manufacturer label selected with the pool's own label merged under it,
+    no GPU resource, no runtimeClassName, no ServiceAccount token. Its pod,
+    built from the template, passes the fleet's restricted PSS with NO
+    exception (every rule passes), is touched by none of the chart's
+    mutations, and is selected by no shape's policy, not by the
+    PolicyException and not by the agents' egress — only by its own deny-all
+    policy (kubernetes: both policy types, no rule; cilium: one empty rule per
+    direction), which selects no shape's fixture and not the download Job's
+    pod. `enabled: false` renders neither object; an empty image list fails
+    the render naming the key; the values the meta chart forwards render the
+    same DaemonSet with the same images.
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
     never the download Job's pod.
@@ -135,6 +151,11 @@ SHAPES = {
     "llmisvc-workload": ("model-serving-llmisvc-workload-pod.yaml", "main", "app.kubernetes.io/name", "llm-d-routing-sidecar"),
 }
 DOWNLOAD_LABELS = {"app.kubernetes.io/managed-by": "model-manager", "model-manager.giantswarm.io/component": "download", "job-name": "pull-qwen3-4b"}
+# The pre-pull DaemonSet's pods (#545): its selector label; the pool's taint they tolerate first; the label Karpenter
+# gives every GPU node, their default selector.
+PREPULL_LABEL = {"agent-platform.giantswarm.io/model-serving-prepull": "true"}
+POOL_TOLERATION = {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+GPU_NODE = {"karpenter.k8s.aws/instance-gpu-manufacturer": "nvidia"}
 # The names the Hugging Face download path uses (#522): the Hub and its API redirects, the LFS fronts one label
 # under hf.co, the Xet fronts two, and the download CDN three — the Hub redirects every shard request of a
 # Xet-backed repository there, Xet client or not (us.aws.cdn.hf.co; the regional siblings share the shape). A new
@@ -447,9 +468,103 @@ def check_selectors(cilium: list[dict], k8s: list[dict]) -> None:
         selector = d["spec"].get("podSelector") or d["spec"]["endpointSelector"]
         if "download" not in d["metadata"]["name"] and selects(selector, DOWNLOAD_LABELS):
             fail(f"{d['metadata']['name']} selects model-manager's download-Job pod")
-    if any(selects(s, DOWNLOAD_LABELS) for s in exception_selectors) or any(selects(p, {**DOWNLOAD_LABELS, "io.kubernetes.pod.namespace": NS}) for p in peers):
-        fail("the PolicyException or the agents' egress selects model-manager's download-Job pod")
-    ok("each shape's pod is selected by exactly its own network policies (both flavours), the agents' egress and the PolicyException; the download Job's pod by none")
+        if not d["metadata"]["name"].endswith("-model-serving-prepull") and selects(selector, prepull_labels(k8s)):
+            fail(f"{d['metadata']['name']} selects the pre-pull DaemonSet's pod")
+    for who, labels in (("model-manager's download-Job pod", DOWNLOAD_LABELS), ("the pre-pull DaemonSet's pod", prepull_labels(k8s))):
+        if any(selects(s, labels) for s in exception_selectors) or any(selects(p, {**labels, "io.kubernetes.pod.namespace": NS}) for p in peers):
+            fail(f"the PolicyException or the agents' egress selects {who}")
+    ok("each shape's pod is selected by exactly its own network policies (both flavours), the agents' egress and the PolicyException; "
+       "the download Job's pod and the pre-pull pod by none of them")
+
+
+def prepull_pod(docs: list[dict]) -> dict:
+    """The pod the pre-pull DaemonSet's template describes, as the kubelet would create it in the serving namespace."""
+    ds = one(docs, "DaemonSet", "-model-serving-prepull")
+    if ds["metadata"]["namespace"] != NS:
+        fail(f"the pre-pull DaemonSet renders in {ds['metadata']['namespace']}, expected the serving namespace {NS}")
+    template = ds["spec"]["template"]
+    return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": f"{ds['metadata']['name']}-x7k2q", "namespace": NS, "labels": template["metadata"]["labels"]},
+            "spec": copy.deepcopy(template["spec"])}
+
+
+def prepull_labels(docs: list[dict]) -> dict:
+    return prepull_pod(docs)["metadata"]["labels"]
+
+
+def check_prepull(connectivity: str, k8s: list[dict], cilium: list[dict], pods_policy: dict, exception: dict) -> None:
+    """The pre-pull DaemonSet (#545): its shape, its pod against the fleet's restricted PSS with no exception, its deny-all policy."""
+    with open(f"{connectivity}/values.yaml", encoding="utf-8") as f:
+        prepull = yaml.safe_load(f)["modelServing"]["prepull"]
+    ds = one(k8s, "DaemonSet", "-model-serving-prepull")
+    pod = prepull_pod(k8s)
+    spec = pod["spec"]
+    if not selects(ds["spec"]["selector"], pod["metadata"]["labels"]) or not selects({"matchLabels": PREPULL_LABEL}, pod["metadata"]["labels"]):
+        fail(f"the pre-pull DaemonSet's selector {ds['spec']['selector']} does not select its own pod, or the pod lacks {PREPULL_LABEL}")
+    images = [c["image"] for c in spec.get("initContainers") or []]
+    if images != prepull["images"] or not images or "/llm-d-cuda:" not in images[0]:
+        fail(f"the pre-pull init containers pull {images}; expected modelServing.prepull.images {prepull['images']}, the llm-d runtime image first")
+    if any(c.get("command") != ["/bin/true"] for c in spec["initContainers"]):
+        fail(f"every pre-pull init container runs /bin/true; got {[c.get('command') for c in spec['initContainers']]}")
+    if [c["name"] for c in spec["containers"]] != ["pause"] or not spec["containers"][0]["image"].endswith("/giantswarm/pause:" + prepull["pauseImage"]["tag"]):
+        fail(f"the pre-pull pod's main container is the pause image alone; got {[(c['name'], c['image']) for c in spec['containers']]}")
+    for c in spec["initContainers"] + spec["containers"]:
+        for kind in ("requests", "limits"):
+            if "nvidia.com/gpu" in (c.get("resources") or {}).get(kind, {}):
+                fail(f"pre-pull container {c['name']} {kind} a GPU")
+        if not (c.get("resources") or {}).get("requests") or not c["resources"].get("limits"):
+            fail(f"pre-pull container {c['name']} declares no requests or no limits")
+    if "runtimeClassName" in spec or spec.get("automountServiceAccountToken") is not False:
+        fail("the pre-pull pod names a runtimeClass or mounts a ServiceAccount token")
+    tolerations = spec.get("tolerations") or []
+    if not tolerations or tolerations[0] != POOL_TOLERATION or {"operator": "Exists"} not in tolerations:
+        fail(f"the pre-pull pod tolerates {tolerations}; expected the pool's taint first and every taint after it")
+    if spec.get("nodeSelector") != GPU_NODE:
+        fail(f"the pre-pull pod's default node selector is {spec.get('nodeSelector')}; expected Karpenter's GPU label {GPU_NODE}")
+    ok("the pre-pull DaemonSet: one /bin/true init container per image (the llm-d runtime image first), the pause main container, "
+       "no GPU, no runtimeClass, no token; the pool's taint tolerated first and every taint after it; Karpenter's GPU label selected")
+
+    results = validate(pod, None)
+    if failed := outcome(results, "fail"):
+        fail(f"the pre-pull pod fails the restricted PSS with no exception: {sorted(failed)}")
+    if outcome(results, "pass") != set(results):
+        fail(f"every restricted-PSS rule must pass on the pre-pull pod; skipped {sorted(outcome(results, 'skip'))}")
+    out = apply([pods_policy], pod)
+    if out is not None and out["spec"] != pod["spec"]:
+        fail("the chart's model-pod mutations touch the pre-pull pod")
+    for label_selector in [m["resources"]["selector"] for m in exception["spec"]["match"]["any"] if "selector" in m["resources"]]:
+        if selects(label_selector, pod["metadata"]["labels"]):
+            fail("the PolicyException selects the pre-pull pod; its pod needs none")
+    ok("the pre-pull pod passes every rule of the fleet's restricted PSS with no exception, and no mutation of the chart touches it")
+
+    k8s_policy = one(k8s, "NetworkPolicy", "-model-serving-prepull")
+    if sorted(k8s_policy["spec"]["policyTypes"]) != ["Egress", "Ingress"] or "ingress" in k8s_policy["spec"] or "egress" in k8s_policy["spec"]:
+        fail(f"the kubernetes-flavour pre-pull policy is not a deny-all: {k8s_policy['spec']}")
+    cilium_policy = one(cilium, "CiliumNetworkPolicy", "-model-serving-prepull")
+    if cilium_policy["spec"].get("ingress") != [{}] or cilium_policy["spec"].get("egress") != [{}]:
+        fail(f"the cilium-flavour pre-pull policy is not a deny-all (one empty rule per direction): {cilium_policy['spec']}")
+    for policy, selector in ((k8s_policy, k8s_policy["spec"]["podSelector"]), (cilium_policy, cilium_policy["spec"]["endpointSelector"])):
+        if policy["metadata"]["namespace"] != NS or not selects(selector, pod["metadata"]["labels"]):
+            fail(f"{policy['kind']}/{policy['metadata']['name']} does not select the pre-pull pod in {NS}")
+        if selects(selector, DOWNLOAD_LABELS) or any(selects(selector, fixture(shape)["metadata"]["labels"]) for shape in SHAPES):
+            fail(f"{policy['kind']}/{policy['metadata']['name']} selects a model pod or the download Job's pod")
+    ok("the pre-pull pods are denied all traffic by a policy of their own in both flavours, which selects them alone")
+
+    off = render(connectivity, ["--set", "modelServing.prepull.enabled=false", *CILIUM])
+    if any(d["metadata"]["name"].endswith("-model-serving-prepull") for d in off):
+        fail("modelServing.prepull.enabled=false still renders a pre-pull object")
+    result = subprocess.run([HELM, "template", "t", connectivity, *BASE, "--set", "modelServing.prepull.images=null"], capture_output=True, text=True, check=False)
+    if result.returncode == 0 or "modelServing.prepull.images is empty" not in result.stderr:
+        fail(f"an empty modelServing.prepull.images must fail the render naming the key; got rc={result.returncode}:\n{result.stderr}")
+    ok("modelServing.prepull.enabled=false renders no pre-pull object; an empty image list fails the render naming the key")
+
+
+def check_prepull_forwarded(connectivity: str, through_meta: list[dict]) -> None:
+    """The values the meta chart forwards render the same DaemonSet: the mirrored image list, the same selector (#545)."""
+    own = one(render(connectivity, []), "DaemonSet", "-model-serving-prepull")["spec"]["template"]["spec"]
+    forwarded = one(through_meta, "DaemonSet", "-model-serving-prepull")["spec"]["template"]["spec"]
+    if forwarded != own:
+        fail(f"the pre-pull pod the meta chart's forwarded values render differs from the connectivity default:\n{yaml.safe_dump(forwarded)}\n--- connectivity:\n{yaml.safe_dump(own)}")
+    ok("the meta chart's forwarded values render the pre-pull DaemonSet's pod as the connectivity default does (the mirrored images and selector)")
 
 
 def container_port(shape: str) -> int:
@@ -546,6 +661,7 @@ def main(connectivity: str, meta: str) -> int:
         check_pod_security(pods_policy, exception, shape)
     check_deployments(deployments_policy)
     cilium = render(connectivity, CILIUM)
+    check_prepull(connectivity, docs, cilium, pods_policy, exception)
     check_selectors(cilium, docs)
     check_fqdns(cilium, docs, "the connectivity chart's defaults")
     check_ports(cilium, docs, "the connectivity chart's defaults")
@@ -567,6 +683,7 @@ def main(connectivity: str, meta: str) -> int:
             through_meta.append(render(connectivity, ["-f", forwarded, *apis]))
         check_fqdns(*through_meta, "the meta chart's forwarded values")
         check_ports(*through_meta, "the meta chart's forwarded values")
+        check_prepull_forwarded(connectivity, through_meta[1])
     return 0
 
 
