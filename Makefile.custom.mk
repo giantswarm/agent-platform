@@ -1094,6 +1094,12 @@ verify-runtimes: ## Assert modelServing.additionalRuntimes (giantswarm/agent-pla
 	@python3 tests/verify-runtimes.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "additional runtimes verified."
 
+.PHONY: verify-model-images
+verify-model-images: ## Assert models as OCI images (giantswarm/agent-platform#551): with modelServing.modelImages.registry set, every oci:// preset's published storageUri — a shipped preset's and a values preset's alike — carries that host and nothing else of the document changes, an hf:// preset is untouched, an empty registry leaves every reference as written; the discovery ConfigMap publishes spec.modelImages.registry; modelServing.prepull.modelPresets renders one init container per named preset after the runtime images — pull-model-<preset>, the published storageUri minus oci://, /bin/true, the runtime init containers' security context and resources — a digest reference keeps its digest; the guards (an unknown name, a preset that is not oci://, a name twice, a registry with a scheme or a path, an oci:// reference without a host) fail the render naming it; the meta chart forwards both blocks and its forwarded values render the same preset ConfigMap and pre-pull pod. Fixture: ci/test-model-serving-oci-values.yaml. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-model-images.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "Models as OCI images verified."
+
 .PHONY: verify-labels
 verify-labels: ## Assert every label value stays valid at the versions the charts are installed under: helm-controller's +digest and a branch build's long prerelease, with the 63-character cut landing on each separator. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"

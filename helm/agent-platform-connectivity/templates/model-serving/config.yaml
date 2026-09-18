@@ -87,6 +87,12 @@ data:
         {{- else }}
         enabled: false
         {{- end }}
+      # Models as OCI images (modelServing.modelImages): the registry host
+      # every oci:// preset's storageUri is published with — empty, as
+      # written — so a consumer that builds an image reference of its own
+      # (model-manager) uses the host the presets do.
+      modelImages:
+        registry: {{ include "agent-platform.modelServing.modelImages.registry" . | quote }}
       presets:
         namespace: {{ .Release.Namespace }}
         labelSelector: agent-platform.giantswarm.io/serving-preset=true

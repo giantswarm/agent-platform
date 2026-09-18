@@ -208,6 +208,42 @@ agent-platform.giantswarm.io/model-serving-prepull: "true"
 {{- end -}}
 
 {{/*
+The registry host of modelServing.modelImages.registry (giantswarm/agent-platform#551),
+validated: a host with an optional port (registry.example.com,
+registry.example.com:5000, an in-cluster Service name), no scheme, no path.
+Empty when unset: every oci:// reference is published as written.
+*/}}
+{{- define "agent-platform.modelServing.modelImages.registry" -}}
+{{- $registry := toString (dig "modelImages" "registry" "" .Values.modelServing) -}}
+{{- if and $registry (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" $registry)) -}}
+{{- fail (printf "modelServing.modelImages.registry %q must be a registry host — host or host:port, no scheme, no path; it replaces the host of every oci:// preset's storageUri, the path stays" $registry) -}}
+{{- end -}}
+{{- $registry -}}
+{{- end -}}
+
+{{/*
+The storageUri of a preset served from an OCI model image, as published: the
+reference's registry host — the segment before the first / — replaced by
+modelServing.modelImages.registry when that is set, the path, tag or digest as
+written; the reference as written when the registry is empty. A reference
+without a host (oci://<name>:<tag>) is refused: the host is what an
+installation swaps, and the pre-pull derives the image from the published form.
+Usage: include "agent-platform.modelServing.publishedOciUri" (dict "root" $ "where" $where "storageUri" $uri)
+*/}}
+{{- define "agent-platform.modelServing.publishedOciUri" -}}
+{{- $ref := trimPrefix "oci://" .storageUri -}}
+{{- if or (not (contains "/" $ref)) (hasPrefix "/" $ref) -}}
+{{- fail (printf "%s: spec.model.storageUri %q names no registry host; an OCI model image is oci://<registry>/<path>[:tag|@digest] — the host is what modelServing.modelImages.registry replaces" .where .storageUri) -}}
+{{- end -}}
+{{- $registry := include "agent-platform.modelServing.modelImages.registry" .root -}}
+{{- if $registry -}}
+{{- printf "oci://%s/%s" $registry (rest (splitList "/" $ref) | join "/") -}}
+{{- else -}}
+{{- .storageUri -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The serving presets in effect, as a JSON object keyed by preset name:
   { "<name>": { "source": "shipped" | "values", "preset": <ServingPreset> } }
 The shipped set (files/model-serving/presets/*.yaml, unless
@@ -264,8 +300,9 @@ Validates one preset and resolves it into the published form the portal and
 model-manager read: runtime defaulted to the component's, model.format to vLLM,
 resources.gpus to 1, requirements.overheadGiB to 30, and the chat template (one
 of file, content, existingConfigMap) resolved to the ConfigMap that holds it,
-with the --chat-template flag appended to args, and the GPU node pool's
-toleration and selector merged under spec.scheduling (modelServing.gpuPool).
+with the --chat-template flag appended to args, the GPU node pool's
+toleration and selector merged under spec.scheduling (modelServing.gpuPool), and
+an oci:// storageUri's registry host swapped for modelServing.modelImages.registry.
 Returns JSON:
   { "preset": <published ServingPreset>,
     "chatTemplate": { "render": bool, "name": string, "key": string, "content": string } }
@@ -302,6 +339,14 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- end -}}
 {{- if not (get $model "storageUri") -}}
 {{- fail (printf "%s: spec.model.storageUri is required" $where) -}}
+{{- end -}}
+{{- /* An OCI model image (oci://…): the registry host published is the
+       installation's (modelServing.modelImages.registry), the path kept —
+       here, so the preset ConfigMap, the pre-pull DaemonSet and every
+       consumer read one value (#551). */ -}}
+{{- $storageUri := toString (get $model "storageUri") -}}
+{{- if hasPrefix "oci://" $storageUri -}}
+{{- $_ := set $model "storageUri" (include "agent-platform.modelServing.publishedOciUri" (dict "root" $root "where" $where "storageUri" $storageUri)) -}}
 {{- end -}}
 {{- $_ := set $model "format" (get $model "format" | default "vLLM") -}}
 {{- $_ := set $spec "model" $model -}}
