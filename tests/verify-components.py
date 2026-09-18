@@ -63,11 +63,11 @@ NEW = {
     "backstage": (GSOCI, ">=1.0.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
     "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://ghcr.io/cloudnative-pg/charts", "0.29.x", [], None),
-    "kserve-crd": (GSOCI, "0.2.x", [], None),
-    "kserve-resources": (GSOCI, "0.2.x", ["kserve-crd"], "deploymentMode: Standard"),
-    "kserve-llmisvc-crd": (GSOCI, "0.2.x", [], None),
+    "kserve-crd": (GSOCI, "0.4.x", [], None),
+    "kserve-resources": (GSOCI, "0.4.x", ["kserve-crd"], "deploymentMode: Standard"),
+    "kserve-llmisvc-crd": (GSOCI, "0.4.x", [], None),
     "kserve-llmisvc-resources": (
-        GSOCI, "0.2.x", ["kserve-crd", "kserve-llmisvc-crd", "kserve-resources"], "createSharedResources: false",
+        GSOCI, "0.4.x", ["kserve-crd", "kserve-llmisvc-crd", "kserve-resources"], "createSharedResources: false",
     ),
 }
 

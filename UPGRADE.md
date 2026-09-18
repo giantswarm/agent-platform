@@ -8,7 +8,7 @@ giantswarm/agent-platform#575: the hook Jobs' images of both charts (`gitops.hoo
 
 ### Operator action
 
-- **None** for an installation on the defaults. A cluster that reaches no public registry no longer mirrors `registry.k8s.io/kubectl`, `docker.io/alpine/k8s`, `docker.io/alpine/openssl` and `ghcr.io/controlplaneio-fluxcd/flux-operator` for the two charts' hooks and the bundled engine.
+- **None** for an installation on the defaults. A cluster that reaches no public registry no longer mirrors `registry.k8s.io/kubectl`, `docker.io/alpine/k8s`, `docker.io/alpine/openssl` and `ghcr.io/controlplaneio-fluxcd/flux-operator` for the two charts' hooks and the bundled engine. An installation with the KServe components on rolls the KServe controllers once onto the `0.4.x` charts (their image defaults move to gsoci; a served model's pods are untouched until they are recreated, and a new pod's `storage-initializer` and `agent` come from gsoci); a BOM pins the five at `0.4.0` or later.
 - **`modelServing.imageVerification.enabled: true` with attestors of your own**: the rule now reads Sigstore bundles. If your signer writes cosign 2's `.sig` tags, set `modelServing.imageVerification.type: Cosign`; a bundle-format signature (cosign 3, the architect orb) needs no change. A block that left `images` or `attestors` empty never rendered (the guards refuse it), so no render changes silently.
 - **Recognising it worked**: both charts' hook Jobs and the `flux-operator` Deployment name `gsoci.azurecr.io/giantswarm/…` images; with the switch on, the `verifyImages` rule of `<release>-model-serving-image-verification` carries `type: SigstoreBundle` and the CircleCI attestor.
 
