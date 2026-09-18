@@ -4877,11 +4877,15 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # model-manager's pre-warm downloads, but the KServe storage-initializer
   # downloads into its ephemeral volume on every start.
   # vLLM's cache — the torch.compile artifacts of a model, tens of seconds of
-  # work per pod, keyed by model and config inside it — is a directory of the
-  # claim's own, .vllm-cache at the claim root, shared by every model: the
-  # redirect rule mounts it on the runtime container at /mnt/vllm-cache and
-  # sets VLLM_CACHE_ROOT to that path in the same rule, so a model's next pod
-  # skips the compile (#537). It is not a model directory and the
+  # work per pod, keyed by model and config inside it — and Triton's kernel
+  # cache are directories of the claim's own, .vllm-cache at the claim root,
+  # shared by every model: the redirect rule mounts it on the runtime
+  # container at /mnt/vllm-cache and sets VLLM_CACHE_ROOT to that path and
+  # TRITON_CACHE_DIR to its triton/ directory in the same rule, so a model's
+  # next pod skips the compile (#537) and a preset that serves eager — no
+  # torch.compile, so none of vLLM's own redirect of Triton's cache under
+  # VLLM_CACHE_ROOT — keeps its Triton kernels across pods (#572). It is not
+  # a model directory and the
   # storage-initializer never touches it: the initializer's Hugging Face
   # client creates <model>/.cache/huggingface as uid 1000, mode 755, during
   # the download, so a cache root under /mnt/models is not writable for the
@@ -5027,9 +5031,9 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # instead — world on 443, the CDN's address blocks — is not the fix. An
     # installation may set env: [] to have Xet back. A mirror (HF_ENDPOINT)
     # belongs here too, next to the fqdns that name it. Not here:
-    # VLLM_CACHE_ROOT — the cache's redirect rule sets it on the runtime
-    # container together with the mount it names (cache, above), so the env
-    # is never set without the directory behind it.
+    # VLLM_CACHE_ROOT and TRITON_CACHE_DIR — the cache's redirect rule sets
+    # them on the runtime container together with the mount they name (cache,
+    # above), so neither env is ever set without the directory behind it.
     env:
       - name: HF_HUB_DISABLE_XET
         value: "1"
