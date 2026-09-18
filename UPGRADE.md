@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the cache claim's defaults are 100Gi at 500 MiB/s; the default class is named with a digest of its parameters)
+
+giantswarm/agent-platform#570: `modelServing.cache.pvc.size` defaults to `100Gi` (was `500Gi`) and the claim's gp3 class to `throughput: "500"`, `iops: "3000"` (was 1000 / 4000): the loader reads at about 300 MB/s on either tier, the download writes at the Hub's ≈ 200 MB/s, and two served models need well under 40 GiB. A StorageClass's parameters are immutable, so the default class is now `agent-platform-connectivity-hf-cache-<digest>` (eight hex characters of provisioner and parameters); the previous `agent-platform-connectivity-hf-cache` goes with the upgrade.
+
+### Operator action
+
+- **None.** An installation with a claim keeps it as it is: the hook applies the claim on the class it has and at its size (a claim never shrinks), and a bound volume works on without the removed class. A fresh installation gets a `100Gi` claim on the new class. Expect one Helm revision of the connectivity release (the class replaced, the hook re-run).
+- **To move an existing installation to the new defaults**: delete the claim while no model is served (`kubectl -n <serving namespace> delete pvc hf-cache` — the volume and the downloaded weights go with it); the next upgrade applies it at `100Gi` on the new class, and the next served model downloads its weights once more.
+- **To keep growing an existing claim that sits on the removed class** (a claim grows only on a class the cluster has): render that class again under its old name — `modelServing.cache.storageClass.name: agent-platform-connectivity-hf-cache` with `parameters` `type: gp3`, `iops: "4000"`, `throughput: "1000"` — and the claim is on the rendered class as before.
+- **To keep the previous tier on a fresh installation**: the same `parameters` (the class then renders under that tier's digest) and `pvc.size: 500Gi`.
+- **Recognising it worked**: `kubectl get storageclass` lists `agent-platform-connectivity-hf-cache-<digest>` and no longer the digest-free name (unless you named it), and `kubectl -n <serving namespace> get pvc hf-cache` shows the size and class the claim had before — or `100Gi` on the new class where none existed.
+
 ## \<current\> → \<next\> (the Substrate worker image follows the chart's Substrate pin; the Substrate line moves to `v0.0.30-gs.4`)
 
 giantswarm/agent-platform#466: the kagent WorkerPool's `workerImage` is now **derived from `components.substrate.versionRange`'s floor** — `<substrate.image.registry>/ateom-gvisor:<floor>`, `ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.30-gs.4` — and merged over the kagent block the chart forwards. The kagent chart's own stamp (the Substrate its build was published against) no longer reaches the cluster, so the atelet and the worker are one Substrate release whatever kagent build the kagent range admits. Chart 4.15.2 had admitted kagent `0.11.0-gs.14` (a `0.0.30` worker) under its `0.0.27-gs.9` atelet and booted no golden actor. `components.substrate` / `components.substrate-crds` move to `>=0.0.30-gs.4 <0.0.31-0` (the bounded golden boot, giantswarm/substrate#39 — the worker the fleet's WorkerPools already run through kagent `0.11.0-gs.20`'s stamp).

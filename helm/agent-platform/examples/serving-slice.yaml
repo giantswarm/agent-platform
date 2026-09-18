@@ -105,7 +105,7 @@ modelServing:
   #     giantswarm.io/machine-pool: <cluster>-<pool>
   # cache:
   #   # The claim's class: by default the chart renders a fast gp3 class of its
-  #   # own (1000 MiB/s, 4000 IOPS, WaitForFirstConsumer; #537) — the claim is
+  #   # own (500 MiB/s, 3000 IOPS, WaitForFirstConsumer; #537, #570) — the claim is
   #   # applied by a hook outside Helm's wait and Binds with the first
   #   # predictor (#483). create: false with a name references an existing
   #   # class instead.

@@ -14,8 +14,13 @@
 # uninstall removes the class and leaves the claim; a bound volume works on
 # without its class, a claim still Pending binds once the next install renders
 # the class again. The parameters are the provisioner's (AWS EBS CSI by
-# default: a gp3 volume at 1000 MiB/s and 4000 IOPS), rendered as the strings
-# a StorageClass takes.
+# default: a gp3 volume at 500 MiB/s and the tier's 3000 IOPS — vLLM's loader
+# reads at about 300 MB/s whatever the volume allows, the download writes at
+# the Hub's 200 MB/s; #570), rendered as the strings a StorageClass takes. The
+# default name carries a digest of provisioner and parameters
+# (agent-platform.modelServing.cacheStorageClass.digest): both are immutable on
+# the API, so a change renders a new class and the old one goes with the
+# upgrade, instead of a forbidden update failing the release.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
