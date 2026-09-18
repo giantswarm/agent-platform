@@ -2,23 +2,28 @@
 {{- $ms := .Values.modelServing }}
 {{- $ns := include "agent-platform.modelServing.namespace" . }}
 {{- if and $ms.namespace.create (ne $ns .Release.Namespace) }}
-# The serving namespace: InferenceServices, the cache PVC and the chat-template
+# The serving namespace: InferenceServices, the cache claim and the chat-template
 # ConfigMaps live here; the Kyverno policies match pods in it. Helm-owned, and
-# KEPT while the cache is on (helm.sh/resource-policy: keep): the cache claim
-# outlives the release by design (cache-pvc.yaml), and a namespace Helm
-# deleted took the claim and its volume down with it — every pool teardown
-# downloaded the weights again (#537). So an uninstall leaves the namespace,
-# the claim and its volume behind, nothing else (the chat-template ConfigMaps,
-# the presets and the policies go with the release), and a re-install adopts
-# the namespace (its Helm annotations are unchanged). With the cache off the
-# namespace goes with the release, as any Helm-owned object. Set
-# namespace.create: false for a namespace that already exists (a
-# GitOps-managed one, for example).
+# KEPT on uninstall (helm.sh/resource-policy: keep; namespace.keep, default
+# true) whatever the cache switch says: the cache claim in it outlives the
+# release by design (cache-pvc.yaml), a namespace Helm deletes takes every
+# object in it along, the claim's own keep policy notwithstanding, and a
+# release composed without the cache is not told what an earlier one with the
+# cache left in the namespace — a namespace kept only while the cache was on
+# took a claim a previous release left there down with it (#565; before that,
+# every pool teardown took the claim and its volume, #537). So an uninstall
+# leaves the namespace behind, and with it what it holds that is not the
+# release's — the claim and its volume; the chat-template ConfigMaps, the
+# presets and the policies go with the release — and a re-install adopts the
+# namespace (its Helm annotations are unchanged). namespace.keep: false is
+# the one way to have the namespace go with the release; everything in it, a
+# cache claim included, goes too. Set namespace.create: false for a namespace
+# that already exists (a GitOps-managed one, for example).
 apiVersion: v1
 kind: Namespace
 metadata:
   name: {{ $ns }}
-  {{- if $ms.cache.enabled }}
+  {{- if $ms.namespace.keep }}
   annotations:
     helm.sh/resource-policy: keep
   {{- end }}

@@ -249,7 +249,7 @@ else:
         ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         quoted = "--default-chat-template-kwargs='" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8b-fp8.yaml", encoding="utf-8").read()
         sized = "weightsGiB: 25" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b.yaml", encoding="utf-8").read()
-        kept = "helm.sh/resource-policy: keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
+        kept = "$ms.namespace.keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
         added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
         prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
@@ -322,15 +322,16 @@ else:
         head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-flash-next-nvfp4\n", "", head[DISCOVERY], flags=re.M)
         expect("the OCI preset's name cut out of the discovery list once", ncuts, 1)
         print(f"note: the preset qwen3-8-flash-next-nvfp4 ships on this side (#553) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
-    # The serving namespace is kept while the cache is on
-    # (giantswarm/agent-platform#537) and its template's comment says so; the
-    # untainted render has the cache off, so only the comment differs, but a
-    # golden from before renders the old one — the namespace document is left
-    # out of the comparison on both sides. Drop this once GOLDEN_REF carries #537.
+    # The serving namespace is kept whatever the cache switch says
+    # (giantswarm/agent-platform#565; modelServing.namespace.keep) and its
+    # template's comment says so; the untainted render has the cache off, so a
+    # golden from before renders the namespace without the policy and with the
+    # old comment — the namespace document is left out of the comparison on
+    # both sides. Drop this once GOLDEN_REF carries #565.
     if not kept:
         for side in (head, golden):
             side.pop(("Namespace", "model-serving"), None)
-        print(f"note: the serving namespace is kept with the cache on this side (#537) and not on {ref}: its document is left out of the comparison")
+        print(f"note: the serving namespace is kept with the cache off on this side (#565) and not on {ref}: its document is left out of the comparison")
     # The llm-d workload's ingress admits the workload's own port, 8000, instead
     # of the classic predictor's 8080 (giantswarm/agent-platform#525); a golden
     # from before renders the old port, so that one policy is left out of the

@@ -48,9 +48,11 @@ property the slice relies on:
   the class, volumeName) as <release>-hooks, whose ClusterRole carries
   get/create/patch on claims; cache.enabled: false and an existing claim render
   neither the hook nor the identity, and the existing claim is published.
-- what outlives the release (giantswarm/agent-platform#537): the serving
-  namespace carries helm.sh/resource-policy: keep while the cache is on and not
-  with it off; the claim references the chart's own StorageClass
+- what outlives the release (giantswarm/agent-platform#537, #565): the serving
+  namespace carries helm.sh/resource-policy: keep with the cache on and off (a
+  namespace kept only with the cache on took a claim an earlier slice left there
+  down with it) and not with namespace.keep: false; namespace.create: false
+  renders none; the claim references the chart's own StorageClass
   (<chart>-<claim>: the EBS CSI provisioner, gp3 at 1000 MiB/s / 4000 IOPS as
   strings, WaitForFirstConsumer, expansion allowed, Delete, no keep policy);
   storageClass.create: false with a name references that name and renders no
@@ -430,9 +432,16 @@ def check_cache(connectivity: str, base: list[str]) -> None:
             sys.exit(f"FAIL: with {label} the render still carries a StorageClass; the class is the chart's claim's")
         if label == "an existing claim" and "claimName: models" not in text:
             sys.exit("FAIL: the existing claim is not published")
-        if label == "cache.enabled: false" and KEEP in off.get(SERVING_NS, ""):
-            sys.exit(f"FAIL: with the cache off the serving namespace is still kept; it is an ordinary Helm-owned object then:\n{off[SERVING_NS]}")
-    ok("cache.enabled: false and an existing claim render no claim, no hook, no hook identity and no StorageClass; with the cache off the namespace is not kept; the existing claim is published")
+        if KEEP not in off.get(SERVING_NS, ""):
+            sys.exit(f"FAIL: with {label} the serving namespace is not kept; the policy is independent of the cache switch — a namespace Helm deletes takes a claim an earlier release left there along (#565):\n{off.get(SERVING_NS)}")
+    ok("cache.enabled: false and an existing claim render no claim, no hook, no hook identity and no StorageClass; the namespace is kept either way; the existing claim is published")
+
+    unkept = documents(helm(connectivity, [*base, "--set", "modelServing.namespace.keep=false", "--set", "modelServing.cache.enabled=false"]))
+    if SERVING_NS not in unkept or KEEP in unkept[SERVING_NS] or "annotations:" in unkept[SERVING_NS]:
+        sys.exit(f"FAIL: namespace.keep: false should render the serving namespace without the keep policy (the namespace and everything in it go with the release):\n{unkept.get(SERVING_NS)}")
+    if SERVING_NS in documents(helm(connectivity, [*base, "--set", "modelServing.namespace.create=false"])):
+        sys.exit("FAIL: namespace.create: false still renders the serving namespace")
+    ok("namespace.keep: false renders the namespace without the keep policy (for an installation that wants nothing of the serving layer to outlive the release); namespace.create: false renders no namespace")
 
 
 # The tail of the well-known runtime template's entrypoint (kserve-runtime-configs,

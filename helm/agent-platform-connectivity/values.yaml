@@ -2941,19 +2941,27 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # false skips it.
     requireApi: true
   # The namespace InferenceServices run in. The runtime is cluster-scoped;
-  # the cache PVC, the chat-template ConfigMaps and the Kyverno policies
+  # the cache claim, the chat-template ConfigMaps and the Kyverno policies
   # target this namespace, and the portal creates InferenceServices here.
   # Created by the chart (Helm-owned) when create is true and the name
-  # differs from the release namespace, and KEPT (helm.sh/resource-policy:
-  # keep) while cache.enabled is on: the cache claim in it outlives the
-  # release by design, and a namespace Helm deleted took the claim and its
-  # volume down with it (#537); with the cache off the namespace goes with
-  # the release. labels: e.g. a Pod Security admission level (the upstream
-  # vLLM image runs as root; a Giant Swarm cluster's restricted profile is
-  # the policyException below).
+  # differs from the release namespace, and KEPT on uninstall
+  # (helm.sh/resource-policy: keep) while keep is true — whatever
+  # cache.enabled says: the cache claim in it outlives the release by design,
+  # a namespace Helm deletes takes every object in it along, and a release
+  # composed without the cache cannot know what an earlier one with the cache
+  # left in the namespace (#565: a namespace kept only while the cache was on
+  # took a claim a previous release left there down with it; before that,
+  # every pool teardown took the claim and its volume, #537). The namespace
+  # outlives the release, the claim outlives the pool, and removing either is
+  # a person's explicit act (delete the claim, then the namespace). keep:
+  # false is the one way to have the namespace go with the release —
+  # everything in it, a cache claim included, goes too. labels: e.g. a Pod
+  # Security admission level (the upstream vLLM image runs as root; a Giant
+  # Swarm cluster's restricted profile is the policyException below).
   namespace:
     name: model-serving
     create: true
+    keep: true
     labels: {}
   # The vLLM ClusterServingRuntime (serving.kserve.io/v1alpha1,
   # cluster-scoped). Every shipped preset runs on it; a preset may name
@@ -3226,12 +3234,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # (#483). Nothing waits for it, and it outlives the release: an uninstall
   # or a cache.enabled flip leaves it (it carries helm.sh/resource-policy:
   # keep to say so) — and the serving namespace with it, which carries the
-  # same policy while the cache is on (a Helm-owned namespace took the claim
-  # down with it, #537). An uninstall leaves the namespace, the claim and its
-  # volume (the downloads) behind, nothing else; a re-install adopts both,
-  # and the claim binds the next pool's node to the volume's zone. To remove
-  # the cache for good, delete the claim (the volume goes with it, the class
-  # below reclaims with Delete) and then the namespace. A size change is
+  # same policy whatever the cache switch says (namespace.keep above; a
+  # Helm-owned namespace took the claim down with it, #537, #565). An
+  # uninstall leaves the namespace, the claim and its volume (the downloads)
+  # behind, nothing else; a re-install adopts both, and the claim binds the
+  # next pool's node to the volume's zone. To remove the cache for good,
+  # delete the claim (the volume goes with it, the class below reclaims with
+  # Delete) and then the namespace. A size change is
   # applied by the next upgrade's hook; an immutable field (storageClassName,
   # accessModes, volumeName) cannot change once the claim exists. Without the
   # Kyverno policies below the claim is still applied and published for

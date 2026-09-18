@@ -1290,6 +1290,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.kserve.requireApi | bool | `true` |  |
 | modelServing.namespace.name | string | `"model-serving"` |  |
 | modelServing.namespace.create | bool | `true` |  |
+| modelServing.namespace.keep | bool | `true` |  |
 | modelServing.namespace.labels | object | `{}` |  |
 | modelServing.runtime.name | string | `"kserve-vllm"` |  |
 | modelServing.runtime.image.registry | string | `"docker.io"` |  |

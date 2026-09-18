@@ -39,15 +39,20 @@ installation what the connectivity default does not) and of the default
 runtime and the additional-runtimes list (`modelServing.runtime`,
 `modelServing.additionalRuntimes`; #550 — an additional runtime inherits every
 field it leaves unset from the forwarded default, so a drifted copy would change
-what every installation's additional runtimes run with) — and holds the
-meta chart's value at the same path equal to it,
+what every installation's additional runtimes run with) and of the serving
+namespace block (`modelServing.namespace`; #565 — the namespace's keep policy
+is what stands between a slice composed without the cache and a cache claim an
+earlier slice left in the namespace, and a forwarded copy without `keep` or
+with it off would strip the policy from every installation's render) — and
+holds the meta chart's value at the same path equal to it,
 naming the path and both values when they differ or the meta chart lacks the
 path. It refuses to pass
 vacuously: the two `huggingFace.fqdns` lists, the two model-serving ports, the
 StorageClass provisioner, the policies' env, the PriorityClass name, the
 pre-pull image and model-preset lists, the model-images registry, the image
-verification's failureAction, the default runtime's image name and the
-additional-runtimes list must be among the paths it compared.
+verification's failureAction, the default runtime's image name, the
+additional-runtimes list and the namespace's keep switch must be among the paths it
+compared.
 `--meta-values FILE` compares another meta values file (the negative
 controls in `make verify-meta`).
 """
@@ -61,10 +66,11 @@ REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networ
             "modelServing.networkPolicy.predictor.port", "modelServing.networkPolicy.llmisvcWorkload.port",
             "modelServing.cache.storageClass.provisioner", "modelServing.policies.env", "clusterManager.prewarmPriorityClass.name",
             "modelServing.prepull.images", "modelServing.prepull.modelPresets", "modelServing.modelImages.registry",
-            "modelServing.imageVerification.failureAction", "modelServing.runtime.image.name", "modelServing.additionalRuntimes"}
+            "modelServing.imageVerification.failureAction", "modelServing.runtime.image.name", "modelServing.additionalRuntimes",
+            "modelServing.namespace.keep"}
 MIRRORED = ("fqdns", "cidrs", "port")
-# Blocks the meta chart mirrors leaf for leaf (#537, #539, #545, #550, #551, #552).
-SUBTREES = (("modelServing", "cache"), ("modelServing", "policies"), ("modelServing", "prepull"), ("modelServing", "modelImages"),
+# Blocks the meta chart mirrors leaf for leaf (#537, #539, #545, #550, #551, #552, #565).
+SUBTREES = (("modelServing", "namespace"), ("modelServing", "cache"), ("modelServing", "policies"), ("modelServing", "prepull"), ("modelServing", "modelImages"),
             ("modelServing", "imageVerification"), ("modelServing", "runtime"), ("modelServing", "additionalRuntimes"),
             ("clusterManager", "prewarmPriorityClass"))
 
@@ -112,7 +118,7 @@ def main() -> int:
         sys.exit(f"FAIL: the connectivity chart no longer declares {sorted(missing)}; this check would pass vacuously")
     if drift:
         sys.exit("FAIL: a mirrored default differs between the charts — the meta chart forwards its copy, which shadows the connectivity default:\n  " + "\n  ".join(drift))
-    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing cache, policies, prepull, modelImages, imageVerification, runtime and additionalRuntimes blocks, the clusterManager prewarmPriorityClass block) are equal in both charts ({', '.join(sorted(compared))})")
+    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing namespace, cache, policies, prepull, modelImages, imageVerification, runtime and additionalRuntimes blocks, the clusterManager prewarmPriorityClass block) are equal in both charts ({', '.join(sorted(compared))})")
     return 0
 
 
