@@ -81,13 +81,7 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # default with no backend, so the default render carries its wiring. Both sides
 # render with the component off (a chart that predates the default accepts the
 # key), and verify-managers asserts the default shape and the static forms.
-# The tenth intended change (giantswarm/agent-platform#455): the kagent
-# controller VerticalPodAutoscaler this chart renders by default with
-# autoscaling.k8s.io/v1 served (templates/kagent/controller-vpa.yaml). Both
-# sides render with kagent.controller.vpa.enabled=false (a chart that predates
-# the key ignores it, the kagent block is additionalProperties: true), and
-# verify-kagent-vpa asserts the object on, off and inert.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.enabled=false
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main

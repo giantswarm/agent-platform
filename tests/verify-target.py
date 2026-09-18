@@ -40,15 +40,12 @@ property that shape relies on:
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
-import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-
-import yaml
 
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = [
@@ -194,71 +191,20 @@ def check_golden(meta: str, connectivity: str) -> None:
     shutil.rmtree(tree)
     subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, ref], check=True)
     try:
-        # Intended differences to GOLDEN_REF are held equal on both sides
-        # (giantswarm/agent-platform#329, model-manager on by default with no
-        # backend): the connectivity shapes render with the component off (a
-        # chart that predates the default accepts the key); the meta shapes,
-        # which forward the model-manager block to the connectivity release
-        # whatever the toggle, also with the one-backend form the old default
-        # forwarded — so a static-backend installation's render is proven
-        # unchanged.
-        mm_off = ["--set", "components.model-manager.enabled=false"]
-        mm_static = ["--set", "model-manager.backend=ollama"]
-        # The model-manager line moves to >=0.22.0 (zero-backend start-up) with
-        # the same change; the CI shape renders the release, so both sides get
-        # the range as a value (components.<name>.versionRange is one). Drop
-        # this once GOLDEN_REF carries the line.
-        mm_range = ["--set", "components.model-manager.versionRange=>=0.22.0 <1.0.0"]
-        # modelManager.networkPolicy.registeredBackends (giantswarm/agent-platform#478)
-        # is a new default key the meta chart forwards to the connectivity
-        # release; empty it renders no rule, so the golden side gets the same
-        # empty list as a value. Drop this once GOLDEN_REF carries the key.
-        mm_registered = ["--set-json", "modelManager.networkPolicy.registeredBackends=[]"]
-        # The predictors' PolicyException (giantswarm/agent-platform#498) is a
-        # new default of the serving slice; its knob is under the open
-        # modelServing block, which the golden chart accepts, so both sides
-        # render without it. Drop this once GOLDEN_REF carries the exception.
-        ms_polex_off = ["--set", "modelServing.policyException.enabled=false"]
-        # The Substrate worker image follows the chart's Substrate pin
-        # (giantswarm/agent-platform#466): the head derives kagent
-        # .substrateWorkerPool.workerImage from components.substrate.versionRange's
-        # floor and moves the two Substrate ranges to 0.0.30-gs.4; the golden
-        # forwards an own workerImage verbatim, so both sides get the derived
-        # image and the range as values. Drop this once GOLDEN_REF carries the line.
-        substrate = ["--set", "components.substrate.versionRange=>=0.0.30-gs.4 <0.0.31-0",
-                     "--set", "components.substrate-crds.versionRange=>=0.0.30-gs.4 <0.0.31-0",
-                     "--set", "kagent.substrateWorkerPool.workerImage=ghcr.io/giantswarm/substrate/ateom-gvisor:0.0.30-gs.4"]
-        # The Hugging Face download CDN's pattern *.*.*.hf.co (giantswarm/agent-platform#522,
-        # round 2) joins both mirrored huggingFace.fqdns lists of the meta chart —
-        # values it forwards to the connectivity release, whose own default
-        # (equal on both sides, held so by verify-meta) already carries it — so
-        # both sides get the connectivity list as a value. Drop this once
-        # GOLDEN_REF carries the entry.
-        with open(f"{connectivity}/values.yaml") as f:
-            conn_serving = yaml.safe_load(f)["modelServing"]
-        hf_cdn = json.dumps(conn_serving["networkPolicy"]["huggingFace"]["fqdns"])
-        hf = ["--set-json", f"modelServing.networkPolicy.huggingFace.fqdns={hf_cdn}",
-              "--set-json", f"modelManager.networkPolicy.huggingFace.fqdns={hf_cdn}"]
-        # The cache claim's StorageClass block (giantswarm/agent-platform#537)
-        # is a new mirrored default the meta chart forwards to the connectivity
-        # release, and the model pods' env list differs from the golden's (#537
-        # put VLLM_CACHE_ROOT there, #541 takes it out: the redirect rule sets
-        # it with the mount); both are held equal to the connectivity chart's
-        # by verify-meta, so both sides get the connectivity values. Drop this
-        # once GOLDEN_REF carries #541.
-        ms_cache = ["--set-json", f"modelServing.cache.storageClass={json.dumps(conn_serving['cache']['storageClass'])}",
-                    "--set-json", f"modelServing.policies.env={json.dumps(conn_serving['policies']['env'])}"]
-        # The llm-d workload shape's own port (giantswarm/agent-platform#525) is a
-        # new default key the meta chart forwards to the connectivity release,
-        # so the golden side gets the same value. Drop this once GOLDEN_REF
-        # carries the key.
-        ms_port = ["--set", "modelServing.networkPolicy.llmisvcWorkload.port=8000"]
+        # No held-equal flags: GOLDEN_REF is origin/main, which now carries every
+        # feature the holds here used to mask, so each one only narrowed the
+        # comparison (giantswarm/agent-platform#455 and #530 for the one that
+        # narrowed it asymmetrically and broke the target). A NEW intended
+        # difference gets its hold back, applied to BOTH sides and with the key
+        # named, and is dropped again once GOLDEN_REF carries it — the cache
+        # claim's StorageClass and the model pods' env (#537, #542) are the
+        # newest to have reached that point.
         shapes = [
-            ("meta default", meta, [*mm_off, *mm_static, *mm_registered, *substrate, *hf, *ms_port, *ms_cache]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *mm_static, *mm_range, *mm_registered, *substrate, *hf, *ms_port, *ms_cache]),
-            ("connectivity default", connectivity, [*VM, *mm_off, *ms_polex_off]),
-            ("connectivity full", connectivity, [*CONN_FULL, *mm_off, *ms_polex_off]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *mm_off, *ms_polex_off]),
+            ("meta default", meta, []),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]),
+            ("connectivity default", connectivity, [*VM]),
+            ("connectivity full", connectivity, [*CONN_FULL]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
