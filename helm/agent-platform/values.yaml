@@ -1005,7 +1005,7 @@ components:  # @schema additionalProperties: true
     # vLLM ClusterServingRuntime already is. Needs the LLMInferenceService
     # CRDs only (the configs are CRs of theirs), not the controller.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.2.x"
+    versionRange: "0.3.x"
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]

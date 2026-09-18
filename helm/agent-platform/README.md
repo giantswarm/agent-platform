@@ -468,7 +468,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-llmisvc-resources.dependsOn[2] | string | `"kserve-resources"` |  |
 | components.kserve-runtime-configs.chart | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.kserve-runtime-configs.versionRange | string | `"0.2.x"` |  |
+| components.kserve-runtime-configs.versionRange | string | `"0.3.x"` |  |
 | components.kserve-runtime-configs.valuesFrom | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.enabled | bool | `false` |  |
 | components.kserve-runtime-configs.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |

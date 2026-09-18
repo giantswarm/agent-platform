@@ -365,7 +365,7 @@ The components the [agent-platform-standalone](https://github.com/giantswarm/age
 | `kserve-resources` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | `kserve-crd` |
 | `kserve-llmisvc-crd` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | — |
 | `kserve-llmisvc-resources` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | `kserve-crd`, `kserve-llmisvc-crd`, `kserve-resources` |
-| `kserve-runtime-configs` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` (into `kserve`; [The serving slice](#the-serving-slice-and-the-models-gateway)) | `kserve-llmisvc-crd` |
+| `kserve-runtime-configs` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.3.x` (into `kserve`; [The serving slice](#the-serving-slice-and-the-models-gateway)) | `kserve-llmisvc-crd` |
 
 **Turning them on.** `components.<name>.enabled: true`. Backstage and mcp-kubernetes also need `global.domain` and `global.identity` (`issuerUrl`, `clientId`, `existingSecret` — the platform credentials Secret, with the keys `dex-client-secret` and, for Backstage, `backstage-session-secret`): the same quick-start inputs muster takes. The mcp-kubernetes chart fails its render without them, by design; the Backstage values mount that Secret by name. `kserve-resources` needs cert-manager on the cluster; `kserve-llmisvc-resources` reuses the shared objects `kserve-resources` renders (`kserve.createSharedResources: false`). On a cluster without Cilium set `mcp-kubernetes.ciliumNetworkPolicy.enabled: false` (see [Prerequisites](#prerequisites)).
 
