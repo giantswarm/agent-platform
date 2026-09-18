@@ -1,7 +1,7 @@
 # flux-engine
 
 The Flux engine of the agent-platform meta chart: the Flux Operator
-(ghcr.io/controlplaneio-fluxcd/flux-operator) and one FluxInstance named
+(the gsoci copy of ghcr.io/controlplaneio-fluxcd/flux-operator) and one FluxInstance named
 `flux` in the release namespace running source-controller and helm-controller
 under the multi-tenancy lockdown, plus the platform's tenant identity — the
 ServiceAccount `agent-platform-flux` bound to cluster-admin, which every
@@ -23,7 +23,7 @@ Not published on its own.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| operator.image | object | `{"pullPolicy":"IfNotPresent","registry":"ghcr.io","repository":"controlplaneio-fluxcd/flux-operator","tag":"v0.60.0"}` | The Flux Operator image. The tag is the operator release (appVersion in Chart.yaml); Renovate tracks it as a docker image pin. |
+| operator.image | object | `{"pullPolicy":"IfNotPresent","registry":"gsoci.azurecr.io","repository":"giantswarm/flux-operator","tag":"v0.60.0"}` | The Flux Operator image. The tag is the operator release (appVersion in Chart.yaml); Renovate tracks it as a docker image pin. |
 | operator.imagePullSecrets | list | `[]` | Pull secrets for the operator image, in the release namespace (`global.imagePullSecrets` of the meta chart apply as well). |
 | operator.logLevel | string | `"info"` | Operator log level: debug, info or error. |
 | operator.reportingInterval | string | `"5m"` | How often the operator refreshes the FluxReport. |

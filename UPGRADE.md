@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (image defaults from gsoci; `modelServing.imageVerification` defaults to the Giant Swarm identity in the Sigstore bundle format)
+
+giantswarm/agent-platform#575: the hook Jobs' images of both charts (`gitops.hooks.image`, `gitops.hooks.helmImage`; `hooks.kubectlImage`, `hooks.opensslImage`) and the bundled Flux engine's operator image (`flux-engine.operator.image`) come from `gsoci.azurecr.io`; `modelServing.imageVerification` (off by default) gains defaults — `images: [gsoci.azurecr.io/giantswarm/*]`, one keyless attestor for the Giant Swarm CircleCI signing identity (issuer `https://oidc.circleci.com`, subject the pipeline definition that ran) and `type: SigstoreBundle`, the signature format cosign 3 writes and the architect orb produces.
+
+### Operator action
+
+- **None** for an installation on the defaults. A cluster that reaches no public registry no longer mirrors `registry.k8s.io/kubectl`, `docker.io/alpine/k8s`, `docker.io/alpine/openssl` and `ghcr.io/controlplaneio-fluxcd/flux-operator` for the two charts' hooks and the bundled engine. An installation with the KServe components on rolls the KServe controllers once onto the `0.4.x` charts (their image defaults move to gsoci; a served model's pods are untouched until they are recreated, and a new pod's `storage-initializer` and `agent` come from gsoci); a BOM pins the five at `0.4.1` or later (from 0.4.1 the storage-initializer's resources follow `kserve.storage.resources`).
+- **`modelServing.imageVerification.enabled: true` with attestors of your own**: the rule now reads Sigstore bundles. If your signer writes cosign 2's `.sig` tags, set `modelServing.imageVerification.type: Cosign`; a bundle-format signature (cosign 3, the architect orb) needs no change. A block that left `images` or `attestors` empty never rendered (the guards refuse it), so no render changes silently.
+- **Recognising it worked**: both charts' hook Jobs and the `flux-operator` Deployment name `gsoci.azurecr.io/giantswarm/…` images; with the switch on, the `verifyImages` rule of `<release>-model-serving-image-verification` carries `type: SigstoreBundle` and the CircleCI attestor.
+
 ## \<current\> → \<next\> (the pre-pull DaemonSet is a hook object; its selector replaces the default)
 
 giantswarm/agent-platform#562, #563: `modelServing.prepull.nodeSelector` defaults to `{}` in both charts and the template holds Karpenter's `karpenter.k8s.aws/instance-gpu-manufacturer: nvidia`, so a selector an installation sets renders alone (the pool's label still merged under it); and the pre-pull DaemonSet is created by the `post-install,post-upgrade,post-rollback` hooks instead of being a release resource, so nothing waits for its pods — an image that cannot be pulled yet leaves them retrying and the connectivity release Ready. A `pre-delete` hook Job removes the DaemonSet on uninstall.

@@ -612,18 +612,18 @@ kyvernoPolicies:
 # anchor and ate-api-server's authentication config, minted once and kept) and
 # the derived Postgres connection Secrets of postgres.databases (post-install,
 # post-upgrade). kubectlImage carries kubectl, a shell and jq; opensslImage the
-# openssl the bootstrap mints its key material with. A cluster that reaches no
-# public registry mirrors both. Both run under the restricted pod security
-# profile as the hook ServiceAccount <release>-hooks (secrets, configmaps and
-# namespaces only, for the hook's lifetime).
+# openssl the bootstrap mints its key material with — the gsoci copies of
+# alpine/k8s and alpine/openssl (giantswarm/retagger). Both run under the
+# restricted pod security profile as the hook ServiceAccount <release>-hooks
+# (secrets, configmaps and namespaces only, for the hook's lifetime).
 hooks:
   kubectlImage:
-    registry: docker.io
-    repository: alpine/k8s
+    registry: gsoci.azurecr.io
+    repository: giantswarm/alpine-k8s
     tag: 1.37.0
   opensslImage:
-    registry: docker.io
-    repository: alpine/openssl
+    registry: gsoci.azurecr.io
+    repository: giantswarm/alpine-openssl
     tag: 3.5.8
 
 # Arbitrary manifests rendered through `tpl` alongside the chart. Useful for
@@ -3453,36 +3453,48 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # checks every container image of the pod that matches `images`. Off by
   # default. On, it renders where the cache policies render (policies.enabled
   # above resolved: Kyverno served) and nowhere else; enabled with an empty
-  # images list, no attestor, a failureAction outside Enforce | Audit or an
-  # unknown key fails the render naming the key.
+  # images list, no attestor, a type or a failureAction outside its options
+  # or an unknown key fails the render naming the key.
   imageVerification:
     enabled: false
     # The image references the rule verifies (Kyverno's imageReferences): a
     # full reference or a wildcard pattern — `*` any run of characters, across
     # path segments, tags and digests; `?` one character. A container image
-    # matching none is left alone, so the runtime image is covered only when
-    # a pattern names its path too. Empty with enabled: true fails the render.
-    #   images:
-    #     - gsoci.azurecr.io/giantswarm/models/*
-    images: []
+    # matching none is left alone. The default is every image under the
+    # platform's registry namespace (giantswarm/agent-platform#575) — the
+    # model images, the runtime, the llm-d sidecars — so a model pod runs
+    # nothing from there without a trusted signature; an installation that
+    # serves from its own registry (modelImages.registry) names its pattern
+    # too. Empty with enabled: true fails the render.
+    images:
+      - gsoci.azurecr.io/giantswarm/*
     # The trusted signers, one entry each — a Kyverno attestor entry, passed
-    # through as written: keyless (issuer + subject or subjectRegExp, rekor;
-    # the fleet's CircleCI identity below), a public key (keys.publicKeys, a
-    # PEM) or certificates. Rendered as one attestor set with count 1: a
-    # signature of any one of them admits the image. Empty with enabled: true
-    # fails the render.
-    #   attestors:
-    #     - keyless:
-    #         issuer: https://oidc.circleci.com
-    #         subjectRegExp: ^https://circleci\.com/api/v2/projects/.+$
-    #         rekor:
-    #           url: https://rekor.sigstore.dev
-    #     - keys:
-    #         publicKeys: |-
-    #           -----BEGIN PUBLIC KEY-----
-    #           ...
-    #           -----END PUBLIC KEY-----
-    attestors: []
+    # through as written: keyless (issuer + subject or subjectRegExp, rekor),
+    # a public key (keys.publicKeys, a PEM) or certificates. Rendered as one
+    # attestor set with count 1: a signature of any one of them admits the
+    # image. The default is the identity every image built or re-signed by a
+    # Giant Swarm CircleCI project carries — the architect orb signs with
+    # cosign keyless through Fulcio's CircleCI federation: the certificate's
+    # OIDC issuer is https://oidc.circleci.com and its subject the pipeline
+    # definition that ran,
+    # https://circleci.com/api/v2/projects/<project id>/pipeline-definitions/<definition id>
+    # (two UUIDs), the pair the orb itself verifies with after signing. The
+    # subject names no organisation; what scopes the rule to Giant Swarm is
+    # `images`: only Giant Swarm pipelines publish under
+    # gsoci.azurecr.io/giantswarm/. Empty with enabled: true fails the render.
+    attestors:
+      - keyless:
+          issuer: https://oidc.circleci.com
+          subjectRegExp: ^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$
+          rekor:
+            url: https://rekor.sigstore.dev
+    # Where a signature is looked for (Kyverno's type): SigstoreBundle — the
+    # Sigstore bundle cosign 3 attaches to the image as an OCI referrer, what
+    # the architect orb and every Giant Swarm re-signing job produce — or
+    # Cosign, the `.sig` tag of cosign 2. A signature is found only in the
+    # format named here: a Giant Swarm image verified as Cosign fails with
+    # "no signatures found".
+    type: SigstoreBundle  # SigstoreBundle | Cosign
     # Replace a verified image's tag with its digest in the pod, so the
     # kubelet runs exactly what was verified — a tag re-pushed later cannot
     # slip in. Kyverno also requires a digest on every verified image

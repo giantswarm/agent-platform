@@ -68,7 +68,8 @@ REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networ
             "modelServing.networkPolicy.predictor.port", "modelServing.networkPolicy.llmisvcWorkload.port",
             "modelServing.cache.storageClass.provisioner", "modelServing.policies.env", "clusterManager.prewarmPriorityClass.name",
             "modelServing.prepull.images", "modelServing.prepull.modelPresets", "modelServing.prepull.nodeSelector", "modelServing.modelImages.registry",
-            "modelServing.imageVerification.failureAction", "modelServing.runtime.image.name", "modelServing.additionalRuntimes",
+            "modelServing.imageVerification.failureAction", "modelServing.imageVerification.images", "modelServing.imageVerification.attestors",
+            "modelServing.runtime.image.name", "modelServing.additionalRuntimes",
             "modelServing.namespace.keep"}
 MIRRORED = ("fqdns", "cidrs", "port")
 # Blocks the meta chart mirrors leaf for leaf (#537, #539, #545, #550, #551, #552, #565).

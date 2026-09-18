@@ -41,7 +41,7 @@ postgres:
     # ImageVolume approach (CNPG 1.29+/PG18). Remove extensionImage.reference and
     # set postgres.image.name to a pgvector-bundled image for older CNPG versions.
     extensionImage:
-      reference: ghcr.io/cloudnative-pg/pgvector:0.8.0-17-bookworm
+      reference: gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
   applicationDatabase:
     name: kagent
     owner: kagent

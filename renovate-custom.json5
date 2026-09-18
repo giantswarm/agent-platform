@@ -16,20 +16,23 @@
   //
   // - The helm-values manager reads every registry/repository/tag block: the
   //   Flux Operator image of the flux-engine subchart (charts/flux-engine/
-  //   values.yaml, operator.image — bump its Chart.yaml appVersion with it; the
+  //   values.yaml, operator.image, the gsoci copy of the operator — bump its
+  //   Chart.yaml appVersion with it; the
   //   operator's embedded Flux manifests decide which Flux 2.x the FluxInstance
   //   runs, so a new Flux minor arrives with a new operator tag), the kubectl
-  //   image of the meta chart's hook Jobs (values.yaml, gitops.hooks.image) and
+  //   image of the meta chart's hook Jobs (values.yaml, gitops.hooks.image, the
+  //   gsoci copy of registry.k8s.io/kubectl) and
   //   the kubectl+helm image of the hooks that need helm or a shell — the
   //   self-management values hook, its resumer and the suspend hook (values.yaml,
-  //   gitops.hooks.helmImage: alpine/k8s, whose tags follow the kubectl minor).
+  //   gitops.hooks.helmImage: the gsoci copy of alpine/k8s, whose tags follow
+  //   the kubectl minor).
   // - The `# registry:` hint regexes of the giantswarm preset read the plain
   //   `version:` keys (vllm-openai, backstage-catalogs, agentgateway).
   //
   // Do not add a regex manager for the three-line image block: helm-values
   // already produces those updates, so a second manager opens a duplicate PR
   // per bump under a different dependency name (alpine/k8s next to
-  // docker.io/alpine/k8s) and cannot resolve registry.k8s.io/kubectl at all.
+  // docker.io/alpine/k8s).
   //
   // The one line the built-in managers cannot see is charts/flux-engine/
   // Chart.yaml's appVersion, which verify-engine holds equal to the operator
@@ -42,7 +45,7 @@
       description: 'charts/flux-engine/Chart.yaml appVersion follows the Flux Operator image tag',
       managerFilePatterns: ['/^helm/agent-platform/charts/flux-engine/Chart\\.yaml$/'],
       matchStrings: ['appVersion: "(?<currentValue>v\\d+\\.\\d+\\.\\d+)"'],
-      depNameTemplate: 'ghcr.io/controlplaneio-fluxcd/flux-operator',
+      depNameTemplate: 'gsoci.azurecr.io/giantswarm/flux-operator',
       datasourceTemplate: 'docker',
       versioningTemplate: 'docker',
     },

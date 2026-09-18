@@ -30,8 +30,8 @@ objects the API server rejects or a preset the portal cannot use.
   {{- if .enabled }}
     {{- $iv := . }}
     {{- range $key, $_ := . }}
-      {{- if not (has $key (list "enabled" "images" "attestors" "mutateDigest" "required" "failureAction")) }}
-        {{- fail (printf "modelServing.imageVerification.%s is not a key of the block: enabled, images, attestors, mutateDigest, required, failureAction" $key) }}
+      {{- if not (has $key (list "enabled" "images" "attestors" "type" "mutateDigest" "required" "failureAction")) }}
+        {{- fail (printf "modelServing.imageVerification.%s is not a key of the block: enabled, images, attestors, type, mutateDigest, required, failureAction" $key) }}
       {{- end }}
     {{- end }}
     {{- if not .images }}
@@ -54,6 +54,9 @@ objects the API server rejects or a preset the portal cannot use.
       {{- if not (has (toString (get $iv $knob)) (list "true" "false")) }}
         {{- fail (printf "modelServing.imageVerification.%s must be true or false (got %v)" $knob (get $iv $knob)) }}
       {{- end }}
+    {{- end }}
+    {{- if not (has (toString .type) (list "SigstoreBundle" "Cosign")) }}
+      {{- fail (printf "modelServing.imageVerification.type must be SigstoreBundle (the bundle cosign 3 attaches to the image as an OCI referrer; what Giant Swarm images carry) or Cosign (the .sig tag of cosign 2) (got %v)" .type) }}
     {{- end }}
     {{- if not (has (toString .failureAction) (list "Enforce" "Audit")) }}
       {{- fail (printf "modelServing.imageVerification.failureAction must be Enforce or Audit (got %v)" .failureAction) }}

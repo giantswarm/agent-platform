@@ -54,6 +54,11 @@ UNTAINTED = ["--set", "modelServing.gpuPool.taint.key="]
 # rendered a PersistentVolumeClaim, and no hook identity); the byte-identity
 # check is about the pool input, so both sides render without the claim.
 NO_CACHE = ["--set", "modelServing.cache.enabled=false"]
+# The hold for giantswarm/agent-platform#575, applied to BOTH sides of the golden
+# comparison: the connectivity hook Jobs' images moved to their gsoci copies.
+# Drop this once GOLDEN_REF carries #575.
+HOLD_575 = ["--set", "hooks.kubectlImage.registry=gsoci.azurecr.io", "--set", "hooks.kubectlImage.repository=giantswarm/alpine-k8s",
+            "--set", "hooks.opensslImage.registry=gsoci.azurecr.io", "--set", "hooks.opensslImage.repository=giantswarm/alpine-openssl"]
 POOL_TOL = {"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}
 LABEL = {"giantswarm.io/machine-pool": "ci-gpu00"}
 RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
@@ -215,7 +220,7 @@ expect("discovery taint (value)", mapping(block(gpu_pool(docs), "taint")), {"key
 ok("a taint value narrows the toleration to Equal and is published")
 
 # --- untainted: nothing rendered, byte-identical to GOLDEN_REF but for the block
-untainted = helm(CONN, [*SERVING, *UNTAINTED, *NO_CACHE])
+untainted = helm(CONN, [*SERVING, *UNTAINTED, *NO_CACHE, *HOLD_575])
 docs = documents(untainted)
 if block(docs[RUNTIME], "tolerations") is not None:
     fail("an empty taint key still renders runtime tolerations")
@@ -243,7 +248,7 @@ else:
         # UNTAINTED override and the discovery block comes out of both sides.
         # A golden from before the change has neither the flag nor the block.
         carries = "gpuPool:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        golden = documents(helm(f"{tree}/{CONN}", [*SERVING, *UNTAINTED, *NO_CACHE] if carries else [*SERVING, *NO_CACHE]))
+        golden = documents(helm(f"{tree}/{CONN}", [*SERVING, *UNTAINTED, *NO_CACHE, *HOLD_575] if carries else [*SERVING, *NO_CACHE, *HOLD_575]))
         resized = "g6.xlarge" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-4b-instruct.yaml", encoding="utf-8").read()
         shaped = "podShapes" in open(f"{tree}/{CONN}/templates/model-serving/_helpers.tpl", encoding="utf-8").read()
         ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()

@@ -85,8 +85,11 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
     never the download Job's pod.
-  * Image verification (modelServing.imageVerification, #552) is off by
-    default and renders nothing without kyverno.io/v1. On, one verifyImages
+  * Image verification (modelServing.imageVerification, #552, #575) is off by
+    default and renders nothing without kyverno.io/v1. Enabled alone, the
+    chart's defaults reach the rule: every image under the platform's
+    registry namespace, the Giant Swarm CircleCI identity as the one keyless
+    attestor, the Sigstore bundle format. On, one verifyImages
     ClusterPolicy with one rule per pod shape selects exactly its shape's
     Pods in the serving namespace at CREATE and UPDATE, carrying the image
     references and the attestor entries verbatim — a keyless CircleCI
@@ -203,17 +206,29 @@ HUB_HOSTS = ["huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs-us-1.hf.co", "
              "transfer.xethub.hf.co", "cas-bridge.xethub.hf.co", CDN, "eu.aws.cdn.hf.co"]
 # What the allow-list keeps out: a depth no name of the download path has, the bare apex, look-alike domains.
 NOT_HUB_HOSTS = ["a.b.c.d.hf.co", "hf.co", "huggingface.co.example.com", "hf.co.example.com", "example.com"]
-# modelServing.imageVerification (#552): the on-render's values — every curated model image; the fleet's CircleCI
-# identity as a keyless attestor entry and a public key (Kyverno's documentation key) beside it, passed through as written.
+# modelServing.imageVerification (#552, #575). The DEFAULTS are the chart's: every image under the platform's registry
+# namespace, one keyless attestor — the identity every image a Giant Swarm CircleCI project signs carries (the architect
+# orb's cosign keyless signing: issuer https://oidc.circleci.com, subject the pipeline definition that ran) — and the
+# Sigstore bundle format cosign 3 writes (the only format Kyverno finds an orb signature in). The OVERRIDE is an
+# installation's own block, passed through as written: a registry of its own, the fleet identity by exact subject next to a
+# public key (Kyverno's documentation key), the legacy Cosign format.
 IV_SUFFIX = "-model-serving-image-verification"
-IV_IMAGES = ["gsoci.azurecr.io/giantswarm/models/*"]
+IV_DEFAULT_IMAGES = ["gsoci.azurecr.io/giantswarm/*"]
+IV_DEFAULT_ATTESTORS = [
+    {"keyless": {"issuer": "https://oidc.circleci.com",
+                 "subjectRegExp": r"^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$",
+                 "rekor": {"url": "https://rekor.sigstore.dev"}}},
+]
+IV_DEFAULT_TYPE = "SigstoreBundle"
+IV_IMAGES = ["registry.example.com/models/*"]
 IV_ATTESTORS = [
-    {"keyless": {"issuer": "https://oidc.circleci.com", "subjectRegExp": r"^https://circleci\.com/api/v2/projects/.+$",
+    {"keyless": {"issuer": "https://oidc.circleci.com",
+                 "subject": "https://circleci.com/api/v2/projects/00000000-0000-0000-0000-000000000000/pipeline-definitions/00000000-0000-0000-0000-000000000000",
                  "rekor": {"url": "https://rekor.sigstore.dev"}}},
     {"keys": {"publicKeys": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPZrfM\n"
                             "5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==\n-----END PUBLIC KEY-----"}},
 ]
-IV_ON = {"enabled": True, "images": IV_IMAGES, "attestors": IV_ATTESTORS}
+IV_ON = {"enabled": True, "images": IV_IMAGES, "attestors": IV_ATTESTORS, "type": "Cosign"}
 BASE = [
     "--namespace", "agent-platform",
     "--set", "ingress.parentRefs[0].name=x",
@@ -785,6 +800,17 @@ def check_image_verification(connectivity: str, docs: list[dict]) -> None:
     if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in docs):
         fail("modelServing.imageVerification is off by default, yet the default render carries the image-verification policy")
     with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-") as tmp:
+        # The switch alone: the chart's defaults reach the rule — the platform's registry namespace, the Giant Swarm
+        # CircleCI identity as one keyless entry, the Sigstore bundle format (#575).
+        defaults = one(render(connectivity, ["--set", "modelServing.imageVerification.enabled=true"]), "ClusterPolicy", IV_SUFFIX)
+        for rule in defaults["spec"]["rules"]:
+            v = rule["verifyImages"][0]
+            if v["imageReferences"] != IV_DEFAULT_IMAGES or v["type"] != IV_DEFAULT_TYPE \
+                    or v["attestors"] != [{"count": 1, "entries": IV_DEFAULT_ATTESTORS}]:
+                fail(f"{rule['name']}: enabled alone must render the defaults — imageReferences {IV_DEFAULT_IMAGES}, type "
+                     f"{IV_DEFAULT_TYPE}, the Giant Swarm CircleCI identity as the one keyless attestor; got\n{yaml.safe_dump(v)}")
+        ok("enabled alone verifies every image under the platform's registry namespace against the Giant Swarm CircleCI identity "
+           "(issuer https://oidc.circleci.com, subject a pipeline definition) in the Sigstore bundle format")
         on = image_verification_values(tmp, {})
         policy = one(render(connectivity, ["-f", on]), "ClusterPolicy", IV_SUFFIX)
         spec = policy["spec"]
@@ -793,7 +819,7 @@ def check_image_verification(connectivity: str, docs: list[dict]) -> None:
                  f"webhookTimeoutSeconds={spec.get('webhookTimeoutSeconds')}")
         if [r["name"] for r in spec["rules"]] != [f"verify-model-images-{s}" for s in SHAPES]:
             fail(f"the image-verification policy's rules are {[r['name'] for r in spec['rules']]}; expected one per pod shape")
-        expected = {"imageReferences": IV_IMAGES, "mutateDigest": True, "required": True, "failureAction": "Enforce",
+        expected = {"imageReferences": IV_IMAGES, "type": "Cosign", "mutateDigest": True, "required": True, "failureAction": "Enforce",
                     "attestors": [{"count": 1, "entries": IV_ATTESTORS}]}
         for rule, shape in zip(spec["rules"], SHAPES):
             matches = rule["match"]["any"]
@@ -806,9 +832,10 @@ def check_image_verification(connectivity: str, docs: list[dict]) -> None:
                 fail(f"{rule['name']}: the selector {selector} does not select exactly its own shape's fixture pod")
             if rule.get("verifyImages") != [expected]:
                 fail(f"{rule['name']}: verifyImages is\n{yaml.safe_dump(rule.get('verifyImages'))}--- expected one entry:\n{yaml.safe_dump(expected)}")
-        ok("on, one verifyImages rule per pod shape selects exactly its shape's Pods in the serving namespace at CREATE and UPDATE, with the "
-           "references and the attestor entries (the keyless CircleCI identity, a public key) verbatim in one attestor set of count 1, "
-           "mutateDigest, required and Enforce")
+        ok("an installation's own block — a registry of its own, the fleet identity by exact subject next to a public key, the legacy "
+           "Cosign format — reaches every rule verbatim: one verifyImages rule per pod shape selects exactly its shape's Pods in the "
+           "serving namespace at CREATE and UPDATE, with the references, the type and the attestor entries in one attestor set of "
+           "count 1, mutateDigest, required and Enforce")
         knobs = one(render(connectivity, ["-f", image_verification_values(tmp, {"mutateDigest": False, "required": False, "failureAction": "Audit"})]),
                     "ClusterPolicy", IV_SUFFIX)
         for rule in knobs["spec"]["rules"]:
@@ -836,6 +863,7 @@ def check_image_verification(connectivity: str, docs: list[dict]) -> None:
             ("an empty images list", {"images": []}, "modelServing.imageVerification.images is empty"),
             ("no attestor", {"attestors": []}, "modelServing.imageVerification.attestors is empty"),
             ("an entry that is no Kyverno attestor entry", {"attestors": [{"issuer": "https://oidc.circleci.com"}]}, "modelServing.imageVerification.attestors[0]"),
+            ("a type outside SigstoreBundle | Cosign", {"type": "Notary"}, "modelServing.imageVerification.type"),
             ("a failureAction outside Enforce | Audit", {"failureAction": "Deny"}, "modelServing.imageVerification.failureAction"),
             ("an unknown key", {"imageRefrences": IV_IMAGES}, "modelServing.imageVerification.imageRefrences"),
         ):
@@ -843,8 +871,8 @@ def check_image_verification(connectivity: str, docs: list[dict]) -> None:
                                     capture_output=True, text=True, check=False)
             if result.returncode == 0 or needle not in result.stderr:
                 fail(f"{description} must fail the render naming the key ({needle}); got rc={result.returncode}:\n{result.stderr}")
-        ok("enabled with an empty images list, no attestor, an entry that is no Kyverno attestor entry, a failureAction outside "
-           "Enforce | Audit or an unknown key fails the render naming the key")
+        ok("enabled with an empty images list, no attestor, an entry that is no Kyverno attestor entry, a type outside "
+           "SigstoreBundle | Cosign, a failureAction outside Enforce | Audit or an unknown key fails the render naming the key")
 
 
 def check_image_verification_forwarded(connectivity: str, forwarded: str) -> None:

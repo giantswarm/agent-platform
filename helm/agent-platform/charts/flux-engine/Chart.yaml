@@ -3,7 +3,7 @@ name: flux-engine
 type: application
 description: |
   The Flux engine of the agent-platform meta chart: the Flux Operator
-  (ghcr.io/controlplaneio-fluxcd/flux-operator) and one FluxInstance named
+  (the gsoci copy of ghcr.io/controlplaneio-fluxcd/flux-operator) and one FluxInstance named
   `flux` in the release namespace running source-controller and helm-controller
   under the multi-tenancy lockdown, plus the platform's tenant identity — the
   ServiceAccount `agent-platform-flux` bound to cluster-admin, which every

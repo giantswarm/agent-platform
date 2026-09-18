@@ -611,6 +611,19 @@ Where it runs: `prepull.nodeSelector` — **an installation's map renders alone*
 
 The pods hold no GPU (no `nvidia.com/gpu` resource, no `runtimeClassName`), mount no ServiceAccount token and need no network — the pull is the kubelet's, not the pod's — so a deny-all policy of their own selects them in the flavour `networkPolicy` resolves (kubernetes: both policy types with no rule; cilium: one empty rule per direction), and they pass the fleet's restricted Pod Security Standard with **no** PolicyException (uid 65534, no privilege escalation, every capability dropped, seccomp `RuntimeDefault`, read-only root). Their selector label `agent-platform.giantswarm.io/model-serving-prepull=true` is carried by no model pod shape, so the serving policies, the cache mutations and the predictors' exception never touch them. `prepull.enabled: false` renders neither object, no cleanup Job and no `daemonsets` rule. The meta chart mirrors the block (`make verify-meta` holds every leaf equal, an empty mapping being a leaf — the forwarded copy shadows this chart's default, and a copy behind it would pre-pull the wrong image, a copy that kept the selector's map would merge into every installation's); `make verify-model-serving-policies` renders the DaemonSet, holds its pod to the fleet's restricted-PSS policies with no exception, asserts the hook shape, the cleanup Job and the identity's rule, the three selector cases and the guard, that the deny-all selects it alone, and that the values the meta chart forwards render the same pod — an installation's selector set on the meta chart reaching the DaemonSet alone.
 
+## Verifying the model images
+
+Every image the charts ship by default is a `gsoci.azurecr.io/…` reference (giantswarm/agent-platform#575). `make verify-images` holds it over the rendered defaults of both charts — with the engine and every component on: every container image of every pod template, every `OCIRepository` url, every registry and reference the meta chart forwards. A reference whose gsoci copy is still being published is tolerated by name with the issue that publishes it (`tests/verify-images.py`, `PENDING`), and an exception that matches nothing fails the check.
+
+On top of that, `modelServing.imageVerification` (giantswarm/agent-platform#552; **off by default**) renders a Kyverno `verifyImages` ClusterPolicy over the model pods of the serving namespace — both pod shapes, Pods at CREATE and UPDATE, every container image of the pod that matches — whose defaults admit exactly what Giant Swarm signs:
+
+- **`images: [gsoci.azurecr.io/giantswarm/*]`** — every image under the platform's registry namespace: the model images, the runtime, the llm-d sidecars. A container image matching no pattern is left alone; an installation that serves from its own registry (`modelServing.modelImages.registry`) adds its pattern.
+- **One keyless attestor**, the identity every image built or re-signed by a Giant Swarm CircleCI project carries. The architect orb signs with cosign keyless through Fulcio's CircleCI federation, so the signing certificate's OIDC issuer is `https://oidc.circleci.com` and its subject the pipeline definition that ran — `https://circleci.com/api/v2/projects/<project id>/pipeline-definitions/<definition id>`, two UUIDs: `issuer: https://oidc.circleci.com`, `subjectRegExp: ^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$`, the pair the orb itself verifies with after signing (`cosign verify --certificate-oidc-issuer-regexp '^https://oidc\.circleci\.com' --certificate-identity-regexp '<the pattern>' <image>`). The subject names no organisation; what scopes the rule to Giant Swarm is `images`, since only Giant Swarm pipelines publish under `gsoci.azurecr.io/giantswarm/`.
+- **`type: SigstoreBundle`** — cosign 3 attaches the signature to the image as a Sigstore bundle in an OCI referrer, no `.sig` tag, and Kyverno reads one format per rule: an orb-signed image verified with Kyverno's default `Cosign` type fails with `no signatures found` (measured with `kyverno apply` against a signed gsoci image; `SigstoreBundle` passes). `Cosign` is for an installation whose own signer writes cosign 2's `.sig` tags.
+- `mutateDigest: true` pins a verified image to its digest in the pod, `required: true` refuses an image without a signature an attestor accepts, `failureAction: Enforce` denies the pod.
+
+It renders where the cache policies render (Kyverno served, `modelServing.policies.enabled` resolved); enabled with an empty images list, no attestor, a type or a failureAction outside its options or an unknown key fails the render naming the key. The switch stays off in the defaults until the curated model images are published and signed (giantswarm/agent-platform#554): the runtime and the llm-d sidecars carry the identity (the llm-d line signs every mirror and repack since its v0.5.0), and so does every image retagger copies since giantswarm/retagger#1230 (the KServe storage-initializer and agent among them); an installation whose model pods run only signed images turns it on. `make verify-model-serving-policies` asserts the defaults, the pass-through of an installation's own block, the guards and, through `kyverno apply`, that Kyverno accepts the policy; the meta chart mirrors the block leaf for leaf (`make verify-meta`).
+
 ## The Hugging Face cache claim
 
 `modelServing.cache.pvc` (`hf-cache`, `500Gi`, on the chart's own StorageClass — below — unless `storageClassName` names a class of the operator's, `"-"` the empty class for a pre-provisioned volume; `volumeName` binds one) is one claim in the serving namespace with one subdirectory per InferenceService; the Kyverno policies mount it into every predictor's storage-initializer and runtime, model-manager's pre-warm downloads land in the same layout. The claim has **no consumer of its own** — the first predictor (or download Job) that mounts it is what Binds it — and under a StorageClass with `volumeBindingMode: WaitForFirstConsumer` (kind's `standard`, the fleet's default `gp3`, the chart's own) it stays `Pending` until then. Helm's wait counts a Pending claim as not ready, so as a release resource it failed every install and upgrade with the switch on (giantswarm/agent-platform#483).
@@ -827,11 +840,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kyvernoPolicies.rules.check-seccomp | string | `"restrict-seccomp"` |  |
 | kyvernoPolicies.rules.check-seccomp-strict | string | `"restrict-seccomp-strict"` |  |
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
-| hooks.kubectlImage.registry | string | `"docker.io"` |  |
-| hooks.kubectlImage.repository | string | `"alpine/k8s"` |  |
+| hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
+| hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
 | hooks.kubectlImage.tag | string | `"1.37.0"` |  |
-| hooks.opensslImage.registry | string | `"docker.io"` |  |
-| hooks.opensslImage.repository | string | `"alpine/openssl"` |  |
+| hooks.opensslImage.registry | string | `"gsoci.azurecr.io"` |  |
+| hooks.opensslImage.repository | string | `"giantswarm/alpine-openssl"` |  |
 | hooks.opensslImage.tag | string | `"3.5.8"` |  |
 | extraObjects | list | `[]` |  |
 | dicebear | object | `{}` |  |
@@ -1474,8 +1487,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
 | modelServing.policies.env[0].value | string | `"1"` |  |
 | modelServing.imageVerification.enabled | bool | `false` |  |
-| modelServing.imageVerification.images | list | `[]` |  |
-| modelServing.imageVerification.attestors | list | `[]` |  |
+| modelServing.imageVerification.images[0] | string | `"gsoci.azurecr.io/giantswarm/*"` |  |
+| modelServing.imageVerification.attestors[0].keyless.issuer | string | `"https://oidc.circleci.com"` |  |
+| modelServing.imageVerification.attestors[0].keyless.subjectRegExp | string | `"^https://circleci\\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$"` |  |
+| modelServing.imageVerification.attestors[0].keyless.rekor.url | string | `"https://rekor.sigstore.dev"` |  |
+| modelServing.imageVerification.type | string | `"SigstoreBundle"` |  |
 | modelServing.imageVerification.mutateDigest | bool | `true` |  |
 | modelServing.imageVerification.required | bool | `true` |  |
 | modelServing.imageVerification.failureAction | string | `"Enforce"` |  |
