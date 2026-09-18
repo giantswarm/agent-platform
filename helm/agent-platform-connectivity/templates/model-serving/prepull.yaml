@@ -5,14 +5,44 @@ the storage-initializer has finished the weights, so on a pool scaling from zero
 the two longest steps of a cold start run one after the other — measured on a
 fresh node: weights 116 s, then 115 s for the 8.8 GB llm-d-cuda image. The
 image is the same for every served model of an installation, and a node knows
-it is a GPU node the moment it joins: this DaemonSet runs on every node
-modelServing.prepull.nodeSelector and the pool's own label (gpuPool.nodeSelector,
-merged under it) select, tolerating the pool's taint and — by default — every
-other, so it is scheduled under the node's start-up taints. One init container
-per image runs /bin/true: the kubelet pulls the image before it starts, in
-parallel with the storage-initializer, and containerd keeps it for the
-predictor, whose Pulled event then reads "already present on machine". The
-pause container keeps the pod — and with it nothing else — running.
+it is a GPU node the moment it joins: this DaemonSet runs on every node its
+selector and the pool's own label (gpuPool.nodeSelector, merged under it)
+select, tolerating the pool's taint and — by default — every other, so it is
+scheduled under the node's start-up taints. One init container per image runs
+/bin/true: the kubelet pulls the image before it starts, in parallel with the
+storage-initializer, and containerd keeps it for the predictor, whose Pulled
+event then reads "already present on machine". The pause container keeps the
+pod — and with it nothing else — running.
+
+The selector (giantswarm/agent-platform#562): modelServing.prepull.nodeSelector
+when the installation sets one — that map alone; empty, the chart's default,
+Karpenter's karpenter.k8s.aws/instance-gpu-manufacturer: nvidia, the label on
+every node of a GPU instance type. The default is the helper's
+(agent-platform.modelServing.prepull.nodeSelector, _helpers.tpl), not a values
+default, so a set map is never merged with it. The pool's label is merged
+under either.
+
+The DaemonSet is a HOOK, not a release resource (giantswarm/agent-platform#563).
+A pod whose image cannot be pulled is never Ready, and a release's wait counts
+a DaemonSet ready by its pods: helm-controller from 1.6 waits with the kstatus
+poller, which needs every pod of a DaemonSet Ready (Helm 3's legacy waiter,
+still on helm-controller 1.4, takes maxUnavailable: 100% as ready once the pods
+are scheduled — the fleet runs both). As a release resource, one listed image
+not yet pullable — a runtime image or a modelPresets image still being built,
+a registry outage — held the pods in ImagePullBackOff, timed the wait out and
+failed the whole connectivity upgrade with every other object applied. Hook
+objects are outside every waiter's set: WatchUntilReady watches Jobs and Pods
+only, in Helm 3, Helm 4 and helm-controller alike. So the DaemonSet is created
+by the post-install, post-upgrade and post-rollback events at weight 0 — after
+the release's objects are applied and waited for — and nothing waits for its
+pods: an image that is not there yet leaves them retrying on the kubelet's
+backoff and the release Ready. before-hook-creation replaces the previous
+DaemonSet on the next event; its pods come back on images already present. A
+hook object is not Helm's to delete on uninstall, so the pre-delete hook Job
+below removes it (the hook include agent-platform.hooks.job; the identity
+<release>-hooks carries delete on exactly this DaemonSet,
+templates/substrate/hooks-rbac.yaml). The deny-all policy stays a release
+resource: nothing waits for a policy.
 
 modelServing.prepull.modelPresets (giantswarm/agent-platform#551) adds the model
 images: a preset served from an OCI model image (spec.model.storageUri oci://…,
@@ -34,7 +64,7 @@ dropped, seccomp RuntimeDefault, read-only root (tests/verify-model-serving-
 policies.py holds the rendered pod to the fleet's policies).
 */ -}}
 {{- $ms := .Values.modelServing }}
-{{- if and (include "agent-platform.modelServing.enabled" .) $ms.prepull.enabled }}
+{{- if include "agent-platform.modelServing.prepull.enabled" . }}
 {{- $pp := $ms.prepull }}
 {{- if not $pp.images }}
 {{- fail "modelServing.prepull.images is empty: name at least one image reference to keep present on the pool's nodes, or set modelServing.prepull.enabled: false" }}
@@ -60,8 +90,9 @@ policies.py holds the rendered pod to the fleet's policies).
 {{- $modelImages = append $modelImages (dict "preset" $preset "image" (trimPrefix "oci://" $uri)) }}
 {{- end }}
 {{- $ns := include "agent-platform.modelServing.namespace" . }}
-{{- $name := printf "%s-model-serving-prepull" (include "name" .) }}
-{{- $sched := include "agent-platform.modelServing.poolScheduling" (dict "root" . "tolerations" $pp.tolerations "nodeSelector" $pp.nodeSelector) | fromJson }}
+{{- $name := include "agent-platform.modelServing.prepull.name" . }}
+{{- $selector := include "agent-platform.modelServing.prepull.nodeSelector" . | fromJson }}
+{{- $sched := include "agent-platform.modelServing.poolScheduling" (dict "root" . "tolerations" $pp.tolerations "nodeSelector" $selector) | fromJson }}
 {{- $containerSecurity := dict "allowPrivilegeEscalation" false "readOnlyRootFilesystem" true "capabilities" (dict "drop" (list "ALL")) }}
 apiVersion: apps/v1
 kind: DaemonSet
@@ -70,6 +101,13 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+  annotations:
+    # A hook object: created after the release's objects are applied and waited
+    # for, waited for by nobody (a DaemonSet is neither a Job nor a Pod), the
+    # previous one replaced first; removed by the pre-delete hook Job.
+    helm.sh/hook: post-install,post-upgrade,post-rollback
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   selector:
     matchLabels:
@@ -132,6 +170,10 @@ spec:
             {{- toYaml $pp.resources | nindent 12 }}
           securityContext:
             {{- toYaml $containerSecurity | nindent 12 }}
+---
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "model-serving-prepull-cleanup" "hook" "pre-delete"
+      "about" (printf "remove the pre-pull DaemonSet %s/%s, a hook object the uninstall would leave behind" $ns $name)
+      "script" (printf "kubectl -n %s delete daemonset %s --ignore-not-found --wait=false\n" ($ns | quote) ($name | quote))) }}
 {{- if .Values.networkPolicy.enabled }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---

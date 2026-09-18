@@ -253,6 +253,7 @@ else:
         added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
         prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         fastimaged = "llm-d-fast/" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
+        hooked = "helm.sh/hook" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
         evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
         listed = "additionalRuntimes:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
@@ -396,6 +397,20 @@ else:
             for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
                 side.pop(key)
         print(f"note: the pre-pull DaemonSet names the llm-d-fast/ runtime image on this side (#568) and not on {ref}: its document is left out of the comparison")
+    # The pre-pull DaemonSet is a post-install/post-upgrade hook object with a
+    # pre-delete cleanup Job, for which the hook identity renders, and its
+    # selector default is the template's (giantswarm/agent-platform#562, #563);
+    # a golden from before renders it as a release resource and — the cache
+    # off — no hook object at all, so the DaemonSet is left out of the
+    # comparison on both sides and the head's Job and identity are left out.
+    # Drop this once GOLDEN_REF carries #563.
+    if prepulled and not hooked:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
+                side.pop(key)
+        for key in [k for k in head if k[1] in ("t-model-serving-prepull-cleanup", "t-hooks")]:
+            head.pop(key)
+        print(f"note: the pre-pull DaemonSet is a hook object with a pre-delete cleanup Job on this side (#563) and not on {ref}: its document, the Job and the hook identity are left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):

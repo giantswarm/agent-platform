@@ -30,7 +30,9 @@ copy under another name would rename the class every pool of the installation
 expects) and of the pre-pull block (`modelServing.prepull`; #545 — the image list
 is the runtime image the predictors run, and a forwarded copy short of it or
 behind it would pre-pull the wrong image on every installation; #551 added the
-model presets to pre-pull), of the model-images block (`modelServing.modelImages`;
+model presets to pre-pull; #562 emptied `prepull.nodeSelector` in both charts —
+the default is the template's, so an installation's map replaces it — and an
+empty mapping counts as a leaf so a copy that kept the map is drift), of the model-images block (`modelServing.modelImages`;
 #551 — a forwarded registry host that differs from the connectivity default would
 rewrite every oci:// preset of every installation) and of the
 image-verification block (`modelServing.imageVerification`; #552 — a forwarded
@@ -49,7 +51,7 @@ naming the path and both values when they differ or the meta chart lacks the
 path. It refuses to pass
 vacuously: the two `huggingFace.fqdns` lists, the two model-serving ports, the
 StorageClass provisioner, the policies' env, the PriorityClass name, the
-pre-pull image and model-preset lists, the model-images registry, the image
+pre-pull image and model-preset lists and its (empty) selector, the model-images registry, the image
 verification's failureAction, the default runtime's image name, the
 additional-runtimes list and the namespace's keep switch must be among the paths it
 compared.
@@ -65,7 +67,7 @@ import yaml
 REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networkPolicy.huggingFace.fqdns",
             "modelServing.networkPolicy.predictor.port", "modelServing.networkPolicy.llmisvcWorkload.port",
             "modelServing.cache.storageClass.provisioner", "modelServing.policies.env", "clusterManager.prewarmPriorityClass.name",
-            "modelServing.prepull.images", "modelServing.prepull.modelPresets", "modelServing.modelImages.registry",
+            "modelServing.prepull.images", "modelServing.prepull.modelPresets", "modelServing.prepull.nodeSelector", "modelServing.modelImages.registry",
             "modelServing.imageVerification.failureAction", "modelServing.runtime.image.name", "modelServing.additionalRuntimes",
             "modelServing.namespace.keep"}
 MIRRORED = ("fqdns", "cidrs", "port")
@@ -77,9 +79,12 @@ SUBTREES = (("modelServing", "namespace"), ("modelServing", "cache"), ("modelSer
 
 def leaves(tree: dict, path: tuple[str, ...] = ()):
     for key, value in tree.items():
-        if isinstance(value, dict):
+        if isinstance(value, dict) and value:
             yield from leaves(value, (*path, key))
         else:
+            # An empty mapping is a leaf too: `{}` on one side and a filled map on the other is drift (#562 moved the
+            # pre-pull selector's default out of both values files; a copy that kept the map would shadow the empty
+            # default on every installation and merge into whatever an installation sets).
             yield (*path, key), value
 
 

@@ -59,7 +59,17 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     well-known LLMInferenceServiceConfig names — running /bin/true, a pause
     main container, the pool's taint tolerated first and every taint after it,
     the manufacturer label selected with the pool's own label merged under it,
-    no GPU resource, no runtimeClassName, no ServiceAccount token. Its pod,
+    no GPU resource, no runtimeClassName, no ServiceAccount token. It is a
+    post-install,post-upgrade,post-rollback hook object at weight 0, replaced
+    before creation (#563: a release resource's pods gate the release's wait,
+    and a pod whose image cannot be pulled is never Ready), its deny-all policy
+    a release resource; a pre-delete hook Job deletes it by name as the hook
+    identity, whose ClusterRole carries delete on exactly that DaemonSet and is
+    created for the pre-delete event; prepull.enabled: false renders neither
+    the Job nor the rule. modelServing.prepull.nodeSelector set renders alone
+    (#562), empty renders Karpenter's label, the pool's label is merged under
+    either, a non-string label value fails the render naming the key; a
+    selector set on the meta chart reaches the DaemonSet alone. Its pod,
     built from the template, passes the fleet's restricted PSS with NO
     exception (every rule passes), is touched by none of the chart's
     mutations, and is selected by no shape's policy, not by the
@@ -177,6 +187,13 @@ DOWNLOAD_LABELS = {"app.kubernetes.io/managed-by": "model-manager", "model-manag
 PREPULL_LABEL = {"agent-platform.giantswarm.io/model-serving-prepull": "true"}
 POOL_TOLERATION = {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
 GPU_NODE = {"karpenter.k8s.aws/instance-gpu-manufacturer": "nvidia"}
+# An installation's own selector (#562: a GPU node not launched by Karpenter, labelled by the GPU operator's feature
+# discovery) and a pool's label; the Helm annotations that make the DaemonSet a hook object (#563).
+OWN_NODE = {"nvidia.com/gpu.present": "true"}
+POOL_LABEL = {"giantswarm.io/machine-pool": "ci-gpu00"}
+OWN_SELECTOR = ["--set-string", "modelServing.prepull.nodeSelector.nvidia\\.com/gpu\\.present=true"]
+POOL_SELECTOR = ["--set-string", "modelServing.gpuPool.nodeSelector.giantswarm\\.io/machine-pool=ci-gpu00"]
+PREPULL_HOOK = {"helm.sh/hook": "post-install,post-upgrade,post-rollback", "helm.sh/hook-weight": "0", "helm.sh/hook-delete-policy": "before-hook-creation"}
 # The names the Hugging Face download path uses (#522): the Hub and its API redirects, the LFS fronts one label
 # under hf.co, the Xet fronts two, and the download CDN three — the Hub redirects every shard request of a
 # Xet-backed repository there, Xet client or not (us.aws.cdn.hf.co; the regional siblings share the shape). A new
@@ -227,13 +244,13 @@ def render(chart: str, flags: list[str], base: list[str] = BASE) -> list[dict]:
     return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
 
 
-def forwarded_values(meta: str, apis: list[str]) -> dict:
+def forwarded_values(meta: str, apis: list[str], extra: list[str] = ()) -> dict:
     """The values an installation's connectivity release receives: the meta chart's defaults with the model serving switch
     on (BASE) and the one input every render needs (global.domain — the CI values would trip the wiring's ingress-mode
     guards, as tests/verify-components.py notes), rendered with the engine off; the connectivity HelmRelease's spec.values.
     The meta chart resolves the cluster-shape knobs from the API groups before it forwards (the child never sees `auto`),
     so the tree carries the flavour of the `apis` it was rendered with: with CILIUM the cilium one, without it kubernetes."""
-    docs = render(meta, ["--set", "components.flux.enabled=false", "--set", "global.domain=example.com", *apis])
+    docs = render(meta, ["--set", "components.flux.enabled=false", "--set", "global.domain=example.com", *apis, *extra])
     releases = [d for d in docs if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "agent-platform-connectivity"]
     if len(releases) != 1:
         fail(f"the meta chart rendered {len(releases)} connectivity HelmReleases; expected exactly one")
@@ -560,6 +577,44 @@ def check_prepull(connectivity: str, k8s: list[dict], cilium: list[dict], pods_p
     ok("the pre-pull DaemonSet: one /bin/true init container per image (the llm-d runtime image first), the pause main container, "
        "no GPU, no runtimeClass, no token; the pool's taint tolerated first and every taint after it; Karpenter's GPU label selected")
 
+    # A hook object, not a release resource (#563): the release's wait counts a DaemonSet ready by its pods, and a pod
+    # whose image cannot be pulled is never Ready. The deny-all policy stays a release resource; the pre-delete hook
+    # Job removes the DaemonSet as the hook identity, which carries delete on exactly that DaemonSet for that event.
+    annotations = {k: v for k, v in (ds["metadata"].get("annotations") or {}).items() if k.startswith("helm.sh/")}
+    if annotations != PREPULL_HOOK:
+        fail(f"the pre-pull DaemonSet's Helm annotations are {annotations}; expected the hook object {PREPULL_HOOK}")
+    for policy in (one(k8s, "NetworkPolicy", "-model-serving-prepull"), one(cilium, "CiliumNetworkPolicy", "-model-serving-prepull")):
+        if any(k.startswith("helm.sh/hook") for k in (policy["metadata"].get("annotations") or {})):
+            fail(f"{policy['kind']}/{policy['metadata']['name']} carries hook annotations; the deny-all is a release resource")
+    cleanup = one(k8s, "Job", "-model-serving-prepull-cleanup")
+    script = cleanup["spec"]["template"]["spec"]["containers"][0]["args"][0]
+    if cleanup["metadata"]["annotations"].get("helm.sh/hook") != "pre-delete" or cleanup["metadata"]["namespace"] != "agent-platform":
+        fail(f"the pre-pull cleanup Job is not a pre-delete hook in the release namespace: {cleanup['metadata']}")
+    if f'kubectl -n "{NS}" delete daemonset "{ds["metadata"]["name"]}" --ignore-not-found --wait=false' not in script:
+        fail(f"the pre-pull cleanup Job does not delete the DaemonSet by name in the serving namespace:\n{script}")
+    role = one(k8s, "ClusterRole", "-hooks")
+    rule = {"apiGroups": ["apps"], "resources": ["daemonsets"], "resourceNames": [ds["metadata"]["name"]], "verbs": ["delete"]}
+    if rule not in role["rules"] or "pre-delete" not in role["metadata"]["annotations"]["helm.sh/hook"].split(","):
+        fail(f"the hook identity lacks delete on exactly the pre-pull DaemonSet, or is not created for the pre-delete event: {role['rules']}, {role['metadata']['annotations']}")
+    if cleanup["spec"]["template"]["spec"].get("serviceAccountName") != role["metadata"]["name"]:
+        fail(f"the pre-pull cleanup Job runs as {cleanup['spec']['template']['spec'].get('serviceAccountName')}, not as the hook identity {role['metadata']['name']}")
+    ok("the pre-pull DaemonSet is a post-install,post-upgrade,post-rollback hook object at weight 0, replaced before creation, its deny-all a "
+       "release resource; the pre-delete cleanup Job deletes it by name as the hook identity, whose ClusterRole carries delete on exactly that "
+       "DaemonSet and is created for the pre-delete event")
+
+    # The selector (#562): a set map renders alone, the pool's label merged under it; empty renders the default; a
+    # non-string label value fails the render naming the key.
+    if (own := prepull_pod(render(connectivity, OWN_SELECTOR))["spec"].get("nodeSelector")) != OWN_NODE:
+        fail(f"modelServing.prepull.nodeSelector set renders {own}; expected the installation's map alone, {OWN_NODE}")
+    if (pooled := prepull_pod(render(connectivity, [*OWN_SELECTOR, *POOL_SELECTOR]))["spec"].get("nodeSelector")) != {**OWN_NODE, **POOL_LABEL}:
+        fail(f"modelServing.prepull.nodeSelector set with a pool label renders {pooled}; expected the pool's label merged under the installation's map")
+    if (default_pooled := prepull_pod(render(connectivity, POOL_SELECTOR))["spec"].get("nodeSelector")) != {**GPU_NODE, **POOL_LABEL}:
+        fail(f"the default pre-pull selector with a pool label renders {default_pooled}; expected the pool's label merged under Karpenter's")
+    result = subprocess.run([HELM, "template", "t", connectivity, *BASE, "--set", "modelServing.prepull.nodeSelector.generation=6"], capture_output=True, text=True, check=False)
+    if result.returncode == 0 or "modelServing.prepull.nodeSelector[generation] (6) must be a string" not in result.stderr:
+        fail(f"a non-string pre-pull label value must fail the render naming the key; got rc={result.returncode}:\n{result.stderr}")
+    ok("modelServing.prepull.nodeSelector set renders alone, empty renders Karpenter's label, the pool's label is merged under either; a non-string label value fails the render naming the key")
+
     results = validate(pod, None)
     if failed := outcome(results, "fail"):
         fail(f"the pre-pull pod fails the restricted PSS with no exception: {sorted(failed)}")
@@ -602,21 +657,32 @@ def check_prepull(connectivity: str, k8s: list[dict], cilium: list[dict], pods_p
     ok("the pre-pull pods are denied all traffic by a policy of their own in both flavours, which selects them alone")
 
     off = render(connectivity, ["--set", "modelServing.prepull.enabled=false", *CILIUM])
-    if any(d["metadata"]["name"].endswith("-model-serving-prepull") for d in off):
-        fail("modelServing.prepull.enabled=false still renders a pre-pull object")
+    if any(d["metadata"]["name"].endswith(("-model-serving-prepull", "-model-serving-prepull-cleanup")) for d in off):
+        fail("modelServing.prepull.enabled=false still renders a pre-pull object or its cleanup Job")
+    if any("daemonsets" in r.get("resources", []) for r in one(off, "ClusterRole", "-hooks")["rules"]):
+        fail("modelServing.prepull.enabled=false still grants the hook identity delete on daemonsets")
     result = subprocess.run([HELM, "template", "t", connectivity, *BASE, "--set", "modelServing.prepull.images=null"], capture_output=True, text=True, check=False)
     if result.returncode == 0 or "modelServing.prepull.images is empty" not in result.stderr:
         fail(f"an empty modelServing.prepull.images must fail the render naming the key; got rc={result.returncode}:\n{result.stderr}")
-    ok("modelServing.prepull.enabled=false renders no pre-pull object; an empty image list fails the render naming the key")
+    ok("modelServing.prepull.enabled=false renders no pre-pull object, no cleanup Job and no daemonsets rule; an empty image list fails the render naming the key")
 
 
-def check_prepull_forwarded(connectivity: str, through_meta: list[dict]) -> None:
-    """The values the meta chart forwards render the same DaemonSet: the mirrored image list, the same selector (#545)."""
+def check_prepull_forwarded(connectivity: str, meta: str, through_meta: list[dict], tmp: str) -> None:
+    """The values the meta chart forwards render the same DaemonSet: the mirrored image list, the same selector (#545);
+    a selector set on the meta chart reaches the DaemonSet alone (#562)."""
     own = one(render(connectivity, []), "DaemonSet", "-model-serving-prepull")["spec"]["template"]["spec"]
     forwarded = one(through_meta, "DaemonSet", "-model-serving-prepull")["spec"]["template"]["spec"]
     if forwarded != own:
         fail(f"the pre-pull pod the meta chart's forwarded values render differs from the connectivity default:\n{yaml.safe_dump(forwarded)}\n--- connectivity:\n{yaml.safe_dump(own)}")
     ok("the meta chart's forwarded values render the pre-pull DaemonSet's pod as the connectivity default does (the mirrored images and selector)")
+    # The meta chart's copy of the block is `{}`, so nothing is merged into an installation's map on the way, and the
+    # connectivity default is the template's, which a set map replaces (the 4.37 shape kept Karpenter's key beside it).
+    path = os.path.join(tmp, "forwarded-own-selector.yaml")
+    with open(path, "w") as f:
+        yaml.safe_dump(forwarded_values(meta, [], OWN_SELECTOR), f)
+    if (selector := prepull_pod(render(connectivity, ["-f", path]))["spec"].get("nodeSelector")) != OWN_NODE:
+        fail(f"an installation's prepull.nodeSelector set on the meta chart renders {selector} on the DaemonSet; expected its map alone, {OWN_NODE}")
+    ok("an installation's modelServing.prepull.nodeSelector set on the meta chart reaches the DaemonSet alone")
 
 
 def container_port(shape: str) -> int:
@@ -836,7 +902,7 @@ def main(connectivity: str, meta: str) -> int:
             through_meta.append(render(connectivity, ["-f", forwarded, *apis]))
         check_fqdns(*through_meta, "the meta chart's forwarded values")
         check_ports(*through_meta, "the meta chart's forwarded values")
-        check_prepull_forwarded(connectivity, through_meta[1])
+        check_prepull_forwarded(connectivity, meta, through_meta[1], tmp)
         check_image_verification_forwarded(connectivity, forwarded)
     return 0
 

@@ -115,6 +115,16 @@ objects the API server rejects or a preset the portal cannot use.
       {{- fail (printf "modelServing.gpuPool.nodeSelector[%s] (%v) must be a string: a label value is a string, quote it" $k $v) }}
     {{- end }}
   {{- end }}
+  {{- /* The pre-pull DaemonSet's own selector (prepull.nodeSelector, #562): a
+         map of string label values; empty is the chart's default. */ -}}
+  {{- if not (kindIs "map" ($ms.prepull.nodeSelector | default dict)) }}
+    {{- fail "modelServing.prepull.nodeSelector must be a mapping of node labels (empty for the chart's default, Karpenter's karpenter.k8s.aws/instance-gpu-manufacturer: nvidia)" }}
+  {{- end }}
+  {{- range $k, $v := ($ms.prepull.nodeSelector | default dict) }}
+    {{- if not (kindIs "string" $v) }}
+      {{- fail (printf "modelServing.prepull.nodeSelector[%s] (%v) must be a string: a label value is a string, quote it" $k $v) }}
+    {{- end }}
+  {{- end }}
   {{- /* The network-policy inputs, checked only while the policies render
          (networkPolicy.enabled): a typo would otherwise ship a selector that
          matches nothing or an object the API server rejects. */ -}}
