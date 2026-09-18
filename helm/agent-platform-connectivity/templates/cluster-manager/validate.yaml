@@ -49,6 +49,24 @@ its CRD, or pool releases nothing reconciles.
     {{- end }}
   {{- end }}
 
+  {{- /* The prewarm placeholder's PriorityClass (priorityclass.yaml): the
+         placeholder is preempted by the workloads it holds the node for, so
+         its value is a whole number below the default priority 0; the name is
+         what the pool chart's Job names (system- is the API's reserved
+         prefix). value is immutable on the API: change it under a new name. */ -}}
+  {{- $pc := $cm.prewarmPriorityClass }}
+  {{- if $pc.enabled }}
+    {{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" (toString $pc.name)) }}
+      {{- fail (printf "clusterManager.prewarmPriorityClass.name %q is not a DNS-1123 subdomain (lowercase letters, digits, - and .); the gpu-node-pool chart's pool.prewarm.priorityClassName defaults to agent-platform-prewarm-placeholder" (toString $pc.name)) }}
+    {{- end }}
+    {{- if hasPrefix "system-" (toString $pc.name) }}
+      {{- fail (printf "clusterManager.prewarmPriorityClass.name %q: the system- prefix is reserved for the API's own priority classes" (toString $pc.name)) }}
+    {{- end }}
+    {{- if or (ne (toString $pc.value) (toString (int $pc.value))) (ge (int $pc.value) 0) }}
+      {{- fail (printf "clusterManager.prewarmPriorityClass.value must be a whole number below 0 (got %v): the placeholder holds a GPU only until a workload at the default priority 0 preempts it, which a value at or above 0 would prevent" $pc.value) }}
+    {{- end }}
+  {{- end }}
+
   {{- /* The workload clusters' API servers: CIDRs are CIDRs, ports are ports. */ -}}
   {{- $wc := $cm.networkPolicy.workloadClusters }}
   {{- range concat ($wc.cidrs | default list) ($cm.networkPolicy.egress.cidrs | default list) }}

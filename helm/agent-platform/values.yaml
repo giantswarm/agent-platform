@@ -4076,6 +4076,29 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
     # build) never sees cluster APIs; turn it on for installs that want a
     # missing Flux to fail the upgrade instead of leaving pools "progressing".
     requireApi: false
+  # The PriorityClass the gpu-node-pool chart's prewarm placeholder runs at
+  # (giantswarm/agent-platform#539): the pool chart's
+  # pool.prewarm.priorityClassName defaults to this name. A pool created with
+  # prewarm (create_node_pool {prewarm: true}) launches its first node with
+  # the release — a one-shot placeholder Job holds one GPU at negative
+  # priority until the first predictor preempts it. A PriorityClass is
+  # cluster-scoped, and a pool release is delivered under Flux multi-tenancy
+  # as the organisation's tenant ServiceAccount, whose rights are namespaced
+  # (a release that renders one fails InstallFailed on it) — so the pool
+  # chart renders none and the platform's release ships the one class every
+  # pool of the installation names. Rendered with the cluster-manager
+  # component, which composes the pool releases: on in exactly one release
+  # per installation (the platform's; the serving slice never carries it), so
+  # the class has one owner. value: a whole number below the default priority
+  # 0 — any workload preempts the placeholder — and immutable on the API:
+  # change it under a new name (and point the pool chart's value at it).
+  # preemptionPolicy Never and globalDefault false are the chart's. enabled:
+  # false renders none; a placeholder pod naming a class the cluster lacks is
+  # rejected at admission and the pool comes up without a prewarmed node.
+  prewarmPriorityClass:
+    enabled: true
+    name: agent-platform-prewarm-placeholder
+    value: -1000
   # Network policy inputs; the policies render under networkPolicy (enabled +
   # flavor). Ingress: muster (MCPServer on) and the kubelet's probes. Egress:
   # DNS, this installation's Kubernetes API (the Cluster API objects, the Flux

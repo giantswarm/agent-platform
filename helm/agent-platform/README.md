@@ -1192,6 +1192,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | clusterManager.flux.requireApi | bool | `false` |  |
+| clusterManager.prewarmPriorityClass.enabled | bool | `true` |  |
+| clusterManager.prewarmPriorityClass.name | string | `"agent-platform-prewarm-placeholder"` |  |
+| clusterManager.prewarmPriorityClass.value | int | `-1000` |  |
 | clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.cidrs | list | `[]` |  |

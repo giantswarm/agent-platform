@@ -26,8 +26,16 @@ one property of that:
   and blocks on 443) and the muster-to policy; kubernetes: the same three as
   NetworkPolicy — the apiserver CIDR, every public destination on the workload ports,
   a narrowed list when cidrs are set;
+- the prewarm placeholder's PriorityClass (giantswarm/agent-platform#539): with the
+  component on the connectivity chart renders agent-platform-prewarm-placeholder — value
+  -1000, preemptionPolicy Never, globalDefault false, the component label, its description
+  naming the pool chart's pool.prewarm.priorityClassName — and no other PriorityClass; the
+  meta chart forwards the mirrored block; clusterManager.prewarmPriorityClass.enabled:
+  false renders none, name and value reach the object; while the component is off no
+  PriorityClass renders at all;
 - the guards: muster off with the MCPServer on, a missing identity input, a bad CIDR,
-  an empty port list, Flux required without the API;
+  an empty port list, Flux required without the API, a placeholder class at or above
+  priority 0 or with a fractional value, a reserved (system-) or malformed class name;
 - the target knob stamps spec.kubeConfig.secretRef onto the release like every other;
 - the schema refuses a non-boolean toggle;
 - examples/customer-bom.yaml pins the exact version and the pin reaches the OCIRepository.
@@ -58,6 +66,8 @@ IDENTITY = [
 CONN = ["--set", "ingress.parentRefs[0].name=x", *ON, *IDENTITY]
 FLUX_APIS = ["--api-versions", "helm.toolkit.fluxcd.io/v2", "--api-versions", "source.toolkit.fluxcd.io/v1"]
 POLICIES = ("ingress", "egress")
+# The prewarm placeholder's PriorityClass — the gpu-node-pool chart's default pool.prewarm.priorityClassName (#539).
+PRIORITY_CLASS = ("PriorityClass", "agent-platform-prewarm-placeholder")
 
 
 def fail(msg: str) -> None:
@@ -116,7 +126,9 @@ def main(meta: str, connectivity: str) -> int:
     conn_off = helm(connectivity, ["--set", "ingress.parentRefs[0].name=x"], ci_values=False)
     if NAME in conn_off:
         fail(f"the connectivity chart renders something named {NAME} while the component is off")
-    ok("off by default: no release, the roster says so, the two blocks are held back, connectivity renders nothing of it")
+    if any(kind == "PriorityClass" for kind, _ in documents(conn_off)):
+        fail("the connectivity chart renders a PriorityClass while the component is off; the prewarm placeholder's class is the pool releases' dependency and goes with the component (#539)")
+    ok("off by default: no release, the roster says so, the two blocks are held back, connectivity renders nothing of it (no PriorityClass either)")
 
     # --- on --------------------------------------------------------------------
     on_docs = documents(helm(meta, ON))
@@ -146,6 +158,8 @@ def main(meta: str, connectivity: str) -> int:
     for block in (NAME, WIRING):
         if not re.search(rf"^    {re.escape(block)}:", conn_on, re.M):
             fail(f"the {block} block did not reach the connectivity release with the component on; its wiring reads it")
+    must_have(conn_on, ("      prewarmPriorityClass:\n        enabled: true\n        name: agent-platform-prewarm-placeholder\n        value: -1000\n",),
+              "the clusterManager block forwarded to the connectivity release (the mirrored prewarm PriorityClass, #539)")
     added = set(on_docs) - set(off_docs)
     if added != {("OCIRepository", NAME), ("HelmRelease", NAME)}:
         fail(f"switching the component on added documents other than its two: {sorted(added)}")
@@ -220,6 +234,24 @@ def main(meta: str, connectivity: str) -> int:
         fail("cilium egress: the IdP, the workload ports and the extra egress do not all open 443")
     ok("cilium: ingress (muster + probes), egress (DNS proxy, kube-apiserver, the Dex issuer, the workload clusters by name and address on 443/6443, the extra names and blocks), muster-to")
 
+    # --- the prewarm placeholder's PriorityClass (#539) ---------------------------------------
+    pc = cilium.get(PRIORITY_CLASS)
+    if not pc:
+        fail(f"no PriorityClass {PRIORITY_CLASS[1]} with the component on; the gpu-node-pool chart's prewarm placeholder names it (pool.prewarm.priorityClassName)")
+    must_have(pc, ("value: -1000\n", "globalDefault: false\n", "preemptionPolicy: Never\n", f"app.kubernetes.io/component: {NAME}\n", "pool.prewarm.priorityClassName"),
+              "the prewarm placeholder's PriorityClass")
+    if sum(1 for kind, _ in cilium if kind == "PriorityClass") != 1:
+        fail(f"more than one PriorityClass with the component on: {sorted(name for kind, name in cilium if kind == 'PriorityClass')}")
+    none = documents(helm(connectivity, [*CONN, "--set", f"{WIRING}.prewarmPriorityClass.enabled=false"], ci_values=False))
+    if any(kind == "PriorityClass" for kind, _ in none):
+        fail(f"{WIRING}.prewarmPriorityClass.enabled: false still renders a PriorityClass")
+    renamed = documents(helm(connectivity, [*CONN, "--set", f"{WIRING}.prewarmPriorityClass.name=lab-placeholder", "--set", f"{WIRING}.prewarmPriorityClass.value=-7"], ci_values=False))
+    lab = renamed.get(("PriorityClass", "lab-placeholder"))
+    if not lab or PRIORITY_CLASS in renamed:
+        fail(f"{WIRING}.prewarmPriorityClass.name should rename the class: {sorted(name for kind, name in renamed if kind == 'PriorityClass')}")
+    must_have(lab, ("value: -7\n", "preemptionPolicy: Never\n"), "the renamed PriorityClass")
+    ok(f"the prewarm placeholder's PriorityClass {PRIORITY_CLASS[1]}: -1000, Never, not the global default, the component label, the pool chart's value named; the only PriorityClass; enabled: false renders none; name and value reach the object")
+
     # --- model-manager reaches the Hugging Face Hub for the kserve backend cluster-manager registers (#494) ---
     mm_egress = cilium.get(("CiliumNetworkPolicy", "agent-platform-connectivity-model-manager-egress"))
     if not mm_egress:
@@ -256,12 +288,16 @@ def main(meta: str, connectivity: str) -> int:
         ("a bad CIDR", ["--set", f"{WIRING}.networkPolicy.workloadClusters.cidrs[0]=not-a-cidr"], "is not an IPv4 CIDR"),
         ("no workload ports", ["--set", f"{WIRING}.networkPolicy.workloadClusters.ports=null"], f"{WIRING}.networkPolicy.workloadClusters.ports is empty"),
         ("Flux required without the API", ["--set", f"{WIRING}.flux.requireApi=true"], "helm.toolkit.fluxcd.io/v2 API (HelmRelease) is not on the cluster"),
+        ("a placeholder class at priority 0", ["--set", f"{WIRING}.prewarmPriorityClass.value=0"], f"{WIRING}.prewarmPriorityClass.value must be a whole number below 0 (got 0)"),
+        ("a fractional placeholder priority", ["--set", f"{WIRING}.prewarmPriorityClass.value=-1.5"], f"{WIRING}.prewarmPriorityClass.value must be a whole number below 0 (got -1.5)"),
+        ("a reserved class name", ["--set", f"{WIRING}.prewarmPriorityClass.name=system-placeholder"], "the system- prefix is reserved"),
+        ("a malformed class name", ["--set", f"{WIRING}.prewarmPriorityClass.name=Bad_Name"], "is not a DNS-1123 subdomain"),
     ):
         err = helm(connectivity, [*CONN, *flags], expect_fail=True, ci_values=False)
         if fragment not in err:
             fail(f"{what}: failed for another reason:\n{err}")
     helm(connectivity, [*CONN, "--set", f"{WIRING}.flux.requireApi=true", *FLUX_APIS], ci_values=False)
-    ok("the guards: muster off, a missing identity input, a bad CIDR, no ports, Flux required; Flux served passes")
+    ok("the guards: muster off, a missing identity input, a bad CIDR, no ports, Flux required, a placeholder priority at or above 0 or fractional, a reserved or malformed class name; Flux served passes")
     return 0
 
 

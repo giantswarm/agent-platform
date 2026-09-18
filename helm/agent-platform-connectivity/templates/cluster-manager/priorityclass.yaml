@@ -1,0 +1,27 @@
+{{- $pc := .Values.clusterManager.prewarmPriorityClass }}
+{{- if and (include "agent-platform.clusterManager.enabled" .) $pc.enabled }}
+# The PriorityClass the gpu-node-pool chart's prewarm placeholder runs at
+# (clusterManager.prewarmPriorityClass; the pool chart's
+# pool.prewarm.priorityClassName defaults to this name). A pool created with
+# prewarm launches its first node with the release: a one-shot placeholder Job
+# holds one GPU at negative priority until the first predictor preempts it. A
+# PriorityClass is cluster-scoped and a pool release is delivered under Flux
+# multi-tenancy as the organisation's tenant ServiceAccount, whose rights are
+# namespaced — the pool chart renders none, and the platform's release ships
+# the one class every pool of the installation names. Rendered with the
+# cluster-manager component, which composes the pool releases: on in exactly
+# one release per installation, so one owner of the class (the serving slice
+# never carries it). The value stays below the default priority 0, so any
+# workload preempts the placeholder; preemptionPolicy Never keeps the
+# placeholder from preempting anything itself; never the global default.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ $pc.name }}
+  labels:
+    {{- include "agent-platform.clusterManager.labels" . | nindent 4 }}
+value: {{ $pc.value | int }}
+globalDefault: false
+preemptionPolicy: Never
+description: "The gpu-node-pool chart's prewarm placeholder: a Job that holds one GPU of a new pool at negative priority until the first workload preempts it (pool.prewarm.priorityClassName). Shipped by the agent-platform connectivity chart with the cluster-manager component."
+{{- end }}
