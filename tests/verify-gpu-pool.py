@@ -242,6 +242,7 @@ else:
         quoted = "--default-chat-template-kwargs='" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8b-fp8.yaml", encoding="utf-8").read()
         sized = "weightsGiB: 25" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b.yaml", encoding="utf-8").read()
         kept = "helm.sh/resource-policy: keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
+        added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -290,6 +291,15 @@ else:
             for key in [k for k in side if k[0] in policies and "model-serving" in k[1]]:
                 side.pop(key)
         print(f"note: the serving policies select both pod shapes on this side (#506) and not on {ref}: they are left out of the comparison")
+    # The preset qwen3-8-27b-l40s ships on this side (giantswarm/agent-platform#544);
+    # a golden from before has no such file, so its ConfigMap is left out of the
+    # comparison, and so is its name in the discovery ConfigMap's presets list.
+    # Drop this once GOLDEN_REF carries #544.
+    if not added:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-27b-l40s"), None)
+        head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-27b-l40s\n", "", head[DISCOVERY], flags=re.M)
+        expect("the new preset's name cut out of the discovery list once", ncuts, 1)
+        print(f"note: the preset qwen3-8-27b-l40s ships on this side (#544) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
     # The serving namespace is kept while the cache is on
     # (giantswarm/agent-platform#537) and its template's comment says so; the
     # untainted render has the cache off, so only the comment differs, but a
