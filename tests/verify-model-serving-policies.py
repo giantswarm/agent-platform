@@ -19,7 +19,10 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     container (its readOnly as KServe declared it: the runtime writes nothing
     into the model's directory); the runtime container mounts the claim a
     second time at /mnt/vllm-cache from the claim-wide subPath .vllm-cache and
-    carries VLLM_CACHE_ROOT naming that path, the storage-initializer neither
+    carries VLLM_CACHE_ROOT naming that path and TRITON_CACHE_DIR naming its
+    triton/ directory (a preset that serves eager never compiles, so vLLM's
+    own in-process redirect of Triton's cache under VLLM_CACHE_ROOT never
+    runs for it, #572), the storage-initializer neither
     — vLLM's cache a directory of the claim's own, never under /mnt/models,
     where the initializer's Hugging Face client owns <model>/.cache (uid 1000,
     mode 755) and a cache root there crash-looped every cold start (#537,
@@ -38,7 +41,7 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     idempotent then adds its patch twice (#514). A pod of the shape without a
     storage-initializer, and a model-manager download-Job pod, are untouched;
     a workload pod without a model name gets the limit and the env but no
-    cache, no VLLM_CACHE_ROOT and no fsGroup (the mount would otherwise land
+    cache, neither cache env and no fsGroup (the mount would otherwise land
     on the claim's root).
   * The mutated pod of each shape passes the fleet's restricted Pod Security
     Standard with the chart's PolicyException and nothing else
@@ -145,9 +148,10 @@ MEMORY = "4Gi"
 ENV = {"HF_HUB_DISABLE_XET": "1"}
 MODEL_DIR = "/mnt/models"
 # vLLM's cache: the claim's own directory, mounted on the runtime container by
-# the redirect rule, which sets the env naming it in the same patch (#537, #541).
+# the redirect rule, which sets the envs naming it in the same patch (#537,
+# #541) — Triton's kernel cache a directory of it (#572).
 VLLM_CACHE = {"name": CLAIM, "mountPath": "/mnt/vllm-cache", "subPath": ".vllm-cache"}
-VLLM_ENV = {"VLLM_CACHE_ROOT": VLLM_CACHE["mountPath"]}
+VLLM_ENV = {"VLLM_CACHE_ROOT": VLLM_CACHE["mountPath"], "TRITON_CACHE_DIR": f"{VLLM_CACHE['mountPath']}/triton"}
 DEADLINE = 3600
 PSS = HERE / "fixtures" / "restricted-pss-clusterpolicies.yaml"
 # The rules the chart's PolicyException names, as (policy, rule).
@@ -358,6 +362,11 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
         fail(f"{shape}: {runtime}'s {VLLM_CACHE['mountPath']} is not {CLAIM}/{VLLM_CACHE['subPath']}: {cm}")
     if VLLM_CACHE["mountPath"] in mounts(storage):
         fail(f"{shape}: the storage-initializer mounts vLLM's cache; the directory is the runtime's alone")
+    for name in VLLM_ENV:
+        value = env_of(runtime_of(spec, runtime)).get(name) or ""
+        if value != VLLM_CACHE["mountPath"] and not value.startswith(f"{VLLM_CACHE['mountPath']}/"):
+            fail(f"{shape}: {runtime}'s {name}={value!r} names a path outside the cache mount {VLLM_CACHE['mountPath']}; "
+                 "the rule sets no cache env without the directory behind it")
     for label, before, after, extra in (("storage-initializer", init_of(pod["spec"], "storage-initializer"), storage, {}),
                                         (runtime, runtime_of(pod["spec"], runtime), runtime_of(spec, runtime), VLLM_ENV)):
         if env_of(after) != {**env_of(before), **ENV, **extra}:
@@ -427,8 +436,8 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
             fail(f"{shape}: a pod without {name_label} did not get {ENV}: {env_of(init_of(out['spec'], 'storage-initializer'))}")
         nameless_runtime = runtime_of(out["spec"], runtime)
         if set(VLLM_ENV) & set(env_of(nameless_runtime)) or VLLM_CACHE["mountPath"] in mounts(nameless_runtime):
-            fail(f"{shape}: a pod without {name_label} got vLLM's cache root or its mount without the claim")
-        ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, no VLLM_CACHE_ROOT, no fsGroup")
+            fail(f"{shape}: a pod without {name_label} got a cache env or vLLM's cache mount without the claim")
+        ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, neither cache env, no fsGroup")
 
 
 def selector_of(shape: str, policy: dict) -> list[dict]:
