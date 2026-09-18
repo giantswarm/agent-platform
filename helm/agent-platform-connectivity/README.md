@@ -586,6 +586,7 @@ The chart applies the input to everything it renders onto the pool and to nothin
 | Site | Toleration | Node selector |
 |---|---|---|
 | The `ClusterServingRuntime` (`modelServing.runtime`; KServe copies both onto every predictor pod of the runtime) | the pool's first, `runtime.tolerations` after it (an equal entry once) | the pool's under `runtime.nodeSelector` (the runtime's keys win) |
+| Every additional `ClusterServingRuntime` (`modelServing.additionalRuntimes[]`, giantswarm/agent-platform#550; an entry's unset `tolerations` and `nodeSelector` are the default runtime's) | the pool's first, the entry's `tolerations` after it (an equal entry once) | the pool's under the entry's `nodeSelector` (the entry's keys win) |
 | Every published preset's `scheduling` block (`agent-platform-serving-preset-<name>`) | the pool's first, the preset's own after it (an equal entry once) | the pool's under the preset's own keys |
 | The discovery ConfigMap `agent-platform-model-serving`: `spec.gpuPool.taint.{key,value,effect}`, `spec.gpuPool.nodeSelector` | published for model-manager (`>= 0.23.0`, giantswarm/model-manager#86), which schedules the `LLMInferenceService`s it composes, its download Jobs and its inventory scan pods by it; a registered backend document may override it | likewise |
 
@@ -1415,6 +1416,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.runtime.supportedModelFormats[0].priority | int | `1` |  |
 | modelServing.runtime.nodeSelector | object | `{}` |  |
 | modelServing.runtime.tolerations | list | `[]` |  |
+| modelServing.additionalRuntimes | list | `[]` |  |
 | modelServing.serving.gpuResourceName | string | `"nvidia.com/gpu"` |  |
 | modelServing.serving.runtimeClassName | string | `""` |  |
 | modelServing.serving.nodeSelector | object | `{}` |  |

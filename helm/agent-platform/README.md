@@ -1321,6 +1321,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.runtime.supportedModelFormats[0].priority | int | `1` |  |
 | modelServing.runtime.nodeSelector | object | `{}` |  |
 | modelServing.runtime.tolerations | list | `[]` |  |
+| modelServing.additionalRuntimes | list | `[]` |  |
 | modelServing.serving.gpuResourceName | string | `"nvidia.com/gpu"` |  |
 | modelServing.serving.runtimeClassName | string | `""` |  |
 | modelServing.serving.nodeSelector | object | `{}` |  |

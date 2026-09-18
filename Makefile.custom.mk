@@ -516,7 +516,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	elif ! grep -q 'gateway.parameters.dataPlaneEnv' /tmp/ap-sym-neg-conn.out; then \
 		echo "FAIL: the symmetry check failed for the wrong reason"; cat /tmp/ap-sym-neg-conn.out; exit 1; \
 	else echo "ok: a nested meta key the connectivity schema lacks fails, naming gateway.parameters.dataPlaneEnv"; fi
-	@echo "--> mirrored defaults: the meta chart's copy of every networkPolicy fqdns / cidrs list and port, of every leaf of the modelServing cache, policies, prepull and imageVerification blocks and of the clusterManager prewarmPriorityClass block, equals the connectivity chart's default — the forwarded copy shadows the child's (#522, #525, #537, #539, #545)"
+	@echo "--> mirrored defaults: the meta chart's copy of every networkPolicy fqdns / cidrs list and port, of every leaf of the modelServing cache, policies, prepull, imageVerification, runtime and additionalRuntimes blocks and of the clusterManager prewarmPriorityClass block, equals the connectivity chart's default — the forwarded copy shadows the child's (#522, #525, #537, #539, #545, #550, #552)"
 	@python3 tests/verify-mirrored-values.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "--> the mirrored-defaults check has teeth: a meta prewarm PriorityClass under another name fails it, naming the path"
 	@python3 -c 'import yaml; v=yaml.safe_load(open("$(CHART_DIR)/values.yaml")); v["clusterManager"]["prewarmPriorityClass"]["name"]="other-placeholder"; yaml.safe_dump(v, open("/tmp/ap-mirror-meta-pc.yaml", "w"))'
@@ -1087,6 +1087,12 @@ verify-gpu-pool: ## Assert the GPU node pool input of the model serving layer (g
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@GOLDEN_REF=$(GOLDEN_REF) python3 tests/verify-gpu-pool.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "GPU node pool input verified."
+
+.PHONY: verify-runtimes
+verify-runtimes: ## Assert modelServing.additionalRuntimes (giantswarm/agent-platform#550): one ClusterServingRuntime per entry beside the default, from the same template -- an entry's own image, base arguments, environment (a list replaces the default's whole) and scheduling render, every field it leaves unset is the default runtime's (an image-only entry differs from the default in its name and image alone), the pool's taint tolerated first and its label under every runtime's selector, the same shell entrypoint on each (/bin/sh -c 'eval "exec vllm serve $@"' -- ahead of the runtime's own base arguments), the discovery ConfigMap's spec.runtimes naming every runtime, the default first, next to spec.runtime; an empty list renders the default alone; the default's name reused, another entry's name reused, a missing name, a name that is no DNS-1123 subdomain and an entry that is not a mapping fail the render naming the entry; the meta chart forwards the list and its forwarded values render the same runtimes. Fixture: ci/test-model-serving-runtimes-values.yaml. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-runtimes.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "additional runtimes verified."
 
 .PHONY: verify-labels
 verify-labels: ## Assert every label value stays valid at the versions the charts are installed under: helm-controller's +digest and a branch build's long prerelease, with the 63-character cut landing on each separator. HELM selects the binary.

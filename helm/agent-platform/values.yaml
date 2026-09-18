@@ -4639,6 +4639,27 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Scheduling of every predictor pod of this runtime (the GPU nodes).
     nodeSelector: {}
     tolerations: []
+  # More vLLM ClusterServingRuntimes beside the default one, rendered from the
+  # same template (giantswarm/agent-platform#550) — for the models whose
+  # accelerator needs a different serving image, a hardware-specific vLLM
+  # build next to the upstream image the other presets run on. A preset
+  # selects one with spec.runtime. Each entry needs a name of its own (a name
+  # already used fails the render, naming it) and takes the default runtime's
+  # value for every field it leaves unset: image (registry, name, version),
+  # args, env, resources, shmSize, startupProbe, annotations,
+  # supportedModelFormats, nodeSelector, tolerations — a mapping field by
+  # field, a list whole (an entry's env replaces the default's, it does not
+  # extend it), an empty value inheriting too. The GPU pool's taint and label
+  # apply as on the default; the container runs through the same shell
+  # entrypoint with the entry's own base arguments, so its image must carry
+  # /bin/sh and `vllm` on PATH as well. Every runtime's name is published in
+  # the discovery ConfigMap as spec.runtimes, the default first.
+  #   - name: kserve-vllm-blackwell
+  #     image:
+  #       registry: registry.example.com
+  #       name: serving/vllm-unified-memory
+  #       version: "2026.09"
+  additionalRuntimes: []
   # Defaults for every InferenceService the portal or model-manager creates
   # from a preset. Published in the discovery ConfigMap; the chart itself
   # creates no InferenceService.

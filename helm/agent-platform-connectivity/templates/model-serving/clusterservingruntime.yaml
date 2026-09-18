@@ -1,9 +1,22 @@
 {{- if (include "agent-platform.modelServing.enabled" .) }}
-{{- $rt := .Values.modelServing.runtime }}
+{{- /* The default runtime (modelServing.runtime) and every
+       modelServing.additionalRuntimes entry, the entry's unset fields the
+       default's (giantswarm/agent-platform#550): one ClusterServingRuntime
+       each, from the one template below. */ -}}
+{{- range $i, $rt := (include "agent-platform.modelServing.runtimes" . | fromJson).runtimes }}
 {{- /* The GPU node pool (modelServing.gpuPool): its toleration first and its
        selector under the runtime's own; KServe copies both onto every
        predictor pod of the runtime. Nothing renders when both are empty. */ -}}
-{{- $sched := include "agent-platform.modelServing.poolScheduling" (dict "root" . "tolerations" $rt.tolerations "nodeSelector" $rt.nodeSelector) | fromJson }}
+{{- $sched := include "agent-platform.modelServing.poolScheduling" (dict "root" $ "tolerations" $rt.tolerations "nodeSelector" $rt.nodeSelector) | fromJson }}
+{{- if $i }}
+---
+# An additional vLLM serving runtime, modelServing.additionalRuntimes[{{ sub $i 1 }}]
+# (cluster-scoped): a preset selects it with spec.runtime. Every field the
+# entry leaves unset is the default runtime's (modelServing.runtime); the
+# container runs through the same shell entrypoint as the default's, with
+# this runtime's own base arguments, so its image must carry /bin/sh and
+# `vllm` on PATH as well.
+{{- else }}
 # The vLLM serving runtime every preset runs on (cluster-scoped). KServe
 # merges an InferenceService's predictor.model spec over this container:
 # the preset's args are appended, its env and resources win field by field,
@@ -20,12 +33,13 @@
 # the llm-d template; straight into argv the quotes stayed and vLLM refused
 # the value (giantswarm/agent-platform#549). The image must carry /bin/sh and
 # `vllm` on PATH (the upstream vLLM images do).
+{{- end }}
 apiVersion: serving.kserve.io/v1alpha1
 kind: ClusterServingRuntime
 metadata:
   name: {{ $rt.name }}
   labels:
-    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+    {{- include "agent-platform.modelServing.labels" $ | nindent 4 }}
 spec:
   {{- with $rt.annotations }}
   annotations:
@@ -80,4 +94,5 @@ spec:
     - v2
   supportedModelFormats:
     {{- toYaml $rt.supportedModelFormats | nindent 4 }}
+{{- end }}
 {{- end }}

@@ -65,6 +65,11 @@ SHIPPED = len(glob.glob(os.path.join(CONN, "files", "model-serving", "presets", 
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
 )
+# The runtimes list giantswarm/agent-platform#550 adds to the discovery ConfigMap,
+# cut out of the head for a golden from before it.
+RUNTIMES_BLOCK = re.compile(
+    r"      # Every ClusterServingRuntime the chart renders.*?(?=      # Defaults of every InferenceService)", re.S
+)
 
 
 def fail(msg: str) -> None:
@@ -245,6 +250,7 @@ else:
         added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
         prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
+        listed = "additionalRuntimes:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -339,6 +345,14 @@ else:
         for side in (head, golden):
             side.pop(RUNTIME, None)
         print(f"note: the classic runtime carries the shell entrypoint on this side (#549) and not on {ref}: its document is left out of the comparison")
+    # The discovery ConfigMap publishes every runtime's name as spec.runtimes
+    # (giantswarm/agent-platform#550); a golden from before has no such block,
+    # so it is cut out of the head's document. Drop this once GOLDEN_REF
+    # carries #550.
+    if not listed:
+        head[DISCOVERY], rcuts = RUNTIMES_BLOCK.subn("", head[DISCOVERY])
+        expect("the runtimes block cut out of the discovery ConfigMap once", rcuts, 1)
+        print(f"note: the discovery ConfigMap publishes spec.runtimes on this side (#550) and not on {ref}: the block is left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):
