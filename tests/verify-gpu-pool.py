@@ -71,6 +71,9 @@ RUNTIMES_BLOCK = re.compile(
     r"      # Every ClusterServingRuntime the chart renders.*?(?=      # Defaults of every InferenceService)", re.S
 )
 
+# The model-images block of the discovery ConfigMap (#551), cut out while GOLDEN_REF predates it.
+MODEL_IMAGES_BLOCK = re.compile(r"      # Models as OCI images \(modelServing\.modelImages\).*?(?=      presets:\n)", re.S)
+
 
 def fail(msg: str) -> None:
     sys.exit(f"FAIL: {msg}")
@@ -251,6 +254,7 @@ else:
         prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
         listed = "additionalRuntimes:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
+        imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -353,6 +357,14 @@ else:
         head[DISCOVERY], rcuts = RUNTIMES_BLOCK.subn("", head[DISCOVERY])
         expect("the runtimes block cut out of the discovery ConfigMap once", rcuts, 1)
         print(f"note: the discovery ConfigMap publishes spec.runtimes on this side (#550) and not on {ref}: the block is left out of the comparison")
+    # The discovery ConfigMap publishes the model-images registry
+    # (giantswarm/agent-platform#551, spec.modelImages.registry); a golden from
+    # before has no such block, so it is cut out of the head's discovery
+    # document. Drop this once GOLDEN_REF carries #551.
+    if not imaged:
+        head[DISCOVERY], icuts = MODEL_IMAGES_BLOCK.subn("", head[DISCOVERY])
+        expect("the model-images block cut out of the discovery ConfigMap once", icuts, 1)
+        print(f"note: the discovery ConfigMap publishes the model-images registry on this side (#551) and not on {ref}: that block is left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):

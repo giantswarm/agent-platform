@@ -1436,9 +1436,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.prepull.resources.requests.cpu | string | `"5m"` |  |
 | modelServing.prepull.resources.requests.memory | string | `"8Mi"` |  |
 | modelServing.prepull.resources.limits.memory | string | `"32Mi"` |  |
+| modelServing.prepull.modelPresets | list | `[]` |  |
 | modelServing.presets | list | `[]` |  |
 | modelServing.shippedPresets.enabled | bool | `true` |  |
 | modelServing.shippedPresets.exclude | list | `[]` |  |
+| modelServing.modelImages.registry | string | `""` |  |
 | modelServing.cache.enabled | bool | `true` |  |
 | modelServing.cache.pvc.name | string | `"hf-cache"` |  |
 | modelServing.cache.pvc.existingClaim | string | `""` |  |

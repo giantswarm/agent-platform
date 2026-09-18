@@ -65,7 +65,10 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     direction), which selects no shape's fixture and not the download Job's
     pod. `enabled: false` renders neither object; an empty image list fails
     the render naming the key; the values the meta chart forwards render the
-    same DaemonSet with the same images.
+    same DaemonSet with the same images. A model init container named through
+    modelServing.prepull.modelPresets (#551) keeps the pod PSS-clean with no
+    exception; the default carries none (tests/verify-model-images.py holds
+    the container's shape).
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
     never the download Job's pod.
@@ -560,6 +563,21 @@ def check_prepull(connectivity: str, k8s: list[dict], cilium: list[dict], pods_p
         if selects(label_selector, pod["metadata"]["labels"]):
             fail("the PolicyException selects the pre-pull pod; its pod needs none")
     ok("the pre-pull pod passes every rule of the fleet's restricted PSS with no exception, and no mutation of the chart touches it")
+
+    # A model init container (modelServing.prepull.modelPresets, #551) carries the runtime init containers' security context, so
+    # the pod stays PSS-clean with one; tests/verify-model-images.py holds the container's shape, this holds the pod's admission.
+    if any(c["name"].startswith("pull-model-") for c in spec["initContainers"]):
+        fail(f"the default pre-pull pod carries a model init container: {[c['name'] for c in spec['initContainers']]}")
+    with_model = prepull_pod(render(connectivity, ["-f", f"{connectivity}/ci/test-model-serving-oci-values.yaml"]))
+    model_inits = [c["name"] for c in with_model["spec"]["initContainers"] if c["name"].startswith("pull-model-")]
+    if model_inits != ["pull-model-oci-model"]:
+        fail(f"the fixture's pre-pull pod carries the model init containers {model_inits}; expected pull-model-oci-model alone")
+    results = validate(with_model, None)
+    if outcome(results, "pass") != set(results):
+        fail(f"the pre-pull pod with a model init container must pass every restricted-PSS rule with no exception; "
+             f"failed {sorted(outcome(results, 'fail'))}, skipped {sorted(outcome(results, 'skip'))}")
+    ok("the default pre-pull pod carries no model init container; with one (modelServing.prepull.modelPresets) the pod still passes every "
+       "rule of the fleet's restricted PSS with no exception")
 
     k8s_policy = one(k8s, "NetworkPolicy", "-model-serving-prepull")
     if sorted(k8s_policy["spec"]["policyTypes"]) != ["Egress", "Ingress"] or "ingress" in k8s_policy["spec"] or "egress" in k8s_policy["spec"]:

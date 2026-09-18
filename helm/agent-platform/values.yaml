@@ -4773,6 +4773,19 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
         memory: 8Mi
       limits:
         memory: 32Mi
+    # The serving presets whose model images join the init containers, after
+    # the runtime images (giantswarm/agent-platform#551). A preset served from
+    # an OCI model image (spec.model.storageUri oci://…, KServe's modelcar
+    # path; modelImages below) has its weights pulled by containerd like any
+    # image, so a preset named here has every serving node hold them before
+    # the first serve, and the running pause pod keeps the image against the
+    # node's image garbage collection. Each name renders one init container,
+    # pull-model-<preset>, on the preset's image as published (the registry
+    # host swapped by modelImages.registry), running /bin/true like the
+    # runtime images' (a modelcar image is busybox-based, see the README). A
+    # name that is not a published preset, or whose model is not oci://,
+    # fails the render naming it.
+    modelPresets: []
   # Serving presets an install adds (ServingPreset documents, see
   # files/model-serving/serving-preset.schema.json and the README). A
   # preset with the name of a shipped one replaces it. Example:
@@ -4797,6 +4810,25 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   shippedPresets:
     enabled: true
     exclude: []
+  # Models as OCI images (giantswarm/agent-platform#551). A preset whose
+  # spec.model.storageUri is oci://<registry>/<path>[:tag|@digest] is served
+  # from a model image — KServe's modelcar path: containerd pulls the image
+  # onto the node's local disk and its /models directory is the model; no
+  # storage-initializer, no cache claim (the cache redirect rule leaves such a
+  # pod alone). A shipped preset references the canonical registry; an
+  # installation serves the same image from a registry of its own — a mirror,
+  # an in-cluster registry — by naming its host here. prepull.modelPresets
+  # above pre-pulls the named presets' images on the serving nodes.
+  modelImages:
+    # The registry host (host or host:port; no scheme, no path) every oci://
+    # preset's storageUri is published with: at render the host of every
+    # oci:// reference — a shipped preset's and a values preset's alike, the
+    # segment before the first / — is replaced by this value and the path, tag
+    # or digest kept, so a registry named here must hold the same path. An
+    # hf:// (or any other) storageUri is untouched. Empty leaves every
+    # reference as written. Published in the discovery ConfigMap as
+    # spec.modelImages.registry.
+    registry: ""
   # Hugging Face model cache: one PVC in the serving namespace with one
   # subdirectory per InferenceService, so a model downloads once and every
   # restart finds it (hours to seconds). The claim is applied by a
