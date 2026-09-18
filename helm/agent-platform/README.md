@@ -562,11 +562,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
 | gateway.metricLabels.agent.enabled | bool | `true` |  |
-| gateway.metricLabels.agent.expression | string | `"source.unverifiedWorkload.serviceAccount"` |  |
+| gateway.metricLabels.agent.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent\"] : source.unverifiedWorkload.serviceAccount"` |  |
 | gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |
-| gateway.metricLabels.agent_namespace.expression | string | `"source.unverifiedWorkload.namespace"` |  |
+| gateway.metricLabels.agent_namespace.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-namespace\"] : source.unverifiedWorkload.namespace"` |  |
 | gateway.metricLabels.user.enabled | bool | `true` |  |
-| gateway.metricLabels.user.expression | string | `"jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
+| gateway.metricLabels.user.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-user\"] : jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |

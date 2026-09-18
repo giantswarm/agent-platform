@@ -153,13 +153,34 @@ gateway:
       expression: jwt.groups  # one more claim; string-valued claims only
 ```
 
-**The defaults.** `agent` and `agent_namespace` name the calling workload
-(`source.unverifiedWorkload.serviceAccount` / `.namespace`), resolved by source
-IP against the agentgateway controller's workload store — not cryptographic,
-adequate for accounting, never for authorization. On the LLM listener that is
-the agent whose inference the metric counts (the LLM usage dashboard reads
-both); on the kagent controller route it is the caller, klaus-gateway or the
-portal.
+**The defaults.** `agent` and `agent_namespace` name the calling workload,
+resolved by source IP against the agentgateway controller's workload store —
+not cryptographic, adequate for accounting, never for authorization. A caller
+with a pod of its own is its ServiceAccount and namespace
+(`source.unverifiedWorkload.serviceAccount` / `.namespace`): on the kagent
+controller route klaus-gateway or the portal, on the MCP path an agent pod of
+a kagent 0.10 installation. A kagent API v2 agent has no pod of its own: it is
+a Substrate actor in the shared WorkerPool, and every actor connection leaves
+the worker as a mTLS CONNECT through the Substrate egress (`atenet-egress`),
+which authenticates the actor at CONNECT time and tunnels the bytes opaquely —
+by source IP every agent's model call is the egress pod, and the egress cannot
+add a header. The kagent runtime therefore sends the identity on every model
+call as request headers, `x-kagent-agent` and `x-kagent-agent-namespace` (the
+`AgentTemplate`'s name and namespace), and the default expressions read them
+when, and only when, the source workload is the egress — its namespace and
+ServiceAccount from the chart's Substrate names
+(`agent-platform.substrate.egressCall`):
+
+```cel
+(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent"] : source.unverifiedWorkload.serviceAccount
+```
+
+Every other caller keeps its own ServiceAccount, so no pod relabels itself by
+sending the header; a call from the egress without the header reads `unknown`,
+and the egress ServiceAccount itself appears in no sample. The identity is an
+accounting identity throughout — the header is client-set and the predicate
+reads the unverified workload — never an authorization input. The LLM usage
+dashboard and the portal's Cost page read both labels.
 
 `user` (on by default) carries the identity claim the kagent controller route
 verifies in `Strict` mode and writes into `x-user-id`
@@ -172,8 +193,12 @@ person: a Slack turn is one `lf.a2a.v1.A2AService/SendStreamingMessage`
 stream, its duration the turn's. The portal, a CLI and every other route that
 verifies a bearer are labelled the same way. A route without a JWT policy —
 the MCP path under `oauthMode: passthrough`, the LLM listener, whose calls
-carry the ModelConfig's API key — renders `unknown`: tokens and cost stay
-attributed to the agent, not the person.
+carry the ModelConfig's API key — renders `unknown`, with the one exception
+the agent labels have: an actor's model call through the Substrate egress
+carries the person of the turn as the kagent runtime sends it in
+`x-kagent-user`, read behind the same predicate, so on a kagent API v2
+installation tokens and cost carry the person too; a turn the runtime runs for
+no person reads `unknown`.
 
 On the installation (`route` is `<namespace>/<name>`):
 

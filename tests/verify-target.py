@@ -76,6 +76,16 @@ CONN_FULL = [
     "--set", "components.kagent.enabled=true", "--set", "components.substrate.enabled=true",
     "--set", "components.substrate-crds.enabled=true", "--set", "networkPolicy.musterInClusterMcpPorts[0]=8080",
 ]
+# giantswarm/agent-platform#586: the default metric-label expressions read the
+# kagent runtime's identity headers behind the Substrate egress predicate, and
+# GOLDEN_REF renders the plain source-IP attributes. Held equal on BOTH sides --
+# the three old expressions, which the meta chart forwards as written -- and
+# dropped once GOLDEN_REF carries #586.
+METRIC_LABELS_HOLD = [
+    "--set", "gateway.metricLabels.agent.expression=source.unverifiedWorkload.serviceAccount",
+    "--set", "gateway.metricLabels.agent_namespace.expression=source.unverifiedWorkload.namespace",
+    "--set", "gateway.metricLabels.user.expression=jwt.email",
+]
 # Makefile.custom.mk's WIRING_BACKSTAGE: the portal on, whose CSP carries the avatars host.
 CONN_BACKSTAGE = [
     *VM, "--namespace", "agent-platform",
@@ -204,15 +214,15 @@ def check_golden(meta: str, connectivity: str) -> None:
         # kagent line's images, the Substrate line's images (the derived worker
         # image follows substrate.image.registry) and the Flux controllers from
         # their gsoci copies — meta chart keys only. Dropped once GOLDEN_REF
-        # carries them.
+        # carries them. METRIC_LABELS_HOLD (#586) is the other hold in force.
         hold_580 = ["--set", "kagent.registry=gsoci.azurecr.io", "--set", "substrate.image.registry=gsoci.azurecr.io/giantswarm/substrate",
                     "--set", "flux-engine.instance.distribution.registry=gsoci.azurecr.io/giantswarm/fluxcd"]
         shapes = [
-            ("meta default", meta, [*hold_580]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_580]),
-            ("connectivity default", connectivity, [*VM]),
-            ("connectivity full", connectivity, [*CONN_FULL]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE]),
+            ("meta default", meta, [*hold_580, *METRIC_LABELS_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_580, *METRIC_LABELS_HOLD]),
+            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD]),
+            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)

@@ -1808,6 +1808,33 @@ targets its two Substrate releases at the same names.
 {{- define "agent-platform.substrate.podcertNamespace" -}}podcertificate-controller-system{{- end -}}
 
 {{/*
+The Substrate egress gateway as the data plane sees it. A kagent API v2 agent is
+a Substrate actor in the shared WorkerPool, and every actor connection leaves
+the worker as a mTLS CONNECT through atenet-egress, which authenticates the
+actor at CONNECT time and tunnels the bytes opaquely — so by source IP the
+egress pod is the caller of every agent's model call, and the egress cannot add
+a header. The ServiceAccount is the substrate chart's bare workload name: the
+meta chart installs that chart as the release `substrate` (the component key),
+under which its names carry no release prefix, into the fixed namespace above.
+*/}}
+{{- define "agent-platform.substrate.egressServiceAccount" -}}atenet-egress{{- end -}}
+
+{{/*
+The CEL predicate "this request came through the Substrate egress": the source
+workload resolved by IP is the egress gateway's pod in its namespace. For
+gateway.metricLabels, where it gates the one place a label may read the
+identity headers the kagent runtime sends on an actor's model call
+(x-kagent-agent, x-kagent-agent-namespace, x-kagent-user) — a caller that is
+not the egress keeps its own ServiceAccount, header or not. Accounting, never
+authorization: the predicate reads the unverified workload like the labels it
+guards.
+Usage: {{ include "agent-platform.substrate.egressCall" . }}
+*/}}
+{{- define "agent-platform.substrate.egressCall" -}}
+{{- printf "(source.unverifiedWorkload.namespace == %q && source.unverifiedWorkload.serviceAccount == %q)" (include "agent-platform.substrate.namespace" .) (include "agent-platform.substrate.egressServiceAccount" .) -}}
+{{- end -}}
+
+{{/*
 Truthy when the platform runs Agent Substrate: the substrate component is on
 (absent from the roster = off, a chart that predates it renders none of this).
 */}}
