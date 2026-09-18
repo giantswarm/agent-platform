@@ -581,6 +581,8 @@ while every route's host is in-cluster.
 
 A GPU node pool created through the platform (bumblebee-plans#46, the `gpu-node-pool` chart) arrives tainted `nvidia.com/gpu` `NoSchedule` — only accelerator work lands there — and labelled `giantswarm.io/machine-pool=<cluster>-<pool>`. `modelServing.gpuPool` is the serving layer's one input for both (giantswarm/agent-platform#315): `taint` (`key`, `value`, `effect`; the default is the pool chart's taint, tolerated with `operator: Exists` because the pool sets no value — a `value` narrows the toleration to `Equal`, an empty `key` is an untainted pool and renders nothing) and `nodeSelector` (the pool's label; per pool, so the slice release's values set it, empty by default).
 
+A pool node also runs containerd with an **unlimited locked-memory limit** (`LimitMEMLOCK=infinity`, the pool chart's `memlock.conf` drop-in on `containerd.service`; giantswarm/agent-platform#564): a container inherits containerd's `RLIMIT_MEMLOCK` and has no `CAP_IPC_LOCK` to raise it — root included, and granting it is refused under the baseline and restricted Pod Security Standards — so under the unit's 8 MB default a serving runtime that `mlock()`s its weights (a unified-memory stack) dies at engine start with an out-of-memory at a few MiB while the node has a hundred GiB free. A GPU node not created through the platform needs the same drop-in for such a runtime; runtimes that only `cudaMalloc` never notice.
+
 The chart applies the input to everything it renders onto the pool and to nothing else — platform components never carry it:
 
 | Site | Toleration | Node selector |
