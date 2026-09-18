@@ -992,14 +992,15 @@ components:  # @schema additionalProperties: true
     chart: kserve-runtime-configs
     # The well-known LLMInferenceServiceConfigs (giantswarm/kserve;
     # giantswarm/agent-platform#326, bumblebee-plans#46's D8): the templates an
-    # LLMInferenceService composes from by baseRefs — the mirrored llm-d-cuda
+    # LLMInferenceService composes from by baseRefs — the llm-d-cuda runtime
     # image among them — installed into the release namespace: the llm-d
     # controller (kserve-llmisvc-resources, the same namespace) resolves a
     # well-known config from the LLMInferenceService's namespace, then from
-    # its own, and nowhere else. Its images come from gsoci by default (the chart's own
-    # kserve.llmisvcConfigs.imageRegistry, giantswarm/kserve#78), so no
-    # registry value is passed here; a private registry sets it in the
-    # kserve-runtime-configs: block below. Its ServingRuntimes stay off: they
+    # its own, and nowhere else. Its image references carry the prefix the
+    # kserve-runtime-configs: block below passes as
+    # kserve.llmisvcConfigs.imageRegistry (giantswarm/kserve#78): the
+    # re-layered llm-d-fast/ set by default, the byte-identical mirror or
+    # upstream by choice. Its ServingRuntimes stay off: they
     # are the classic InferenceService path, which the modelServing switch's
     # vLLM ClusterServingRuntime already is. Needs the LLMInferenceService
     # CRDs only (the configs are CRs of theirs), not the controller.
@@ -4476,16 +4477,25 @@ kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties:
 
 # === The well-known LLMInferenceServiceConfigs (components.kserve-runtime-configs) ===
 # Forwarded to the kserve-runtime-configs release. llmisvcConfigs on: the
-# templates an LLMInferenceService names by baseRefs, their image references
-# from gsoci by default (the chart's kserve.llmisvcConfigs.imageRegistry,
-# giantswarm/kserve#78 — set it here for a private registry, nothing else names
-# one). servingruntime off: the chart's ServingRuntimes are the classic
-# InferenceService path, which the modelServing switch's vLLM
-# ClusterServingRuntime serves.
+# templates an LLMInferenceService names by baseRefs. imageRegistry: the
+# prefix every image reference they render carries (the chart rewrites
+# upstream's ghcr.io/llm-d/ to it, giantswarm/kserve#78; nothing else names
+# one). The default is the llm-d-fast/ set giantswarm/llm-d publishes beside
+# its byte-identical mirror: the same images re-layered — zstd, llm-d-cuda
+# split into layers of at most 1.2 GB — because containerd pulls one stream
+# per layer and the mirror's 5.5 GB gzip layer alone bounded the pull to about
+# 60 MB/s, 132–149 s on a fresh pool node where four streams reach 306 MB/s
+# (giantswarm/agent-platform#568). gsoci.azurecr.io/giantswarm/ is the
+# byte-identical mirror, ghcr.io/llm-d/ upstream, a private registry its own
+# prefix; modelServing.prepull.images below names the same llm-d-cuda
+# reference — keep the two in step. servingruntime off: the chart's
+# ServingRuntimes are the classic InferenceService path, which the
+# modelServing switch's vLLM ClusterServingRuntime serves.
 kserve-runtime-configs:  # @schema skipProperties: true; additionalProperties: true
   kserve:
     llmisvcConfigs:
       enabled: true
+      imageRegistry: gsoci.azurecr.io/giantswarm/llm-d-fast/
     servingruntime:
       enabled: false
 
@@ -4740,17 +4750,24 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     # The images to keep present, as full references. The default is the
     # runtime image of the well-known LLMInferenceServiceConfig every served
-    # model composes from: the kserve-runtime-configs chart (giantswarm/kserve)
-    # names it, and its kserve.llmisvcConfigs.imageRegistry mirrors it to
-    # gsoci — this chart has no other value for that image, so the reference
-    # is pinned here and follows that chart's line: a re-pin there moves it
-    # here, never ahead (a newer tag pre-pulled is a tag no predictor runs). A
-    # list of plain references on purpose: Renovate's image managers read
-    # registry/repository/tag blocks, and a bump ahead of the runtime configs
-    # would pre-pull the wrong image. Empty with enabled: true fails the
-    # render.
+    # model composes from, at the prefix the serving slice passes to the
+    # kserve-runtime-configs chart (giantswarm/kserve) as
+    # kserve.llmisvcConfigs.imageRegistry: the llm-d-fast/ set giantswarm/llm-d
+    # publishes beside its byte-identical mirror — the same image re-layered
+    # (zstd, layers of at most 1.2 GB), which containerd pulls over several
+    # streams instead of the one stream the mirror's 5.5 GB layer bounded to
+    # about 60 MB/s (giantswarm/agent-platform#568). This chart has no other
+    # value for that image, so the reference is pinned here and follows that
+    # chart's line and prefix: a re-pin there moves it here, never ahead (a
+    # newer tag pre-pulled is a tag no predictor runs), and an installation
+    # that sets another prefix there — gsoci.azurecr.io/giantswarm/ for the
+    # byte-identical mirror, ghcr.io/llm-d/ for upstream — sets the matching
+    # reference here. A list of plain references on purpose: Renovate's image
+    # managers read registry/repository/tag blocks, and a bump ahead of the
+    # runtime configs would pre-pull the wrong image. Empty with enabled: true
+    # fails the render.
     images:
-      - gsoci.azurecr.io/giantswarm/llm-d-cuda:v0.8.0
+      - gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0
     # The nodes. Karpenter labels every node of a GPU instance type with its
     # accelerator's manufacturer (a fractional-GPU type such as g6f carries it
     # too); the pool's own label (gpuPool.nodeSelector) is merged under this

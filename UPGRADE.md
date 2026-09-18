@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the serving slice's llm-d images come from the `llm-d-fast/` prefix)
+
+giantswarm/agent-platform#568: the meta chart's `kserve-runtime-configs:` block passes `kserve.llmisvcConfigs.imageRegistry: gsoci.azurecr.io/giantswarm/llm-d-fast/`, and `modelServing.prepull.images` names `gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0` — the same images as the byte-identical mirror at `gsoci.azurecr.io/giantswarm/`, re-layered (zstd, layers of at most 1.2 GB) so a node pulls them over several streams.
+
+### Operator action
+
+- **None** for an installation that follows the chart's defaults. The well-known configs change their image references, so a served `LLMInferenceService` rolls once onto the re-layered image on its next reconcile; the pre-pull DaemonSet rolls with it and warms the new reference on every pool node.
+- **`kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry` set in your values** (a private registry): it stands. Set `modelServing.prepull.images` to the matching `llm-d-cuda` reference under your prefix, and mirror the `llm-d-fast/` set — or the byte-identical one — there.
+- **To stay on the byte-identical mirror or on upstream**: `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry: gsoci.azurecr.io/giantswarm/` (or `ghcr.io/llm-d/`) and `modelServing.prepull.images: [gsoci.azurecr.io/giantswarm/llm-d-cuda:v0.8.0]` (or the `ghcr.io/llm-d/` reference). The two must carry the same prefix: the pre-pull warms exactly the image the predictor runs.
+- **Recognising it worked**: the pre-pull pod's init container and the model pod's runtime container name an image under `…/llm-d-fast/`, and the predictor's `Pulled` event reads "already present on machine".
+
 ## \<current\> → \<next\> (the cache claim's defaults are 100Gi at 500 MiB/s; the default class is named with a digest of its parameters)
 
 giantswarm/agent-platform#570: `modelServing.cache.pvc.size` defaults to `100Gi` (was `500Gi`) and the claim's gp3 class to `throughput: "500"`, `iops: "3000"` (was 1000 / 4000): the loader reads at about 300 MB/s on either tier, the download writes at the Hub's ≈ 200 MB/s, and two served models need well under 40 GiB. A StorageClass's parameters are immutable, so the default class is now `agent-platform-connectivity-hf-cache-<digest>` (eight hex characters of provisioner and parameters); the previous `agent-platform-connectivity-hf-cache` goes with the upgrade.

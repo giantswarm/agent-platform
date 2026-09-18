@@ -252,6 +252,7 @@ else:
         kept = "$ms.namespace.keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
         added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
         prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
+        fastimaged = "llm-d-fast/" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
         listed = "additionalRuntimes:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
@@ -386,6 +387,15 @@ else:
         head[DISCOVERY], icuts = MODEL_IMAGES_BLOCK.subn("", head[DISCOVERY])
         expect("the model-images block cut out of the discovery ConfigMap once", icuts, 1)
         print(f"note: the discovery ConfigMap publishes the model-images registry on this side (#551) and not on {ref}: that block is left out of the comparison")
+    # The pre-pull DaemonSet names the re-layered llm-d-fast/ runtime image
+    # (giantswarm/agent-platform#568); a golden from before names the mirror's,
+    # so the DaemonSet document is left out of the comparison on both sides.
+    # Drop this once GOLDEN_REF carries #568.
+    if prepulled and not fastimaged:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
+                side.pop(key)
+        print(f"note: the pre-pull DaemonSet names the llm-d-fast/ runtime image on this side (#568) and not on {ref}: its document is left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):

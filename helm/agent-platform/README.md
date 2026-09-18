@@ -1284,6 +1284,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kserve-llmisvc-resources.kserve.createSharedResources | bool | `false` |  |
 | kserve-llmisvc-resources.kserve.llmisvc.createGIECRDs | bool | `true` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.enabled | bool | `true` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/"` |  |
 | kserve-runtime-configs.kserve.servingruntime.enabled | bool | `false` |  |
 | gpu-operator.driver.enabled | bool | `false` |  |
 | gpu-operator.toolkit.enabled | bool | `false` |  |
@@ -1333,7 +1334,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
 | modelServing.prepull.enabled | bool | `true` |  |
-| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-cuda:v0.8.0"` |  |
+| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
 | modelServing.prepull.nodeSelector."karpenter.k8s.aws/instance-gpu-manufacturer" | string | `"nvidia"` |  |
 | modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |
 | modelServing.prepull.pauseImage.registry | string | `"gsoci.azurecr.io"` |  |
