@@ -154,6 +154,41 @@ Usage: include "agent-platform.modelServing.poolScheduling" (dict "root" $ "tole
 {{- end -}}
 
 {{/*
+The ClusterServingRuntimes the chart renders (templates/model-serving/
+clusterservingruntime.yaml), as a JSON object with one key, runtimes — the
+list: the default (modelServing.runtime) first, then every modelServing.additionalRuntimes entry in order
+(giantswarm/agent-platform#550), each deep-merged over the default's values so
+a field the entry leaves unset is the default's — a mapping field by field, a
+list (args, env, tolerations, supportedModelFormats) whole; Helm's merge keeps
+the default where the entry's value is empty. name is required, a DNS-1123
+subdomain, and unique across the default and the list.
+Usage: $runtimes := (include "agent-platform.modelServing.runtimes" . | fromJson).runtimes
+*/}}
+{{- define "agent-platform.modelServing.runtimes" -}}
+{{- $default := .Values.modelServing.runtime -}}
+{{- $out := list $default -}}
+{{- $names := list $default.name -}}
+{{- range $i, $entry := .Values.modelServing.additionalRuntimes -}}
+{{- if not (kindIs "map" $entry) -}}
+{{- fail (printf "modelServing.additionalRuntimes[%d]: a runtime is a mapping with a name" $i) -}}
+{{- end -}}
+{{- $name := get $entry "name" | default "" | toString -}}
+{{- if not $name -}}
+{{- fail (printf "modelServing.additionalRuntimes[%d]: name is required" $i) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$" $name) -}}
+{{- fail (printf "modelServing.additionalRuntimes[%d]: name %q must be a lowercase DNS-1123 subdomain (it names the ClusterServingRuntime a preset selects with spec.runtime)" $i $name) -}}
+{{- end -}}
+{{- if has $name $names -}}
+{{- fail (printf "modelServing.additionalRuntimes[%d]: runtime %q is rendered already (modelServing.runtime and every entry need a name of their own)" $i $name) -}}
+{{- end -}}
+{{- $names = append $names $name -}}
+{{- $out = append $out (mergeOverwrite (deepCopy $default) $entry) -}}
+{{- end -}}
+{{- dict "runtimes" $out | toJson -}}
+{{- end -}}
+
+{{/*
 Labels of every object the wiring renders.
 */}}
 {{- define "agent-platform.modelServing.labels" -}}
