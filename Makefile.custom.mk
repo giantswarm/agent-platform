@@ -3561,6 +3561,13 @@ verify-images: ## Assert every image reference in the rendered defaults of both 
 	@python3 tests/verify-images.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-substrate-images
+verify-substrate-images: ## Assert values.yaml's substrate.images — the meta chart's gsoci pins of the substrate chart's third-party image defaults (the bundled database, the bundled store, the atenet agentgateway build; giantswarm/agent-platform#575, #580) — hold for every Substrate release components.substrate.versionRange admits: each pin carries the release default's digest (or its tag) under gsoci.azurecr.io and names a key the release knows; the release rendered with the values the meta chart forwards, the bundled store and database on, runs no third-party image off gsoci; images.awsCli is forwarded at the chart's own value on purpose (the bucket-init Job's pod template is immutable) and must stay so until the line's Job can be recreated. Network: ghcr.io (the substrate charts). Needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-substrate-images.py $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-scenarios
 verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and the `make e2e` values overlay (tests/e2e_overlay.py) offline: the kind and eks defaults, every refusal naming its variable, the derived muster base URL, the base-URL --set, and the overlay's shapes.
 	@echo "====> $@"

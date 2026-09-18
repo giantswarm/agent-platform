@@ -242,9 +242,18 @@ def check_golden(meta: str, connectivity: str) -> None:
         # defaults do not (both charts mirror the block). Dropped once GOLDEN_REF
         # carries the switch.
         hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
+        # The hold for the substrate chart's third-party image defaults pinned to
+        # gsoci in the forwarded block (#575, #580; values.yaml substrate.images):
+        # the same four keys on both sides, meta renders only (the connectivity
+        # chart forwards nothing of the block itself). Dropped once GOLDEN_REF
+        # carries them.
+        hold_images = ["--set", "substrate.images.postgres=gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15",
+                       "--set", "substrate.images.rustfs=gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358",
+                       "--set", "substrate.images.awsCli=amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73",
+                       "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway:v1.5.1-gs.4"]
         shapes = [
-            ("meta default", meta, [*hold_580, *METRIC_LABELS_HOLD, *hold_iv]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_580, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("meta default", meta, [*hold_580, *METRIC_LABELS_HOLD, *hold_iv, *hold_images]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_580, *METRIC_LABELS_HOLD, *hold_iv, *hold_images]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv]),
