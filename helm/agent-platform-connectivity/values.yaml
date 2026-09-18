@@ -3125,17 +3125,24 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     # The images to keep present, as full references. The default is the
     # runtime image of the well-known LLMInferenceServiceConfig every served
-    # model composes from: the kserve-runtime-configs chart (giantswarm/kserve)
-    # names it, and its kserve.llmisvcConfigs.imageRegistry mirrors it to
-    # gsoci — this chart has no other value for that image, so the reference
-    # is pinned here and follows that chart's line: a re-pin there moves it
-    # here, never ahead (a newer tag pre-pulled is a tag no predictor runs). A
-    # list of plain references on purpose: Renovate's image managers read
-    # registry/repository/tag blocks, and a bump ahead of the runtime configs
-    # would pre-pull the wrong image. Empty with enabled: true fails the
-    # render.
+    # model composes from, at the prefix the serving slice passes to the
+    # kserve-runtime-configs chart (giantswarm/kserve) as
+    # kserve.llmisvcConfigs.imageRegistry: the llm-d-fast/ set giantswarm/llm-d
+    # publishes beside its byte-identical mirror — the same image re-layered
+    # (zstd, layers of at most 1.2 GB), which containerd pulls over several
+    # streams instead of the one stream the mirror's 5.5 GB layer bounded to
+    # about 60 MB/s (giantswarm/agent-platform#568). This chart has no other
+    # value for that image, so the reference is pinned here and follows that
+    # chart's line and prefix: a re-pin there moves it here, never ahead (a
+    # newer tag pre-pulled is a tag no predictor runs), and an installation
+    # that sets another prefix there — gsoci.azurecr.io/giantswarm/ for the
+    # byte-identical mirror, ghcr.io/llm-d/ for upstream — sets the matching
+    # reference here. A list of plain references on purpose: Renovate's image
+    # managers read registry/repository/tag blocks, and a bump ahead of the
+    # runtime configs would pre-pull the wrong image. Empty with enabled: true
+    # fails the render.
     images:
-      - gsoci.azurecr.io/giantswarm/llm-d-cuda:v0.8.0
+      - gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0
     # The nodes. Karpenter labels every node of a GPU instance type with its
     # accelerator's manufacturer (a fractional-GPU type such as g6f carries it
     # too); the pool's own label (gpuPool.nodeSelector) is merged under this

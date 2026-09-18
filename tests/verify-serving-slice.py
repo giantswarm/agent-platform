@@ -11,8 +11,9 @@ property the slice relies on:
   release owns the controller beside it), the engine off;
 - components.kserve-runtime-configs: dependsOn kserve-llmisvc-crd, targetNamespace
   kserve (release history there too), llmisvcConfigs on and servingruntime off,
-  no registry value (the chart's gsoci default stands), the block held back from
-  the connectivity release;
+  the llm-d-fast/ prefix as imageRegistry — the same prefix the pre-pull's
+  llm-d-cuda reference carries (#568) — the block held back from the
+  connectivity release;
 - the derived KServe ingress-gateway value: kserve-resources carries
   kserve.controller.gateway.ingressGateway.kserveGateway = <namespace>/<gateway>,
   a differing copy of the operator's fails the render naming both;
@@ -86,6 +87,9 @@ VM = ["--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
 INSTALLATION = ["--namespace", "agent-platform", "--set", "global.domain=wc01.example.com", "--set", "global.identity.issuerUrl=https://dex.mc.example.com",
                 "--set", "gatewayApi.gateway.tls.secretName=wildcard-tls"]
 SERVING = {"kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources", "kserve-runtime-configs", "agent-platform-connectivity"}
+# The prefix the slice passes to the well-known configs as imageRegistry (#568): the
+# re-layered llm-d-fast/ set. The pre-pull's runtime image carries the same prefix.
+FAST_PREFIX = "gsoci.azurecr.io/giantswarm/llm-d-fast/"
 PRESETS = ("qwen3-4b-instruct", "qwen3-8b-fp8")
 # The smallest instance of the presets' accelerator (nvidia-l4 -> g6.xlarge:
 # 4 vCPU, 16 GiB) and what a Giant Swarm node of that shape leaves a predictor
@@ -164,8 +168,7 @@ def check_profile(meta: str) -> str:
     need(rc, "  targetNamespace: agent-platform", "the kserve-runtime-configs release")
     if "storageNamespace" in rc:
         sys.exit("FAIL: the kserve-runtime-configs release targets a namespace of its own; the llm-d controller resolves the well-known configs from the LLMInferenceService's namespace and its own (the release namespace) only")
-    if "imageRegistry" in rc:
-        sys.exit("FAIL: the kserve-runtime-configs release passes a registry value; the chart's gsoci default stands (giantswarm/kserve#78)")
+    need(rc, f"      llmisvcConfigs:\n        enabled: true\n        imageRegistry: {FAST_PREFIX}", "the kserve-runtime-configs release")
     need(docs[("HelmRelease", "kserve-resources")], "            kserveGateway: agent-platform/models", "the kserve-resources release")
     conn = docs[("HelmRelease", "agent-platform-connectivity")]
     need(conn, "    runtimeClassName: nvidia", "the connectivity release")
@@ -174,7 +177,7 @@ def check_profile(meta: str) -> str:
     need(conn, "      kserve-runtime-configs:\n        enabled: true", "the connectivity release's roster")
     if "kubeConfig" in render:
         sys.exit("FAIL: the profile without the target knob renders a kubeConfig")
-    ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into the release namespace, the llm-d controller's (configs on, runtimes off, no registry, held back from connectivity); kserveGateway derived; runtimeClassName nvidia")
+    ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into the release namespace, the llm-d controller's (configs on, runtimes off, the llm-d-fast/ prefix as imageRegistry, held back from connectivity); kserveGateway derived; runtimeClassName nvidia")
 
     helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway=other/gw"],
          expect_failure="kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway (other/gw) differs")
@@ -697,7 +700,21 @@ def resource_requests(text: str, name: str) -> tuple:
     return vcpu, gib
 
 
+def check_prepull_prefix(meta: str, connectivity: str) -> None:
+    """The pre-pull's runtime image is the well-known config's llm-d-cuda at the prefix the slice passes (#568)."""
+    with open(f"{meta}/values.yaml", encoding="utf-8") as f:
+        registry = yaml.safe_load(f)["kserve-runtime-configs"]["kserve"]["llmisvcConfigs"]["imageRegistry"]
+    with open(f"{connectivity}/values.yaml", encoding="utf-8") as f:
+        images = yaml.safe_load(f)["modelServing"]["prepull"]["images"]
+    if registry != FAST_PREFIX:
+        sys.exit(f"FAIL: the kserve-runtime-configs block passes imageRegistry {registry!r}, expected the llm-d-fast/ prefix {FAST_PREFIX!r}")
+    if not images or not images[0].startswith(f"{registry}llm-d-cuda:"):
+        sys.exit(f"FAIL: modelServing.prepull.images {images} does not start with the well-known config's llm-d-cuda at the slice's imageRegistry {registry!r}: the pre-pull would warm an image no predictor runs")
+    ok(f"the pre-pull's runtime image {images[0]} is the well-known config's llm-d-cuda at the prefix the slice passes as imageRegistry ({registry})")
+
+
 def main(meta: str, connectivity: str) -> int:
+    check_prepull_prefix(meta, connectivity)
     forwarded = check_profile(meta)
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
         f.write(forwarded)
