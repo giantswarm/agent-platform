@@ -945,9 +945,10 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The four kserve charts come from one repository and move together; the
     # forwarded blocks below assume the 0.4.x key shape (createSharedResources,
-    # controller.deploymentMode), so the range holds the line. 0.4.0 is the
+    # controller.deploymentMode), so the range holds the line. 0.4.x is the
     # first line whose every image default is a gsoci reference
-    # (giantswarm/agent-platform#575).
+    # (giantswarm/agent-platform#575); from 0.4.1 the storage-initializer's
+    # resources follow kserve.storage.resources.
     versionRange: "0.4.x"
     valuesFrom: kserve-crd
     enabled: false
