@@ -597,8 +597,8 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@$(METRICS_POLICIES) /tmp/vl-on.out >/tmp/vl-on-metrics.out
 	@[ "$$(cat /tmp/vl-on-metrics.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: the policies with a frontend.metrics section are [$$(tr '\n' ' ' </tmp/vl-on-metrics.out)], not agent-platform-connectivity-metrics alone; the data plane keeps one per Gateway and drops the rest in silence"; exit 1; }
 	@awk '/^  name: agent-platform-connectivity-llm$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out | grep -q 'frontend:' && { echo "FAIL: the LLM policy carries a frontend section; the labels moved to the -metrics policy"; exit 1; } || true
-	@grep -q 'expression: source.unverifiedWorkload.serviceAccount' /tmp/vl-on.out || { echo "FAIL: no agent attribution label"; exit 1; }
-	@grep -q 'expression: source.unverifiedWorkload.namespace' /tmp/vl-on.out || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vl-on.out | grep -q '^agent=.* : source.unverifiedWorkload.serviceAccount$$' || { echo "FAIL: no agent attribution label (the source ServiceAccount behind the Substrate egress predicate; verify-metric-labels holds the expression)"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vl-on.out | grep -q '^agent_namespace=.* : source.unverifiedWorkload.namespace$$' || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
 	@echo "ok: route-type map on the LLM policy, the labels on the metrics policy"
 	@echo "--> the price ConfigMap renders and the AgentgatewayParameters references it"
 	@grep -q 'name: t-model-catalog' /tmp/vl-on.out || { echo "FAIL: no model-price ConfigMap; every cost lookup would report NoCatalog"; exit 1; }
