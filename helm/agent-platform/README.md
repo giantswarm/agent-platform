@@ -1363,7 +1363,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.cache.storageClass.parameters.throughput | string | `"500"` |  |
 | modelServing.cache.fsGroup | int | `1000` |  |
 | modelServing.policies.enabled | string | `"auto"` |  |
-| modelServing.policies.storageInitializerMemoryLimit | string | `"4Gi"` |  |
+| modelServing.policies.storageInitializerMemoryLimit | string | `"8Gi"` |  |
 | modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
 | modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
 | modelServing.policies.env[0].value | string | `"1"` |  |

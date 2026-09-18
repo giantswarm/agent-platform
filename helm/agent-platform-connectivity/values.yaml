@@ -3387,9 +3387,23 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   policies:
     enabled: auto  # auto | true | false
     # Memory limit of the KServe storage-initializer init container. The
-    # KServe default (1Gi) is OOM-killed by the Hugging Face download of a
-    # large model. Empty leaves KServe's default.
-    storageInitializerMemoryLimit: 4Gi
+    # limit holds hf_transfer's in-flight chunks and the page-cache pages of
+    # the files the initializer writes, which the kernel charges to the
+    # container's cgroup until write-back has drained them to the disk.
+    # KServe's default (1Gi) is OOM-killed by the download of an 8 GB model.
+    # 4Gi was OOM-killed on a 4 vCPU / 16 GiB node when a 9.4 GB download into
+    # the emptyDir on the node's local disk ran inside the runtime pre-pull's
+    # CPU-bound gunzip of an 8.8 GB image — the GPU appeared before the unpack
+    # had finished, load average 30, the page cache filling the node,
+    # write-back saturated, so the download's dirty pages stayed charged to
+    # the initializer (#576). The zstd re-layered runtime image (#568) ends
+    # the pre-pull before the GPU appears and removes that overlap on the L4
+    # size; 8Gi is the headroom for a download that still overlaps an unpack
+    # (a bigger model, a slower disk), not the fix. 8Gi fits the smallest
+    # curated L4 size (16 GiB: about 12 GiB for pods after the kubelet's
+    # reservations; the predictor's own request is 10Gi, and init and main
+    # containers do not run at once). Empty leaves KServe's default.
+    storageInitializerMemoryLimit: 8Gi
     # progressDeadlineSeconds of every InferenceService Deployment. The
     # Kubernetes default (600) is shorter than a first model download and
     # fires rollout-stuck alerts; 0 leaves the default.
