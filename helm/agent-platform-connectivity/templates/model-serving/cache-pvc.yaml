@@ -20,9 +20,10 @@ pool's zone, not the zone of whatever pod would have claimed it first.
 What follows from the claim not being Helm's: an uninstall or a cache.enabled
 flip leaves it — the intent of the helm.sh/resource-policy: keep it carries
 (hundreds of gigabytes of downloads outlive the release), now by construction —
-together with the serving namespace, which carries the same policy while the
-cache is on (namespace.yaml; a Helm-owned namespace took the claim down with
-it, #537); a size change is applied by the next upgrade's hook (the
+together with the serving namespace, which carries the same policy whatever
+the cache switch says (namespace.yaml, namespace.keep; a Helm-owned namespace
+took the claim down with it, #537, #565); a size change is applied by the next
+upgrade's hook (the
 StorageClass has to allow expansion; the chart's own does,
 storageclass.yaml); a change to an immutable field (storageClassName,
 accessModes, volumeName) fails the hook — and with it the release — naming the
