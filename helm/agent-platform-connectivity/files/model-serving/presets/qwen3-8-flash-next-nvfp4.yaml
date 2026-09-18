@@ -124,9 +124,19 @@ spec:
     requests:
       cpu: "4"
       memory: 48Gi
+    # The B12X stack keeps the resident weights as mlock()ed managed memory of
+    # the engine process — file-backed pages the memory cgroup charges to the
+    # container, unlike the cudaMalloc device memory other runtimes use. The
+    # limit therefore covers the resident weights (~74 GiB with the n-gram
+    # table on disk, up to the 99 GiB checkpoint if the loader keeps it) plus
+    # the runtime; the request stays at what a node shared with platform pods
+    # can grant. A 64Gi limit OOM-killed the engine core at 61 GiB of file RSS
+    # (giantswarm/agent-platform#553 follow-up). The node also needs containerd
+    # LimitMEMLOCK=infinity: the stack mlock()s every weight allocation, and a
+    # container has no CAP_IPC_LOCK (giantswarm/agent-platform#564).
     limits:
       cpu: "8"
-      memory: 64Gi
+      memory: 118Gi
   requirements:
     # The Hub's safetensors index sizes the checkpoint at 98.6 GiB
     # (make verify-preset-weights). 20 GiB of overhead: the n-gram table is
