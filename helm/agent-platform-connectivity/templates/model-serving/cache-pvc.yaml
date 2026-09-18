@@ -22,13 +22,18 @@ flip leaves it — the intent of the helm.sh/resource-policy: keep it carries
 (hundreds of gigabytes of downloads outlive the release), now by construction —
 together with the serving namespace, which carries the same policy whatever
 the cache switch says (namespace.yaml, namespace.keep; a Helm-owned namespace
-took the claim down with it, #537, #565); a size change is applied by the next
-upgrade's hook (the
-StorageClass has to allow expansion; the chart's own does,
-storageclass.yaml); a change to an immutable field (storageClassName,
-accessModes, volumeName) fails the hook — and with it the release — naming the
-field. An installation upgrading from a chart that rendered the claim as a
-release resource keeps it (the keep policy) and the hook takes its fields over
+took the claim down with it, #537, #565); an existing claim keeps its class
+and its size (#570): the hook applies the claim on the class the claim has —
+storageClassName is immutable on a claim, whatever this release renders — and
+grows it to the rendered size where that is larger (the StorageClass has to
+allow expansion; the chart's own does, storageclass.yaml) and keeps it where
+it is not (the API refuses a smaller request; a claim never shrinks); the log
+line names what was kept. A Pending claim on a class the cluster no longer has
+cannot bind: the hook fails naming the claim and the way out (delete it; the
+next upgrade applies it on the rendered class). A change to accessModes or
+volumeName fails the hook — and with it the release — naming the field. An
+installation upgrading from a chart that rendered the claim as a release
+resource keeps it (the keep policy) and the hook takes its fields over
 (--force-conflicts).
 
 The claim's class (agent-platform.modelServing.cacheClaim.storageClassName):
@@ -75,16 +80,81 @@ spec:
 
 {{- /*
 The hook's script: the claim as one JSON line (single-quoted for the shell, a
-quote in a value escaped), server-side applied under this chart's field
-manager; the log says created or present and the claim's phase.
+quote in a value escaped) with the size and — where the chart names one — the
+class as placeholders, decided against the existing claim (#570): the size is
+the larger of the claim's and the rendered one (a quantity compared in bytes;
+a claim never shrinks), the class is the claim's own (immutable), a claim
+Pending on a class the cluster lacks fails the hook naming the way out. Then
+server-side applied under this chart's field manager; the log says created or
+present, what was kept, and the claim's phase.
 */ -}}
 {{- define "agent-platform.modelServing.cacheClaim.script" -}}
 {{- $pvc := .Values.modelServing.cache.pvc -}}
 {{- $claim := include "agent-platform.modelServing.cacheClaim" . | fromYaml | toJson -}}
+{{- $claim = $claim | replace (printf "\"storage\":%s" ($pvc.size | toString | toJson)) "\"storage\":\"@@SIZE@@\"" -}}
+{{- $class := "" -}}
+{{- $hasClass := false -}}
+{{- if eq $pvc.storageClassName "-" -}}
+{{- $hasClass = true -}}
+{{- else -}}
+{{- with (include "agent-platform.modelServing.cacheClaim.storageClassName" .) -}}
+{{- $hasClass = true -}}
+{{- $class = . -}}
+{{- end -}}
+{{- end -}}
+{{- if $hasClass -}}
+{{- $claim = $claim | replace (printf "\"storageClassName\":%s" ($class | toJson)) "\"storageClassName\":\"@@CLASS@@\"" -}}
+{{- end -}}
 ns={{ include "agent-platform.modelServing.namespace" . | quote }}
 name={{ $pvc.name | quote }}
-if kubectl -n "$ns" get pvc "$name" >/dev/null 2>&1; then state=present; else state=created; fi
-printf '%s' '{{ $claim | replace "'" "'\\''" }}' \
-  | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
-echo "cache claim $ns/$name $state, $(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.status.phase}') (it Binds with its first consumer; nothing waits for it)"
+size={{ $pvc.size | toString | quote }}
+{{- if $hasClass }}
+class={{ $class | quote }}
+{{- end }}
+claim='{{ $claim | replace "'" "'\\''" }}'
+kept=""
+if kubectl -n "$ns" get pvc "$name" >/dev/null 2>&1; then
+  state=present
+  have_size=$(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.spec.resources.requests.storage}')
+  # The size grows to the rendered one and never shrinks: the larger of the two, compared in bytes (and how they relate).
+  want_size=$size
+  sized=$(awk -v have="$have_size" -v want="$want_size" '
+    function bytes(q,  n, u) {
+      if (match(q, /[A-Za-z]+$/)) { u = substr(q, RSTART); n = substr(q, 1, RSTART - 1) + 0 } else { u = ""; n = q + 0 }
+      if (u == "") return n
+      if (u == "Ki") return n * 1024; if (u == "Mi") return n * 1024 ^ 2; if (u == "Gi") return n * 1024 ^ 3
+      if (u == "Ti") return n * 1024 ^ 4; if (u == "Pi") return n * 1024 ^ 5; if (u == "Ei") return n * 1024 ^ 6
+      if (u == "k") return n * 1e3; if (u == "M") return n * 1e6; if (u == "G") return n * 1e9
+      if (u == "T") return n * 1e12; if (u == "P") return n * 1e15; if (u == "E") return n * 1e18
+      print "cache claim: unknown quantity " q > "/dev/stderr"; exit 2
+    }
+    BEGIN { h = bytes(have); w = bytes(want); print (h >= w) ? have : want, (h > w) ? "larger" : (h == w) ? "equal" : "smaller" }')
+  size=${sized% *}
+  case "${sized##* }" in
+    smaller) kept="$kept, grown from $have_size to $size" ;;
+    larger) kept="$kept, size $have_size kept ($want_size rendered; a claim never shrinks)" ;;
+  esac
+{{- if $hasClass }}
+  # The class stays as it is: storageClassName is immutable on a claim. With the flag a missing key is an error, so a claim that names no class is told from one on the empty class.
+  if have_class=$(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.spec.storageClassName}' --allow-missing-template-keys=false 2>/dev/null); then
+    case "$have_class" in
+      "$class") ;;
+      "") kept="$kept, the empty class kept"; class="" ;;
+      *)
+        if [ "$(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.status.phase}')" != Bound ] && ! kubectl get storageclass "$have_class" >/dev/null 2>&1; then
+          echo "cache claim $ns/$name is not Bound and names StorageClass $have_class, which the cluster does not have, so it cannot bind; this release renders $class. Delete the claim (kubectl -n $ns delete pvc $name; nothing is on it) and the next upgrade applies it on $class." >&2
+          exit 1
+        fi
+        kept="$kept, class $have_class kept ($class rendered; storageClassName is immutable)"; class=$have_class ;;
+    esac
+  else
+    claim=$(printf '%s' "$claim" | sed 's|,"storageClassName":"@@CLASS@@"||'); kept="$kept, no class kept (the claim names none)"
+  fi
+{{- end }}
+else
+  state=created
+fi
+claim=$(printf '%s' "$claim" | sed "s|@@SIZE@@|$size|{{ if $hasClass }}; s|@@CLASS@@|$class|{{ end }}")
+printf '%s' "$claim" | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
+echo "cache claim $ns/$name $state$kept, $(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.status.phase}') (it Binds with its first consumer; nothing waits for it)"
 {{- end -}}

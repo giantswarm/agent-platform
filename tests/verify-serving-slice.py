@@ -53,7 +53,7 @@ property the slice relies on:
   namespace kept only with the cache on took a claim an earlier slice left there
   down with it) and not with namespace.keep: false; namespace.create: false
   renders none; the claim references the chart's own StorageClass
-  (<chart>-<claim>: the EBS CSI provisioner, gp3 at 1000 MiB/s / 4000 IOPS as
+  (<chart>-<claim>-<digest>: the EBS CSI provisioner, gp3 at 500 MiB/s / 3000 IOPS as
   strings, WaitForFirstConsumer, expansion allowed, Delete, no keep policy);
   storageClass.create: false with a name references that name and renders no
   class, without a name leaves the claim on the cluster's default; a name and
@@ -65,6 +65,7 @@ Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -343,19 +344,68 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
 CACHE_JOB = ("Job", "t-model-serving-cache")
 HOOK_IDENTITY = "t-hooks"
 SERVING_NS = ("Namespace", "model-serving")
-# The claim's StorageClass, named after the chart (cluster-scoped) and the claim (#537).
-CACHE_CLASS = ("StorageClass", "agent-platform-connectivity-hf-cache")
+# The claim's StorageClass, named after the chart (cluster-scoped), the claim and a digest of
+# provisioner and parameters (#537, #570) -- both immutable on the API, so a parameter change is a new class.
+CACHE_PROVISIONER, CACHE_PARAMETERS = "ebs.csi.aws.com", {"type": "gp3", "iops": "3000", "throughput": "500"}
+
+
+def class_digest(provisioner: str, parameters: dict) -> str:
+    """The eight hex characters a default class name carries: sha256 of "<provisioner>;<key>=<value>;..." over the parameters sorted by key."""
+    spec = provisioner + "".join(f";{k}={v}" for k, v in sorted(parameters.items()))
+    return hashlib.sha256(spec.encode()).hexdigest()[:8]
+
+
+CACHE_CLASS = ("StorageClass", f"agent-platform-connectivity-hf-cache-{class_digest(CACHE_PROVISIONER, CACHE_PARAMETERS)}")
 NO_CLASS = ["--set", "modelServing.cache.storageClass.create=false"]
 # The keep annotation as rendered (the templates' comments name the policy too).
 KEEP = "    helm.sh/resource-policy: keep"
 
 
+# A stub kubectl for the hook's script (#570): STUB_SIZE describes an existing claim (empty: no claim), STUB_PHASE its phase,
+# STUB_CLASS its storageClassName (the variable unset: the claim carries no such key; empty: the empty class), STUB_SC_EXISTS
+# whether `get storageclass` finds the class, STUB_APPLIED where the applied manifest lands.
+STUB_KUBECTL = """#!/bin/sh
+case "$*" in
+  *"get pvc"*"{.spec.resources.requests.storage}"*) printf '%s' "$STUB_SIZE" ;;
+  *"get pvc"*"{.status.phase}"*) printf '%s' "$STUB_PHASE" ;;
+  *"get pvc"*"{.spec.storageClassName}"*"--allow-missing-template-keys=false"*)
+    [ -n "${STUB_CLASS+x}" ] || { echo 'error: error executing jsonpath "{.spec.storageClassName}": storageClassName is not found' >&2; exit 1; }
+    printf '%s' "$STUB_CLASS" ;;
+  *"get pvc"*) [ -n "$STUB_SIZE" ] || exit 1 ;;
+  *"get storageclass"*) [ "$STUB_SC_EXISTS" = 1 ] || exit 1 ;;
+  *"apply"*) cat > "$STUB_APPLIED" ;;
+  *) echo "stub kubectl: unexpected $*" >&2; exit 9 ;;
+esac
+"""
+
+
+def run_hook(job: str, phase: str = "", size: str = "", storage_class: str | None = None, class_exists: bool = True) -> tuple[int, dict | None, str, str]:
+    """Run the hook Job's script against the stub kubectl: (rc, the applied manifest or None, stdout, stderr). size "" is no existing claim."""
+    script = yaml.safe_load(job)["spec"]["template"]["spec"]["containers"][0]["args"][0]
+    with tempfile.TemporaryDirectory() as d:
+        stub = os.path.join(d, "kubectl")
+        with open(stub, "w", encoding="utf-8") as f:
+            f.write(STUB_KUBECTL)
+        os.chmod(stub, 0o755)
+        applied = os.path.join(d, "applied.json")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("STUB_")}
+        env.update(PATH=f"{d}:{env['PATH']}", STUB_APPLIED=applied, STUB_PHASE=phase, STUB_SIZE=size, STUB_SC_EXISTS="1" if class_exists else "0")
+        if storage_class is not None:
+            env["STUB_CLASS"] = storage_class
+        result = subprocess.run(["sh", "-eu", "-c", script], env=env, capture_output=True, text=True, check=False)
+        manifest = None
+        if os.path.exists(applied):
+            with open(applied, encoding="utf-8") as f:
+                manifest = json.load(f)
+    return result.returncode, manifest, result.stdout, result.stderr
+
+
 def applied_claim(job: str) -> dict:
-    """The claim the hook applies: the one JSON line the script pipes into kubectl."""
-    m = re.search(r"printf '%s' '(\{.*\})' \\$", job, re.M)
-    if not m:
-        sys.exit(f"FAIL: the cache claim hook pipes no JSON claim into kubectl:\n{job}")
-    return json.loads(m.group(1))
+    """The claim the hook applies where none exists yet: the script run against the stub kubectl."""
+    rc, manifest, out, err = run_hook(job)
+    if rc != 0 or not manifest or "created" not in out:
+        sys.exit(f"FAIL: the cache claim hook script does not apply the claim where none exists (rc={rc}):\n{out}\n{err}")
+    return manifest
 
 
 def check_cache(connectivity: str, base: list[str]) -> None:
@@ -367,7 +417,8 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     if not job:
         sys.exit(f"FAIL: no hook Job {CACHE_JOB[1]} in the connectivity render")
     for needle in ("    helm.sh/hook: post-install,post-upgrade", "    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded", f"      serviceAccountName: {HOOK_IDENTITY}",
-                   "kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f -", 'then state=present; else state=created; fi'):
+                   "kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f -", "state=present", "state=created",
+                   "--allow-missing-template-keys=false", "a claim never shrinks"):
         need(job, needle, "the cache claim hook")
     claim = applied_claim(job)
     meta, spec = claim["metadata"], claim["spec"]
@@ -375,13 +426,13 @@ def check_cache(connectivity: str, base: list[str]) -> None:
         sys.exit(f"FAIL: the hook applies {claim['kind']} {meta.get('namespace')}/{meta.get('name')}, not the claim hf-cache in model-serving")
     if meta["annotations"].get("helm.sh/resource-policy") != "keep" or meta["labels"].get("app.kubernetes.io/component") != "model-serving":
         sys.exit(f"FAIL: the applied claim lacks the keep policy or the model-serving component label:\n{json.dumps(meta, indent=1)}")
-    if spec != {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "500Gi"}}, "storageClassName": CACHE_CLASS[1]}:
-        sys.exit(f"FAIL: the applied claim's default spec is off (RWO, 500Gi, the chart's class {CACHE_CLASS[1]}, no volumeName expected):\n{json.dumps(spec, indent=1)}")
+    if spec != {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "100Gi"}}, "storageClassName": CACHE_CLASS[1]}:
+        sys.exit(f"FAIL: the applied claim's default spec is off (RWO, 100Gi, the chart's class {CACHE_CLASS[1]}, no volumeName expected):\n{json.dumps(spec, indent=1)}")
     role = docs.get(("ClusterRole", HOOK_IDENTITY))
     if not role or ("ServiceAccount", HOOK_IDENTITY) not in docs or ("ClusterRoleBinding", HOOK_IDENTITY) not in docs:
         sys.exit(f"FAIL: the hook identity {HOOK_IDENTITY} (ServiceAccount, ClusterRole, ClusterRoleBinding) is incomplete")
     need(role, '    resources: ["persistentvolumeclaims"]\n    verbs: ["get", "create", "patch"]', "the hook identity's ClusterRole")
-    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 500Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete")
+    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 100Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete")
 
     ns = docs.get(SERVING_NS)
     if not ns:
@@ -390,12 +441,48 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     cls = docs.get(CACHE_CLASS)
     if not cls:
         sys.exit(f"FAIL: no StorageClass {CACHE_CLASS[1]} in the connectivity render; the claim references it")
-    for needle in ('provisioner: "ebs.csi.aws.com"', '  type: "gp3"', '  iops: "4000"', '  throughput: "1000"', "volumeBindingMode: WaitForFirstConsumer",
+    for needle in ('provisioner: "ebs.csi.aws.com"', '  type: "gp3"', '  iops: "3000"', '  throughput: "500"', "volumeBindingMode: WaitForFirstConsumer",
                    "allowVolumeExpansion: true", "reclaimPolicy: Delete", "app.kubernetes.io/component: model-serving"):
         need(cls, needle, "the claim's StorageClass")
     if KEEP in cls:
         sys.exit(f"FAIL: the claim's StorageClass carries a resource policy; the claim is the durable object, the class goes with the release:\n{cls}")
-    ok(f"with the cache on the serving namespace is kept (helm.sh/resource-policy: keep) and the claim's StorageClass {CACHE_CLASS[1]} renders: ebs.csi.aws.com, gp3 at 1000 MiB/s / 4000 IOPS as strings, WaitForFirstConsumer, expansion allowed, Delete, Helm-owned")
+    ok(f"with the cache on the serving namespace is kept (helm.sh/resource-policy: keep) and the claim's StorageClass {CACHE_CLASS[1]} renders: ebs.csi.aws.com, gp3 at 500 MiB/s / 3000 IOPS as strings, WaitForFirstConsumer, expansion allowed, Delete, Helm-owned; its name carries the digest of provisioner and parameters")
+
+    # An existing claim keeps its class and its size (#570): the hook's script against the stub kubectl.
+    old = "agent-platform-connectivity-hf-cache"
+    rc, kept, out, err = run_hook(job, "Bound", "500Gi", old)
+    if rc != 0 or kept["spec"] != {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "500Gi"}}, "storageClassName": old} \
+            or "present" not in out or "size 500Gi kept" not in out or f"class {old} kept" not in out:
+        sys.exit(f"FAIL: a Bound 500Gi claim on the former class should be applied as it is, the log naming what was kept (rc={rc}):\n{json.dumps(kept, indent=1)}\n{out}\n{err}")
+    rc, grown, out, err = run_hook(job, "Bound", "50Gi", CACHE_CLASS[1])
+    if rc != 0 or grown["spec"]["resources"]["requests"]["storage"] != "100Gi" or grown["spec"]["storageClassName"] != CACHE_CLASS[1] or "grown from 50Gi to 100Gi" not in out:
+        sys.exit(f"FAIL: a smaller claim on the rendered class should be grown to the rendered size (rc={rc}):\n{json.dumps(grown, indent=1)}\n{out}\n{err}")
+    rc, same, out, err = run_hook(job, "Bound", "107374182400", CACHE_CLASS[1])
+    if rc != 0 or same["spec"]["resources"]["requests"]["storage"] != "107374182400" or "kept" in out or "grown" in out:
+        sys.exit(f"FAIL: an equal size in another spelling should be applied as it is and reported as nothing (rc={rc}):\n{json.dumps(same, indent=1)}\n{out}\n{err}")
+    rc, pending, out, err = run_hook(job, "Pending", "500Gi", old, class_exists=False)
+    if rc == 0 or pending is not None or "cannot bind" not in err or f"delete pvc hf-cache" not in err or CACHE_CLASS[1] not in err:
+        sys.exit(f"FAIL: a Pending claim on a class the cluster lacks should fail the hook naming the claim, the way out and the rendered class (rc={rc}):\n{out}\n{err}")
+    rc, other, out, err = run_hook(job, "Pending", "100Gi", "gp3")
+    if rc != 0 or other["spec"]["storageClassName"] != "gp3" or "class gp3 kept" not in out:
+        sys.exit(f"FAIL: a Pending claim on a class the cluster has should keep it (rc={rc}):\n{json.dumps(other, indent=1)}\n{out}\n{err}")
+    rc, none, out, err = run_hook(job, "Bound", "1Ti", None)
+    if rc != 0 or "storageClassName" in none["spec"] or none["spec"]["resources"]["requests"]["storage"] != "1Ti" or "no class kept" not in out:
+        sys.exit(f"FAIL: a claim without a storageClassName should be applied without one, its 1Ti kept (rc={rc}):\n{json.dumps(none, indent=1)}\n{out}\n{err}")
+    rc, empty, out, err = run_hook(job, "Bound", "100Gi", "")
+    if rc != 0 or empty["spec"].get("storageClassName") != "" or "the empty class kept" not in out:
+        sys.exit(f"FAIL: a claim on the empty class should keep it (rc={rc}):\n{json.dumps(empty, indent=1)}\n{out}\n{err}")
+    ok("an existing claim keeps its class and its size: a Bound 500Gi claim on the former class is applied as it is (both kept, the log says so); a smaller one on the rendered class "
+       "is grown to 100Gi; an equal size in another spelling passes silently; a Pending claim on a class the cluster lacks fails naming the claim, the way out and the rendered class; "
+       "a Pending claim on a class the cluster has, a claim without a class and one on the empty class keep theirs")
+
+    # A parameter change renders a new class -- the API forbids changing a class's parameters -- and the claim references it (#570).
+    retiered = documents(helm(connectivity, [*base, "--set", "modelServing.cache.storageClass.parameters.throughput=1000"]))
+    retiered_name = f"agent-platform-connectivity-hf-cache-{class_digest(CACHE_PROVISIONER, {**CACHE_PARAMETERS, 'throughput': '1000'})}"
+    if ("StorageClass", retiered_name) not in retiered or CACHE_CLASS in retiered or applied_claim(retiered[CACHE_JOB])["spec"]["storageClassName"] != retiered_name:
+        sys.exit(f"FAIL: a parameter change should render the class under a new name ({retiered_name}) and the claim reference it: {sorted(k for k in retiered if k[0] == 'StorageClass')}, {applied_claim(retiered[CACHE_JOB])['spec']}")
+    need(retiered[("StorageClass", retiered_name)], '  throughput: "1000"', "the re-tiered StorageClass")
+    ok(f"a parameter change renders the class under a new digest name ({retiered_name}), the former ({CACHE_CLASS[1]}) gone, and the applied claim references the new one")
 
     knobs = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.pvc.storageClassName=gp3", "--set", "modelServing.cache.pvc.size=1Ti",
                                           "--set", "modelServing.cache.pvc.volumeName=nvme-0", "--set", "modelServing.cache.pvc.accessModes[0]=ReadWriteMany"]))

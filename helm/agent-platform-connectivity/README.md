@@ -1445,7 +1445,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.cache.enabled | bool | `true` |  |
 | modelServing.cache.pvc.name | string | `"hf-cache"` |  |
 | modelServing.cache.pvc.existingClaim | string | `""` |  |
-| modelServing.cache.pvc.size | string | `"500Gi"` |  |
+| modelServing.cache.pvc.size | string | `"100Gi"` |  |
 | modelServing.cache.pvc.storageClassName | string | `""` |  |
 | modelServing.cache.pvc.volumeName | string | `""` |  |
 | modelServing.cache.pvc.accessModes[0] | string | `"ReadWriteOnce"` |  |
@@ -1453,8 +1453,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.cache.storageClass.name | string | `""` |  |
 | modelServing.cache.storageClass.provisioner | string | `"ebs.csi.aws.com"` |  |
 | modelServing.cache.storageClass.parameters.type | string | `"gp3"` |  |
-| modelServing.cache.storageClass.parameters.iops | string | `"4000"` |  |
-| modelServing.cache.storageClass.parameters.throughput | string | `"1000"` |  |
+| modelServing.cache.storageClass.parameters.iops | string | `"3000"` |  |
+| modelServing.cache.storageClass.parameters.throughput | string | `"500"` |  |
 | modelServing.cache.fsGroup | int | `1000` |  |
 | modelServing.policyException.enabled | bool | `true` |  |
 | modelServing.policies.enabled | string | `"auto"` |  |

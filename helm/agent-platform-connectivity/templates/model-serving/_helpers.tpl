@@ -87,7 +87,22 @@ chart like the serving ClusterPolicies.
 */}}
 {{- define "agent-platform.modelServing.cacheStorageClass.name" -}}
 {{- $cache := .Values.modelServing.cache -}}
-{{- $cache.storageClass.name | default (printf "%s-%s" (include "name" .) $cache.pvc.name) -}}
+{{- $cache.storageClass.name | default (printf "%s-%s-%s" (include "name" .) $cache.pvc.name (include "agent-platform.modelServing.cacheStorageClass.digest" .)) -}}
+{{- end -}}
+
+{{- /*
+The digest a default class name carries (giantswarm/agent-platform#570): eight
+hex characters of the provisioner and its parameters (sorted, key=value), so the
+class is named by what the API forbids changing on it. A parameter change renders
+a new class; the old Helm-owned one goes with the upgrade instead of failing it
+on a forbidden update. A name set in storageClass.name carries none: the
+operator owns it.
+*/ -}}
+{{- define "agent-platform.modelServing.cacheStorageClass.digest" -}}
+{{- $sc := .Values.modelServing.cache.storageClass -}}
+{{- $spec := $sc.provisioner | toString -}}
+{{- range $k, $v := $sc.parameters }}{{- $spec = printf "%s;%s=%s" $spec $k (toString $v) -}}{{ end -}}
+{{- $spec | sha256sum | trunc 8 -}}
 {{- end -}}
 
 {{/*
