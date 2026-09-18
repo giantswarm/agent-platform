@@ -46,7 +46,7 @@ postgres:
   vector:
     enabled: true
     extensionImage:
-      reference: ghcr.io/cloudnative-pg/pgvector:0.8.0-17-bookworm
+      reference: gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
 # muster-direct: this case exercises the store, not routing.
 ingress:

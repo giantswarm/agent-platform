@@ -7,8 +7,8 @@ operator:
   # -- The Flux Operator image. The tag is the operator release
   # (appVersion in Chart.yaml); Renovate tracks it as a docker image pin.
   image:
-    registry: ghcr.io
-    repository: controlplaneio-fluxcd/flux-operator
+    registry: gsoci.azurecr.io
+    repository: giantswarm/flux-operator
     tag: v0.60.0
     pullPolicy: IfNotPresent
   # -- Pull secrets for the operator image, in the release namespace

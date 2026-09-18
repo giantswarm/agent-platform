@@ -15,7 +15,13 @@ of the pod — init, sidecar, main — that matches imageReferences and leaves t
 others alone; with mutateDigest the verified tag is replaced by its digest, so
 the kubelet runs exactly what was verified. The references and the attestor
 entries are passed through as written, the entries as one attestor set with
-count 1: a signature of any one trusted signer admits the image. Rendered where
+count 1: a signature of any one trusted signer admits the image. `type` names
+the signature format Kyverno looks for — SigstoreBundle, the bundle cosign 3
+attaches as an OCI referrer (what the architect orb produces; the default), or
+Cosign, cosign 2's `.sig` tag — since Kyverno reads one format per rule and an
+orb-signed image verified as Cosign fails with "no signatures found"
+(giantswarm/agent-platform#575). The defaults admit every image under the
+platform's registry namespace that a Giant Swarm CircleCI pipeline signed. Rendered where
 the cache policies render — Kyverno served, modelServing.policies.enabled
 resolved — and nowhere else; the guards (templates/model-serving/validate.yaml)
 refuse an enabled block without images or attestors, a failureAction outside
@@ -56,6 +62,7 @@ spec:
       verifyImages:
         - imageReferences:
             {{- toYaml $iv.images | nindent 12 }}
+          type: {{ $iv.type }}
           mutateDigest: {{ $iv.mutateDigest }}
           required: {{ $iv.required }}
           failureAction: {{ $iv.failureAction }}

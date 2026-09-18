@@ -276,8 +276,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gitops.serviceAccountName | string | `""` |  |
 | gitops.target.kubeConfig.secretRef.name | string | `""` |  |
 | gitops.target.kubeConfig.secretRef.key | string | `""` |  |
-| gitops.hooks.image.registry | string | `"registry.k8s.io"` |  |
-| gitops.hooks.image.repository | string | `"kubectl"` |  |
+| gitops.hooks.image.registry | string | `"gsoci.azurecr.io"` |  |
+| gitops.hooks.image.repository | string | `"giantswarm/kubectl"` |  |
 | gitops.hooks.image.tag | string | `"v1.37.0"` |  |
 | gitops.hooks.helmImage.registry | string | `"docker.io"` |  |
 | gitops.hooks.helmImage.repository | string | `"alpine/k8s"` |  |
@@ -1368,8 +1368,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
 | modelServing.policies.env[0].value | string | `"1"` |  |
 | modelServing.imageVerification.enabled | bool | `false` |  |
-| modelServing.imageVerification.images | list | `[]` |  |
-| modelServing.imageVerification.attestors | list | `[]` |  |
+| modelServing.imageVerification.images[0] | string | `"gsoci.azurecr.io/giantswarm/*"` |  |
+| modelServing.imageVerification.attestors[0].keyless.issuer | string | `"https://oidc.circleci.com"` |  |
+| modelServing.imageVerification.attestors[0].keyless.subjectRegExp | string | `"^https://circleci\\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$"` |  |
+| modelServing.imageVerification.attestors[0].keyless.rekor.url | string | `"https://rekor.sigstore.dev"` |  |
+| modelServing.imageVerification.type | string | `"SigstoreBundle"` |  |
 | modelServing.imageVerification.mutateDigest | bool | `true` |  |
 | modelServing.imageVerification.required | bool | `true` |  |
 | modelServing.imageVerification.failureAction | string | `"Enforce"` |  |

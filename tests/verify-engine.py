@@ -276,7 +276,7 @@ def main(chart: str) -> int:
     dep = one(on, "Deployment", "flux-operator")
     if "app.kubernetes.io/component: helm-controller" in dep:
         fail("the operator Deployment carries the helm-controller component label the render guard looks for")
-    if f'image: "ghcr.io/controlplaneio-fluxcd/flux-operator:{op_tag}"' not in dep:
+    if f'image: "gsoci.azurecr.io/giantswarm/flux-operator:{op_tag}"' not in dep:
         fail(f"the operator Deployment does not run the pinned image tag {op_tag}")
     if 'value: "0"' not in dep or "WEB_SERVER_PORT" not in dep:
         fail("the operator's web server is not disabled (WEB_SERVER_PORT=0)")
