@@ -256,6 +256,7 @@ else:
         listed = "additionalRuntimes:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
         flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
+        flashsized = flashnext and "memory: 118Gi" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -293,6 +294,15 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: six presets quote their JSON arguments on this side (#532) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # The Flash-Next preset's memory limit covers the B12X stack's mlock()ed
+    # resident weights (giantswarm/agent-platform#567: limits.memory 118Gi, the
+    # comment in the preset says why); a golden from before carries 64Gi, so
+    # that preset document is left out of the comparison on both sides. Drop
+    # this once GOLDEN_REF carries #567.
+    if flashnext and not flashsized:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
+        print(f"note: the Flash-Next preset's memory limit is 118Gi on this side (#567) and not on {ref}: its ConfigMap is left out of the comparison")
     # The serving namespace's policies select both pod shapes — the classic
     # predictor and the LLMInferenceService workload pod — and render per shape
     # (giantswarm/agent-platform#506); a golden from before knows the classic
