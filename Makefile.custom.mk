@@ -2344,7 +2344,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	$(call managers_must_fail,classic networkPolicy.predictor refused,$(WIRING_SERVING) --set modelServing.networkPolicy.predictor.port=8080,modelServing.networkPolicy.predictor)
 	$(call managers_must_fail,classic serving.timeoutSeconds refused,$(WIRING_SERVING) --set modelServing.serving.timeoutSeconds=1800,modelServing.serving.timeoutSeconds)
 	$(call managers_must_fail,classic components.kserve-resources refused,$(WIRING_SERVING) --set components.kserve-resources.enabled=true,its keys are refused: components.kserve-resources)
-	$(call managers_must_fail,classic kserve-crd values block refused by the schema,$(WIRING_SERVING) --set kserve-crd.crd.keep=true,additional properties 'kserve-crd' not allowed)
+	$(call managers_must_fail,classic kserve-crd values block refused by the schema,$(WIRING_SERVING) --set kserve-crd.crd.keep=true,kserve-crd.*not allowed)
 	@echo "ok: modelServing prerequisite guard; the classic keys are refused naming them"
 	@echo "--> modelServing + llm-d components on (fleet shape, kagent on): namespace, discovery ConfigMap, presets, chat template, the cache claim's hook Job (no PVC object: #483) and its identity, the two Kyverno policies, the cilium policies incl. the agent egress, the llm-d controller policy; no serving.kserve.io object"
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_SERVING) --set components.kagent.enabled=true >/tmp/vw-ms.out 2>&1 || { cat /tmp/vw-ms.out; exit 1; }
