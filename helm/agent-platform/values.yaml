@@ -1411,22 +1411,37 @@ gateway:
   metricLabels:  # @schema additionalProperties: {"type": "object", "additionalProperties": false, "properties": {"expression": {"type": "string"}, "enabled": {"type": "boolean"}}}
     # Which agent made the call: the caller resolved by source IP against the
     # agentgateway controller's workload store — not cryptographic, for
-    # accounting, never authorization. The LLM usage dashboard reads both.
+    # accounting, never authorization. A kagent API v2 agent is a Substrate
+    # actor in the shared WorkerPool, and every actor connection leaves the
+    # worker through the Substrate egress (atenet-egress, a mTLS CONNECT tunnel
+    # the egress cannot add a header to), so by source IP every agent's model
+    # call is the egress pod. The kagent runtime sends the identity as request
+    # headers instead — x-kagent-agent and x-kagent-agent-namespace, the
+    # AgentTemplate's name and namespace — and the expressions read them when,
+    # and only when, the source workload is the egress
+    # (agent-platform.substrate.egressCall: its namespace and ServiceAccount
+    # from the chart's Substrate names). Every other caller keeps its
+    # ServiceAccount, so no pod relabels itself by sending the header; a call
+    # from the egress without the header reads unknown. The LLM usage dashboard
+    # and the portal's Cost page read both.
     agent:
       enabled: true
-      expression: source.unverifiedWorkload.serviceAccount
+      expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent"] : source.unverifiedWorkload.serviceAccount'
     agent_namespace:
       enabled: true
-      expression: source.unverifiedWorkload.namespace
+      expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-namespace"] : source.unverifiedWorkload.namespace'
     # The person behind the call: the identity claim the kagent controller route
     # verifies and writes into x-user-id (kagent.controller.auth.userIdClaim, a
     # bare identifier — the same knob names the claim on the managers' routes,
-    # kagent on or off).
+    # kagent on or off). An actor's model call through the Substrate egress
+    # carries no bearer: there the label is the person of the turn as the
+    # runtime sends it in x-kagent-user, read behind the same predicate as the
+    # agent labels, and unknown for a turn the runtime runs for no person.
     # An email address in Mimir is personal data, and the label multiplies the
     # verifying routes' series by the number of people: `enabled: false` drops it.
     user:
       enabled: true
-      expression: 'jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
+      expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-user"] : jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,

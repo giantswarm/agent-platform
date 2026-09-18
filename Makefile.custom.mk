@@ -691,6 +691,12 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 METRICS_POLICIES := python3 -c 'import re,sys; docs=open(sys.argv[1]).read().split("\n---\n"); [print(re.search(r"^  name: (\S+)", d, re.M).group(1)) for d in docs if "kind: AgentgatewayPolicy\n" in d and re.search(r"^  frontend:\n(?:.*\n)*?    metrics:", d, re.M)]'
 # The document of the -metrics policy, from a render.
 METRICS_DOC := awk '/^  name: agent-platform-connectivity-metrics$$/{f=1} f&&/^---/{exit} f'
+# name=expression of every label the -metrics policy adds, parsed: toYaml folds an expression longer than a line across lines, so a grep of the rendered text cannot hold one.
+METRICS_EXPRS := python3 -c 'import sys,yaml; [print(a["name"]+"="+a["expression"]) for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="AgentgatewayPolicy" and d["metadata"]["name"].endswith("-metrics") for a in d["spec"]["frontend"]["metrics"]["attributes"]["add"]]'
+# gateway.metricLabels as the meta chart forwards it to the connectivity HelmRelease, name=enabled=expression, the expression as written (the meta chart must not render it).
+META_METRIC_LABELS := python3 -c 'import sys,yaml; hr=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="HelmRelease" and d["metadata"]["name"]=="agent-platform-connectivity"][0]; [print(n+"="+str(e.get("enabled",True))+"="+e["expression"]) for n,e in sorted(hr["spec"]["values"]["gateway"]["metricLabels"].items())]'
+# The Substrate egress predicate the default expressions read the kagent runtime's identity headers behind (agent-platform.substrate.egressCall, giantswarm/agent-platform#586): the fixed Substrate namespace and the egress workload's ServiceAccount.
+EGRESS_CALL := (source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress")
 # The data plane on, no route verifying a bearer: jwt. entries are held here;
 # KAGENT_ROUTE and MANAGERS_ON + MANAGERS_ROUTES render them.
 AGW_VM := $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true
@@ -735,50 +741,58 @@ VML_SEVENTEEN = $(KAGENT_ROUTE) --set-json 'gateway.metricLabels=$(shell python3
 # A boolean-looking name, on a non-jwt expression so it renders with the data plane alone.
 VML_ON = $(AGW_VM) --set-json 'gateway.metricLabels.on={"expression":"source.unverifiedWorkload.name"}'
 .PHONY: verify-metric-labels
-verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scoped -metrics policy from gateway.metricLabels (a map — one entry off or one more without restating the rest; tpl; an entry that reads jwt. held until a route verifies a bearer), no policy with nothing enabled or in muster-direct, one template with a frontend section, the meta chart's forwarding, the retired llmRouting.metricLabels refused, the schema holding every entry's shape, the claim guard where the claim is read and silent elsewhere, and the guards.
+verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scoped -metrics policy from gateway.metricLabels (a map — one entry off or one more without restating the rest; tpl; an entry that reads jwt. held until a route verifies a bearer), the three defaults reading the kagent runtime's identity headers behind the Substrate egress predicate and nowhere else (#586), an installation's own expression replacing a default, no policy with nothing enabled or in muster-direct, one template with a frontend section, the meta chart's forwarding (the expressions as written), the retired llmRouting.metricLabels refused, the schema holding every entry's shape, the claim guard where the claim is read and silent elsewhere, and the guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> the data plane on, no route verifying a bearer: one -metrics policy on the Gateway, the two agent labels, nothing that reads jwt. — the default user entry and a custom claim are held (they would read unknown on every series)"
 	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups"}' --set-json 'gateway.metricLabels.org={"expression":"jwt[\"https://example.com/org\"]"}' >/tmp/vml-on.out 2>&1 || { cat /tmp/vml-on.out; exit 1; }
 	@$(METRICS_DOC) /tmp/vml-on.out >/tmp/vml-pol.out
 	@[ -s /tmp/vml-pol.out ] || { echo "FAIL: no agent-platform-connectivity-metrics policy with the data plane on"; exit 1; }
 	@grep -q 'kind: Gateway' /tmp/vml-pol.out && grep -q 'name: agentgateway' /tmp/vml-pol.out || { echo "FAIL: the metrics policy does not target the data-plane Gateway (frontend.metrics may target nothing else)"; exit 1; }
-	@grep -A1 '^          - name: agent$$' /tmp/vml-pol.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: no agent label"; exit 1; }
-	@grep -A1 '^          - name: agent_namespace$$' /tmp/vml-pol.out | grep -q 'expression: source.unverifiedWorkload.namespace' || { echo "FAIL: no agent_namespace label"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-on.out >/tmp/vml-exprs.out
+	@grep -qxF 'agent=$(EGRESS_CALL) ? request.headers["x-kagent-agent"] : source.unverifiedWorkload.serviceAccount' /tmp/vml-exprs.out || { echo "FAIL: the agent label is not the runtime's x-kagent-agent header behind the Substrate egress predicate, else the source ServiceAccount: $$(grep '^agent=' /tmp/vml-exprs.out)"; exit 1; }
+	@grep -qxF 'agent_namespace=$(EGRESS_CALL) ? request.headers["x-kagent-agent-namespace"] : source.unverifiedWorkload.namespace' /tmp/vml-exprs.out || { echo "FAIL: the agent_namespace label is not the runtime's x-kagent-agent-namespace header behind the Substrate egress predicate, else the source namespace: $$(grep '^agent_namespace=' /tmp/vml-exprs.out)"; exit 1; }
 	@if grep -qE 'jwt[.[]' /tmp/vml-pol.out; then echo "FAIL: a jwt label rendered with no route verifying a bearer; it would read unknown on every series"; exit 1; fi
-	@[ "$$(grep -c '^          - name: ' /tmp/vml-pol.out)" = "2" ] || { echo "FAIL: the policy does not carry exactly the two agent labels"; exit 1; }
+	@[ "$$(wc -l </tmp/vml-exprs.out | tr -d ' ')" = "2" ] || { echo "FAIL: the policy does not carry exactly the two agent labels: $$(cut -d= -f1 /tmp/vml-exprs.out | tr '\n' ' ')"; exit 1; }
+	@echo "--> the header is read behind the predicate and nowhere else: the predicate's namespace and ServiceAccount are the chart's Substrate names, and the rendered policy parses back to one line per expression"
+	@grep -q 'define "agent-platform.substrate.namespace" -}}ate-system{{' $(CONNECTIVITY_DIR)/templates/_helpers.tpl && grep -q 'define "agent-platform.substrate.egressServiceAccount" -}}atenet-egress{{' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the Substrate names the predicate is built from moved; update EGRESS_CALL and the README"; exit 1; }
+	@[ "$$(grep -c 'request.headers\[' /tmp/vml-exprs.out)" = "2" ] && ! grep -v '^[a-z_]*=$(EGRESS_CALL) ?' /tmp/vml-exprs.out | grep -q 'request.headers' || { echo "FAIL: a default expression reads a request header outside the Substrate egress predicate"; cat /tmp/vml-exprs.out; exit 1; }
 	@[ "$$($(METRICS_POLICIES) /tmp/vml-on.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: the policies with a frontend.metrics section are not agent-platform-connectivity-metrics alone"; exit 1; }
 	@echo "ok: data plane alone"
 	@echo "--> the controller route with its JWT policy: user = jwt.email and both custom claims with it — five labels, in name order"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'gateway.metricLabels.team={"expression":"jwt.groups"}' --set-json 'gateway.metricLabels.org={"expression":"jwt[\"https://example.com/org\"]"}' >/tmp/vml-route.out 2>&1 || { cat /tmp/vml-route.out; exit 1; }
 	@$(METRICS_DOC) /tmp/vml-route.out >/tmp/vml-route-pol.out
-	@grep -A1 '^          - name: user$$' /tmp/vml-route-pol.out | grep -q 'expression: jwt.email' || { echo "FAIL: the person label is not user = jwt.email with the controller route on"; exit 1; }
-	@grep -A1 '^          - name: team$$' /tmp/vml-route-pol.out | grep -q 'expression: jwt.groups' || { echo "FAIL: a custom jwt entry does not render with the controller route on"; exit 1; }
-	@grep -A1 '^          - name: org$$' /tmp/vml-route-pol.out | grep -qF 'jwt["https://example.com/org"]' || { echo "FAIL: an indexed claim entry (jwt[...]) does not render with the controller route on"; exit 1; }
-	@[ "$$(awk '/^          - name: /{printf "%s ", $$3}' /tmp/vml-route-pol.out)" = "agent agent_namespace org team user " ] || { echo "FAIL: the policy does not carry exactly agent, agent_namespace, org, team, user in name order: $$(awk '/^          - name: /{printf "%s ", $$3}' /tmp/vml-route-pol.out)"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-route.out >/tmp/vml-route-exprs.out
+	@grep -qxF 'user=$(EGRESS_CALL) ? request.headers["x-kagent-user"] : jwt.email' /tmp/vml-route-exprs.out || { echo "FAIL: the person label is not the runtime's x-kagent-user header behind the Substrate egress predicate, else jwt.email, with the controller route on: $$(grep '^user=' /tmp/vml-route-exprs.out)"; exit 1; }
+	@grep -qxF 'team=jwt.groups' /tmp/vml-route-exprs.out || { echo "FAIL: a custom jwt entry does not render with the controller route on"; exit 1; }
+	@grep -qxF 'org=jwt["https://example.com/org"]' /tmp/vml-route-exprs.out || { echo "FAIL: an indexed claim entry (jwt[...]) does not render with the controller route on"; exit 1; }
+	@[ "$$(cut -d= -f1 /tmp/vml-route-exprs.out | tr '\n' ' ')" = "agent agent_namespace org team user " ] || { echo "FAIL: the policy does not carry exactly agent, agent_namespace, org, team, user in name order: $$(cut -d= -f1 /tmp/vml-route-exprs.out | tr '\n' ' ')"; exit 1; }
 	@[ "$$($(METRICS_POLICIES) /tmp/vml-route.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: with the controller route on, the policies with a frontend.metrics section are [$$($(METRICS_POLICIES) /tmp/vml-route.out | tr '\n' ' ')], not the metrics policy alone (the route's JWT policy is a traffic policy)"; exit 1; }
 	@echo "ok: jwt entries with the controller route"
 	@echo "--> the managers' routes with their JWT policies gate it too; the expression follows the claim knob through tpl; enabled false drops an entry and keeps the rest; a renamed person label is user off plus one more entry"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) >/tmp/vml-managers.out 2>&1 || { cat /tmp/vml-managers.out; exit 1; }
-	@$(METRICS_DOC) /tmp/vml-managers.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: the managers' JWT routes do not render the person label; their series carry the claim too"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-managers.out | grep -qxF 'user=$(EGRESS_CALL) ? request.headers["x-kagent-user"] : jwt.email' || { echo "FAIL: the managers' JWT routes do not render the person label; their series carry the claim too"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controller.auth.userIdClaim=sub >/tmp/vml-claim.out 2>&1 || { cat /tmp/vml-claim.out; exit 1; }
-	@$(METRICS_DOC) /tmp/vml-claim.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.sub' || { echo "FAIL: the user entry does not follow kagent.controller.auth.userIdClaim (its expression is a tpl of the knob)"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-claim.out | grep -qxF 'user=$(EGRESS_CALL) ? request.headers["x-kagent-user"] : jwt.sub' || { echo "FAIL: the user entry does not follow kagent.controller.auth.userIdClaim behind the predicate (its expression is a tpl of the knob)"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set kagent.controller=null >/tmp/vml-nocontroller.out 2>&1 || { cat /tmp/vml-nocontroller.out; exit 1; }
-	@$(METRICS_DOC) /tmp/vml-nocontroller.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: with the kagent.controller block deleted the user entry does not fall back to jwt.email (the expression includes the claim helper, which carries the default)"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-nocontroller.out | grep -qxF 'user=$(EGRESS_CALL) ? request.headers["x-kagent-user"] : jwt.email' || { echo "FAIL: with the kagent.controller block deleted the user entry does not fall back to jwt.email (the expression includes the claim helper, which carries the default)"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.user.enabled=false >/tmp/vml-user-off.out 2>&1 || { cat /tmp/vml-user-off.out; exit 1; }
 	@if $(METRICS_DOC) /tmp/vml-user-off.out | grep -q 'jwt\.'; then echo "FAIL: gateway.metricLabels.user.enabled=false still rendered a jwt label"; exit 1; fi
-	@$(METRICS_DOC) /tmp/vml-user-off.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: turning the person label off lost the agent labels (a map merges; the other defaults must stay)"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-user-off.out | grep -q '^agent=.* : source.unverifiedWorkload.serviceAccount$$' || { echo "FAIL: turning the person label off lost the agent labels (a map merges; the other defaults must stay)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.agent.expression=source.unverifiedWorkload.serviceAccount >/tmp/vml-own.out 2>&1 || { cat /tmp/vml-own.out; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-own.out | grep -qxF 'agent=source.unverifiedWorkload.serviceAccount' || { echo "FAIL: an installation's own agent expression does not replace the default, predicate and all"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-own.out | grep -qxF 'agent_namespace=$(EGRESS_CALL) ? request.headers["x-kagent-agent-namespace"] : source.unverifiedWorkload.namespace' || { echo "FAIL: replacing one default expression changed another (a map merges)"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.user.enabled=false --set-json 'gateway.metricLabels.person={"expression":"jwt.{{ .Values.kagent.controller.auth.userIdClaim }}"}' >/tmp/vml-person.out 2>&1 || { cat /tmp/vml-person.out; exit 1; }
-	@$(METRICS_DOC) /tmp/vml-person.out | grep -A1 '^          - name: person$$' | grep -q 'expression: jwt.email' || { echo "FAIL: a renamed person label (user off, person with the same tpl expression) does not render"; exit 1; }
-	@if $(METRICS_DOC) /tmp/vml-person.out | grep -q '^          - name: user$$'; then echo "FAIL: user still renders beside person"; exit 1; fi
-	@echo "ok: gate, tpl, toggle, rename"
+	@$(METRICS_EXPRS) /tmp/vml-person.out | grep -qxF 'person=jwt.email' || { echo "FAIL: a renamed person label (user off, person with the same tpl expression) does not render"; exit 1; }
+	@if $(METRICS_EXPRS) /tmp/vml-person.out | grep -q '^user='; then echo "FAIL: user still renders beside person"; exit 1; fi
+	@echo "ok: gate, tpl, toggle, own expression, rename"
 	@echo "--> nothing enabled, no policy — the map deleted, or the agent entries off with the user entry held; the person label alone is a policy; nothing in muster-direct"
 	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set gateway.metricLabels=null >/tmp/vml-none.out 2>&1 || { cat /tmp/vml-none.out; exit 1; }
 	@if grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vml-none.out; then echo "FAIL: a metrics policy with nothing to add rendered; the API server refuses an empty add list"; exit 1; fi
 	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) --set gateway.metricLabels.agent.enabled=false --set gateway.metricLabels.agent_namespace.enabled=false >/tmp/vml-gated.out 2>&1 || { cat /tmp/vml-gated.out; exit 1; }
 	@if grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vml-gated.out; then echo "FAIL: a metrics policy rendered with only the held user entry left and no route verifying a bearer"; exit 1; fi
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set gateway.metricLabels.agent.enabled=false --set gateway.metricLabels.agent_namespace.enabled=false >/tmp/vml-useronly.out 2>&1 || { cat /tmp/vml-useronly.out; exit 1; }
-	@$(METRICS_DOC) /tmp/vml-useronly.out | grep -A1 '^          - name: user$$' | grep -q 'expression: jwt.email' || { echo "FAIL: the person label alone renders no policy"; exit 1; }
-	@[ "$$($(METRICS_DOC) /tmp/vml-useronly.out | grep -c '^          - name: ')" = "1" ] || { echo "FAIL: the agent entries rendered although disabled"; exit 1; }
+	@$(METRICS_EXPRS) /tmp/vml-useronly.out | grep -qxF 'user=$(EGRESS_CALL) ? request.headers["x-kagent-user"] : jwt.email' || { echo "FAIL: the person label alone renders no policy"; exit 1; }
+	@[ "$$($(METRICS_EXPRS) /tmp/vml-useronly.out | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: the agent entries rendered although disabled"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vml-direct.out 2>&1 || { cat /tmp/vml-direct.out; exit 1; }
 	@if grep -q 'frontend:' /tmp/vml-direct.out; then echo "FAIL: a metrics policy rendered in muster-direct, where there is no data plane"; exit 1; fi
 	@echo "ok: empty, held-only, person-only, muster-direct"
@@ -813,10 +827,9 @@ verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scop
 	$(call vml_must_fail,more than 16 enabled entries,VML_SEVENTEEN,the AgentgatewayPolicy CRD takes at most 16)
 	@echo "--> the meta chart forwards the map — one entry off, the tpl expression as written for the connectivity release to render — and its schema refuses the retired llmRouting.metricLabels"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gateway.metricLabels.user.enabled=false >/tmp/vml-meta.out 2>&1 || { cat /tmp/vml-meta.out; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' /tmp/vml-meta.out >/tmp/vml-meta-conn.out
-	@grep -A2 '^        user:$$' /tmp/vml-meta-conn.out | grep -q 'enabled: false' || { echo "FAIL: gateway.metricLabels.user.enabled does not reach the connectivity HelmRelease"; exit 1; }
-	@grep -A2 '^        user:$$' /tmp/vml-meta-conn.out | grep -qF 'include "agent-platform.kagent.userIdClaim"' || { echo "FAIL: the user entry's tpl expression does not reach the connectivity HelmRelease as written (the meta chart must not render it)"; exit 1; }
-	@grep -A2 '^        agent:$$' /tmp/vml-meta-conn.out | grep -q 'expression: source.unverifiedWorkload.serviceAccount' || { echo "FAIL: gateway.metricLabels.agent does not reach the connectivity HelmRelease"; exit 1; }
+	@$(META_METRIC_LABELS) /tmp/vml-meta.out >/tmp/vml-meta-labels.out
+	@grep -qxF 'user=False={{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-user"] : jwt.{{ include "agent-platform.kagent.userIdClaim" . }}' /tmp/vml-meta-labels.out || { echo "FAIL: gateway.metricLabels.user (enabled false, the tpl expression as written — the meta chart must not render it) does not reach the connectivity HelmRelease: $$(grep '^user=' /tmp/vml-meta-labels.out)"; exit 1; }
+	@grep -qxF 'agent=True={{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent"] : source.unverifiedWorkload.serviceAccount' /tmp/vml-meta-labels.out || { echo "FAIL: gateway.metricLabels.agent does not reach the connectivity HelmRelease as written: $$(grep '^agent=' /tmp/vml-meta-labels.out)"; exit 1; }
 	@if helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set 'llmRouting.metricLabels[0].name=agent' --set 'llmRouting.metricLabels[0].expression=x' >/tmp/vml-retired.out 2>&1; then \
 		echo "FAIL: the meta chart accepted llmRouting.metricLabels; the value would reach the connectivity release and be refused there on every installation"; exit 1; \
 	elif ! grep -q "values don't meet the specifications of the schema" /tmp/vml-retired.out || ! grep -q "metricLabels" /tmp/vml-retired.out; then \
