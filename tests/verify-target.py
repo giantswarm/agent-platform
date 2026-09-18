@@ -196,32 +196,16 @@ def check_golden(meta: str, connectivity: str) -> None:
         # comparison (giantswarm/agent-platform#455 and #530 for the one that
         # narrowed it asymmetrically and broke the target). A NEW intended
         # difference gets its hold back, applied to BOTH sides and with the key
-        # named, and is dropped again once GOLDEN_REF carries it — the cache
-        # claim's StorageClass and the model pods' env (#537, #542) are the
-        # newest to have reached that point.
-        # The hold for giantswarm/agent-platform#575, applied to BOTH sides: the
-        # image defaults that moved to gsoci (the meta chart's kubectl and
-        # kubectl+helm hook images, the Flux operator image, the connectivity
-        # chart's hook images), the five kserve component ranges (0.4.x, the line
-        # whose image defaults are gsoci references) and the
-        # modelServing.imageVerification defaults the meta chart forwards (images,
-        # attestors, type). Dropped once GOLDEN_REF carries them.
-        hold_conn = ["--set", "hooks.kubectlImage.registry=gsoci.azurecr.io", "--set", "hooks.kubectlImage.repository=giantswarm/alpine-k8s",
-                     "--set", "hooks.opensslImage.registry=gsoci.azurecr.io", "--set", "hooks.opensslImage.repository=giantswarm/alpine-openssl",
-                     "--set-json", "modelServing.imageVerification.images=[]", "--set-json", "modelServing.imageVerification.attestors=[]",
-                     "--set", "modelServing.imageVerification.type=null"]
-        # The meta chart's own keys on top (the connectivity schema knows none of them).
-        hold_meta = [*hold_conn, *[f for c in ("kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources", "kserve-runtime-configs")
-                                  for f in ("--set", f"components.{c}.versionRange=0.4.x")],
-                     "--set", "gitops.hooks.image.registry=gsoci.azurecr.io", "--set", "gitops.hooks.image.repository=giantswarm/kubectl",
-                     "--set", "gitops.hooks.helmImage.registry=gsoci.azurecr.io", "--set", "gitops.hooks.helmImage.repository=giantswarm/alpine-k8s",
-                     "--set", "flux-engine.operator.image.registry=gsoci.azurecr.io", "--set", "flux-engine.operator.image.repository=giantswarm/flux-operator"]
+        # named, and is dropped again once GOLDEN_REF carries it — the image
+        # defaults' move to gsoci, the kserve 0.4.x ranges and the forwarded
+        # imageVerification defaults (#575) are the newest to have reached that
+        # point.
         shapes = [
-            ("meta default", meta, [*hold_meta]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_meta]),
-            ("connectivity default", connectivity, [*VM, *hold_conn]),
-            ("connectivity full", connectivity, [*CONN_FULL, *hold_conn]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *hold_conn]),
+            ("meta default", meta, []),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]),
+            ("connectivity default", connectivity, [*VM]),
+            ("connectivity full", connectivity, [*CONN_FULL]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
