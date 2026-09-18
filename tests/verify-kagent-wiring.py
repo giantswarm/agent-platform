@@ -210,8 +210,9 @@ def check_forwarded_block(values: dict[str, list[str]], omitted: set[str]) -> No
 
 
 def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent: str, substrate_range: str) -> None:
-    if scalar(values.get("registry", []), "registry") != "ghcr.io":
-        fail("kagent.registry is not ghcr.io (the line's images live under ghcr.io/giantswarm/kagent)")
+    if scalar(values.get("registry", []), "registry") != "gsoci.azurecr.io":
+        fail("kagent.registry is not gsoci.azurecr.io (the line's release images are copied under their upstream path, "
+             "gsoci.azurecr.io/giantswarm/kagent/<image>, giantswarm/retagger#1229; giantswarm/agent-platform#580)")
     controller = values.get("controller", [])
     for key, repo in (("image", "controller"), ("agentImage", "golang-adk")):
         if f"repository: {LINE_IMAGES}/{repo}" not in controller:
@@ -228,9 +229,9 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
              "giantswarm/agent-platform#418); the floor is 0.11.0-gs.9")
     # The worker image is the meta chart's derivation from its own Substrate pin
     # (giantswarm/agent-platform#466; tests/verify-worker-image.py holds the rule).
-    worker = re.search(r"^workerImage: ghcr\.io/giantswarm/substrate/ateom-gvisor:(\S+)$", "\n".join(values.get("substrateWorkerPool", [])), re.M)
+    worker = re.search(r"^workerImage: gsoci\.azurecr\.io/giantswarm/substrate/ateom-gvisor:(\S+)$", "\n".join(values.get("substrateWorkerPool", [])), re.M)
     if not worker:
-        fail("kagent.substrateWorkerPool.workerImage is not forwarded as ghcr.io/giantswarm/substrate/ateom-gvisor:<the floor of "
+        fail("kagent.substrateWorkerPool.workerImage is not forwarded as gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:<the floor of "
              "components.substrate.versionRange>; the chart derives the worker from its own Substrate pin so the worker and the atelet "
              "are one Substrate release whatever kagent build the range admits (giantswarm/agent-platform#466)")
     if worker.group(1) != substrate_range.split()[0].lstrip(">="):

@@ -96,7 +96,7 @@ KAGENT_RANGE = ">=0.11.0-gs.16 <0.11.1-0"
 SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
 SUBSTRATE_RANGE = ">=0.0.30-gs.4 <0.0.31-0"
 SUBSTRATE_PIN = "0.0.30-gs.4"  # the range's floor, the BOM pin and the worker image's tag: the bounded golden boot (giantswarm/substrate#39, giantswarm/giantswarm#37801), the worker the fleet already ran under kagent 0.11.0-gs.20's stamp
-WORKER_IMAGE = f"ghcr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"
+WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release copied under its upstream path (giantswarm/retagger#1229)
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),

@@ -95,7 +95,7 @@ WORKER_POD = {
         "securityContext": {"runAsUser": 0, "runAsGroup": 0},
         "containers": [{
             "name": "ateom",
-            "image": "ghcr.io/giantswarm/substrate/ateom-gvisor",
+            "image": "gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor",
             "securityContext": {
                 "privileged": False,
                 "runAsUser": 0,
