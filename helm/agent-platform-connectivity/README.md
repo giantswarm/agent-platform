@@ -1457,6 +1457,12 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
 | modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
 | modelServing.policies.env[0].value | string | `"1"` |  |
+| modelServing.imageVerification.enabled | bool | `false` |  |
+| modelServing.imageVerification.images | list | `[]` |  |
+| modelServing.imageVerification.attestors | list | `[]` |  |
+| modelServing.imageVerification.mutateDigest | bool | `true` |  |
+| modelServing.imageVerification.required | bool | `true` |  |
+| modelServing.imageVerification.failureAction | string | `"Enforce"` |  |
 | modelServing.networkPolicy.predictor.port | int | `8080` |  |
 | modelServing.networkPolicy.predictor.additionalIngressNamespaces | list | `[]` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
