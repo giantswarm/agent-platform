@@ -1,0 +1,172 @@
+{{- /*
+The pre-pull DaemonSet of the serving namespace (giantswarm/agent-platform#545).
+A predictor pulls its runtime image only when its main container starts, after
+the storage-initializer has finished the weights, so on a pool scaling from zero
+the two longest steps of a cold start run one after the other — measured on a
+fresh node: weights 116 s, then 115 s for the 8.8 GB llm-d-cuda image. The
+image is the same for every served model of an installation, and a node knows
+it is a GPU node the moment it joins: this DaemonSet runs on every node
+modelServing.prepull.nodeSelector and the pool's own label (gpuPool.nodeSelector,
+merged under it) select, tolerating the pool's taint and — by default — every
+other, so it is scheduled under the node's start-up taints. One init container
+per image runs /bin/true: the kubelet pulls the image before it starts, in
+parallel with the storage-initializer, and containerd keeps it for the
+predictor, whose Pulled event then reads "already present on machine". The
+pause container keeps the pod — and with it nothing else — running.
+
+modelServing.prepull.modelPresets (giantswarm/agent-platform#551) adds the model
+images: a preset served from an OCI model image (spec.model.storageUri oci://…,
+KServe's modelcar path) has its weights pulled by containerd like any image, so
+one init container per named preset — pull-model-<preset>, on the preset's image
+as published (the registry host modelServing.modelImages.registry swaps in),
+after the runtime images — has every serving node hold the weights before the
+first serve, and the running pause pod keeps a 100 GiB image against the node's
+image garbage collection. A modelcar image is busybox-based (the README's
+contract), so /bin/true is there. A name that is not a published preset, or
+whose model is not oci://, fails the render naming it.
+
+The pods hold no GPU (no nvidia.com/gpu resource, no runtimeClassName), mount
+no ServiceAccount token, and need no network: the pull is the kubelet's, not
+the pod's, so the policy below denies them everything, in the flavor
+networkPolicy selects. They pass the fleet's restricted Pod Security Standard
+without an exception: uid 65534, no privilege escalation, every capability
+dropped, seccomp RuntimeDefault, read-only root (tests/verify-model-serving-
+policies.py holds the rendered pod to the fleet's policies).
+*/ -}}
+{{- $ms := .Values.modelServing }}
+{{- if and (include "agent-platform.modelServing.enabled" .) $ms.prepull.enabled }}
+{{- $pp := $ms.prepull }}
+{{- if not $pp.images }}
+{{- fail "modelServing.prepull.images is empty: name at least one image reference to keep present on the pool's nodes, or set modelServing.prepull.enabled: false" }}
+{{- end }}
+{{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}
+{{- $modelImages := list }}
+{{- $named := list }}
+{{- range $pp.modelPresets }}
+{{- $preset := toString . }}
+{{- if has $preset $named }}
+{{- fail (printf "modelServing.prepull.modelPresets names %q twice" $preset) }}
+{{- end }}
+{{- $named = append $named $preset }}
+{{- $entry := get $presets $preset }}
+{{- if not $entry }}
+{{- fail (printf "modelServing.prepull.modelPresets names %q, which is not a published serving preset (published: %s)" $preset (keys $presets | sortAlpha | join ", ")) }}
+{{- end }}
+{{- $resolved := include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name" $preset "entry" $entry) | fromJson }}
+{{- $uri := toString $resolved.preset.spec.model.storageUri }}
+{{- if not (hasPrefix "oci://" $uri) }}
+{{- fail (printf "modelServing.prepull.modelPresets names %q, whose model is %s: only a preset served from an OCI model image (spec.model.storageUri oci://…) has an image to pre-pull" $preset $uri) }}
+{{- end }}
+{{- $modelImages = append $modelImages (dict "preset" $preset "image" (trimPrefix "oci://" $uri)) }}
+{{- end }}
+{{- $ns := include "agent-platform.modelServing.namespace" . }}
+{{- $name := printf "%s-model-serving-prepull" (include "name" .) }}
+{{- $sched := include "agent-platform.modelServing.poolScheduling" (dict "root" . "tolerations" $pp.tolerations "nodeSelector" $pp.nodeSelector) | fromJson }}
+{{- $containerSecurity := dict "allowPrivilegeEscalation" false "readOnlyRootFilesystem" true "capabilities" (dict "drop" (list "ALL")) }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "agent-platform.modelServing.prepull.selectorLabels" . | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # The pods serve nothing: a changed image list rolls every node at once.
+      maxUnavailable: 100%
+  template:
+    metadata:
+      labels:
+        {{- include "agent-platform.modelServing.labels" . | nindent 8 }}
+        {{- include "agent-platform.modelServing.prepull.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with $sched.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sched.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        {{- range $i, $image := $pp.images }}
+        {{- /* pull-<n>-<repository's last segment>: a DNS label whatever the reference. */ -}}
+        {{- $short := regexReplaceAll "[^a-z0-9-]" ($image | splitList "/" | last | splitList "@" | first | splitList ":" | first | lower) "-" }}
+        - name: {{ printf "pull-%d-%s" $i $short | trunc 63 | trimSuffix "-" }}
+          image: {{ $image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/true"]
+          resources:
+            {{- toYaml $pp.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $containerSecurity | nindent 12 }}
+        {{- end }}
+        {{- range $modelImages }}
+        {{- /* pull-model-<preset>: a preset name is a DNS label of at most 30 characters (resolvePreset), so the name fits. */}}
+        - name: {{ printf "pull-model-%s" .preset }}
+          image: {{ .image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/true"]
+          resources:
+            {{- toYaml $pp.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $containerSecurity | nindent 12 }}
+        {{- end }}
+      containers:
+        - name: pause
+          image: {{ printf "%s/%s:%s" $pp.pauseImage.registry $pp.pauseImage.repository $pp.pauseImage.tag | quote }}
+          imagePullPolicy: IfNotPresent
+          resources:
+            {{- toYaml $pp.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $containerSecurity | nindent 12 }}
+{{- if .Values.networkPolicy.enabled }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# The pre-pull pods need no network: an empty rule per direction is Cilium's
+# default deny for the selected endpoints.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "agent-platform.modelServing.prepull.selectorLabels" . | nindent 6 }}
+  ingress:
+    - {}
+  egress:
+    - {}
+{{- else }}
+---
+# The pre-pull pods need no network: both policy types with no rule deny all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agent-platform.modelServing.prepull.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+{{- end }}
+{{- end }}
+{{- end }}

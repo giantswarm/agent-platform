@@ -65,6 +65,14 @@ SHIPPED = len(glob.glob(os.path.join(CONN, "files", "model-serving", "presets", 
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
 )
+# The runtimes list giantswarm/agent-platform#550 adds to the discovery ConfigMap,
+# cut out of the head for a golden from before it.
+RUNTIMES_BLOCK = re.compile(
+    r"      # Every ClusterServingRuntime the chart renders.*?(?=      # Defaults of every InferenceService)", re.S
+)
+
+# The model-images block of the discovery ConfigMap (#551), cut out while GOLDEN_REF predates it.
+MODEL_IMAGES_BLOCK = re.compile(r"      # Models as OCI images \(modelServing\.modelImages\).*?(?=      presets:\n)", re.S)
 
 
 def fail(msg: str) -> None:
@@ -240,6 +248,14 @@ else:
         shaped = "podShapes" in open(f"{tree}/{CONN}/templates/model-serving/_helpers.tpl", encoding="utf-8").read()
         ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         quoted = "--default-chat-template-kwargs='" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8b-fp8.yaml", encoding="utf-8").read()
+        sized = "weightsGiB: 25" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b.yaml", encoding="utf-8").read()
+        kept = "helm.sh/resource-policy: keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
+        added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
+        prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
+        evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
+        listed = "additionalRuntimes:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
+        imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
+        flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -257,6 +273,16 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: the two L4 presets are resized on this side (#502) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # Two presets declare the Hub's weight size (giantswarm/agent-platform#535:
+    # qwen3-8-27b 25 GiB, devstral-small-2 25 GiB, their descriptions say so); a
+    # golden from before carries 15 and 48, so those two preset documents are
+    # left out of the comparison on both sides. Drop this once GOLDEN_REF
+    # carries #535.
+    if not sized:
+        for name in ("qwen3-8-27b", "devstral-small-2"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: two presets declare the Hub's weight size on this side (#535) and not on {ref}: their ConfigMaps are left out of the comparison")
     # Six presets write their JSON-valued vLLM arguments as one single-quoted
     # argument, the form the llm-d runtime template's eval keeps intact
     # (giantswarm/agent-platform#532); a golden from before carries the bare
@@ -278,6 +304,33 @@ else:
             for key in [k for k in side if k[0] in policies and "model-serving" in k[1]]:
                 side.pop(key)
         print(f"note: the serving policies select both pod shapes on this side (#506) and not on {ref}: they are left out of the comparison")
+    # The preset qwen3-8-27b-l40s ships on this side (giantswarm/agent-platform#544);
+    # a golden from before has no such file, so its ConfigMap is left out of the
+    # comparison, and so is its name in the discovery ConfigMap's presets list.
+    # Drop this once GOLDEN_REF carries #544.
+    if not added:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-27b-l40s"), None)
+        head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-27b-l40s\n", "", head[DISCOVERY], flags=re.M)
+        expect("the new preset's name cut out of the discovery list once", ncuts, 1)
+        print(f"note: the preset qwen3-8-27b-l40s ships on this side (#544) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
+    # The preset qwen3-8-flash-next-nvfp4 ships on this side (giantswarm/agent-platform#553);
+    # a golden from before has no such file, so its ConfigMap is left out of the
+    # comparison, and so is its name in the discovery ConfigMap's presets list.
+    # Drop this once GOLDEN_REF carries #553.
+    if not flashnext:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
+        head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-flash-next-nvfp4\n", "", head[DISCOVERY], flags=re.M)
+        expect("the OCI preset's name cut out of the discovery list once", ncuts, 1)
+        print(f"note: the preset qwen3-8-flash-next-nvfp4 ships on this side (#553) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
+    # The serving namespace is kept while the cache is on
+    # (giantswarm/agent-platform#537) and its template's comment says so; the
+    # untainted render has the cache off, so only the comment differs, but a
+    # golden from before renders the old one — the namespace document is left
+    # out of the comparison on both sides. Drop this once GOLDEN_REF carries #537.
+    if not kept:
+        for side in (head, golden):
+            side.pop(("Namespace", "model-serving"), None)
+        print(f"note: the serving namespace is kept with the cache on this side (#537) and not on {ref}: its document is left out of the comparison")
     # The llm-d workload's ingress admits the workload's own port, 8000, instead
     # of the classic predictor's 8080 (giantswarm/agent-platform#525); a golden
     # from before renders the old port, so that one policy is left out of the
@@ -288,6 +341,40 @@ else:
                         and k[1].endswith(("-model-serving-llmisvc-workload", "-model-serving-llmisvc-workload-ingress"))]:
                 side.pop(key)
         print(f"note: the llm-d workload's ingress admits the workload's port on this side (#525) and not on {ref}: that policy is left out of the comparison")
+    # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
+    # are new documents of the serving render; a golden from before has neither,
+    # so both are left out of the comparison on both sides. Drop this once
+    # GOLDEN_REF carries #545.
+    if not prepulled:
+        for side in (head, golden):
+            for key in [k for k in side if k[1].endswith("-model-serving-prepull")]:
+                side.pop(key)
+        print(f"note: the pre-pull DaemonSet and its policy render on this side (#545) and not on {ref}: they are left out of the comparison")
+    # The classic runtime's container runs through the shell entrypoint with the
+    # llm-d template's argument grammar (giantswarm/agent-platform#549); a golden
+    # from before renders the container without a command, so the runtime
+    # document is left out of the comparison on both sides. Drop this once
+    # GOLDEN_REF carries #549.
+    if not evaled:
+        for side in (head, golden):
+            side.pop(RUNTIME, None)
+        print(f"note: the classic runtime carries the shell entrypoint on this side (#549) and not on {ref}: its document is left out of the comparison")
+    # The discovery ConfigMap publishes every runtime's name as spec.runtimes
+    # (giantswarm/agent-platform#550); a golden from before has no such block,
+    # so it is cut out of the head's document. Drop this once GOLDEN_REF
+    # carries #550.
+    if not listed:
+        head[DISCOVERY], rcuts = RUNTIMES_BLOCK.subn("", head[DISCOVERY])
+        expect("the runtimes block cut out of the discovery ConfigMap once", rcuts, 1)
+        print(f"note: the discovery ConfigMap publishes spec.runtimes on this side (#550) and not on {ref}: the block is left out of the comparison")
+    # The discovery ConfigMap publishes the model-images registry
+    # (giantswarm/agent-platform#551, spec.modelImages.registry); a golden from
+    # before has no such block, so it is cut out of the head's discovery
+    # document. Drop this once GOLDEN_REF carries #551.
+    if not imaged:
+        head[DISCOVERY], icuts = MODEL_IMAGES_BLOCK.subn("", head[DISCOVERY])
+        expect("the model-images block cut out of the discovery ConfigMap once", icuts, 1)
+        print(f"note: the discovery ConfigMap publishes the model-images registry on this side (#551) and not on {ref}: that block is left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):

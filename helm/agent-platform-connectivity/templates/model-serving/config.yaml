@@ -1,6 +1,7 @@
 {{- if (include "agent-platform.modelServing.enabled" .) }}
 {{- $ms := .Values.modelServing }}
 {{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}
+{{- $runtimes := (include "agent-platform.modelServing.runtimes" . | fromJson).runtimes }}
 # Discovery ConfigMap of the model-serving layer, read by the portal's serve
 # flow and by model-manager: where InferenceServices go, which runtime and
 # defaults they get, which cache claim to mount and where the presets are.
@@ -23,6 +24,13 @@ data:
       namespace: {{ include "agent-platform.modelServing.namespace" . }}
       # The ClusterServingRuntime a preset without a runtime of its own uses.
       runtime: {{ $ms.runtime.name }}
+      # Every ClusterServingRuntime the chart renders: the default first, then
+      # modelServing.additionalRuntimes in order; a preset names one in
+      # spec.runtime.
+      runtimes:
+        {{- range $runtimes }}
+        - {{ .name }}
+        {{- end }}
       # Defaults of every InferenceService created from a preset.
       gpuResourceName: {{ $ms.serving.gpuResourceName }}
       runtimeClassName: {{ $ms.serving.runtimeClassName | quote }}
@@ -79,6 +87,12 @@ data:
         {{- else }}
         enabled: false
         {{- end }}
+      # Models as OCI images (modelServing.modelImages): the registry host
+      # every oci:// preset's storageUri is published with — empty, as
+      # written — so a consumer that builds an image reference of its own
+      # (model-manager) uses the host the presets do.
+      modelImages:
+        registry: {{ include "agent-platform.modelServing.modelImages.registry" . | quote }}
       presets:
         namespace: {{ .Release.Namespace }}
         labelSelector: agent-platform.giantswarm.io/serving-preset=true

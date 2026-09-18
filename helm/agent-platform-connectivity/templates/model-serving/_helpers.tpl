@@ -64,6 +64,48 @@ else the claim this chart applies (cache-pvc.yaml).
 {{- end -}}
 
 {{/*
+Truthy when this chart renders the cache claim's StorageClass
+(templates/model-serving/storageclass.yaml): the claim is this chart's
+(cacheClaimManaged) and modelServing.cache.storageClass.create. Refuses a
+pvc.storageClassName next to it — two values would name the claim's class.
+*/}}
+{{- define "agent-platform.modelServing.cacheStorageClassManaged" -}}
+{{- $cache := .Values.modelServing.cache -}}
+{{- if and (include "agent-platform.modelServing.cacheClaimManaged" .) $cache.storageClass.create -}}
+{{- with $cache.pvc.storageClassName -}}
+{{- fail (printf "modelServing.cache.pvc.storageClassName (%q) and modelServing.cache.storageClass.create: true both name the cache claim's class; set storageClass.create: false to keep the named class (\"-\" is the empty class), or drop pvc.storageClassName for the class the chart renders" .) -}}
+{{- end -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+The name of the cache claim's StorageClass, rendered or referenced:
+modelServing.cache.storageClass.name, else <chart>-<claim>
+(agent-platform-connectivity-hf-cache) — cluster-scoped, so named after the
+chart like the serving ClusterPolicies.
+*/}}
+{{- define "agent-platform.modelServing.cacheStorageClass.name" -}}
+{{- $cache := .Values.modelServing.cache -}}
+{{- $cache.storageClass.name | default (printf "%s-%s" (include "name" .) $cache.pvc.name) -}}
+{{- end -}}
+
+{{/*
+The storageClassName the applied claim carries: pvc.storageClassName when set
+("-" included — the caller renders it as the empty class), else the chart's
+class when it renders one or storageClass.name names an existing one, else
+nothing (empty string = falsy): the cluster's default class.
+*/}}
+{{- define "agent-platform.modelServing.cacheClaim.storageClassName" -}}
+{{- $cache := .Values.modelServing.cache -}}
+{{- if $cache.pvc.storageClassName -}}
+{{- $cache.pvc.storageClassName -}}
+{{- else if or (include "agent-platform.modelServing.cacheStorageClassManaged" .) $cache.storageClass.name -}}
+{{- include "agent-platform.modelServing.cacheStorageClass.name" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The GPU node pool input (modelServing.gpuPool) as the scheduling it puts on a
 workload the chart renders onto the pool, as JSON:
   { "tolerations": [<the toleration of the pool taint>] | [], "nodeSelector": {...} }
@@ -112,11 +154,93 @@ Usage: include "agent-platform.modelServing.poolScheduling" (dict "root" $ "tole
 {{- end -}}
 
 {{/*
+The ClusterServingRuntimes the chart renders (templates/model-serving/
+clusterservingruntime.yaml), as a JSON object with one key, runtimes — the
+list: the default (modelServing.runtime) first, then every modelServing.additionalRuntimes entry in order
+(giantswarm/agent-platform#550), each deep-merged over the default's values so
+a field the entry leaves unset is the default's — a mapping field by field, a
+list (args, env, tolerations, supportedModelFormats) whole; Helm's merge keeps
+the default where the entry's value is empty. name is required, a DNS-1123
+subdomain, and unique across the default and the list.
+Usage: $runtimes := (include "agent-platform.modelServing.runtimes" . | fromJson).runtimes
+*/}}
+{{- define "agent-platform.modelServing.runtimes" -}}
+{{- $default := .Values.modelServing.runtime -}}
+{{- $out := list $default -}}
+{{- $names := list $default.name -}}
+{{- range $i, $entry := .Values.modelServing.additionalRuntimes -}}
+{{- if not (kindIs "map" $entry) -}}
+{{- fail (printf "modelServing.additionalRuntimes[%d]: a runtime is a mapping with a name" $i) -}}
+{{- end -}}
+{{- $name := get $entry "name" | default "" | toString -}}
+{{- if not $name -}}
+{{- fail (printf "modelServing.additionalRuntimes[%d]: name is required" $i) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$" $name) -}}
+{{- fail (printf "modelServing.additionalRuntimes[%d]: name %q must be a lowercase DNS-1123 subdomain (it names the ClusterServingRuntime a preset selects with spec.runtime)" $i $name) -}}
+{{- end -}}
+{{- if has $name $names -}}
+{{- fail (printf "modelServing.additionalRuntimes[%d]: runtime %q is rendered already (modelServing.runtime and every entry need a name of their own)" $i $name) -}}
+{{- end -}}
+{{- $names = append $names $name -}}
+{{- $out = append $out (mergeOverwrite (deepCopy $default) $entry) -}}
+{{- end -}}
+{{- dict "runtimes" $out | toJson -}}
+{{- end -}}
+
+{{/*
 Labels of every object the wiring renders.
 */}}
 {{- define "agent-platform.modelServing.labels" -}}
 {{ include "labels.common" . }}
 app.kubernetes.io/component: model-serving
+{{- end -}}
+
+{{/*
+The selector label of the pre-pull DaemonSet's pods (templates/model-serving/
+prepull.yaml, giantswarm/agent-platform#545): the DaemonSet's selector and its
+deny-all network policy match it; no model pod shape (podShapes below) and no
+policy of a shape carries it, so the pods stay outside every rule written for
+a served model.
+*/}}
+{{- define "agent-platform.modelServing.prepull.selectorLabels" -}}
+agent-platform.giantswarm.io/model-serving-prepull: "true"
+{{- end -}}
+
+{{/*
+The registry host of modelServing.modelImages.registry (giantswarm/agent-platform#551),
+validated: a host with an optional port (registry.example.com,
+registry.example.com:5000, an in-cluster Service name), no scheme, no path.
+Empty when unset: every oci:// reference is published as written.
+*/}}
+{{- define "agent-platform.modelServing.modelImages.registry" -}}
+{{- $registry := toString (dig "modelImages" "registry" "" .Values.modelServing) -}}
+{{- if and $registry (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" $registry)) -}}
+{{- fail (printf "modelServing.modelImages.registry %q must be a registry host — host or host:port, no scheme, no path; it replaces the host of every oci:// preset's storageUri, the path stays" $registry) -}}
+{{- end -}}
+{{- $registry -}}
+{{- end -}}
+
+{{/*
+The storageUri of a preset served from an OCI model image, as published: the
+reference's registry host — the segment before the first / — replaced by
+modelServing.modelImages.registry when that is set, the path, tag or digest as
+written; the reference as written when the registry is empty. A reference
+without a host (oci://<name>:<tag>) is refused: the host is what an
+installation swaps, and the pre-pull derives the image from the published form.
+Usage: include "agent-platform.modelServing.publishedOciUri" (dict "root" $ "where" $where "storageUri" $uri)
+*/}}
+{{- define "agent-platform.modelServing.publishedOciUri" -}}
+{{- $ref := trimPrefix "oci://" .storageUri -}}
+{{- if or (not (contains "/" $ref)) (hasPrefix "/" $ref) -}}
+{{- fail (printf "%s: spec.model.storageUri %q names no registry host; an OCI model image is oci://<registry>/<path>[:tag|@digest] — the host is what modelServing.modelImages.registry replaces" .where .storageUri) -}}
+{{- end -}}
+{{- $registry := include "agent-platform.modelServing.modelImages.registry" .root -}}
+{{- if $registry -}}
+{{- printf "oci://%s/%s" $registry (rest (splitList "/" $ref) | join "/") -}}
+{{- else -}}
+{{- .storageUri -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -176,8 +300,9 @@ Validates one preset and resolves it into the published form the portal and
 model-manager read: runtime defaulted to the component's, model.format to vLLM,
 resources.gpus to 1, requirements.overheadGiB to 30, and the chat template (one
 of file, content, existingConfigMap) resolved to the ConfigMap that holds it,
-with the --chat-template flag appended to args, and the GPU node pool's
-toleration and selector merged under spec.scheduling (modelServing.gpuPool).
+with the --chat-template flag appended to args, the GPU node pool's
+toleration and selector merged under spec.scheduling (modelServing.gpuPool), and
+an oci:// storageUri's registry host swapped for modelServing.modelImages.registry.
 Returns JSON:
   { "preset": <published ServingPreset>,
     "chatTemplate": { "render": bool, "name": string, "key": string, "content": string } }
@@ -214,6 +339,14 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- end -}}
 {{- if not (get $model "storageUri") -}}
 {{- fail (printf "%s: spec.model.storageUri is required" $where) -}}
+{{- end -}}
+{{- /* An OCI model image (oci://…): the registry host published is the
+       installation's (modelServing.modelImages.registry), the path kept —
+       here, so the preset ConfigMap, the pre-pull DaemonSet and every
+       consumer read one value (#551). */ -}}
+{{- $storageUri := toString (get $model "storageUri") -}}
+{{- if hasPrefix "oci://" $storageUri -}}
+{{- $_ := set $model "storageUri" (include "agent-platform.modelServing.publishedOciUri" (dict "root" $root "where" $where "storageUri" $storageUri)) -}}
 {{- end -}}
 {{- $_ := set $model "format" (get $model "format" | default "vLLM") -}}
 {{- $_ := set $spec "model" $model -}}

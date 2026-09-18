@@ -4076,6 +4076,29 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
     # build) never sees cluster APIs; turn it on for installs that want a
     # missing Flux to fail the upgrade instead of leaving pools "progressing".
     requireApi: false
+  # The PriorityClass the gpu-node-pool chart's prewarm placeholder runs at
+  # (giantswarm/agent-platform#539): the pool chart's
+  # pool.prewarm.priorityClassName defaults to this name. A pool created with
+  # prewarm (create_node_pool {prewarm: true}) launches its first node with
+  # the release — a one-shot placeholder Job holds one GPU at negative
+  # priority until the first predictor preempts it. A PriorityClass is
+  # cluster-scoped, and a pool release is delivered under Flux multi-tenancy
+  # as the organisation's tenant ServiceAccount, whose rights are namespaced
+  # (a release that renders one fails InstallFailed on it) — so the pool
+  # chart renders none and the platform's release ships the one class every
+  # pool of the installation names. Rendered with the cluster-manager
+  # component, which composes the pool releases: on in exactly one release
+  # per installation (the platform's; the serving slice never carries it), so
+  # the class has one owner. value: a whole number below the default priority
+  # 0 — any workload preempts the placeholder — and immutable on the API:
+  # change it under a new name (and point the pool chart's value at it).
+  # preemptionPolicy Never and globalDefault false are the chart's. enabled:
+  # false renders none; a placeholder pod naming a class the cluster lacks is
+  # rejected at admission and the pool comes up without a prewarmed node.
+  prewarmPriorityClass:
+    enabled: true
+    name: agent-platform-prewarm-placeholder
+    value: -1000
   # Network policy inputs; the policies render under networkPolicy (enabled +
   # flavor). Ingress: muster (MCPServer on) and the kubelet's probes. Egress:
   # DNS, this installation's Kubernetes API (the Cluster API objects, the Flux
@@ -4534,9 +4557,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # the cache PVC, the chat-template ConfigMaps and the Kyverno policies
   # target this namespace, and the portal creates InferenceServices here.
   # Created by the chart (Helm-owned) when create is true and the name
-  # differs from the release namespace. labels: e.g. a Pod Security
-  # admission level — the upstream vLLM image runs as root, and the cache
-  # init container needs root to create the per-model directory.
+  # differs from the release namespace, and KEPT (helm.sh/resource-policy:
+  # keep) while cache.enabled is on: the cache claim in it outlives the
+  # release by design, and a namespace Helm deleted took the claim and its
+  # volume down with it (#537); with the cache off the namespace goes with
+  # the release. labels: e.g. a Pod Security admission level (the upstream
+  # vLLM image runs as root; a Giant Swarm cluster's restricted profile is
+  # the policyException below).
   namespace:
     name: model-serving
     create: true
@@ -4554,10 +4581,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       name: vllm/vllm-openai
       # registry: docker.io/vllm/vllm-openai
       version: "v0.29.0"
-    # Server arguments common to every model. KServe expands {{.Name}} to
-    # the InferenceService name; a preset's args are appended by KServe.
-    # The port must stay 8080 (the probe, the metrics annotations and
-    # KServe's predictor Service assume it).
+    # Server arguments common to every model, after `vllm serve` in the
+    # container's shell entrypoint (sh -c 'eval "exec vllm serve $@"' --).
+    # KServe expands {{.Name}} to the InferenceService name and appends a
+    # preset's args; the eval re-parses them all, so a value with whitespace
+    # or JSON is single-quoted inside one argument. The port must stay 8080
+    # (the probe, the metrics annotations and KServe's predictor Service
+    # assume it).
     args:
       - --model
       - /mnt/models
@@ -4609,6 +4639,27 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Scheduling of every predictor pod of this runtime (the GPU nodes).
     nodeSelector: {}
     tolerations: []
+  # More vLLM ClusterServingRuntimes beside the default one, rendered from the
+  # same template (giantswarm/agent-platform#550) — for the models whose
+  # accelerator needs a different serving image, a hardware-specific vLLM
+  # build next to the upstream image the other presets run on. A preset
+  # selects one with spec.runtime. Each entry needs a name of its own (a name
+  # already used fails the render, naming it) and takes the default runtime's
+  # value for every field it leaves unset: image (registry, name, version),
+  # args, env, resources, shmSize, startupProbe, annotations,
+  # supportedModelFormats, nodeSelector, tolerations — a mapping field by
+  # field, a list whole (an entry's env replaces the default's, it does not
+  # extend it), an empty value inheriting too. The GPU pool's taint and label
+  # apply as on the default; the container runs through the same shell
+  # entrypoint with the entry's own base arguments, so its image must carry
+  # /bin/sh and `vllm` on PATH as well. Every runtime's name is published in
+  # the discovery ConfigMap as spec.runtimes, the default first.
+  #   - name: kserve-vllm-blackwell
+  #     image:
+  #       registry: registry.example.com
+  #       name: serving/vllm-unified-memory
+  #       version: "2026.09"
+  additionalRuntimes: []
   # Defaults for every InferenceService the portal or model-manager creates
   # from a preset. Published in the discovery ConfigMap; the chart itself
   # creates no InferenceService.
@@ -4659,6 +4710,82 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # it with the pool); empty selects no pool. Label values are strings:
     # quote a number.
     nodeSelector: {}
+  # Pre-pulling the serving runtime image on the pool's nodes
+  # (giantswarm/agent-platform#545); mirrored from the connectivity chart leaf
+  # for leaf (make verify-meta holds the two equal: the forwarded copy shadows
+  # the child's default). A predictor pulls its runtime image only
+  # when its main container starts — after the storage-initializer has
+  # finished the weights — so on a pool scaling from zero the two longest
+  # steps of a cold start run one after the other (measured on a fresh node:
+  # weights 116 s, then 115 s for the 8.8 GB llm-d-cuda image). On, a
+  # DaemonSet in the serving namespace runs on every node nodeSelector and
+  # the pool's own label (gpuPool.nodeSelector, merged under it) select: one
+  # init container per image running /bin/true, then a pause container. The
+  # kubelet pulls the images the moment the node joins, in parallel with the
+  # weights, and containerd keeps them for the predictor ("already present on
+  # machine"). The pods hold no GPU and need no network — the pull is the
+  # kubelet's, not the pod's; a deny-all network policy selects them — and
+  # pass the restricted Pod Security Standard without an exception (uid
+  # 65534, no privilege escalation, every capability dropped, seccomp
+  # RuntimeDefault, read-only root).
+  prepull:
+    enabled: true
+    # The images to keep present, as full references. The default is the
+    # runtime image of the well-known LLMInferenceServiceConfig every served
+    # model composes from: the kserve-runtime-configs chart (giantswarm/kserve)
+    # names it, and its kserve.llmisvcConfigs.imageRegistry mirrors it to
+    # gsoci — this chart has no other value for that image, so the reference
+    # is pinned here and follows that chart's line: a re-pin there moves it
+    # here, never ahead (a newer tag pre-pulled is a tag no predictor runs). A
+    # list of plain references on purpose: Renovate's image managers read
+    # registry/repository/tag blocks, and a bump ahead of the runtime configs
+    # would pre-pull the wrong image. Empty with enabled: true fails the
+    # render.
+    images:
+      - gsoci.azurecr.io/giantswarm/llm-d-cuda:v0.8.0
+    # The nodes. Karpenter labels every node of a GPU instance type with its
+    # accelerator's manufacturer (a fractional-GPU type such as g6f carries it
+    # too); the pool's own label (gpuPool.nodeSelector) is merged under this
+    # map, so a pool release runs the DaemonSet on the pool's nodes alone. A
+    # GPU node not launched by Karpenter needs the label, or another selector
+    # here. Label values are strings: quote a number.
+    nodeSelector:
+      karpenter.k8s.aws/instance-gpu-manufacturer: nvidia
+    # Tolerations after the pool's own (gpuPool.taint, rendered first, an
+    # equal entry once). The default tolerates every taint — the fleet's
+    # DaemonSet convention — so the pull starts under a node's start-up taints
+    # (Karpenter's unregistered, CAPI's uninitialized) and not once they are
+    # lifted; the DaemonSet controller adds the node-condition tolerations
+    # itself. An empty list tolerates the pool's taint alone.
+    tolerations:
+      - operator: Exists
+    # The container that keeps the pod running once the images are present:
+    # the cluster's own sandbox image, mirrored.
+    pauseImage:
+      registry: gsoci.azurecr.io
+      repository: giantswarm/pause
+      tag: "3.10.1"
+    # Requests and limits of every container of the pod: the init containers
+    # exit at once, the pause container idles. Never a GPU.
+    resources:
+      requests:
+        cpu: 5m
+        memory: 8Mi
+      limits:
+        memory: 32Mi
+    # The serving presets whose model images join the init containers, after
+    # the runtime images (giantswarm/agent-platform#551). A preset served from
+    # an OCI model image (spec.model.storageUri oci://…, KServe's modelcar
+    # path; modelImages below) has its weights pulled by containerd like any
+    # image, so a preset named here has every serving node hold them before
+    # the first serve, and the running pause pod keeps the image against the
+    # node's image garbage collection. Each name renders one init container,
+    # pull-model-<preset>, on the preset's image as published (the registry
+    # host swapped by modelImages.registry), running /bin/true like the
+    # runtime images' (a modelcar image is busybox-based, see the README). A
+    # name that is not a published preset, or whose model is not oci://,
+    # fails the render naming it.
+    modelPresets: []
   # Serving presets an install adds (ServingPreset documents, see
   # files/model-serving/serving-preset.schema.json and the README). A
   # preset with the name of a shipped one replaces it. Example:
@@ -4683,21 +4810,59 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   shippedPresets:
     enabled: true
     exclude: []
+  # Models as OCI images (giantswarm/agent-platform#551). A preset whose
+  # spec.model.storageUri is oci://<registry>/<path>[:tag|@digest] is served
+  # from a model image — KServe's modelcar path: containerd pulls the image
+  # onto the node's local disk and its /models directory is the model; no
+  # storage-initializer, no cache claim (the cache redirect rule leaves such a
+  # pod alone). A shipped preset references the canonical registry; an
+  # installation serves the same image from a registry of its own — a mirror,
+  # an in-cluster registry — by naming its host here. prepull.modelPresets
+  # above pre-pulls the named presets' images on the serving nodes.
+  modelImages:
+    # The registry host (host or host:port; no scheme, no path) every oci://
+    # preset's storageUri is published with: at render the host of every
+    # oci:// reference — a shipped preset's and a values preset's alike, the
+    # segment before the first / — is replaced by this value and the path, tag
+    # or digest kept, so a registry named here must hold the same path. An
+    # hf:// (or any other) storageUri is untouched. Empty leaves every
+    # reference as written. Published in the discovery ConfigMap as
+    # spec.modelImages.registry.
+    registry: ""
   # Hugging Face model cache: one PVC in the serving namespace with one
   # subdirectory per InferenceService, so a model downloads once and every
   # restart finds it (hours to seconds). The claim is applied by a
   # post-install/post-upgrade hook Job, not rendered as a release resource:
   # it has no consumer of its own and Binds with the first predictor that
-  # mounts it, so under a WaitForFirstConsumer StorageClass (kind's standard,
-  # AWS gp3) it stays Pending until then — as a release resource Helm's wait
-  # failed the release on it (#483). Nothing waits for it, and it outlives the
-  # release: an uninstall or a cache.enabled flip leaves it (it carries
-  # helm.sh/resource-policy: keep to say so). A size change is applied by the
-  # next upgrade's hook; an immutable field (storageClassName, accessModes,
-  # volumeName) cannot change once the claim exists. Without the Kyverno
-  # policies below the claim is still applied and published for
+  # mounts it, so under a WaitForFirstConsumer StorageClass it stays Pending
+  # until then — as a release resource Helm's wait failed the release on it
+  # (#483). Nothing waits for it, and it outlives the release: an uninstall
+  # or a cache.enabled flip leaves it (it carries helm.sh/resource-policy:
+  # keep to say so) — and the serving namespace with it, which carries the
+  # same policy while the cache is on (a Helm-owned namespace took the claim
+  # down with it, #537). An uninstall leaves the namespace, the claim and its
+  # volume (the downloads) behind, nothing else; a re-install adopts both,
+  # and the claim binds the next pool's node to the volume's zone. To remove
+  # the cache for good, delete the claim (the volume goes with it, the class
+  # below reclaims with Delete) and then the namespace. A size change is
+  # applied by the next upgrade's hook; an immutable field (storageClassName,
+  # accessModes, volumeName) cannot change once the claim exists. Without the
+  # Kyverno policies below the claim is still applied and published for
   # model-manager's pre-warm downloads, but the KServe storage-initializer
   # downloads into its ephemeral volume on every start.
+  # vLLM's cache — the torch.compile artifacts of a model, tens of seconds of
+  # work per pod, keyed by model and config inside it — is a directory of the
+  # claim's own, .vllm-cache at the claim root, shared by every model: the
+  # redirect rule mounts it on the runtime container at /mnt/vllm-cache and
+  # sets VLLM_CACHE_ROOT to that path in the same rule, so a model's next pod
+  # skips the compile (#537). It is not a model directory and the
+  # storage-initializer never touches it: the initializer's Hugging Face
+  # client creates <model>/.cache/huggingface as uid 1000, mode 755, during
+  # the download, so a cache root under /mnt/models is not writable for the
+  # runtime (another uid, gid 1000 through the fsGroup) and crash-looped
+  # every cold start (#541); the kubelet creates a missing subPath directory
+  # with the claim root's group and mode (root:1000 2775), which gid 1000
+  # writes.
   cache:
     enabled: true
     pvc:
@@ -4708,14 +4873,46 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # set, no claim is applied.
       existingClaim: ""
       size: 500Gi
-      # Empty uses the cluster's default StorageClass; "-" sets an empty
-      # class (static binding to a pre-provisioned PersistentVolume, e.g.
-      # local NVMe on the GPU node).
+      # The claim's class is the StorageClass below (storageClass.create, or
+      # storageClass.name without it). Set, this names a class of the
+      # operator's instead — "-" is the empty class (static binding to a
+      # pre-provisioned PersistentVolume, e.g. local NVMe on the GPU node) —
+      # and requires storageClass.create: false; the render refuses both.
       storageClassName: ""
       # Bind this claim to a specific pre-provisioned PersistentVolume.
       volumeName: ""
       accessModes:
         - ReadWriteOnce
+    # The claim's StorageClass. The cluster's default class is the slowest
+    # tier of its kind — the fleet's gp3 at its baseline (125 MiB/s, 3000
+    # IOPS), and a served model reads its weights at exactly that rate (8.8
+    # GiB in 71 s, #537), the storage-initializer's download writes into the
+    # same cap — so the chart renders a class of the claim's own:
+    # cluster-scoped, named <chart>-<claim> (agent-platform-connectivity-hf-cache)
+    # unless name says otherwise, volumeBindingMode WaitForFirstConsumer (the
+    # volume is provisioned in the zone of the pod that first mounts the
+    # claim, the GPU pool's), allowVolumeExpansion (a size change reaches the
+    # volume), reclaimPolicy Delete (the claim is the durable object: it
+    # outlives the release, the volume goes when the claim does). The class
+    # is Helm-owned, unlike the claim: an uninstall removes it and leaves the
+    # claim; a bound volume works on without its class, a claim still
+    # Pending binds once the next install renders the class again. The
+    # default is AWS's EBS CSI driver with a gp3 volume at 1000 MiB/s and
+    # 4000 IOPS (the driver's parameters, strings); another cloud sets
+    # provisioner and parameters to its own driver's (a per-provider default
+    # is a follow-up), create: false with name references an existing class
+    # instead and renders none, create: false without a name leaves the
+    # claim on the cluster's default class. An existing claim keeps the
+    # class it has (the field is immutable; the hook would fail naming it):
+    # create: false, name: <its class>.
+    storageClass:
+      create: true
+      name: ""
+      provisioner: ebs.csi.aws.com
+      parameters:
+        type: gp3
+        iops: "4000"
+        throughput: "1000"
     # The group every pod that mounts the claim carries as its fsGroup: the
     # Kyverno policies below set it on the model pods; model-manager's cache
     # pods (the download Job, the scan and removal pods) run as uid 1000 with
@@ -4777,10 +4974,64 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Cilium DNS proxy saw resolved for an allowed name. Widening the egress
     # instead — world on 443, the CDN's address blocks — is not the fix. An
     # installation may set env: [] to have Xet back. A mirror (HF_ENDPOINT)
-    # belongs here too, next to the fqdns that name it.
+    # belongs here too, next to the fqdns that name it. Not here:
+    # VLLM_CACHE_ROOT — the cache's redirect rule sets it on the runtime
+    # container together with the mount it names (cache, above), so the env
+    # is never set without the directory behind it.
     env:
       - name: HF_HUB_DISABLE_XET
         value: "1"
+  # Signature verification of the model pods' images at admission
+  # (giantswarm/agent-platform#552): a Kyverno verifyImages ClusterPolicy over
+  # every model pod of the serving namespace — both pod shapes; the modelcar
+  # sidecar that carries the weights, the pre-fetch init container KServe
+  # runs from the same image and the runtime container alike, since Kyverno
+  # checks every container image of the pod that matches `images`. Off by
+  # default. On, it renders where the cache policies render (policies.enabled
+  # above resolved: Kyverno served) and nowhere else; enabled with an empty
+  # images list, no attestor, a failureAction outside Enforce | Audit or an
+  # unknown key fails the render naming the key.
+  imageVerification:
+    enabled: false
+    # The image references the rule verifies (Kyverno's imageReferences): a
+    # full reference or a wildcard pattern — `*` any run of characters, across
+    # path segments, tags and digests; `?` one character. A container image
+    # matching none is left alone, so the runtime image is covered only when
+    # a pattern names its path too. Empty with enabled: true fails the render.
+    #   images:
+    #     - gsoci.azurecr.io/giantswarm/models/*
+    images: []
+    # The trusted signers, one entry each — a Kyverno attestor entry, passed
+    # through as written: keyless (issuer + subject or subjectRegExp, rekor;
+    # the fleet's CircleCI identity below), a public key (keys.publicKeys, a
+    # PEM) or certificates. Rendered as one attestor set with count 1: a
+    # signature of any one of them admits the image. Empty with enabled: true
+    # fails the render.
+    #   attestors:
+    #     - keyless:
+    #         issuer: https://oidc.circleci.com
+    #         subjectRegExp: ^https://circleci\.com/api/v2/projects/.+$
+    #         rekor:
+    #           url: https://rekor.sigstore.dev
+    #     - keys:
+    #         publicKeys: |-
+    #           -----BEGIN PUBLIC KEY-----
+    #           ...
+    #           -----END PUBLIC KEY-----
+    attestors: []
+    # Replace a verified image's tag with its digest in the pod, so the
+    # kubelet runs exactly what was verified — a tag re-pushed later cannot
+    # slip in. Kyverno also requires a digest on every verified image
+    # (verifyDigest, its default): with this false, an image must be pinned
+    # by digest in the preset itself.
+    mutateDigest: true
+    # Every image matching `images` must carry a signature an attestor
+    # accepts; false verifies the signatures it finds and admits an image
+    # without one.
+    required: true
+    # Enforce denies a pod whose image fails verification; Audit admits it
+    # and reports the failure.
+    failureAction: Enforce  # Enforce | Audit
   # Network policies of the serving namespace, rendered under networkPolicy
   # (enabled + the resolved flavor) like every other component's wiring:
   # nothing renders while networkPolicy.enabled is false. On, both flavors

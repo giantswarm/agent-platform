@@ -196,7 +196,9 @@ def check_golden(meta: str, connectivity: str) -> None:
         # comparison (giantswarm/agent-platform#455 and #530 for the one that
         # narrowed it asymmetrically and broke the target). A NEW intended
         # difference gets its hold back, applied to BOTH sides and with the key
-        # named, and is dropped again once GOLDEN_REF carries it.
+        # named, and is dropped again once GOLDEN_REF carries it — the cache
+        # claim's StorageClass and the model pods' env (#537, #542) are the
+        # newest to have reached that point.
         shapes = [
             ("meta default", meta, []),
             ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]),

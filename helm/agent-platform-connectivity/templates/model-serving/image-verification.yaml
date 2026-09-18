@@ -1,0 +1,67 @@
+{{- /*
+Signature verification of the model pods' images at admission
+(giantswarm/agent-platform#552). A model pod runs whatever the registry serves
+under its references: the modelcar sidecar that carries the weights, the
+pre-fetch init container KServe runs from the same image and the runtime
+container were admitted unverified. modelServing.imageVerification renders one
+Kyverno verifyImages ClusterPolicy over the model pods of the serving namespace
+— one rule per pod shape (_helpers.tpl, agent-platform.modelServing.podShapes;
+the shapes share no label, so each rule matches its own), Pods at CREATE and
+UPDATE: a pod's container images are among the few fields the API server lets
+an update change, so a CREATE-only rule would admit an image swapped into a
+running pod unverified (Kyverno records the verified images in an annotation
+and skips an unchanged one on update). Kyverno verifies every container image
+of the pod — init, sidecar, main — that matches imageReferences and leaves the
+others alone; with mutateDigest the verified tag is replaced by its digest, so
+the kubelet runs exactly what was verified. The references and the attestor
+entries are passed through as written, the entries as one attestor set with
+count 1: a signature of any one trusted signer admits the image. Rendered where
+the cache policies render — Kyverno served, modelServing.policies.enabled
+resolved — and nowhere else; the guards (templates/model-serving/validate.yaml)
+refuse an enabled block without images or attestors, a failureAction outside
+Enforce | Audit and an unknown key. A signature cannot be checked offline:
+tests/verify-model-serving-policies.py asserts the rendered rule's shape, and
+runs the policy through `kyverno apply` over both fixture pods, none of whose
+images match — every rule skipped, the policy accepted by Kyverno's schema.
+*/ -}}
+{{- $ms := .Values.modelServing }}
+{{- $iv := $ms.imageVerification }}
+{{- if and (include "agent-platform.modelServing.enabled" .) $iv.enabled (include "agent-platform.modelServingPolicies" .) }}
+{{- $ns := include "agent-platform.modelServing.namespace" . }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ include "name" . }}-model-serving-image-verification
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Model serving image verification
+    policies.kyverno.io/description: >-
+      Verifies the signature of every container image of a model pod in the
+      {{ $ns }} namespace that matches the configured references — the
+      modelcar sidecar carrying the weights, its pre-fetch init container, the
+      runtime — against the trusted signers, and pins a verified image to its
+      digest.
+spec:
+  # A signature check reaches the registry and, for a keyless signature,
+  # Rekor; Kyverno's default 10 s is short for a cold lookup.
+  webhookTimeoutSeconds: 30
+  background: false
+  rules:
+    {{- range $shape := (include "agent-platform.modelServing.podShapes" . | fromJsonArray) }}
+    - name: verify-model-images-{{ $shape.name }}
+      match:
+        any:
+          {{- include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "shapes" (list $shape) "operations" (list "CREATE" "UPDATE")) | trim | nindent 10 }}
+      verifyImages:
+        - imageReferences:
+            {{- toYaml $iv.images | nindent 12 }}
+          mutateDigest: {{ $iv.mutateDigest }}
+          required: {{ $iv.required }}
+          failureAction: {{ $iv.failureAction }}
+          attestors:
+            - count: 1
+              entries:
+                {{- toYaml $iv.attestors | nindent 16 }}
+    {{- end }}
+{{- end }}

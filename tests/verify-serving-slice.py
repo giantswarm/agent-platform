@@ -45,9 +45,19 @@ property the slice relies on:
 - the cache claim (giantswarm/agent-platform#483): no PersistentVolumeClaim object
   in the connectivity render -- a post-install,post-upgrade hook Job server-side
   applies hf-cache into the serving namespace (keep, the access modes, the size,
-  the class knob incl. "-", volumeName) as <release>-hooks, whose ClusterRole
-  carries get/create/patch on claims; cache.enabled: false and an existing claim
-  render neither the hook nor the identity, and the existing claim is published.
+  the class, volumeName) as <release>-hooks, whose ClusterRole carries
+  get/create/patch on claims; cache.enabled: false and an existing claim render
+  neither the hook nor the identity, and the existing claim is published.
+- what outlives the release (giantswarm/agent-platform#537): the serving
+  namespace carries helm.sh/resource-policy: keep while the cache is on and not
+  with it off; the claim references the chart's own StorageClass
+  (<chart>-<claim>: the EBS CSI provisioner, gp3 at 1000 MiB/s / 4000 IOPS as
+  strings, WaitForFirstConsumer, expansion allowed, Delete, no keep policy);
+  storageClass.create: false with a name references that name and renders no
+  class, without a name leaves the claim on the cluster's default; a name and
+  parameters reach the rendered class; pvc.storageClassName next to
+  storageClass.create: true is refused naming both; cache.enabled: false and an
+  existing claim render no class.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
@@ -330,6 +340,12 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
 
 CACHE_JOB = ("Job", "t-model-serving-cache")
 HOOK_IDENTITY = "t-hooks"
+SERVING_NS = ("Namespace", "model-serving")
+# The claim's StorageClass, named after the chart (cluster-scoped) and the claim (#537).
+CACHE_CLASS = ("StorageClass", "agent-platform-connectivity-hf-cache")
+NO_CLASS = ["--set", "modelServing.cache.storageClass.create=false"]
+# The keep annotation as rendered (the templates' comments name the policy too).
+KEEP = "    helm.sh/resource-policy: keep"
 
 
 def applied_claim(job: str) -> dict:
@@ -357,32 +373,66 @@ def check_cache(connectivity: str, base: list[str]) -> None:
         sys.exit(f"FAIL: the hook applies {claim['kind']} {meta.get('namespace')}/{meta.get('name')}, not the claim hf-cache in model-serving")
     if meta["annotations"].get("helm.sh/resource-policy") != "keep" or meta["labels"].get("app.kubernetes.io/component") != "model-serving":
         sys.exit(f"FAIL: the applied claim lacks the keep policy or the model-serving component label:\n{json.dumps(meta, indent=1)}")
-    if spec != {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "500Gi"}}}:
-        sys.exit(f"FAIL: the applied claim's default spec is off (RWO, 500Gi, the cluster's default class, no volumeName expected):\n{json.dumps(spec, indent=1)}")
+    if spec != {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "500Gi"}}, "storageClassName": CACHE_CLASS[1]}:
+        sys.exit(f"FAIL: the applied claim's default spec is off (RWO, 500Gi, the chart's class {CACHE_CLASS[1]}, no volumeName expected):\n{json.dumps(spec, indent=1)}")
     role = docs.get(("ClusterRole", HOOK_IDENTITY))
     if not role or ("ServiceAccount", HOOK_IDENTITY) not in docs or ("ClusterRoleBinding", HOOK_IDENTITY) not in docs:
         sys.exit(f"FAIL: the hook identity {HOOK_IDENTITY} (ServiceAccount, ClusterRole, ClusterRoleBinding) is incomplete")
     need(role, '    resources: ["persistentvolumeclaims"]\n    verbs: ["get", "create", "patch"]', "the hook identity's ClusterRole")
-    ok("the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 500Gi, the default class) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete")
+    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 500Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete")
 
-    knobs = documents(helm(connectivity, [*base, "--set", "modelServing.cache.pvc.storageClassName=gp3", "--set", "modelServing.cache.pvc.size=1Ti", "--set", "modelServing.cache.pvc.volumeName=nvme-0",
-                                          "--set", "modelServing.cache.pvc.accessModes[0]=ReadWriteMany"]))
+    ns = docs.get(SERVING_NS)
+    if not ns:
+        sys.exit("FAIL: no serving namespace in the connectivity render")
+    need(ns, KEEP, "the serving namespace with the cache on")
+    cls = docs.get(CACHE_CLASS)
+    if not cls:
+        sys.exit(f"FAIL: no StorageClass {CACHE_CLASS[1]} in the connectivity render; the claim references it")
+    for needle in ('provisioner: "ebs.csi.aws.com"', '  type: "gp3"', '  iops: "4000"', '  throughput: "1000"', "volumeBindingMode: WaitForFirstConsumer",
+                   "allowVolumeExpansion: true", "reclaimPolicy: Delete", "app.kubernetes.io/component: model-serving"):
+        need(cls, needle, "the claim's StorageClass")
+    if KEEP in cls:
+        sys.exit(f"FAIL: the claim's StorageClass carries a resource policy; the claim is the durable object, the class goes with the release:\n{cls}")
+    ok(f"with the cache on the serving namespace is kept (helm.sh/resource-policy: keep) and the claim's StorageClass {CACHE_CLASS[1]} renders: ebs.csi.aws.com, gp3 at 1000 MiB/s / 4000 IOPS as strings, WaitForFirstConsumer, expansion allowed, Delete, Helm-owned")
+
+    knobs = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.pvc.storageClassName=gp3", "--set", "modelServing.cache.pvc.size=1Ti",
+                                          "--set", "modelServing.cache.pvc.volumeName=nvme-0", "--set", "modelServing.cache.pvc.accessModes[0]=ReadWriteMany"]))
     spec = applied_claim(knobs[CACHE_JOB])["spec"]
     if spec != {"accessModes": ["ReadWriteMany"], "resources": {"requests": {"storage": "1Ti"}}, "storageClassName": "gp3", "volumeName": "nvme-0"}:
         sys.exit(f"FAIL: the class, size, volumeName and access-mode knobs did not reach the applied claim:\n{json.dumps(spec, indent=1)}")
-    dash = applied_claim(documents(helm(connectivity, [*base, "--set", "modelServing.cache.pvc.storageClassName=-"]))[CACHE_JOB])["spec"]
+    dash = applied_claim(documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.pvc.storageClassName=-"]))[CACHE_JOB])["spec"]
     if dash.get("storageClassName") != "":
         sys.exit(f"FAIL: storageClassName \"-\" should apply the empty class (static binding):\n{json.dumps(dash, indent=1)}")
-    ok('storageClassName, size, volumeName and accessModes reach the applied claim; "-" is the empty class')
+    ok('with storageClass.create: false, pvc.storageClassName, size, volumeName and accessModes reach the applied claim; "-" is the empty class')
+
+    helm(connectivity, [*base, "--set", "modelServing.cache.pvc.storageClassName=gp3"], expect_failure="both name the cache claim's class")
+    named = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.storageClass.name=io2-fast"]))
+    if any(kind == "StorageClass" for kind, _ in named) or applied_claim(named[CACHE_JOB])["spec"].get("storageClassName") != "io2-fast":
+        sys.exit(f"FAIL: storageClass.create: false with a name should render no class and reference io2-fast: {sorted(k for k in named if k[0] == 'StorageClass')}, {applied_claim(named[CACHE_JOB])['spec']}")
+    default_class = documents(helm(connectivity, [*base, *NO_CLASS]))
+    if any(kind == "StorageClass" for kind, _ in default_class) or "storageClassName" in applied_claim(default_class[CACHE_JOB])["spec"]:
+        sys.exit(f"FAIL: storageClass.create: false without a name should render no class and leave the claim on the cluster's default: {applied_claim(default_class[CACHE_JOB])['spec']}")
+    own = documents(helm(connectivity, [*base, "--set", "modelServing.cache.storageClass.name=fast", "--set", "modelServing.cache.storageClass.parameters.iops=16000",
+                                        "--set", "modelServing.cache.storageClass.provisioner=disk.csi.azure.com"]))
+    fast = own.get(("StorageClass", "fast"))
+    if not fast or CACHE_CLASS in own or applied_claim(own[CACHE_JOB])["spec"].get("storageClassName") != "fast":
+        sys.exit(f"FAIL: storageClass.name should name the rendered class and the claim's reference: {sorted(k for k in own if k[0] == 'StorageClass')}, {applied_claim(own[CACHE_JOB])['spec']}")
+    for needle in ('provisioner: "disk.csi.azure.com"', '  iops: "16000"', '  type: "gp3"'):
+        need(fast, needle, "the renamed StorageClass")
+    ok("storageClass.create: false with a name references it and renders no class, without a name leaves the claim on the cluster's default; a name, the provisioner and a parameter (as a string) reach the rendered class; pvc.storageClassName next to create: true is refused naming both")
 
     for flags, label in ((["--set", "modelServing.cache.enabled=false"], "cache.enabled: false"), (["--set", "modelServing.cache.pvc.existingClaim=models"], "an existing claim")):
         text = helm(connectivity, [*base, *flags])
         off = documents(text)
         if "PersistentVolumeClaim" in text or CACHE_JOB in off or any(name == HOOK_IDENTITY for _, name in off):
             sys.exit(f"FAIL: with {label} the render still carries the claim, its hook or the hook identity (the slice has no other hook): {sorted(k for k in off if k == CACHE_JOB or k[1] == HOOK_IDENTITY)}")
+        if any(kind == "StorageClass" for kind, _ in off):
+            sys.exit(f"FAIL: with {label} the render still carries a StorageClass; the class is the chart's claim's")
         if label == "an existing claim" and "claimName: models" not in text:
             sys.exit("FAIL: the existing claim is not published")
-    ok("cache.enabled: false and an existing claim render no claim, no hook and no hook identity; the existing claim is published")
+        if label == "cache.enabled: false" and KEEP in off.get(SERVING_NS, ""):
+            sys.exit(f"FAIL: with the cache off the serving namespace is still kept; it is an ordinary Helm-owned object then:\n{off[SERVING_NS]}")
+    ok("cache.enabled: false and an existing claim render no claim, no hook, no hook identity and no StorageClass; with the cache off the namespace is not kept; the existing claim is published")
 
 
 # The tail of the well-known runtime template's entrypoint (kserve-runtime-configs,
@@ -392,6 +442,15 @@ def check_cache(connectivity: str, base: list[str]) -> None:
 # check runs that eval, with argv dumped instead of vLLM, over each preset's args.
 ENTRYPOINT_EVAL = 'eval "exec {dump} serve /mnt/models --served-model-name "m" "publishers/ns/models/m" --port 8000 ${{VLLM_ADDITIONAL_ARGS}} $@"'
 ARGV_DUMP = "import json, sys; print(json.dumps(sys.argv[1:]))"
+# The chart's own kserve-vllm ClusterServingRuntime (the classic InferenceService
+# path) carries the same grammar in its container command — `sh -c <eval script> --`
+# ahead of the base arguments KServe appends the preset's to (giantswarm/agent-platform#549).
+# The check runs the RENDERED command over the rendered base arguments and each
+# preset's, with a `vllm` stub on PATH dumping argv in place of the server.
+RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
+RUNTIME_EVAL = re.compile(r'eval "exec vllm serve(?: \S+)* \$@"')
+NAME_PLACEHOLDER = "{{.Name}}"
+EXTRA_BASE_ARGS = ["--max-model-len", "16384"]
 
 
 def eval_argv(args: list[str]) -> list[str]:
@@ -404,38 +463,92 @@ def eval_argv(args: list[str]) -> list[str]:
     return json.loads(result.stdout)[7:]
 
 
+def runtime_container(connectivity: str, flags: list[str]) -> dict:
+    """The rendered kserve-vllm ClusterServingRuntime's container."""
+    doc = documents(helm(connectivity, flags)).get(RUNTIME)
+    if doc is None:
+        sys.exit(f"FAIL: the render carries no {RUNTIME[0]} {RUNTIME[1]}")
+    return yaml.safe_load(doc)["spec"]["containers"][0]
+
+
+def classic_argv(command: list[str], args: list[str], preset_args: list[str], name: str) -> list[str]:
+    """vLLM's argv on the classic path: the rendered command run over the base
+    arguments ({{.Name}} expanded the way KServe does before the container starts)
+    and the preset's appended ones; a `vllm` stub on PATH dumps argv from `serve` on."""
+    with tempfile.TemporaryDirectory() as stubs:
+        stub = os.path.join(stubs, "vllm")
+        with open(stub, "w") as f:
+            f.write(f"#!/bin/sh\nexec python3 -c {shlex.quote(ARGV_DUMP)} \"$@\"\n")
+        os.chmod(stub, 0o755)
+        expanded = [a.replace(NAME_PLACEHOLDER, name) for a in args]
+        result = subprocess.run([*command, *expanded, *preset_args], capture_output=True, text=True, check=False,
+                                env={"PATH": f"{stubs}:{os.environ['PATH']}"})
+    if result.returncode != 0:
+        sys.exit(f"FAIL: the classic runtime's entrypoint {command!r} fails over {expanded + preset_args!r}:\n{result.stderr}")
+    return json.loads(result.stdout)
+
+
+def json_values(name: str, path: str, got: list[str], expected: list[str]) -> int:
+    """Assert vLLM sees one word per argument and every JSON value parses; the
+    count of JSON values checked."""
+    if got != expected:
+        sys.exit(f"FAIL: preset {name} on {path}: vLLM would see {got!r}, not one word per argument {expected!r}")
+    checked = 0
+    for word in got:
+        flag, sep, value = word.partition("=")
+        if sep and value[:1] in "{[":
+            try:
+                json.loads(value)
+            except ValueError as err:
+                sys.exit(f"FAIL: preset {name} on {path}: {flag}'s value {value!r} is not JSON: {err}")
+            checked += 1
+    return checked
+
+
 def check_preset_args(connectivity: str, base: list[str]) -> None:
     files = sorted(glob.glob(f"{connectivity}/files/model-serving/presets/*.yaml"))
     if len(files) < 2:
         sys.exit(f"FAIL: expected the shipped presets under {connectivity}/files/model-serving/presets/, found {files}")
-    checked = 0
+    container = runtime_container(connectivity, base)
+    command, args = container.get("command") or [], [str(a) for a in container.get("args") or []]
+    if command[:2] != ["/bin/sh", "-c"] or len(command) != 4 or command[3] != "--" or not RUNTIME_EVAL.fullmatch(command[2]):
+        sys.exit(f"FAIL: the classic runtime's command is {command!r}, not /bin/sh -c '<eval \"exec vllm serve … $@\">' -- (the llm-d template's grammar)")
+    if args[args.index("--served-model-name") + 1] != NAME_PLACEHOLDER:
+        sys.exit(f"FAIL: the classic runtime's base arguments {args!r} do not carry --served-model-name {NAME_PLACEHOLDER} for KServe to expand")
+    name = "qwen3-8b-fp8-test"
+    base_words = ["serve", *[a.replace(NAME_PLACEHOLDER, name) for a in args]]
+    if classic_argv(command, args, [], name) != base_words:
+        sys.exit(f"FAIL: the classic runtime's base arguments alone reach vLLM as {classic_argv(command, args, [], name)!r}, not {base_words!r}")
+    checked = classic = 0
     for path in files:
         preset = yaml.safe_load(open(path))
-        name = preset["metadata"]["name"]
-        args = [str(a) for a in preset["spec"].get("args") or []]
-        expected = [shlex.split(a)[0] for a in args]
-        got = eval_argv(args)
-        if got != expected:
-            sys.exit(f"FAIL: preset {name}: after the entrypoint's eval vLLM would see {got!r}, not one word per argument {expected!r}")
-        for word in got:
-            flag, sep, value = word.partition("=")
-            if sep and value[:1] in "{[":
-                try:
-                    json.loads(value)
-                except ValueError as err:
-                    sys.exit(f"FAIL: preset {name}: {flag}'s value {value!r} is not JSON after the eval: {err}")
-                checked += 1
-    if checked == 0:
-        sys.exit("FAIL: no shipped preset carries a JSON-valued argument; the eval check has nothing to prove")
+        preset_name = preset["metadata"]["name"]
+        preset_args = [str(a) for a in preset["spec"].get("args") or []]
+        expected = [shlex.split(a)[0] for a in preset_args]
+        checked += json_values(preset_name, "the llm-d template", eval_argv(preset_args), expected)
+        got = classic_argv(command, args, preset_args, name)
+        if got[:len(base_words)] != base_words:
+            sys.exit(f"FAIL: preset {preset_name} on the classic runtime: the base arguments came out as {got[:len(base_words)]!r}, not {base_words!r}")
+        classic += json_values(preset_name, "the classic runtime", got[len(base_words):], expected)
+    if checked == 0 or classic != checked:
+        sys.exit(f"FAIL: {checked} JSON values on the llm-d template, {classic} on the classic runtime; the eval check has nothing to prove")
+    # An installation's extra base arguments (modelServing.runtime.args) reach
+    # vLLM one word each ahead of the preset's.
+    extra = runtime_container(connectivity, [*base, "--set-json", "modelServing.runtime.args=" + json.dumps([*args, *EXTRA_BASE_ARGS])])
+    got = classic_argv(extra["command"], [str(a) for a in extra["args"]], ["--x='{\"a\": 1}'"], name)
+    if got != [*base_words, *EXTRA_BASE_ARGS, '--x={"a": 1}']:
+        sys.exit(f"FAIL: with extra base arguments the classic runtime yields {got!r}")
     bad = {"bare JSON in two arguments": ["--default-chat-template-kwargs", '{"enable_thinking": false}'],
            "a space": ["--x=a b"], "a stray single quote": ["--x=it's"], "a double quote": ['--x="a"'],
            "a brace expansion": ["--x={a,b}"], "a variable": ["--x=$HOME"], "a glob": ["--x=*"]}
-    for what, args in bad.items():
+    for what, bad_args in bad.items():
         doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "bad"},
-               "spec": {"displayName": "Bad", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "args": args}}
+               "spec": {"displayName": "Bad", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "args": bad_args}}
         err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="outside single quotes")
         need(err, 'serving preset "bad" (values): spec.args', f"the guard's message for {what}")
-    ok(f"{len(files)} shipped presets' arguments survive the runtime template's eval ({checked} JSON values parse); "
+    ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval and the classic runtime's rendered entrypoint "
+       f"({command[0]} {command[1]} {command[2]!r} {command[3]}; {checked} JSON values parse on each path; the base arguments incl. "
+       f"{NAME_PLACEHOLDER} and an installation's extra ones one word each); "
        f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
 
 

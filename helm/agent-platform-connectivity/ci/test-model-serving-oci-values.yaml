@@ -1,0 +1,61 @@
+# Models as OCI images (giantswarm/agent-platform#551): a preset served from a
+# model image (spec.model.storageUri oci://…, KServe's modelcar path) beside an
+# hf:// one, the installation's registry named in modelServing.modelImages.registry
+# — at render the oci:// reference's host is swapped for it, the path and tag
+# kept; the hf:// preset is untouched — and the oci:// preset's image pre-pulled
+# on the serving nodes through modelServing.prepull.modelPresets. Render-valid
+# for `ct lint` (the modelServing guard is satisfied by the kserve components
+# being on); tests/verify-model-images.py asserts the render.
+global:
+  domain: ci.example.com
+  gatewayApi:
+    parentRefs:
+      - name: giantswarm-default
+        namespace: envoy-gateway-system
+
+components:
+  kserve-crd:
+    enabled: true
+  kserve-resources:
+    enabled: true
+  modelServing:
+    enabled: true
+
+modelServing:
+  modelImages:
+    registry: registry.example.com:5000
+  prepull:
+    modelPresets:
+      - oci-model
+  presets:
+    - apiVersion: agent-platform.giantswarm.io/v1alpha1
+      kind: ServingPreset
+      metadata:
+        name: oci-model
+      spec:
+        displayName: A model served from an OCI image
+        model:
+          id: org/Oci-Model
+          storageUri: oci://registry.example.org/models/oci-model:abc1234
+        # The modelcar runs the runtime as its own uid; every writable path
+        # under /tmp.
+        env:
+          - name: HOME
+            value: /tmp
+          - name: HF_HOME
+            value: /tmp/hf
+          - name: VLLM_CACHE_ROOT
+            value: /tmp/vllm-cache
+        requirements:
+          weightsGiB: 16
+    - apiVersion: agent-platform.giantswarm.io/v1alpha1
+      kind: ServingPreset
+      metadata:
+        name: hub-model
+      spec:
+        displayName: A model downloaded from the Hub
+        model:
+          id: org/Hub-Model
+          storageUri: hf://org/Hub-Model
+        requirements:
+          weightsGiB: 16

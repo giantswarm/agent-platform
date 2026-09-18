@@ -16,7 +16,15 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     on a GPU cluster, with the storage-initializer KServe injects for an hf://
     model URI): the hf-cache claim is mounted at /mnt/models with the model's
     name as subPath on the storage-initializer and on the shape's runtime
-    container (the classic one stays read-only), the pod carries the claim's
+    container (its readOnly as KServe declared it: the runtime writes nothing
+    into the model's directory); the runtime container mounts the claim a
+    second time at /mnt/vllm-cache from the claim-wide subPath .vllm-cache and
+    carries VLLM_CACHE_ROOT naming that path, the storage-initializer neither
+    — vLLM's cache a directory of the claim's own, never under /mnt/models,
+    where the initializer's Hugging Face client owns <model>/.cache (uid 1000,
+    mode 755) and a cache root there crash-looped every cold start (#537,
+    #541); no mount or env value of the pod names a path under /mnt/models
+    — the pod carries the claim's
     fsGroup (also when it declared another: one claim, one group), no
     container is added or lost, the original volumes stay, the initializer's
     memory limit is raised, and the storage-initializer and the runtime carry
@@ -30,7 +38,8 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     idempotent then adds its patch twice (#514). A pod of the shape without a
     storage-initializer, and a model-manager download-Job pod, are untouched;
     a workload pod without a model name gets the limit and the env but no
-    cache and no fsGroup (the mount would otherwise land on the claim's root).
+    cache, no VLLM_CACHE_ROOT and no fsGroup (the mount would otherwise land
+    on the claim's root).
   * The mutated pod of each shape passes the fleet's restricted Pod Security
     Standard with the chart's PolicyException and nothing else
     (tests/fixtures/restricted-pss-clusterpolicies.yaml, the five
@@ -41,9 +50,42 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     hf-cache-init of chart 4.28.14 fails exactly the two rules that denied
     every LLMInferenceService workload pod on a Giant Swarm cluster (#518).
   * The Deployments' progress-deadline rule applies to both shapes' Deployments.
+  * The pre-pull DaemonSet (modelServing.prepull, #545) renders in the serving
+    namespace by default: one init container per image of
+    modelServing.prepull.images — the first the llm-d runtime image the
+    well-known LLMInferenceServiceConfig names — running /bin/true, a pause
+    main container, the pool's taint tolerated first and every taint after it,
+    the manufacturer label selected with the pool's own label merged under it,
+    no GPU resource, no runtimeClassName, no ServiceAccount token. Its pod,
+    built from the template, passes the fleet's restricted PSS with NO
+    exception (every rule passes), is touched by none of the chart's
+    mutations, and is selected by no shape's policy, not by the
+    PolicyException and not by the agents' egress — only by its own deny-all
+    policy (kubernetes: both policy types, no rule; cilium: one empty rule per
+    direction), which selects no shape's fixture and not the download Job's
+    pod. `enabled: false` renders neither object; an empty image list fails
+    the render naming the key; the values the meta chart forwards render the
+    same DaemonSet with the same images. A model init container named through
+    modelServing.prepull.modelPresets (#551) keeps the pod PSS-clean with no
+    exception; the default carries none (tests/verify-model-images.py holds
+    the container's shape).
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
     never the download Job's pod.
+  * Image verification (modelServing.imageVerification, #552) is off by
+    default and renders nothing without kyverno.io/v1. On, one verifyImages
+    ClusterPolicy with one rule per pod shape selects exactly its shape's
+    Pods in the serving namespace at CREATE and UPDATE, carrying the image
+    references and the attestor entries verbatim — a keyless CircleCI
+    identity and a public key, as one attestor set of count 1 — with
+    mutateDigest, required and failureAction as set; `kyverno apply` accepts
+    the policy and skips both fixture pods, none of whose images match the
+    references (a signature cannot be checked offline), and drops a policy
+    with a misspelt verifyImages field, so that acceptance has teeth; enabled
+    with an empty images list, no attestor, an entry that is no Kyverno
+    attestor entry, a failureAction outside Enforce | Audit or an unknown key
+    fails the render naming the key; the values the meta chart forwards
+    render the same policy.
   * Each shape's policies admit exactly the port its fixture pod is reached
     on — the container port KServe's Service targets: the classic predictor's
     kserve-container on 8080, the llm-d workload's routing sidecar on 8000
@@ -101,6 +143,11 @@ FSGROUP = 1000
 MEMORY = "4Gi"
 # modelServing.policies.env, as the chart ships it (#520).
 ENV = {"HF_HUB_DISABLE_XET": "1"}
+MODEL_DIR = "/mnt/models"
+# vLLM's cache: the claim's own directory, mounted on the runtime container by
+# the redirect rule, which sets the env naming it in the same patch (#537, #541).
+VLLM_CACHE = {"name": CLAIM, "mountPath": "/mnt/vllm-cache", "subPath": ".vllm-cache"}
+VLLM_ENV = {"VLLM_CACHE_ROOT": VLLM_CACHE["mountPath"]}
 DEADLINE = 3600
 PSS = HERE / "fixtures" / "restricted-pss-clusterpolicies.yaml"
 # The rules the chart's PolicyException names, as (policy, rule).
@@ -121,6 +168,11 @@ SHAPES = {
     "llmisvc-workload": ("model-serving-llmisvc-workload-pod.yaml", "main", "app.kubernetes.io/name", "llm-d-routing-sidecar"),
 }
 DOWNLOAD_LABELS = {"app.kubernetes.io/managed-by": "model-manager", "model-manager.giantswarm.io/component": "download", "job-name": "pull-qwen3-4b"}
+# The pre-pull DaemonSet's pods (#545): its selector label; the pool's taint they tolerate first; the label Karpenter
+# gives every GPU node, their default selector.
+PREPULL_LABEL = {"agent-platform.giantswarm.io/model-serving-prepull": "true"}
+POOL_TOLERATION = {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+GPU_NODE = {"karpenter.k8s.aws/instance-gpu-manufacturer": "nvidia"}
 # The names the Hugging Face download path uses (#522): the Hub and its API redirects, the LFS fronts one label
 # under hf.co, the Xet fronts two, and the download CDN three — the Hub redirects every shard request of a
 # Xet-backed repository there, Xet client or not (us.aws.cdn.hf.co; the regional siblings share the shape). A new
@@ -130,6 +182,17 @@ HUB_HOSTS = ["huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs-us-1.hf.co", "
              "transfer.xethub.hf.co", "cas-bridge.xethub.hf.co", CDN, "eu.aws.cdn.hf.co"]
 # What the allow-list keeps out: a depth no name of the download path has, the bare apex, look-alike domains.
 NOT_HUB_HOSTS = ["a.b.c.d.hf.co", "hf.co", "huggingface.co.example.com", "hf.co.example.com", "example.com"]
+# modelServing.imageVerification (#552): the on-render's values — every curated model image; the fleet's CircleCI
+# identity as a keyless attestor entry and a public key (Kyverno's documentation key) beside it, passed through as written.
+IV_SUFFIX = "-model-serving-image-verification"
+IV_IMAGES = ["gsoci.azurecr.io/giantswarm/models/*"]
+IV_ATTESTORS = [
+    {"keyless": {"issuer": "https://oidc.circleci.com", "subjectRegExp": r"^https://circleci\.com/api/v2/projects/.+$",
+                 "rekor": {"url": "https://rekor.sigstore.dev"}}},
+    {"keys": {"publicKeys": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPZrfM\n"
+                            "5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==\n-----END PUBLIC KEY-----"}},
+]
+IV_ON = {"enabled": True, "images": IV_IMAGES, "attestors": IV_ATTESTORS}
 BASE = [
     "--namespace", "agent-platform",
     "--set", "ingress.parentRefs[0].name=x",
@@ -153,8 +216,8 @@ def ok(msg: str) -> None:
     print(f"ok: {msg}")
 
 
-def render(chart: str, flags: list[str]) -> list[dict]:
-    result = subprocess.run([HELM, "template", "t", chart, *BASE, *flags], capture_output=True, text=True, check=False)
+def render(chart: str, flags: list[str], base: list[str] = BASE) -> list[dict]:
+    result = subprocess.run([HELM, "template", "t", chart, *base, *flags], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         fail(f"render of {chart} {' '.join(flags)} failed:\n{result.stderr}")
     return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
@@ -283,23 +346,36 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
         fail(f"{shape}: the storage-initializer's /mnt/models is not {CLAIM}/{model}: {sm}")
     if [c["name"] for c in spec["containers"]] != [c["name"] for c in pod["spec"]["containers"]]:
         fail(f"{shape}: the mutation changed the container list: {[c['name'] for c in spec['containers']]}")
-    rm = mounts(runtime_of(spec, runtime)).get("/mnt/models", {})
+    rm = mounts(runtime_of(spec, runtime)).get(MODEL_DIR, {})
     if rm.get("name") != CLAIM or rm.get("subPath") != model:
-        fail(f"{shape}: {runtime}'s /mnt/models is not {CLAIM}/{model}: {rm}")
-    original = mounts(runtime_of(pod["spec"], runtime))["/mnt/models"]
+        fail(f"{shape}: {runtime}'s {MODEL_DIR} is not {CLAIM}/{model}: {rm}")
+    original = mounts(runtime_of(pod["spec"], runtime))[MODEL_DIR]
     if rm.get("readOnly") != original.get("readOnly"):
-        fail(f"{shape}: {runtime}'s /mnt/models readOnly changed from {original.get('readOnly')} to {rm.get('readOnly')}")
-    for label, before, after in (("storage-initializer", init_of(pod["spec"], "storage-initializer"), storage),
-                                 (runtime, runtime_of(pod["spec"], runtime), runtime_of(spec, runtime))):
-        if env_of(after) != {**env_of(before), **ENV}:
-            fail(f"{shape}: {label}'s env is {env_of(after)}; expected its own {env_of(before)} plus {ENV}")
+        fail(f"{shape}: {runtime}'s {MODEL_DIR} readOnly changed from {original.get('readOnly')} to {rm.get('readOnly')}; "
+             "the runtime writes nothing into the model's directory (#541)")
+    cm = mounts(runtime_of(spec, runtime)).get(VLLM_CACHE["mountPath"], {})
+    if cm != VLLM_CACHE:
+        fail(f"{shape}: {runtime}'s {VLLM_CACHE['mountPath']} is not {CLAIM}/{VLLM_CACHE['subPath']}: {cm}")
+    if VLLM_CACHE["mountPath"] in mounts(storage):
+        fail(f"{shape}: the storage-initializer mounts vLLM's cache; the directory is the runtime's alone")
+    for label, before, after, extra in (("storage-initializer", init_of(pod["spec"], "storage-initializer"), storage, {}),
+                                        (runtime, runtime_of(pod["spec"], runtime), runtime_of(spec, runtime), VLLM_ENV)):
+        if env_of(after) != {**env_of(before), **ENV, **extra}:
+            fail(f"{shape}: {label}'s env is {env_of(after)}; expected its own {env_of(before)} plus {ENV}{' plus ' + str(extra) if extra else ''}")
+    for c in spec["initContainers"] + spec["containers"]:
+        for path in [m["mountPath"] for m in c.get("volumeMounts") or []] + [v for v in env_of(c).values() if v]:
+            if path.startswith(f"{MODEL_DIR}/"):
+                fail(f"{shape}: {c['name']} names {path}, a path under the model's directory — the initializer's Hugging Face client "
+                     f"owns {MODEL_DIR}/.cache (uid 1000, mode 755) and nothing of the pod writes there (#541)")
     volumes = {v["name"]: v for v in spec["volumes"]}
     if volumes.get(CLAIM) != {"name": CLAIM, "persistentVolumeClaim": {"claimName": CLAIM}}:
         fail(f"{shape}: no {CLAIM} claim volume: {volumes.get(CLAIM)}")
     if missing := [v["name"] for v in pod["spec"]["volumes"] if v["name"] not in volumes]:
         fail(f"{shape}: the mutation dropped volumes {missing}")
-    ok(f"{shape}: {CLAIM}/{model} mounted at /mnt/models on storage-initializer and {runtime}, fsGroup {FSGROUP}, the limit {MEMORY}, "
-       f"{ENV} next to both containers' own env, no container added, containers and volumes kept")
+    ok(f"{shape}: {CLAIM}/{model} mounted at {MODEL_DIR} on storage-initializer and {runtime} (readOnly as declared), "
+       f"vLLM's cache {CLAIM}/{VLLM_CACHE['subPath']} at {VLLM_CACHE['mountPath']} with {VLLM_ENV} on {runtime} alone, "
+       f"fsGroup {FSGROUP}, the limit {MEMORY}, {ENV} next to both containers' own env, nothing under {MODEL_DIR}/, "
+       f"no container added, containers and volumes kept")
 
     again = apply([pods_policy], out)
     if again is not None and again["spec"] != spec:
@@ -319,10 +395,10 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
     for c in bare["spec"]["initContainers"] + bare["spec"]["containers"]:
         c.pop("env", None)
     out = apply([pods_policy], bare)
-    if out is None or env_of(init_of(out["spec"], "storage-initializer")) != ENV or env_of(runtime_of(out["spec"], runtime)) != ENV:
-        fail(f"{shape}: containers without env did not get exactly {ENV}: "
+    if out is None or env_of(init_of(out["spec"], "storage-initializer")) != ENV or env_of(runtime_of(out["spec"], runtime)) != {**ENV, **VLLM_ENV}:
+        fail(f"{shape}: containers without env did not get exactly {ENV} (the {runtime} plus {VLLM_ENV}): "
              f"{out and (env_of(init_of(out['spec'], 'storage-initializer')), env_of(runtime_of(out['spec'], runtime)))}")
-    ok(f"{shape}: a storage-initializer and a {runtime} without env get exactly {ENV}")
+    ok(f"{shape}: a storage-initializer without env gets exactly {ENV}, a {runtime} without env exactly {ENV} plus {VLLM_ENV}")
 
     plain = copy.deepcopy(pod)
     plain["spec"]["initContainers"] = [c for c in plain["spec"]["initContainers"] if c["name"] != "storage-initializer"]
@@ -349,7 +425,10 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
             fail(f"{shape}: a pod without {name_label} kept the initializer's default limit")
         if env_of(init_of(out["spec"], "storage-initializer")) != {**env_of(init_of(pod["spec"], "storage-initializer")), **ENV}:
             fail(f"{shape}: a pod without {name_label} did not get {ENV}: {env_of(init_of(out['spec'], 'storage-initializer'))}")
-        ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, no fsGroup")
+        nameless_runtime = runtime_of(out["spec"], runtime)
+        if set(VLLM_ENV) & set(env_of(nameless_runtime)) or VLLM_CACHE["mountPath"] in mounts(nameless_runtime):
+            fail(f"{shape}: a pod without {name_label} got vLLM's cache root or its mount without the claim")
+        ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, no VLLM_CACHE_ROOT, no fsGroup")
 
 
 def selector_of(shape: str, policy: dict) -> list[dict]:
@@ -417,9 +496,118 @@ def check_selectors(cilium: list[dict], k8s: list[dict]) -> None:
         selector = d["spec"].get("podSelector") or d["spec"]["endpointSelector"]
         if "download" not in d["metadata"]["name"] and selects(selector, DOWNLOAD_LABELS):
             fail(f"{d['metadata']['name']} selects model-manager's download-Job pod")
-    if any(selects(s, DOWNLOAD_LABELS) for s in exception_selectors) or any(selects(p, {**DOWNLOAD_LABELS, "io.kubernetes.pod.namespace": NS}) for p in peers):
-        fail("the PolicyException or the agents' egress selects model-manager's download-Job pod")
-    ok("each shape's pod is selected by exactly its own network policies (both flavours), the agents' egress and the PolicyException; the download Job's pod by none")
+        if not d["metadata"]["name"].endswith("-model-serving-prepull") and selects(selector, prepull_labels(k8s)):
+            fail(f"{d['metadata']['name']} selects the pre-pull DaemonSet's pod")
+    for who, labels in (("model-manager's download-Job pod", DOWNLOAD_LABELS), ("the pre-pull DaemonSet's pod", prepull_labels(k8s))):
+        if any(selects(s, labels) for s in exception_selectors) or any(selects(p, {**labels, "io.kubernetes.pod.namespace": NS}) for p in peers):
+            fail(f"the PolicyException or the agents' egress selects {who}")
+    ok("each shape's pod is selected by exactly its own network policies (both flavours), the agents' egress and the PolicyException; "
+       "the download Job's pod and the pre-pull pod by none of them")
+
+
+def prepull_pod(docs: list[dict]) -> dict:
+    """The pod the pre-pull DaemonSet's template describes, as the kubelet would create it in the serving namespace."""
+    ds = one(docs, "DaemonSet", "-model-serving-prepull")
+    if ds["metadata"]["namespace"] != NS:
+        fail(f"the pre-pull DaemonSet renders in {ds['metadata']['namespace']}, expected the serving namespace {NS}")
+    template = ds["spec"]["template"]
+    return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": f"{ds['metadata']['name']}-x7k2q", "namespace": NS, "labels": template["metadata"]["labels"]},
+            "spec": copy.deepcopy(template["spec"])}
+
+
+def prepull_labels(docs: list[dict]) -> dict:
+    return prepull_pod(docs)["metadata"]["labels"]
+
+
+def check_prepull(connectivity: str, k8s: list[dict], cilium: list[dict], pods_policy: dict, exception: dict) -> None:
+    """The pre-pull DaemonSet (#545): its shape, its pod against the fleet's restricted PSS with no exception, its deny-all policy."""
+    with open(f"{connectivity}/values.yaml", encoding="utf-8") as f:
+        prepull = yaml.safe_load(f)["modelServing"]["prepull"]
+    ds = one(k8s, "DaemonSet", "-model-serving-prepull")
+    pod = prepull_pod(k8s)
+    spec = pod["spec"]
+    if not selects(ds["spec"]["selector"], pod["metadata"]["labels"]) or not selects({"matchLabels": PREPULL_LABEL}, pod["metadata"]["labels"]):
+        fail(f"the pre-pull DaemonSet's selector {ds['spec']['selector']} does not select its own pod, or the pod lacks {PREPULL_LABEL}")
+    images = [c["image"] for c in spec.get("initContainers") or []]
+    if images != prepull["images"] or not images or "/llm-d-cuda:" not in images[0]:
+        fail(f"the pre-pull init containers pull {images}; expected modelServing.prepull.images {prepull['images']}, the llm-d runtime image first")
+    if any(c.get("command") != ["/bin/true"] for c in spec["initContainers"]):
+        fail(f"every pre-pull init container runs /bin/true; got {[c.get('command') for c in spec['initContainers']]}")
+    if [c["name"] for c in spec["containers"]] != ["pause"] or not spec["containers"][0]["image"].endswith("/giantswarm/pause:" + prepull["pauseImage"]["tag"]):
+        fail(f"the pre-pull pod's main container is the pause image alone; got {[(c['name'], c['image']) for c in spec['containers']]}")
+    for c in spec["initContainers"] + spec["containers"]:
+        for kind in ("requests", "limits"):
+            if "nvidia.com/gpu" in (c.get("resources") or {}).get(kind, {}):
+                fail(f"pre-pull container {c['name']} {kind} a GPU")
+        if not (c.get("resources") or {}).get("requests") or not c["resources"].get("limits"):
+            fail(f"pre-pull container {c['name']} declares no requests or no limits")
+    if "runtimeClassName" in spec or spec.get("automountServiceAccountToken") is not False:
+        fail("the pre-pull pod names a runtimeClass or mounts a ServiceAccount token")
+    tolerations = spec.get("tolerations") or []
+    if not tolerations or tolerations[0] != POOL_TOLERATION or {"operator": "Exists"} not in tolerations:
+        fail(f"the pre-pull pod tolerates {tolerations}; expected the pool's taint first and every taint after it")
+    if spec.get("nodeSelector") != GPU_NODE:
+        fail(f"the pre-pull pod's default node selector is {spec.get('nodeSelector')}; expected Karpenter's GPU label {GPU_NODE}")
+    ok("the pre-pull DaemonSet: one /bin/true init container per image (the llm-d runtime image first), the pause main container, "
+       "no GPU, no runtimeClass, no token; the pool's taint tolerated first and every taint after it; Karpenter's GPU label selected")
+
+    results = validate(pod, None)
+    if failed := outcome(results, "fail"):
+        fail(f"the pre-pull pod fails the restricted PSS with no exception: {sorted(failed)}")
+    if outcome(results, "pass") != set(results):
+        fail(f"every restricted-PSS rule must pass on the pre-pull pod; skipped {sorted(outcome(results, 'skip'))}")
+    out = apply([pods_policy], pod)
+    if out is not None and out["spec"] != pod["spec"]:
+        fail("the chart's model-pod mutations touch the pre-pull pod")
+    for label_selector in [m["resources"]["selector"] for m in exception["spec"]["match"]["any"] if "selector" in m["resources"]]:
+        if selects(label_selector, pod["metadata"]["labels"]):
+            fail("the PolicyException selects the pre-pull pod; its pod needs none")
+    ok("the pre-pull pod passes every rule of the fleet's restricted PSS with no exception, and no mutation of the chart touches it")
+
+    # A model init container (modelServing.prepull.modelPresets, #551) carries the runtime init containers' security context, so
+    # the pod stays PSS-clean with one; tests/verify-model-images.py holds the container's shape, this holds the pod's admission.
+    if any(c["name"].startswith("pull-model-") for c in spec["initContainers"]):
+        fail(f"the default pre-pull pod carries a model init container: {[c['name'] for c in spec['initContainers']]}")
+    with_model = prepull_pod(render(connectivity, ["-f", f"{connectivity}/ci/test-model-serving-oci-values.yaml"]))
+    model_inits = [c["name"] for c in with_model["spec"]["initContainers"] if c["name"].startswith("pull-model-")]
+    if model_inits != ["pull-model-oci-model"]:
+        fail(f"the fixture's pre-pull pod carries the model init containers {model_inits}; expected pull-model-oci-model alone")
+    results = validate(with_model, None)
+    if outcome(results, "pass") != set(results):
+        fail(f"the pre-pull pod with a model init container must pass every restricted-PSS rule with no exception; "
+             f"failed {sorted(outcome(results, 'fail'))}, skipped {sorted(outcome(results, 'skip'))}")
+    ok("the default pre-pull pod carries no model init container; with one (modelServing.prepull.modelPresets) the pod still passes every "
+       "rule of the fleet's restricted PSS with no exception")
+
+    k8s_policy = one(k8s, "NetworkPolicy", "-model-serving-prepull")
+    if sorted(k8s_policy["spec"]["policyTypes"]) != ["Egress", "Ingress"] or "ingress" in k8s_policy["spec"] or "egress" in k8s_policy["spec"]:
+        fail(f"the kubernetes-flavour pre-pull policy is not a deny-all: {k8s_policy['spec']}")
+    cilium_policy = one(cilium, "CiliumNetworkPolicy", "-model-serving-prepull")
+    if cilium_policy["spec"].get("ingress") != [{}] or cilium_policy["spec"].get("egress") != [{}]:
+        fail(f"the cilium-flavour pre-pull policy is not a deny-all (one empty rule per direction): {cilium_policy['spec']}")
+    for policy, selector in ((k8s_policy, k8s_policy["spec"]["podSelector"]), (cilium_policy, cilium_policy["spec"]["endpointSelector"])):
+        if policy["metadata"]["namespace"] != NS or not selects(selector, pod["metadata"]["labels"]):
+            fail(f"{policy['kind']}/{policy['metadata']['name']} does not select the pre-pull pod in {NS}")
+        if selects(selector, DOWNLOAD_LABELS) or any(selects(selector, fixture(shape)["metadata"]["labels"]) for shape in SHAPES):
+            fail(f"{policy['kind']}/{policy['metadata']['name']} selects a model pod or the download Job's pod")
+    ok("the pre-pull pods are denied all traffic by a policy of their own in both flavours, which selects them alone")
+
+    off = render(connectivity, ["--set", "modelServing.prepull.enabled=false", *CILIUM])
+    if any(d["metadata"]["name"].endswith("-model-serving-prepull") for d in off):
+        fail("modelServing.prepull.enabled=false still renders a pre-pull object")
+    result = subprocess.run([HELM, "template", "t", connectivity, *BASE, "--set", "modelServing.prepull.images=null"], capture_output=True, text=True, check=False)
+    if result.returncode == 0 or "modelServing.prepull.images is empty" not in result.stderr:
+        fail(f"an empty modelServing.prepull.images must fail the render naming the key; got rc={result.returncode}:\n{result.stderr}")
+    ok("modelServing.prepull.enabled=false renders no pre-pull object; an empty image list fails the render naming the key")
+
+
+def check_prepull_forwarded(connectivity: str, through_meta: list[dict]) -> None:
+    """The values the meta chart forwards render the same DaemonSet: the mirrored image list, the same selector (#545)."""
+    own = one(render(connectivity, []), "DaemonSet", "-model-serving-prepull")["spec"]["template"]["spec"]
+    forwarded = one(through_meta, "DaemonSet", "-model-serving-prepull")["spec"]["template"]["spec"]
+    if forwarded != own:
+        fail(f"the pre-pull pod the meta chart's forwarded values render differs from the connectivity default:\n{yaml.safe_dump(forwarded)}\n--- connectivity:\n{yaml.safe_dump(own)}")
+    ok("the meta chart's forwarded values render the pre-pull DaemonSet's pod as the connectivity default does (the mirrored images and selector)")
 
 
 def container_port(shape: str) -> int:
@@ -496,6 +684,106 @@ def check_fqdns(cilium: list[dict], k8s: list[dict], via: str) -> None:
     ok(f"kubernetes flavour ({via}): each model pod's and the download Job's egress admits 443 to every public block (no name to get wrong)")
 
 
+def loaded_rules(policies: list[dict], resource: dict) -> int:
+    """How many rules `kyverno apply` loaded from the policies: the CLI drops a policy its schema refuses and applies the rest."""
+    with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-") as tmp:
+        pathlib.Path(tmp, "policies.yaml").write_text(yaml.safe_dump_all(policies), encoding="utf-8")
+        pathlib.Path(tmp, "resource.yaml").write_text(yaml.safe_dump(resource), encoding="utf-8")
+        result = subprocess.run([KYVERNO, "apply", f"{tmp}/policies.yaml", "--resource", f"{tmp}/resource.yaml"], capture_output=True, text=True, check=False)
+    if not (m := re.search(r"Applying (\d+) policy rule", result.stdout)):
+        fail(f"kyverno apply did not report how many rules it loaded:\n{result.stdout}\n{result.stderr}")
+    return int(m.group(1))
+
+
+def image_verification_values(tmp: str, block: dict, *extra: str) -> str:
+    """A values file turning modelServing.imageVerification on with `block` merged over IV_ON."""
+    path = os.path.join(tmp, f"iv-{len(os.listdir(tmp))}.yaml")
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump({"modelServing": {"imageVerification": {**IV_ON, **block}}}, f)
+    return path
+
+
+def check_image_verification(connectivity: str, docs: list[dict]) -> None:
+    """modelServing.imageVerification (#552): off by default and without Kyverno; on, one verifyImages rule per shape with the
+    references and the attestor entries verbatim and the knobs as set, accepted by Kyverno's schema and skipping a pod none of
+    whose images match; the guards name their key."""
+    if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in docs):
+        fail("modelServing.imageVerification is off by default, yet the default render carries the image-verification policy")
+    with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-") as tmp:
+        on = image_verification_values(tmp, {})
+        policy = one(render(connectivity, ["-f", on]), "ClusterPolicy", IV_SUFFIX)
+        spec = policy["spec"]
+        if spec.get("background") is not False or spec.get("webhookTimeoutSeconds") != 30:
+            fail(f"the image-verification policy is admission-only with a 30 s webhook timeout; got background={spec.get('background')} "
+                 f"webhookTimeoutSeconds={spec.get('webhookTimeoutSeconds')}")
+        if [r["name"] for r in spec["rules"]] != [f"verify-model-images-{s}" for s in SHAPES]:
+            fail(f"the image-verification policy's rules are {[r['name'] for r in spec['rules']]}; expected one per pod shape")
+        expected = {"imageReferences": IV_IMAGES, "mutateDigest": True, "required": True, "failureAction": "Enforce",
+                    "attestors": [{"count": 1, "entries": IV_ATTESTORS}]}
+        for rule, shape in zip(spec["rules"], SHAPES):
+            matches = rule["match"]["any"]
+            resources = matches[0]["resources"] if len(matches) == 1 else {}
+            if resources.get("kinds") != ["Pod"] or resources.get("namespaces") != [NS] or sorted(resources.get("operations") or []) != ["CREATE", "UPDATE"]:
+                fail(f"{rule['name']}: matches {matches}; expected the shape's Pods in {NS} at CREATE and UPDATE (a pod's images are mutable)")
+            selector = resources["selector"]
+            if not selects(selector, fixture(shape)["metadata"]["labels"]) or selects(selector, DOWNLOAD_LABELS) \
+                    or any(selects(selector, fixture(other)["metadata"]["labels"]) for other in SHAPES if other != shape):
+                fail(f"{rule['name']}: the selector {selector} does not select exactly its own shape's fixture pod")
+            if rule.get("verifyImages") != [expected]:
+                fail(f"{rule['name']}: verifyImages is\n{yaml.safe_dump(rule.get('verifyImages'))}--- expected one entry:\n{yaml.safe_dump(expected)}")
+        ok("on, one verifyImages rule per pod shape selects exactly its shape's Pods in the serving namespace at CREATE and UPDATE, with the "
+           "references and the attestor entries (the keyless CircleCI identity, a public key) verbatim in one attestor set of count 1, "
+           "mutateDigest, required and Enforce")
+        knobs = one(render(connectivity, ["-f", image_verification_values(tmp, {"mutateDigest": False, "required": False, "failureAction": "Audit"})]),
+                    "ClusterPolicy", IV_SUFFIX)
+        for rule in knobs["spec"]["rules"]:
+            v = rule["verifyImages"][0]
+            if v["mutateDigest"] is not False or v["required"] is not False or v["failureAction"] != "Audit":
+                fail(f"{rule['name']}: mutateDigest false, required false and Audit did not reach the rule: {v}")
+        ok("mutateDigest, required and failureAction reach every rule as set")
+        for shape in SHAPES:
+            if apply([policy], fixture(shape)) is not None:
+                fail(f"{shape}: the image-verification policy changed a fixture pod none of whose images match the references")
+        bogus = copy.deepcopy(policy)
+        for rule in bogus["spec"]["rules"]:
+            rule["verifyImages"][0]["mutateDigst"] = rule["verifyImages"][0].pop("mutateDigest")
+        if loaded_rules([policy], fixture("predictor")) != len(SHAPES) or loaded_rules([bogus], fixture("predictor")) != 0:
+            fail("kyverno apply must load every rule of the rendered policy and none of a policy with a misspelt verifyImages field")
+        ok("kyverno apply accepts the policy (every rule loaded; a misspelt verifyImages field drops it) and skips both fixture pods, "
+           "none of whose images match the references")
+        no_kyverno = [flag for i, flag in enumerate(BASE) if flag != "kyverno.io/v1" and not (flag == "--api-versions" and BASE[i + 1] == "kyverno.io/v1")]
+        if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["-f", on], no_kyverno)):
+            fail("without kyverno.io/v1 served, the image-verification policy still renders")
+        if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["-f", on, "--set", "modelServing.imageVerification.enabled=false"])):
+            fail("modelServing.imageVerification.enabled=false still renders the image-verification policy")
+        ok("nothing renders while disabled or without kyverno.io/v1")
+        for description, block, needle in (
+            ("an empty images list", {"images": []}, "modelServing.imageVerification.images is empty"),
+            ("no attestor", {"attestors": []}, "modelServing.imageVerification.attestors is empty"),
+            ("an entry that is no Kyverno attestor entry", {"attestors": [{"issuer": "https://oidc.circleci.com"}]}, "modelServing.imageVerification.attestors[0]"),
+            ("a failureAction outside Enforce | Audit", {"failureAction": "Deny"}, "modelServing.imageVerification.failureAction"),
+            ("an unknown key", {"imageRefrences": IV_IMAGES}, "modelServing.imageVerification.imageRefrences"),
+        ):
+            result = subprocess.run([HELM, "template", "t", connectivity, *BASE, "-f", image_verification_values(tmp, block)],
+                                    capture_output=True, text=True, check=False)
+            if result.returncode == 0 or needle not in result.stderr:
+                fail(f"{description} must fail the render naming the key ({needle}); got rc={result.returncode}:\n{result.stderr}")
+        ok("enabled with an empty images list, no attestor, an entry that is no Kyverno attestor entry, a failureAction outside "
+           "Enforce | Audit or an unknown key fails the render naming the key")
+
+
+def check_image_verification_forwarded(connectivity: str, forwarded: str) -> None:
+    """The values the meta chart forwards render the same image-verification policy as the connectivity defaults with the block on (#552)."""
+    with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-") as tmp:
+        on = image_verification_values(tmp, {})
+        own = one(render(connectivity, ["-f", on]), "ClusterPolicy", IV_SUFFIX)["spec"]
+        through = one(render(connectivity, ["-f", forwarded, "-f", on]), "ClusterPolicy", IV_SUFFIX)["spec"]
+        if through != own:
+            fail(f"the image-verification policy the meta chart's forwarded values render differs from the connectivity default:\n"
+                 f"{yaml.safe_dump(through)}\n--- connectivity:\n{yaml.safe_dump(own)}")
+    ok("the meta chart's forwarded values render the image-verification policy as the connectivity default does")
+
+
 def main(connectivity: str, meta: str) -> int:
     if shutil.which(KYVERNO) is None:
         fail(f"the kyverno CLI ({KYVERNO}) is not installed; the mutations are asserted with `kyverno apply`")
@@ -515,7 +803,9 @@ def main(connectivity: str, meta: str) -> int:
         check_mutations(pods_policy, shape)
         check_pod_security(pods_policy, exception, shape)
     check_deployments(deployments_policy)
+    check_image_verification(connectivity, docs)
     cilium = render(connectivity, CILIUM)
+    check_prepull(connectivity, docs, cilium, pods_policy, exception)
     check_selectors(cilium, docs)
     check_fqdns(cilium, docs, "the connectivity chart's defaults")
     check_ports(cilium, docs, "the connectivity chart's defaults")
@@ -537,6 +827,8 @@ def main(connectivity: str, meta: str) -> int:
             through_meta.append(render(connectivity, ["-f", forwarded, *apis]))
         check_fqdns(*through_meta, "the meta chart's forwarded values")
         check_ports(*through_meta, "the meta chart's forwarded values")
+        check_prepull_forwarded(connectivity, through_meta[1])
+        check_image_verification_forwarded(connectivity, forwarded)
     return 0
 
 

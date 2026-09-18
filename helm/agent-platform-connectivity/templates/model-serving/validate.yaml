@@ -21,6 +21,45 @@ objects the API server rejects or a preset the portal cannot use.
   {{- if and (include "agent-platform.modelServingPolicies" .) (not (include "agent-platform.kyvernoPolicies" .)) }}
     {{- fail "modelServing.policies.enabled is true but kyvernoPolicies.enabled resolves to false: the cache policies are Kyverno ClusterPolicies and need kyverno.io/v1 on the cluster. Set modelServing.policies.enabled: auto (follows kyvernoPolicies.enabled) or false, or turn kyvernoPolicies.enabled on where Kyverno runs." }}
   {{- end }}
+  {{- /* Image verification (giantswarm/agent-platform#552): an enabled block
+         names what to verify and whom to trust, and its knobs are Kyverno's
+         own values — a typo would otherwise render a rule that verifies
+         nothing under an installation that believes its images are verified.
+         Checked whenever the block is on, Kyverno served or not. */ -}}
+  {{- with $ms.imageVerification }}
+  {{- if .enabled }}
+    {{- $iv := . }}
+    {{- range $key, $_ := . }}
+      {{- if not (has $key (list "enabled" "images" "attestors" "mutateDigest" "required" "failureAction")) }}
+        {{- fail (printf "modelServing.imageVerification.%s is not a key of the block: enabled, images, attestors, mutateDigest, required, failureAction" $key) }}
+      {{- end }}
+    {{- end }}
+    {{- if not .images }}
+      {{- fail "modelServing.imageVerification.images is empty: name the image references to verify (Kyverno imageReferences, e.g. gsoci.azurecr.io/giantswarm/models/*), or set modelServing.imageVerification.enabled: false" }}
+    {{- end }}
+    {{- range $i, $image := .images }}
+      {{- if or (not (kindIs "string" $image)) (not $image) }}
+        {{- fail (printf "modelServing.imageVerification.images[%d] must be an image reference or a wildcard pattern (got %v)" $i $image) }}
+      {{- end }}
+    {{- end }}
+    {{- if not .attestors }}
+      {{- fail "modelServing.imageVerification.attestors is empty: name at least one trusted signer (a Kyverno attestor entry: keyless, keys or certificates), or set modelServing.imageVerification.enabled: false" }}
+    {{- end }}
+    {{- range $i, $entry := .attestors }}
+      {{- if or (not (kindIs "map" $entry)) (not (or (hasKey $entry "keyless") (hasKey $entry "keys") (hasKey $entry "certificates") (hasKey $entry "attestor"))) }}
+        {{- fail (printf "modelServing.imageVerification.attestors[%d] must be a Kyverno attestor entry: a mapping with keyless, keys, certificates or attestor" $i) }}
+      {{- end }}
+    {{- end }}
+    {{- range $knob := list "mutateDigest" "required" }}
+      {{- if not (has (toString (get $iv $knob)) (list "true" "false")) }}
+        {{- fail (printf "modelServing.imageVerification.%s must be true or false (got %v)" $knob (get $iv $knob)) }}
+      {{- end }}
+    {{- end }}
+    {{- if not (has (toString .failureAction) (list "Enforce" "Audit")) }}
+      {{- fail (printf "modelServing.imageVerification.failureAction must be Enforce or Audit (got %v)" .failureAction) }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
   {{- if not $ms.runtime.name }}
     {{- fail "modelServing.runtime.name is empty: the ClusterServingRuntime needs a name, and every preset without a runtime of its own runs on it" }}
   {{- end }}
