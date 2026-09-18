@@ -3073,6 +3073,67 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # it with the pool); empty selects no pool. Label values are strings:
     # quote a number.
     nodeSelector: {}
+  # Pre-pulling the serving runtime image on the pool's nodes
+  # (giantswarm/agent-platform#545). A predictor pulls its runtime image only
+  # when its main container starts — after the storage-initializer has
+  # finished the weights — so on a pool scaling from zero the two longest
+  # steps of a cold start run one after the other (measured on a fresh node:
+  # weights 116 s, then 115 s for the 8.8 GB llm-d-cuda image). On, a
+  # DaemonSet in the serving namespace runs on every node nodeSelector and
+  # the pool's own label (gpuPool.nodeSelector, merged under it) select: one
+  # init container per image running /bin/true, then a pause container. The
+  # kubelet pulls the images the moment the node joins, in parallel with the
+  # weights, and containerd keeps them for the predictor ("already present on
+  # machine"). The pods hold no GPU and need no network — the pull is the
+  # kubelet's, not the pod's; a deny-all network policy selects them — and
+  # pass the restricted Pod Security Standard without an exception (uid
+  # 65534, no privilege escalation, every capability dropped, seccomp
+  # RuntimeDefault, read-only root).
+  prepull:
+    enabled: true
+    # The images to keep present, as full references. The default is the
+    # runtime image of the well-known LLMInferenceServiceConfig every served
+    # model composes from: the kserve-runtime-configs chart (giantswarm/kserve)
+    # names it, and its kserve.llmisvcConfigs.imageRegistry mirrors it to
+    # gsoci — this chart has no other value for that image, so the reference
+    # is pinned here and follows that chart's line: a re-pin there moves it
+    # here, never ahead (a newer tag pre-pulled is a tag no predictor runs). A
+    # list of plain references on purpose: Renovate's image managers read
+    # registry/repository/tag blocks, and a bump ahead of the runtime configs
+    # would pre-pull the wrong image. Empty with enabled: true fails the
+    # render.
+    images:
+      - gsoci.azurecr.io/giantswarm/llm-d-cuda:v0.8.0
+    # The nodes. Karpenter labels every node of a GPU instance type with its
+    # accelerator's manufacturer (a fractional-GPU type such as g6f carries it
+    # too); the pool's own label (gpuPool.nodeSelector) is merged under this
+    # map, so a pool release runs the DaemonSet on the pool's nodes alone. A
+    # GPU node not launched by Karpenter needs the label, or another selector
+    # here. Label values are strings: quote a number.
+    nodeSelector:
+      karpenter.k8s.aws/instance-gpu-manufacturer: nvidia
+    # Tolerations after the pool's own (gpuPool.taint, rendered first, an
+    # equal entry once). The default tolerates every taint — the fleet's
+    # DaemonSet convention — so the pull starts under a node's start-up taints
+    # (Karpenter's unregistered, CAPI's uninitialized) and not once they are
+    # lifted; the DaemonSet controller adds the node-condition tolerations
+    # itself. An empty list tolerates the pool's taint alone.
+    tolerations:
+      - operator: Exists
+    # The container that keeps the pod running once the images are present:
+    # the cluster's own sandbox image, mirrored.
+    pauseImage:
+      registry: gsoci.azurecr.io
+      repository: giantswarm/pause
+      tag: "3.10.1"
+    # Requests and limits of every container of the pod: the init containers
+    # exit at once, the pause container idles. Never a GPU.
+    resources:
+      requests:
+        cpu: 5m
+        memory: 8Mi
+      limits:
+        memory: 32Mi
   # Serving presets an install adds (ServingPreset documents, see
   # files/model-serving/serving-preset.schema.json and the README). A
   # preset with the name of a shipped one replaces it. Example:

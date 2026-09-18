@@ -27,12 +27,15 @@ render) and of the prewarm placeholder's PriorityClass block
 (`clusterManager.prewarmPriorityClass`; #539 — the class name is the
 gpu-node-pool chart's default `pool.prewarm.priorityClassName`, and a forwarded
 copy under another name would rename the class every pool of the installation
-expects) — and holds the meta chart's value at the same path equal to it,
+expects) and of the pre-pull block (`modelServing.prepull`; #545 — the image list
+is the runtime image the predictors run, and a forwarded copy short of it or
+behind it would pre-pull the wrong image on every installation) — and holds the
+meta chart's value at the same path equal to it,
 naming the path and both values when they differ or the meta chart lacks the
 path. It refuses to pass
 vacuously: the two `huggingFace.fqdns` lists, the two model-serving ports, the
-StorageClass provisioner, the policies' env and the PriorityClass name must be
-among the paths it compared. `--meta-values FILE` compares another meta values file (the negative
+StorageClass provisioner, the policies' env, the PriorityClass name and the
+pre-pull image list must be among the paths it compared. `--meta-values FILE` compares another meta values file (the negative
 controls in `make verify-meta`).
 """
 
@@ -43,10 +46,11 @@ import yaml
 
 REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networkPolicy.huggingFace.fqdns",
             "modelServing.networkPolicy.predictor.port", "modelServing.networkPolicy.llmisvcWorkload.port",
-            "modelServing.cache.storageClass.provisioner", "modelServing.policies.env", "clusterManager.prewarmPriorityClass.name"}
+            "modelServing.cache.storageClass.provisioner", "modelServing.policies.env", "clusterManager.prewarmPriorityClass.name",
+            "modelServing.prepull.images"}
 MIRRORED = ("fqdns", "cidrs", "port")
-# Blocks the meta chart mirrors leaf for leaf (#537, #539).
-SUBTREES = (("modelServing", "cache"), ("modelServing", "policies"), ("clusterManager", "prewarmPriorityClass"))
+# Blocks the meta chart mirrors leaf for leaf (#537, #539, #545).
+SUBTREES = (("modelServing", "cache"), ("modelServing", "policies"), ("modelServing", "prepull"), ("clusterManager", "prewarmPriorityClass"))
 
 
 def leaves(tree: dict, path: tuple[str, ...] = ()):
@@ -92,7 +96,7 @@ def main() -> int:
         sys.exit(f"FAIL: the connectivity chart no longer declares {sorted(missing)}; this check would pass vacuously")
     if drift:
         sys.exit("FAIL: a mirrored default differs between the charts — the meta chart forwards its copy, which shadows the connectivity default:\n  " + "\n  ".join(drift))
-    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing cache and policies blocks, the clusterManager prewarmPriorityClass block) are equal in both charts ({', '.join(sorted(compared))})")
+    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing cache, policies and prepull blocks, the clusterManager prewarmPriorityClass block) are equal in both charts ({', '.join(sorted(compared))})")
     return 0
 
 

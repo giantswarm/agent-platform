@@ -1330,6 +1330,16 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.gpuPool.taint.value | string | `""` |  |
 | modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
+| modelServing.prepull.enabled | bool | `true` |  |
+| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-cuda:v0.8.0"` |  |
+| modelServing.prepull.nodeSelector."karpenter.k8s.aws/instance-gpu-manufacturer" | string | `"nvidia"` |  |
+| modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |
+| modelServing.prepull.pauseImage.registry | string | `"gsoci.azurecr.io"` |  |
+| modelServing.prepull.pauseImage.repository | string | `"giantswarm/pause"` |  |
+| modelServing.prepull.pauseImage.tag | string | `"3.10.1"` |  |
+| modelServing.prepull.resources.requests.cpu | string | `"5m"` |  |
+| modelServing.prepull.resources.requests.memory | string | `"8Mi"` |  |
+| modelServing.prepull.resources.limits.memory | string | `"32Mi"` |  |
 | modelServing.presets | list | `[]` |  |
 | modelServing.shippedPresets.enabled | bool | `true` |  |
 | modelServing.shippedPresets.exclude | list | `[]` |  |
