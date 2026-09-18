@@ -16,15 +16,20 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     on a GPU cluster, with the storage-initializer KServe injects for an hf://
     model URI): the hf-cache claim is mounted at /mnt/models with the model's
     name as subPath on the storage-initializer and on the shape's runtime
-    container — read-write on both, where KServe mounts the classic
-    predictor's read-only: vLLM's cache root is under it (#537) — the pod carries the claim's
+    container (its readOnly as KServe declared it: the runtime writes nothing
+    into the model's directory); the runtime container mounts the claim a
+    second time at /mnt/vllm-cache from the claim-wide subPath .vllm-cache and
+    carries VLLM_CACHE_ROOT naming that path, the storage-initializer neither
+    — vLLM's cache a directory of the claim's own, never under /mnt/models,
+    where the initializer's Hugging Face client owns <model>/.cache (uid 1000,
+    mode 755) and a cache root there crash-looped every cold start (#537,
+    #541); no mount or env value of the pod names a path under /mnt/models
+    — the pod carries the claim's
     fsGroup (also when it declared another: one claim, one group), no
     container is added or lost, the original volumes stay, the initializer's
     memory limit is raised, and the storage-initializer and the runtime carry
     modelServing.policies.env (HF_HUB_DISABLE_XET=1: the Hugging Face client
-    off the Xet path, whose CDN a toFQDNs allow-list cannot follow, #520;
-    VLLM_CACHE_ROOT=/mnt/models/.cache/vllm: vLLM's torch.compile artifacts on
-    the claim in the model's directory, #537) next
+    off the Xet path, whose CDN a toFQDNs allow-list cannot follow, #520) next
     to their own env — KServe's HF_HUB_ENABLE_HF_TRANSFER and HF_XET_* on the
     initializer, the runtime's on the classic predictor — and added where a
     container has none; an empty list renders no env rule. The policy over its own output is a
@@ -33,7 +38,8 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     idempotent then adds its patch twice (#514). A pod of the shape without a
     storage-initializer, and a model-manager download-Job pod, are untouched;
     a workload pod without a model name gets the limit and the env but no
-    cache and no fsGroup (the mount would otherwise land on the claim's root).
+    cache, no VLLM_CACHE_ROOT and no fsGroup (the mount would otherwise land
+    on the claim's root).
   * The mutated pod of each shape passes the fleet's restricted Pod Security
     Standard with the chart's PolicyException and nothing else
     (tests/fixtures/restricted-pss-clusterpolicies.yaml, the five
@@ -102,8 +108,13 @@ NS = "model-serving"
 CLAIM = "hf-cache"
 FSGROUP = 1000
 MEMORY = "4Gi"
-# modelServing.policies.env, as the chart ships it (#520, #537).
-ENV = {"HF_HUB_DISABLE_XET": "1", "VLLM_CACHE_ROOT": "/mnt/models/.cache/vllm"}
+# modelServing.policies.env, as the chart ships it (#520).
+ENV = {"HF_HUB_DISABLE_XET": "1"}
+MODEL_DIR = "/mnt/models"
+# vLLM's cache: the claim's own directory, mounted on the runtime container by
+# the redirect rule, which sets the env naming it in the same patch (#537, #541).
+VLLM_CACHE = {"name": CLAIM, "mountPath": "/mnt/vllm-cache", "subPath": ".vllm-cache"}
+VLLM_ENV = {"VLLM_CACHE_ROOT": VLLM_CACHE["mountPath"]}
 DEADLINE = 3600
 PSS = HERE / "fixtures" / "restricted-pss-clusterpolicies.yaml"
 # The rules the chart's PolicyException names, as (policy, rule).
@@ -286,22 +297,36 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
         fail(f"{shape}: the storage-initializer's /mnt/models is not {CLAIM}/{model}: {sm}")
     if [c["name"] for c in spec["containers"]] != [c["name"] for c in pod["spec"]["containers"]]:
         fail(f"{shape}: the mutation changed the container list: {[c['name'] for c in spec['containers']]}")
-    rm = mounts(runtime_of(spec, runtime)).get("/mnt/models", {})
+    rm = mounts(runtime_of(spec, runtime)).get(MODEL_DIR, {})
     if rm.get("name") != CLAIM or rm.get("subPath") != model:
-        fail(f"{shape}: {runtime}'s /mnt/models is not {CLAIM}/{model}: {rm}")
-    if rm.get("readOnly"):
-        fail(f"{shape}: {runtime}'s /mnt/models is read-only; vLLM's cache root ({ENV['VLLM_CACHE_ROOT']}) is under it and the runtime writes there (#537)")
-    for label, before, after in (("storage-initializer", init_of(pod["spec"], "storage-initializer"), storage),
-                                 (runtime, runtime_of(pod["spec"], runtime), runtime_of(spec, runtime))):
-        if env_of(after) != {**env_of(before), **ENV}:
-            fail(f"{shape}: {label}'s env is {env_of(after)}; expected its own {env_of(before)} plus {ENV}")
+        fail(f"{shape}: {runtime}'s {MODEL_DIR} is not {CLAIM}/{model}: {rm}")
+    original = mounts(runtime_of(pod["spec"], runtime))[MODEL_DIR]
+    if rm.get("readOnly") != original.get("readOnly"):
+        fail(f"{shape}: {runtime}'s {MODEL_DIR} readOnly changed from {original.get('readOnly')} to {rm.get('readOnly')}; "
+             "the runtime writes nothing into the model's directory (#541)")
+    cm = mounts(runtime_of(spec, runtime)).get(VLLM_CACHE["mountPath"], {})
+    if cm != VLLM_CACHE:
+        fail(f"{shape}: {runtime}'s {VLLM_CACHE['mountPath']} is not {CLAIM}/{VLLM_CACHE['subPath']}: {cm}")
+    if VLLM_CACHE["mountPath"] in mounts(storage):
+        fail(f"{shape}: the storage-initializer mounts vLLM's cache; the directory is the runtime's alone")
+    for label, before, after, extra in (("storage-initializer", init_of(pod["spec"], "storage-initializer"), storage, {}),
+                                        (runtime, runtime_of(pod["spec"], runtime), runtime_of(spec, runtime), VLLM_ENV)):
+        if env_of(after) != {**env_of(before), **ENV, **extra}:
+            fail(f"{shape}: {label}'s env is {env_of(after)}; expected its own {env_of(before)} plus {ENV}{' plus ' + str(extra) if extra else ''}")
+    for c in spec["initContainers"] + spec["containers"]:
+        for path in [m["mountPath"] for m in c.get("volumeMounts") or []] + [v for v in env_of(c).values() if v]:
+            if path.startswith(f"{MODEL_DIR}/"):
+                fail(f"{shape}: {c['name']} names {path}, a path under the model's directory — the initializer's Hugging Face client "
+                     f"owns {MODEL_DIR}/.cache (uid 1000, mode 755) and nothing of the pod writes there (#541)")
     volumes = {v["name"]: v for v in spec["volumes"]}
     if volumes.get(CLAIM) != {"name": CLAIM, "persistentVolumeClaim": {"claimName": CLAIM}}:
         fail(f"{shape}: no {CLAIM} claim volume: {volumes.get(CLAIM)}")
     if missing := [v["name"] for v in pod["spec"]["volumes"] if v["name"] not in volumes]:
         fail(f"{shape}: the mutation dropped volumes {missing}")
-    ok(f"{shape}: {CLAIM}/{model} mounted at /mnt/models on storage-initializer and {runtime}, fsGroup {FSGROUP}, the limit {MEMORY}, "
-       f"{ENV} next to both containers' own env, no container added, containers and volumes kept")
+    ok(f"{shape}: {CLAIM}/{model} mounted at {MODEL_DIR} on storage-initializer and {runtime} (readOnly as declared), "
+       f"vLLM's cache {CLAIM}/{VLLM_CACHE['subPath']} at {VLLM_CACHE['mountPath']} with {VLLM_ENV} on {runtime} alone, "
+       f"fsGroup {FSGROUP}, the limit {MEMORY}, {ENV} next to both containers' own env, nothing under {MODEL_DIR}/, "
+       f"no container added, containers and volumes kept")
 
     again = apply([pods_policy], out)
     if again is not None and again["spec"] != spec:
@@ -321,10 +346,10 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
     for c in bare["spec"]["initContainers"] + bare["spec"]["containers"]:
         c.pop("env", None)
     out = apply([pods_policy], bare)
-    if out is None or env_of(init_of(out["spec"], "storage-initializer")) != ENV or env_of(runtime_of(out["spec"], runtime)) != ENV:
-        fail(f"{shape}: containers without env did not get exactly {ENV}: "
+    if out is None or env_of(init_of(out["spec"], "storage-initializer")) != ENV or env_of(runtime_of(out["spec"], runtime)) != {**ENV, **VLLM_ENV}:
+        fail(f"{shape}: containers without env did not get exactly {ENV} (the {runtime} plus {VLLM_ENV}): "
              f"{out and (env_of(init_of(out['spec'], 'storage-initializer')), env_of(runtime_of(out['spec'], runtime)))}")
-    ok(f"{shape}: a storage-initializer and a {runtime} without env get exactly {ENV}")
+    ok(f"{shape}: a storage-initializer without env gets exactly {ENV}, a {runtime} without env exactly {ENV} plus {VLLM_ENV}")
 
     plain = copy.deepcopy(pod)
     plain["spec"]["initContainers"] = [c for c in plain["spec"]["initContainers"] if c["name"] != "storage-initializer"]
@@ -351,7 +376,10 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
             fail(f"{shape}: a pod without {name_label} kept the initializer's default limit")
         if env_of(init_of(out["spec"], "storage-initializer")) != {**env_of(init_of(pod["spec"], "storage-initializer")), **ENV}:
             fail(f"{shape}: a pod without {name_label} did not get {ENV}: {env_of(init_of(out['spec'], 'storage-initializer'))}")
-        ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, no fsGroup")
+        nameless_runtime = runtime_of(out["spec"], runtime)
+        if set(VLLM_ENV) & set(env_of(nameless_runtime)) or VLLM_CACHE["mountPath"] in mounts(nameless_runtime):
+            fail(f"{shape}: a pod without {name_label} got vLLM's cache root or its mount without the claim")
+        ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, no VLLM_CACHE_ROOT, no fsGroup")
 
 
 def selector_of(shape: str, policy: dict) -> list[dict]:

@@ -21,15 +21,15 @@ llm-d workload shape its own `modelServing.networkPolicy.llmisvcWorkload.port`,
 a value the meta chart had to carry too or its forwarded tree would have kept
 the connectivity release on the old port) — and for every leaf of the
 model-serving cache and policy blocks (`modelServing.cache`,
-`modelServing.policies`; #537 gave the claim its StorageClass block and the
-model pods' env a second entry, `VLLM_CACHE_ROOT`, and a forwarded `env` list
-without it would drop the entry from every installation's render) and of the
-prewarm placeholder's PriorityClass block (`clusterManager.prewarmPriorityClass`;
-#539 — the class name is the gpu-node-pool chart's default
-`pool.prewarm.priorityClassName`, and a forwarded copy under another name would
-rename the class every pool of the installation expects) — and holds the meta
-chart's value at the same path equal to it, naming the path and both values
-when they differ or the meta chart lacks the path. It refuses to pass
+`modelServing.policies`; #537 gave the claim its StorageClass block, and a
+forwarded `env` list short of an entry would drop it from every installation's
+render) and of the prewarm placeholder's PriorityClass block
+(`clusterManager.prewarmPriorityClass`; #539 — the class name is the
+gpu-node-pool chart's default `pool.prewarm.priorityClassName`, and a forwarded
+copy under another name would rename the class every pool of the installation
+expects) — and holds the meta chart's value at the same path equal to it,
+naming the path and both values when they differ or the meta chart lacks the
+path. It refuses to pass
 vacuously: the two `huggingFace.fqdns` lists, the two model-serving ports, the
 StorageClass provisioner, the policies' env and the PriorityClass name must be
 among the paths it compared. `--meta-values FILE` compares another meta values file (the negative

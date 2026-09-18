@@ -239,11 +239,13 @@ def check_golden(meta: str, connectivity: str) -> None:
         hf_cdn = json.dumps(conn_serving["networkPolicy"]["huggingFace"]["fqdns"])
         hf = ["--set-json", f"modelServing.networkPolicy.huggingFace.fqdns={hf_cdn}",
               "--set-json", f"modelManager.networkPolicy.huggingFace.fqdns={hf_cdn}"]
-        # The cache claim's StorageClass block and the VLLM_CACHE_ROOT entry of
-        # the model pods' env (giantswarm/agent-platform#537) are new mirrored
-        # defaults the meta chart forwards to the connectivity release (held
-        # equal to the connectivity chart's by verify-meta), so both sides get
-        # the connectivity values. Drop this once GOLDEN_REF carries them.
+        # The cache claim's StorageClass block (giantswarm/agent-platform#537)
+        # is a new mirrored default the meta chart forwards to the connectivity
+        # release, and the model pods' env list differs from the golden's (#537
+        # put VLLM_CACHE_ROOT there, #541 takes it out: the redirect rule sets
+        # it with the mount); both are held equal to the connectivity chart's
+        # by verify-meta, so both sides get the connectivity values. Drop this
+        # once GOLDEN_REF carries #541.
         ms_cache = ["--set-json", f"modelServing.cache.storageClass={json.dumps(conn_serving['cache']['storageClass'])}",
                     "--set-json", f"modelServing.policies.env={json.dumps(conn_serving['policies']['env'])}"]
         # The llm-d workload shape's own port (giantswarm/agent-platform#525) is a

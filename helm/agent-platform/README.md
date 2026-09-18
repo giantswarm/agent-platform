@@ -1352,8 +1352,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
 | modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
 | modelServing.policies.env[0].value | string | `"1"` |  |
-| modelServing.policies.env[1].name | string | `"VLLM_CACHE_ROOT"` |  |
-| modelServing.policies.env[1].value | string | `"/mnt/models/.cache/vllm"` |  |
 | modelServing.networkPolicy.predictor.port | int | `8080` |  |
 | modelServing.networkPolicy.predictor.additionalIngressNamespaces | list | `[]` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
