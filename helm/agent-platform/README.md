@@ -468,7 +468,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-llmisvc-resources.dependsOn[2] | string | `"kserve-resources"` |  |
 | components.kserve-runtime-configs.chart | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.kserve-runtime-configs.versionRange | string | `"0.2.x"` |  |
+| components.kserve-runtime-configs.versionRange | string | `"0.3.x"` |  |
 | components.kserve-runtime-configs.valuesFrom | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.enabled | bool | `false` |  |
 | components.kserve-runtime-configs.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
@@ -1335,7 +1335,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
 | modelServing.prepull.enabled | bool | `true` |  |
 | modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
-| modelServing.prepull.nodeSelector."karpenter.k8s.aws/instance-gpu-manufacturer" | string | `"nvidia"` |  |
+| modelServing.prepull.nodeSelector | object | `{}` |  |
 | modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |
 | modelServing.prepull.pauseImage.registry | string | `"gsoci.azurecr.io"` |  |
 | modelServing.prepull.pauseImage.repository | string | `"giantswarm/pause"` |  |

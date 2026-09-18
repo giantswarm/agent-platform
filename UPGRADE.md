@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the pre-pull DaemonSet is a hook object; its selector replaces the default)
+
+giantswarm/agent-platform#562, #563: `modelServing.prepull.nodeSelector` defaults to `{}` in both charts and the template holds Karpenter's `karpenter.k8s.aws/instance-gpu-manufacturer: nvidia`, so a selector an installation sets renders alone (the pool's label still merged under it); and the pre-pull DaemonSet is created by the `post-install,post-upgrade,post-rollback` hooks instead of being a release resource, so nothing waits for its pods — an image that cannot be pulled yet leaves them retrying and the connectivity release Ready. A `pre-delete` hook Job removes the DaemonSet on uninstall.
+
+### Operator action
+
+- **None** for an installation on the defaults. The first upgrade deletes the release-owned DaemonSet and the post-upgrade hook creates it again — its pods restart once, on images already present — and so does every later upgrade (a hook object is replaced, not patched).
+- **`modelServing.prepull.nodeSelector` set in your values**: it stands and is now the whole selector; Karpenter's key is no longer merged next to it. Remove a post-renderer or a `null` that stripped the default key. An installation with GPU nodes of both kinds selects them by a label they share — the GPU operator's `nvidia.com/gpu.present: "true"`, say — since a `nodeSelector` is a conjunction.
+- **A workaround for the wait** — `disableWait` on the connectivity HelmRelease, a longer `timeout`, a post-renderer taking the DaemonSet out — can go: nothing waits for the DaemonSet any more.
+- **Recognising it worked**: `kubectl -n <serving namespace> get daemonset <release>-model-serving-prepull -o jsonpath='{.metadata.annotations.helm\.sh/hook}'` reads `post-install,post-upgrade,post-rollback`; `helm get manifest` of the connectivity release no longer lists the DaemonSet (`helm get hooks` does); the HelmRelease reaches Ready while a pre-pull pod is still `Init:ImagePullBackOff`.
+
 ## \<current\> → \<next\> (the serving slice's llm-d images come from the `llm-d-fast/` prefix)
 
 giantswarm/agent-platform#568: the meta chart's `kserve-runtime-configs:` block passes `kserve.llmisvcConfigs.imageRegistry: gsoci.azurecr.io/giantswarm/llm-d-fast/`, and `modelServing.prepull.images` names `gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0` — the same images as the byte-identical mirror at `gsoci.azurecr.io/giantswarm/`, re-layered (zstd, layers of at most 1.2 GB) so a node pulls them over several streams.

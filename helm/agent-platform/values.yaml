@@ -1005,7 +1005,7 @@ components:  # @schema additionalProperties: true
     # vLLM ClusterServingRuntime already is. Needs the LLMInferenceService
     # CRDs only (the configs are CRs of theirs), not the controller.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.2.x"
+    versionRange: "0.3.x"
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
@@ -4741,7 +4741,12 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # init container per image running /bin/true, then a pause container. The
   # kubelet pulls the images the moment the node joins, in parallel with the
   # weights, and containerd keeps them for the predictor ("already present on
-  # machine"). The pods hold no GPU and need no network — the pull is the
+  # machine"). The DaemonSet is a post-install/post-upgrade hook object, not
+  # a release resource (giantswarm/agent-platform#563): nothing waits for its
+  # pods, so an image that cannot be pulled yet — one still being built, a
+  # registry outage — leaves them retrying and the release Ready instead of
+  # failing the whole upgrade; a pre-delete hook removes the DaemonSet with
+  # the release. The pods hold no GPU and need no network — the pull is the
   # kubelet's, not the pod's; a deny-all network policy selects them — and
   # pass the restricted Pod Security Standard without an exception (uid
   # 65534, no privilege escalation, every capability dropped, seccomp
@@ -4768,14 +4773,17 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # fails the render.
     images:
       - gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0
-    # The nodes. Karpenter labels every node of a GPU instance type with its
-    # accelerator's manufacturer (a fractional-GPU type such as g6f carries it
-    # too); the pool's own label (gpuPool.nodeSelector) is merged under this
-    # map, so a pool release runs the DaemonSet on the pool's nodes alone. A
-    # GPU node not launched by Karpenter needs the label, or another selector
-    # here. Label values are strings: quote a number.
-    nodeSelector:
-      karpenter.k8s.aws/instance-gpu-manufacturer: nvidia
+    # The nodes. Empty (the default): Karpenter's label on every node of a GPU
+    # instance type, karpenter.k8s.aws/instance-gpu-manufacturer: nvidia (a
+    # fractional-GPU type such as g6f carries it too). The template holds that
+    # default, not this file, so a map set here REPLACES it instead of being
+    # merged with it (giantswarm/agent-platform#562): a GPU node not launched
+    # by Karpenter — labelled nvidia.com/gpu.present: "true" by the GPU
+    # operator's feature discovery, say — is selected by its own labels alone.
+    # The pool's own label (gpuPool.nodeSelector) is merged under either, so a
+    # pool release runs the DaemonSet on the pool's nodes alone. Label values
+    # are strings: quote a number.
+    nodeSelector: {}
     # Tolerations after the pool's own (gpuPool.taint, rendered first, an
     # equal entry once). The default tolerates every taint — the fleet's
     # DaemonSet convention — so the pull starts under a node's start-up taints

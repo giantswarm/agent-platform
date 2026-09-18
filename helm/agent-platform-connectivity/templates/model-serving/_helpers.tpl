@@ -223,6 +223,40 @@ agent-platform.giantswarm.io/model-serving-prepull: "true"
 {{- end -}}
 
 {{/*
+Whether the pre-pull DaemonSet renders (templates/model-serving/prepull.yaml):
+model serving on and modelServing.prepull.enabled. Its cleanup hook and the
+hook identity's pre-delete event follow this.
+*/}}
+{{- define "agent-platform.modelServing.prepull.enabled" -}}
+{{- if and (include "agent-platform.modelServing.enabled" .) .Values.modelServing.prepull.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/* The pre-pull DaemonSet's name: the deny-all policy, the cleanup hook and its RBAC rule name the same object. */}}
+{{- define "agent-platform.modelServing.prepull.name" -}}
+{{- printf "%s-model-serving-prepull" (include "name" .) -}}
+{{- end -}}
+
+{{/*
+The nodes the pre-pull DaemonSet selects before the pool's label is merged
+under them (poolScheduling), as a JSON map: modelServing.prepull.nodeSelector
+when the installation sets one — that map alone — else the chart's default,
+Karpenter's label on every node of a GPU instance type. The default lives here
+and not in values.yaml on purpose (giantswarm/agent-platform#562): Helm merges
+maps, so a default key in values.yaml would be kept next to whatever an
+installation sets — a selector no node carries — and a null for it is
+coalesced away by the meta chart before it forwards its values. An empty map
+is the default, a set map replaces it.
+Usage: include "agent-platform.modelServing.prepull.nodeSelector" . | fromJson
+*/}}
+{{- define "agent-platform.modelServing.prepull.nodeSelector" -}}
+{{- with (.Values.modelServing.prepull.nodeSelector | default dict) -}}
+{{- toJson . -}}
+{{- else -}}
+{{- dict "karpenter.k8s.aws/instance-gpu-manufacturer" "nvidia" | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The registry host of modelServing.modelImages.registry (giantswarm/agent-platform#551),
 validated: a host with an optional port (registry.example.com,
 registry.example.com:5000, an in-cluster Service name), no scheme, no path.

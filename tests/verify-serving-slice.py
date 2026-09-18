@@ -48,7 +48,9 @@ property the slice relies on:
   applies hf-cache into the serving namespace (keep, the access modes, the size,
   the class, volumeName) as <release>-hooks, whose ClusterRole carries
   get/create/patch on claims; cache.enabled: false and an existing claim render
-  neither the hook nor the identity, and the existing claim is published.
+  neither the hook nor the claim rule, and the existing claim is published; the
+  identity then stays for the pre-pull DaemonSet's pre-delete cleanup Job alone
+  (giantswarm/agent-platform#563) and goes with prepull.enabled: false.
 - what outlives the release (giantswarm/agent-platform#537, #565): the serving
   namespace carries helm.sh/resource-policy: keep with the cache on and off (a
   namespace kept only with the cache on took a claim an earlier slice left there
@@ -345,6 +347,8 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
 
 
 CACHE_JOB = ("Job", "t-model-serving-cache")
+# The pre-pull DaemonSet's pre-delete cleanup Job (#563): the one hook left with the cache off.
+PREPULL_CLEANUP = ("Job", "t-model-serving-prepull-cleanup")
 HOOK_IDENTITY = "t-hooks"
 SERVING_NS = ("Namespace", "model-serving")
 # The claim's StorageClass, named after the chart (cluster-scoped), the claim and a digest of
@@ -435,7 +439,7 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     if not role or ("ServiceAccount", HOOK_IDENTITY) not in docs or ("ClusterRoleBinding", HOOK_IDENTITY) not in docs:
         sys.exit(f"FAIL: the hook identity {HOOK_IDENTITY} (ServiceAccount, ClusterRole, ClusterRoleBinding) is incomplete")
     need(role, '    resources: ["persistentvolumeclaims"]\n    verbs: ["get", "create", "patch"]', "the hook identity's ClusterRole")
-    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 100Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete")
+    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 100Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete on them")
 
     ns = docs.get(SERVING_NS)
     if not ns:
@@ -516,15 +520,26 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     for flags, label in ((["--set", "modelServing.cache.enabled=false"], "cache.enabled: false"), (["--set", "modelServing.cache.pvc.existingClaim=models"], "an existing claim")):
         text = helm(connectivity, [*base, *flags])
         off = documents(text)
-        if "PersistentVolumeClaim" in text or CACHE_JOB in off or any(name == HOOK_IDENTITY for _, name in off):
-            sys.exit(f"FAIL: with {label} the render still carries the claim, its hook or the hook identity (the slice has no other hook): {sorted(k for k in off if k == CACHE_JOB or k[1] == HOOK_IDENTITY)}")
+        if "PersistentVolumeClaim" in text or CACHE_JOB in off:
+            sys.exit(f"FAIL: with {label} the render still carries the claim or its hook: {sorted(k for k in off if k == CACHE_JOB)}")
+        # The hook identity stays for the pre-pull DaemonSet's pre-delete cleanup Job (#563) — created for that event
+        # alone, without the claim rule — and goes with the pre-pull switch: the slice then has no hook at all.
+        role = off.get(("ClusterRole", HOOK_IDENTITY))
+        if not role or PREPULL_CLEANUP not in off or ("ServiceAccount", HOOK_IDENTITY) not in off or ("ClusterRoleBinding", HOOK_IDENTITY) not in off:
+            sys.exit(f"FAIL: with {label} the pre-pull cleanup Job or the hook identity it runs as is missing: {sorted(k for k in off if k == PREPULL_CLEANUP or k[1] == HOOK_IDENTITY)}")
+        need(role, "    helm.sh/hook: pre-delete\n", f"the hook identity with {label} (pre-delete its only event)")
+        if 'resources: ["persistentvolumeclaims"]' in role:
+            sys.exit(f"FAIL: with {label} the hook identity still carries the claim rule")
+        none = documents(helm(connectivity, [*base, *flags, "--set", "modelServing.prepull.enabled=false"]))
+        if PREPULL_CLEANUP in none or any(name == HOOK_IDENTITY for _, name in none):
+            sys.exit(f"FAIL: with {label} and prepull.enabled: false the render still carries a hook or the hook identity (the slice has no other hook): {sorted(k for k in none if k == PREPULL_CLEANUP or k[1] == HOOK_IDENTITY)}")
         if any(kind == "StorageClass" for kind, _ in off):
             sys.exit(f"FAIL: with {label} the render still carries a StorageClass; the class is the chart's claim's")
         if label == "an existing claim" and "claimName: models" not in text:
             sys.exit("FAIL: the existing claim is not published")
         if KEEP not in off.get(SERVING_NS, ""):
             sys.exit(f"FAIL: with {label} the serving namespace is not kept; the policy is independent of the cache switch — a namespace Helm deletes takes a claim an earlier release left there along (#565):\n{off.get(SERVING_NS)}")
-    ok("cache.enabled: false and an existing claim render no claim, no hook, no hook identity and no StorageClass; the namespace is kept either way; the existing claim is published")
+    ok("cache.enabled: false and an existing claim render no claim, no cache hook and no StorageClass; the hook identity stays for the pre-pull's pre-delete cleanup Job alone (pre-delete its only event, no claim rule) and goes with prepull.enabled: false; the namespace is kept either way; the existing claim is published")
 
     unkept = documents(helm(connectivity, [*base, "--set", "modelServing.namespace.keep=false", "--set", "modelServing.cache.enabled=false"]))
     if SERVING_NS not in unkept or KEEP in unkept[SERVING_NS] or "annotations:" in unkept[SERVING_NS]:
