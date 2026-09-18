@@ -3324,6 +3324,57 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     env:
       - name: HF_HUB_DISABLE_XET
         value: "1"
+  # Signature verification of the model pods' images at admission
+  # (giantswarm/agent-platform#552): a Kyverno verifyImages ClusterPolicy over
+  # every model pod of the serving namespace — both pod shapes; the modelcar
+  # sidecar that carries the weights, the pre-fetch init container KServe
+  # runs from the same image and the runtime container alike, since Kyverno
+  # checks every container image of the pod that matches `images`. Off by
+  # default. On, it renders where the cache policies render (policies.enabled
+  # above resolved: Kyverno served) and nowhere else; enabled with an empty
+  # images list, no attestor, a failureAction outside Enforce | Audit or an
+  # unknown key fails the render naming the key.
+  imageVerification:
+    enabled: false
+    # The image references the rule verifies (Kyverno's imageReferences): a
+    # full reference or a wildcard pattern — `*` any run of characters, across
+    # path segments, tags and digests; `?` one character. A container image
+    # matching none is left alone, so the runtime image is covered only when
+    # a pattern names its path too. Empty with enabled: true fails the render.
+    #   images:
+    #     - gsoci.azurecr.io/giantswarm/models/*
+    images: []
+    # The trusted signers, one entry each — a Kyverno attestor entry, passed
+    # through as written: keyless (issuer + subject or subjectRegExp, rekor;
+    # the fleet's CircleCI identity below), a public key (keys.publicKeys, a
+    # PEM) or certificates. Rendered as one attestor set with count 1: a
+    # signature of any one of them admits the image. Empty with enabled: true
+    # fails the render.
+    #   attestors:
+    #     - keyless:
+    #         issuer: https://oidc.circleci.com
+    #         subjectRegExp: ^https://circleci\.com/api/v2/projects/.+$
+    #         rekor:
+    #           url: https://rekor.sigstore.dev
+    #     - keys:
+    #         publicKeys: |-
+    #           -----BEGIN PUBLIC KEY-----
+    #           ...
+    #           -----END PUBLIC KEY-----
+    attestors: []
+    # Replace a verified image's tag with its digest in the pod, so the
+    # kubelet runs exactly what was verified — a tag re-pushed later cannot
+    # slip in. Kyverno also requires a digest on every verified image
+    # (verifyDigest, its default): with this false, an image must be pinned
+    # by digest in the preset itself.
+    mutateDigest: true
+    # Every image matching `images` must carry a signature an attestor
+    # accepts; false verifies the signatures it finds and admits an image
+    # without one.
+    required: true
+    # Enforce denies a pod whose image fails verification; Audit admits it
+    # and reports the failure.
+    failureAction: Enforce  # Enforce | Audit
   # Network policies of the serving namespace, rendered under networkPolicy
   # (enabled + the resolved flavor) like every other component's wiring:
   # nothing renders while networkPolicy.enabled is false. On, both flavors
