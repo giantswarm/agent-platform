@@ -248,17 +248,17 @@ value stands only while its tag is the pinned release. */ -}}
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
 {{- end -}}
-{{- if and (eq .name "kserve-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) (include "agent-platform.componentEnabled" (dict "root" .root "name" "kserve-llmisvc-resources")) -}}
+{{- if and (eq .name "kserve-llmisvc-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) -}}
 {{- /* The models Gateway (modelServing.modelsGateway, rendered by the
 connectivity release in the platform's namespace) is the Gateway every
-LLMInferenceService route attaches to: KServe reads it from the shared
-inferenceservice-config ConfigMap kserve-resources renders. */ -}}
+LLMInferenceService route attaches to: the llm-d controller reads it from the
+shared inferenceservice-config ConfigMap its own release renders. */ -}}
 {{- $mg := dig "modelsGateway" dict (.root.Values.modelServing | default dict) -}}
 {{- if $mg.enabled -}}
 {{- $gw := printf "%s/%s" (.root.Values.gitops.targetNamespace | default .root.Release.Namespace) ($mg.name | default "models") -}}
-{{- $own := dig "kserve" "controller" "gateway" "ingressGateway" "kserveGateway" "" (index .root.Values "kserve-resources" | default dict) -}}
+{{- $own := dig "kserve" "controller" "gateway" "ingressGateway" "kserveGateway" "" (index .root.Values "kserve-llmisvc-resources" | default dict) -}}
 {{- if and $own (ne $own $gw) -}}
-{{- fail (printf "kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway (%s) differs from the models Gateway the connectivity release renders (%s): every LLMInferenceService route attaches to modelServing.modelsGateway — set modelServing.modelsGateway.name, or modelsGateway.enabled: false to bring a Gateway of your own, and leave the kserve-resources copy unset" $own $gw) -}}
+{{- fail (printf "kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway (%s) differs from the models Gateway the connectivity release renders (%s): every LLMInferenceService route attaches to modelServing.modelsGateway — set modelServing.modelsGateway.name, or modelsGateway.enabled: false to bring a Gateway of your own, and leave the kserve-llmisvc-resources copy unset" $own $gw) -}}
 {{- end -}}
 {{- $_ := set $derived "kserve" (dict "controller" (dict "gateway" (dict "ingressGateway" (dict "kserveGateway" $gw)))) -}}
 {{- end -}}
@@ -786,6 +786,28 @@ klaus-gateway's own `enabled: true` default coalesced in while that dependency i
 on and has to special-case it; nothing here does.) The removed `mcps:` block
 needs no entry: the root schema rejects it already.
 */}}
+{{- define "agent-platform.validateRemovedComponents" -}}
+{{- /* The classic KServe controller (InferenceService, ClusterServingRuntime)
+went with the classic serving path: every served model is an
+LLMInferenceService on the llm-d control plane (components.kserve-llmisvc-crd,
+kserve-llmisvc-resources, kserve-runtime-configs). A roster entry or a values
+block for the removed components is refused, not ignored — an entry without a
+chart would otherwise pass as a feature switch and silently install nothing
+where the operator asked for a controller. */ -}}
+{{- $found := list -}}
+{{- range $name := list "kserve-crd" "kserve-resources" -}}
+{{- if hasKey ($.Values.components | default dict) $name -}}
+{{- $found = append $found (printf "components.%s" $name) -}}
+{{- end -}}
+{{- if hasKey $.Values $name -}}
+{{- $found = append $found (printf "%s (the chart's values block)" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- with $found -}}
+{{- fail (printf "the classic KServe controller was removed with the classic InferenceService serving path and its keys are refused: %s. The llm-d control plane is components.kserve-llmisvc-crd + components.kserve-llmisvc-resources (which renders the shared inferenceservice-config, Issuer and ClusterStorageContainer itself) + components.kserve-runtime-configs; drop the keys (see UPGRADE.md)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agent-platform.validateLegacyToggles" -}}
 {{- $moved := list
       (list "agentgateway" "components.agentgateway.enabled")
@@ -806,7 +828,7 @@ needs no entry: the root schema rejects it already.
 
 {{/*
 The kagent line ships its CRDs as the kagent-crds chart (a roster entry the
-kagent release dependsOn, the kserve-crd shape). kagent on with kagent-crds off
+kagent release dependsOn, the kserve-llmisvc-crd shape). kagent on with kagent-crds off
 would install a controller without its CRDs and fail every kagent CR the
 connectivity release renders at apply time ("no matches for kind"); refuse it
 at render time instead.

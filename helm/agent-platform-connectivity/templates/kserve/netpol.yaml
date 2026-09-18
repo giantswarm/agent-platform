@@ -1,20 +1,15 @@
-{{- if and (include "agent-platform.kserve.enabled" .) .Values.networkPolicy.enabled }}
+{{- if and (include "agent-platform.kserve.llmisvcEnabled" .) .Values.networkPolicy.enabled }}
 {{- /*
-Network policies of the KServe controller (and, when on, the llmisvc
-controller) in the release namespace — the kserve-resources and
-kserve-llmisvc-resources releases target the same namespace as this one. Both
-are admission webhooks + controllers: the kube-apiserver calls their webhook
-port (9443), the kubelet probes their health port (8081), a metrics scraper the
-kube-rbac-proxy (8443); they talk to DNS and the Kubernetes API and nothing
+Network policy of the llm-d controller in the release namespace — the
+kserve-llmisvc-resources release targets the same namespace as this one. It is
+an admission webhook + controller: the kube-apiserver calls its webhook port
+(9443), the kubelet probes its health port (8081), a metrics scraper the
+kube-rbac-proxy (8443); it talks to DNS and the Kubernetes API and nothing
 else. The API server has no pod identity a NetworkPolicy could select, so the
 webhook and probe ports admit every source in the kubernetes flavor and the
 cluster/host entities in the cilium flavor.
 */ -}}
-{{- $controllers := list (dict "name" "kserve-controller" "selector" "kserve-controller-manager") }}
-{{- if (include "agent-platform.kserve.llmisvcEnabled" .) }}
-{{- $controllers = append $controllers (dict "name" "llmisvc-controller" "selector" "llmisvc-controller-manager") }}
-{{- end }}
-{{- range $c := $controllers }}
+{{- range $c := list (dict "name" "llmisvc-controller" "selector" "llmisvc-controller-manager") }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" $) "cilium" }}
 ---
 apiVersion: cilium.io/v2

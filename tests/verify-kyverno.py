@@ -79,7 +79,7 @@ KAGENT_NAMESPACE = "kagent"
 # one rule each may name.
 OTHER_EXCEPTIONS = {
     "kagent-pg-image-volume": {"restricted-volumes"},
-    # The serving predictors (root vLLM image; #498), rendered with modelServing on.
+    # The serving model pods (root vLLM runtime image; #498), rendered with modelServing on.
     "model-serving-predictors": {"require-drop-all", "privilege-escalation", "run-as-non-root", "check-seccomp-strict"},
 }
 

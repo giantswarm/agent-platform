@@ -64,13 +64,11 @@ components:
   cluster-manager:               { versionRange: "0.4.2" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
-  # chart's tested pins on 2026-09-08; the three kserve charts and the two
-  # llmisvc charts move together (one upstream repository).
+  # chart's tested pins on 2026-09-08; the kserve charts move together (one
+  # upstream repository).
   backstage:                     { versionRange: "1.0.0" }
   mcp-kubernetes:                { versionRange: "1.1.8" }
   cloudnative-pg:                { versionRange: "0.29.0" }
-  kserve-crd:                    { versionRange: "0.4.1" }
-  kserve-resources:              { versionRange: "0.4.1" }
   kserve-llmisvc-crd:            { versionRange: "0.4.1" }
   kserve-llmisvc-resources:      { versionRange: "0.4.1" }
   kserve-runtime-configs:        { versionRange: "0.4.1" }

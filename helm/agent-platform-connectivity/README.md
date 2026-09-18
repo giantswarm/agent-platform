@@ -615,12 +615,10 @@ The chart applies the input to everything it renders onto the pool and to nothin
 
 | Site | Toleration | Node selector |
 |---|---|---|
-| The `ClusterServingRuntime` (`modelServing.runtime`; KServe copies both onto every predictor pod of the runtime) | the pool's first, `runtime.tolerations` after it (an equal entry once) | the pool's under `runtime.nodeSelector` (the runtime's keys win) |
-| Every additional `ClusterServingRuntime` (`modelServing.additionalRuntimes[]`, giantswarm/agent-platform#550; an entry's unset `tolerations` and `nodeSelector` are the default runtime's) | the pool's first, the entry's `tolerations` after it (an equal entry once) | the pool's under the entry's `nodeSelector` (the entry's keys win) |
 | Every published preset's `scheduling` block (`agent-platform-serving-preset-<name>`) | the pool's first, the preset's own after it (an equal entry once) | the pool's under the preset's own keys |
 | The discovery ConfigMap `agent-platform-model-serving`: `spec.gpuPool.taint.{key,value,effect}`, `spec.gpuPool.nodeSelector` | published for model-manager (`>= 0.23.0`, giantswarm/model-manager#86), which schedules the `LLMInferenceService`s it composes, its download Jobs and its inventory scan pods by it; a registered backend document may override it | likewise |
 
-Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute` (empty tolerates every effect of the key), the key is a qualified name, and every selector value is a string (a label value is a string: quote a number). `make verify-gpu-pool` asserts the three sites in the default, pool-selected, valued and untainted shapes, the guards, the meta chart's forwarding of the block, and that an empty taint key leaves the serving render byte-identical to `origin/main` but for the discovery block; `ci/test-model-serving-gpu-pool-values.yaml` is the pool-selected fixture.
+Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute` (empty tolerates every effect of the key), the key is a qualified name, and every selector value is a string (a label value is a string: quote a number). `make verify-gpu-pool` asserts both sites in the default, pool-selected, valued and untainted shapes, the guards, the meta chart's forwarding of the block, and that an empty taint key leaves the serving render byte-identical to `origin/main` but for the discovery block; `ci/test-model-serving-gpu-pool-values.yaml` is the pool-selected fixture.
 
 ### The prewarm placeholder's PriorityClass
 
@@ -651,7 +649,7 @@ It renders where the cache policies render (Kyverno served, `modelServing.polici
 
 ## The Hugging Face cache claim
 
-`modelServing.cache.pvc` (`hf-cache`, `500Gi`, on the chart's own StorageClass — below — unless `storageClassName` names a class of the operator's, `"-"` the empty class for a pre-provisioned volume; `volumeName` binds one) is one claim in the serving namespace with one subdirectory per InferenceService; the Kyverno policies mount it into every predictor's storage-initializer and runtime, model-manager's pre-warm downloads land in the same layout. The claim has **no consumer of its own** — the first predictor (or download Job) that mounts it is what Binds it — and under a StorageClass with `volumeBindingMode: WaitForFirstConsumer` (kind's `standard`, the fleet's default `gp3`, the chart's own) it stays `Pending` until then. Helm's wait counts a Pending claim as not ready, so as a release resource it failed every install and upgrade with the switch on (giantswarm/agent-platform#483).
+`modelServing.cache.pvc` (`hf-cache`, `100Gi`, on the chart's own StorageClass — below — unless `storageClassName` names a class of the operator's, `"-"` the empty class for a pre-provisioned volume; `volumeName` binds one) is one claim in the serving namespace with one subdirectory per served model; the Kyverno policies mount it into every model pod's storage-initializer and runtime, model-manager's pre-warm downloads land in the same layout. The claim has **no consumer of its own** — the first predictor (or download Job) that mounts it is what Binds it — and under a StorageClass with `volumeBindingMode: WaitForFirstConsumer` (kind's `standard`, the fleet's default `gp3`, the chart's own) it stays `Pending` until then. Helm's wait counts a Pending claim as not ready, so as a release resource it failed every install and upgrade with the switch on (giantswarm/agent-platform#483).
 
 The claim is therefore **applied by a `post-install,post-upgrade` hook Job** (`templates/model-serving/cache-pvc.yaml`; the hook include `agent-platform.hooks.job`, the identity `<release>-hooks` with `get`, `create`, `patch` on `persistentvolumeclaims` while the claim is the chart's, never `delete`), not rendered as a release resource: `kubectl apply --server-side --force-conflicts` under the field manager `agent-platform-connectivity`, the log says `created` or `present` and the claim's phase, nothing waits for a Bind. It binds where its first consumer schedules — the GPU pool's zone, which is what a zonal volume needs. What follows from the claim not being Helm's:
 
@@ -732,8 +730,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.backstage.enabled | bool | `false` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
 | components.cloudnative-pg.enabled | bool | `false` |  |
-| components.kserve-crd.enabled | bool | `false` |  |
-| components.kserve-resources.enabled | bool | `false` |  |
 | components.kserve-llmisvc-crd.enabled | bool | `false` |  |
 | components.kserve-llmisvc-resources.enabled | bool | `false` |  |
 | components.modelServing.enabled | bool | `false` |  |
@@ -1427,51 +1423,16 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | substrate.atelet.affinity | object | `{}` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
-| kserve-crd | object | `{}` |  |
-| kserve-resources | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |
 | kserve-llmisvc-resources | object | `{}` |  |
-| modelServing.kserve.requireApi | bool | `true` |  |
+| modelServing.kserve.requireApi | bool | `true` | api-versions serving.kserve.io/v1alpha2; false skips it. |
 | modelServing.namespace.name | string | `"model-serving"` |  |
 | modelServing.namespace.create | bool | `true` |  |
 | modelServing.namespace.keep | bool | `true` |  |
 | modelServing.namespace.labels | object | `{}` |  |
-| modelServing.runtime.name | string | `"kserve-vllm"` |  |
-| modelServing.runtime.image.registry | string | `"docker.io"` |  |
-| modelServing.runtime.image.name | string | `"vllm/vllm-openai"` |  |
-| modelServing.runtime.image.version | string | `"v0.29.0"` |  |
-| modelServing.runtime.args[0] | string | `"--model"` |  |
-| modelServing.runtime.args[1] | string | `"/mnt/models"` |  |
-| modelServing.runtime.args[2] | string | `"--port"` |  |
-| modelServing.runtime.args[3] | string | `"8080"` |  |
-| modelServing.runtime.args[4] | string | `"--served-model-name"` |  |
-| modelServing.runtime.args[5] | string | `"{{.Name}}"` |  |
-| modelServing.runtime.env[0].name | string | `"HF_HUB_ENABLE_HF_TRANSFER"` |  |
-| modelServing.runtime.env[0].value | string | `"1"` |  |
-| modelServing.runtime.env[1].name | string | `"VLLM_CONFIG_ROOT"` |  |
-| modelServing.runtime.env[1].value | string | `"/tmp"` |  |
-| modelServing.runtime.resources.requests.cpu | string | `"2"` |  |
-| modelServing.runtime.resources.requests.memory | string | `"16Gi"` |  |
-| modelServing.runtime.resources.limits.cpu | string | `"8"` |  |
-| modelServing.runtime.resources.limits.memory | string | `"64Gi"` |  |
-| modelServing.runtime.shmSize | string | `"16Gi"` |  |
-| modelServing.runtime.startupProbe.initialDelaySeconds | int | `300` |  |
-| modelServing.runtime.startupProbe.periodSeconds | int | `30` |  |
-| modelServing.runtime.startupProbe.failureThreshold | int | `360` |  |
-| modelServing.runtime.annotations."prometheus.kserve.io/path" | string | `"/metrics"` |  |
-| modelServing.runtime.annotations."prometheus.kserve.io/port" | string | `"8080"` |  |
-| modelServing.runtime.supportedModelFormats[0].name | string | `"vLLM"` |  |
-| modelServing.runtime.supportedModelFormats[0].version | string | `"1"` |  |
-| modelServing.runtime.supportedModelFormats[0].autoSelect | bool | `true` |  |
-| modelServing.runtime.supportedModelFormats[0].priority | int | `1` |  |
-| modelServing.runtime.nodeSelector | object | `{}` |  |
-| modelServing.runtime.tolerations | list | `[]` |  |
-| modelServing.additionalRuntimes | list | `[]` |  |
 | modelServing.serving.gpuResourceName | string | `"nvidia.com/gpu"` |  |
 | modelServing.serving.runtimeClassName | string | `""` |  |
 | modelServing.serving.nodeSelector | object | `{}` |  |
-| modelServing.serving.deploymentStrategyType | string | `"Recreate"` |  |
-| modelServing.serving.timeoutSeconds | int | `1800` |  |
 | modelServing.gpuPool.taint.key | string | `"nvidia.com/gpu"` |  |
 | modelServing.gpuPool.taint.value | string | `""` |  |
 | modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
@@ -1520,9 +1481,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.imageVerification.mutateDigest | bool | `true` |  |
 | modelServing.imageVerification.required | bool | `true` |  |
 | modelServing.imageVerification.failureAction | string | `"Enforce"` |  |
-| modelServing.networkPolicy.predictor.port | int | `8080` |  |
-| modelServing.networkPolicy.predictor.additionalIngressNamespaces | list | `[]` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
+| modelServing.networkPolicy.additionalIngressNamespaces | list | `[]` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |

@@ -5,15 +5,36 @@ objects the API server rejects or a preset the portal cannot use.
 */ -}}
 {{- if (include "agent-platform.modelServing.enabled" .) }}
   {{- $ms := .Values.modelServing }}
-  {{- /* The KServe control plane the runtime and the InferenceServices need:
-         the platform's own (components.kserve-crd + kserve-resources — the
-         connectivity release dependsOn kserve-resources, so the CRDs and the
-         webhook are Established before these objects apply), or a KServe the
-         cluster already runs, which Helm sees through .Capabilities.APIVersions
-         on install/upgrade (an offline `helm template` has to be told with
-         --api-versions). Neither: fail, naming the toggles. */ -}}
-  {{- if and $ms.kserve.requireApi (not (include "agent-platform.modelServing.kserveBundled" .)) (not (include "agent-platform.modelServing.kserveApiPresent" .)) }}
-    {{- fail "components.modelServing.enabled is true but the KServe control plane is not: turn on components.kserve-crd and components.kserve-resources (the platform's KServe; the model serving objects apply after them), or install KServe first — the serving.kserve.io/v1alpha1 (ClusterServingRuntime) and serving.kserve.io/v1beta1 (InferenceService) APIs are not served on this cluster. For an offline render pass --api-versions serving.kserve.io/v1alpha1 --api-versions serving.kserve.io/v1beta1, or set modelServing.kserve.requireApi=false to skip this check." }}
+  {{- /* The classic InferenceService path is gone: its keys are refused, not
+         ignored, so a values file that still spells them fails the render
+         naming them instead of shipping a serving layer that silently differs
+         from what the operator wrote. The path an installation moves to is in
+         UPGRADE.md. */ -}}
+  {{- $removed := list }}
+  {{- range $key := list "runtime" "additionalRuntimes" }}
+    {{- if hasKey $ms $key }}
+      {{- $removed = append $removed (printf "modelServing.%s" $key) }}
+    {{- end }}
+  {{- end }}
+  {{- if hasKey $ms.networkPolicy "predictor" }}
+    {{- $removed = append $removed "modelServing.networkPolicy.predictor (its additionalIngressNamespaces is modelServing.networkPolicy.additionalIngressNamespaces now; the port is the llm-d workload's, llmisvcWorkload.port)" }}
+  {{- end }}
+  {{- range $key := list "deploymentStrategyType" "timeoutSeconds" }}
+    {{- if hasKey $ms.serving $key }}
+      {{- $removed = append $removed (printf "modelServing.serving.%s" $key) }}
+    {{- end }}
+  {{- end }}
+  {{- with $removed }}
+    {{- fail (printf "the classic InferenceService serving path was removed and its keys are refused: %s. Every model is served as an LLMInferenceService on the well-known LLMInferenceServiceConfigs (components.kserve-llmisvc-crd, kserve-llmisvc-resources, kserve-runtime-configs); drop the keys (see UPGRADE.md)" (join "; " .)) }}
+  {{- end }}
+  {{- /* The llm-d control plane model-manager composes the LLMInferenceServices
+         onto: the platform's own (components.kserve-llmisvc-crd +
+         kserve-llmisvc-resources), or one the cluster already runs, which Helm
+         sees through .Capabilities.APIVersions on install/upgrade (an offline
+         `helm template` has to be told with --api-versions). Neither: fail,
+         naming the toggles. */ -}}
+  {{- if and $ms.kserve.requireApi (not (include "agent-platform.modelServing.llmisvcBundled" .)) (not (include "agent-platform.modelServing.llmisvcApiPresent" .)) }}
+    {{- fail "components.modelServing.enabled is true but the llm-d control plane is not: turn on components.kserve-llmisvc-crd, components.kserve-llmisvc-resources and components.kserve-runtime-configs (the platform's llm-d controller and the well-known LLMInferenceServiceConfigs every served model composes onto), or install KServe's LLMInferenceService controller first — the serving.kserve.io/v1alpha2 (LLMInferenceService) API is not served on this cluster. For an offline render pass --api-versions serving.kserve.io/v1alpha2, or set modelServing.kserve.requireApi=false to skip this check." }}
   {{- end }}
   {{- /* The Kyverno cache policies are Kyverno mutate policies: an explicit
          policies.enabled: true needs the kyverno.io objects to render (auto
@@ -62,12 +83,6 @@ objects the API server rejects or a preset the portal cannot use.
       {{- fail (printf "modelServing.imageVerification.failureAction must be Enforce or Audit (got %v)" .failureAction) }}
     {{- end }}
   {{- end }}
-  {{- end }}
-  {{- if not $ms.runtime.name }}
-    {{- fail "modelServing.runtime.name is empty: the ClusterServingRuntime needs a name, and every preset without a runtime of its own runs on it" }}
-  {{- end }}
-  {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ms.runtime.name) }}
-    {{- fail (printf "modelServing.runtime.name (%q) must be a lowercase DNS-1123 label" $ms.runtime.name) }}
   {{- end }}
   {{- if and $ms.cache.enabled (not $ms.cache.pvc.existingClaim) (not $ms.cache.pvc.name) }}
     {{- fail "modelServing.cache.pvc.name is empty: name the cache claim, or set cache.pvc.existingClaim" }}
@@ -133,13 +148,13 @@ objects the API server rejects or a preset the portal cannot use.
          matches nothing or an object the API server rejects. */ -}}
   {{- if .Values.networkPolicy.enabled }}
     {{- $np := $ms.networkPolicy }}
-    {{- $port := int $np.predictor.port }}
+    {{- $port := int $np.llmisvcWorkload.port }}
     {{- if or (lt $port 1) (gt $port 65535) }}
-      {{- fail (printf "modelServing.networkPolicy.predictor.port (%v) must be a TCP port (1-65535): the port the runtime container listens on" $np.predictor.port) }}
+      {{- fail (printf "modelServing.networkPolicy.llmisvcWorkload.port (%v) must be a TCP port (1-65535): the port the LLMInferenceService workload pod is reached on" $np.llmisvcWorkload.port) }}
     {{- end }}
-    {{- range $i, $n := $np.predictor.additionalIngressNamespaces }}
+    {{- range $i, $n := $np.additionalIngressNamespaces }}
       {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString $n)) }}
-        {{- fail (printf "modelServing.networkPolicy.predictor.additionalIngressNamespaces[%d] (%q) must be a namespace name (lowercase DNS-1123 label)" $i (toString $n)) }}
+        {{- fail (printf "modelServing.networkPolicy.additionalIngressNamespaces[%d] (%q) must be a namespace name (lowercase DNS-1123 label)" $i (toString $n)) }}
       {{- end }}
     {{- end }}
     {{- range $i, $f := $np.huggingFace.fqdns }}

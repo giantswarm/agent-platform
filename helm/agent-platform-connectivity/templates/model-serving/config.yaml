@@ -1,10 +1,9 @@
 {{- if (include "agent-platform.modelServing.enabled" .) }}
 {{- $ms := .Values.modelServing }}
 {{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}
-{{- $runtimes := (include "agent-platform.modelServing.runtimes" . | fromJson).runtimes }}
 # Discovery ConfigMap of the model-serving layer, read by the portal's serve
-# flow and by model-manager: where InferenceServices go, which runtime and
-# defaults they get, which cache claim to mount and where the presets are.
+# flow and by model-manager: where the LLMInferenceServices go, which defaults
+# they get, which cache claim to mount and where the presets are.
 # Fixed name and label, in the release namespace:
 #   kubectl -n {{ .Release.Namespace }} get configmap -l agent-platform.giantswarm.io/model-serving-config=true
 apiVersion: v1
@@ -20,18 +19,9 @@ data:
     apiVersion: agent-platform.giantswarm.io/v1alpha1
     kind: ModelServingConfig
     spec:
-      # The namespace InferenceServices are created in.
+      # The namespace the LLMInferenceServices are created in.
       namespace: {{ include "agent-platform.modelServing.namespace" . }}
-      # The ClusterServingRuntime a preset without a runtime of its own uses.
-      runtime: {{ $ms.runtime.name }}
-      # Every ClusterServingRuntime the chart renders: the default first, then
-      # modelServing.additionalRuntimes in order; a preset names one in
-      # spec.runtime.
-      runtimes:
-        {{- range $runtimes }}
-        - {{ .name }}
-        {{- end }}
-      # Defaults of every InferenceService created from a preset.
+      # Defaults of every LLMInferenceService composed from a preset.
       gpuResourceName: {{ $ms.serving.gpuResourceName }}
       runtimeClassName: {{ $ms.serving.runtimeClassName | quote }}
       nodeSelector:
@@ -39,14 +29,12 @@ data:
         {{- toYaml $ms.serving.nodeSelector | nindent 8 }}
         {{- else }} {}
         {{- end }}
-      deploymentStrategyType: {{ $ms.serving.deploymentStrategyType }}
-      timeoutSeconds: {{ $ms.serving.timeoutSeconds }}
       # The GPU node pool (modelServing.gpuPool): the taint every serving
-      # workload tolerates and the pool's label(s). The runtime and the
-      # presets carry both already; model-manager schedules the
-      # LLMInferenceServices it composes, its download Jobs and its inventory
-      # scan pods by the same input (a registered backend document may
-      # override it). No taint means an untainted pool.
+      # workload tolerates and the pool's label(s). The presets carry both
+      # already; model-manager schedules the LLMInferenceServices it composes,
+      # its download Jobs and its inventory scan pods by the same input (a
+      # registered backend document may override it). No taint means an
+      # untainted pool.
       gpuPool:
         {{- with $ms.gpuPool.taint.key }}
         taint:
@@ -68,11 +56,11 @@ data:
         enabled: {{ $ms.cache.enabled }}
         {{- if $ms.cache.enabled }}
         # The claim in the serving namespace that holds one subdirectory per
-        # InferenceService (its name), mounted at mountPath in the predictor.
+        # served model (its name), mounted at mountPath in the model pod.
         claimName: {{ include "agent-platform.modelServing.claimName" . }}
         mountPath: /mnt/models
         # Whether the Kyverno policies redirect the KServe storage-initializer
-        # into that claim at admission (no InferenceService change needed).
+        # into that claim at admission (no LLMInferenceService change needed).
         redirectPolicy: {{ if (include "agent-platform.modelServingPolicies" .) }}true{{ else }}false{{ end }}
         {{- end }}
       # The models Gateway every LLMInferenceService route attaches to, and the

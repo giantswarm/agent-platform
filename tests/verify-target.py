@@ -160,6 +160,25 @@ def check_knob(meta: str) -> None:
 
 ROSTER = re.compile(r"(?<=\n    components:\n)((?:      [a-z0-9-]+:\n        enabled: (?:true|false)\n)+)")
 
+# The classic KServe controller went with the classic InferenceService serving
+# path (giantswarm/agent-platform#574): the meta chart forwards no kserve-crd /
+# kserve-resources block any more, the kserve-llmisvc-resources block carries
+# the control plane's shared objects and the controller knobs that lived on
+# kserve-resources, and model-manager's range admits 1.0.0. Held on BOTH sides,
+# each key named; drop once GOLDEN_REF carries #574.
+LLMD_ONLY_BLOCKS = re.compile(r"^    (?:kserve-crd|kserve-resources|kserve-llmisvc-resources):(?: \{\})?\n(?:      .*\n)*", re.M)
+MODEL_MANAGER_RANGE = re.compile(r'(url: oci://gsoci\.azurecr\.io/charts/giantswarm/model-manager\n  ref:\n    semver: )"[^"]*"')
+
+
+def hold_llmd_only(here: str, there: str) -> tuple:
+    """The two meta renders with #574's intended differences held equal on both sides."""
+    def strip(render: str) -> str:
+        render = LLMD_ONLY_BLOCKS.sub("", render)
+        return MODEL_MANAGER_RANGE.sub(r'\1"<held: #574>"', render)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #574 hold — the connectivity release's kserve-crd, kserve-resources and kserve-llmisvc-resources values blocks and model-manager's range are left out of the golden comparison")
+    return h, strip(there)
+
 
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
@@ -235,6 +254,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
+                here, there = hold_llmd_only(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

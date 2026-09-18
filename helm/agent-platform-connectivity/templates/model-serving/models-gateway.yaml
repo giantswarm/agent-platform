@@ -1,7 +1,7 @@
 {{- /*
 The models Gateway (giantswarm/agent-platform#326; bumblebee-plans#46, D6): the
 agentgateway Gateway every LLMInferenceService route attaches to (KServe's
-ingress-gateway value on the kserve-resources release is derived from it by the
+ingress-gateway value on the kserve-llmisvc-resources release is derived from it by the
 meta chart) and its one JWT policy against the platform's Dex. A served model
 answers at https://<host>/<namespace>/<model>/v1/chat/completions with a
 person's id_token and 401 without one. The data plane strips the Authorization

@@ -288,7 +288,7 @@ def check_sources(docs, kagent_range: str) -> None:
             fail(f"the kagent release does not dependsOn {dep} ({why})")
     crds = docs[("HelmRelease", "kagent-crds")]
     if any(line.strip().startswith("crds: ") for line in crds):
-        fail("kagent-crds carries a crds: policy, but its CRDs are templates (the kserve-crd shape)")
+        fail("kagent-crds carries a crds: policy, but its CRDs are templates (the kserve-llmisvc-crd shape)")
     crds_values = forwarded_values(crds)
     if "global" in crds_values:
         fail("global injected into kagent-crds, which reads none (components.kagent-crds.injectGlobal must be false)")

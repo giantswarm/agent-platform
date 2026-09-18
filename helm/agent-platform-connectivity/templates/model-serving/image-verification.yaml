@@ -5,8 +5,8 @@ under its references: the modelcar sidecar that carries the weights, the
 pre-fetch init container KServe runs from the same image and the runtime
 container were admitted unverified. modelServing.imageVerification renders one
 Kyverno verifyImages ClusterPolicy over the model pods of the serving namespace
-— one rule per pod shape (_helpers.tpl, agent-platform.modelServing.podShapes;
-the shapes share no label, so each rule matches its own), Pods at CREATE and
+— the LLMInferenceService workload pods (_helpers.tpl,
+agent-platform.modelServing.podShape), Pods at CREATE and
 UPDATE: a pod's container images are among the few fields the API server lets
 an update change, so a CREATE-only rule would admit an image swapped into a
 running pod unverified (Kyverno records the verified images in an annotation
@@ -54,11 +54,11 @@ spec:
   webhookTimeoutSeconds: 30
   background: false
   rules:
-    {{- range $shape := (include "agent-platform.modelServing.podShapes" . | fromJsonArray) }}
-    - name: verify-model-images-{{ $shape.name }}
+    {{- with (include "agent-platform.modelServing.podShape" . | fromJson) }}
+    - name: verify-model-images-{{ .name }}
       match:
         any:
-          {{- include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "shapes" (list $shape) "operations" (list "CREATE" "UPDATE")) | trim | nindent 10 }}
+          {{- include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "operations" (list "CREATE" "UPDATE")) | trim | nindent 10 }}
       verifyImages:
         - imageReferences:
             {{- toYaml $iv.images | nindent 12 }}

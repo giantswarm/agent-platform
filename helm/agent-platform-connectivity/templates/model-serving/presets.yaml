@@ -5,7 +5,7 @@
 {{- $resolved := include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name" $name "entry" $entry) | fromJson }}
 ---
 # Serving preset {{ $name }} ({{ $entry.source }}): the published ServingPreset
-# the portal's serve flow turns into an InferenceService. Schema:
+# the portal's serve flow turns into an LLMInferenceService. Schema:
 # files/model-serving/serving-preset.schema.json. List all presets with
 #   kubectl -n {{ $.Release.Namespace }} get configmap -l agent-platform.giantswarm.io/serving-preset=true
 apiVersion: v1

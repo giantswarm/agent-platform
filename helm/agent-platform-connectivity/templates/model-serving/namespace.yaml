@@ -2,7 +2,7 @@
 {{- $ms := .Values.modelServing }}
 {{- $ns := include "agent-platform.modelServing.namespace" . }}
 {{- if and $ms.namespace.create (ne $ns .Release.Namespace) }}
-# The serving namespace: InferenceServices, the cache claim and the chat-template
+# The serving namespace: the LLMInferenceServices, the cache claim and the chat-template
 # ConfigMaps live here; the Kyverno policies match pods in it. Helm-owned, and
 # KEPT on uninstall (helm.sh/resource-policy: keep; namespace.keep, default
 # true) whatever the cache switch says: the cache claim in it outlives the

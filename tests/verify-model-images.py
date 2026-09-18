@@ -48,8 +48,8 @@ SERVING = [
     "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
     "--set", "global.gatewayApi.parentRefs[0].name=giantswarm-default",
     "--set", "global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system",
-    "--set", "components.kserve-crd.enabled=true",
-    "--set", "components.kserve-resources.enabled=true",
+    "--set", "components.kserve-llmisvc-crd.enabled=true",
+    "--set", "components.kserve-llmisvc-resources.enabled=true",
     "--set", "components.modelServing.enabled=true",
 ]
 REGISTRY = "registry.example.com:5000"

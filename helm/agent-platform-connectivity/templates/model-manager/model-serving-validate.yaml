@@ -2,13 +2,13 @@
 Render-time guards between a model-manager with the kserve backend among its
 backends (model-manager.backends, else model-manager.backend) and the
 modelServing wiring (components.modelServing.enabled). The two describe one
-serving layer: model-manager reads the runtime, GPU resource name, cache claim
-and preset selector from the modelServing discovery ConfigMap at run time, so
-only what must be static (the serving namespace, the discovery ConfigMap's name
-and namespace) and explicit overrides are checked here. They fail `helm
-template` (and therefore CI lint + install) with an actionable message instead
-of shipping a model-manager that manages InferenceServices in a namespace the
-runtime, presets and cache do not target. An unset model-manager.kserve key
+serving layer: model-manager reads the GPU resource name, the RuntimeClass, the
+cache claim and the preset selector from the modelServing discovery ConfigMap
+at run time, so only what must be static (the serving namespace, the discovery
+ConfigMap's name and namespace) and explicit overrides are checked here. They
+fail `helm template` (and therefore CI lint + install) with an actionable
+message instead of shipping a model-manager that composes LLMInferenceServices
+in a namespace the presets and the cache do not target. An unset model-manager.kserve key
 means the model-manager chart's own default, which is the modelServing layer's
 (kserve.namespace model-serving, kserve.discovery.configMap
 agent-platform-model-serving): the two agree out of the box.
@@ -20,7 +20,7 @@ agent-platform-model-serving): the two agree out of the box.
   {{- $kserve := dig "kserve" dict $chart }}
   {{- $mmNs := dig "namespace" "" $kserve | default "model-serving" }}
   {{- if ne $servingNs $mmNs }}
-    {{- fail (printf "model-manager.kserve.namespace (%s) must equal modelServing.namespace.name (%s): model-manager manages the InferenceServices the modelServing runtime, presets and cache target" $mmNs $servingNs) }}
+    {{- fail (printf "model-manager.kserve.namespace (%s) must equal modelServing.namespace.name (%s): model-manager composes the LLMInferenceServices the modelServing presets and cache target" $mmNs $servingNs) }}
   {{- end }}
   {{- $discovery := dig "discovery" dict $kserve }}
   {{- $discoveryName := dig "configMap" "" $discovery | default "agent-platform-model-serving" }}
@@ -30,10 +30,6 @@ agent-platform-model-serving): the two agree out of the box.
   {{- $discoveryNs := dig "namespace" "" $discovery }}
   {{- if and $discoveryNs (ne $discoveryNs .Release.Namespace) }}
     {{- fail (printf "model-manager.kserve.discovery.namespace (%s) must be empty or the release namespace (%s), where the modelServing wiring publishes its discovery ConfigMap" $discoveryNs .Release.Namespace) }}
-  {{- end }}
-  {{- $runtime := dig "runtime" "" $kserve }}
-  {{- if and $runtime (ne $runtime $ms.runtime.name) }}
-    {{- fail (printf "model-manager.kserve.runtime (%s) differs from modelServing.runtime.name (%s); leave it empty to follow the discovery ConfigMap" $runtime $ms.runtime.name) }}
   {{- end }}
   {{- $gpu := dig "gpuResourceName" "" $kserve }}
   {{- if and $gpu (ne $gpu $ms.serving.gpuResourceName) }}

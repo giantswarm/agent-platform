@@ -1,30 +1,43 @@
 {{- /*
-Render-time guards of the KServe components' wiring. They fail `helm template`
-(and therefore CI lint + install) with an actionable message instead of
-shipping a control plane that cannot start. The standalone umbrella's other
-kserve guards are the meta chart's ordering now: kserve-crd before the
-controllers and before every CR consumer (dependsOn), so the two-phase first
-install and the "CRDs on the cluster yet?" checks have no counterpart here;
-cert-manager stays a documented prerequisite of kserve-resources (its release
-reports the missing Issuer API).
+Render-time guards of the llm-d control plane's wiring. They fail `helm
+template` (and therefore CI lint + install) with an actionable message instead
+of shipping a control plane that cannot start. The ordering is the meta
+chart's: kserve-llmisvc-crd before the controller and the well-known configs
+(dependsOn); cert-manager stays a documented prerequisite of
+kserve-llmisvc-resources (its release reports the missing Issuer API).
 */ -}}
-{{- if (include "agent-platform.kserve.enabled" .) }}
-  {{- $resources := include "agent-platform.kserve.resourcesValues" . | fromJson }}
+{{- /* The classic KServe controller is gone with the InferenceService path: a
+       roster that still switches its components is refused, not ignored. */ -}}
+{{- $removed := list }}
+{{- range $name := list "kserve-crd" "kserve-resources" }}
+  {{- if hasKey ($.Values.components | default dict) $name }}
+    {{- $removed = append $removed (printf "components.%s" $name) }}
+  {{- end }}
+  {{- if hasKey $.Values $name }}
+    {{- $removed = append $removed (printf "%s (the chart's values block)" $name) }}
+  {{- end }}
+{{- end }}
+{{- with $removed }}
+  {{- fail (printf "the classic KServe controller (InferenceService, ClusterServingRuntime) was removed with the classic serving path and its keys are refused: %s. The llm-d control plane is components.kserve-llmisvc-crd + kserve-llmisvc-resources (which renders the shared inferenceservice-config, Issuer and ClusterStorageContainer itself) + kserve-runtime-configs; drop the keys (see UPGRADE.md)" (join ", " .)) }}
+{{- end }}
+{{- if (include "agent-platform.kserve.llmisvcEnabled" .) }}
+  {{- $llmisvc := include "agent-platform.kserve.llmisvcValues" . | fromJson }}
+  {{- /* The shared objects of the control plane — the inferenceservice-config
+         ConfigMap the controller reads its storage-initializer and ingress
+         gateway from, the self-signed Issuer of its webhook certificate, the
+         default ClusterStorageContainer — are the llmisvc release's own
+         (kserve.createSharedResources, the chart's default): no other release
+         renders them any more. An explicit false would start a controller
+         without its config. */ -}}
+  {{- if and (hasKey (dig "kserve" dict $llmisvc) "createSharedResources") (not (dig "kserve" "createSharedResources" true $llmisvc)) }}
+    {{- fail "kserve-llmisvc-resources.kserve.createSharedResources must stay true: the llmisvc release renders the shared inferenceservice-config ConfigMap, the self-signed Issuer and the default ClusterStorageContainer the controller starts against, and no other release does" }}
+  {{- end }}
   {{- /* Deployment mode: only the raw mode works without Knative/ModelMesh.
          Checked when set — the meta chart forwards Standard by default; a
          connectivity render on its own without the block relies on the
          chart's default and its own release. */ -}}
-  {{- $mode := dig "kserve" "controller" "deploymentMode" "" $resources }}
+  {{- $mode := dig "kserve" "controller" "deploymentMode" "" $llmisvc }}
   {{- if and $mode (not (or (eq $mode "Standard") (eq $mode "RawDeployment"))) }}
-    {{- fail (printf "kserve-resources.kserve.controller.deploymentMode (%q) must be Standard (plain Deployments and Services per InferenceService; RawDeployment is its former name): the Knative and ModelMesh modes need controllers the platform does not ship" $mode) }}
-  {{- end }}
-{{- end }}
-{{- if (include "agent-platform.kserve.llmisvcEnabled" .) }}
-  {{- if not (include "agent-platform.kserve.enabled" .) }}
-    {{- fail "components.kserve-llmisvc-resources.enabled is true but components.kserve-resources.enabled is false: the llmisvc controller reads the KServe control plane's inferenceservice-config and shares its webhook certificate Issuer. Turn on components.kserve-resources (and components.kserve-crd)." }}
-  {{- end }}
-  {{- $llmisvc := include "agent-platform.kserve.llmisvcValues" . | fromJson }}
-  {{- if dig "kserve" "createSharedResources" false $llmisvc }}
-    {{- fail "kserve-llmisvc-resources.kserve.createSharedResources must stay false: kserve-resources renders the shared inferenceservice-config ConfigMap, the self-signed Issuer and the default ClusterStorageContainer, and a second copy in the same namespace conflicts" }}
+    {{- fail (printf "kserve-llmisvc-resources.kserve.controller.deploymentMode (%q) must be Standard (plain Deployments and Services per served model; RawDeployment is its former name): the Knative and ModelMesh modes need controllers the platform does not ship" $mode) }}
   {{- end }}
 {{- end }}

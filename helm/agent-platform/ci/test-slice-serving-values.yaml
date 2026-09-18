@@ -1,5 +1,5 @@
 # The serving-shaped toggle set of one `<cluster>-agent-platform` release
-# (giantswarm/agent-platform#328): the KServe components and the model serving
+# (giantswarm/agent-platform#328): the llm-d components and the model serving
 # switch on, the platform's own components — muster, dicebear, valkey, kagent
 # and everything that rides it — left to the platform's release. The bundled
 # engine is off: the release is delivered by the installation's Flux, beside the
@@ -24,10 +24,6 @@ components:
   # runs on the installation and manages the slices' backends registered at runtime.
   model-manager:
     enabled: false
-  kserve-crd:
-    enabled: true
-  kserve-resources:
-    enabled: true
   kserve-llmisvc-crd:
     enabled: true
   kserve-llmisvc-resources:

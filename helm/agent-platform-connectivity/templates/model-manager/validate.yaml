@@ -88,16 +88,17 @@ login provider beside global.identity, or a route the API server rejects.
     {{- end }}
   {{- end }}
 
-  {{- /* The kserve backend manages InferenceServices: it needs KServe on the
-         cluster. Only checkable through its CRDs at render time — unless this
-         platform installs KServe itself: with the kserve-resources component
-         (or the modelServing wiring that runs on it) on, that component's own
-         guards own the check and a missing API is the first install, where the
-         CRDs arrive in the same reconcile. Optional components: a roster that
-         does not carry them yet is not force-on. */ -}}
-  {{- $kserveBundled := or (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-resources")) (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "modelServing")) }}
-  {{- if and (eq $backend "kserve") $mm.kserve.requireApi (not $kserveBundled) (not (.Capabilities.APIVersions.Has "serving.kserve.io/v1beta1")) }}
-    {{- fail "model-manager.backend is kserve but the serving.kserve.io/v1beta1 API (InferenceService) is not on the cluster and no component of this chart installs it: turn on the KServe components (components.kserve-crd, components.kserve-resources; with components.modelServing for the platform's serving runtime) or install KServe first. For an offline render pass --api-versions serving.kserve.io/v1beta1, or set modelManager.kserve.requireApi=false to skip this check." }}
+  {{- /* The kserve backend composes LLMInferenceServices: it needs the llm-d
+         control plane on the cluster. Only checkable through its CRD at render
+         time — unless this platform installs the control plane itself: with
+         the kserve-llmisvc-resources component (or the modelServing wiring
+         that runs on it) on, that component's own guards own the check and a
+         missing API is the first install, where the CRDs arrive in the same
+         reconcile. Optional components: a roster that does not carry them yet
+         is not force-on. */ -}}
+  {{- $llmisvcBundled := or (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-llmisvc-resources")) (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "modelServing")) }}
+  {{- if and (eq $backend "kserve") $mm.kserve.requireApi (not $llmisvcBundled) (not (.Capabilities.APIVersions.Has "serving.kserve.io/v1alpha2")) }}
+    {{- fail "model-manager.backend is kserve but the serving.kserve.io/v1alpha2 API (LLMInferenceService) is not on the cluster and no component of this chart installs it: turn on the llm-d components (components.kserve-llmisvc-crd, components.kserve-llmisvc-resources, components.kserve-runtime-configs; with components.modelServing for the platform's serving layer) or install KServe's LLMInferenceService controller first. For an offline render pass --api-versions serving.kserve.io/v1alpha2, or set modelManager.kserve.requireApi=false to skip this check." }}
   {{- end }}
 
   {{- /* ModelConfig wiring lands in the kagent namespace: the ModelConfigs

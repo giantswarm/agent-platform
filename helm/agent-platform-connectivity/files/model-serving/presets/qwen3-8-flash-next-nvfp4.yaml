@@ -5,14 +5,16 @@
 # NVIDIA's own NVFP4 checkpoint is 123.6 GiB and does not fit the node next to
 # a KV cache; the repack (98.6 GiB, the n-gram table in NVFP4 too) does once
 # the table is read from disk, with MTP speculative decoding on the B12X
-# serving stack. Thirty-odd tuned flags and nine runtime knobs: this is why
-# presets are curated in git and not typed into a form.
+# serving stack — the runtime image the installation's well-known
+# LLMInferenceServiceConfig names for such a node. Thirty-odd tuned flags and
+# nine runtime knobs: this is why presets are curated in git and not typed
+# into a form.
 apiVersion: agent-platform.giantswarm.io/v1alpha1
 kind: ServingPreset
 metadata:
   name: qwen3-8-flash-next-nvfp4
 spec:
-  displayName: Qwen3.8-Flash-Next (NVFP4, OCI model image, B12X runtime)
+  displayName: Qwen3.8-Flash-Next (NVFP4, OCI model image, B12X serving stack)
   description: |
     Qwen3.8-Flash-Next: a 125B-parameter mixture of experts with 6B active
     (Qwen3-Next lineage, Gated DeltaNet hybrid) and a 51B n-gram embedding
@@ -25,13 +27,13 @@ spec:
     (VLLM_PLE_TABLE_MEMORY=disk) and MTP speculative decoding proposing four
     tokens per target pass.
     Target hardware: one single-GPU 128 GB unified-memory Blackwell node
-    (GB10, the CUTE_DSL_ARCH sm_121a pin). Runtime: kserve-vllm-b12x, a
-    ClusterServingRuntime the installation defines through
-    modelServing.additionalRuntimes from the B12X serving stack's image (the
-    community's spark-vllm-b12x build, which brings the b12x load format, GDN
-    decode kernel, linear and MoE backends this recipe selects); the default
-    upstream vLLM runtime cannot serve this architecture on the node, so the
-    preset schedules only where that runtime exists.
+    (GB10, the CUTE_DSL_ARCH sm_121a pin). Runtime: the B12X serving stack
+    (the community's spark-vllm-b12x build, which brings the b12x load format,
+    GDN decode kernel, linear and MoE backends this recipe selects) as the
+    runtime image of the well-known LLMInferenceServiceConfig the installation
+    serves such a node with (components.kserve-runtime-configs, the chart's
+    image field); the upstream vLLM image cannot serve this architecture on
+    the node.
     Weights: an OCI model image, giantswarm/models/qwen3-8-flash-next-nvfp4
     at the checkpoint revision, pulled onto the node by containerd like any
     image (KServe's modelcar path: no download, no cache claim, every serving
@@ -57,10 +59,6 @@ spec:
     contextLength: 262144
     capabilities: [chat, tools, reasoning, vision, coding]
     license: other
-  # An additional runtime the installation defines from the B12X image
-  # (modelServing.additionalRuntimes, giantswarm/agent-platform#550); the
-  # default upstream runtime cannot serve this architecture.
-  runtime: kserve-vllm-b12x
   env:
     # The 51B n-gram (PLE) table is read from disk instead of resident memory:
     # what makes the 98.6 GiB checkpoint fit the node next to a KV cache.
@@ -144,7 +142,3 @@ spec:
     # budget of a 128 GB node is the fp8 KV cache, CUDA graphs and the runtime.
     weightsGiB: 99
     overheadGiB: 20
-  predictor:
-    # KServe writes this into the predictor route as the request timeout; the
-    # default 60s cuts long reasoning streams mid-response.
-    timeout: 1800

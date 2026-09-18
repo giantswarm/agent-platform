@@ -10,8 +10,8 @@ roster that the fleet, the quick-start values or the connectivity wiring rely on
   the same as before they existed;
 - on: one OCIRepository + one HelmRelease each, at the documented OCI source and
   version range, with `global` injected, the standalone's defaults forwarded, no
-  `crds:` policy (none of the seven ships a crds/ dir), and the CRD-before-CR
-  order in `dependsOn` — kserve-crd before the KServe controllers, the operator
+  `crds:` policy (none of them ships a crds/ dir), and the CRD-before-CR
+  order in `dependsOn` — kserve-llmisvc-crd before the llm-d controller, the operator
   and control plane before their CR consumers (connectivity, model-manager);
 - the customer BOM pins every one of them exactly, and does not pin the wiring
   chart: agent-platform-connectivity is released off the meta chart's tag and
@@ -21,12 +21,12 @@ roster that the fleet, the quick-start values or the connectivity wiring rely on
   versions are one, a pin at the chart's repository is refused, and the two
   development shapes (a semverFilter, another repository) are admitted;
 - the values tree the meta chart forwards to the connectivity release validates
-  against the connectivity chart's schema with the seven off and on. The
+  against the connectivity chart's schema with the extras off and on. The
   connectivity root schema is additionalProperties: false, so a top-level block
   the meta chart forwards but the connectivity chart does not declare fails the
   connectivity release on every installation — for as long as the fleet's
   connectivity OCIRepository has not re-resolved to a chart that declares it;
-- the seven blocks REACH the connectivity release (nothing is held back any
+- the extras' blocks REACH the connectivity release (nothing is held back any
   more: the connectivity chart reads them for the wiring it renders — the
   Backstage app-config and route, the mcp-kubernetes MCPServer, the model
   serving objects, the KServe controllers' network policies), off and on;
@@ -63,12 +63,10 @@ NEW = {
     "backstage": (GSOCI, ">=1.0.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
     "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://ghcr.io/cloudnative-pg/charts", "0.29.x", [], None),
-    "kserve-crd": (GSOCI, "0.4.x", [], None),
-    "kserve-resources": (GSOCI, "0.4.x", ["kserve-crd"], "deploymentMode: Standard"),
     "kserve-llmisvc-crd": (GSOCI, "0.4.x", [], None),
-    "kserve-llmisvc-resources": (
-        GSOCI, "0.4.x", ["kserve-crd", "kserve-llmisvc-crd", "kserve-resources"], "createSharedResources: false",
-    ),
+    # The one KServe controller: it renders the control plane's shared objects
+    # itself, since the classic controller (kserve-resources) is gone.
+    "kserve-llmisvc-resources": (GSOCI, "0.4.x", ["kserve-llmisvc-crd"], "createSharedResources: true"),
 }
 
 # The wiring chart has no range of its own: released off the same tag as the
@@ -104,7 +102,10 @@ LINE = {
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
-    "model-manager": (GSOCI, ">=0.23.0 <1.0.0", ["muster", "kagent", "kserve-resources"]),
+    # The ceiling admits model-manager 1.0.0, the release that composes
+    # LLMInferenceServices only: nothing the meta chart forwards names the
+    # values it drops (kserve.servingKind, kserve.runtime).
+    "model-manager": (GSOCI, ">=0.23.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
     # 0.20.2 is the first vm-manager release from the generated CircleCI
     # pipeline with its guest image artifact (gsoci, the catalog). muster
     # alone: the MCPServer CR.
@@ -133,9 +134,12 @@ MANAGERS = ["model-manager", "agent-manager"]
 GATED = {"vm-manager": ["vm-manager", "vmManager"], "cluster-manager": ["cluster-manager", "clusterManager"]}
 
 # CR consumers that come after the operator / control plane when those are on.
+# The connectivity release renders no serving.kserve.io CR (model-manager
+# composes the LLMInferenceServices at run time), so it waits for no kserve
+# component; model-manager waits for the llm-d controller.
 CONSUMERS = {
-    "agent-platform-connectivity": ["muster", "cloudnative-pg", "kserve-resources", "substrate-crds", "kagent-crds"],
-    "model-manager": ["kserve-resources"],
+    "agent-platform-connectivity": ["muster", "cloudnative-pg", "substrate-crds", "kagent-crds"],
+    "model-manager": ["kserve-llmisvc-resources"],
 }
 # Releases a consumer must NOT wait for: the connectivity release's hooks mint
 # what kagent's and Substrate's pods start against (the CNPG connection
@@ -287,7 +291,7 @@ def main(meta: str, connectivity: str) -> int:
             dangling = [x for x in depends_on(d) if x in NEW]
             if dangling:
                 fail(f"{name} dependsOn {dangling} while those components are off (would block forever)")
-    print("ok: the seven are off by default — no release, no dangling dependsOn, roster says false, blocks forwarded")
+    print("ok: the standalone's extras are off by default — no release, no dangling dependsOn, roster says false, blocks forwarded")
 
     # --- kagent-crds, substrate and substrate-crds follow components.kagent ---------
     no_kagent = docs(render(meta, [*ci, "--set", "components.kagent.enabled=false"]))
@@ -395,7 +399,7 @@ def main(meta: str, connectivity: str) -> int:
     # the release objects only: the kagent CRDs' storage-version hooks (#396, verify-engine.py) are Helm hooks and render with the engine off too
     kinds = {m.group(1) for d in on_manifest.split("\n---\n") if "helm.sh/hook:" not in d for m in [re.search(r"^kind: (\S+)$", d, re.M)] if m}
     if kinds - {"OCIRepository", "HelmRelease"}:
-        fail(f"the seven-on render is not a pure app-of-apps render: {sorted(kinds)}")
+        fail(f"the extras-on render is not a pure app-of-apps render: {sorted(kinds)}")
     on = docs(on_manifest)
     conn_on_values = hr_values(on[("HelmRelease", "agent-platform-connectivity")])
     ron = roster(conn_on_values)
@@ -411,10 +415,10 @@ def main(meta: str, connectivity: str) -> int:
         if sorted(depends_on(hr)) != sorted(deps):
             fail(f"{name} dependsOn {depends_on(hr)}, expected {deps}")
         if "crds: " in hr:
-            fail(f"{name} carries a crds: policy, but none of the seven ships a crds/ dir (CRDs are templates)")
+            fail(f"{name} carries a crds: policy, but none of them ships a crds/ dir (CRDs are templates)")
         vals = hr_values(hr)
         if not re.search(r"^global:$", vals, re.M):
-            fail(f"{name} release values carry no injected global (every one of the seven charts accepts it)")
+            fail(f"{name} release values carry no injected global (every one of their charts accepts it)")
         if marker and marker not in vals:
             fail(f"{name} release values lack the standalone default {marker!r}")
         if ron.get(name) is not True:
@@ -454,7 +458,7 @@ def main(meta: str, connectivity: str) -> int:
         vals = hr_values(on[("HelmRelease", name)]) + "\n"
         if not re.search(rf"^kagent:\n(?:  .*\n)*?  apiVersion: {KAGENT_API_VERSION}$", vals, re.M):
             fail(f"{name} release values do not pin kagent.apiVersion: {KAGENT_API_VERSION} — left to `auto`, a pod that started under kagent 0.10 keeps v1alpha2 across the upgrade (giantswarm/agent-platform#401)")
-    print(f"ok: seven on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges, the managers pinned to kagent.dev/{KAGENT_API_VERSION}")
+    print(f"ok: the extras on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges, the managers pinned to kagent.dev/{KAGENT_API_VERSION}")
 
     # --- the dev channel: semverFilter ----------------------------------------------
     check_semver_filters(meta, ci)
@@ -519,12 +523,12 @@ def main(meta: str, connectivity: str) -> int:
         fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
     if substrate_pins != {SUBSTRATE_PIN}:
         fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the two Substrate charts and the derived worker image are one release of the line")
-    print(f"ok: the customer BOM pins the seven, the kagent line and the managers exactly, and not the wiring chart; the kagent release's worker image is {WORKER_IMAGE}, the chart's own Substrate pin")
+    print(f"ok: the customer BOM pins the extras, the kagent line and the managers exactly, and not the wiring chart; the kagent release's worker image is {WORKER_IMAGE}, the chart's own Substrate pin")
 
     # --- the forwarded tree validates against the connectivity chart --------------
     # The meta chart's defaults plus the one input every render needs; the CI
     # values would trip connectivity's ingress-mode guards, which is not the point.
-    # With the seven (and the modelServing switch) on, the wiring needs the
+    # With the extras (and the modelServing switch) on, the wiring needs the
     # quick-start inputs Backstage takes by design: global.domain, global.identity
     # and a public Gateway for its route.
     quickstart = [
@@ -541,11 +545,11 @@ def main(meta: str, connectivity: str) -> int:
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write(tree)
         render(connectivity, ["-f", f.name])
-    print("ok: the forwarded values tree (roster included) validates against the connectivity chart, seven off and on (with the wiring's quick-start inputs)")
+    print("ok: the forwarded values tree (roster included) validates against the connectivity chart, the extras off and on (with the wiring's quick-start inputs)")
 
     # --- schema symmetry ------------------------------------------------------------
     # gitops is never forwarded; a block named in the connectivity entry's omitKeys
-    # is held back (the flux-engine subchart's values; the seven blocks of the
+    # is held back (the flux-engine subchart's values; the extras' blocks of the
     # standalone's extras are forwarded — the connectivity chart reads them).
     omit = re.search(r"^    omitKeys:\n((?:      .*\n)+)", open(f"{meta}/values.yaml").read()[open(f"{meta}/values.yaml").read().index("  agent-platform-connectivity:"):], re.M)
     held = set(re.findall(r"^      - (\S+)$", omit.group(1), re.M)) if omit else set()
@@ -563,7 +567,7 @@ def main(meta: str, connectivity: str) -> int:
     for name in NEW:
         if name not in conn_keys:
             fail(f"connectivity values.yaml does not declare the {name} block")
-    print("ok: every meta top-level key is declared by the connectivity schema; the seven blocks included")
+    print("ok: every meta top-level key is declared by the connectivity schema; the extras' blocks included")
     return 0
 
 

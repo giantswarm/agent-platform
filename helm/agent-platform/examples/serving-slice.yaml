@@ -1,6 +1,6 @@
 # The serving slice (giantswarm/agent-platform#326; bumblebee-plans#46, D4/D6/D8):
 # the values profile of ONE `<cluster>-agent-platform` release that serves
-# models on a GPU cluster and nothing else — the KServe control plane, the
+# models on a GPU cluster and nothing else — the llm-d control plane, the
 # well-known LLMInferenceServiceConfigs, the model serving switch and the
 # models Gateway with its Dex JWT policy. Delivered by the installation's Flux
 # like every workload-cluster app: beside the platform's own release on the
@@ -11,8 +11,8 @@
 # operator sets the toggle by the target's shape. Layer this file over the
 # installation's platform inputs (global.domain, global.identity, ingress.mode
 # agentgateway-*, gatewayApi.gateway.tls.secretName) and a BOM
-# (examples/customer-bom.yaml). The target runs cert-manager (the KServe
-# controllers' webhook certificates come from a self-signed Issuer of the
+# (examples/customer-bom.yaml). The target runs cert-manager (the llm-d
+# controller's webhook certificate comes from a self-signed Issuer of the
 # release namespace) — part of every Giant Swarm installation; the well-known
 # LLMInferenceServiceConfigs install into the release namespace, where the llm-d
 # controller resolves them from (besides an LLMInferenceService's own).
@@ -66,12 +66,8 @@ components:
   # target runs no controller of its own.
   agentgateway:
     enabled: false
-  # The serving component set: the KServe control plane, the llm-d controller
-  # and its CRDs, the well-known configs, the serving switch.
-  kserve-crd:
-    enabled: true
-  kserve-resources:
-    enabled: true
+  # The serving component set: the llm-d controller and its CRDs, the
+  # well-known configs, the serving switch.
   kserve-llmisvc-crd:
     enabled: true
   kserve-llmisvc-resources:

@@ -1,13 +1,15 @@
 {{/* vim: set filetype=mustache: */}}
 {{/*
-Helpers of the modelServing wiring (templates/model-serving/): KServe/vLLM model
-serving — the ClusterServingRuntime, the serving presets and their discovery
-ConfigMap, the Hugging Face cache claim, the Kyverno cache policies and the
-network policies of the serving namespace. Ported from the standalone umbrella,
-where it was a component of its own; here it is a feature switch of the roster
+Helpers of the modelServing wiring (templates/model-serving/): model serving
+on llm-d — the serving presets and their discovery ConfigMap, the Hugging Face
+cache claim, the Kyverno cache policies, the network policies of the serving
+namespace and the models Gateway. A feature switch of the roster
 (components.modelServing.enabled, no chart behind it) plus the modelServing:
-values block, and it runs on the KServe control plane the kserve-crd and
-kserve-resources components install (or a KServe the cluster already serves).
+values block; it runs on the llm-d control plane the kserve-llmisvc-crd and
+kserve-llmisvc-resources components install (or an LLMInferenceService API the
+cluster already serves). The chart renders no serving.kserve.io object itself:
+model-manager composes every served model into an LLMInferenceService on the
+well-known LLMInferenceServiceConfigs (components.kserve-runtime-configs).
 */}}
 
 {{/*
@@ -19,26 +21,27 @@ Optional: a roster that does not carry the entry is off, never force-on.
 {{- end -}}
 
 {{/*
-Truthy when the platform installs the KServe control plane itself: the
-kserve-crd AND kserve-resources components are on.
+Truthy when the platform installs the llm-d control plane itself: the
+kserve-llmisvc-crd AND kserve-llmisvc-resources components are on.
 */}}
-{{- define "agent-platform.modelServing.kserveBundled" -}}
-{{- if and (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-crd")) (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-resources")) -}}true{{- end -}}
+{{- define "agent-platform.modelServing.llmisvcBundled" -}}
+{{- if and (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-llmisvc-crd")) (include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-llmisvc-resources")) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
-Truthy when the cluster serves the KServe serving APIs (ClusterServingRuntime,
-InferenceService). Helm fills .Capabilities.APIVersions from the cluster on
-install/upgrade; an offline `helm template` has to be told with --api-versions.
+Truthy when the cluster serves the LLMInferenceService API
+(serving.kserve.io/v1alpha2). Helm fills .Capabilities.APIVersions from the
+cluster on install/upgrade; an offline `helm template` has to be told with
+--api-versions.
 */}}
-{{- define "agent-platform.modelServing.kserveApiPresent" -}}
-{{- if and (.Capabilities.APIVersions.Has "serving.kserve.io/v1alpha1") (.Capabilities.APIVersions.Has "serving.kserve.io/v1beta1") -}}true{{- end -}}
+{{- define "agent-platform.modelServing.llmisvcApiPresent" -}}
+{{- if .Capabilities.APIVersions.Has "serving.kserve.io/v1alpha2" -}}true{{- end -}}
 {{- end -}}
 
 {{/*
-The serving namespace: where InferenceServices run, the cache PVC and the
-chat-template ConfigMaps live and the Kyverno policies match. Empty falls back
-to the release namespace.
+The serving namespace: where the LLMInferenceServices run, the cache PVC and
+the chat-template ConfigMaps live and the Kyverno policies match. Empty falls
+back to the release namespace.
 */}}
 {{- define "agent-platform.modelServing.namespace" -}}
 {{- .Values.modelServing.namespace.name | default .Release.Namespace -}}
@@ -55,7 +58,7 @@ resource (giantswarm/agent-platform#483).
 {{- end -}}
 
 {{/*
-The cache claim every predictor pod mounts: the pre-existing claim when named,
+The cache claim every model pod mounts: the pre-existing claim when named,
 else the claim this chart applies (cache-pvc.yaml).
 */}}
 {{- define "agent-platform.modelServing.claimName" -}}
@@ -126,8 +129,8 @@ workload the chart renders onto the pool, as JSON:
   { "tolerations": [<the toleration of the pool taint>] | [], "nodeSelector": {...} }
 The toleration tolerates the pool taint with operator Exists (no value — the
 gpu-node-pool chart's taint) or Equal (taint.value set); an empty taint.key
-yields none. One source for the runtime, the presets and the discovery
-ConfigMap, so the three sites never disagree.
+yields none. One source for the presets and the discovery ConfigMap, so the
+two sites never disagree.
 Usage: $pool := include "agent-platform.modelServing.gpuPool" . | fromJson
 */}}
 {{- define "agent-platform.modelServing.gpuPool" -}}
@@ -169,41 +172,6 @@ Usage: include "agent-platform.modelServing.poolScheduling" (dict "root" $ "tole
 {{- end -}}
 
 {{/*
-The ClusterServingRuntimes the chart renders (templates/model-serving/
-clusterservingruntime.yaml), as a JSON object with one key, runtimes — the
-list: the default (modelServing.runtime) first, then every modelServing.additionalRuntimes entry in order
-(giantswarm/agent-platform#550), each deep-merged over the default's values so
-a field the entry leaves unset is the default's — a mapping field by field, a
-list (args, env, tolerations, supportedModelFormats) whole; Helm's merge keeps
-the default where the entry's value is empty. name is required, a DNS-1123
-subdomain, and unique across the default and the list.
-Usage: $runtimes := (include "agent-platform.modelServing.runtimes" . | fromJson).runtimes
-*/}}
-{{- define "agent-platform.modelServing.runtimes" -}}
-{{- $default := .Values.modelServing.runtime -}}
-{{- $out := list $default -}}
-{{- $names := list $default.name -}}
-{{- range $i, $entry := .Values.modelServing.additionalRuntimes -}}
-{{- if not (kindIs "map" $entry) -}}
-{{- fail (printf "modelServing.additionalRuntimes[%d]: a runtime is a mapping with a name" $i) -}}
-{{- end -}}
-{{- $name := get $entry "name" | default "" | toString -}}
-{{- if not $name -}}
-{{- fail (printf "modelServing.additionalRuntimes[%d]: name is required" $i) -}}
-{{- end -}}
-{{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$" $name) -}}
-{{- fail (printf "modelServing.additionalRuntimes[%d]: name %q must be a lowercase DNS-1123 subdomain (it names the ClusterServingRuntime a preset selects with spec.runtime)" $i $name) -}}
-{{- end -}}
-{{- if has $name $names -}}
-{{- fail (printf "modelServing.additionalRuntimes[%d]: runtime %q is rendered already (modelServing.runtime and every entry need a name of their own)" $i $name) -}}
-{{- end -}}
-{{- $names = append $names $name -}}
-{{- $out = append $out (mergeOverwrite (deepCopy $default) $entry) -}}
-{{- end -}}
-{{- dict "runtimes" $out | toJson -}}
-{{- end -}}
-
-{{/*
 Labels of every object the wiring renders.
 */}}
 {{- define "agent-platform.modelServing.labels" -}}
@@ -214,9 +182,9 @@ app.kubernetes.io/component: model-serving
 {{/*
 The selector label of the pre-pull DaemonSet's pods (templates/model-serving/
 prepull.yaml, giantswarm/agent-platform#545): the DaemonSet's selector and its
-deny-all network policy match it; no model pod shape (podShapes below) and no
-policy of a shape carries it, so the pods stay outside every rule written for
-a served model.
+deny-all network policy match it; the model pod shape (podShape below) and no
+policy of it carries it, so the pods stay outside every rule written for a
+served model.
 */}}
 {{- define "agent-platform.modelServing.prepull.selectorLabels" -}}
 agent-platform.giantswarm.io/model-serving-prepull: "true"
@@ -346,8 +314,8 @@ Usage: $presets := include "agent-platform.modelServing.presets" . | fromJson
 
 {{/*
 Validates one preset and resolves it into the published form the portal and
-model-manager read: runtime defaulted to the component's, model.format to vLLM,
-resources.gpus to 1, requirements.overheadGiB to 30, and the chat template (one
+model-manager read: model.format defaulted to vLLM, resources.gpus to 1,
+requirements.overheadGiB to 30, and the chat template (one
 of file, content, existingConfigMap) resolved to the ConfigMap that holds it,
 with the --chat-template flag appended to args, the GPU node pool's
 toleration and selector merged under spec.scheduling (modelServing.gpuPool), and
@@ -359,7 +327,6 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 */}}
 {{- define "agent-platform.modelServing.resolvePreset" -}}
 {{- $root := .root -}}
-{{- $ms := $root.Values.modelServing -}}
 {{- $name := .name -}}
 {{- $where := printf "serving preset %q (%s)" $name .entry.source -}}
 {{- $doc := deepCopy .entry.preset -}}
@@ -370,11 +337,21 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- fail (printf "%s: kind must be ServingPreset" $where) -}}
 {{- end -}}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,28}[a-z0-9])?$" $name) -}}
-{{- fail (printf "%s: metadata.name must be a lowercase DNS-1123 label of at most 30 characters (it names the InferenceService and the preset ConfigMaps)" $where) -}}
+{{- fail (printf "%s: metadata.name must be a lowercase DNS-1123 label of at most 30 characters (it names the LLMInferenceService and the preset ConfigMaps)" $where) -}}
 {{- end -}}
 {{- $spec := get $doc "spec" | default dict -}}
 {{- if not (kindIs "map" $spec) -}}
 {{- fail (printf "%s: spec must be a mapping" $where) -}}
+{{- end -}}
+{{- /* The classic InferenceService path is gone with it its two preset fields:
+       spec.runtime (a ClusterServingRuntime) and spec.predictor (InferenceService
+       predictor fields). A model composes onto the well-known
+       LLMInferenceServiceConfigs; spec.template carries LLMInferenceService
+       template fields. */ -}}
+{{- range $removed := list "runtime" "predictor" -}}
+{{- if hasKey $spec $removed -}}
+{{- fail (printf "%s: spec.%s is no longer a preset field — the classic InferenceService path was removed; a preset composes onto the well-known LLMInferenceServiceConfigs, and LLMInferenceService template fields go under spec.template (see UPGRADE.md)" $where $removed) -}}
+{{- end -}}
 {{- end -}}
 {{- if not (get $spec "displayName") -}}
 {{- fail (printf "%s: spec.displayName is required" $where) -}}
@@ -399,7 +376,6 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- end -}}
 {{- $_ := set $model "format" (get $model "format" | default "vLLM") -}}
 {{- $_ := set $spec "model" $model -}}
-{{- $_ := set $spec "runtime" (get $spec "runtime" | default $ms.runtime.name) -}}
 {{- $resources := get $spec "resources" | default dict -}}
 {{- if not (kindIs "map" $resources) -}}
 {{- fail (printf "%s: spec.resources must be a mapping" $where) -}}
@@ -630,69 +606,58 @@ wildcard (gatewayApi.gateway.tls.secretName).
 {{- end -}}
 
 {{/*
-The pods KServe runs for a served model come in two shapes, and their labels
-share nothing: the classic InferenceService predictor carries
-serving.kserve.io/inferenceservice=<name> and serves from kserve-container; the
-LLMInferenceService workload pod the llm-d controller creates carries
-kserve.io/component=workload with app.kubernetes.io/part-of=llminferenceservice
-and app.kubernetes.io/name=<name>, and serves from main
-(giantswarm/agent-platform#506). Every selector of the serving namespace's
-model pods — the Kyverno mutations, the network policies, the PolicyException —
-renders from this list, one entry per shape, so they never disagree. JSON:
-  [ { "name": "predictor" | "llmisvc-workload",   the object name suffix
-      "kind": "InferenceService" | "LLMInferenceService",
-      "nameLabel": <the label that carries the served model's name>,
-      "runtimeContainer": <the container that serves>,
-      "port": <the port the pod is reached on, its Service's target: modelServing.networkPolicy.<shape>.port>,
-      "matchExpressions": [<the label selector of the shape>] } ]
-Usage: $shapes := include "agent-platform.modelServing.podShapes" . | fromJsonArray
+The pod the llm-d controller runs for a served model: the LLMInferenceService
+workload pod, which carries kserve.io/component=workload with
+app.kubernetes.io/part-of=llminferenceservice and app.kubernetes.io/name=<name>
+and serves from `main` (giantswarm/agent-platform#506). Every selector of the
+serving namespace's model pods — the Kyverno mutations, the network policies,
+the PolicyException — renders from this one description, so they never
+disagree. JSON:
+  { "name": "llmisvc-workload",   the object name suffix
+    "kind": "LLMInferenceService",
+    "nameLabel": <the label that carries the served model's name>,
+    "runtimeContainer": <the container that serves>,
+    "port": <the port the pod is reached on, its Service's target: modelServing.networkPolicy.llmisvcWorkload.port>,
+    "matchExpressions": [<the label selector of the pod>] }
+Usage: $shape := include "agent-platform.modelServing.podShape" . | fromJson
 */}}
-{{- define "agent-platform.modelServing.podShapes" -}}
+{{- define "agent-platform.modelServing.podShape" -}}
 {{- $np := .Values.modelServing.networkPolicy -}}
-{{- $classic := dict "name" "predictor" "kind" "InferenceService" "nameLabel" "serving.kserve.io/inferenceservice" "runtimeContainer" "kserve-container" "port" (int $np.predictor.port) -}}
-{{- $_ := set $classic "matchExpressions" (list (dict "key" "serving.kserve.io/inferenceservice" "operator" "Exists")) -}}
 {{- $llmisvc := dict "name" "llmisvc-workload" "kind" "LLMInferenceService" "nameLabel" "app.kubernetes.io/name" "runtimeContainer" "main" "port" (int $np.llmisvcWorkload.port) -}}
 {{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "kserve.io/component" "operator" "In" "values" (list "workload")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
-{{- list $classic $llmisvc | toJson -}}
+{{- $llmisvc | toJson -}}
 {{- end -}}
 
 {{/*
-The Kyverno `match` entries selecting the model pods of the serving namespace
-at CREATE, one per pod shape (agent-platform.modelServing.podShapes, or the
-`shapes` subset given); the caller nests them under `match.any`. Kinds default
-to Pod; the operations to CREATE (a pod's init containers are immutable, and
-the filter keeps later updates untouched).
+The Kyverno `match` entry selecting the model pods of the serving namespace at
+CREATE (agent-platform.modelServing.podShape); the caller nests it under
+`match.any`. Kinds default to Pod; the operations to CREATE (a pod's init
+containers are immutable, and the filter keeps later updates untouched).
 Usage: include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "kinds" (list "Deployment") "operations" (list "CREATE" "UPDATE"))
-       include "agent-platform.modelServing.kyvernoMatch" (dict "root" $ "shapes" (list $shape))
 */}}
 {{- define "agent-platform.modelServing.kyvernoMatch" -}}
 {{- $ns := include "agent-platform.modelServing.namespace" .root -}}
-{{- range (.shapes | default (include "agent-platform.modelServing.podShapes" .root | fromJsonArray)) }}
-# {{ .kind }}
+{{- $shape := include "agent-platform.modelServing.podShape" .root | fromJson }}
+# {{ $shape.kind }}
 - resources:
     kinds:
-      {{- toYaml ($.kinds | default (list "Pod")) | nindent 6 }}
+      {{- toYaml (.kinds | default (list "Pod")) | nindent 6 }}
     namespaces:
       - {{ $ns }}
     operations:
-      {{- toYaml ($.operations | default (list "CREATE")) | nindent 6 }}
+      {{- toYaml (.operations | default (list "CREATE")) | nindent 6 }}
     selector:
       matchExpressions:
-        {{- toYaml .matchExpressions | nindent 8 }}
-{{- end }}
+        {{- toYaml $shape.matchExpressions | nindent 8 }}
 {{- end -}}
 
 {{/*
-The JMESPath (bare, no delimiters) of the served model's name on a model pod,
-whatever its shape: the first of the shapes' name labels the pod carries. It
-names the pod's cache subdirectory (<claim>/<model>). Kyverno evaluates it at
-admission; the caller wraps it in its delimiters (and `length(... || '')` for a
-precondition that the pod carries one at all).
+The JMESPath (bare, no delimiters) of the served model's name on a model pod:
+the pod shape's name label. It names the pod's cache subdirectory
+(<claim>/<model>). Kyverno evaluates it at admission; the caller wraps it in
+its delimiters (and `length(... || '')` for a precondition that the pod carries
+one at all).
 */}}
 {{- define "agent-platform.modelServing.modelNamePath" -}}
-{{- $labels := list -}}
-{{- range (include "agent-platform.modelServing.podShapes" . | fromJsonArray) -}}
-{{- $labels = append $labels (printf "request.object.metadata.labels.%q" .nameLabel) -}}
-{{- end -}}
-{{- join " || " $labels -}}
+{{- printf "request.object.metadata.labels.%q" (include "agent-platform.modelServing.podShape" . | fromJson).nameLabel -}}
 {{- end -}}
