@@ -132,8 +132,8 @@ per-agent placement values are gone, capacity is the WorkerPool".
 
 The pool's `workerImage` — the gVisor worker every actor runs in — is **derived by
 this chart** from `components.substrate.versionRange`'s floor:
-`<substrate.image.registry>/ateom-gvisor:<floor>` (`ghcr.io/giantswarm/substrate/
-ateom-gvisor:0.0.30-gs.4` today), merged over the kagent block the chart forwards.
+`<substrate.image.registry>/ateom-gvisor:<floor>` (`gsoci.azurecr.io/giantswarm/
+substrate/ateom-gvisor:0.0.30-gs.4` today), merged over the kagent block the chart forwards.
 The kagent chart stamps a worker of its own at publish (the Substrate its build was
 published against), and that stamp never reaches the cluster: the atelet the
 substrate release installs and the worker the WorkerPool runs are one Substrate
@@ -726,7 +726,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
-| kagent.registry | string | `"ghcr.io"` |  |
+| kagent.registry | string | `"gsoci.azurecr.io"` |  |
 | kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
 | kagent.controller.agentImage.repository | string | `"giantswarm/kagent/golang-adk"` |  |
 | kagent.controller.substrate.enabled | bool | `true` |  |
@@ -1260,6 +1260,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent-crds.kmcp.enabled | bool | `false` |  |
 | kagent-crds.substrate.enabled | bool | `false` |  |
 | substrate.createNamespace | bool | `false` |  |
+| substrate.image.registry | string | `"gsoci.azurecr.io/giantswarm/substrate"` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
 | substrate.postgres.connectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |

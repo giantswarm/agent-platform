@@ -52,9 +52,11 @@ instance:
     # so the manifests come embedded in the operator image (air-gap default):
     # a new Flux minor arrives with a new operator tag.
     version: "2.x"
-    # -- Registry the Flux controller images are pulled from. A mirror of
-    # ghcr.io/fluxcd goes here.
-    registry: ghcr.io/fluxcd
+    # -- Registry the Flux controller images are pulled from: retagger's copy
+    # of ghcr.io/fluxcd under its upstream path (source-controller and
+    # helm-controller of every 2.9+ release, giantswarm/retagger#1229); the
+    # operator composes <registry>/<controller>:<tag>. Another mirror goes here.
+    registry: gsoci.azurecr.io/giantswarm/fluxcd
     # -- Pull secret for the controller images, in the release namespace.
     imagePullSecret: ""
   # -- The controllers the instance runs. Explicit on purpose: the operator's

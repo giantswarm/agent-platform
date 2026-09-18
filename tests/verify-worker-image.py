@@ -14,9 +14,10 @@ now DERIVES the worker from `components.substrate.versionRange`'s floor
 (`agent-platform.substrate.workerImage`: `<substrate.image.registry>/ateom-gvisor:
 <floor>`), merged over the forwarded kagent block, and confines the Substrate
 range to one release (`agent-platform.substrate.validateRange`). Here:
-  - the default render forwards workerImage = ghcr.io/giantswarm/substrate/
-    ateom-gvisor:<floor of values.yaml's components.substrate.versionRange> to the
-    kagent release, and the substrate OCIRepository carries that range;
+  - the default render forwards workerImage = gsoci.azurecr.io/giantswarm/
+    substrate/ateom-gvisor:<floor of values.yaml's components.substrate.versionRange>
+    (the line's release copied under its upstream path, giantswarm/retagger#1229)
+    to the kagent release, and the substrate OCIRepository carries that range;
   - substrate.image.registry (a mirror) moves the worker's registry with it;
   - an installation's own workerImage stands verbatim while its tag is the pinned
     release; another tag, or a digest without a tag, fails the render naming the
@@ -52,7 +53,7 @@ cc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cc)
 
 KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
-REGISTRY = "ghcr.io/giantswarm/substrate"
+REGISTRY = "gsoci.azurecr.io/giantswarm/substrate"
 WORKER = "ateom-gvisor"
 # The 4.15.2 shape of the skew: the Substrate range one release behind the kagent
 # line's stamp. The atelet of that range and this worker are one release.

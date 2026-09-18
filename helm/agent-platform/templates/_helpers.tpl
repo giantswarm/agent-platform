@@ -675,7 +675,7 @@ the line publishes atelet and ateom-gvisor under the same tag.
 Usage: include "agent-platform.substrate.workerImage" $root
 */}}
 {{- define "agent-platform.substrate.workerImage" -}}
-{{- $registry := dig "image" "registry" "ghcr.io/giantswarm/substrate" (.Values.substrate | default dict) -}}
+{{- $registry := dig "image" "registry" "gsoci.azurecr.io/giantswarm/substrate" (.Values.substrate | default dict) -}}
 {{- printf "%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (include "agent-platform.substrate.pinnedVersion" .) -}}
 {{- end -}}
 

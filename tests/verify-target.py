@@ -200,9 +200,16 @@ def check_golden(meta: str, connectivity: str) -> None:
         # defaults' move to gsoci, the kserve 0.4.x ranges and the forwarded
         # imageVerification defaults (#575) are the newest to have reached that
         # point.
+        # The hold for giantswarm/agent-platform#580, applied to BOTH sides: the
+        # kagent line's images, the Substrate line's images (the derived worker
+        # image follows substrate.image.registry) and the Flux controllers from
+        # their gsoci copies — meta chart keys only. Dropped once GOLDEN_REF
+        # carries them.
+        hold_580 = ["--set", "kagent.registry=gsoci.azurecr.io", "--set", "substrate.image.registry=gsoci.azurecr.io/giantswarm/substrate",
+                    "--set", "flux-engine.instance.distribution.registry=gsoci.azurecr.io/giantswarm/fluxcd"]
         shapes = [
-            ("meta default", meta, []),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]),
+            ("meta default", meta, [*hold_580]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_580]),
             ("connectivity default", connectivity, [*VM]),
             ("connectivity full", connectivity, [*CONN_FULL]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE]),

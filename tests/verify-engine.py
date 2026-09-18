@@ -284,7 +284,7 @@ def main(chart: str) -> int:
     comps = re.search(r"^  components:\n((?:    - .*\n)+)", fi + "\n", re.M)
     if not comps or re.findall(r"- (\S+)", comps.group(1)) != ["source-controller", "helm-controller"]:
         fail("FluxInstance components are not exactly [source-controller, helm-controller]")
-    for needle in ('version: "2.x"', 'registry: "ghcr.io/fluxcd"', "multitenant: true", "tenantDefaultServiceAccount: default", "networkPolicy: false"):
+    for needle in ('version: "2.x"', 'registry: "gsoci.azurecr.io/giantswarm/fluxcd"', "multitenant: true", "tenantDefaultServiceAccount: default", "networkPolicy: false"):
         if needle not in fi:
             fail(f"FluxInstance lacks {needle!r}")
     if "artifact:" in fi:

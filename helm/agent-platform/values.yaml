@@ -1167,7 +1167,8 @@ components:  # @schema additionalProperties: true
 # subchart's values.yaml documents every key: flux-engine.operator.image (the
 # Flux Operator, a Renovate-managed pin), flux-engine.instance.distribution
 # (the Flux version range `2.x` and the registry the controller images come
-# from — a mirror of ghcr.io/fluxcd goes here), flux-engine.instance.components
+# from — gsoci.azurecr.io/giantswarm/fluxcd, retagger's copy of ghcr.io/fluxcd
+# under its upstream path; another mirror goes here), flux-engine.instance.components
 # (source-controller + helm-controller), flux-engine.instance.cluster (the
 # multi-tenancy lockdown) and flux-engine.instance.kustomizePatches. Nothing
 # to set for a default installation.
@@ -2117,10 +2118,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Pin the release-independent name so the controller Service is always
   # `kagent-controller` regardless of the umbrella release name.
   fullnameOverride: kagent
-  # The kagent line's images (components.kagent): ghcr.io/giantswarm/kagent/
-  # {controller,ui,golang-adk}, multi-arch, published by the line's tag
-  # workflow with the upstream repository hierarchy.
-  registry: ghcr.io
+  # The kagent line's images (components.kagent): the line's tag workflow
+  # publishes ghcr.io/giantswarm/kagent/{controller,ui,golang-adk,claude-harness}
+  # (multi-arch, the upstream repository hierarchy) and retagger copies every
+  # release to gsoci.azurecr.io/giantswarm/kagent/<image>, the same path under
+  # the org's registry with the index digests preserved (giantswarm/retagger#1229),
+  # so the registry is the one value that moves: the repositories and the
+  # digests the chart stamps (the Go ADK and Claude harness images, the
+  # kagent-images ConfigMap Substrate's image cache reads) stand as published.
+  # A dev build's images are not copied — the dev channel (README "Dev channel")
+  # sets this back to ghcr.io next to components.kagent*.repository.
+  registry: gsoci.azurecr.io
   # ONE build of the line, named by the chart: the line's tag workflow stamps
   # `tag` (the controller and UI image tag = the chart version) and
   # controller.agentImage.digest (the Go ADK image the platform Harness runs)
@@ -2247,8 +2255,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # the concurrently active agents, and a worker's resources bound a sandbox.
   # workerImage is the gVisor worker of the Substrate release the cluster runs:
   # the Giant Swarm Substrate line (giantswarm/substrate, published as
-  # ghcr.io/giantswarm/substrate/*, tagged with the bare version; its FORK.md
-  # is the ledger). The chart DERIVES it from components.substrate.versionRange's
+  # ghcr.io/giantswarm/substrate/*, tagged with the bare version, every release
+  # copied to gsoci.azurecr.io/giantswarm/substrate/* — substrate.image.registry
+  # below; its FORK.md is the ledger). The chart DERIVES it from components.substrate.versionRange's
   # floor — <substrate.image.registry>/ateom-gvisor:<floor> — so the worker and
   # the atelet are one Substrate release whatever kagent build the kagent range
   # admits (giantswarm/agent-platform#466; the kagent chart's own stamp, the
@@ -4366,6 +4375,18 @@ kagent-crds:  # @schema skipProperties: true; additionalProperties: true
 substrate:  # @schema skipProperties: true; additionalProperties: true
   # helm-controller creates the target namespace (components.substrate.targetNamespace).
   createNamespace: false
+  # The line's images: published as ghcr.io/giantswarm/substrate/<component>
+  # (the chart's stamp) and copied for every release to
+  # gsoci.azurecr.io/giantswarm/substrate/<component>, the same path under the
+  # org's registry with the digests preserved (giantswarm/retagger#1229). The
+  # registry is the one value that moves: the control plane's images
+  # (<registry>/<component>:<tag>, the tag the chart's stamp) and the derived
+  # worker image (agent-platform.substrate.workerImage, kagent.substrateWorkerPool
+  # above) follow it. A dev build's images are not copied — the dev channel
+  # sets this back to ghcr.io/giantswarm/substrate next to
+  # components.substrate*.repository.
+  image:
+    registry: gsoci.azurecr.io/giantswarm/substrate
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows
     # the platform: with the platform's CNPG Cluster on (postgres.enabled) the

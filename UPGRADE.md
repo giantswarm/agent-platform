@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the kagent line's, the Substrate line's and the Flux controllers' images from gsoci)
+
+giantswarm/agent-platform#580: `kagent.registry` is `gsoci.azurecr.io`, `substrate.image.registry` is `gsoci.azurecr.io/giantswarm/substrate` and `flux-engine.instance.distribution.registry` is `gsoci.azurecr.io/giantswarm/fluxcd` — retagger's copies of the two lines' releases and of the Flux 2.9+ controllers under their upstream paths, the same digests as on ghcr.io (giantswarm/retagger#1229). The chart sources of the kagent and Substrate components stay on ghcr.io for now.
+
+### Operator action
+
+- **None** for an installation on the defaults. The kagent controller and UI, every Substrate control-plane pod, the atelet DaemonSet and the Flux controllers restart once onto the same image content from the other registry; the `kagent-default` WorkerPool rolls its workers (the worker image's registry changed) — running agent turns end with their actor, as on every WorkerPool change. A cluster that reaches no public registry no longer mirrors the two lines' images or `ghcr.io/fluxcd`; it still mirrors the two lines' charts (`components.kagent*.repository`, `components.substrate*.repository`).
+- **`kagent.registry`, `substrate.image.registry` or `flux-engine.instance.distribution.registry` set in your values** (a mirror): they stand; nothing changes for you. A mirror of `ghcr.io/giantswarm/kagent` or `ghcr.io/giantswarm/substrate` can point at gsoci instead — the paths under the registry are the same.
+- **The dev channel** (a `components.<name>.semverFilter` selecting the kagent or Substrate line's `-dev.giantswarm.` builds): dev builds are not copied to gsoci. Set `kagent.registry: ghcr.io` and `substrate.image.registry: ghcr.io/giantswarm/substrate` beside the filter, or the pods fail to pull.
+- **Recognising it worked**: `kubectl -n <kagent namespace> get deploy kagent-controller -o jsonpath='{.spec.template.spec.containers[*].image}'` names `gsoci.azurecr.io/giantswarm/kagent/controller:<version>`; `kubectl -n ate-system get ds atelet -o jsonpath='{.spec.template.spec.containers[*].image}'` names `gsoci.azurecr.io/giantswarm/substrate/atelet:<version>`; `kubectl -n <release namespace> get fluxinstance flux -o jsonpath='{.spec.distribution.registry}'` reads `gsoci.azurecr.io/giantswarm/fluxcd`; `crictl images` on a node lists no `ghcr.io/giantswarm/kagent`, `ghcr.io/giantswarm/substrate` or `ghcr.io/fluxcd` image once the old pods are gone.
+
 ## \<current\> → \<next\> (image defaults from gsoci; `modelServing.imageVerification` defaults to the Giant Swarm identity in the Sigstore bundle format)
 
 giantswarm/agent-platform#575: the hook Jobs' images of both charts (`gitops.hooks.image`, `gitops.hooks.helmImage`; `hooks.kubectlImage`, `hooks.opensslImage`) and the bundled Flux engine's operator image (`flux-engine.operator.image`) come from `gsoci.azurecr.io`; `modelServing.imageVerification` (off by default) gains defaults — `images: [gsoci.azurecr.io/giantswarm/*]`, one keyless attestor for the Giant Swarm CircleCI signing identity (issuer `https://oidc.circleci.com`, subject the pipeline definition that ran) and `type: SigstoreBundle`, the signature format cosign 3 writes and the architect orb produces.

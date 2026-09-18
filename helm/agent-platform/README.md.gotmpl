@@ -118,8 +118,8 @@ per-agent placement values are gone, capacity is the WorkerPool".
 
 The pool's `workerImage` — the gVisor worker every actor runs in — is **derived by
 this chart** from `components.substrate.versionRange`'s floor:
-`<substrate.image.registry>/ateom-gvisor:<floor>` (`ghcr.io/giantswarm/substrate/
-ateom-gvisor:0.0.30-gs.4` today), merged over the kagent block the chart forwards.
+`<substrate.image.registry>/ateom-gvisor:<floor>` (`gsoci.azurecr.io/giantswarm/
+substrate/ateom-gvisor:0.0.30-gs.4` today), merged over the kagent block the chart forwards.
 The kagent chart stamps a worker of its own at publish (the Substrate its build was
 published against), and that stamp never reaches the cluster: the atelet the
 substrate release installs and the worker the WorkerPool runs are one Substrate

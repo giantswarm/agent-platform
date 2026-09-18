@@ -76,23 +76,17 @@ INPUTS = ["--set", "global.domain=ci.example.com", "--set", "global.identity.iss
 # (the rendered object's kind/name, the field path and the value).
 PENDING = {
     # The kagent line (giantswarm/kagent-upstream) and the Substrate line
-    # (giantswarm/substrate) publish their charts and images to ghcr.io; the
-    # upstream CloudNativePG chart and the Flux controllers the bundled engine
-    # installs likewise. Their gsoci copies and the switch of these defaults:
-    # giantswarm/agent-platform#580 (the defaults), giantswarm/retagger#1229
-    # (the images).
+    # (giantswarm/substrate) publish their charts to ghcr.io and retagger copies
+    # images only; their release charts on gsoci and the switch of the two
+    # chart sources: giantswarm/agent-platform#580. The upstream CloudNativePG
+    # chart likewise, behind a Giant Swarm wrapper release on the same operator
+    # line (giantswarm/agent-platform#580).
     r"OCIRepository/kagent(-crds)?\.spec\.url=oci://ghcr\.io/giantswarm/kagent/helm/kagent(-crds)?":
         "the kagent line's charts from gsoci (giantswarm/agent-platform#580)",
-    r"HelmRelease/(kagent|agent-platform-connectivity)\.spec\.values(\.kagent)?\.registry=ghcr\.io":
-        "the kagent line's images from gsoci (giantswarm/agent-platform#580, giantswarm/retagger#1229)",
     r"OCIRepository/substrate(-crds)?\.spec\.url=oci://ghcr\.io/giantswarm/substrate/helm/substrate(-crds)?":
         "the Substrate line's charts from gsoci (giantswarm/agent-platform#580)",
-    r"HelmRelease/kagent\.spec\.values\.substrateWorkerPool\.workerImage=ghcr\.io/giantswarm/substrate/ateom-gvisor:.+":
-        "the Substrate line's images from gsoci (giantswarm/agent-platform#580, giantswarm/retagger#1229)",
     r"OCIRepository/cloudnative-pg\.spec\.url=oci://ghcr\.io/cloudnative-pg/charts/cloudnative-pg":
         "the CloudNativePG operator chart from gsoci (giantswarm/agent-platform#580)",
-    r"FluxInstance/flux\.spec\.distribution\.registry=ghcr\.io/fluxcd":
-        "the Flux controllers from gsoci (giantswarm/agent-platform#580, giantswarm/retagger#1229)",
     # The classic ClusterServingRuntime's upstream vLLM image; the runtime goes
     # with the classic serving path (giantswarm/agent-platform#574).
     r"ClusterServingRuntime/.+\.containers\[\d+\]\.image=docker\.io/vllm/vllm-openai:.+":
