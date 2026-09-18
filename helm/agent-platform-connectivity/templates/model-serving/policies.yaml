@@ -15,9 +15,11 @@
 {{- $podMatch := include "agent-platform.modelServing.kyvernoMatch" (dict "root" .) | trim }}
 {{- /* vLLM's cache: a directory of the claim's own at the claim root, mounted
        on the runtime container next to the model's directory — never a path
-       under /mnt/models (#541). The env naming it is set in the same rule as
-       the mount, so a pod without the cache keeps vLLM's default cache root. */ -}}
+       under /mnt/models (#541); Triton's kernel cache a directory of it (#572).
+       The envs naming them are set in the same rule as the mount, so a pod
+       without the cache keeps vLLM's and Triton's default cache roots. */ -}}
 {{- $vllmCache := dict "mountPath" "/mnt/vllm-cache" "subPath" ".vllm-cache" }}
+{{- $tritonCache := printf "%s/triton" $vllmCache.mountPath }}
 # Admission-time wiring of every model pod in the serving namespace — the
 # classic InferenceService predictor and the LLMInferenceService workload pod
 # the llm-d controller creates alike; they share no label, so each rule
@@ -49,11 +51,22 @@
 #                              runtime container mounts the claim a second
 #                              time, at /mnt/vllm-cache from the claim-wide
 #                              subPath .vllm-cache, and carries
-#                              VLLM_CACHE_ROOT naming that path: vLLM's
-#                              torch.compile artifacts (tens of seconds of
-#                              work per pod, keyed by model and config inside
-#                              the directory) land on the claim and a model's
-#                              next pod skips the compile (#537). A subPath
+#                              VLLM_CACHE_ROOT naming that path and
+#                              TRITON_CACHE_DIR naming its triton/ directory:
+#                              vLLM's torch.compile artifacts (tens of seconds
+#                              of work per pod, keyed by model and config
+#                              inside the directory) land on the claim and a
+#                              model's next pod skips the compile (#537);
+#                              Triton's compiled kernels and autotuning
+#                              results land beside them, so a preset that
+#                              serves eager keeps them across pods too — with
+#                              no torch.compile, vLLM's own in-process
+#                              redirect of Triton's cache under
+#                              VLLM_CACHE_ROOT never runs, and Triton's
+#                              default ~/.triton/cache died with the pod
+#                              (#572). vLLM and Triton create both
+#                              directories themselves, as the runtime's uid,
+#                              under the setgid .vllm-cache. A subPath
 #                              of the claim's own, never a path under
 #                              /mnt/models: the storage-initializer's Hugging
 #                              Face client creates <model>/.cache/huggingface
@@ -142,8 +155,9 @@ spec:
             # classic predictor's runtime mount stays read-only, as KServe
             # declares it; the runtime writes nothing into the model's
             # directory. The runtime's second mount is vLLM's cache, the
-            # claim-wide .vllm-cache directory, and VLLM_CACHE_ROOT (merged by
-            # name into the container's env) names it as the runtime sees it.
+            # claim-wide .vllm-cache directory; VLLM_CACHE_ROOT and
+            # TRITON_CACHE_DIR (merged by name into the container's env) name
+            # it and its triton/ directory as the runtime sees them.
             initContainers:
               - name: storage-initializer
                 volumeMounts:
@@ -162,6 +176,8 @@ spec:
                 env:
                   - name: VLLM_CACHE_ROOT
                     value: {{ $vllmCache.mountPath }}
+                  - name: TRITON_CACHE_DIR
+                    value: {{ $tritonCache }}
     {{- end }}
     {{- end }}
     {{- with $ms.policies.env }}
