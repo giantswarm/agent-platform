@@ -1,0 +1,140 @@
+# Qwen3.8-Flash-Next, the quantization-aware-distilled NVFP4 repack on one
+# 128 GB unified-memory Blackwell node, served from an OCI model image. A 125B
+# mixture of experts with 6B active (Qwen3-Next lineage, Gated DeltaNet hybrid)
+# and a 51B n-gram embedding table, 262k context, tools, reasoning, vision.
+# NVIDIA's own NVFP4 checkpoint is 123.6 GiB and does not fit the node next to
+# a KV cache; the repack (98.6 GiB, the n-gram table in NVFP4 too) does once
+# the table is read from disk, with MTP speculative decoding on the B12X
+# serving stack. Thirty-odd tuned flags and nine runtime knobs: this is why
+# presets are curated in git and not typed into a form.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-8-flash-next-nvfp4
+spec:
+  displayName: Qwen3.8-Flash-Next (NVFP4, OCI model image, B12X runtime)
+  description: |
+    Qwen3.8-Flash-Next: a 125B-parameter mixture of experts with 6B active
+    (Qwen3-Next lineage, Gated DeltaNet hybrid) and a 51B n-gram embedding
+    table, 262k native context, tool calling, reasoning and vision. As
+    published by NVIDIA the NVFP4 checkpoint is 123.6 GiB on disk and does
+    not fit a 128 GB unified-memory node next to a KV cache; this preset
+    serves the quantization-aware-distilled repack
+    local-inference-lab/Qwen3.8-Flash-Next-NVFP4 (98.6 GiB, the n-gram
+    table in NVFP4 as well) with the table read from disk
+    (VLLM_PLE_TABLE_MEMORY=disk) and MTP speculative decoding proposing four
+    tokens per target pass.
+    Target hardware: one single-GPU 128 GB unified-memory Blackwell node
+    (GB10, the CUTE_DSL_ARCH sm_121a pin). Runtime: kserve-vllm-b12x, a
+    ClusterServingRuntime the installation defines through
+    modelServing.additionalRuntimes from the B12X serving stack's image (the
+    community's spark-vllm-b12x build, which brings the b12x load format, GDN
+    decode kernel, linear and MoE backends this recipe selects); the default
+    upstream vLLM runtime cannot serve this architecture on the node, so the
+    preset schedules only where that runtime exists.
+    Weights: an OCI model image, giantswarm/models/qwen3-8-flash-next-nvfp4
+    at the checkpoint revision, pulled onto the node by containerd like any
+    image (KServe's modelcar path: no download, no cache claim, every serving
+    node a target); an installation serves it from a registry of its own
+    that holds the same path by setting modelServing.modelImages.registry.
+    The modelcar path runs the runtime as a non-root uid on a read-only
+    image, so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+    Memory: 99 GiB on disk (the Hub's size), of which the 25 GiB n-gram
+    table stays on disk, so about 74 GiB of weights are resident and
+    --gpu-memory-utilization=0.80 of the 128 GB leaves the rest to the fp8 KV
+    cache — 20 GiB of overhead on top of the 99. Eight concurrent requests at
+    4096 batched tokens; tools on with the qwen3_xml parser, reasoning with
+    the qwen3 parser. No size of the curated AWS accelerator families hosts
+    it. Licence: the Qwen community licence (license other).
+  model:
+    id: local-inference-lab/Qwen3.8-Flash-Next-NVFP4
+    # The tag is the first 12 characters of the checkpoint revision
+    # 7c4f1bc1a2d6847e0cbc01ac6b823f00251de8dd (36 safetensors shards under
+    # /models). modelServing.modelImages.registry swaps the host at render;
+    # the path, giantswarm/models/qwen3-8-flash-next-nvfp4:7c4f1bc1a2d6, stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-8-flash-next-nvfp4:7c4f1bc1a2d6
+    format: vLLM
+    contextLength: 262144
+    capabilities: [chat, tools, reasoning, vision, coding]
+    license: other
+  # An additional runtime the installation defines from the B12X image
+  # (modelServing.additionalRuntimes, giantswarm/agent-platform#550); the
+  # default upstream runtime cannot serve this architecture.
+  runtime: kserve-vllm-b12x
+  env:
+    # The 51B n-gram (PLE) table is read from disk instead of resident memory:
+    # what makes the 98.6 GiB checkpoint fit the node next to a KV cache.
+    - name: VLLM_PLE_TABLE_MEMORY
+      value: disk
+    # cute-dsl CUDA-graph kernels need the arch pinned on Blackwell sm_121.
+    - name: CUTE_DSL_ARCH
+      value: sm_121a
+    - name: SAFETENSORS_FAST_GPU
+      value: "1"
+    - name: VLLM_WORKER_MULTIPROC_METHOD
+      value: spawn
+    - name: VLLM_SSM_CONV_STATE_LAYOUT
+      value: DS
+    - name: VLLM_USE_AOT_COMPILE
+      value: "1"
+    - name: VLLM_USE_MEGA_AOT_ARTIFACT
+      value: "1"
+    - name: VLLM_USE_V2_MODEL_RUNNER
+      value: "1"
+    - name: B12X_POLICY_MODE
+      value: auto
+    # The modelcar path runs the runtime as the platform KServe's modelcar uid
+    # on a read-only model image: the home, the Hub cache and vLLM's compile
+    # cache go under /tmp (the cache claim's compile cache is not mounted).
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf
+    - name: VLLM_CACHE_ROOT
+      value: /tmp/vllm-cache
+  args:
+    - --trust-remote-code
+    - --mamba-cache-mode=align
+    - --enable-prefix-caching
+    - --enable-chunked-prefill
+    - --dtype=bfloat16
+    - --kv-cache-dtype=fp8
+    - --quantization=modelopt_mixed
+    - --block-size=16
+    - --load-format=b12x
+    - --max-model-len=262144
+    - --max-num-seqs=8
+    - --max-num-batched-tokens=4096
+    # One argument, the JSON single-quoted inside it: the well-known runtime
+    # template re-parses every argument through a shell (eval "… $@"), which
+    # would split a bare JSON at its whitespace and eat its double quotes.
+    - "--speculative-config='{\"method\":\"mtp\",\"num_speculative_tokens\":4}'"
+    - --gdn-decode-kernel=b12x
+    - --linear-backend=b12x
+    - --moe-backend=b12x
+    - --no-enable-flashinfer-autotune
+    - --mm-encoder-tp-mode=data
+    - --reasoning-parser=qwen3
+    - --tool-call-parser=qwen3_xml
+    - --enable-auto-tool-choice
+    - "--compilation-config='{\"pass_config\":{\"fuse_act_quant\":true}}'"
+    - --gpu-memory-utilization=0.80
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 48Gi
+    limits:
+      cpu: "8"
+      memory: 64Gi
+  requirements:
+    # The Hub's safetensors index sizes the checkpoint at 98.6 GiB
+    # (make verify-preset-weights). 20 GiB of overhead: the n-gram table is
+    # read from disk, so ~74 GiB are resident and the rest of the 0.80
+    # budget of a 128 GB node is the fp8 KV cache, CUDA graphs and the runtime.
+    weightsGiB: 99
+    overheadGiB: 20
+  predictor:
+    # KServe writes this into the predictor route as the request timeout; the
+    # default 60s cuts long reasoning streams mid-response.
+    timeout: 1800

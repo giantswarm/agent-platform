@@ -255,6 +255,7 @@ else:
         evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
         listed = "additionalRuntimes:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
+        flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -312,6 +313,15 @@ else:
         head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-27b-l40s\n", "", head[DISCOVERY], flags=re.M)
         expect("the new preset's name cut out of the discovery list once", ncuts, 1)
         print(f"note: the preset qwen3-8-27b-l40s ships on this side (#544) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
+    # The preset qwen3-8-flash-next-nvfp4 ships on this side (giantswarm/agent-platform#553);
+    # a golden from before has no such file, so its ConfigMap is left out of the
+    # comparison, and so is its name in the discovery ConfigMap's presets list.
+    # Drop this once GOLDEN_REF carries #553.
+    if not flashnext:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
+        head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-flash-next-nvfp4\n", "", head[DISCOVERY], flags=re.M)
+        expect("the OCI preset's name cut out of the discovery list once", ncuts, 1)
+        print(f"note: the preset qwen3-8-flash-next-nvfp4 ships on this side (#553) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
     # The serving namespace is kept while the cache is on
     # (giantswarm/agent-platform#537) and its template's comment says so; the
     # untainted render has the cache off, so only the comment differs, but a
