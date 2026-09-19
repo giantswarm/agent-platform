@@ -1,0 +1,90 @@
+# gpt-oss-20b, OpenAI's open-weight reasoning model at its native MXFP4 on one
+# 24 GB GPU (an L4), served from a signed OCI model image. A 21B mixture of
+# experts with 3.6B active, tools and reasoning (harmony format), text only.
+# No serving image: the predictor runs the llm-d-cuda the well-known
+# LLMInferenceServiceConfig names (components.kserve-runtime-configs).
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: gpt-oss-20b
+spec:
+  displayName: gpt-oss-20b (MXFP4, one 24 GB GPU)
+  description: |
+    gpt-oss-20b: OpenAI's open-weight mixture of experts (21B parameters,
+    3.6B active) with reasoning at three effort levels and tool calling in
+    the harmony format, text only, Apache 2.0. Served as published — the
+    experts in MXFP4 (12.8 GiB of weights, the checkpoint's own quantization,
+    nothing to re-quantize) — on one 24 GB GPU of the L4 class. The GPU has
+    no native MXFP4, so vLLM runs the experts through the Marlin weight-only
+    kernel, which its backend selection picks for a pre-Hopper card on its
+    own (no flag, no environment). 32k of the model's 128k context, four
+    concurrent requests, chunked prefill and prefix caching;
+    --gpu-memory-utilization=0.90 leaves about 7 GiB to the KV cache next
+    to the weights — 13 + 9 GiB on the fit check. Reasoning with the
+    openai_gptoss parser (the effort follows the request's reasoning_effort,
+    medium by default), tools on with the openai parser (agents always send
+    tools, and vLLM answers 400 without --enable-auto-tool-choice); the
+    model's built-in browser and Python tools are not served.
+    Weights: an OCI model image, giantswarm/models/gpt-oss-20b at the
+    checkpoint revision, pulled onto the node by containerd like any image
+    (KServe's modelcar path: no download, no cache claim, every serving node
+    a target); an installation serves it from a registry of its own that
+    holds the same path by setting modelServing.modelImages.registry. The
+    modelcar path runs the runtime as a non-root uid on a read-only image,
+    so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+    Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+    node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+    follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+    requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+    its host memory is the runtime and the weights passing through the page
+    cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
+    (13 + 9 GiB, and the card predates bf16).
+  model:
+    id: openai/gpt-oss-20b
+    # The tag is the first 12 characters of the checkpoint revision
+    # 6cee5e81ee83917806bbde320786a8fb61efebee (three safetensors shards under
+    # /models; the original/ and metal/ checkpoints of the Hub repository are
+    # not in the image). modelServing.modelImages.registry swaps the host at
+    # render; the path, giantswarm/models/gpt-oss-20b:6cee5e81ee83, stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/gpt-oss-20b:6cee5e81ee83
+    format: vLLM
+    contextLength: 32768
+    capabilities: [chat, tools, reasoning]
+    license: apache-2.0
+  env:
+    # The modelcar path runs the runtime as the platform KServe's modelcar uid
+    # on a read-only model image: the home, the Hub cache and vLLM's compile
+    # cache go under /tmp (the cache claim's compile cache is not mounted).
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf
+    - name: VLLM_CACHE_ROOT
+      value: /tmp/vllm-cache
+  args:
+    - --gpu-memory-utilization=0.90
+    - --max-model-len=32768
+    - --max-num-seqs=4
+    - --enable-chunked-prefill
+    - --enable-prefix-caching
+    - --no-enable-log-requests
+    - --reasoning-parser=openai_gptoss
+    # kagent agents call /v1/chat/completions with tools and tool_choice auto;
+    # without a parser vLLM rejects every agent request (400).
+    - --enable-auto-tool-choice
+    - --tool-call-parser=openai
+  resources:
+    gpus: 1
+    requests:
+      cpu: "2"
+      memory: 10Gi
+    limits:
+      cpu: "4"
+      memory: 12Gi
+  requirements:
+    # The Hub's safetensors index sizes the served checkpoint at 12.82 GiB
+    # (make verify-preset-weights; the index covers the three shards, not the
+    # original/ and metal/ copies beside them). 9 GiB of overhead: the KV
+    # cache, CUDA graphs and the runtime within 0.90 of a 24 GB card.
+    weightsGiB: 13
+    overheadGiB: 9

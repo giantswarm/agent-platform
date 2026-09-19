@@ -1,0 +1,93 @@
+# Gemma 4 12B, Google's official quantization-aware-trained W4A16 checkpoint
+# on one 24 GB GPU (an L4), served from a signed OCI model image. Dense 12B,
+# tools, reasoning (off by default), vision. No serving image: the predictor
+# runs the llm-d-cuda the well-known LLMInferenceServiceConfig names
+# (components.kserve-runtime-configs).
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: gemma-4-12b
+spec:
+  displayName: Gemma 4 12B (QAT W4A16, one 24 GB GPU)
+  description: |
+    Gemma 4 12B: Google DeepMind's dense 12B model with tool calling,
+    thinking (off unless a request turns it on with enable_thinking or a
+    reasoning_effort) and image understanding, Apache 2.0. Served as the
+    official quantization-aware-trained W4A16 checkpoint in the
+    compressed-tensors format (9.6 GiB of weights — 4-bit weights trained
+    to keep the bf16 quality, not a post-hoc quantization) on one 24 GB GPU
+    of the L4 class, whose hybrid attention (sliding windows of 1024 tokens,
+    one global layer in six) keeps the KV cache small. 32k of the model's
+    256k context, four concurrent requests, chunked prefill and prefix
+    caching; --gpu-memory-utilization=0.90 leaves about 10 GiB to the KV
+    cache next to the weights — 10 + 8 GiB on the fit check. One image per
+    request, no audio (the 12B understands speech, this recipe does not
+    serve it: --limit-mm-per-prompt); reasoning with the gemma4 parser,
+    tools on with the gemma4 parser (agents always send tools, and vLLM
+    answers 400 without --enable-auto-tool-choice).
+    Weights: an OCI model image, giantswarm/models/gemma-4-12b-qat-w4a16 at
+    the checkpoint revision, pulled onto the node by containerd like any
+    image (KServe's modelcar path: no download, no cache claim, every
+    serving node a target); an installation serves it from a registry of
+    its own that holds the same path by setting
+    modelServing.modelImages.registry. The modelcar path runs the runtime as
+    a non-root uid on a read-only image, so HOME, HF_HOME and
+    VLLM_CACHE_ROOT live under /tmp.
+    Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+    node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+    follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+    requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+    its host memory is the runtime and the weights passing through the page
+    cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
+    (10 + 8 GiB, and the card predates bf16).
+  model:
+    id: google/gemma-4-12B-it-qat-w4a16-ct
+    # The tag is the first 12 characters of the checkpoint revision
+    # 1d2c2d7f2466070e69d6fb3fd5ce9a7d75f2f6ee (one safetensors file under
+    # /models). modelServing.modelImages.registry swaps the host at render;
+    # the path, giantswarm/models/gemma-4-12b-qat-w4a16:1d2c2d7f2466, stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/gemma-4-12b-qat-w4a16:1d2c2d7f2466
+    format: vLLM
+    contextLength: 32768
+    capabilities: [chat, tools, reasoning, vision]
+    license: apache-2.0
+  env:
+    # The modelcar path runs the runtime as the platform KServe's modelcar uid
+    # on a read-only model image: the home, the Hub cache and vLLM's compile
+    # cache go under /tmp (the cache claim's compile cache is not mounted).
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf
+    - name: VLLM_CACHE_ROOT
+      value: /tmp/vllm-cache
+  args:
+    - --gpu-memory-utilization=0.90
+    - --max-model-len=32768
+    - --max-num-seqs=4
+    - --enable-chunked-prefill
+    - --enable-prefix-caching
+    # One argument, the JSON single-quoted inside it: the well-known runtime
+    # template re-parses every argument through a shell (eval "… $@"), which
+    # would split a bare JSON at its whitespace and eat its double quotes.
+    - "--limit-mm-per-prompt='{\"image\": 1, \"audio\": 0}'"
+    - --no-enable-log-requests
+    - --reasoning-parser=gemma4
+    # kagent agents call /v1/chat/completions with tools and tool_choice auto;
+    # without a parser vLLM rejects every agent request (400).
+    - --enable-auto-tool-choice
+    - --tool-call-parser=gemma4
+  resources:
+    gpus: 1
+    requests:
+      cpu: "2"
+      memory: 10Gi
+    limits:
+      cpu: "4"
+      memory: 12Gi
+  requirements:
+    # The Hub sizes the checkpoint at 9.56 GiB (one safetensors file, no
+    # index; make verify-preset-weights). 8 GiB of overhead: the KV cache,
+    # the vision path, CUDA graphs and the runtime within 0.90 of a 24 GB card.
+    weightsGiB: 10
+    overheadGiB: 8

@@ -1,0 +1,97 @@
+# Qwen3.5 9B, FP8 dynamic (Red Hat's compressed-tensors checkpoint) on one
+# 24 GB GPU (an L4), served from a signed OCI model image. Dense 9B of the
+# Qwen3.5 lineage (hybrid Gated DeltaNet and gated attention), thinking off by
+# default, tools on, vision. No serving image: the predictor runs the
+# llm-d-cuda the well-known LLMInferenceServiceConfig names
+# (components.kserve-runtime-configs).
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-5-9b-fp8
+spec:
+  displayName: Qwen3.5 9B (FP8, one 24 GB GPU)
+  description: |
+    Qwen3.5 9B: the dense 9B general model of the Qwen3.5 lineage (hybrid
+    Gated DeltaNet and gated attention, 262k native context) with tool
+    calling, thinking and image and video understanding, Apache 2.0. Served
+    as Red Hat's FP8 dynamic quantization (compressed-tensors, weights and
+    activations in FP8: 13 GiB on disk, of which the multi-token-prediction
+    head — 0.4 GiB — is not loaded without speculative decoding) on one
+    24 GB GPU of the L4 class, whose FP8 tensor cores run it natively. 32k
+    context, four concurrent requests, chunked prefill and prefix caching;
+    --gpu-memory-utilization=0.90 leaves about 7 GiB to the KV cache next to
+    the weights (the linear-attention layers keep no KV cache, so it goes a
+    long way) — 14 + 9 GiB on the fit check. Thinking is off by default (a
+    request turns it on with enable_thinking), reasoning with the qwen3
+    parser, tools on with the qwen3_coder parser the model card names for
+    vLLM (agents always send tools, and vLLM answers 400 without
+    --enable-auto-tool-choice), one image and no video per request
+    (--limit-mm-per-prompt), the model's own chat template.
+    Weights: an OCI model image, giantswarm/models/qwen3-5-9b-fp8 at the
+    checkpoint revision, pulled onto the node by containerd like any image
+    (KServe's modelcar path: no download, no cache claim, every serving node
+    a target); an installation serves it from a registry of its own that
+    holds the same path by setting modelServing.modelImages.registry. The
+    modelcar path runs the runtime as a non-root uid on a read-only image,
+    so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+    Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+    node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+    follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+    requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+    its host memory is the runtime and the weights passing through the page
+    cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
+    (14 + 9 GiB, and the card has neither FP8 nor bf16).
+  model:
+    id: RedHatAI/Qwen3.5-9B-FP8-dynamic
+    # The tag is the first 12 characters of the checkpoint revision
+    # 790f0576d2d77dd5322aa0603a470bd9e3a3d1f6 (model.safetensors and the
+    # MTP head under /models). modelServing.modelImages.registry swaps the
+    # host at render; the path, giantswarm/models/qwen3-5-9b-fp8:790f0576d2d7,
+    # stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-5-9b-fp8:790f0576d2d7
+    format: vLLM
+    contextLength: 32768
+    capabilities: [chat, tools, reasoning, vision]
+    license: apache-2.0
+  env:
+    # The modelcar path runs the runtime as the platform KServe's modelcar uid
+    # on a read-only model image: the home, the Hub cache and vLLM's compile
+    # cache go under /tmp (the cache claim's compile cache is not mounted).
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf
+    - name: VLLM_CACHE_ROOT
+      value: /tmp/vllm-cache
+  args:
+    - --gpu-memory-utilization=0.90
+    - --max-model-len=32768
+    - --max-num-seqs=4
+    - --enable-chunked-prefill
+    - --enable-prefix-caching
+    # One argument, the JSON single-quoted inside it: the well-known runtime
+    # template re-parses every argument through a shell (eval "… $@"), which
+    # would split a bare JSON at its whitespace and eat its double quotes.
+    - "--limit-mm-per-prompt='{\"image\": 1, \"video\": 0}'"
+    - --no-enable-log-requests
+    - --reasoning-parser=qwen3
+    # kagent agents call /v1/chat/completions with tools and tool_choice auto;
+    # without a parser vLLM rejects every agent request (400).
+    - --enable-auto-tool-choice
+    - --tool-call-parser=qwen3_coder
+    - "--default-chat-template-kwargs='{\"enable_thinking\": false}'"
+  resources:
+    gpus: 1
+    requests:
+      cpu: "2"
+      memory: 10Gi
+    limits:
+      cpu: "4"
+      memory: 12Gi
+  requirements:
+    # The Hub's safetensors index sizes the checkpoint at 13.04 GiB, the MTP
+    # head included (make verify-preset-weights: a preset declares at least
+    # the Hub's size, so 14). 9 GiB of overhead: the KV cache, the vision
+    # path, CUDA graphs and the runtime within 0.90 of a 24 GB card.
+    weightsGiB: 14
+    overheadGiB: 9

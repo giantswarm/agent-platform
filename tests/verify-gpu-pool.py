@@ -64,6 +64,9 @@ DISCOVERY = ("ConfigMap", "agent-platform-model-serving")
 PRESET = re.compile(r"^agent-platform-serving-preset-(.+)$")
 # The presets the connectivity chart ships (one file each; #481 added two).
 SHIPPED = len(glob.glob(os.path.join(CONN, "files", "model-serving", "presets", "*.yaml")))
+# The 24 GB presets of the September 2026 line-up and the ones they replaced (#591).
+LINEUP_24GB = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b")
+RETIRED_24GB = ("qwen3-4b-instruct", "qwen3-8b-fp8", "qwen3-14b")
 # The discovery block this change adds, cut out for the byte-identity check.
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
@@ -240,10 +243,8 @@ else:
         classic = os.path.exists(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml")
         golden_serving = [f.replace("kserve-llmisvc-crd", "kserve-crd").replace("kserve-llmisvc-resources", "kserve-resources") for f in SERVING] if classic else SERVING
         golden = documents(helm(f"{tree}/{CONN}", [*golden_serving, *UNTAINTED, *NO_CACHE] if carries else [*golden_serving, *NO_CACHE]))
-        resized = "g6.xlarge" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-4b-instruct.yaml", encoding="utf-8").read()
         shaped = "podShapes" in open(f"{tree}/{CONN}/templates/model-serving/_helpers.tpl", encoding="utf-8").read()
         ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        quoted = "--default-chat-template-kwargs='" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8b-fp8.yaml", encoding="utf-8").read()
         sized = "weightsGiB: 25" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b.yaml", encoding="utf-8").read()
         kept = "$ms.namespace.keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
         added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
@@ -253,6 +254,7 @@ else:
         imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
         flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
         flashsized = flashnext and "memory: 118Gi" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
+        lineup24 = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -282,15 +284,6 @@ else:
             for key in [k for k in side if k[0] == "ConfigMap" and PRESET.match(k[1])]:
                 side.pop(key)
         print(f"note: the classic serving path is removed on this side (#574) and not on {ref}: its runtime, the discovery ConfigMap, the serving policies and the published presets (which carried the defaulted runtime) are left out of the comparison")
-    # The two L4 presets are sized for a g6.xlarge (giantswarm/agent-platform#502:
-    # requests 2 vCPU / 10 GiB, the description says so); a golden from before
-    # carries the old 4 vCPU / 16 GiB, so its two preset documents are left out
-    # of the comparison on both sides. Drop this once GOLDEN_REF carries #502.
-    if not resized:
-        for name in ("qwen3-4b-instruct", "qwen3-8b-fp8"):
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-        print(f"note: the two L4 presets are resized on this side (#502) and not on {ref}: their ConfigMaps are left out of the comparison")
     # Two presets declare the Hub's weight size (giantswarm/agent-platform#535:
     # qwen3-8-27b 25 GiB, devstral-small-2 25 GiB, their descriptions say so); a
     # golden from before carries 15 and 48, so those two preset documents are
@@ -301,16 +294,6 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: two presets declare the Hub's weight size on this side (#535) and not on {ref}: their ConfigMaps are left out of the comparison")
-    # Six presets write their JSON-valued vLLM arguments as one single-quoted
-    # argument, the form the llm-d runtime template's eval keeps intact
-    # (giantswarm/agent-platform#532); a golden from before carries the bare
-    # two-argument form, so those preset documents are left out of the
-    # comparison on both sides. Drop this once GOLDEN_REF carries #532.
-    if not quoted:
-        for name in ("nemotron-3-super-nvfp4", "qwen3-14b", "qwen3-5-27b", "qwen3-5-35b-a3b", "qwen3-8-27b", "qwen3-8b-fp8"):
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-        print(f"note: six presets quote their JSON arguments on this side (#532) and not on {ref}: their ConfigMaps are left out of the comparison")
     # The Flash-Next preset's memory limit covers the B12X stack's mlock()ed
     # resident weights (giantswarm/agent-platform#567: limits.memory 118Gi, the
     # comment in the preset says why); a golden from before carries 64Gi, so
@@ -349,6 +332,19 @@ else:
         head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-flash-next-nvfp4\n", "", head[DISCOVERY], flags=re.M)
         expect("the OCI preset's name cut out of the discovery list once", ncuts, 1)
         print(f"note: the preset qwen3-8-flash-next-nvfp4 ships on this side (#553) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
+    # The four 24 GB presets of the September 2026 line-up ship on this side
+    # (giantswarm/agent-platform#591) and the three Qwen3 small presets they
+    # replace do not; a golden from before has it the other way round, so the
+    # new presets' ConfigMaps and discovery entries are left out of the head and
+    # the retired ones' out of the golden. Drop this once GOLDEN_REF carries #591.
+    if not lineup24:
+        for side, names in ((head, LINEUP_24GB), (golden, RETIRED_24GB)):
+            for name in names:
+                side.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+                if DISCOVERY in side:
+                    side[DISCOVERY], ncuts = re.subn(rf"^ +- {re.escape(name)}\n", "", side[DISCOVERY], flags=re.M)
+                    expect(f"the preset {name}'s name cut out of the discovery list once", ncuts, 1)
+        print(f"note: the 24 GB line-up ships on this side (#591) and not on {ref}: the new presets' ConfigMaps and discovery entries, and the retired ones' on {ref}, are left out of the comparison")
     # The serving namespace is kept whatever the cache switch says
     # (giantswarm/agent-platform#565; modelServing.namespace.keep) and its
     # template's comment says so; the untainted render has the cache off, so a
