@@ -16,7 +16,7 @@ spec:
     checkpoint (35 GiB of weights) on one 48 GB GPU of the L40S family:
     g6e.2xlarge or g6e.4xlarge (g6e.xlarge leaves a predictor 3 vCPU /
     27 GiB, less than the 4 vCPU / 32 GiB requested here). The model's own
-    window is 262,144 tokens; the preset serves 32k, what the KV cache of a
+    window is 262,144 tokens; the preset serves 16k, what the KV cache of a
     48 GB card holds beside 35 GiB of weights at
     --gpu-memory-utilization=0.92 (four concurrent requests, one image per
     prompt). Thinking is off by default (a request turns it on with
@@ -35,7 +35,7 @@ spec:
     # the path, giantswarm/models/qwen3-6-35b-a3b-fp8:95a723d08a94, stays.
     storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-6-35b-a3b-fp8:95a723d08a94
     format: vLLM
-    contextLength: 32768
+    contextLength: 16384
     capabilities: [chat, tools, reasoning, vision, coding]
     license: apache-2.0
   env:
@@ -58,9 +58,13 @@ spec:
       value: vllm
     - name: TORCHINDUCTOR_CACHE_DIR
       value: /tmp/torchinductor
+  # 34.9 GiB of FP8 weights leave about 4 GiB for the KV cache on the 48 GB
+  # card at --gpu-memory-utilization 0.92; the context is capped at 16k so one
+  # full-length sequence fits and vLLM starts (the 64k gemma-4-31b preset did
+  # not, see its note).
   args:
     - --gpu-memory-utilization=0.92
-    - --max-model-len=32768
+    - --max-model-len=16384
     - --max-num-seqs=4
     - --max-num-batched-tokens=8192
     - --enable-chunked-prefill

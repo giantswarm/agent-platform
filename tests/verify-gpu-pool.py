@@ -261,6 +261,7 @@ else:
         lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml")
         fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
         uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
+        ctx48 = lineup and "--max-model-len=32768" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -359,6 +360,15 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: the model-image presets carry the modelcar uid environment on this side (#591) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # gemma-4-31b and qwen3-6-35b-a3b carry the context lengths a 48 GB card
+    # holds next to their weights on this side (giantswarm/agent-platform#591);
+    # a golden from before renders them at 64k/32k, so both ConfigMaps are left
+    # out of the comparison. Drop this once GOLDEN_REF carries the change.
+    if not ctx48:
+        for name in ("gemma-4-31b", "qwen3-6-35b-a3b"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: the 48 GB presets carry their fitted context lengths on this side (#591) and not on {ref}: their ConfigMaps are left out of the comparison")
     # The four 24 GB presets of the September 2026 line-up ship on this side
     # (giantswarm/agent-platform#591) and the three Qwen3 small presets they
     # replace do not; a golden from before has it the other way round, so the
