@@ -23,7 +23,7 @@ time, in the child HelmRelease or in the running controller:
     cutover, `providers.<default>.config.baseUrl`) and the connectivity chart
     reads for the provider key of its own ModelConfigs;
   * a range that admits the line's dev builds, or upstream's next minor, or
-    that Flux (Masterminds semver) would not match a `-gs.N` release against;
+    that Flux (Masterminds semver) would not match the line's stable releases against;
   * a kagent-crds source that differs from kagent's, a kagent release that does
     not come after its CRDs, a `crds:` policy on a chart whose CRDs are
     templates, `global` injected into a chart that reads none;
@@ -81,13 +81,17 @@ LINE_REPOSITORY = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
 LINE_IMAGES = "giantswarm/kagent"
 HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 # What the release range must admit and refuse, by shape: the line's releases
-# of the pinned upstream version and nothing else — not its dev builds (`dev` <
-# `gs` identifier-wise), not a later upstream base (the ceiling holds the patch;
-# Masterminds confines a prerelease to no patch tuple, so `<0.12.0-0` would let
-# 0.11.1-dev.… through), not the next minor.
-ADMITTED = ["{floor}", "{floor_next}", "{floor_tenfold}", "{base}"]
-REFUSED = ["{below_floor}", "{base}-dev.giantswarm.2026-09-10.22-06-46.h0ac5240", "{next_patch}-dev.giantswarm.2026-09-11.00-00-00.h0000000",
-           "{next_patch}-gs.1", "{next_patch}", "{next_minor}-gs.1", "{next_minor}"]
+# of the pinned minor — the floor and its patches, which never change a runtime
+# contract — and nothing else: not the line's dev builds (Masterminds skips
+# every prerelease while no bound of the range carries one — and evaluates them
+# all once one does, so a `-0` anywhere in the range is refused), not the last release
+# of the former coupled `-gs.N` scheme, not the next minor (a re-pin onto
+# another upstream release) or its release candidates, not the next major.
+ADMITTED = ["{floor}", "{floor_patch}", "{floor_patch_tenfold}"]
+REFUSED = ["{last_coupled}", "{floor}-dev.giantswarm.2026-09-19.00-00-00.h0000000", "{floor_patch}-dev.giantswarm.2026-09-19.00-00-00.h0000000",
+           "{next_minor}-rc.1", "{next_minor}", "{next_major}"]
+STABLE_FLOOR = "1.0.0"  # the line's first release of its own stable semver
+LAST_COUPLED = "0.11.0-gs.22"  # the line's last release under the coupled scheme, below every stable range
 EXAMPLE_AGENTS = ["k8s-agent", "kgateway-agent", "istio-agent", "promql-agent", "observability-agent",
                   "argo-rollouts-agent", "helm-agent", "cilium-policy-agent", "cilium-manager-agent", "cilium-debug-agent"]
 
@@ -220,13 +224,13 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
     if f"repository: {LINE_IMAGES}/ui" not in values.get("ui", []):
         fail(f"kagent.ui.image.repository is not {LINE_IMAGES}/ui (the line's image)")
     if "tag" in values:
-        fail("kagent.tag forwarded to the kagent chart; the line stamps the build's image tag into the chart at publish "
-             "(0.11.0-gs.6+), an override here would pin every release the range admits to one build")
-    if fluxsemver.parse(kagent_range.split()[0].lstrip(">=")) < fluxsemver.parse("0.11.0-gs.9"):
-        fail(f"components.kagent.versionRange {kagent_range!r} admits a chart whose Harness template keeps an empty-valued selector "
-             "label (the stamps — tag, controller.agentImage.digest, harness.create, the kagent-images ConfigMap — came with "
-             "0.11.0-gs.6; the empty-value drop that removes kagent.dev/harness from the platform Harness's selector with 0.11.0-gs.9, "
-             "giantswarm/agent-platform#418); the floor is 0.11.0-gs.9")
+        fail("kagent.tag forwarded to the kagent chart; the line stamps the build's image tag into the chart at publish, "
+             "an override here would pin every release the range admits to one build")
+    if fluxsemver.parse(kagent_range.split()[0].lstrip(">=")) < fluxsemver.parse(STABLE_FLOOR):
+        fail(f"components.kagent.versionRange {kagent_range!r} admits a release of the former coupled scheme (vX.Y.Z-gs.N), which the "
+             f"line publishes no more; its stable releases begin at {STABLE_FLOOR}, and every one of them carries the stamps (tag, "
+             "controller.agentImage.digest, harness.create, the kagent-images ConfigMap) and a Harness template that drops an "
+             "empty-valued selector label (giantswarm/agent-platform#418)")
     # The worker image is the meta chart's derivation from its own Substrate pin
     # (giantswarm/agent-platform#466; tests/verify-worker-image.py holds the rule).
     worker = re.search(r"^workerImage: gsoci\.azurecr\.io/giantswarm/substrate/ateom-gvisor:(\S+)$", "\n".join(values.get("substrateWorkerPool", [])), re.M)
@@ -267,11 +271,13 @@ def check_sources(docs, kagent_range: str) -> None:
         if filtered:
             fail(f"{name} OCIRepository carries a semverFilter by default; the release range selects releases, a filter is a consumer's dev-channel knob")
     floor = kagent_range.split()[0].lstrip(">=")
-    base = fluxsemver.base(floor)
-    major, minor, patch = (int(x) for x in base.split("."))
-    n = int(re.search(r"-gs\.(\d+)$", floor).group(1))  # the line's counter at the floor
-    shapes = {"base": base, "floor": floor, "floor_next": f"{base}-gs.{n + 1}", "floor_tenfold": f"{base}-gs.{n * 10}", "below_floor": f"{base}-gs.{n - 1}",
-              "next_patch": f"{major}.{minor}.{patch + 1}", "next_minor": f"{major}.{minor + 1}.0"}
+    if floor != fluxsemver.base(floor):
+        fail(f"components.kagent.versionRange {kagent_range!r} has a prerelease floor; the line's releases are stable semver")
+    if "-" in kagent_range:
+        fail(f"components.kagent.versionRange {kagent_range!r} carries a prerelease bound: Flux's Masterminds semver evaluates every prerelease against a range as soon as one bound carries one, so a -0 here would put every installation on the line's newest dev build")
+    major, minor, patch = (int(x) for x in floor.split("."))
+    shapes = {"floor": floor, "floor_patch": f"{major}.{minor}.{patch + 7}", "floor_patch_tenfold": f"{major}.{minor}.{patch + 10}",
+              "last_coupled": LAST_COUPLED, "next_minor": f"{major}.{minor + 1}.0", "next_major": f"{major + 1}.0.0"}
     for template in ADMITTED:
         v = template.format(**shapes)
         if not fluxsemver.satisfies(v, kagent_range):
@@ -296,7 +302,7 @@ def check_sources(docs, kagent_range: str) -> None:
         if "enabled: false" not in crds_values.get(sub, []):
             fail(f"kagent-crds.{sub}.enabled is not false (kmcp is not part of the platform; the Substrate CRDs come with Substrate)")
     print(f"ok: kagent + kagent-crds from {LINE_REPOSITORY} on {kagent_range!r} (admits {', '.join(t.format(**shapes) for t in ADMITTED)}; "
-          f"refuses the dev builds and {shapes['next_patch']}, {shapes['next_minor']}); kagent after kagent-crds; CRDs as templates, subcharts off")
+          f"refuses the dev builds, {shapes['last_coupled']}, {shapes['next_minor']} and {shapes['next_major']}); kagent after kagent-crds; CRDs as templates, subcharts off")
 
 
 def check_retired_keys(values: dict[str, list[str]], conn_kagent: str) -> None:

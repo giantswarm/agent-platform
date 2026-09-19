@@ -14,10 +14,17 @@ It also holds the controller at two or more replicas (controller.replicaCount):
 the data plane fetches its config over xDS, and a data-plane pod rescheduled
 onto a rebooted node waits for a controller to answer.
 
+And it holds the images: the block names the agentgateway line's release IN
+FULL — controller.image and proxy.image at the line's nested repositories
+(giantswarm/agentgateway-upstream/{controller,agentgateway}) with one bare
+X.Y.Z tag for both — so the packaging chart's defaults cannot move them (a
+value wins over a chart default; giantswarm/agent-platform#608).
+
 Reads a rendered meta-package manifest. Deliberately stdlib-only: the CI image
 has no PyYAML.
 """
 
+import re
 import sys
 
 VALUES_INDENT = "    "
@@ -71,8 +78,20 @@ def main(path: str) -> int:
     if "enabled" in values:
         sys.exit("FAIL: `enabled` forwarded to the agentgateway chart, whose schema is additionalProperties:false")
     controller = values.get("controller", [])
-    if "repository: giantswarm/agentgateway-controller" not in [l.strip() for l in controller]:
-        sys.exit("FAIL: agentgateway values lost controller.image.repository")
+    images = {}
+    for name, block in (("controller", controller), ("proxy", values.get("proxy", []))):
+        stripped = [l.strip() for l in block]
+        repo = next((l.split(": ", 1)[1] for l in stripped if l.startswith("repository: ")), None)
+        tag = next((l.split(": ", 1)[1].strip("\"'") for l in stripped if l.startswith("tag: ")), None)
+        images[name] = (repo, tag)
+    for name, want in (("controller", "giantswarm/agentgateway-upstream/controller"), ("proxy", "giantswarm/agentgateway-upstream/agentgateway")):
+        repo, tag = images[name]
+        if repo != want:
+            sys.exit(f"FAIL: agentgateway {name}.image.repository is {repo!r}, not {want!r}: the agentgateway line's image under its nested name (giantswarm/agent-platform#608)")
+        if not tag or not re.fullmatch(r"\d+\.\d+\.\d+", tag):
+            sys.exit(f"FAIL: agentgateway {name}.image.tag is {tag!r}, not a release of the line's stable semver (a bare X.Y.Z — no v, no -gs.N): the meta chart names the release in full so the packaging chart's defaults cannot move it (giantswarm/agent-platform#608)")
+    if images["controller"][1] != images["proxy"][1]:
+        sys.exit(f"FAIL: the controller ({images['controller'][1]}) and the data plane ({images['proxy'][1]}) name different releases of the line; they move together")
     replicas = direct_child(controller, "replicaCount")
     if replicas is None or not replicas.isdigit() or int(replicas) < 2:
         sys.exit(

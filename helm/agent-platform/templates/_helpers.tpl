@@ -629,7 +629,7 @@ run it.
 {{/*
 The floor of a Flux semver range as the roster carries it (components.<name>
 .versionRange): the version of its `>=` (or `>`, `^`, `~`, `=`) term, or the
-range itself when it is one exact version (a BOM pin, `0.0.30-gs.1`). Empty for
+range itself when it is one exact version (a BOM pin, `1.0.0`). Empty for
 a range without a floor (`0.x`, `*`, a `<` term alone) — the caller decides what
 that means. Terms are separated by spaces or commas (Masterminds/semver, which
 source-controller uses).
@@ -661,7 +661,7 @@ Usage: include "agent-platform.substrate.pinnedVersion" $root
 {{- $range := dig "substrate" "versionRange" "" .Values.components -}}
 {{- $floor := include "agent-platform.semverRangeFloor" $range -}}
 {{- if not $floor -}}
-{{- fail (printf "components.substrate.versionRange %q has no floor: the Substrate worker image the kagent WorkerPool runs (ateom-gvisor) is derived from the range's floor, so the range is one exact version or `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` (giantswarm/agent-platform#466)" $range) -}}
+{{- fail (printf "components.substrate.versionRange %q has no floor: the Substrate worker image the kagent WorkerPool runs (ateom-gvisor) is derived from the range's floor, so the range is one exact version or `>=X.Y.Z <X.(Y+1).0` (giantswarm/agent-platform#466)" $range) -}}
 {{- end -}}
 {{- $floor -}}
 {{- end -}}
@@ -681,14 +681,20 @@ Usage: include "agent-platform.substrate.workerImage" $root
 
 {{/*
 Fail the render when components.substrate.versionRange could resolve to a
-Substrate release of another X.Y.Z than the one it pins (giantswarm/agent-
-platform#466). The worker image follows the range's FLOOR and the atelet
-follows what Flux RESOLVES, so the two are one runtime only while the range
-confines one release: an exact version (a BOM pin, `0.0.30-gs.5`), or a floor
-with the ceiling of its own patch, `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` — the line's
-later gs.N of that release may reach the control plane ahead of the worker
-(the line moves the pin when a patch changes the runtime), a 0.0.31 never.
-`0.x`, `~0.0.30`, `^0.0.30`, `<0.0.32-0` are refused. Called by
+Substrate release of another runtime contract than the one it pins
+(giantswarm/agent-platform#466). The worker image follows the range's FLOOR and
+the atelet follows what Flux RESOLVES, so the two are one runtime only while the
+range confines one contract — and the line changes one only in a minor: a patch
+release is carried patches or a rebuild on the same upstream pin (the worker and
+atelet bundle layout stays), a re-pin onto another upstream release is at least
+a minor. So the range is an exact version (a BOM pin, `1.0.0`) or a floor with
+the ceiling of its own minor, `>=X.Y.Z <X.(Y+1).0` — and no `-0` anywhere: Flux's
+Masterminds semver skips every prerelease while no bound of a range carries one
+and evaluates them all once one does, so `<1.1.0-0` would admit the line's dev
+builds. A later patch of the pinned minor may reach the control plane ahead of
+the worker, a `1.1.0` never. `0.x`, `~1.0.0`, `^1.0.0`, `<1.1.0`, a `-0` bound, a
+`<=` ceiling, a patch ceiling and the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` are
+refused. Called by
 agent-platform.validateSubstrate while components.substrate is on.
 */}}
 {{- define "agent-platform.substrate.validateRange" -}}
@@ -703,11 +709,11 @@ agent-platform.validateSubstrate while components.substrate is on.
 {{- $floor := trimPrefix ">=" (first $terms) -}}
 {{- if regexMatch $version $floor -}}
 {{- $parts := splitList "." (first (splitList "-" $floor)) -}}
-{{- $ok = eq (trimPrefix "<" (last $terms)) (printf "%s.%s.%d-0" (index $parts 0) (index $parts 1) (add1 (atoi (index $parts 2)))) -}}
+{{- $ok = eq (trimPrefix "<" (last $terms)) (printf "%s.%d.0" (index $parts 0) (add1 (atoi (index $parts 1)))) -}}
 {{- end -}}
 {{- end -}}
 {{- if not $ok -}}
-{{- fail (printf "components.substrate.versionRange %q does not confine one Substrate release: the kagent WorkerPool's worker image (ateom-gvisor) follows the range's floor and the atelet follows the release Flux resolves, so the range is one exact version (0.0.30-gs.4) or a floor with the ceiling of its own patch (>=0.0.30-gs.4 <0.0.31-0) — a worker and an atelet of different releases boot no golden actor (giantswarm/agent-platform#466)" $range) -}}
+{{- fail (printf "components.substrate.versionRange %q does not confine one Substrate release and its patches: the kagent WorkerPool's worker image (ateom-gvisor) follows the range's floor, the atelet follows the release Flux resolves, and only a minor of the line changes the runtime contract the two share — so the range is one exact version (1.0.0) or a floor with the ceiling of its own minor and no -0 bound (>=1.0.0 <1.1.0 — a -0 anywhere makes Flux evaluate the line's dev builds against the range); a worker and an atelet of different contracts boot no golden actor (giantswarm/agent-platform#466)" $range) -}}
 {{- end -}}
 {{- end -}}
 
@@ -715,14 +721,14 @@ agent-platform.validateSubstrate while components.substrate is on.
 The first release of the Substrate line (giantswarm/substrate, the chart
 components.substrate pins) whose WorkerPool CRD carries spec.template
 .topologySpreadConstraints and spec.template.podAntiAffinity — the carried patch
-tracked as giantswarm/giantswarm#37797 (#37742 row 46), released as v0.0.30-gs.2
-(2026-09-15). agent-platform.validateWorkerPool refuses the two keys while
-components.substrate.versionRange's floor is below it — every earlier release
-prunes them silently — and forwards them verbatim from it on
+tracked as giantswarm/giantswarm#37797 (#37742 row 46), in every release of the
+line's stable semver. agent-platform.validateWorkerPool refuses the two keys
+while components.substrate.versionRange's floor is below it — every earlier
+release prunes them silently — and forwards them verbatim from it on
 (giantswarm/agent-platform#472). One line, no comment inside the define:
 tests/verify-workerpool.py reads the value from this file.
 */}}
-{{- define "agent-platform.substrate.workerPoolSpreadFloor" -}}0.0.30-gs.2{{- end -}}
+{{- define "agent-platform.substrate.workerPoolSpreadFloor" -}}1.0.0{{- end -}}
 
 {{/*
 Fail the render when kagent.substrateWorkerPool.template would not reach the
@@ -738,7 +744,7 @@ at the render, instead:
     map[string]string);
   - `topologySpreadConstraints` and `podAntiAffinity`, which the Substrate line
     carries only from the release agent-platform.substrate.workerPoolSpreadFloor
-    names (0.0.30-gs.2): refused while components.substrate.versionRange's floor
+    names (1.0.0): refused while components.substrate.versionRange's floor
     is below it, forwarded verbatim from it on;
   - any other key WorkerPool.spec.template does not have (labels, annotations,
     nodeSelector, tolerations, priorityClassName, nodeAffinity, resources are

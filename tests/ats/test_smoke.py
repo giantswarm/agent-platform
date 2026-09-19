@@ -728,16 +728,16 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # runtime survives: the ModelConfig, the WorkerPool and its workers, the
     # controller and its Postgres (the kagent release's), the
     # substrate release's SandboxConfig and Substrate's control plane go. The
-    # three ate.dev CRDs stay too — the Substrate line's keep policy (from
-    # v0.0.27-gs.3 on), the same convention as kagent-crds', so a consumer's
+    # three ate.dev CRDs stay too — the Substrate line's keep policy (on its
+    # CRD templates), the same convention as kagent-crds', so a consumer's
     # uninstall can always delete its CRs whatever order the releases go in
     # (giantswarm/agent-platform#385). What stays by design, and what the next
     # install on this cluster relies on: in ate-system the bootstrap hook's
     # CA/JWT pools, ate-api-server's authentication config and the bundled
     # Postgres's claim (a StatefulSet's PVC), none Helm-owned; the
     # podcertificate-controller's namespace with its two CA pools, kept by the
-    # Substrate line's chart (helm.sh/resource-policy: keep, from v0.0.27-gs.5
-    # on — the pools it signs from must outlive the release); and the signers'
+    # Substrate line's chart (helm.sh/resource-policy: keep — the pools it
+    # signs from must outlive the release); and the signers'
     # cluster-scoped ClusterTrustBundles, which carry those pools' roots
     # (giantswarm/agent-platform#384). The own-Flux scenario reinstalls onto
     # exactly this.

@@ -396,8 +396,12 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # 2.0.0 flattened the chart: upstream keys moved from `agentgateway.*` to the
     # chart root, so the forwarded block is no longer nested (no valuesKey) and
-    # the 1.x range cannot be used with this wiring.
-    versionRange: "2.x"
+    # the 1.x range cannot be used with this wiring. The floor is 2.2.2, the
+    # release that renders the controller's image tag as written (through
+    # 2.2.1 the chart prefixed a `v` to a bare X.Y.Z, and the agentgateway line
+    # publishes no such tag): the agentgateway block below names the line's
+    # release in full, and no chart this range admits renders it unpullable.
+    versionRange: ">=2.2.2 <3.0.0"
     valuesFrom: agentgateway
     enabled: false
     # The slice profiles set this per target: on for a workload cluster, off
@@ -449,58 +453,29 @@ components:  # @schema additionalProperties: true
     # the charts kagent and kagent-crds to oci://gsoci.azurecr.io/giantswarm/kagent/helm
     # and the multi-arch images gsoci.azurecr.io/giantswarm/kagent/{controller,ui,
     # golang-adk,claude-harness}, signed with the Giant Swarm CircleCI identity:
-    # releases as vX.Y.Z-gs.N (X.Y.Z the upstream version the pin anticipates,
-    # N the line's counter from 1) and, on every push to the consumed branch,
-    # dev builds X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7>.
+    # releases as the line's own stable semver (X.Y.Z, decoupled from the
+    # upstream version, which FORK.md and the images' annotation
+    # io.giantswarm.upstream.version record) and, on every push to the
+    # consumed branch, dev builds X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7>.
     # Upstream's chart shape: keys at the chart root, the CRDs as their own
     # chart (kagent-crds below), no values schema.
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    # The line's releases of upstream 0.11.0 — 0.11.0-gs.1, 0.11.0-gs.2, … —
-    # and nothing else. Flux resolves the range with Masterminds semver: a
-    # prerelease compares identifier by identifier (gs.2 > gs.1; `dev` < `gs`,
-    # so the line's 0.11.0-dev.giantswarm.… builds fall below the floor), a
-    # prerelease never satisfies a bound that has none (hence the -0 on the
-    # ceiling), and — unlike npm — a prerelease is confined to no patch tuple,
-    # so the ceiling holds the patch: 0.11.1-<anything> is out. The range would
-    # also admit a bare 0.11.0, the upstream release the line anticipates, if
-    # one ever appeared at this OCI path — upstream publishes to
-    # ghcr.io/kagent-dev and the line's releases are vX.Y.Z-gs.N tags only,
-    # so none is expected; by design (D2) the later switch to an upstream
-    # release is a range change here, not a rename. Re-pinning the line is one
-    # values change: this range and kagent-crds' range move together (README
-    # "Re-pinning the kagent line"); the build's image tag and Go ADK digest
-    # travel inside the chart (stamped at publish), not here. The floor is
-    # 0.11.0-gs.9, the first release whose Harness template drops a selector
-    # label with an empty value (kagent.harness.allowedAgentTemplates below);
-    # 0.11.0-gs.6 brought the stamps this chart relies on
-    # (controller.agentImage.digest, harness.create, the kagent-images
-    # ConfigMap). 0.11.0-gs.12 stamps the Substrate worker 0.0.27-gs.9, whose
-    # terminate collects a crashed golden actor (giantswarm/giantswarm#37773).
-    # 0.11.0-gs.14 is the line re-pinned onto upstream main 800015de (2026-09-14,
-    # kagent-dev/kagent#2802: the a2a gateway addresses an actor by the
-    # ate-target-actor header) and stamps the Substrate worker 0.0.30-gs.1 —
-    # the two lines move together, a gs.14 kagent on a 0.0.27 Substrate fails
-    # every turn.
-    # 0.11.0-gs.15 carries kagent-dev/kagent#2788: spec.anthropic.promptCaching
-    # and cacheTTL on the ModelConfig CRD (kagent-crds) and the cache_control
-    # breakpoints in the Go ADK — the floor, because providers.anthropic.config
-    # below sets both and an older CRD would prune them at admission, leaving
-    # the models uncached in silence (giantswarm/giantswarm#37788).
-    # 0.11.0-gs.16 carries kagent-dev/kagent#2790: spec.context.compaction on
-    # the AgentTemplate CRD (kagent-crds) and the Go ADK runtime honouring it
-    # through ADK v2.3.0's session/compaction — the floor, because the agent
-    # chart (giantswarm/agent 1.3+) renders a compaction default on every
-    # platform agent and an older CRD would prune it at admission, leaving
-    # every long turn re-reading its whole history in silence
-    # (giantswarm/giantswarm#37792).
-    # 0.11.0-gs.22 is the line's first release published natively to gsoci
-    # from CircleCI (the four images and both charts, signed with the org's
-    # identity; the patches of gs.21) — the floor, because the chart path on
-    # gsoci begins there: gs.21 and older exist on gsoci as retagger's image
-    # copies only, no charts.
-    # No semverFilter: a dev build is selected only by a consumer
-    # that sets one (README "Dev channel").
-    versionRange: ">=0.11.0-gs.22 <0.11.1-0"
+    # The line's 1.0 releases. A patch of the line is carried patches or a
+    # rebuild on the same upstream pin and never changes a runtime contract
+    # (the Harness template's shape, the CRD fields this chart forwards); a
+    # re-pin onto another upstream release is at least a minor — so the ceiling
+    # is the next minor, and moving the floor is the re-pin. Flux resolves the
+    # range with Masterminds semver, which skips every prerelease while no bound
+    # of the range carries one — and evaluates them all as soon as one bound
+    # does — so the range carries no `-0`: `<1.1.0-0` would admit the line's
+    # 1.0.x-dev.giantswarm.… builds (the dev channel is a consumer's `-0` range
+    # plus a semverFilter, README "Dev channel"). The build's image tag and Go
+    # ADK digest travel inside
+    # the chart (stamped at publish), not here. Re-pinning the line is one
+    # values change: this range and kagent-crds' range move together, and the
+    # Substrate range follows when the line's own Substrate pin moves (README
+    # "Re-pinning the kagent line").
+    versionRange: ">=1.0.0 <1.1.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -599,7 +574,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=0.11.0-gs.22 <0.11.1-0"
+    versionRange: ">=1.0.0 <1.1.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -615,59 +590,40 @@ components:  # @schema additionalProperties: true
     # CircleCI pipeline publishes the charts substrate-crds and substrate to
     # oci://gsoci.azurecr.io/giantswarm/substrate/helm and the images under
     # gsoci.azurecr.io/giantswarm/substrate, signed with the Giant Swarm
-    # CircleCI identity, as dev builds
-    # 0.0.N-dev.giantswarm.<date>.<time>.h<sha7> on every push and as releases
-    # vX.Y.Z-gs.N. Two roster entries, the kagent-crds shape: this one renders
-    # the three ate.dev CRDs (WorkerPool, SandboxConfig, CSIDriverConfig) as
-    # templates; substrate below renders the control plane. Both FOLLOW
-    # components.kagent when they carry no `enabled` (a consumer turns kagent
-    # on and gets its runtime; an explicit false with kagent on fails the
-    # render — agent-platform.validateSubstrate). Both releases land in
-    # ate-system (targetNamespace; the chart's Roles name that namespace), and
-    # both carry ONE version pin: the same range in the two versionRanges
-    # (>=0.0.30-gs.5 <0.0.31-0, the kagent entry's shape — the line's releases
-    # of upstream 0.0.29, from gs.1 the pin kagent main names since
-    # kagent-dev/kagent#2802 — its router addresses an actor by the
-    # ate-target-actor header, which kagent 0.11.0-gs.14 sets and Substrate
-    # 0.0.27 did not know — with the line's ten carried patches replayed (the
-    # egress gateway's frontend policy for its agentgateway dataplane is
-    # upstream's own from v0.0.29, under agentgateway#3318's name; the
-    # dataplane is the agentgateway line's v1.5.1-gs.4), among them a
-    # terminate that collects a crashed golden actor whose runsc containers
-    # are already gone (giantswarm/giantswarm#37773), the ServiceAccount
-    # annotations of atelet and ate-api-server (the snapshot store's IRSA
-    # role, kagent.harness.snapshotStore) and ateApiServer.extraEnv, the
-    # connection string from a Secret, atelet scheduling, `keep` on the three
-    # CRD templates so a concurrent uninstall never fails on a vanished kind,
-    # a golden boot whose image the registry refuses failing with the reason,
-    # and the kept podcertificate-controller namespace so a reinstall keeps
-    # its trust chain, and from 0.0.30-gs.2 the WorkerPool template's
-    # topologySpreadConstraints and podAntiAffinity, giantswarm/giantswarm#37797,
-    # next to a paused actor's resume failing fast when its node is gone),
-    # whose floor is 0.0.30-gs.5, the line's first release published natively
-    # to gsoci from CircleCI (the six images and both charts, signed with the
-    # org's identity; the patches of gs.4): gs.2 is the release whose CRD
-    # carries the spread fields (agent-platform.substrate.workerPoolSpreadFloor,
-    # the render guard on kagent.substrateWorkerPool.template), gs.3 makes
-    # every pause durable, gs.4 bounds the golden boot a workload keeps failing
-    # (giantswarm/substrate#39, giantswarm/giantswarm#37801: three boots, then
-    # GoldenActorNotReady with the workload's last output — the WORKER quotes
-    # it). The
-    # worker image the kagent WorkerPool runs is DERIVED from this range's
-    # floor (agent-platform.substrate.workerImage: substrate.image.registry,
+    # CircleCI identity, as releases of the line's own stable semver (X.Y.Z,
+    # decoupled from the upstream version FORK.md records) and as dev builds
+    # X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7> on every push. Two roster
+    # entries, the kagent-crds shape: this one renders the three ate.dev CRDs
+    # (WorkerPool, SandboxConfig, CSIDriverConfig) as templates; substrate
+    # below renders the control plane. Both FOLLOW components.kagent when they
+    # carry no `enabled` (a consumer turns kagent on and gets its runtime; an
+    # explicit false with kagent on fails the render —
+    # agent-platform.validateSubstrate). Both releases land in ate-system
+    # (targetNamespace; the chart's Roles name that namespace), and both carry
+    # ONE version pin: the same range in the two versionRanges — the line's
+    # 1.0 releases, whose WorkerPool CRD carries spec.template
+    # .topologySpreadConstraints and podAntiAffinity (agent-platform.substrate
+    # .workerPoolSpreadFloor, the render guard on kagent.substrateWorkerPool
+    # .template) and whose egress gateway runs the agentgateway line's release
+    # named in substrate.images.agentgateway below. The worker image the kagent
+    # WorkerPool runs is DERIVED from this range's floor
+    # (agent-platform.substrate.workerImage: substrate.image.registry,
     # ateom-gvisor, the floor), never taken from the kagent chart's stamp: the
     # worker and the atelet are one Substrate release whatever kagent build
     # components.kagent's range admits, and moving this floor rolls the pool
-    # (giantswarm/agent-platform#466 — chart 4.15.2 admitted a kagent stamping
-    # a 0.0.30 worker under its 0.0.27 atelet and booted no golden actor). So
-    # the range confines one release, `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` or an exact
-    # pin (agent-platform.substrate.validateRange refuses any other shape); a
+    # (giantswarm/agent-platform#466). So the range confines one runtime
+    # contract: a patch of the line is carried patches or a rebuild on the same
+    # upstream pin and never changes the worker and atelet bundle layout, a
+    # re-pin onto another upstream release is at least a minor — the range is
+    # `>=X.Y.Z <X.(Y+1).0` — no `-0`: a prerelease bound anywhere in a range
+    # makes Flux evaluate the line's dev builds against it — or an exact pin,
+    # and agent-platform.substrate.validateRange refuses any other shape. A
     # Substrate re-pin is this floor, and the kagent range follows when the
-    # kagent line's own pin moves (README "Agent Substrate"). A mirror sets
-    # `repository` here and substrate.image.registry below, which the derived
-    # worker image follows.
+    # kagent line's own pin moves
+    # (README "Agent Substrate"). A mirror sets `repository` here and
+    # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.30-gs.5 <0.0.31-0"
+    versionRange: ">=1.0.0 <1.1.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -689,7 +645,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.30-gs.5 <0.0.31-0"
+    versionRange: ">=1.0.0 <1.1.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -2386,7 +2342,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # in a quiet window.
     #
     # Spread. WorkerPool.spec.template carries topologySpreadConstraints and
-    # podAntiAffinity from Substrate 0.0.30-gs.2 (the carried patch
+    # podAntiAffinity from the Substrate line's 1.0.0 on (the carried patch
     # giantswarm/giantswarm#37797); every release before it prunes them at
     # admission, silently. The render REFUSES both keys
     # (agent-platform.validateWorkerPool) while components.substrate
@@ -2465,8 +2421,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       apiKey: ""  # Leave empty; pre-create the apiKeySecretRef Secret instead
       # Provider options the kagent chart renders into the default ModelConfig's
       # `anthropic` block, next to the baseUrl the LLM cut-over forwards
-      # (llmRouting; README "LLM routing"). promptCaching (kagent line
-      # 0.11.0-gs.15+, kagent-dev/kagent#2788) marks the last tool definition,
+      # (llmRouting; README "LLM routing"). promptCaching (the kagent line's
+      # carried patch kagent-dev/kagent#2788) marks the last tool definition,
       # the last system prompt block and the last content block of the latest
       # turn with cache_control, so every model call after the first reads its
       # prefix — system prompt, tool schemas, previous turns — from Anthropic's
@@ -2680,7 +2636,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # the substrate release as the eks.amazonaws.com/role-arn annotation of its
     # atelet and ate-api-server ServiceAccounts (substrate.atelet.serviceAccount
     # .annotations, substrate.ateApiServer.serviceAccount.annotations —
-    # Substrate 0.0.27-gs.8+). Meta-chart-owned: never forwarded to the kagent
+    # the Substrate line's carried patch). Meta-chart-owned: never forwarded to the kagent
     # chart (components.kagent.omitKeys). Off by default; nothing changes for
     # an installation that names its store by hand.
     snapshotStore:
@@ -2838,7 +2794,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # merges maps on coalesce, so the kagent chart's own default key
     # (kagent.dev/harness: kagent) would join this one and a template would
     # need both labels. The empty value removes it: the line's Harness
-    # template (0.11.0-gs.9+) drops every selector label whose value is empty.
+    # template drops every selector label whose value is empty.
     # Not a null — a null deletes the key on coalesce only while it reaches
     # the chart, and the JSON merge patch that updates a kagent HelmRelease
     # which pre-existed the cut-over removes a null key instead of storing it,
@@ -2878,8 +2834,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     grpc:
       # The gRPC services the route carries, one GRPCRoute rule per service. An
       # empty method list is one service-only match — every RPC of the service,
-      # translated by the agentgateway controller (chart >= 2.1.1, the line's
-      # v1.5.1-gs.3 or newer) into the path prefix "/<service>/"; an installation
+      # translated by the agentgateway controller (chart >= 2.1.1 running the
+      # line's release) into the path prefix "/<service>/"; an installation
       # whose agentgateway is older lists the RPCs it needs instead (the
       # controller before 2.1.1 translated a service-only match into an exact
       # path no request has). Either shape outranks the MCP catch-all route.
@@ -3443,9 +3399,21 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: agentgateway-controller
   image:
     registry: gsoci.azurecr.io
+  # The controller and the data plane run one release of the Giant Swarm line
+  # of agentgateway (github.com/giantswarm/agentgateway-upstream; FORK.md there
+  # is the ledger of pin and patches): the line's own stable semver under its
+  # nested names, gsoci.azurecr.io/giantswarm/agentgateway-upstream/{controller,
+  # agentgateway}, named IN FULL here — repository and tag — so every
+  # installation runs this release whatever the packaging chart's defaults
+  # name (a value wins over a chart default; a default that moves alone
+  # renders a tag that exists under another name). The connectivity chart's
+  # agentgateway.proxy.image (the AgentgatewayParameters of its data planes)
+  # and the Substrate line's egress dataplane (substrate.images.agentgateway)
+  # name the same release; move all of them together.
   controller:
     image:
-      repository: giantswarm/agentgateway-controller
+      repository: giantswarm/agentgateway-upstream/controller
+      tag: "2.0.0"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -3468,7 +3436,8 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   proxy:
     image:
       registry: gsoci.azurecr.io
-      repository: giantswarm/agentgateway
+      repository: giantswarm/agentgateway-upstream/agentgateway
+      tag: "2.0.0"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -4455,11 +4424,12 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # check sees it, as it sees the other three.
     awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
     # The agentgateway build atenet-router and atenet-egress run: the release
-    # of the agentgateway line the Substrate release was published with — its
-    # egress config is written for that build's config schema, so the two
-    # move together and this pin moves only with the Substrate pin. The gsoci
-    # mirror of the line's release tags (retagger renamed-agentgateway.yaml).
-    agentgateway: gsoci.azurecr.io/giantswarm/agentgateway:v1.5.1-gs.4
+    # of the agentgateway line the Substrate release was published with (its
+    # egress config is written for that build's config schema), the line's own
+    # stable semver under its nested name on gsoci — the same release the
+    # agentgateway block above names for the controller and the data plane.
+    # The three move together; this one moves with the Substrate pin.
+    agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3
@@ -4481,7 +4451,7 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # (ate-api-server, which also reads and writes snapshots, has no such knob
     # in the chart yet — an S3-compatible store outside AWS waits for it.)
     extraEnv: []
-    # atelet's image cache (Substrate 0.0.27-gs.6+): gcPeriod, highPercent,
+    # atelet's image cache: gcPeriod, highPercent,
     # lowPercent, minAge, maxBytes tune the GC pass — unset, the chart leaves
     # atelet's defaults. pinnedImages are pulled at every pass and never
     # evicted. The platform's runtime images (the Harness's Go ADK image, the
