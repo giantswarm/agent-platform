@@ -255,16 +255,19 @@ def check_golden(meta: str, connectivity: str) -> None:
         # point.
         # The hold for giantswarm/agent-platform#580, applied to BOTH sides: the
         # kagent line's and the Substrate line's chart sources from gsoci (the
-        # four components' `repository` defaults) and the Substrate floor
-        # 0.0.30-gs.5, the line's first native release (the derived worker
-        # image follows it) — meta chart keys only. Dropped once GOLDEN_REF
-        # carries them. METRIC_LABELS_HOLD (#586) is the other hold in force.
+        # four components' `repository` defaults) and the floors 0.11.0-gs.22
+        # and 0.0.30-gs.5, each line's first native release (the derived
+        # worker image follows the Substrate floor) — meta chart keys only.
+        # Dropped once GOLDEN_REF carries them. METRIC_LABELS_HOLD (#586) is
+        # the other hold in force.
         hold_580 = ["--set", "components.kagent.repository=oci://gsoci.azurecr.io/giantswarm/kagent/helm",
                     "--set", "components.kagent-crds.repository=oci://gsoci.azurecr.io/giantswarm/kagent/helm",
                     "--set", "components.substrate.repository=oci://gsoci.azurecr.io/giantswarm/substrate/helm",
                     "--set", "components.substrate-crds.repository=oci://gsoci.azurecr.io/giantswarm/substrate/helm",
                     "--set", "components.substrate.versionRange=>=0.0.30-gs.5 <0.0.31-0",
-                    "--set", "components.substrate-crds.versionRange=>=0.0.30-gs.5 <0.0.31-0"]
+                    "--set", "components.substrate-crds.versionRange=>=0.0.30-gs.5 <0.0.31-0",
+                    "--set", "components.kagent.versionRange=>=0.11.0-gs.22 <0.11.1-0",
+                    "--set", "components.kagent-crds.versionRange=>=0.11.0-gs.22 <0.11.1-0"]
         # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH
         # sides: modelServing.imageVerification is on by default now, so a serving
         # shape under Kyverno renders the image-verification policy that GOLDEN_REF's
