@@ -1,0 +1,89 @@
+# Muse Glimmer 30B, Red Hat's FP8-block quantization of Meta's agent-tuned 30B
+# on one 48 GB GPU of the L40S family, served from an OCI model image. Meta's
+# runtime contract — reasoning and tool calls in the ATEM channel format — is
+# what vLLM's muse_glimmer reasoning and tool parsers read; vLLM serves the
+# architecture and ships both parsers from a version after v0.23.0, the vLLM
+# inside llm-d v0.8.0 (the platform's runtime image), so the preset names the
+# parsers of the runtime that serves the model. Meta's DFlash drafter (the
+# speculative-decoding companion) stays out: no room beside 32 GiB of weights
+# on a 48 GB card.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: muse-glimmer-30b
+spec:
+  displayName: Muse Glimmer 30B (FP8, one 48 GB GPU)
+  description: |
+    Meta's agent-tuned dense 30B — a 28B language model with a 1.8B
+    perception encoder for interleaved text and images (screenshots, charts,
+    documents) — with tool calling and reasoning, served as Red Hat's
+    FP8-block quantization (32 GiB of weights) on one 48 GB GPU of the L40S
+    family: g6e.2xlarge or g6e.4xlarge (g6e.xlarge leaves a predictor
+    3 vCPU / 27 GiB, less than the 4 vCPU / 32 GiB requested here). The
+    model's own window is 131,072 tokens; the preset serves 32k, what the KV
+    cache of a 48 GB card holds beside 32 GiB of weights at
+    --gpu-memory-utilization=0.92 (four concurrent requests, one image per
+    prompt). Reasoning and tool calls follow Meta's ATEM channel format,
+    parsed with vLLM's muse_glimmer reasoning and tool parsers (the model
+    card's vLLM instructions). vLLM serves this architecture and ships these
+    parsers from a version after v0.23.0 — the vLLM inside llm-d v0.8.0 —
+    so the runtime image the well-known LLMInferenceServiceConfig names
+    (components.kserve-runtime-configs) must carry that newer vLLM for this
+    preset to serve. Meta's DFlash speculative drafter is left out: no room
+    on a 48 GB card. Weights: an OCI model image,
+    giantswarm/models/muse-glimmer-30b-fp8 at the checkpoint revision,
+    pulled onto the node by containerd (KServe's modelcar path: no download,
+    no cache claim); the runtime runs as a non-root uid on the read-only
+    image, so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+    33 + 11 GiB exceed a 24 GB L4/A10G and a 16 GB T4.
+  model:
+    id: RedHatAI/Muse-Glimmer-30B-FP8-block
+    # The tag is the first 12 characters of the checkpoint revision
+    # 1deb4641ff84f9a728dd11b27cac1f6a02a9ed14 (2 safetensors shards under
+    # /models). modelServing.modelImages.registry swaps the host at render;
+    # the path, giantswarm/models/muse-glimmer-30b-fp8:1deb4641ff84, stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/muse-glimmer-30b-fp8:1deb4641ff84
+    format: vLLM
+    contextLength: 32768
+    capabilities: [chat, tools, reasoning, vision]
+    license: apache-2.0
+  env:
+    # The modelcar path runs the runtime as the platform KServe's modelcar uid
+    # on a read-only model image: the home, the Hub cache and vLLM's compile
+    # cache go under /tmp (the cache claim's compile cache is not mounted).
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf
+    - name: VLLM_CACHE_ROOT
+      value: /tmp/vllm-cache
+  args:
+    - --gpu-memory-utilization=0.92
+    - --max-model-len=32768
+    - --max-num-seqs=4
+    - --max-num-batched-tokens=8192
+    - --enable-chunked-prefill
+    - --enable-prefix-caching
+    # One argument, the JSON single-quoted inside it: the well-known runtime
+    # template re-parses every argument through a shell (eval "… $@"), which
+    # would split a bare JSON at its whitespace and eat its double quotes.
+    - "--limit-mm-per-prompt='{\"image\": 1}'"
+    - --no-enable-log-requests
+    - --reasoning-parser=muse_glimmer
+    - --enable-auto-tool-choice
+    - --tool-call-parser=muse_glimmer
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 32Gi
+    limits:
+      cpu: "8"
+      memory: 48Gi
+  requirements:
+    # The Hub's safetensors index sizes the weights at 32.03 GiB (make
+    # verify-preset-weights: a preset declares at least the Hub's size);
+    # 11 GiB of overhead is the KV cache of the 32k context, CUDA graphs and
+    # the runtime — 44 GiB in all on a 48 GB card at 0.92.
+    weightsGiB: 33
+    overheadGiB: 11

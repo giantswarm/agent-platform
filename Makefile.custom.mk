@@ -1033,7 +1033,7 @@ verify-serving-slice: ## Assert the serving slice (giantswarm/agent-platform#326
 	@echo "serving slice verified."
 
 .PHONY: verify-preset-weights
-verify-preset-weights: ## Assert every shipped serving preset's requirements.weightsGiB matches the Hub (giantswarm/agent-platform#535): each preset's spec.model.id is sized the way model-manager sizes a fit — model.safetensors.index.json's metadata.total_size, else the sum of the *.safetensors files — and passes at >= the Hub's size and <= 15 % above it; a preset the Hub cannot size fails. The two fixtures (tests/fixtures/serving-preset-weights-*.yaml) are the negative controls and must verify as understated and overstated. Network: the Hub API.
+verify-preset-weights: ## Assert every shipped serving preset's requirements.weightsGiB matches the Hub (giantswarm/agent-platform#535): each preset's spec.model.id is sized the way model-manager sizes a fit — model.safetensors.index.json's metadata.total_size when it agrees with the shards it maps (a stale index is overruled by their sum), else the sum of the *.safetensors files — and passes at >= the Hub's size and <= 15 % above it; a preset the Hub cannot size fails. The two fixtures (tests/fixtures/serving-preset-weights-*.yaml) are the negative controls and must verify as understated and overstated. Network: the Hub API.
 	@echo "====> $@ ($(CONNECTIVITY_DIR)/files/model-serving/presets)"
 	@python3 tests/verify-preset-weights.py $(CONNECTIVITY_DIR)/files/model-serving/presets
 	@python3 tests/verify-preset-weights.py --expect understated tests/fixtures/serving-preset-weights-understated.yaml
