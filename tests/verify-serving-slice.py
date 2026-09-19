@@ -37,8 +37,10 @@ property the slice relies on:
   preset's args, yields one word per argument, a JSON value parses; a values
   preset with a bare JSON, a space, a stray quote or a metacharacter fails the
   render naming the guard (giantswarm/agent-platform#532)
-- the two 24 GB presets pass the preset schema's required keys, name no image,
-  enable tools with a parser, request one GPU, fit 24 GB, and request no more
+- the four 24 GB presets (the September 2026 line-up, giantswarm/agent-platform#591)
+  pass the preset schema's required keys, are served from a signed model image
+  and name no serving image, enable tools and reasoning with their parsers,
+  request one GPU, fit 24 GB, and request no more
   CPU and memory than the smallest L4 instance (a g6.xlarge: 4 vCPU, 16 GiB)
   leaves a predictor after the node's kubelet reservations and daemonsets
   (giantswarm/agent-platform#502) -- the same node model cluster-manager's
@@ -92,7 +94,10 @@ SERVING = {"kserve-llmisvc-crd", "kserve-llmisvc-resources", "kserve-runtime-con
 # The prefix the slice passes to the well-known configs as imageRegistry (#568): the
 # re-layered llm-d-fast/ set. The pre-pull's runtime image carries the same prefix.
 FAST_PREFIX = "gsoci.azurecr.io/giantswarm/llm-d-fast/"
-PRESETS = ("qwen3-4b-instruct", "qwen3-8b-fp8")
+# The 24 GB presets of the September 2026 line-up (giantswarm/agent-platform#591),
+# each served from a signed model image.
+PRESETS = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b")
+MODEL_IMAGES = "oci://gsoci.azurecr.io/giantswarm/models/"
 # The smallest instance of the presets' accelerator (nvidia-l4 -> g6.xlarge:
 # 4 vCPU, 16 GiB) and what a Giant Swarm node of that shape leaves a predictor
 # (giantswarm/agent-platform#502): the hypervisor takes ~5 % of the memory, the
@@ -647,8 +652,14 @@ def check_presets(connectivity: str) -> None:
                 sys.exit(f"FAIL: preset {name} carries spec.{key}, not in the schema")
         if re.search(r"image", text, re.I) and re.search(r"^\s+image\w*:", text, re.M):
             sys.exit(f"FAIL: preset {name} names an image; the well-known config's llm-d-cuda serves")
-        for needle in ("    - --enable-auto-tool-choice", "    - --tool-call-parser=hermes", "    gpus: 1", "    capabilities: [chat, tools]"):
+        for needle in ("    - --enable-auto-tool-choice", "    gpus: 1", f"    storageUri: {MODEL_IMAGES}"):
             need(text, needle, f"preset {name}")
+        for flag in ("--tool-call-parser", "--reasoning-parser"):
+            if not re.search(rf"^    - {flag}=\w+$", text, re.M):
+                sys.exit(f"FAIL: preset {name} sets no {flag}; agents send tools and read reasoning on every request")
+        caps = re.search(r"^    capabilities: \[(.*)\]$", text, re.M)
+        if not caps or not {"tools", "reasoning"} <= {c.strip() for c in caps.group(1).split(",")}:
+            sys.exit(f"FAIL: preset {name} does not declare the tools and reasoning capabilities its parsers serve")
         w = float(re.search(r"weightsGiB: ([\d.]+)", text).group(1))
         o = float(re.search(r"overheadGiB: ([\d.]+)", text).group(1))
         if w + o > 24:
@@ -661,7 +672,7 @@ def check_presets(connectivity: str) -> None:
             sys.exit(f"FAIL: preset {name}'s description does not name the instance it is sized for (g6.xlarge)")
     if "template" not in spec_keys:
         sys.exit("FAIL: the preset schema has no spec.template")
-    ok(f"presets {', '.join(PRESETS)}: schema keys, no image, tools on with a parser, one GPU, <= 24 GiB, "
+    ok(f"presets {', '.join(PRESETS)}: schema keys, a signed model image and no serving image, tools and reasoning on with their parsers, one GPU, <= 24 GiB, "
        f"requests within a g6.xlarge's {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB; the schema knows spec.template")
 
 

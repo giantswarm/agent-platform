@@ -14,6 +14,17 @@ giantswarm/agent-platform#599: a `verifyImages` rule is evaluated by Kyverno's a
 - **The kubernetes network-policy flavor** (`networkPolicy.flavor: kubernetes`, or no Cilium API): nothing renders — a `NetworkPolicy` has no names to allow; open the egress for Kyverno's admission controller yourself, or set `modelServing.imageVerification.enabled: false`.
 - **Recognising it worked**: `kubectl -n kyverno get ciliumnetworkpolicy <release>-model-serving-image-verification-egress` exists; a newly created model pod is admitted with its images pinned to digests (`kubectl -n <serving namespace> get pod <pod> -o jsonpath='{.metadata.annotations.kyverno\.io/verify-images}'`), and Kyverno's admission-controller log carries no `failed to fetch bundles` for the registry.
 
+## \<current\> → \<next\> (the 24 GB presets of the September 2026 line-up replace the Qwen3 small presets)
+
+giantswarm/agent-platform#591: the connectivity chart ships four 24 GB presets served from signed model images — `gpt-oss-20b`, `gemma-4-12b`, `qwen3-5-9b-fp8` and `qwen3-5-4b` — and no longer ships `qwen3-4b-instruct`, `qwen3-8b-fp8` and `qwen3-14b`. The upgrade removes the three retired presets' ConfigMaps from the serving namespace (they carry no keep policy); the discovery ConfigMap lists twelve presets.
+
+### Operator action
+
+- **None** for an installation that serves none of the three. A model already served from one of them keeps serving: the `LLMInferenceService` model-manager composed is not the preset's object and is not touched by the upgrade. The retired preset can no longer be picked to serve anew; the line-up's successors are `qwen3-5-4b` for `qwen3-4b-instruct`, `qwen3-5-9b-fp8` or `gemma-4-12b` for `qwen3-8b-fp8`, and `gpt-oss-20b` or `gemma-4-12b` for `qwen3-14b`.
+- **To keep a retired preset**: copy its file from the previous release into `modelServing.presets`; a values preset renders like a shipped one (`spec.runtime` and `spec.predictor` stay out).
+- **The new presets pull their weights as images** from `gsoci.azurecr.io/giantswarm/models/…` (an installation serving from a registry of its own that holds the same paths sets `modelServing.modelImages.registry`) and can be pre-pulled onto the serving nodes with `modelServing.prepull.modelPresets`; they need no Hugging Face egress and no cache claim.
+- **Recognising it worked**: `kubectl -n <serving namespace> get configmaps -l agent-platform.giantswarm.io/serving-preset=true` lists `agent-platform-serving-preset-gpt-oss-20b`, `…-gemma-4-12b`, `…-qwen3-5-9b-fp8` and `…-qwen3-5-4b` and none of the three retired names.
+
 ## \<current\> → \<next\> (the substrate chart's third-party images from gsoci: `substrate.images`)
 
 giantswarm/agent-platform#575, #580: the meta chart's forwarded `substrate:` block pins the substrate chart's third-party image defaults to their `gsoci.azurecr.io/giantswarm/…` copies — the bundled control-plane database (`substrate.images.postgres`), the bundled snapshot store (`substrate.images.rustfs`) and the agentgateway build the atenet router and egress run (`substrate.images.agentgateway`) — at the same digests the chart pinned on Docker Hub and ghcr. `substrate.images.awsCli`, the rustfs-bucket-init Job's image, is forwarded at the chart's own value unchanged.
