@@ -37,7 +37,7 @@ exceptions are hand-written; this check computes them.
   * No exception may select app: kagent (the v1alpha2 agent Deployments' label;
     nothing carries it on kagent API v2).
 
-Needs PyYAML (the CI job installs it) and network to ghcr.io for the chart.
+Needs PyYAML (the CI job installs it) and network to gsoci.azurecr.io for the chart.
 """
 
 import fnmatch
