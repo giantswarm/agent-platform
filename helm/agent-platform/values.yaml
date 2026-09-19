@@ -4764,7 +4764,7 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     pauseImage:
       registry: gsoci.azurecr.io
       repository: giantswarm/pause
-      tag: "3.10.1"
+      tag: "3.10.2"
     # Requests and limits of every container of the pod: the init containers
     # exit at once, the pause container idles. Never a GPU.
     resources:
