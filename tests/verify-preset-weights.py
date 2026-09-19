@@ -12,7 +12,10 @@ refuses; one that overstates it hides pools that would serve the model.
 Each preset's spec.model.id is sized the way model-manager sizes a fit
 (internal/backend/kserve/fit.go): the repository's model.safetensors.index.json
 metadata.total_size when the repository has an index, else the sum of its
-*.safetensors files (else the other checkpoint formats). The preset passes when
+*.safetensors files (else the other checkpoint formats). The index's total_size
+counts only when it agrees with the shards its weight_map names (within 1 %):
+a stale index -- a quantized repository that kept the unquantized total -- is
+overruled by those shards' sum. The preset passes when
 weightsGiB is at least the Hub's size and at most 15 % above it. A preset the
 Hub cannot size fails; it is never skipped.
 
@@ -39,6 +42,8 @@ import yaml
 
 HUB = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
 TOLERANCE_ABOVE = 0.15
+# An index total and the shards it maps differ by the safetensors headers only; more is a stale index.
+INDEX_TOLERANCE = 0.01
 GIB = 1024 ** 3
 INDEX = "model.safetensors.index.json"
 # The checkpoint formats model-manager sums when a repository ships no safetensors.
@@ -78,11 +83,16 @@ def hub_weights(model_id: str):
     if INDEX in files:
         doc = get_json(f"{HUB}/{quoted}/resolve/main/{INDEX}")
         total = int((doc.get("metadata") or {}).get("total_size") or 0)
-        if total > 0:
+        # The shards the index maps, not every .safetensors file: a repository that also ships a
+        # consolidated checkpoint would count its weights twice.
+        mapped = sum(files.get(name, 0) for name in set((doc.get("weight_map") or {}).values()))
+        if total > 0 and (mapped == 0 or abs(total - mapped) <= INDEX_TOLERANCE * mapped):
             return total, "safetensors-index"
-    safetensors = sum(size for name, size in files.items() if name.lower().endswith(".safetensors"))
-    if safetensors > 0:
-        return safetensors, "safetensors files"
+        if total > 0:
+            return mapped, f"the index's shards; its total_size of {total} B disagrees with them"
+    shards = sum(size for name, size in files.items() if name.lower().endswith(".safetensors"))
+    if shards > 0:
+        return shards, "safetensors files"
     other = sum(size for name, size in files.items() if name.lower().endswith(OTHER_WEIGHTS))
     if other > 0:
         return other, "checkpoint files"

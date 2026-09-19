@@ -1,8 +1,9 @@
-# Qwen3.8 27B, NVFP4 repack on one 48 GB GPU: the qwen3-8-27b recipe cut to the
-# L40S family, proven live on one L40S. Ada has no native FP4, so vLLM takes the
-# Marlin weight-only FP4 path; what the Blackwell recipe adds (the DFlash2 draft
-# model, 256k context, the CUTE_DSL_ARCH pin, the patched chat template) has no
-# room on a 48 GB card and stays out.
+# Qwen3.8 27B, NVIDIA's NVFP4 checkpoint on one 48 GB GPU: the qwen3-8-27b
+# recipe cut to the L40S family, served from an OCI model image. Ada has no
+# native FP4, so vLLM takes the Marlin weight-only path for the NVFP4 layers;
+# what the Blackwell recipe adds (the DFlash2 draft model, 256k context, the
+# CUTE_DSL_ARCH pin, the patched chat template) has no room on a 48 GB card
+# and stays out.
 apiVersion: agent-platform.giantswarm.io/v1alpha1
 kind: ServingPreset
 metadata:
@@ -11,26 +12,47 @@ spec:
   displayName: Qwen3.8 27B (NVFP4, one 48 GB GPU)
   description: |
     Dense 27B coding and agent model (Qwen3.5 lineage) with tool calling
-    (Claude Code compatible) and vision, served as the Inferact NVFP4 repack
-    (25 GiB of weights) on one 48 GB GPU of the L40S family: g6e.2xlarge or
-    g6e.4xlarge (g6e.xlarge leaves a predictor 3 vCPU / 27 GiB, less than the
-    4 vCPU / 32 GiB requested here). The GPU has no native FP4, so vLLM takes
-    the Marlin weight-only FP4 path (MarlinNvFp4LinearKernel): 24.17 GiB of
-    weights loaded, 14.65 GiB left for the KV cache at
-    --gpu-memory-utilization=0.92 — 222,822 tokens, 3.4 concurrent requests
-    of the 64k context. Thinking is off by default (a request turns it on
-    with enable_thinking), tools on with the qwen3_coder parser, the model's
-    own chat template. The qwen3-8-27b preset is the same model tuned for a
-    128 GB unified-memory Blackwell node and adds what a 48 GB card has no
-    room for: the DFlash2 speculative decoder, 256k context and the patched
-    chat template. 25 + 16 GiB exceed a 24 GB L4/A10G and a 16 GB T4.
+    (Claude Code compatible) and vision, served as NVIDIA's own NVFP4
+    checkpoint (20.4 GiB of weights: NVFP4 on the MLPs and the language-model
+    head, FP8 on the attention layers) on one 48 GB GPU of the L40S family:
+    g6e.2xlarge or g6e.4xlarge (g6e.xlarge leaves a predictor 3 vCPU /
+    27 GiB, less than the 4 vCPU / 32 GiB requested here). The GPU has no
+    native FP4, so vLLM runs the NVFP4 layers on the Marlin weight-only path
+    and the FP8 layers on the card's FP8 units; at
+    --gpu-memory-utilization=0.92 about 20 GiB stay for the KV cache, CUDA
+    graphs and the runtime — 64k context, four concurrent requests. Thinking
+    is off by default (a request turns it on with enable_thinking), tools on
+    with the qwen3_coder parser, reasoning with the qwen3 parser, the
+    model's own chat template. Weights: an OCI model image,
+    giantswarm/models/qwen3-8-27b-nvfp4 at the checkpoint revision, pulled
+    onto the node by containerd (KServe's modelcar path: no download, no
+    cache claim); the runtime runs as a non-root uid on the read-only image,
+    so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp. The qwen3-8-27b
+    preset is the same model (the Inferact repack) tuned for a 128 GB
+    unified-memory Blackwell node and adds what a 48 GB card has no room
+    for: the DFlash2 speculative decoder, 256k context and the patched chat
+    template. 21 + 20 GiB exceed a 24 GB L4/A10G and a 16 GB T4.
   model:
-    id: Inferact/Qwen3.8-27B-NVFP4
-    storageUri: hf://Inferact/Qwen3.8-27B-NVFP4
+    id: nvidia/Qwen3.8-27B-NVFP4
+    # The tag is the first 12 characters of the checkpoint revision
+    # 482ca0f3832238542f8f5295dde86b5f22711d80 (3 safetensors shards under
+    # /models). modelServing.modelImages.registry swaps the host at render;
+    # the path, giantswarm/models/qwen3-8-27b-nvfp4:482ca0f38322, stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-8-27b-nvfp4:482ca0f38322
     format: vLLM
     contextLength: 65536
     capabilities: [chat, tools, reasoning, vision, coding]
     license: apache-2.0
+  env:
+    # The modelcar path runs the runtime as the platform KServe's modelcar uid
+    # on a read-only model image: the home, the Hub cache and vLLM's compile
+    # cache go under /tmp (the cache claim's compile cache is not mounted).
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf
+    - name: VLLM_CACHE_ROOT
+      value: /tmp/vllm-cache
   args:
     - --gpu-memory-utilization=0.92
     - --max-model-len=65536
@@ -56,8 +78,9 @@ spec:
       cpu: "8"
       memory: 48Gi
   requirements:
-    # The Hub's safetensors index sizes the weights at 24.6 GiB
-    # (make verify-preset-weights); 16 GiB of overhead is the 14.65 GiB KV
-    # cache plus CUDA graphs and the runtime on a 48 GiB card at 0.92.
-    weightsGiB: 25
-    overheadGiB: 16
+    # The Hub's safetensors index sizes the weights at 20.4 GiB
+    # (make verify-preset-weights); 20 GiB of overhead is the KV cache of the
+    # 64k context, CUDA graphs and the runtime — 41 GiB in all on a 48 GB
+    # card at 0.92.
+    weightsGiB: 21
+    overheadGiB: 20
