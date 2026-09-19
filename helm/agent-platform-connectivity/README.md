@@ -1445,7 +1445,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |
 | modelServing.prepull.pauseImage.registry | string | `"gsoci.azurecr.io"` |  |
 | modelServing.prepull.pauseImage.repository | string | `"giantswarm/pause"` |  |
-| modelServing.prepull.pauseImage.tag | string | `"3.10.1"` |  |
+| modelServing.prepull.pauseImage.tag | string | `"3.10.2"` |  |
 | modelServing.prepull.resources.requests.cpu | string | `"5m"` |  |
 | modelServing.prepull.resources.requests.memory | string | `"8Mi"` |  |
 | modelServing.prepull.resources.limits.memory | string | `"32Mi"` |  |
