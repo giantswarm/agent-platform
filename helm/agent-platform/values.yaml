@@ -493,9 +493,14 @@ components:  # @schema additionalProperties: true
     # platform agent and an older CRD would prune it at admission, leaving
     # every long turn re-reading its whole history in silence
     # (giantswarm/giantswarm#37792).
+    # 0.11.0-gs.22 is the line's first release published natively to gsoci
+    # from CircleCI (the four images and both charts, signed with the org's
+    # identity; the patches of gs.21) — the floor, because the chart path on
+    # gsoci begins there: gs.21 and older exist on gsoci as retagger's image
+    # copies only, no charts.
     # No semverFilter: a dev build is selected only by a consumer
     # that sets one (README "Dev channel").
-    versionRange: ">=0.11.0-gs.16 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.22 <0.11.1-0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -594,7 +599,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=0.11.0-gs.16 <0.11.1-0"
+    versionRange: ">=0.11.0-gs.22 <0.11.1-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
