@@ -49,7 +49,7 @@ chart's guard. The meta renders are the vanilla cluster shape (no
 
 A range is resolved the way Flux does — the registry's tag list, the highest
 semver the constraint admits (tests/fluxsemver.py: Masterminds semantics, a
-`-gs.N` prerelease included) — because `helm pull --version <range>` reads the
+a prerelease included) — because `helm pull --version <range>` reads the
 constraint with its own semver and, for the kagent line's prerelease releases,
 differently. A BOM pin that resolves to no published tag FAILS: a BOM no
 installation can install is a broken BOM, not something to render a substitute
@@ -103,7 +103,7 @@ UNRELEASED: dict[str, str] = {}
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release. Empty today.
 RENDER_AGAINST: dict[str, str] = {}
-# An exact version, prerelease included (`0.11.0-gs.12` is one) — what a BOM
+# An exact version, prerelease included (a dev build is one) — what a BOM
 # line may carry; a range is not a version this check can render "the pin" at.
 EXACT_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 QUICKSTART = [
@@ -293,7 +293,7 @@ def check_harness_selector(manifest: str, what: str) -> None:
         fail(
             f"{what} renders the platform Harness selecting by {labels or 'nothing'}; the admission contract is "
             f"{HARNESS_LABEL}=kagent alone — the chart's own kagent.dev/harness must be dropped (the meta chart forwards it "
-            "empty; the line's Harness template drops an empty-valued selector label from 0.11.0-gs.9, giantswarm/agent-platform#418)"
+            "empty; the line's Harness template drops an empty-valued selector label, giantswarm/agent-platform#418)"
         )
     print(f"ok: {what} renders the platform Harness selecting by {HARNESS_LABEL}=kagent alone")
 

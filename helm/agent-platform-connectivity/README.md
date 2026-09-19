@@ -1231,11 +1231,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | klausGateway.agentgatewayRoute.hostname | string | `""` |  |
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
-| agentgateway.image.tag | string | `"v1.2.1"` |  |
-| agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
+| agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
+| agentgateway.controller.image.tag | string | `"2.0.0"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
-| agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"v1.5.1-gs.4"` |  |
+| agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
+| agentgateway.proxy.image.tag | string | `"2.0.0"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
