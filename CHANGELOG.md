@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- model-serving: `gemma-4-31b` serves 8k context on the 48 GB card — vLLM needs 9.5 GiB of KV cache for 32k next to 31.7 GiB of weights and has 7.3, and named 8640 tokens as the ceiling; 32k returns with an fp8 KV cache once that is proven on the L40S (#591).
 - model-serving: `gemma-4-31b` serves 32k context and `qwen3-6-35b-a3b` 16k on the 48 GB card — the 64k the first shipped with needs 12 GiB of KV cache next to 31.7 GiB of weights and vLLM refused to start (`estimated maximum model length is 8624`); the fit check passed it (giantswarm/model-manager#149) (#591).
 
 - model-serving: every preset served from a model image sets `USER`, `LOGNAME` and `TORCHINDUCTOR_CACHE_DIR` — the predictor runs as the modelcar uid, which the runtime image's passwd does not know, and vLLM's import died in torch's inductor cache-dir lookup (`getpwuid(1010)`) on every one of the new presets (#591).

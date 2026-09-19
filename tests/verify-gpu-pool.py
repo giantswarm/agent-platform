@@ -261,7 +261,7 @@ else:
         lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml")
         fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
         uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
-        ctx48 = lineup and "--max-model-len=32768" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
+        ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
