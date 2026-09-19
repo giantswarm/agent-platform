@@ -33,7 +33,14 @@ rendered object is walked:
     a forwarded `repository`, `workerImage`, `reference`, `storageUri` or list
     entry whatever its key. A host without a path (a network policy's FQDN
     allow-list naming ghcr.io as an egress destination) is not a reference and
-    passes.
+    passes;
+  * a string under a key named `image`, or an entry of a map or list named
+    `images`, that is shaped like an image reference (`name[:tag][@sha256:…]`,
+    with or without a registry host) must be a gsoci reference: a bare name
+    such as `postgres:18-alpine@sha256:…` names no host at all — Docker Hub on
+    containerd, a refusal on CRI-O's short-name mode — and names no registry
+    the FOREIGN rule could see; a forwarded `images:` map (the substrate
+    chart's third-party defaults) is where these travel.
 
 References whose gsoci copy does not exist yet are listed in PENDING with the
 issue that lands it, each as a pattern over the object, the field and the
@@ -60,6 +67,14 @@ REGISTRY = "gsoci.azurecr.io"
 FOREIGN = ("docker.io", "index.docker.io", "ghcr.io", "quay.io", "registry.k8s.io", "k8s.gcr.io", "gcr.io",
            "nvcr.io", "public.ecr.aws", "mcr.microsoft.com", "cr.kagent.dev", "cr.agentgateway.dev")
 CONTAINER_LISTS = ("containers", "initContainers", "ephemeralContainers")
+# An image reference under a key named `image` or in a map or list named
+# `images`: an optional registry host (with a port), a path of lowercase
+# components, an optional tag, an optional digest. Prose and bare tags or
+# version strings do not match (a tag alone has no name before the colon).
+IMAGE_REFERENCE = re.compile(
+    r"(?:[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]+)?/)?"
+    r"[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?:/[a-z0-9]+(?:[._-]+[a-z0-9]+)*)*"
+    r"(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?(?:@sha256:[a-f0-9]{64})?")
 # The API groups a Giant Swarm management cluster serves (Makefile FLEET_APIS):
 # with them the Kyverno policies, the Cilium policies and the monitors render too.
 FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2", "--api-versions", "monitoring.coreos.com/v1",
@@ -87,6 +102,17 @@ PENDING = {
         "the Substrate line's charts from gsoci (giantswarm/agent-platform#580)",
     r"OCIRepository/cloudnative-pg\.spec\.url=oci://ghcr\.io/cloudnative-pg/charts/cloudnative-pg":
         "the CloudNativePG operator chart from gsoci (giantswarm/agent-platform#580)",
+    # The substrate chart's rustfs-bucket-init Job runs Docker Hub's aws-cli by
+    # its short name, and the meta chart forwards that value unchanged on
+    # purpose (values.yaml substrate.images.awsCli): the Job is a release
+    # resource whose pod template is immutable, so a changed image fails the
+    # upgrade of every installation with the bundled store on; the connectivity
+    # release carries the meta chart's whole tree, so the same value sits under
+    # its values.substrate as well. Its gsoci copy
+    # (giantswarm/aws-cli:2.17.0, the same digest) is named once the Substrate
+    # line ships a release whose Job can be recreated (giantswarm/agent-platform#580).
+    r"HelmRelease/(substrate|agent-platform-connectivity)\.spec\.values(\.substrate)?\.images\.awsCli=amazon/aws-cli:2\.17\.0@sha256:[a-f0-9]{64}":
+        "the rustfs-bucket-init Job recreatable, its image the gsoci copy (giantswarm/agent-platform#580)",
 }
 
 findings: list[tuple[str, str, str]] = []
@@ -128,30 +154,33 @@ def is_gsoci(reference: str) -> bool:
     return host_of(reference) == REGISTRY
 
 
-def walk(node, shape: str, kind: str, path: str) -> None:
+def walk(node, shape: str, kind: str, path: str, parent: str = "") -> None:
+    """Every string of the object: `parent` is the key the node sits under (a
+    list's entries share the list's key), so a map or list named `images` is
+    known to hold references."""
     if isinstance(node, dict):
         for key, value in node.items():
             here = f"{path}.{key}" if path else key
             if isinstance(value, str):
-                check_string(shape, kind, here, key, value)
+                check_string(shape, kind, here, key, value, parent)
             elif key in CONTAINER_LISTS and isinstance(value, list):
                 for i, container in enumerate(value):
                     if not isinstance(container, dict):
                         continue
                     if isinstance(container.get("image"), str) and not is_gsoci(container["image"]):
                         record(shape, f"{here}[{i}].image", container["image"], "a container image off gsoci")
-                    walk({k: v for k, v in container.items() if k != "image"}, shape, kind, f"{here}[{i}]")
+                    walk({k: v for k, v in container.items() if k != "image"}, shape, kind, f"{here}[{i}]", key)
             else:
-                walk(value, shape, kind, here)
+                walk(value, shape, kind, here, key)
     elif isinstance(node, list):
         for i, item in enumerate(node):
             if isinstance(item, str):
-                check_string(shape, kind, f"{path}[{i}]", "", item)
+                check_string(shape, kind, f"{path}[{i}]", "", item, parent)
             else:
-                walk(item, shape, kind, f"{path}[{i}]")
+                walk(item, shape, kind, f"{path}[{i}]", parent)
 
 
-def check_string(shape: str, kind: str, path: str, key: str, value: str) -> None:
+def check_string(shape: str, kind: str, path: str, key: str, value: str, parent: str = "") -> None:
     if not value or re.search(r"\s", value):
         return  # prose (an annotation, a description) is not a reference
     if kind == "OCIRepository" and path == "spec.url":
@@ -170,6 +199,10 @@ def check_string(shape: str, kind: str, path: str, key: str, value: str) -> None
         if re.search(rf"(^|[^A-Za-z0-9.-]){re.escape(host)}/", value):
             record(shape, path, value, f"a reference on {host}")
             return
+    if (key == "image" or parent == "images") and IMAGE_REFERENCE.fullmatch(value) and not is_gsoci(value):
+        host = host_of(value)
+        record(shape, path, value, f"an image reference on {host}" if host
+               else "a bare name — Docker Hub on containerd, refused by CRI-O's short-name mode")
 
 
 def scan(shape: str, docs: list[dict]) -> int:

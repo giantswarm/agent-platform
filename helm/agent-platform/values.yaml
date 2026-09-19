@@ -4416,6 +4416,47 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # snapshot store (s3://ate-snapshots). Off (the default),
     # kagent.harness.snapshotLocation names the installation's own store.
     enabled: false
+  # The chart's own third-party image defaults, pinned to their gsoci copies
+  # (giantswarm/agent-platform#575, #580). The chart names Docker Hub —
+  # `postgres:18-alpine@…`, `rustfs/rustfs:…`, `amazon/aws-cli:…`, short names
+  # whose registry is the node runtime's call (containerd defaults to
+  # docker.io; CRI-O in short-name enforcing mode refuses them) — and the
+  # agentgateway line's ghcr build, and this block travels verbatim into the
+  # substrate release, where `make verify-images` could not see them. Each
+  # value here is the SAME DIGEST under gsoci.azurecr.io/giantswarm — retagger's
+  # mirrors of library/postgres, rustfs/rustfs and the agentgateway line's
+  # release tags — so the pods roll once onto identical bits. These pins hold
+  # for the Substrate release components.substrate.versionRange confines: a
+  # re-pin moves them with it (`make verify-substrate-images` renders the
+  # pinned release with this block and refuses a digest or tag that drifted
+  # from the release's own defaults, or an image left off gsoci). The line's
+  # own defaults are the durable fix; until its release carries them this
+  # block is the fleet's.
+  images:
+    # The bundled control-plane database (postgres.enabled true, or auto
+    # without the platform Cluster). The chart pins Docker Hub's floating
+    # 18-alpine by digest; the mirror carries that digest as 18.4-alpine.
+    postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    # The bundled snapshot store (rustfs.enabled).
+    rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
+    # The rustfs-bucket-init Job's image, kept at the chart's own short name
+    # ON PURPOSE (its gsoci copy exists: giantswarm/aws-cli:2.17.0, the same
+    # digest). The Job is a release resource and a Job's pod template is
+    # immutable: any change of this value fails the upgrade of every
+    # installation running the bundled store — `Job.batch "rustfs-bucket-init"
+    # is invalid: spec.template: … field is immutable` — until someone deletes
+    # the completed Job by hand. It moves to gsoci with the release of the
+    # Substrate line that lets the Job be recreated (a hook Job, or a name
+    # carrying the template's hash); tests/verify-images.py tolerates it by
+    # name until then. Set here so the rendered release carries it and the
+    # check sees it, as it sees the other three.
+    awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+    # The agentgateway build atenet-router and atenet-egress run: the release
+    # of the agentgateway line the Substrate release was published with — its
+    # egress config is written for that build's config schema, so the two
+    # move together and this pin moves only with the Substrate pin. The gsoci
+    # mirror of the line's release tags (retagger renamed-agentgateway.yaml).
+    agentgateway: gsoci.azurecr.io/giantswarm/agentgateway:v1.5.1-gs.4
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3
