@@ -66,7 +66,3 @@ spec:
   requirements:
     weightsGiB: 25
     overheadGiB: 30
-  predictor:
-    # KServe writes this into the predictor route as the request timeout; the
-    # default 60s cuts long reasoning streams mid-response.
-    timeout: 1800

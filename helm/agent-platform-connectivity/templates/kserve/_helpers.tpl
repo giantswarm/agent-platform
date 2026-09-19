@@ -1,19 +1,11 @@
 {{/* vim: set filetype=mustache: */}}
 {{/*
-Helpers of the KServe control plane wiring (templates/kserve/): the guards and
-the controllers' network policies for the kserve-resources and
-kserve-llmisvc-resources components. The standalone umbrella switched both
-controllers (and the CRDs) with one components.kserve toggle; here each is a
-component of its own (components.kserve-crd, kserve-resources,
-kserve-llmisvc-crd, kserve-llmisvc-resources) and the wiring gates on those.
+Helpers of the llm-d control plane wiring (templates/kserve/): the guards and
+the controller's network policy for the kserve-llmisvc-resources component
+(KServe's LLMInferenceService controller), whose CRDs are the
+kserve-llmisvc-crd component's and whose well-known LLMInferenceServiceConfigs
+are the kserve-runtime-configs component's.
 */}}
-
-{{/*
-Truthy when the KServe controller component is on (components.kserve-resources.enabled).
-*/}}
-{{- define "agent-platform.kserve.enabled" -}}
-{{- include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "kserve-resources") -}}
-{{- end -}}
 
 {{/*
 Truthy when the llm-d controller component is on (components.kserve-llmisvc-resources.enabled).
@@ -23,12 +15,9 @@ Truthy when the llm-d controller component is on (components.kserve-llmisvc-reso
 {{- end -}}
 
 {{/*
-The component charts' values blocks (dicts; empty when unset) — what the
-kserve-resources / kserve-llmisvc-resources releases will see.
+The component chart's values block (a dict; empty when unset) — what the
+kserve-llmisvc-resources release will see.
 */}}
-{{- define "agent-platform.kserve.resourcesValues" -}}
-{{- index .Values "kserve-resources" | default dict | toJson -}}
-{{- end -}}
 {{- define "agent-platform.kserve.llmisvcValues" -}}
 {{- index .Values "kserve-llmisvc-resources" | default dict | toJson -}}
 {{- end -}}

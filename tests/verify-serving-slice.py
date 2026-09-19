@@ -14,7 +14,7 @@ property the slice relies on:
   the llm-d-fast/ prefix as imageRegistry — the same prefix the pre-pull's
   llm-d-cuda reference carries (#568) — the block held back from the
   connectivity release;
-- the derived KServe ingress-gateway value: kserve-resources carries
+- the derived KServe ingress-gateway value: kserve-llmisvc-resources carries
   kserve.controller.gateway.ingressGateway.kserveGateway = <namespace>/<gateway>,
   a differing copy of the operator's fails the render naming both;
 - modelServing.serving.runtimeClassName: nvidia reaches the connectivity release;
@@ -88,7 +88,7 @@ VM = ["--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
 # The installation's platform inputs the profile is layered over.
 INSTALLATION = ["--namespace", "agent-platform", "--set", "global.domain=wc01.example.com", "--set", "global.identity.issuerUrl=https://dex.mc.example.com",
                 "--set", "gatewayApi.gateway.tls.secretName=wildcard-tls"]
-SERVING = {"kserve-crd", "kserve-resources", "kserve-llmisvc-crd", "kserve-llmisvc-resources", "kserve-runtime-configs", "agent-platform-connectivity"}
+SERVING = {"kserve-llmisvc-crd", "kserve-llmisvc-resources", "kserve-runtime-configs", "agent-platform-connectivity"}
 # The prefix the slice passes to the well-known configs as imageRegistry (#568): the
 # re-layered llm-d-fast/ set. The pre-pull's runtime image carries the same prefix.
 FAST_PREFIX = "gsoci.azurecr.io/giantswarm/llm-d-fast/"
@@ -171,7 +171,12 @@ def check_profile(meta: str) -> str:
     if "storageNamespace" in rc:
         sys.exit("FAIL: the kserve-runtime-configs release targets a namespace of its own; the llm-d controller resolves the well-known configs from the LLMInferenceService's namespace and its own (the release namespace) only")
     need(rc, f"      llmisvcConfigs:\n        enabled: true\n        imageRegistry: {FAST_PREFIX}", "the kserve-runtime-configs release")
-    need(docs[("HelmRelease", "kserve-resources")], "            kserveGateway: agent-platform/models", "the kserve-resources release")
+    need(docs[("HelmRelease", "kserve-llmisvc-resources")], "            kserveGateway: agent-platform/models", "the kserve-llmisvc-resources release")
+    need(docs[("HelmRelease", "kserve-llmisvc-resources")], "      createSharedResources: true", "the kserve-llmisvc-resources release (the control plane's shared objects are its own)")
+    need(docs[("HelmRelease", "kserve-llmisvc-resources")], "        deploymentMode: Standard", "the kserve-llmisvc-resources release")
+    for classic in ("kserve-crd", "kserve-resources"):
+        if ("HelmRelease", classic) in docs or ("OCIRepository", classic) in docs:
+            sys.exit(f"FAIL: the profile renders the classic {classic} release; the classic InferenceService path was removed (giantswarm/agent-platform#574)")
     conn = docs[("HelmRelease", "agent-platform-connectivity")]
     need(conn, "    runtimeClassName: nvidia", "the connectivity release")
     if "\n    kserve-runtime-configs:\n      kserve:" in conn:
@@ -181,14 +186,16 @@ def check_profile(meta: str) -> str:
         sys.exit("FAIL: the profile without the target knob renders a kubeConfig")
     ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into the release namespace, the llm-d controller's (configs on, runtimes off, the llm-d-fast/ prefix as imageRegistry, held back from connectivity); kserveGateway derived; runtimeClassName nvidia")
 
-    helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway=other/gw"],
-         expect_failure="kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway (other/gw) differs")
-    same = helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "kserve-resources.kserve.controller.gateway.ingressGateway.kserveGateway=agent-platform/models"])
-    if documents(same)[("HelmRelease", "kserve-resources")] != docs[("HelmRelease", "kserve-resources")]:
-        sys.exit("FAIL: an equal kserveGateway copy changed the kserve-resources release")
+    helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway=other/gw"],
+         expect_failure="kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway (other/gw) differs")
+    same = helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway=agent-platform/models"])
+    if documents(same)[("HelmRelease", "kserve-llmisvc-resources")] != docs[("HelmRelease", "kserve-llmisvc-resources")]:
+        sys.exit("FAIL: an equal kserveGateway copy changed the kserve-llmisvc-resources release")
     off = helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "modelServing.modelsGateway.enabled=false"])
-    if "kserveGateway" in documents(off)[("HelmRelease", "kserve-resources")]:
+    if "kserveGateway" in documents(off)[("HelmRelease", "kserve-llmisvc-resources")]:
         sys.exit("FAIL: kserveGateway derived with modelsGateway.enabled=false")
+    helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "components.kserve-resources.enabled=true"],
+         expect_failure="its keys are refused: components.kserve-resources")
     ok("kserveGateway: a differing operator copy fails naming both, an equal one is a no-op, no derivation with the Gateway off")
 
     target = helm(meta, ["-f", profile, "-f", f"{meta}/ci/test-target-values.yaml", *VM, *INSTALLATION])
@@ -214,14 +221,14 @@ def check_ingress_guard(connectivity: str, base: list[str]) -> None:
 
 
 def check_policy_exception(connectivity: str, base: list[str]) -> None:
-    """The predictors' PolicyException (#498): the four restricted-PSS rules the root vLLM image violates, in the serving namespace."""
+    """The model pods' PolicyException (#498): the four restricted-PSS rules the root vLLM image violates, in the serving namespace."""
     docs = documents(helm(connectivity, base))
     pe = docs.get(("PolicyException", "model-serving-predictors"))
     if not pe:
         sys.exit("FAIL: no PolicyException model-serving-predictors: the fleet's restricted PSS policies deny the predictor Deployment")
     for needle in ("  namespace: policy-exceptions", "  - policyName: disallow-capabilities-strict", "      - require-drop-all", "      - autogen-require-drop-all",
                    "  - policyName: disallow-privilege-escalation", "      - autogen-privilege-escalation", "  - policyName: require-run-as-nonroot", "      - autogen-run-as-non-root",
-                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: serving.kserve.io/inferenceservice", "          - key: kserve.io/component", "          - key: app.kubernetes.io/part-of",
+                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: kserve.io/component", "          - key: app.kubernetes.io/part-of",
                    "            - llminferenceservice",
                    '        - "*-kserve*"'):
         need(pe, needle, "the predictors' PolicyException")
@@ -233,7 +240,9 @@ def check_policy_exception(connectivity: str, base: list[str]) -> None:
     knob = documents(helm(connectivity, [*base, "--set", "modelServing.policyException.enabled=false"]))
     if ("PolicyException", "model-serving-predictors") in knob:
         sys.exit("FAIL: the predictors' PolicyException rendered with modelServing.policyException.enabled=false")
-    ok("the predictors' PolicyException: the four restricted-PSS rules with their autogen copies, the serving namespace, both pod shapes' labels (#506) and the name match; none with Kyverno off")
+    if "serving.kserve.io/inferenceservice" in pe:
+        sys.exit("FAIL: the PolicyException still selects the classic predictor's label (giantswarm/agent-platform#574)")
+    ok("the model pods' PolicyException: the four restricted-PSS rules with their autogen copies, the serving namespace, the workload pod's labels (#506) and the name match; none with Kyverno off")
 
 
 def check_controller_xds(connectivity: str, base: list[str]) -> None:
@@ -556,15 +565,9 @@ def check_cache(connectivity: str, base: list[str]) -> None:
 # check runs that eval, with argv dumped instead of vLLM, over each preset's args.
 ENTRYPOINT_EVAL = 'eval "exec {dump} serve /mnt/models --served-model-name "m" "publishers/ns/models/m" --port 8000 ${{VLLM_ADDITIONAL_ARGS}} $@"'
 ARGV_DUMP = "import json, sys; print(json.dumps(sys.argv[1:]))"
-# The chart's own kserve-vllm ClusterServingRuntime (the classic InferenceService
-# path) carries the same grammar in its container command — `sh -c <eval script> --`
-# ahead of the base arguments KServe appends the preset's to (giantswarm/agent-platform#549).
-# The check runs the RENDERED command over the rendered base arguments and each
-# preset's, with a `vllm` stub on PATH dumping argv in place of the server.
-RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
-RUNTIME_EVAL = re.compile(r'eval "exec vllm serve(?: \S+)* \$@"')
-NAME_PLACEHOLDER = "{{.Name}}"
-EXTRA_BASE_ARGS = ["--max-model-len", "16384"]
+# The classic InferenceService path's preset fields, refused by the render
+# since giantswarm/agent-platform#574.
+CLASSIC_PRESET_FIELDS = ("runtime", "predictor")
 
 
 def eval_argv(args: list[str]) -> list[str]:
@@ -575,31 +578,6 @@ def eval_argv(args: list[str]) -> list[str]:
     if result.returncode != 0:
         sys.exit(f"FAIL: the entrypoint's eval fails over {args!r}:\n{result.stderr}")
     return json.loads(result.stdout)[7:]
-
-
-def runtime_container(connectivity: str, flags: list[str]) -> dict:
-    """The rendered kserve-vllm ClusterServingRuntime's container."""
-    doc = documents(helm(connectivity, flags)).get(RUNTIME)
-    if doc is None:
-        sys.exit(f"FAIL: the render carries no {RUNTIME[0]} {RUNTIME[1]}")
-    return yaml.safe_load(doc)["spec"]["containers"][0]
-
-
-def classic_argv(command: list[str], args: list[str], preset_args: list[str], name: str) -> list[str]:
-    """vLLM's argv on the classic path: the rendered command run over the base
-    arguments ({{.Name}} expanded the way KServe does before the container starts)
-    and the preset's appended ones; a `vllm` stub on PATH dumps argv from `serve` on."""
-    with tempfile.TemporaryDirectory() as stubs:
-        stub = os.path.join(stubs, "vllm")
-        with open(stub, "w") as f:
-            f.write(f"#!/bin/sh\nexec python3 -c {shlex.quote(ARGV_DUMP)} \"$@\"\n")
-        os.chmod(stub, 0o755)
-        expanded = [a.replace(NAME_PLACEHOLDER, name) for a in args]
-        result = subprocess.run([*command, *expanded, *preset_args], capture_output=True, text=True, check=False,
-                                env={"PATH": f"{stubs}:{os.environ['PATH']}"})
-    if result.returncode != 0:
-        sys.exit(f"FAIL: the classic runtime's entrypoint {command!r} fails over {expanded + preset_args!r}:\n{result.stderr}")
-    return json.loads(result.stdout)
 
 
 def json_values(name: str, path: str, got: list[str], expected: list[str]) -> int:
@@ -623,35 +601,26 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
     files = sorted(glob.glob(f"{connectivity}/files/model-serving/presets/*.yaml"))
     if len(files) < 2:
         sys.exit(f"FAIL: expected the shipped presets under {connectivity}/files/model-serving/presets/, found {files}")
-    container = runtime_container(connectivity, base)
-    command, args = container.get("command") or [], [str(a) for a in container.get("args") or []]
-    if command[:2] != ["/bin/sh", "-c"] or len(command) != 4 or command[3] != "--" or not RUNTIME_EVAL.fullmatch(command[2]):
-        sys.exit(f"FAIL: the classic runtime's command is {command!r}, not /bin/sh -c '<eval \"exec vllm serve … $@\">' -- (the llm-d template's grammar)")
-    if args[args.index("--served-model-name") + 1] != NAME_PLACEHOLDER:
-        sys.exit(f"FAIL: the classic runtime's base arguments {args!r} do not carry --served-model-name {NAME_PLACEHOLDER} for KServe to expand")
-    name = "qwen3-8b-fp8-test"
-    base_words = ["serve", *[a.replace(NAME_PLACEHOLDER, name) for a in args]]
-    if classic_argv(command, args, [], name) != base_words:
-        sys.exit(f"FAIL: the classic runtime's base arguments alone reach vLLM as {classic_argv(command, args, [], name)!r}, not {base_words!r}")
-    checked = classic = 0
+    docs = documents(helm(connectivity, base))
+    if classic := [k for k in docs if k[0] in ("ClusterServingRuntime", "ServingRuntime", "InferenceService")]:
+        sys.exit(f"FAIL: the serving render carries classic serving objects {classic}; the classic path was removed (giantswarm/agent-platform#574)")
+    checked = 0
     for path in files:
         preset = yaml.safe_load(open(path))
         preset_name = preset["metadata"]["name"]
+        if carried := [f for f in CLASSIC_PRESET_FIELDS if f in preset["spec"]]:
+            sys.exit(f"FAIL: shipped preset {preset_name} carries the classic field(s) {carried}; a preset composes onto the well-known LLMInferenceServiceConfigs (#574)")
         preset_args = [str(a) for a in preset["spec"].get("args") or []]
         expected = [shlex.split(a)[0] for a in preset_args]
         checked += json_values(preset_name, "the llm-d template", eval_argv(preset_args), expected)
-        got = classic_argv(command, args, preset_args, name)
-        if got[:len(base_words)] != base_words:
-            sys.exit(f"FAIL: preset {preset_name} on the classic runtime: the base arguments came out as {got[:len(base_words)]!r}, not {base_words!r}")
-        classic += json_values(preset_name, "the classic runtime", got[len(base_words):], expected)
-    if checked == 0 or classic != checked:
-        sys.exit(f"FAIL: {checked} JSON values on the llm-d template, {classic} on the classic runtime; the eval check has nothing to prove")
-    # An installation's extra base arguments (modelServing.runtime.args) reach
-    # vLLM one word each ahead of the preset's.
-    extra = runtime_container(connectivity, [*base, "--set-json", "modelServing.runtime.args=" + json.dumps([*args, *EXTRA_BASE_ARGS])])
-    got = classic_argv(extra["command"], [str(a) for a in extra["args"]], ["--x='{\"a\": 1}'"], name)
-    if got != [*base_words, *EXTRA_BASE_ARGS, '--x={"a": 1}']:
-        sys.exit(f"FAIL: with extra base arguments the classic runtime yields {got!r}")
+    if checked == 0:
+        sys.exit("FAIL: no JSON value among the shipped presets' arguments; the eval check has nothing to prove")
+    # A values preset that still carries a classic field fails the render naming it.
+    for field in CLASSIC_PRESET_FIELDS:
+        doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "old"},
+               "spec": {"displayName": "Old", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, field: {} if field == "predictor" else "kserve-vllm"}}
+        err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure=f"spec.{field} is no longer a preset field")
+        need(err, 'serving preset "old" (values)', f"the guard's message for spec.{field}")
     bad = {"bare JSON in two arguments": ["--default-chat-template-kwargs", '{"enable_thinking": false}'],
            "a space": ["--x=a b"], "a stray single quote": ["--x=it's"], "a double quote": ['--x="a"'],
            "a brace expansion": ["--x={a,b}"], "a variable": ["--x=$HOME"], "a glob": ["--x=*"]}
@@ -660,9 +629,8 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
                "spec": {"displayName": "Bad", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "args": bad_args}}
         err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="outside single quotes")
         need(err, 'serving preset "bad" (values): spec.args', f"the guard's message for {what}")
-    ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval and the classic runtime's rendered entrypoint "
-       f"({command[0]} {command[1]} {command[2]!r} {command[3]}; {checked} JSON values parse on each path; the base arguments incl. "
-       f"{NAME_PLACEHOLDER} and an installation's extra ones one word each); "
+    ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval ({checked} JSON values parse), none carries a classic field, "
+       f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
        f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
 
 

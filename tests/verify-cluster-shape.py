@@ -65,11 +65,11 @@ ON = [
     "--set", "components.substrate-crds.enabled=true",
     "--set", "components.agent-sandbox.enabled=true",
     "--set", "postgres.enabled=true",
-    # The modelServing switch with its KServe prerequisites: its values block
+    # The modelServing switch with its llm-d prerequisites: its values block
     # (and the policies knob) travels to connectivity only while it is on.
     "--set", "components.modelServing.enabled=true",
-    "--set", "components.kserve-crd.enabled=true",
-    "--set", "components.kserve-resources.enabled=true",
+    "--set", "components.kserve-llmisvc-crd.enabled=true",
+    "--set", "components.kserve-llmisvc-resources.enabled=true",
 ]
 # The fleet's values, written out: what `auto` has to resolve to under FLEET_APIS.
 EXPLICIT_FLEET_KNOBS = [

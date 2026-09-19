@@ -61,7 +61,3 @@ spec:
     # cache plus CUDA graphs and the runtime on a 48 GiB card at 0.92.
     weightsGiB: 25
     overheadGiB: 16
-  predictor:
-    # KServe writes this into the predictor route as the request timeout; the
-    # default 60s cuts long reasoning streams mid-response.
-    timeout: 1800

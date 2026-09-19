@@ -290,7 +290,7 @@ components:  # @schema additionalProperties: true
   # NOTE: there is no longer an agent-platform-crds component. Every component
   # ships its own CRDs — in its chart's crds/ dir with `crds: CreateReplace`
   # (muster, agentgateway, agent-sandbox) or as templates of its own CRD chart
-  # (kagent-crds, kserve-crd, kserve-llmisvc-crd, cloudnative-pg) — and its CR
+  # (kagent-crds, kserve-llmisvc-crd, cloudnative-pg) — and its CR
   # consumers dependsOn it directly. The standalone CRD bundle has been
   # retired — see CHANGELOG / UPGRADE.
   #
@@ -581,7 +581,7 @@ components:  # @schema additionalProperties: true
     # The CRDs of the kagent line (kagent.dev/v1alpha3 AgentTemplate, Harness,
     # ModelConfig, ModelProviderConfig, RemoteMCPServer) as their own chart,
     # from the same source, range and build as the kagent chart above — the
-    # kserve-crd shape: the CRDs are templates (upgraded with the release; the
+    # kserve-llmisvc-crd shape: the CRDs are templates (upgraded with the release; the
     # chart has no crds/ dir, so Helm's `crds:` policy does not apply) and the
     # CR consumers dependsOn this component (the kagent release, the
     # connectivity release's kagent CRs). The line's CRD templates carry
@@ -758,18 +758,22 @@ components:  # @schema additionalProperties: true
     # pool input the discovery ConfigMap publishes (spec.gpuPool, from
     # modelServing.gpuPool; giantswarm/agent-platform#315) — and, from 0.22.0
     # (#68), zero-backend start-up and the runtime backend registry. The
-    # ceiling stays the next major, so minor releases roll on their own.
-    versionRange: ">=0.23.0 <1.0.0"
+    # ceiling is 2.0.0: model-manager 1.0.0 is the release that composes
+    # LLMInferenceServices only (the classic InferenceService kind and its
+    # kserve.servingKind / kserve.runtime values are gone), and nothing this
+    # chart forwards names either, so the 0.24 → 1.0 move rolls on its own.
+    versionRange: ">=0.23.0 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
     # and wires ModelConfigs into the kagent namespace, which the connectivity
     # release creates; both references are dropped at render time when the
-    # component is off. With model-manager.backend kserve it manages
-    # InferenceServices on the KServe control plane; when the kserve-resources
-    # component provides that control plane it installs first (the reference
-    # is dropped while that component is off, as every other one).
-    dependsOn: [muster, kagent, kserve-resources]
+    # component is off. With the kserve backend it composes
+    # LLMInferenceServices on the llm-d control plane; when the
+    # kserve-llmisvc-resources component provides that control plane it
+    # installs first (the reference is dropped while that component is off,
+    # as every other one).
+    dependsOn: [muster, kagent, kserve-llmisvc-resources]
   agent-manager:  # @schema additionalProperties: true
     chart: agent-manager
     # The agent write surface of the Agent Control Plane
@@ -854,7 +858,7 @@ components:  # @schema additionalProperties: true
   # cluster runs each of them as its own app and keeps them off here, so the
   # fleet render is unchanged; a cluster that has none of them turns them on
   # from this roster (the quick-start values). None of the seven ships CRDs in
-  # a crds/ dir — kserve-crd, kserve-llmisvc-crd and cloudnative-pg render their
+  # a crds/ dir — kserve-llmisvc-crd and cloudnative-pg render their
   # CRDs as templates, upgraded with the release and annotated
   # helm.sh/resource-policy: keep — so no `crds:` policy applies to them; the
   # CRD-before-CR order is dependsOn. Their values blocks (backstage:,
@@ -936,44 +940,23 @@ components:  # @schema additionalProperties: true
     versionRange: "0.29.x"
     valuesFrom: cloudnative-pg
     enabled: false
-  kserve-crd:  # @schema additionalProperties: true
-    chart: kserve-crd
-    # The KServe CRDs (giantswarm/kserve: InferenceService, ServingRuntime,
-    # ClusterServingRuntime, ...), rendered as templates annotated
-    # helm.sh/resource-policy: keep, so Helm upgrades them with the release and
-    # an uninstall leaves them and their CRs in place.
+  kserve-llmisvc-crd:  # @schema additionalProperties: true
+    chart: kserve-llmisvc-crd
+    # The LLMInferenceService CRDs (giantswarm/kserve: LLMInferenceService,
+    # LLMInferenceServiceConfig and the ClusterStorageContainer the
+    # storage-initializer is configured through), rendered as templates
+    # annotated helm.sh/resource-policy: keep, so Helm upgrades them with the
+    # release and an uninstall leaves them and their CRs in place. The
+    # standalone umbrella left this chart a prerequisite installed by hand
+    # because its 4.5 MB of CRD YAML did not fit next to everything else in
+    # one Helm release Secret; as its own release it does.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The four kserve charts come from one repository and move together; the
+    # The kserve charts come from one repository and move together; the
     # forwarded blocks below assume the 0.4.x key shape (createSharedResources,
     # controller.deploymentMode), so the range holds the line. 0.4.x is the
     # first line whose every image default is a gsoci reference
     # (giantswarm/agent-platform#575); from 0.4.1 the storage-initializer's
     # resources follow kserve.storage.resources.
-    versionRange: "0.4.x"
-    valuesFrom: kserve-crd
-    enabled: false
-    ownedCrds:
-      - inferenceservices.serving.kserve.io
-  kserve-resources:  # @schema additionalProperties: true
-    chart: kserve-resources
-    # The KServe controller (giantswarm/kserve): plain Deployments and Services
-    # per InferenceService (Standard mode), webhook certificates through
-    # cert-manager (a cluster prerequisite of this component).
-    repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.4.x"
-    valuesFrom: kserve-resources
-    enabled: false
-    # Its webhook configurations and default ClusterServingRuntimes need the
-    # CRDs Established first.
-    dependsOn: [kserve-crd]
-  kserve-llmisvc-crd:  # @schema additionalProperties: true
-    chart: kserve-llmisvc-crd
-    # The LLMInferenceService CRDs (giantswarm/kserve), rendered as templates
-    # annotated keep like kserve-crd. The standalone umbrella left this chart a
-    # prerequisite installed by hand because its 4.5 MB of CRD YAML did not fit
-    # next to everything else in one Helm release Secret; as its own release it
-    # does.
-    repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.4.x"
     valuesFrom: kserve-llmisvc-crd
     enabled: false
@@ -981,16 +964,21 @@ components:  # @schema additionalProperties: true
       - llminferenceservices.serving.kserve.io
   kserve-llmisvc-resources:  # @schema additionalProperties: true
     chart: kserve-llmisvc-resources
-    # The LLMInferenceService (llm-d) controller (giantswarm/kserve). It reuses
-    # the shared objects kserve-resources renders (the inferenceservice-config
-    # ConfigMap, the Issuer, the default ClusterStorageContainer — see
-    # kserve-llmisvc-resources.kserve.createSharedResources below) and ships the
-    # Gateway API Inference Extension CRDs as templates.
+    # The LLMInferenceService (llm-d) controller (giantswarm/kserve): the one
+    # KServe controller of the platform. It renders the control plane's shared
+    # objects itself — the inferenceservice-config ConfigMap it reads its
+    # storage-initializer and ingress gateway from, the self-signed Issuer of
+    # its webhook certificate (cert-manager is a cluster prerequisite of this
+    # component), the default ClusterStorageContainer
+    # (kserve-llmisvc-resources.kserve.createSharedResources below) — and
+    # ships the Gateway API Inference Extension CRDs as templates.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.4.x"
     valuesFrom: kserve-llmisvc-resources
     enabled: false
-    dependsOn: [kserve-crd, kserve-llmisvc-crd, kserve-resources]
+    # Its webhook configurations and the shared objects need the CRDs
+    # Established first.
+    dependsOn: [kserve-llmisvc-crd]
   kserve-runtime-configs:  # @schema additionalProperties: true
     chart: kserve-runtime-configs
     # The well-known LLMInferenceServiceConfigs (giantswarm/kserve;
@@ -1003,26 +991,26 @@ components:  # @schema additionalProperties: true
     # kserve-runtime-configs: block below passes as
     # kserve.llmisvcConfigs.imageRegistry (giantswarm/kserve#78): the
     # re-layered llm-d-fast/ set by default, the byte-identical mirror or
-    # upstream by choice. Its ServingRuntimes stay off: they
-    # are the classic InferenceService path, which the modelServing switch's
-    # vLLM ClusterServingRuntime already is. Needs the LLMInferenceService
-    # CRDs only (the configs are CRs of theirs), not the controller.
+    # upstream by choice. Its ServingRuntimes stay off: they are the classic
+    # InferenceService path, which the platform does not serve. Needs the
+    # LLMInferenceService CRDs only (the configs are CRs of theirs), not the
+    # controller.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.4.x"
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
-  # Model serving on KServe with vLLM (the standalone umbrella's modelServing
-  # component): a feature switch, not a component — no chart, so the loop
-  # renders no release for it; the flag is forwarded to the connectivity
-  # release like every other, and that chart renders the objects (the vLLM
-  # ClusterServingRuntime, the serving presets and their discovery ConfigMap,
-  # the Hugging Face cache PVC, the Kyverno cache policies, the network
-  # policies of the serving namespace) from the modelServing: block below. It
-  # runs on the KServe control plane: turn on components.kserve-crd and
-  # components.kserve-resources with it (the connectivity release dependsOn
-  # kserve-resources, so the CRDs are Established first), or point it at a
-  # KServe the cluster already runs (see modelServing.kserve.requireApi).
+  # Model serving on llm-d: a feature switch, not a component — no chart, so
+  # the loop renders no release for it; the flag is forwarded to the
+  # connectivity release like every other, and that chart renders the objects
+  # (the serving presets and their discovery ConfigMap, the Hugging Face cache
+  # PVC, the models Gateway, the pre-pull DaemonSet, the Kyverno cache
+  # policies, the network policies of the serving namespace) from the
+  # modelServing: block below. It runs on the llm-d control plane: turn on
+  # components.kserve-llmisvc-crd, components.kserve-llmisvc-resources and
+  # components.kserve-runtime-configs with it, or point it at an
+  # LLMInferenceService API the cluster already serves (see
+  # modelServing.kserve.requireApi).
   modelServing:  # @schema additionalProperties: true
     enabled: false
   # NVIDIA's GPU operator, once per cluster (giantswarm/agent-platform#327;
@@ -1148,10 +1136,12 @@ components:  # @schema additionalProperties: true
     # CRDs, and nothing of muster's — muster is force-on and Ready before this
     # release on every installation). Likewise the CNPG Cluster it renders under
     # postgres.enabled (postgresql.cnpg.io, owned by the cloudnative-pg
-    # component) and the model serving objects (serving.kserve.io, owned by the
-    # kserve components): the operator and the KServe control plane come first
-    # when they are components of this chart, and the references are dropped
-    # while they are off — a management cluster provides both as its own apps.
+    # component): the operator comes first when it is a component of this
+    # chart, and the reference is dropped while it is off — a management
+    # cluster provides it as its own app. The model serving objects this
+    # release renders are ConfigMaps, policies and a Gateway, no
+    # serving.kserve.io CR: model-manager composes those at run time, so no
+    # kserve component is waited for.
     # The kagent CRs this release renders (RemoteMCPServer, ModelConfig, the
     # platform Harness) need kagent's CRDs, not its controller — so it depends
     # on kagent-crds and substrate-crds, never on kagent or substrate: those two
@@ -1159,7 +1149,7 @@ components:  # @schema additionalProperties: true
     # and a dependency the other way would deadlock every install and the 3.x →
     # 4.0 upgrade (the v2 controller waits for the derived DSN Secret this
     # release's hook writes).
-    dependsOn: [muster, agentgateway, substrate-crds, kagent-crds, cloudnative-pg, kserve-resources]
+    dependsOn: [muster, agentgateway, substrate-crds, kagent-crds, cloudnative-pg]
 
 # === The Flux engine (flux-engine subchart) ===
 # Values of charts/flux-engine, handed to the subchart under this key when
@@ -3671,9 +3661,10 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
           caSecretName: ""
   kserve:
     # Fail the render when model-manager.backend is kserve and the
-    # serving.kserve.io/v1beta1 API (InferenceService) is not on the cluster;
-    # an offline `helm template` passes with --api-versions
-    # serving.kserve.io/v1beta1, or false skips the check.
+    # serving.kserve.io/v1alpha2 API (LLMInferenceService) is not on the
+    # cluster and no component of this chart installs it; an offline `helm
+    # template` passes with --api-versions serving.kserve.io/v1alpha2, or
+    # false skips the check.
     requireApi: true
   # Network policy inputs. The policies render under networkPolicy (enabled +
   # flavor) like every other component's wiring. Ingress: the agentgateway
@@ -4178,7 +4169,7 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # === The standalone chart's extras: values blocks ===
 # One block per component of the agent-platform-standalone umbrella that joined
 # the roster above (components.backstage, .mcp-kubernetes, .cloudnative-pg,
-# .kserve-crd, .kserve-resources, .kserve-llmisvc-crd, .kserve-llmisvc-resources),
+# .kserve-llmisvc-crd, .kserve-llmisvc-resources),
 # each forwarded verbatim to that component's release, with global injected
 # (every one of the seven charts accepts it) and carrying the defaults the
 # standalone shipped. All seven components are off by default, so these blocks
@@ -4476,38 +4467,35 @@ hooks:
     repository: giantswarm/alpine-openssl
     tag: 3.5.8
 
-# === KServe (kserve-crd, kserve-resources, kserve-llmisvc-crd, kserve-llmisvc-resources) ===
-# Values forwarded verbatim to the four KServe component releases
-# (giantswarm/kserve, the vendored upstream charts). The two CRD charts take
-# only crd.keep, on by default (every CRD annotated helm.sh/resource-policy:
-# keep); nothing to set.
-kserve-crd: {}  # @schema skipProperties: true; additionalProperties: true
+# === KServe (kserve-llmisvc-crd, kserve-llmisvc-resources) ===
+# Values forwarded verbatim to the two llm-d component releases
+# (giantswarm/kserve, the vendored upstream charts). The CRD chart takes only
+# crd.keep, on by default (every CRD annotated helm.sh/resource-policy: keep);
+# nothing to set.
 kserve-llmisvc-crd: {}  # @schema skipProperties: true; additionalProperties: true
-# The KServe controller. Everything not set here is the chart's default: the
-# upstream multi-arch kserve/kserve-controller image at the KServe version the
-# chart vendors, the storage-initializer, the webhook certificates through
+# The LLMInferenceService (llm-d) controller. Everything not set here is the
+# chart's default: the llmisvc-controller image at the KServe version the chart
+# vendors, the storage-initializer, the webhook certificates through
 # cert-manager.
-kserve-resources:  # @schema skipProperties: true; additionalProperties: true
+kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties: true
   kserve:
+    # The control plane's shared objects — the inferenceservice-config
+    # ConfigMap the controller reads its storage-initializer and ingress
+    # gateway from, the self-signed Issuer, the default ClusterStorageContainer
+    # — are this release's own; no other release renders them. Guarded by the
+    # connectivity chart: false would start the controller without its config.
+    createSharedResources: true
     controller:
-      # Plain Deployments and Services per InferenceService ("Standard", the
+      # Plain Deployments and Services per served model ("Standard", the
       # former RawDeployment). The Knative and ModelMesh modes need
       # controllers this chart does not ship; the render fails on them.
       deploymentMode: Standard
       gateway:
-        # No per-model Ingress or HTTPRoute: agents and the platform reach a
-        # model through its predictor Service (<name>-predictor.<namespace>),
-        # which is what the portal and model-manager wire into kagent. An
-        # install that wants external per-model routes sets this false and
-        # the gateway domain / ingressGateway.* of the chart.
+        # The llm-d controller renders an LLMInferenceService's HTTPRoute
+        # onto the models Gateway (modelServing.modelsGateway), whose
+        # reference the chart derives onto
+        # controller.gateway.ingressGateway.kserveGateway; no Ingress objects.
         disableIngressCreation: true
-# The LLMInferenceService (llm-d) controller.
-kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties: true
-  kserve:
-    # kserve-resources renders the shared objects (the inferenceservice-config
-    # ConfigMap, the self-signed Issuer, the default ClusterStorageContainer);
-    # a second copy in the same namespace would conflict. Guarded by the chart.
-    createSharedResources: false
     llmisvc:
       # Ship the Gateway API Inference Extension CRDs (InferencePool, ...)
       # with the controller. A cluster that already has them (an inference
@@ -4528,8 +4516,8 @@ kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties:
 # byte-identical mirror, ghcr.io/llm-d/ upstream, a private registry its own
 # prefix; modelServing.prepull.images below names the same llm-d-cuda
 # reference — keep the two in step. servingruntime off: the chart's
-# ServingRuntimes are the classic InferenceService path, which the
-# modelServing switch's vLLM ClusterServingRuntime serves.
+# ServingRuntimes are the classic InferenceService path, which the platform
+# does not serve.
 kserve-runtime-configs:  # @schema skipProperties: true; additionalProperties: true
   kserve:
     llmisvcConfigs:
@@ -4568,43 +4556,41 @@ gpu-operator:  # @schema skipProperties: true; additionalProperties: true
     enabled: false
 
 # === Model serving (modelServing) ===
-# Model serving on KServe with vLLM, for installs that run local models —
-# the standalone umbrella's modelServing component, rendered by the
+# Model serving on llm-d, for installs that run local models, rendered by the
 # connectivity chart (templates/model-serving/ and files/model-serving/ there)
 # from this block, gated on components.modelServing.enabled (a feature switch
 # of the roster, no chart behind it). Off by default and inert while off:
-# nothing below renders. The KServe control plane is a prerequisite: the
-# platform's own (components.kserve-crd + components.kserve-resources; the
-# connectivity release dependsOn kserve-resources, so the CRDs and the webhook
-# are Established before these objects apply) or a KServe the cluster already
-# runs (kserve.requireApi). The block is forwarded to the connectivity
-# release only while the switch is on (templates/components.yaml): while off
-# nothing reads it, and a live connectivity chart that predates the block
-# would reject it. On, the connectivity chart renders: the vLLM ClusterServingRuntime every preset runs on; the
-# curated serving presets the portal's serve flow offers (one ConfigMap per
-# preset in the release namespace, label
+# nothing below renders. The llm-d control plane is a prerequisite: the
+# platform's own (components.kserve-llmisvc-crd + kserve-llmisvc-resources +
+# kserve-runtime-configs, the well-known LLMInferenceServiceConfigs every
+# served model composes onto) or one the cluster already runs
+# (kserve.requireApi). The block is forwarded to the connectivity release only
+# while the switch is on (templates/components.yaml): while off nothing reads
+# it, and a live connectivity chart that predates the block would reject it.
+# On, the connectivity chart renders: the curated serving presets the portal's
+# serve flow offers (one ConfigMap per preset in the release namespace, label
 # agent-platform.giantswarm.io/serving-preset=true, schema in
 # files/model-serving/serving-preset.schema.json); the discovery ConfigMap
 # agent-platform-model-serving (label
 # agent-platform.giantswarm.io/model-serving-config=true) that tells the portal
-# and model-manager where InferenceServices go and how; the Hugging Face cache
-# PVC; and, where Kyverno runs, the admission policies that wire every
-# InferenceService pod in the serving namespace to that cache. The
-# standalone's components.modelServing.* keys map one-to-one onto this block
-# (components.modelServing.enabled stays where it was).
+# and model-manager where the LLMInferenceServices go and how; the Hugging Face
+# cache PVC; the models Gateway; the pre-pull DaemonSet; and, where Kyverno
+# runs, the admission policies that wire every LLMInferenceService workload pod
+# in the serving namespace to that cache. The connectivity chart renders no
+# serving.kserve.io object itself: model-manager composes a preset into an
+# LLMInferenceService.
 modelServing:  # @schema skipProperties: true; additionalProperties: true
   kserve:
-    # Fail the render when neither the KServe components (kserve-crd +
-    # kserve-resources) are on nor the KServe CRDs (serving.kserve.io/v1alpha1
-    # ClusterServingRuntime, v1beta1 InferenceService) are served on the
-    # cluster, instead of shipping objects the API server rejects. An offline
+    # Fail the render when neither the llm-d components (kserve-llmisvc-crd +
+    # kserve-llmisvc-resources) are on nor the LLMInferenceService API
+    # (serving.kserve.io/v1alpha2) is served on the cluster, instead of
+    # shipping a serving layer model-manager cannot compose onto. An offline
     # `helm template` passes the check with the components on, or with
-    # --api-versions serving.kserve.io/v1alpha1 --api-versions serving.kserve.io/v1beta1;
-    # false skips it.
+    # --api-versions serving.kserve.io/v1alpha2; false skips it.
     requireApi: true
-  # The namespace InferenceServices run in. The runtime is cluster-scoped;
-  # the cache claim, the chat-template ConfigMaps and the Kyverno policies
-  # target this namespace, and the portal creates InferenceServices here.
+  # The namespace the LLMInferenceServices run in: the cache claim, the
+  # chat-template ConfigMaps and the Kyverno policies target this namespace,
+  # and model-manager composes the LLMInferenceServices here.
   # Created by the chart (Helm-owned) when create is true and the name
   # differs from the release namespace, and KEPT on uninstall
   # (helm.sh/resource-policy: keep) while keep is true — whatever
@@ -4618,137 +4604,35 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # a person's explicit act (delete the claim, then the namespace). keep:
   # false is the one way to have the namespace go with the release —
   # everything in it, a cache claim included, goes too. labels: e.g. a Pod
-  # Security admission level (the upstream vLLM image runs as root; a Giant
+  # Security admission level (the vLLM runtime image runs as root; a Giant
   # Swarm cluster's restricted profile is the policyException below).
   namespace:
     name: model-serving
     create: true
     keep: true
     labels: {}
-  # The vLLM ClusterServingRuntime (serving.kserve.io/v1alpha1,
-  # cluster-scoped). Every shipped preset runs on it; a preset may name
-  # another runtime.
-  runtime:
-    name: kserve-vllm
-    # The upstream x86-64 CUDA image. An install with special hardware
-    # (ARM64, Blackwell sm_121) points registry/name/version at its own
-    # build; the presets do not change.
-    image:
-      registry: docker.io
-      name: vllm/vllm-openai
-      # registry: docker.io/vllm/vllm-openai
-      version: "v0.29.0"
-    # Server arguments common to every model, after `vllm serve` in the
-    # container's shell entrypoint (sh -c 'eval "exec vllm serve $@"' --).
-    # KServe expands {{.Name}} to the InferenceService name and appends a
-    # preset's args; the eval re-parses them all, so a value with whitespace
-    # or JSON is single-quoted inside one argument. The port must stay 8080
-    # (the probe, the metrics annotations and KServe's predictor Service
-    # assume it).
-    args:
-      - --model
-      - /mnt/models
-      - --port
-      - "8080"
-      - --served-model-name
-      - "{{.Name}}"
-    # Environment of the runtime container; a preset's env is merged on
-    # top by KServe. VLLM_CONFIG_ROOT keeps vLLM's config writable when
-    # /mnt/models is a read-only mount.
-    env:
-      - name: HF_HUB_ENABLE_HF_TRANSFER
-        value: "1"
-      - name: VLLM_CONFIG_ROOT
-        value: /tmp
-    # Resource envelope of the runtime container. A preset's resources win
-    # field by field (KServe merges the InferenceService over the runtime);
-    # the GPU count always comes from the preset.
-    resources:
-      requests:
-        cpu: "2"
-        memory: 16Gi
-      limits:
-        cpu: "8"
-        memory: 64Gi
-    # /dev/shm (memory-backed emptyDir) for vLLM's worker IPC.
-    shmSize: 16Gi
-    # Startup budget of the runtime container: loading a large model after
-    # the download takes many minutes; 360 x 30s = 3 hours before KServe
-    # gives up on the pod.
-    startupProbe:
-      initialDelaySeconds: 300
-      periodSeconds: 30
-      failureThreshold: 360
-    # Pod annotations KServe copies onto every predictor pod of this
-    # runtime; the defaults let KServe's Prometheus scraping find vLLM's
-    # /metrics.
-    annotations:
-      prometheus.kserve.io/path: /metrics
-      prometheus.kserve.io/port: "8080"
-    # Model formats this runtime serves. KServe matches an InferenceService
-    # whose modelFormat.name is listed here (autoSelect) or that names the
-    # runtime explicitly.
-    supportedModelFormats:
-      - name: vLLM
-        version: "1"
-        autoSelect: true
-        priority: 1
-    # Scheduling of every predictor pod of this runtime (the GPU nodes).
-    nodeSelector: {}
-    tolerations: []
-  # More vLLM ClusterServingRuntimes beside the default one, rendered from the
-  # same template (giantswarm/agent-platform#550) — for the models whose
-  # accelerator needs a different serving image, a hardware-specific vLLM
-  # build next to the upstream image the other presets run on. A preset
-  # selects one with spec.runtime. Each entry needs a name of its own (a name
-  # already used fails the render, naming it) and takes the default runtime's
-  # value for every field it leaves unset: image (registry, name, version),
-  # args, env, resources, shmSize, startupProbe, annotations,
-  # supportedModelFormats, nodeSelector, tolerations — a mapping field by
-  # field, a list whole (an entry's env replaces the default's, it does not
-  # extend it), an empty value inheriting too. The GPU pool's taint and label
-  # apply as on the default; the container runs through the same shell
-  # entrypoint with the entry's own base arguments, so its image must carry
-  # /bin/sh and `vllm` on PATH as well. Every runtime's name is published in
-  # the discovery ConfigMap as spec.runtimes, the default first.
-  #   - name: kserve-vllm-blackwell
-  #     image:
-  #       registry: registry.example.com
-  #       name: serving/vllm-unified-memory
-  #       version: "2026.09"
-  additionalRuntimes: []
-  # Defaults for every InferenceService the portal or model-manager creates
-  # from a preset. Published in the discovery ConfigMap; the chart itself
-  # creates no InferenceService.
+  # Defaults for every LLMInferenceService model-manager composes from a
+  # preset. Published in the discovery ConfigMap; the chart itself creates no
+  # LLMInferenceService.
   serving:
     # The extended resource a GPU is requested as (NVIDIA device plugin).
     gpuResourceName: nvidia.com/gpu
-    # RuntimeClass of the predictor pods, e.g. nvidia for the NVIDIA
-    # container toolkit; empty leaves the cluster default.
+    # RuntimeClass of the model pods, e.g. nvidia for the NVIDIA container
+    # toolkit; empty leaves the cluster default.
     runtimeClassName: ""
-    # Node selector of every predictor pod, e.g. the GPU node pool; a
-    # preset's scheduling.nodeSelector is merged on top.
+    # Node selector of every model pod, e.g. the GPU node pool; a preset's
+    # scheduling.nodeSelector is merged on top.
     nodeSelector: {}
-    # Deployment strategy of the predictor: Recreate frees the GPU memory
-    # of the old pod before the new one loads the model, which a node
-    # whose memory is shared between GPU and CPU (unified memory) needs.
-    deploymentStrategyType: Recreate
-    # Request timeout KServe writes into the predictor's route. Long
-    # reasoning turns stream for minutes; the KServe default of 60s cuts
-    # them mid-response.
-    timeoutSeconds: 1800
   # The GPU node pool the served models run on (giantswarm/agent-platform#315;
   # bumblebee-plans#46, the plan's D3). A pool created through the platform
   # (the gpu-node-pool chart) arrives tainted nvidia.com/gpu NoSchedule — only
   # accelerator work lands there — and labelled
   # giantswarm.io/machine-pool=<cluster>-<pool>. The chart puts the taint as a
   # toleration and the label as a nodeSelector on everything it renders onto
-  # the pool and on nothing else: the ClusterServingRuntime (KServe copies
-  # both onto every predictor pod of the runtime; runtime.tolerations come
-  # after it, runtime.nodeSelector keys win) and every published preset's
-  # scheduling block (the pool's entries first, the preset's own after; the
-  # preset's selector keys win), and publishes both in the discovery ConfigMap
-  # as spec.gpuPool.taint and spec.gpuPool.nodeSelector for model-manager
+  # the pool and on nothing else: every published preset's scheduling block
+  # (the pool's entries first, the preset's own after; the preset's selector
+  # keys win), and publishes both in the discovery ConfigMap as
+  # spec.gpuPool.taint and spec.gpuPool.nodeSelector for model-manager
   # (>= 0.23.0), which schedules the LLMInferenceServices it composes, its
   # download Jobs and its inventory scan pods by the same input (a registered
   # backend document may override it). Platform components never carry it.
@@ -4902,7 +4786,7 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # spec.modelImages.registry.
     registry: ""
   # Hugging Face model cache: one PVC in the serving namespace with one
-  # subdirectory per InferenceService, so a model downloads once and every
+  # subdirectory per served model, so a model downloads once and every
   # restart finds it (hours to seconds). The claim is applied by a
   # post-install/post-upgrade hook Job, not rendered as a release resource:
   # it has no consumer of its own and Binds with the first predictor that
@@ -5036,15 +4920,14 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # nowhere else; `true` / `false` force them (an explicit true with Kyverno
   # off fails the render). Resolved here with the other cluster-shape knobs
   # before the values are forwarded (agent-platform.shape.apply). On, every
-  # model pod — an InferenceService predictor or an LLMInferenceService
-  # workload pod — gets the storage-initializer's and the runtime's
-  # /mnt/models redirected into the pod's cache subdirectory (<claim>/<model>;
-  # the kubelet creates it at mount time, writable for the claim's fsGroup the
-  # pod carries, cache.fsGroup above), the Hugging Face client's environment
-  # (Xet off, env below: a toFQDNs allow-list cannot follow the Xet CDN) and a
-  # storage-initializer memory limit that survives multi-GB downloads; the
-  # Deployment gets a progressDeadlineSeconds long enough for a first
-  # download. Nothing to do on the node by hand.
+  # LLMInferenceService workload pod gets the storage-initializer's and the
+  # runtime's /mnt/models redirected into the pod's cache subdirectory
+  # (<claim>/<model>; the kubelet creates it at mount time, writable for the
+  # claim's fsGroup the pod carries, cache.fsGroup above), the Hugging Face
+  # client's environment (Xet off, env below: a toFQDNs allow-list cannot
+  # follow the Xet CDN) and a storage-initializer memory limit that survives
+  # multi-GB downloads; the Deployment gets a progressDeadlineSeconds long
+  # enough for a first download. Nothing to do on the node by hand.
   policies:
     enabled: auto  # auto | true | false
     # Memory limit of the KServe storage-initializer init container. The
@@ -5065,12 +4948,12 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # reservations; the predictor's own request is 10Gi, and init and main
     # containers do not run at once). Empty leaves KServe's default.
     storageInitializerMemoryLimit: 8Gi
-    # progressDeadlineSeconds of every InferenceService Deployment. The
+    # progressDeadlineSeconds of every LLMInferenceService Deployment. The
     # Kubernetes default (600) is shorter than a first model download and
     # fires rollout-stuck alerts; 0 leaves the default.
     progressDeadlineSeconds: 3600
     # Environment merged, by name, onto the storage-initializer and the
-    # runtime container of every model pod of both shapes (a pod without a
+    # runtime container of every model pod (a pod without a
     # storage-initializer is untouched): the entries are added to, or
     # overwrite by name, the containers' own env; everything else stays. An
     # empty list renders no rule. The default takes the Hugging Face client
@@ -5100,10 +4983,10 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
         value: "1"
   # Signature verification of the model pods' images at admission
   # (giantswarm/agent-platform#552): a Kyverno verifyImages ClusterPolicy over
-  # every model pod of the serving namespace — both pod shapes; the modelcar
-  # sidecar that carries the weights, the pre-fetch init container KServe
-  # runs from the same image and the runtime container alike, since Kyverno
-  # checks every container image of the pod that matches `images`. On by
+  # every model pod of the serving namespace — the modelcar sidecar that
+  # carries the weights, the pre-fetch init container KServe runs from the
+  # same image and the runtime container alike, since Kyverno checks every
+  # container image of the pod that matches `images`. On by
   # default (giantswarm/agent-platform#575): every image a shipped preset's
   # pod runs from the platform's registry namespace carries the identity
   # below — the curated model images, the llm-d runtime and sidecars, the
@@ -5172,41 +5055,32 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # Network policies of the serving namespace, rendered under networkPolicy
   # (enabled + the resolved flavor) like every other component's wiring:
   # nothing renders while networkPolicy.enabled is false. On, both flavors
-  # get: ingress to the model pods (every pod KServe runs for an
-  # InferenceService or an LLMInferenceService — the two shapes share no
-  # label, so a policy renders per shape) on the
-  # runtime port from the kagent agent pods, the release namespace and
-  # predictor.additionalIngressNamespaces; egress from the predictor pods
-  # (the storage-initializer download, the runtime) and from model-manager's
-  # pre-warm download Jobs to DNS and the Hugging Face endpoints below. The
-  # cilium flavor also admits the kubelet's probes (host entity) — under
-  # policyEnforcementMode always a policy without that rule kills the
-  # predictor before it turns Ready — and adds the agent-side egress to the
-  # predictor pods (the chart's agent egress covers 443 only).
+  # get: ingress to the model pods (the LLMInferenceService workload pods the
+  # llm-d controller runs) on the workload port from the kagent agent pods,
+  # the release namespace and additionalIngressNamespaces; egress from the
+  # model pods (the storage-initializer download, the runtime) and from
+  # model-manager's pre-warm download Jobs to DNS and the Hugging Face
+  # endpoints below. The cilium flavor also admits the kubelet's probes (host
+  # entity) — under policyEnforcementMode always a policy without that rule
+  # kills the model pod before it turns Ready — and adds the agent-side egress
+  # to the model pods (the chart's agent egress covers 443 only).
   networkPolicy:
-    predictor:
-      # The port the runtime container listens on (the ClusterServingRuntime
-      # above: 8080); a preset that names another runtime with another port
-      # changes it here.
-      port: 8080
-      # Namespaces whose pods may reach the predictor pods on that port,
-      # besides the kagent agent pods and the release namespace: e.g. the
-      # namespace of the KServe ingress Gateway (envoy-gateway-system) or of
-      # Prometheus (KServe's scrape annotations point at the same port).
-      additionalIngressNamespaces: []
     # The LLMInferenceService workload pod the llm-d controller creates is
-    # reached on its own port — the one KServe's `<name>-kserve-workload-svc`
-    # targets and the rendered HTTPRoute's backendRef names: 8000, the
-    # template's llm-d routing sidecar (`--port=8000 --vllm-port=8001`; vLLM's
-    # `main` listens on 8001 behind it), not the classic predictor's 8080 — so
-    # its policy admits that port from the same callers (the kagent agent pods,
-    # the release namespace, predictor.additionalIngressNamespaces) and for the
-    # kubelet's probes (giantswarm/agent-platform#525).
-    # tests/verify-model-serving-policies.py holds each shape's admitted port to
-    # the port of the container its fixture pod is reached on, so the two
-    # cannot drift again.
+    # reached on the port KServe's `<name>-kserve-workload-svc` targets and the
+    # rendered HTTPRoute's backendRef names: 8000, the template's llm-d routing
+    # sidecar (`--port=8000 --vllm-port=8001`; vLLM's `main` listens on 8001
+    # behind it) — so its policy admits that port from the callers (the kagent
+    # agent pods, the release namespace, additionalIngressNamespaces) and for
+    # the kubelet's probes (giantswarm/agent-platform#525).
+    # tests/verify-model-serving-policies.py holds the admitted port to the
+    # port of the container the fixture pod is reached on, so the two cannot
+    # drift.
     llmisvcWorkload:
       port: 8000
+    # Namespaces whose pods may reach the model pods on that port, besides the
+    # kagent agent pods and the release namespace: e.g. the namespace of a
+    # Gateway of the operator's own or of Prometheus.
+    additionalIngressNamespaces: []
     # Where the weights come from, TCP 443: the KServe storage-initializer
     # (hf:// presets), the runtime's own Hub lookups, model-manager's
     # pre-warm download Jobs and — on the kserve backend — model-manager
@@ -5248,16 +5122,17 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       cidrs: []
   # The models Gateway (giantswarm/agent-platform#326; bumblebee-plans#46, D6):
   # one agentgateway Gateway per serving cluster that every LLMInferenceService
-  # route attaches to — KServe's ingress-gateway value on the kserve-resources
-  # release is derived from it (kserve.controller.gateway.ingressGateway.kserveGateway,
+  # route attaches to — KServe's ingress-gateway value on the
+  # kserve-llmisvc-resources release is derived from it
+  # (kserve.controller.gateway.ingressGateway.kserveGateway,
   # `<release namespace>/<name>`; leave the block's own copy unset) — with one
   # JWT policy against the platform's Dex. A served model answers at
   #   https://<hostPrefix>.<global.domain>/<namespace>/<model>/v1/chat/completions
   # with a person's id_token (200) and 401 without one; the data plane strips
   # the bearer before the model server sees the request. The Gateway is the
   # serving slice's (examples/serving-slice.yaml turns it on): off by default,
-  # so a platform release that serves models on the classic path renders no
-  # Gateway and needs none of its inputs. Renders while enabled is true and
+  # so a platform release without the serving slice renders no Gateway and
+  # needs none of its inputs. Renders while enabled is true and
   # components.modelServing and components.kserve-llmisvc-resources are on.
   # The GatewayClass it names is the agentgateway controller's — the
   # platform's release's beside this one, or this release's own

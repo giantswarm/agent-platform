@@ -5,25 +5,21 @@
 {{- $name := include "name" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
-{{- $shapes := include "agent-platform.modelServing.podShapes" . | fromJsonArray }}
+{{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
+{{- $port := int $shape.port }}
 {{- /* Network policies of the serving namespace, in the flavor networkPolicy
        selects (auto: cilium where cilium.io/v2 is served). The model pods are
-       every pod KServe runs for a served model, in either of its shapes — the
-       classic InferenceService predictor and the LLMInferenceService workload
-       pod (_helpers.tpl, agent-platform.modelServing.podShapes; the two share
-       no label and listen on different ports — the classic predictor's 8080,
-       the llm-d workload's 8000, the port its Service targets — so a policy
-       renders per shape with that shape's port, #525) — whatever the runtime; the
-       storage-initializer is an init container of that pod, so one egress
+       the LLMInferenceService workload pods the llm-d controller runs
+       (_helpers.tpl, agent-platform.modelServing.podShape), reached on the
+       port their Service targets — 8000, the template's routing sidecar, #525;
+       the storage-initializer is an init container of that pod, so one egress
        rule covers the download and the runtime. model-manager's pre-warm
        download Jobs (kserve backend) run in the same namespace under their
        own labels. */ -}}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
-{{- range $shape := $shapes }}
-{{- $port := int $shape.port }}
 ---
-# {{ $shape.kind }} pods: ingress on the runtime port from the callers of the
+# {{ $shape.kind }} pods: ingress on the workload port from the callers of the
 # OpenAI-compatible API, egress to DNS and the model download endpoints.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -50,7 +46,7 @@ spec:
         # data plane.
         - matchLabels:
             io.kubernetes.pod.namespace: {{ $.Release.Namespace }}
-        {{- range $np.predictor.additionalIngressNamespaces }}
+        {{- range $np.additionalIngressNamespaces }}
         - matchLabels:
             io.kubernetes.pod.namespace: {{ . }}
         {{- end }}
@@ -60,7 +56,7 @@ spec:
               protocol: TCP
     # The kubelet's startup and readiness probes arrive from the host entity.
     # Under policyEnforcementMode always, a policy without this rule
-    # default-denies them and the predictor is killed before it turns Ready.
+    # default-denies them and the model pod is killed before it turns Ready.
     - fromEntities:
         - host
         - remote-node
@@ -71,7 +67,6 @@ spec:
   egress:
     {{- include "agent-platform.dnsEgressWithProxy" $ | nindent 4 }}
     {{- include "agent-platform.modelServing.huggingFaceEgress.cilium" $ | trim | nindent 4 }}
-{{- end }}
 ---
 # model-manager's pre-warm download Jobs (kserve backend): DNS and the model
 # download endpoints; they serve nothing and mount no ServiceAccount token.
@@ -92,11 +87,11 @@ spec:
     {{- include "agent-platform.modelServing.huggingFaceEgress.cilium" . | trim | nindent 4 }}
 {{- if $kagentOn }}
 ---
-# Egress from kagent agent pods to the model pods of either shape, on that
-# shape's port. The chart's agent egress (templates/kagent/netpol.yaml) admits
-# world and cluster on 443 only; Cilium evaluates after service translation, so
-# the model pod's own port is what must be allowed (Cilium policies are
-# additive to the agents' own).
+# Egress from kagent agent pods to the model pods, on the workload port. The
+# chart's agent egress (templates/kagent/netpol.yaml) admits world and cluster
+# on 443 only; Cilium evaluates after service translation, so the model pod's
+# own port is what must be allowed (Cilium policies are additive to the agents'
+# own).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -109,24 +104,20 @@ spec:
     matchLabels:
       app: atenet-egress
   egress:
-    {{- range $shapes }}
     - toEndpoints:
         - matchExpressions:
-            {{- toYaml .matchExpressions | nindent 12 }}
+            {{- toYaml $shape.matchExpressions | nindent 12 }}
           matchLabels:
             io.kubernetes.pod.namespace: {{ $ns }}
       toPorts:
         - ports:
-            - port: {{ int .port | quote }}
+            - port: {{ $port | quote }}
               protocol: TCP
-    {{- end }}
 {{- end }}
 
 {{- else }}
-{{- range $shape := $shapes }}
-{{- $port := int $shape.port }}
 ---
-# {{ $shape.kind }} pods: ingress on the runtime port from the callers of the
+# {{ $shape.kind }} pods: ingress on the workload port from the callers of the
 # OpenAI-compatible API. The kubelet's probes are not subject to
 # NetworkPolicy; the kagent agents' own egress is unrestricted in this flavor
 # (the chart renders no egress policy for agent pods), so no agent-side rule
@@ -160,7 +151,7 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $.Release.Namespace }}
-        {{- range $np.predictor.additionalIngressNamespaces }}
+        {{- range $np.additionalIngressNamespaces }}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ . }}
@@ -186,7 +177,6 @@ spec:
   egress:
     {{- include "agent-platform.dnsEgress.kubernetes" $ | nindent 4 }}
     {{- include "agent-platform.modelServing.huggingFaceEgress.kubernetes" $ | trim | nindent 4 }}
-{{- end }}
 ---
 # model-manager's pre-warm download Jobs (kserve backend): DNS and the model
 # download endpoints.

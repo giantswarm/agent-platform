@@ -1,6 +1,6 @@
 {{- /*
 The Hugging Face model cache claim (modelServing.cache.pvc): one claim in the
-serving namespace, one subdirectory per InferenceService (its name). The Kyverno
+serving namespace, one subdirectory per served model (its name). The Kyverno
 policies (policies.yaml) mount it into the KServe storage-initializer and the
 runtime; model-manager's pre-warm downloads land in the same layout.
 

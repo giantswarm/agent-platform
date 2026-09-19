@@ -164,15 +164,6 @@
                         }
                     }
                 },
-                "kserve-crd": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean"
-                        }
-                    }
-                },
                 "kserve-llmisvc-crd": {
                     "type": "object",
                     "additionalProperties": true,
@@ -183,15 +174,6 @@
                     }
                 },
                 "kserve-llmisvc-resources": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean"
-                        }
-                    }
-                },
-                "kserve-resources": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
@@ -831,19 +813,11 @@
             "type": "object",
             "additionalProperties": true
         },
-        "kserve-crd": {
-            "type": "object",
-            "additionalProperties": true
-        },
         "kserve-llmisvc-crd": {
             "type": "object",
             "additionalProperties": true
         },
         "kserve-llmisvc-resources": {
-            "type": "object",
-            "additionalProperties": true
-        },
-        "kserve-resources": {
             "type": "object",
             "additionalProperties": true
         },

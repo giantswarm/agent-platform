@@ -8,7 +8,7 @@ layer's one input for both, applied to everything the connectivity chart renders
 onto the pool and published for model-manager. Each case below pins one property:
 
 - default (taint nvidia.com/gpu NoSchedule, no value; no selector): the
-  ClusterServingRuntime and every published preset carry the one toleration
+  every published preset carries the one toleration
   (operator Exists) and no node selector; the discovery ConfigMap publishes
   spec.gpuPool.taint.{key,value,effect} and spec.gpuPool.nodeSelector: {};
 - the pool selected (ci/test-model-serving-gpu-pool-values.yaml): the label on
@@ -39,14 +39,14 @@ import tempfile
 HELM = os.environ.get("HELM", "helm")
 META, CONN = sys.argv[1], sys.argv[2]
 FIXTURE = f"{CONN}/ci/test-model-serving-gpu-pool-values.yaml"
-# The serving shape of the connectivity chart: the switch and the KServe
+# The serving shape of the connectivity chart: the switch and the llm-d
 # components on (the prerequisite guard), one Gateway parent.
 SERVING = [
     "--namespace", "agent-platform",
     "--set", "global.gatewayApi.parentRefs[0].name=giantswarm-default",
     "--set", "global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system",
-    "--set", "components.kserve-crd.enabled=true",
-    "--set", "components.kserve-resources.enabled=true",
+    "--set", "components.kserve-llmisvc-crd.enabled=true",
+    "--set", "components.kserve-llmisvc-resources.enabled=true",
     "--set", "components.modelServing.enabled=true",
 ]
 UNTAINTED = ["--set", "modelServing.gpuPool.taint.key="]
@@ -56,7 +56,10 @@ UNTAINTED = ["--set", "modelServing.gpuPool.taint.key="]
 NO_CACHE = ["--set", "modelServing.cache.enabled=false"]
 POOL_TOL = {"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}
 LABEL = {"giantswarm.io/machine-pool": "ci-gpu00"}
-RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
+# The classic path's documents on a golden from before giantswarm/agent-platform#574:
+# the ClusterServingRuntime and the predictor-shaped policies, left out of the
+# comparison while GOLDEN_REF carries them.
+CLASSIC_RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
 DISCOVERY = ("ConfigMap", "agent-platform-model-serving")
 PRESET = re.compile(r"^agent-platform-serving-preset-(.+)$")
 # The presets the connectivity chart ships (one file each; #481 added two).
@@ -65,12 +68,6 @@ SHIPPED = len(glob.glob(os.path.join(CONN, "files", "model-serving", "presets", 
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
 )
-# The runtimes list giantswarm/agent-platform#550 adds to the discovery ConfigMap,
-# cut out of the head for a golden from before it.
-RUNTIMES_BLOCK = re.compile(
-    r"      # Every ClusterServingRuntime the chart renders.*?(?=      # Defaults of every InferenceService)", re.S
-)
-
 # The model-images block of the discovery ConfigMap (#551), cut out while GOLDEN_REF predates it.
 MODEL_IMAGES_BLOCK = re.compile(r"      # Models as OCI images \(modelServing\.modelImages\).*?(?=      presets:\n)", re.S)
 
@@ -170,9 +167,8 @@ def expect(what: str, got, want) -> None:
 
 # --- default: the taint tolerated everywhere, no selector, published ---------
 docs = documents(helm(CONN, SERVING))
-tol, sel = scheduling(docs[RUNTIME])
-expect("runtime tolerations", tol, [POOL_TOL])
-expect("runtime nodeSelector", sel, {})
+if CLASSIC_RUNTIME in docs:
+    fail("the serving render carries a ClusterServingRuntime; the classic path was removed (giantswarm/agent-platform#574)")
 shipped = presets(docs)
 expect("shipped presets", len(shipped), SHIPPED)
 for name, doc in shipped.items():
@@ -184,13 +180,10 @@ for name, doc in shipped.items():
 gp = gpu_pool(docs)
 expect("discovery spec.gpuPool.taint", mapping(block(gp, "taint")), {"key": "nvidia.com/gpu", "value": "", "effect": "NoSchedule"})
 expect("discovery spec.gpuPool.nodeSelector", block(gp, "nodeSelector"), [])
-ok(f"default: the pool taint tolerated (Exists) by the runtime and all {SHIPPED} presets, no selector, published as spec.gpuPool")
+ok(f"default: the pool taint tolerated (Exists) by all {SHIPPED} presets, no selector, published as spec.gpuPool")
 
-# --- the pool selected: the label on the three sites, a preset's own kept ----
+# --- the pool selected: the label on both sites, a preset's own kept ---------
 docs = documents(helm(CONN, [*SERVING, "-f", FIXTURE]))
-tol, sel = scheduling(docs[RUNTIME])
-expect("runtime tolerations (pool selected)", tol, [POOL_TOL])
-expect("runtime nodeSelector (pool selected)", sel, LABEL)
 all_presets = presets(docs)
 expect("presets with the fixture's own", len(all_presets), SHIPPED + 1)
 for name, doc in all_presets.items():
@@ -205,20 +198,18 @@ for name, doc in all_presets.items():
         expect(f"preset {name} nodeSelector (pool selected)", sel, LABEL)
 gp = gpu_pool(docs)
 expect("discovery spec.gpuPool.nodeSelector (pool selected)", mapping(block(gp, "nodeSelector")), LABEL)
-ok("pool selected: the label on the runtime, every preset and the discovery ConfigMap; a preset's own scheduling kept, the pool's toleration once")
+ok("pool selected: the label on every preset and the discovery ConfigMap; a preset's own scheduling kept, the pool's toleration once")
 
 # --- a taint value: operator Equal -------------------------------------------
 docs = documents(helm(CONN, [*SERVING, "--set", "modelServing.gpuPool.taint.value=present"]))
-tol, _ = scheduling(docs[RUNTIME])
-expect("runtime tolerations (value)", tol, [{**POOL_TOL, "operator": "Equal", "value": "present"}])
+for name, doc in presets(docs).items():
+    expect(f"preset {name} tolerations (value)", items(block("\n".join(block(doc, "scheduling") or []), "tolerations")), [{**POOL_TOL, "operator": "Equal", "value": "present"}])
 expect("discovery taint (value)", mapping(block(gpu_pool(docs), "taint")), {"key": "nvidia.com/gpu", "value": "present", "effect": "NoSchedule"})
 ok("a taint value narrows the toleration to Equal and is published")
 
 # --- untainted: nothing rendered, byte-identical to GOLDEN_REF but for the block
 untainted = helm(CONN, [*SERVING, *UNTAINTED, *NO_CACHE])
 docs = documents(untainted)
-if block(docs[RUNTIME], "tolerations") is not None:
-    fail("an empty taint key still renders runtime tolerations")
 for name, doc in presets(docs).items():
     if block(doc, "scheduling") is not None:
         fail(f"an empty taint key still renders a scheduling block on preset {name}")
@@ -243,7 +234,12 @@ else:
         # UNTAINTED override and the discovery block comes out of both sides.
         # A golden from before the change has neither the flag nor the block.
         carries = "gpuPool:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        golden = documents(helm(f"{tree}/{CONN}", [*SERVING, *UNTAINTED, *NO_CACHE] if carries else [*SERVING, *NO_CACHE]))
+        # A golden from before giantswarm/agent-platform#574 renders the classic
+        # path too and takes the classic components as its prerequisite; the
+        # llm-d components stand in for them on that side.
+        classic = os.path.exists(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml")
+        golden_serving = [f.replace("kserve-llmisvc-crd", "kserve-crd").replace("kserve-llmisvc-resources", "kserve-resources") for f in SERVING] if classic else SERVING
+        golden = documents(helm(f"{tree}/{CONN}", [*golden_serving, *UNTAINTED, *NO_CACHE] if carries else [*golden_serving, *NO_CACHE]))
         resized = "g6.xlarge" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-4b-instruct.yaml", encoding="utf-8").read()
         shaped = "podShapes" in open(f"{tree}/{CONN}/templates/model-serving/_helpers.tpl", encoding="utf-8").read()
         ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
@@ -254,8 +250,6 @@ else:
         prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         fastimaged = "llm-d-fast/" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         hooked = "helm.sh/hook" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
-        evaled = "exec vllm serve" in open(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml", encoding="utf-8").read()
-        listed = "additionalRuntimes:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
         flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
         flashsized = flashnext and "memory: 118Gi" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
@@ -267,6 +261,27 @@ else:
     if carries:
         golden[DISCOVERY], gcuts = GPU_POOL_BLOCK.subn("", golden[DISCOVERY])
         expect(f"the discovery block cut out of {ref} once", gcuts, 1)
+    # The classic InferenceService path is removed on this side
+    # (giantswarm/agent-platform#574); a golden from before renders the
+    # ClusterServingRuntime, the discovery ConfigMap's runtime keys and classic
+    # defaults, the predictor-shaped policies beside the workload's, a
+    # two-shape PolicyException and agents' egress, the classic controller's
+    # network policy beside the llm-d controller's, and every published preset
+    # with the runtime it defaulted to — so those documents are left out of
+    # the comparison on both sides (the presets' pool scheduling is asserted
+    # above without the golden). Drop this once GOLDEN_REF carries #574.
+    if classic:
+        for side in (head, golden):
+            side.pop(CLASSIC_RUNTIME, None)
+            side.pop(DISCOVERY, None)
+            side.pop(("Namespace", "model-serving"), None)  # its comment names the LLMInferenceServices now
+            side.pop(("PolicyException", "model-serving-predictors"), None)
+            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy", "ClusterPolicy")
+                        and ("model-serving" in k[1] or k[1].endswith(("-kserve-controller", "-llmisvc-controller")))]:
+                side.pop(key)
+            for key in [k for k in side if k[0] == "ConfigMap" and PRESET.match(k[1])]:
+                side.pop(key)
+        print(f"note: the classic serving path is removed on this side (#574) and not on {ref}: its runtime, the discovery ConfigMap, the serving policies and the published presets (which carried the defaulted runtime) are left out of the comparison")
     # The two L4 presets are sized for a g6.xlarge (giantswarm/agent-platform#502:
     # requests 2 vCPU / 10 GiB, the description says so); a golden from before
     # carries the old 4 vCPU / 16 GiB, so its two preset documents are left out
@@ -363,28 +378,11 @@ else:
             for key in [k for k in side if k[1].endswith("-model-serving-prepull")]:
                 side.pop(key)
         print(f"note: the pre-pull DaemonSet and its policy render on this side (#545) and not on {ref}: they are left out of the comparison")
-    # The classic runtime's container runs through the shell entrypoint with the
-    # llm-d template's argument grammar (giantswarm/agent-platform#549); a golden
-    # from before renders the container without a command, so the runtime
-    # document is left out of the comparison on both sides. Drop this once
-    # GOLDEN_REF carries #549.
-    if not evaled:
-        for side in (head, golden):
-            side.pop(RUNTIME, None)
-        print(f"note: the classic runtime carries the shell entrypoint on this side (#549) and not on {ref}: its document is left out of the comparison")
-    # The discovery ConfigMap publishes every runtime's name as spec.runtimes
-    # (giantswarm/agent-platform#550); a golden from before has no such block,
-    # so it is cut out of the head's document. Drop this once GOLDEN_REF
-    # carries #550.
-    if not listed:
-        head[DISCOVERY], rcuts = RUNTIMES_BLOCK.subn("", head[DISCOVERY])
-        expect("the runtimes block cut out of the discovery ConfigMap once", rcuts, 1)
-        print(f"note: the discovery ConfigMap publishes spec.runtimes on this side (#550) and not on {ref}: the block is left out of the comparison")
     # The discovery ConfigMap publishes the model-images registry
     # (giantswarm/agent-platform#551, spec.modelImages.registry); a golden from
     # before has no such block, so it is cut out of the head's discovery
     # document. Drop this once GOLDEN_REF carries #551.
-    if not imaged:
+    if not imaged and DISCOVERY in head:
         head[DISCOVERY], icuts = MODEL_IMAGES_BLOCK.subn("", head[DISCOVERY])
         expect("the model-images block cut out of the discovery ConfigMap once", icuts, 1)
         print(f"note: the discovery ConfigMap publishes the model-images registry on this side (#551) and not on {ref}: that block is left out of the comparison")
@@ -428,13 +426,14 @@ for flags, needle in [
     if needle not in err:
         fail(f"{' '.join(flags)} failed for the wrong reason:\n{err}")
 docs = documents(helm(CONN, [*SERVING, "--set-string", "modelServing.gpuPool.nodeSelector.generation=6"]))
-expect("a quoted number as a label value", scheduling(docs[RUNTIME])[1], {"generation": "6"})
+first = next(iter(presets(docs).values()))
+expect("a quoted number as a label value", mapping(block("\n".join(block(first, "scheduling") or []), "nodeSelector")), {"generation": "6"})
 ok("guards: the effect, the key and string label values")
 
 # --- the meta chart forwards the block --------------------------------------
 meta = helm(META, [
     "-f", f"{META}/ci/ci-values.yaml", "--set", "components.flux.enabled=false",
-    "--set", "components.kserve-crd.enabled=true", "--set", "components.kserve-resources.enabled=true",
+    "--set", "components.kserve-llmisvc-crd.enabled=true", "--set", "components.kserve-llmisvc-resources.enabled=true",
     "--set", "components.modelServing.enabled=true",
     "--set-json", 'modelServing.gpuPool.nodeSelector={"giantswarm.io/machine-pool":"ci-gpu00"}',
 ])

@@ -87,12 +87,6 @@ PENDING = {
         "the Substrate line's charts from gsoci (giantswarm/agent-platform#580)",
     r"OCIRepository/cloudnative-pg\.spec\.url=oci://ghcr\.io/cloudnative-pg/charts/cloudnative-pg":
         "the CloudNativePG operator chart from gsoci (giantswarm/agent-platform#580)",
-    # The classic ClusterServingRuntime's upstream vLLM image; the runtime goes
-    # with the classic serving path (giantswarm/agent-platform#574).
-    r"ClusterServingRuntime/.+\.containers\[\d+\]\.image=docker\.io/vllm/vllm-openai:.+":
-        "the classic serving path removed (giantswarm/agent-platform#574)",
-    r"HelmRelease/agent-platform-connectivity\.spec\.values\.modelServing\.runtime\.image\.registry=docker\.io":
-        "the classic serving path removed (giantswarm/agent-platform#574)",
 }
 
 findings: list[tuple[str, str, str]] = []

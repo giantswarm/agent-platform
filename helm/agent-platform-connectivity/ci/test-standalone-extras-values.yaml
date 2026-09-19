@@ -1,7 +1,7 @@
 # The standalone umbrella's extras on: Backstage (the app-config ConfigMap, the
 # public route, the config-reload hook), the mcp-kubernetes MCPServer
-# registration and the KServe/vLLM model serving layer, on the KServe control
-# plane the kserve-crd / kserve-resources components install. Render-valid for
+# registration and the model serving layer on the llm-d control plane the
+# kserve-llmisvc-crd / kserve-llmisvc-resources components install. Render-valid for
 # `ct lint` (no --api-versions: the cluster-shape knobs resolve to the vanilla
 # shape, and the modelServing guard is satisfied by the components being on).
 global:
@@ -24,9 +24,9 @@ components:
     enabled: true
   mcp-kubernetes:
     enabled: true
-  kserve-crd:
+  kserve-llmisvc-crd:
     enabled: true
-  kserve-resources:
+  kserve-llmisvc-resources:
     enabled: true
   modelServing:
     enabled: true
@@ -44,7 +44,8 @@ gateway:
   jwksEgress:
     enabled: true
 
-kserve-resources:
+kserve-llmisvc-resources:
   kserve:
+    createSharedResources: true
     controller:
       deploymentMode: Standard

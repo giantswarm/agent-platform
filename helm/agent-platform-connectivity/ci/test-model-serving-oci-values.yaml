@@ -4,7 +4,7 @@
 # — at render the oci:// reference's host is swapped for it, the path and tag
 # kept; the hf:// preset is untouched — and the oci:// preset's image pre-pulled
 # on the serving nodes through modelServing.prepull.modelPresets. Render-valid
-# for `ct lint` (the modelServing guard is satisfied by the kserve components
+# for `ct lint` (the modelServing guard is satisfied by the llm-d components
 # being on); tests/verify-model-images.py asserts the render.
 global:
   domain: ci.example.com
@@ -14,9 +14,9 @@ global:
         namespace: envoy-gateway-system
 
 components:
-  kserve-crd:
+  kserve-llmisvc-crd:
     enabled: true
-  kserve-resources:
+  kserve-llmisvc-resources:
     enabled: true
   modelServing:
     enabled: true

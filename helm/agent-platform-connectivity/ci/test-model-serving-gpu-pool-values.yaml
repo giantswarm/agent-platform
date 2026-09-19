@@ -4,7 +4,7 @@
 # modelServing.gpuPool.nodeSelector, the value the serving slice sets per
 # pool. One preset of its own carries a scheduling block, to show the pool's
 # entries merged under it (its equal toleration once, its selector keys kept).
-# Render-valid for `ct lint` (the modelServing guard is satisfied by the kserve
+# Render-valid for `ct lint` (the modelServing guard is satisfied by the llm-d
 # components being on); tests/verify-gpu-pool.py asserts the render.
 global:
   domain: ci.example.com
@@ -14,9 +14,9 @@ global:
         namespace: envoy-gateway-system
 
 components:
-  kserve-crd:
+  kserve-llmisvc-crd:
     enabled: true
-  kserve-resources:
+  kserve-llmisvc-resources:
     enabled: true
   modelServing:
     enabled: true

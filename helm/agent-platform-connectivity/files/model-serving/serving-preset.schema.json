@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ServingPreset",
-  "description": "A curated recipe for serving one model on the platform's KServe/vLLM runtime. The chart ships a reviewed set (files/model-serving/presets/) and publishes each preset in effect as a ConfigMap in the release namespace (label agent-platform.giantswarm.io/serving-preset=true, key preset.yaml); modelServing.presets adds or replaces presets. The portal's serve flow and model-manager turn a published preset into an InferenceService; they never invent vLLM flags. Authoring form and published form share this schema: publishing fills the defaults noted below and resolves chatTemplate to the ConfigMap that holds it.",
+  "description": "A curated recipe for serving one model on the platform's llm-d serving path. The chart ships a reviewed set (files/model-serving/presets/) and publishes each preset in effect as a ConfigMap in the release namespace (label agent-platform.giantswarm.io/serving-preset=true, key preset.yaml); modelServing.presets adds or replaces presets. model-manager composes a published preset into an LLMInferenceService on the well-known LLMInferenceServiceConfigs; it never invents vLLM flags. Authoring form and published form share this schema: publishing fills the defaults noted below and resolves chatTemplate to the ConfigMap that holds it.",
   "type": "object",
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],
@@ -15,7 +15,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Lowercase DNS-1123 label, at most 30 characters. Names the preset ConfigMap (agent-platform-serving-preset-<name>), its chat-template ConfigMap (agent-platform-chat-template-<name>) and, by default, the InferenceService created from it.",
+          "description": "Lowercase DNS-1123 label, at most 30 characters. Names the preset ConfigMap (agent-platform-serving-preset-<name>), its chat-template ConfigMap (agent-platform-chat-template-<name>) and, by default, the LLMInferenceService composed from it.",
           "pattern": "^[a-z0-9]([-a-z0-9]{0,28}[a-z0-9])?$"
         }
       }
@@ -33,15 +33,14 @@
           "required": ["id", "storageUri"],
           "properties": {
             "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "Hugging Face repository (owner/name); the cache inventory and the import flow key on it."},
-            "storageUri": {"type": "string", "pattern": "^(hf|pvc|s3|gs|oci|https?)://.+", "description": "InferenceService predictor.model.storageUri. hf://<id> downloads through the KServe storage-initializer (into the cache when the Kyverno policies are on); pvc://<claim>/<dir> serves pre-warmed weights without a download."},
-            "format": {"type": "string", "default": "vLLM", "description": "predictor.model.modelFormat.name; must be a format the runtime lists in supportedModelFormats. Published presets always carry it."},
+            "storageUri": {"type": "string", "pattern": "^(hf|pvc|s3|gs|oci|https?)://.+", "description": "The LLMInferenceService's model URI. hf://<id> downloads through the KServe storage-initializer (into the cache when the Kyverno policies are on); pvc://<claim>/<dir> serves pre-warmed weights without a download; oci://<registry>/<path>[:tag|@digest] is a model image (KServe's modelcar path)."},
+            "format": {"type": "string", "default": "vLLM", "description": "The model format, informational on the llm-d path (the well-known template serves vLLM). Published presets always carry it."},
             "contextLength": {"type": "integer", "minimum": 1, "description": "Context window in tokens the recipe serves (informational; --max-model-len in args is authoritative)."},
             "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Informational tags, e.g. chat, tools, reasoning, vision, coding, embeddings."},
             "license": {"type": "string", "description": "SPDX identifier or the model card's license name."}
           }
         },
-        "runtime": {"type": "string", "description": "ClusterServingRuntime to run on. Empty or absent: modelServing.runtime.name; published presets always carry it."},
-        "args": {"type": "array", "items": {"type": "string"}, "description": "vLLM server arguments appended to the runtime's, complete and literal. The runtime template re-parses every argument through a shell (eval \"… $@\"), so outside single quotes an argument carries no whitespace, quote or shell metacharacter; a value that needs them is single-quoted inside one argument: --default-chat-template-kwargs='{\"enable_thinking\": false}'. Do not pass --chat-template: publishing appends it from chatTemplate."},
+        "args": {"type": "array", "items": {"type": "string"}, "description": "vLLM server arguments appended to the well-known template's, complete and literal. The template re-parses every argument through a shell (eval \"… $@\"), so outside single quotes an argument carries no whitespace, quote or shell metacharacter; a value that needs them is single-quoted inside one argument: --default-chat-template-kwargs='{\"enable_thinking\": false}'. Do not pass --chat-template: publishing appends it from chatTemplate."},
         "env": {
           "type": "array",
           "description": "Extra environment of the runtime container (Kubernetes EnvVar).",
@@ -78,7 +77,7 @@
         "resources": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Predictor resources. gpus is requested and limited as modelServing.serving.gpuResourceName; requests/limits are merged over the runtime's envelope by KServe.",
+          "description": "Resources of the runtime container. gpus is requested and limited as modelServing.serving.gpuResourceName; requests/limits are merged over the well-known template's envelope.",
           "properties": {
             "gpus": {"type": "integer", "minimum": 0, "default": 1},
             "requests": {"type": "object", "additionalProperties": {"type": ["string", "number"]}},
@@ -98,21 +97,16 @@
         "scheduling": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Placement of the predictor on top of modelServing.serving: nodeSelector is merged over the component default.",
+          "description": "Placement of the model pod on top of modelServing.serving: nodeSelector is merged over the component default; publishing merges the GPU pool's toleration and selector (modelServing.gpuPool) under it.",
           "properties": {
             "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
             "tolerations": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
           }
         },
-        "predictor": {
-          "type": "object",
-          "additionalProperties": true,
-          "description": "Extra InferenceService predictor fields copied verbatim (e.g. minReplicas, timeout, deploymentStrategy); they win over the component defaults."
-        },
         "template": {
           "type": "object",
           "additionalProperties": true,
-          "description": "Extra LLMInferenceService template fields copied verbatim (the llm-d path). A preset names no image: the predictor runs the mirrored llm-d-cuda the well-known LLMInferenceServiceConfig names (components.kserve-runtime-configs); an image here is the exception and states its reason in description."
+          "description": "Extra LLMInferenceService template fields copied verbatim. A preset names no image: the model pod runs the runtime image the well-known LLMInferenceServiceConfig names (components.kserve-runtime-configs); an image here is the exception and states its reason in description."
         }
       }
     }

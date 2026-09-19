@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Assert the connectivity chart's model-serving policies over both pod shapes
-KServe creates (giantswarm/agent-platform#506, #518, #520, #522, #525).
+"""Assert the connectivity chart's model-serving policies over the pod shape
+the llm-d controller creates (giantswarm/agent-platform#506, #518, #520, #522, #525, #574).
 
-A served model runs as one of two pods, and their labels share nothing: the
-classic InferenceService predictor (serving.kserve.io/inferenceservice=<name>,
-runtime container kserve-container) and the LLMInferenceService workload pod
-the llm-d controller creates (kserve.io/component=workload,
+A served model runs as the LLMInferenceService workload pod the llm-d
+controller creates (kserve.io/component=workload,
 app.kubernetes.io/part-of=llminferenceservice, app.kubernetes.io/name=<name>,
-runtime container main). The chart renders every selector of the serving
-namespace from one list of those shapes (_helpers.tpl,
-agent-platform.modelServing.podShapes); this check holds what that buys:
+runtime container main); the classic InferenceService predictor went with the
+classic serving path (#574). The chart renders every selector of the serving
+namespace from one description of that shape (_helpers.tpl,
+agent-platform.modelServing.podShape); this check holds what that buys:
 
   * `kyverno apply` of the rendered ClusterPolicies over a fixture pod of each
     shape (tests/fixtures/model-serving-*-pod.yaml — the llm-d one as observed
@@ -52,7 +51,7 @@ agent-platform.modelServing.podShapes); this check holds what that buys:
     storage-initializer, not the chart's additions); a pod with the root
     hf-cache-init of chart 4.28.14 fails exactly the two rules that denied
     every LLMInferenceService workload pod on a Giant Swarm cluster (#518).
-  * The Deployments' progress-deadline rule applies to both shapes' Deployments.
+  * The Deployments' progress-deadline rule applies to the workload's Deployments.
   * The pre-pull DaemonSet (modelServing.prepull, #545) renders in the serving
     namespace by default: one init container per image of
     modelServing.prepull.images — the first the llm-d runtime image the
@@ -179,11 +178,13 @@ ROOT_INIT = {"name": "hf-cache-init", "image": "gsoci.azurecr.io/giantswarm/alpi
                                  "capabilities": {"drop": ["ALL"], "add": ["CHOWN", "DAC_OVERRIDE", "FOWNER"]}},
              "volumeMounts": [{"name": CLAIM, "mountPath": "/cache"}]}
 # shape -> (fixture, runtime container, the label carrying the model's name, the container the pod is reached on — the
-# one KServe's Service targets: the runtime itself, or the llm-d routing sidecar in front of it)
+# one KServe's Service targets: the llm-d routing sidecar in front of the runtime). One shape since the classic
+# InferenceService predictor went with the classic path (giantswarm/agent-platform#574).
 SHAPES = {
-    "predictor": ("model-serving-classic-predictor-pod.yaml", "kserve-container", "serving.kserve.io/inferenceservice", "kserve-container"),
     "llmisvc-workload": ("model-serving-llmisvc-workload-pod.yaml", "main", "app.kubernetes.io/name", "llm-d-routing-sidecar"),
 }
+# The classic predictor's port, which no policy may admit any more.
+CLASSIC_PORT = 8080
 DOWNLOAD_LABELS = {"app.kubernetes.io/managed-by": "model-manager", "model-manager.giantswarm.io/component": "download", "job-name": "pull-qwen3-4b"}
 # The pre-pull DaemonSet's pods (#545): its selector label; the pool's taint they tolerate first; the label Karpenter
 # gives every GPU node, their default selector.
@@ -234,8 +235,8 @@ BASE = [
     "--set", "ingress.parentRefs[0].name=x",
     "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
     "--set", "components.modelServing.enabled=true",
-    "--set", "components.kserve-crd.enabled=true",
-    "--set", "components.kserve-resources.enabled=true",
+    "--set", "components.kserve-llmisvc-crd.enabled=true",
+    "--set", "components.kserve-llmisvc-resources.enabled=true",
     "--set", "components.kagent.enabled=true",
     "--set", f"modelServing.namespace.name={NS}",
     "--api-versions", "kyverno.io/v1",
@@ -510,7 +511,7 @@ def check_deployments(deployments_policy: dict) -> None:
         out = apply([deployments_policy], deployment)
         if out is None or out["spec"].get("progressDeadlineSeconds") != DEADLINE:
             fail(f"{shape}: the Deployment did not get progressDeadlineSeconds {DEADLINE}")
-    ok(f"both shapes' Deployments get progressDeadlineSeconds {DEADLINE}")
+    ok(f"the workload's Deployments get progressDeadlineSeconds {DEADLINE}")
 
 
 def check_selectors(cilium: list[dict], k8s: list[dict]) -> None:
@@ -736,9 +737,9 @@ def check_ports(cilium: list[dict], k8s: list[dict], via: str) -> None:
             fail(f"-kagent-agents-to-model-serving ({via}): the egress to the {shape} pods admits {sorted(cilium_ports(to_shape))}; "
                  f"the fixture's {runtime} is reached on {want}")
         ports[shape] = want
-    if len(set(ports.values())) != len(ports):
-        fail(f"the fixtures are reached on the same port ({ports}); the check could not tell one shape's value from the other's")
-    ok(f"{via}: each shape's ingress (both flavours, the kubelet's rule too) and the agents' egress admit exactly the port its fixture is reached on: {ports}")
+    if CLASSIC_PORT in ports.values():
+        fail(f"a fixture is reached on the classic predictor's port {CLASSIC_PORT}; the check could not tell the llm-d value from the classic one")
+    ok(f"{via}: the workload's ingress (both flavours, the kubelet's rule too) and the agents' egress admit exactly the port its fixture is reached on: {ports}")
 
 
 def cilium_regex(entry: dict) -> re.Pattern:
@@ -853,9 +854,9 @@ def check_image_verification(connectivity: str, docs: list[dict]) -> None:
         bogus = copy.deepcopy(policy)
         for rule in bogus["spec"]["rules"]:
             rule["verifyImages"][0]["mutateDigst"] = rule["verifyImages"][0].pop("mutateDigest")
-        if loaded_rules([policy], fixture("predictor")) != len(SHAPES) or loaded_rules([bogus], fixture("predictor")) != 0:
+        if loaded_rules([policy], fixture("llmisvc-workload")) != len(SHAPES) or loaded_rules([bogus], fixture("llmisvc-workload")) != 0:
             fail("kyverno apply must load every rule of the rendered policy and none of a policy with a misspelt verifyImages field")
-        ok("kyverno apply accepts the policy (every rule loaded; a misspelt verifyImages field drops it) and skips both fixture pods, "
+        ok("kyverno apply accepts the policy (every rule loaded; a misspelt verifyImages field drops it) and skips the fixture pod, "
            "none of whose images match the references")
         no_kyverno = [flag for i, flag in enumerate(BASE) if flag != "kyverno.io/v1" and not (flag == "--api-versions" and BASE[i + 1] == "kyverno.io/v1")]
         if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["-f", on], no_kyverno)):
@@ -917,7 +918,7 @@ def main(connectivity: str, meta: str) -> int:
     check_selectors(cilium, docs)
     check_fqdns(cilium, docs, "the connectivity chart's defaults")
     check_ports(cilium, docs, "the connectivity chart's defaults")
-    regressed = render(connectivity, [*CILIUM, "--set", f"modelServing.networkPolicy.llmisvcWorkload.port={container_port('predictor')}"])
+    regressed = render(connectivity, [*CILIUM, "--set", f"modelServing.networkPolicy.llmisvcWorkload.port={CLASSIC_PORT}"])
     try:
         check_ports(regressed, docs, "the negative control")
     except SystemExit as e:
@@ -926,6 +927,10 @@ def main(connectivity: str, meta: str) -> int:
     else:
         fail("the port check passed a render whose llmisvc-workload policy admits the classic predictor's port (the 4.28.18 shape)")
     ok("a render whose llm-d value is the classic port fails the port check naming -model-serving-llmisvc-workload")
+    classic = subprocess.run([HELM, "template", "t", connectivity, *BASE, *CILIUM, "--set", f"modelServing.networkPolicy.predictor.port={CLASSIC_PORT}"], capture_output=True, text=True, check=False)
+    if classic.returncode == 0 or "modelServing.networkPolicy.predictor" not in classic.stderr:
+        fail(f"the removed modelServing.networkPolicy.predictor block must fail the render naming it; got rc={classic.returncode}:\n{classic.stderr}")
+    ok("the removed modelServing.networkPolicy.predictor block fails the render naming it (#574)")
     with tempfile.TemporaryDirectory() as tmp:
         through_meta = []
         for flavour, apis in (("cilium", CILIUM), ("kubernetes", [])):
