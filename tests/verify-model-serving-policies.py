@@ -230,6 +230,17 @@ IV_ATTESTORS = [
                             "5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==\n-----END PUBLIC KEY-----"}},
 ]
 IV_ON = {"enabled": True, "images": IV_IMAGES, "attestors": IV_ATTESTORS, "type": "Cosign"}
+# The egress Kyverno's admission controller needs for the verification (#599): the fleet's Kyverno namespace and
+# admission-controller labels, the registry and Sigstore hosts as toFQDNs entries. The OVERRIDE is an installation's own
+# Kyverno layout and registry.
+EGRESS_SUFFIX = "-model-serving-image-verification-egress"
+EGRESS_DEFAULT_NAMESPACE = "kyverno"
+EGRESS_DEFAULT_SELECTOR = {"app.kubernetes.io/component": "admission-controller", "app.kubernetes.io/instance": "kyverno"}
+EGRESS_DEFAULT_HOSTS = [{"matchName": "gsoci.azurecr.io"}, {"matchPattern": "*.*.data.azurecr.io"},
+                        {"matchName": "tuf-repo-cdn.sigstore.dev"}, {"matchName": "rekor.sigstore.dev"}]
+EGRESS_OWN = {"enabled": True, "namespace": "policy", "podSelector": {"app": "kyverno-admission"},
+              "hosts": [{"matchName": "registry.example.com"}, {"matchPattern": "*.sigstore.example.com"}]}
+EGRESS_VALID = {"enabled": True, "namespace": "kyverno", "podSelector": {"app": "kyverno"}, "hosts": [{"matchName": "registry.example.com"}]}
 BASE = [
     "--namespace", "agent-platform",
     "--set", "ingress.parentRefs[0].name=x",
@@ -893,6 +904,81 @@ def check_image_verification_forwarded(connectivity: str, forwarded: str) -> Non
     ok("the meta chart's forwarded values render the image-verification policy as the connectivity default does")
 
 
+def egress_rules(policy: dict) -> tuple[dict, dict]:
+    """The DNS rule and the toFQDNs rule of an image-verification egress policy, in that order."""
+    egress = policy["spec"]["egress"]
+    dns = [r for r in egress if "toEndpoints" in r]
+    fqdn = [r for r in egress if "toFQDNs" in r]
+    if len(egress) != 2 or len(dns) != 1 or len(fqdn) != 1:
+        fail(f"{policy['metadata']['name']}: expected exactly a DNS rule and a toFQDNs rule; got\n{yaml.safe_dump(egress)}")
+    return dns[0], fqdn[0]
+
+
+def check_image_verification_egress(connectivity: str, cilium: list[dict], docs: list[dict]) -> None:
+    """modelServing.imageVerification.kyvernoEgress (#599): Kyverno's admission controller fetches and verifies the bundles itself,
+    and the fleet's Kyverno may reach the API server only — so the default cilium render carries one CiliumNetworkPolicy in
+    Kyverno's namespace selecting the admission controller with DNS through the proxy and 443 to the registry and Sigstore hosts;
+    nothing in the kubernetes flavour, with either switch off or without Kyverno; an installation's own layout reaches the object
+    verbatim (a set selector renders alone, the default is not merged in); the guards name their key."""
+    policy = one(cilium, "CiliumNetworkPolicy", EGRESS_SUFFIX)
+    if policy["metadata"]["namespace"] != EGRESS_DEFAULT_NAMESPACE or policy["spec"]["endpointSelector"] != {"matchLabels": EGRESS_DEFAULT_SELECTOR}:
+        fail(f"the egress policy must select Kyverno's admission controller in {EGRESS_DEFAULT_NAMESPACE}; got namespace "
+             f"{policy['metadata']['namespace']}, selector {policy['spec']['endpointSelector']}")
+    dns, fqdn = egress_rules(policy)
+    if not any(e.get("matchLabels", {}).get("k8s-app") == "kube-dns" for e in dns["toEndpoints"]) \
+            or dns["toPorts"][0].get("rules") != {"dns": [{"matchPattern": "*"}]}:
+        fail(f"the DNS rule must reach kube-dns through Cilium's DNS proxy (rules.dns matchPattern *), the precondition of toFQDNs; got\n{yaml.safe_dump(dns)}")
+    if fqdn["toFQDNs"] != EGRESS_DEFAULT_HOSTS or cilium_ports([fqdn]) != {443}:
+        fail(f"the toFQDNs rule must admit exactly the registry and Sigstore hosts on 443; got\n{yaml.safe_dump(fqdn)}")
+    if "toCIDR" in str(policy["spec"]) or "world" in str(policy["spec"]):
+        fail("the egress policy must stay a toFQDNs allow-list: no toCIDR, no world entity")
+    ok("the default cilium render carries the Kyverno egress policy: the admission controller in kyverno, DNS through the proxy, "
+       "443 to the registry, its data endpoints, the Sigstore TUF repository and Rekor — a toFQDNs allow-list")
+    if any(d["metadata"]["name"].endswith(EGRESS_SUFFIX) for d in docs):
+        fail("the kubernetes flavour renders the Kyverno egress policy; a NetworkPolicy has no names to allow")
+    for description, flags in (("kyvernoEgress.enabled=false", ["--set", "modelServing.imageVerification.kyvernoEgress.enabled=false"]),
+                               ("imageVerification.enabled=false", ["--set", "modelServing.imageVerification.enabled=false"])):
+        if any(d["metadata"]["name"].endswith(EGRESS_SUFFIX) for d in render(connectivity, [*CILIUM, *flags])):
+            fail(f"{description} still renders the Kyverno egress policy")
+    no_kyverno = [flag for i, flag in enumerate(BASE) if flag != "kyverno.io/v1" and not (flag == "--api-versions" and BASE[i + 1] == "kyverno.io/v1")]
+    if any(d["metadata"]["name"].endswith(EGRESS_SUFFIX) for d in render(connectivity, CILIUM, no_kyverno)):
+        fail("without kyverno.io/v1 served, the Kyverno egress policy still renders")
+    ok("nothing renders in the kubernetes flavour, with kyvernoEgress or imageVerification off, or without kyverno.io/v1")
+    with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-egress-") as tmp:
+        own = one(render(connectivity, [*CILIUM, "-f", image_verification_values(tmp, {"kyvernoEgress": EGRESS_OWN})]), "CiliumNetworkPolicy", EGRESS_SUFFIX)
+        _, own_fqdn = egress_rules(own)
+        if own["metadata"]["namespace"] != EGRESS_OWN["namespace"] or own["spec"]["endpointSelector"] != {"matchLabels": EGRESS_OWN["podSelector"]} \
+                or own_fqdn["toFQDNs"] != EGRESS_OWN["hosts"]:
+            fail(f"an installation's own kyvernoEgress block did not reach the policy verbatim:\n{yaml.safe_dump(own)}")
+        ok("an installation's own Kyverno namespace, pod labels (alone, the defaults not merged in) and hosts reach the egress policy verbatim")
+        for description, block, needle in (
+            ("an empty host list", {**EGRESS_VALID, "hosts": []}, "modelServing.imageVerification.kyvernoEgress.hosts is empty"),
+            ("a host that is no toFQDNs entry", {**EGRESS_VALID, "hosts": ["registry.example.com"]}, "modelServing.imageVerification.kyvernoEgress.hosts[0]"),
+            ("an empty namespace", {**EGRESS_VALID, "namespace": ""}, "modelServing.imageVerification.kyvernoEgress.namespace is empty"),
+            ("a selector that is no mapping", {**EGRESS_VALID, "podSelector": ["app"]}, "modelServing.imageVerification.kyvernoEgress.podSelector must be a mapping"),
+            ("a non-string label value", {**EGRESS_VALID, "podSelector": {"app": True}}, "modelServing.imageVerification.kyvernoEgress.podSelector[app]"),
+            ("a switch outside true | false", {**EGRESS_VALID, "enabled": "yes"}, "modelServing.imageVerification.kyvernoEgress.enabled must be true or false"),
+            ("a nulled block", None, "modelServing.imageVerification.kyvernoEgress must be a mapping"),
+            ("an unknown key", {**EGRESS_VALID, "host": []}, "modelServing.imageVerification.kyvernoEgress.host is not a key"),
+        ):
+            result = subprocess.run([HELM, "template", "t", connectivity, *BASE, *CILIUM, "-f", image_verification_values(tmp, {"kyvernoEgress": block})],
+                                    capture_output=True, text=True, check=False)
+            if result.returncode == 0 or needle not in result.stderr:
+                fail(f"{description} must fail the render naming the key ({needle}); got rc={result.returncode}:\n{result.stderr}")
+        ok("an empty host list, a host that is no toFQDNs entry, an empty namespace, a selector that is no mapping, a non-string label value, a switch "
+           "outside true | false, a nulled block or an unknown key fails the render naming the key")
+
+
+def check_image_verification_egress_forwarded(connectivity: str, forwarded_cilium: str) -> None:
+    """The values the meta chart forwards render the same Kyverno egress policy as the connectivity defaults (#599)."""
+    own = one(render(connectivity, CILIUM), "CiliumNetworkPolicy", EGRESS_SUFFIX)
+    through = one(render(connectivity, [*CILIUM, "-f", forwarded_cilium]), "CiliumNetworkPolicy", EGRESS_SUFFIX)
+    if through["spec"] != own["spec"] or through["metadata"]["namespace"] != own["metadata"]["namespace"]:
+        fail(f"the Kyverno egress policy the meta chart's forwarded values render differs from the connectivity default:\n"
+             f"{yaml.safe_dump(through)}\n--- connectivity:\n{yaml.safe_dump(own)}")
+    ok("the meta chart's forwarded values render the Kyverno egress policy as the connectivity default does")
+
+
 def main(connectivity: str, meta: str) -> int:
     if shutil.which(KYVERNO) is None:
         fail(f"the kyverno CLI ({KYVERNO}) is not installed; the mutations are asserted with `kyverno apply`")
@@ -914,6 +1000,7 @@ def main(connectivity: str, meta: str) -> int:
     check_deployments(deployments_policy)
     check_image_verification(connectivity, docs)
     cilium = render(connectivity, CILIUM)
+    check_image_verification_egress(connectivity, cilium, docs)
     check_prepull(connectivity, docs, cilium, pods_policy, exception)
     check_selectors(cilium, docs)
     check_fqdns(cilium, docs, "the connectivity chart's defaults")
@@ -942,6 +1029,7 @@ def main(connectivity: str, meta: str) -> int:
         check_ports(*through_meta, "the meta chart's forwarded values")
         check_prepull_forwarded(connectivity, meta, through_meta[1], tmp)
         check_image_verification_forwarded(connectivity, forwarded)
+        check_image_verification_egress_forwarded(connectivity, os.path.join(tmp, "forwarded-cilium.yaml"))
     return 0
 
 

@@ -1,0 +1,62 @@
+{{- /*
+The egress the image verification needs from Kyverno's admission controller
+(giantswarm/agent-platform#599). A verifyImages rule is evaluated by the
+admission controller itself: it fetches the image's Sigstore bundle from the
+registry (the OCI referrers of the image, the bundle's blob) and verifies it
+against the Sigstore trust root (the TUF repository; Rekor for the keyless
+attestor's transparency log). A Kyverno that runs under a network policy
+allowing egress to the API server only — the fleet's Kyverno chart ships exactly
+that CiliumNetworkPolicy, and Cilium's default-deny does the rest, DNS
+included — fails every fetch before it starts (`lookup <registry>: i/o
+timeout`), and since verifyImages runs in the mutating webhook with
+failurePolicy Fail, the fetch error denies the pod whatever failureAction says:
+every model pod is refused and no model comes up. This policy is additive to
+whatever Kyverno's own policies allow: DNS through Cilium's DNS proxy (so the
+names below resolve into the allow-list) and TCP 443 to the registry and
+Sigstore hosts of modelServing.imageVerification.kyvernoEgress.hosts, for the
+pods kyvernoEgress.podSelector names (empty: the upstream chart's admission-controller
+labels) in kyvernoEgress.namespace. Rendered where
+the image-verification policy renders (templates/model-serving/image-verification.yaml)
+and the network-policy flavor is cilium — a NetworkPolicy has no names to allow;
+an installation on plain NetworkPolicies opens the egress itself — and not with
+kyvernoEgress.enabled false, for a Kyverno whose own policies reach the
+registry already. The guards (templates/model-serving/validate.yaml) refuse an
+empty namespace, selector or host list, a host entry that is no toFQDNs entry
+and an unknown key. tests/verify-model-serving-policies.py asserts the render,
+the switches and the guards.
+*/ -}}
+{{- $ms := .Values.modelServing }}
+{{- $iv := $ms.imageVerification }}
+{{- if and (include "agent-platform.modelServing.enabled" .) $iv.enabled (include "agent-platform.modelServingPolicies" .) (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
+{{- $eg := $iv.kyvernoEgress }}
+{{- if $eg.enabled }}
+{{- /* An empty podSelector selects the upstream Kyverno chart's admission-controller labels; a set one renders alone. */ -}}
+{{- $selector := $eg.podSelector | default (dict "app.kubernetes.io/component" "admission-controller" "app.kubernetes.io/instance" "kyverno") }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-model-serving-image-verification-egress
+  namespace: {{ $eg.namespace }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  description: >-
+    The egress Kyverno's admission controller needs to verify the images of the
+    {{ include "agent-platform.modelServing.namespace" . }} model pods: DNS, and
+    TCP 443 to the registry and the Sigstore hosts the bundles are fetched from
+    and verified against.
+  endpointSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    # The registry the verified images come from and the Sigstore hosts, by
+    # name (resolved through the DNS proxy rule above).
+    - toFQDNs:
+        {{- toYaml $eg.hosts | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+{{- end }}
+{{- end }}

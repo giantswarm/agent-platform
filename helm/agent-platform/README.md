@@ -1332,6 +1332,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.imageVerification.mutateDigest | bool | `true` |  |
 | modelServing.imageVerification.required | bool | `true` |  |
 | modelServing.imageVerification.failureAction | string | `"Enforce"` |  |
+| modelServing.imageVerification.kyvernoEgress.enabled | bool | `true` |  |
+| modelServing.imageVerification.kyvernoEgress.namespace | string | `"kyverno"` |  |
+| modelServing.imageVerification.kyvernoEgress.podSelector | object | `{}` |  |
+| modelServing.imageVerification.kyvernoEgress.hosts[0].matchName | string | `"gsoci.azurecr.io"` |  |
+| modelServing.imageVerification.kyvernoEgress.hosts[1].matchPattern | string | `"*.*.data.azurecr.io"` |  |
+| modelServing.imageVerification.kyvernoEgress.hosts[2].matchName | string | `"tuf-repo-cdn.sigstore.dev"` |  |
+| modelServing.imageVerification.kyvernoEgress.hosts[3].matchName | string | `"rekor.sigstore.dev"` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
 | modelServing.networkPolicy.additionalIngressNamespaces | list | `[]` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |

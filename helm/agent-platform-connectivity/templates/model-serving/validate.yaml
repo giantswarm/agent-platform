@@ -51,8 +51,8 @@ objects the API server rejects or a preset the portal cannot use.
   {{- if .enabled }}
     {{- $iv := . }}
     {{- range $key, $_ := . }}
-      {{- if not (has $key (list "enabled" "images" "attestors" "type" "mutateDigest" "required" "failureAction")) }}
-        {{- fail (printf "modelServing.imageVerification.%s is not a key of the block: enabled, images, attestors, type, mutateDigest, required, failureAction" $key) }}
+      {{- if not (has $key (list "enabled" "images" "attestors" "type" "mutateDigest" "required" "failureAction" "kyvernoEgress")) }}
+        {{- fail (printf "modelServing.imageVerification.%s is not a key of the block: enabled, images, attestors, type, mutateDigest, required, failureAction, kyvernoEgress" $key) }}
       {{- end }}
     {{- end }}
     {{- if not .images }}
@@ -81,6 +81,45 @@ objects the API server rejects or a preset the portal cannot use.
     {{- end }}
     {{- if not (has (toString .failureAction) (list "Enforce" "Audit")) }}
       {{- fail (printf "modelServing.imageVerification.failureAction must be Enforce or Audit (got %v)" .failureAction) }}
+    {{- end }}
+    {{- /* The egress Kyverno's admission controller needs for the verification
+         (giantswarm/agent-platform#599): a mapping with a switch, the
+         namespace and pod labels of the controller and the hosts (toFQDNs
+         entries) it reaches; a null block would be read as a missing key and
+         render nothing where the operator expects the egress. */ -}}
+    {{- if not (kindIs "map" .kyvernoEgress) }}
+      {{- fail "modelServing.imageVerification.kyvernoEgress must be a mapping (enabled, namespace, podSelector, hosts) — do not null it out; set kyvernoEgress.enabled: false to render no egress policy" }}
+    {{- end }}
+    {{- with .kyvernoEgress }}
+      {{- range $key, $_ := . }}
+        {{- if not (has $key (list "enabled" "namespace" "podSelector" "hosts")) }}
+          {{- fail (printf "modelServing.imageVerification.kyvernoEgress.%s is not a key of the block: enabled, namespace, podSelector, hosts" $key) }}
+        {{- end }}
+      {{- end }}
+      {{- if not (has (toString .enabled) (list "true" "false")) }}
+        {{- fail (printf "modelServing.imageVerification.kyvernoEgress.enabled must be true or false (got %v)" .enabled) }}
+      {{- end }}
+      {{- if .enabled }}
+        {{- if or (not (kindIs "string" .namespace)) (not .namespace) }}
+          {{- fail "modelServing.imageVerification.kyvernoEgress.namespace is empty: name the namespace Kyverno's admission controller runs in (kyverno on a Giant Swarm cluster), or set kyvernoEgress.enabled: false" }}
+        {{- end }}
+        {{- if not (kindIs "map" .podSelector) }}
+          {{- fail (printf "modelServing.imageVerification.kyvernoEgress.podSelector must be a mapping of labels (empty selects the upstream chart's admission-controller labels; got %v)" .podSelector) }}
+        {{- end }}
+        {{- range $label, $value := .podSelector }}
+          {{- if not (kindIs "string" $value) }}
+            {{- fail (printf "modelServing.imageVerification.kyvernoEgress.podSelector[%s] must be a string label value (got %v)" $label $value) }}
+          {{- end }}
+        {{- end }}
+        {{- if not .hosts }}
+          {{- fail "modelServing.imageVerification.kyvernoEgress.hosts is empty: name the registry and Sigstore hosts the verification reaches (Cilium toFQDNs entries: matchName or matchPattern), or set kyvernoEgress.enabled: false" }}
+        {{- end }}
+        {{- range $i, $host := .hosts }}
+          {{- if or (not (kindIs "map" $host)) (not (or (hasKey $host "matchName") (hasKey $host "matchPattern"))) }}
+            {{- fail (printf "modelServing.imageVerification.kyvernoEgress.hosts[%d] must be a Cilium toFQDNs entry: a mapping with matchName or matchPattern (got %v)" $i $host) }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
     {{- end }}
   {{- end }}
   {{- end }}

@@ -5093,6 +5093,47 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Enforce denies a pod whose image fails verification; Audit admits it
     # and reports the failure.
     failureAction: Enforce  # Enforce | Audit
+    # The egress the verification needs from Kyverno's admission controller
+    # (giantswarm/agent-platform#599). The controller fetches an image's
+    # Sigstore bundle from the registry and verifies it against the Sigstore
+    # trust root itself, so it needs DNS and TCP 443 to the registry hosts (the
+    # registry of `images` and the data endpoints its blob reads redirect to)
+    # and to the Sigstore hosts (the TUF repository the trust root comes from,
+    # Rekor). A Kyverno under a network policy that allows the API server only
+    # — the fleet's Kyverno chart ships exactly that CiliumNetworkPolicy, and
+    # Cilium's default-deny does the rest, DNS included — fails every fetch
+    # (`lookup <registry>: i/o timeout`), and the verifyImages webhook fails
+    # closed: every model pod is denied, whatever failureAction says. With
+    # enabled (the default) the chart renders one CiliumNetworkPolicy in
+    # Kyverno's namespace selecting the admission controller pods with that
+    # egress — additive to whatever Kyverno's own policies allow —, in the
+    # cilium network-policy flavor only (a NetworkPolicy has no names to allow;
+    # an installation on plain NetworkPolicies opens the egress itself). false
+    # renders none, for a Kyverno whose own policies reach the registry
+    # already. Nothing renders while imageVerification is off.
+    kyvernoEgress:
+      enabled: true
+      # Kyverno's namespace and the labels of its admission controller pods.
+      # An empty podSelector selects the upstream chart's admission-controller
+      # labels (app.kubernetes.io/component: admission-controller,
+      # app.kubernetes.io/instance: kyverno), what the fleet runs; a selector
+      # set here renders alone (Helm merges mappings, so the default is not
+      # written out where it would have to be nulled to be replaced).
+      namespace: kyverno
+      podSelector: {}
+      # The hosts the verification reaches on TCP 443, as Cilium toFQDNs
+      # entries (matchName a host; matchPattern with `*` for one label of a
+      # name). The defaults: the platform's registry and the Azure Container
+      # Registry data endpoints a blob read is redirected to
+      # (<registry>.<region>.data.azurecr.io), the Sigstore TUF repository
+      # (the trust root every bundle is verified against) and Rekor (the
+      # transparency log the keyless attestor names). An installation that
+      # verifies images of another registry adds its hosts.
+      hosts:
+        - matchName: gsoci.azurecr.io
+        - matchPattern: "*.*.data.azurecr.io"
+        - matchName: tuf-repo-cdn.sigstore.dev
+        - matchName: rekor.sigstore.dev
   # Network policies of the serving namespace, rendered under networkPolicy
   # (enabled + the resolved flavor) like every other component's wiring:
   # nothing renders while networkPolicy.enabled is false. On, both flavors
