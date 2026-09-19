@@ -32,7 +32,8 @@ property the slice relies on:
   ConfigMap's gateway entry; a cert-manager Certificate only with tls.issuerRef.name;
   nothing of it with modelsGateway.enabled: false; the guards (no issuer, no
   certificate, no audience, a host carrying a port) fail naming the key;
-- every shipped preset's arguments survive the runtime template's entrypoint
+- every shipped preset's resources.gpus equals the tensor-parallel size its arguments
+  set (1 without the flag), and its arguments survive the runtime template's entrypoint
   (eval "… $@" re-parses them through a shell): the exact eval, run over each
   preset's args, yields one word per argument, a JSON value parses; a values
   preset with a bare JSON, a space, a stray quote or a metacharacter fails the
@@ -616,6 +617,13 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
         if carried := [f for f in CLASSIC_PRESET_FIELDS if f in preset["spec"]]:
             sys.exit(f"FAIL: shipped preset {preset_name} carries the classic field(s) {carried}; a preset composes onto the well-known LLMInferenceServiceConfigs (#574)")
         preset_args = [str(a) for a in preset["spec"].get("args") or []]
+        # A preset on N GPUs splits the model across them itself: the well-known template adds a
+        # --tensor-parallel-size only for spec.parallelism.tensor, which model-manager never sets (#591).
+        gpus = int((preset["spec"].get("resources") or {}).get("gpus", 1))
+        tp = next((int(a.split("=", 1)[1]) for a in preset_args if a.startswith("--tensor-parallel-size=")), 1)
+        if gpus != tp:
+            sys.exit(f"FAIL: shipped preset {preset_name} requests {gpus} GPU(s) (resources.gpus) but its arguments set tensor parallel {tp}; "
+                     "a preset on N GPUs carries --tensor-parallel-size=N, a one-GPU preset no such flag")
         expected = [shlex.split(a)[0] for a in preset_args]
         checked += json_values(preset_name, "the llm-d template", eval_argv(preset_args), expected)
     if checked == 0:
@@ -635,6 +643,7 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
         err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="outside single quotes")
         need(err, 'serving preset "bad" (values): spec.args', f"the guard's message for {what}")
     ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval ({checked} JSON values parse), none carries a classic field, "
+       f"each one's resources.gpus equals its tensor-parallel size, "
        f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
        f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
 

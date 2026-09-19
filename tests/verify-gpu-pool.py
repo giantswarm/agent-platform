@@ -67,6 +67,8 @@ SHIPPED = len(glob.glob(os.path.join(CONN, "files", "model-serving", "presets", 
 # The 24 GB presets of the September 2026 line-up and the ones they replaced (#591).
 LINEUP_24GB = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b")
 RETIRED_24GB = ("qwen3-4b-instruct", "qwen3-8b-fp8", "qwen3-14b")
+# The two four-GPU presets (giantswarm/agent-platform#591): tensor parallel across four L40S.
+FOUR_GPU = ("mistral-small-4", "gpt-oss-120b")
 # The discovery block this change adds, cut out for the byte-identity check.
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
@@ -256,6 +258,7 @@ else:
         flashsized = flashnext and "memory: 118Gi" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
         lineup24 = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml")
         lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml")
+        fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -304,6 +307,16 @@ else:
         head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
         golden.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
         print(f"note: the Flash-Next preset's memory limit is 118Gi on this side (#567) and not on {ref}: its ConfigMap is left out of the comparison")
+    # The two four-GPU presets ship on this side (giantswarm/agent-platform#591)
+    # and not on a golden from before: their ConfigMaps and discovery entries are
+    # left out of the head. Drop this once GOLDEN_REF carries #591.
+    if not fourgpu:
+        for name in FOUR_GPU:
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            if DISCOVERY in head:
+                head[DISCOVERY], ncuts = re.subn(rf"^ +- {re.escape(name)}\n", "", head[DISCOVERY], flags=re.M)
+                expect(f"the preset {name}'s name cut out of the discovery list once", ncuts, 1)
+        print(f"note: the four-GPU presets ship on this side (#591) and not on {ref}: their ConfigMaps and discovery entries are left out of the comparison")
     # The serving namespace's policies select both pod shapes — the classic
     # predictor and the LLMInferenceService workload pod — and render per shape
     # (giantswarm/agent-platform#506); a golden from before knows the classic
