@@ -4021,7 +4021,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.1.7
+      tag: 1.1.11
     dryRun: false
     githubToken:
       secretName: kagent-skills-token
