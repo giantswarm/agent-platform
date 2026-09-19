@@ -15,7 +15,7 @@ spec:
     48 GB GPU of the L40S family: g6e.2xlarge or g6e.4xlarge (g6e.xlarge
     leaves a predictor 3 vCPU / 27 GiB, less than the 4 vCPU / 32 GiB
     requested here). The model's own window is 262,144 tokens; the preset
-    serves 32k, what the KV cache of a 48 GB card holds beside 31 GiB of
+    serves 8k, what the KV cache of a 48 GB card holds beside 31 GiB of
     weights at --gpu-memory-utilization=0.92 (four concurrent requests, one
     image per prompt, no audio). Tool calls and thinking use Gemma 4's own
     token protocol, parsed with vLLM's gemma4 tool and reasoning parsers
@@ -38,7 +38,7 @@ spec:
     # the path, giantswarm/models/gemma-4-31b-fp8:d4ab4f579dd3, stays.
     storageUri: oci://gsoci.azurecr.io/giantswarm/models/gemma-4-31b-fp8:d4ab4f579dd3
     format: vLLM
-    contextLength: 32768
+    contextLength: 8192
     capabilities: [chat, tools, reasoning, vision, coding]
     license: apache-2.0
   env:
@@ -62,13 +62,15 @@ spec:
     - name: TORCHINDUCTOR_CACHE_DIR
       value: /tmp/torchinductor
   # 31.7 GiB of FP8 weights load on the 48 GB card; at --gpu-memory-utilization
-  # 0.92 that leaves about 7 GiB for the KV cache, and Gemma 4 31B needs
-  # 0.188 MiB per token: 64k would need 12 GiB and vLLM refuses to start
-  # ("estimated maximum model length is 8624" once activations are counted);
-  # 32k is one full-length sequence, shorter prompts run concurrently.
+  # 0.92 that leaves 7.3 GiB for the KV cache. Gemma 4's KV need is not linear
+  # in the context (the local-attention layers hold a window each, the global
+  # layers grow with the length): vLLM measured 12.0 GiB for 64k and 9.5 GiB
+  # for 8k, and named 8640 tokens as the ceiling this card holds. 8k is that
+  # ceiling rounded down; 32k needs an fp8 KV cache, which is not yet proven on
+  # the L40S (giantswarm/agent-platform#611).
   args:
     - --gpu-memory-utilization=0.92
-    - --max-model-len=32768
+    - --max-model-len=8192
     - --max-num-seqs=4
     - --max-num-batched-tokens=8192
     - --enable-chunked-prefill
