@@ -151,14 +151,17 @@ What follows from it:
   follows); another tag, or a digest alone, fails the render naming the key, the
   release and the derived image.
 - **The Substrate range confines one runtime contract**: an exact version (the
-  BOM's `1.0.0`) or `>=X.Y.Z <X.(Y+1).0-0`, the ceiling of the pinned minor. A
-  patch of the line is carried patches or a rebuild on the same upstream pin and
-  never changes the worker and atelet bundle layout; a re-pin onto another
-  upstream release is at least a minor. The worker follows the floor and the
-  atelet follows what Flux resolves, so a later patch of the pinned minor may
-  reach the control plane ahead of the worker and a `1.1.0` never does. `0.x`,
-  `~`, `^`, a `<=` ceiling, a patch ceiling, a floor alone or the former
-  `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` fail the render (`agent-platform.substrate.validateRange`).
+  BOM's `1.0.0`) or `>=X.Y.Z <X.(Y+1).0`, the ceiling of the pinned minor and no
+  `-0` anywhere — Flux's Masterminds semver skips every prerelease while no bound
+  of a range carries one and evaluates them all once one does, so `<1.1.0-0`
+  would admit the line's dev builds. A patch of the line is carried patches or a
+  rebuild on the same upstream pin and never changes the worker and atelet bundle
+  layout; a re-pin onto another upstream release is at least a minor. The worker
+  follows the floor and the atelet follows what Flux resolves, so a later patch
+  of the pinned minor may reach the control plane ahead of the worker and a
+  `1.1.0` never does. `0.x`, `~`, `^`, a `-0` bound, a `<=` ceiling, a patch
+  ceiling, a floor alone or the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` fail the
+  render (`agent-platform.substrate.validateRange`).
 - **A Substrate re-pin is one values change**, `components.substrate.versionRange`
   and `components.substrate-crds.versionRange` together; it **rolls the pool once**
   (the WorkerPool's `workerImage` changes; one worker at a time under the budget, a
@@ -305,7 +308,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.ownedCrds[0] | string | `"mcpservers.muster.giantswarm.io"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agentgateway.versionRange | string | `">=2.2.2 <3.0.0-0"` |  |
+| components.agentgateway.versionRange | string | `">=2.2.2 <3.0.0"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
 | components.agentgateway.enabled | bool | `false` |  |
 | components.agentgateway.ownedCrds[0] | string | `"agentgatewaypolicies.agentgateway.dev"` |  |
@@ -326,7 +329,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.0.0 <1.1.0-0"` |  |
+| components.kagent.versionRange | string | `">=1.0.0 <1.1.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -348,19 +351,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.0.0 <1.1.0-0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.0.0 <1.1.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.0.0 <1.1.0-0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.0.0 <1.1.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.0.0 <1.1.0-0"` |  |
+| components.substrate.versionRange | string | `">=1.0.0 <1.1.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |

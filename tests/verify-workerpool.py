@@ -92,7 +92,7 @@ SPREAD_FLOOR_RE = re.compile(r'^\{\{- define "agent-platform\.substrate\.workerP
 # A range below any release that could carry the spread fields (a synthetic older
 # minor in the stable shape), and one at the floor, for the guard's two branches
 # once the floor is set.
-BELOW_FLOOR_RANGE = ">=0.9.0 <0.10.0-0"
+BELOW_FLOOR_RANGE = ">=0.9.0 <0.10.0"
 
 
 def values_file(tmp: str, name: str, template: dict) -> str:
@@ -266,7 +266,7 @@ def main(meta: str) -> int:
             # worker image is derived from the floor (#466, verify-worker-image.py).
             render_fails(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", "components.substrate.versionRange=0.x"],
                          'components.substrate.versionRange "0.x" does not confine one Substrate release', f"template.{key} with a components.substrate.versionRange without a floor")
-            at_floor, _, _ = kagent_release(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", f"components.substrate.versionRange=>={floor} <{next_minor(floor)}-0"])
+            at_floor, _, _ = kagent_release(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", f"components.substrate.versionRange=>={floor} <{next_minor(floor)}"])
             if template_of(at_floor).get(key) != SPREAD[key]:
                 cc.fail(f"template.{key} does not reach the kagent release verbatim with the Substrate range at {floor}: {template_of(at_floor).get(key)!r}")
             print(f"ok: template.{key} fails the render below the Substrate floor {floor} (naming the key, the floor and the range) and reaches the kagent release verbatim from it on")

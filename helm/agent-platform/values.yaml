@@ -401,7 +401,7 @@ components:  # @schema additionalProperties: true
     # 2.2.1 the chart prefixed a `v` to a bare X.Y.Z, and the agentgateway line
     # publishes no such tag): the agentgateway block below names the line's
     # release in full, and no chart this range admits renders it unpullable.
-    versionRange: ">=2.2.2 <3.0.0-0"
+    versionRange: ">=2.2.2 <3.0.0"
     valuesFrom: agentgateway
     enabled: false
     # The slice profiles set this per target: on for a workload cluster, off
@@ -465,16 +465,17 @@ components:  # @schema additionalProperties: true
     # (the Harness template's shape, the CRD fields this chart forwards); a
     # re-pin onto another upstream release is at least a minor — so the ceiling
     # is the next minor, and moving the floor is the re-pin. Flux resolves the
-    # range with Masterminds semver: a comparator without a prerelease admits
-    # no prerelease, so the line's 1.0.x-dev.giantswarm.… builds fall outside
-    # it (no semverFilter: a dev build is selected only by a consumer that sets
-    # one, README "Dev channel"), and the -0 on the ceiling keeps 1.1.0's own
-    # prereleases out. The build's image tag and Go ADK digest travel inside
+    # range with Masterminds semver, which skips every prerelease while no bound
+    # of the range carries one — and evaluates them all as soon as one bound
+    # does — so the range carries no `-0`: `<1.1.0-0` would admit the line's
+    # 1.0.x-dev.giantswarm.… builds (the dev channel is a consumer's `-0` range
+    # plus a semverFilter, README "Dev channel"). The build's image tag and Go
+    # ADK digest travel inside
     # the chart (stamped at publish), not here. Re-pinning the line is one
     # values change: this range and kagent-crds' range move together, and the
     # Substrate range follows when the line's own Substrate pin moves (README
     # "Re-pinning the kagent line").
-    versionRange: ">=1.0.0 <1.1.0-0"
+    versionRange: ">=1.0.0 <1.1.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -573,7 +574,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.0.0 <1.1.0-0"
+    versionRange: ">=1.0.0 <1.1.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -614,13 +615,15 @@ components:  # @schema additionalProperties: true
     # contract: a patch of the line is carried patches or a rebuild on the same
     # upstream pin and never changes the worker and atelet bundle layout, a
     # re-pin onto another upstream release is at least a minor — the range is
-    # `>=X.Y.Z <X.(Y+1).0-0` or an exact pin, and agent-platform.substrate
-    # .validateRange refuses any other shape. A Substrate re-pin is this
-    # floor, and the kagent range follows when the kagent line's own pin moves
+    # `>=X.Y.Z <X.(Y+1).0` — no `-0`: a prerelease bound anywhere in a range
+    # makes Flux evaluate the line's dev builds against it — or an exact pin,
+    # and agent-platform.substrate.validateRange refuses any other shape. A
+    # Substrate re-pin is this floor, and the kagent range follows when the
+    # kagent line's own pin moves
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.0.0 <1.1.0-0"
+    versionRange: ">=1.0.0 <1.1.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -642,7 +645,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.0.0 <1.1.0-0"
+    versionRange: ">=1.0.0 <1.1.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system

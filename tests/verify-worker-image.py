@@ -27,8 +27,8 @@ range to one release (`agent-platform.substrate.validateRange`). Here:
     Substrate, whatever kagent build the range admits;
   - an exact Substrate pin (the BOM shape) derives that version;
   - a range that does not confine one runtime contract (no floor, a ceiling past
-    the next minor or at the next patch, a tilde or caret range, a <= ceiling, the
-    former -gs.N shape) fails the render naming the range;
+    the next minor or at the next patch, a -0 bound, a tilde or caret range, a <=
+    ceiling, the former -gs.N shape) fails the render naming the range;
   - the kagent chart the range resolves to renders the forwarded values into the
     one WorkerPool whose spec.workerImage is the derived image, its own stamp
     overridden — and the Substrate that build was published against
@@ -59,7 +59,7 @@ WORKER = "ateom-gvisor"
 # The 4.15.2 shape of the skew: the Substrate range a minor behind the kagent
 # line's stamp (a synthetic older minor in the stable shape; the render alone is
 # asserted). The atelet of that range and this worker are one release.
-OLDER_RANGE = ">=0.9.0 <0.10.0-0"
+OLDER_RANGE = ">=0.9.0 <0.10.0"
 FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 
 
@@ -116,8 +116,8 @@ def main(meta: str) -> int:
     rng = values_yaml["components"]["substrate"]["versionRange"]
     floor = floor_of(rng)
     derived = f"{REGISTRY}/{WORKER}:{floor}"
-    if rng != f">={floor} <{next_minor(floor)}-0":
-        cc.fail(f"values.yaml's components.substrate.versionRange {rng!r} is not `>={floor} <{next_minor(floor)}-0`: the range confines the pinned minor of the Substrate line — one runtime contract, the worker image's")
+    if rng != f">={floor} <{next_minor(floor)}":
+        cc.fail(f"values.yaml's components.substrate.versionRange {rng!r} is not `>={floor} <{next_minor(floor)}`: the range confines the pinned minor of the Substrate line — one runtime contract, the worker image's — and carries no -0 (a prerelease bound anywhere makes Flux evaluate the line's dev builds against the range)")
     if values_yaml["components"]["substrate-crds"]["versionRange"] != rng:
         cc.fail(f"components.substrate-crds.versionRange differs from components.substrate.versionRange {rng!r}; the two charts are one release of the line")
 
@@ -158,12 +158,12 @@ def main(meta: str) -> int:
         cc.fail(f"an exact Substrate pin {floor!r} (the BOM shape) derives workerImage {worker_image(values)!r}; expected {derived!r}")
     print(f"ok: an exact Substrate pin (the BOM shape) derives the {floor} worker")
 
-    for bad in ("0.x", f">={floor} <{next_minor(next_minor(floor))}-0", f">={floor} <{next_patch(floor)}-0", ">=0.0.30-gs.5 <0.0.31-0",
-                f"~{tuple_of(floor)}", f"^{tuple_of(floor)}", f">={floor} <={floor}", f">={floor}", f"<{next_minor(floor)}-0"):
+    for bad in ("0.x", f">={floor} <{next_minor(next_minor(floor))}", f">={floor} <{next_patch(floor)}", f">={floor} <{next_minor(floor)}-0", ">=0.0.30-gs.5 <0.0.31-0",
+                f"~{tuple_of(floor)}", f"^{tuple_of(floor)}", f">={floor} <={floor}", f">={floor}", f"<{next_minor(floor)}"):
         render_fails(meta, ["--set", f"components.substrate.versionRange={bad}"],
                      f"components.substrate.versionRange {bad!r} does not confine one Substrate release".replace("'", '"'),
                      f"a Substrate range that does not confine one release ({bad})")
-    print("ok: a Substrate range with no floor, a ceiling past the next minor or at the next patch, the former -gs.N shape, a ~ or ^ range, a <= ceiling or a floor alone fails the render naming the range")
+    print("ok: a Substrate range with no floor, a ceiling past the next minor or at the next patch, a -0 ceiling (which admits the line's dev builds), the former -gs.N shape, a ~ or ^ range, a <= ceiling or a floor alone fails the render naming the range")
 
     # --- the kagent chart the range resolves to, with the forwarded values ---
     with tempfile.TemporaryDirectory() as tmp:

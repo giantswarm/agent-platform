@@ -427,7 +427,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
-	@grep -q 'semver: ">=2.2.2 <3.0.0-0"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.2.2 <3.0.0-0 (the flattened chart line, floored at the packaging release that renders a bare image tag as written — giantswarm/agent-platform#608)"; exit 1; }
+	@grep -q 'semver: ">=2.2.2 <3.0.0"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.2.2 <3.0.0 (the flattened chart line, floored at the packaging release that renders a bare image tag as written — giantswarm/agent-platform#608)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out

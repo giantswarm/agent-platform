@@ -82,8 +82,9 @@ LINE_IMAGES = "giantswarm/kagent"
 HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 # What the release range must admit and refuse, by shape: the line's releases
 # of the pinned minor — the floor and its patches, which never change a runtime
-# contract — and nothing else: not the line's dev builds (a Masterminds
-# comparator without a prerelease admits no prerelease), not the last release
+# contract — and nothing else: not the line's dev builds (Masterminds skips
+# every prerelease while no bound of the range carries one — and evaluates them
+# all once one does, so a `-0` anywhere in the range is refused), not the last release
 # of the former coupled `-gs.N` scheme, not the next minor (a re-pin onto
 # another upstream release) or its release candidates, not the next major.
 ADMITTED = ["{floor}", "{floor_patch}", "{floor_patch_tenfold}"]
@@ -272,6 +273,8 @@ def check_sources(docs, kagent_range: str) -> None:
     floor = kagent_range.split()[0].lstrip(">=")
     if floor != fluxsemver.base(floor):
         fail(f"components.kagent.versionRange {kagent_range!r} has a prerelease floor; the line's releases are stable semver")
+    if "-" in kagent_range:
+        fail(f"components.kagent.versionRange {kagent_range!r} carries a prerelease bound: Flux's Masterminds semver evaluates every prerelease against a range as soon as one bound carries one, so a -0 here would put every installation on the line's newest dev build")
     major, minor, patch = (int(x) for x in floor.split("."))
     shapes = {"floor": floor, "floor_patch": f"{major}.{minor}.{patch + 7}", "floor_patch_tenfold": f"{major}.{minor}.{patch + 10}",
               "last_coupled": LAST_COUPLED, "next_minor": f"{major}.{minor + 1}.0", "next_major": f"{major + 1}.0.0"}

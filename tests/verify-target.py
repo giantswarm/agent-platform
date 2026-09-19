@@ -216,7 +216,7 @@ def hold_hook_pods(here: str, there: str) -> tuple:
     return h, strip(there)
 
 # giantswarm/agent-platform#608: the Substrate range moved from the former
-# `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` shape to `>=1.0.0 <1.1.0-0`, and each side's
+# `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` shape to `>=1.0.0 <1.1.0`, and each side's
 # validateRange refuses the other's shape, so the range cannot be held by --set.
 # The two substrate OCIRepositories' semver and the kagent release's derived
 # worker image (ateom-gvisor:<floor>) are blanked on BOTH sides instead; drop
@@ -294,9 +294,9 @@ def check_golden(meta: str, connectivity: str) -> None:
         # hold_substrate_range() blanks it and the worker image derived from it
         # in both renders. Dropped once GOLDEN_REF carries them. METRIC_LABELS_HOLD
         # (#586) is the other hold in force.
-        hold_608 = ["--set", "components.kagent.versionRange=>=1.0.0 <1.1.0-0",
-                    "--set", "components.kagent-crds.versionRange=>=1.0.0 <1.1.0-0",
-                    "--set", "components.agentgateway.versionRange=>=2.2.2 <3.0.0-0",
+        hold_608 = ["--set", "components.kagent.versionRange=>=1.0.0 <1.1.0",
+                    "--set", "components.kagent-crds.versionRange=>=1.0.0 <1.1.0",
+                    "--set", "components.agentgateway.versionRange=>=2.2.2 <3.0.0",
                     "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0",
                     *AGENTGATEWAY_IMAGES_HOLD]
         # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH

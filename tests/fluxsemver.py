@@ -10,9 +10,12 @@ The rules that matter for the ranges in values.yaml (all Masterminds, none npm):
   identifiers by value, alphanumeric ones lexically, numeric below
   alphanumeric, a shorter list of identifiers below a longer one with the same
   prefix; a version without a prerelease outranks every prerelease of its core;
-- a comparator whose version has NO prerelease never admits a prerelease
-  version (">=0.11.0 <0.12.0" matches no 0.11.x-anything), which is why a range
-  meant to admit prereleases carries a `-0` on its bounds;
+- a range none of whose comparators carries a prerelease skips prerelease
+  versions entirely (">=1.0.0 <1.1.0" matches no 1.0.x-anything), and ONE
+  comparator with a prerelease — a "-0" bound — switches prerelease evaluation
+  on for the whole AND group (">=1.0.0 <1.1.0-0" admits 1.0.1-dev.x; verified
+  against Masterminds/semver v3.5.0, giantswarm/agent-platform#608), which is
+  why a stable range carries no -0 anywhere and a dev-channel range carries one;
 - a prerelease is confined to no patch tuple: ">=1.0.0-0 <1.1.0-0" admits
   1.0.1-dev.x as well; a ceiling holds the patch only when it names it;
 - a bare version is an exact match (`=`), `1.x` / `0.2.x` are minor / patch
@@ -102,9 +105,6 @@ def _check(op: str, v: Version, c: Version) -> bool:
         return v == c
     if op == "!=":
         return not v == c
-    # Masterminds: a prerelease version against a comparator without one is out.
-    if v.prerelease and not c.prerelease:
-        return False
     if op == ">":
         return c < v
     if op == ">=":
@@ -121,7 +121,14 @@ def satisfies(version: str, constraint: str) -> bool:
     v = Version(version)
     for alternative in constraint.split("||"):
         terms = [t for t in re.split(r"[\s,]+", alternative.strip()) if t]
-        if terms and all(_check(op, v, c) for t in terms for op, c in _comparators(t)):
+        if not terms:
+            continue
+        comparators = [pair for t in terms for pair in _comparators(t)]
+        # Masterminds: an AND group none of whose comparators carries a
+        # prerelease skips prerelease versions; one that does evaluates them all.
+        if v.prerelease and not any(c.prerelease for _, c in comparators):
+            continue
+        if all(_check(op, v, c) for op, c in comparators):
             return True
     return False
 

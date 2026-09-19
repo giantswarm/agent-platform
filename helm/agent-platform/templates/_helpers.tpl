@@ -661,7 +661,7 @@ Usage: include "agent-platform.substrate.pinnedVersion" $root
 {{- $range := dig "substrate" "versionRange" "" .Values.components -}}
 {{- $floor := include "agent-platform.semverRangeFloor" $range -}}
 {{- if not $floor -}}
-{{- fail (printf "components.substrate.versionRange %q has no floor: the Substrate worker image the kagent WorkerPool runs (ateom-gvisor) is derived from the range's floor, so the range is one exact version or `>=X.Y.Z <X.(Y+1).0-0` (giantswarm/agent-platform#466)" $range) -}}
+{{- fail (printf "components.substrate.versionRange %q has no floor: the Substrate worker image the kagent WorkerPool runs (ateom-gvisor) is derived from the range's floor, so the range is one exact version or `>=X.Y.Z <X.(Y+1).0` (giantswarm/agent-platform#466)" $range) -}}
 {{- end -}}
 {{- $floor -}}
 {{- end -}}
@@ -688,10 +688,13 @@ range confines one contract — and the line changes one only in a minor: a patc
 release is carried patches or a rebuild on the same upstream pin (the worker and
 atelet bundle layout stays), a re-pin onto another upstream release is at least
 a minor. So the range is an exact version (a BOM pin, `1.0.0`) or a floor with
-the ceiling of its own minor, `>=X.Y.Z <X.(Y+1).0-0`: a later patch of the pinned
-minor may reach the control plane ahead of the worker, a `1.1.0` never. `0.x`,
-`~1.0.0`, `^1.0.0`, `<1.1.0-0`, a `<=` ceiling, a patch ceiling and the former
-`>=X.Y.Z-gs.N <X.Y.(Z+1)-0` are refused. Called by
+the ceiling of its own minor, `>=X.Y.Z <X.(Y+1).0` — and no `-0` anywhere: Flux's
+Masterminds semver skips every prerelease while no bound of a range carries one
+and evaluates them all once one does, so `<1.1.0-0` would admit the line's dev
+builds. A later patch of the pinned minor may reach the control plane ahead of
+the worker, a `1.1.0` never. `0.x`, `~1.0.0`, `^1.0.0`, `<1.1.0`, a `-0` bound, a
+`<=` ceiling, a patch ceiling and the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` are
+refused. Called by
 agent-platform.validateSubstrate while components.substrate is on.
 */}}
 {{- define "agent-platform.substrate.validateRange" -}}
@@ -706,11 +709,11 @@ agent-platform.validateSubstrate while components.substrate is on.
 {{- $floor := trimPrefix ">=" (first $terms) -}}
 {{- if regexMatch $version $floor -}}
 {{- $parts := splitList "." (first (splitList "-" $floor)) -}}
-{{- $ok = eq (trimPrefix "<" (last $terms)) (printf "%s.%d.0-0" (index $parts 0) (add1 (atoi (index $parts 1)))) -}}
+{{- $ok = eq (trimPrefix "<" (last $terms)) (printf "%s.%d.0" (index $parts 0) (add1 (atoi (index $parts 1)))) -}}
 {{- end -}}
 {{- end -}}
 {{- if not $ok -}}
-{{- fail (printf "components.substrate.versionRange %q does not confine one Substrate release and its patches: the kagent WorkerPool's worker image (ateom-gvisor) follows the range's floor, the atelet follows the release Flux resolves, and only a minor of the line changes the runtime contract the two share — so the range is one exact version (1.0.0) or a floor with the ceiling of its own minor (>=1.0.0 <1.1.0-0); a worker and an atelet of different contracts boot no golden actor (giantswarm/agent-platform#466)" $range) -}}
+{{- fail (printf "components.substrate.versionRange %q does not confine one Substrate release and its patches: the kagent WorkerPool's worker image (ateom-gvisor) follows the range's floor, the atelet follows the release Flux resolves, and only a minor of the line changes the runtime contract the two share — so the range is one exact version (1.0.0) or a floor with the ceiling of its own minor and no -0 bound (>=1.0.0 <1.1.0 — a -0 anywhere makes Flux evaluate the line's dev builds against the range); a worker and an atelet of different contracts boot no golden actor (giantswarm/agent-platform#466)" $range) -}}
 {{- end -}}
 {{- end -}}
 
