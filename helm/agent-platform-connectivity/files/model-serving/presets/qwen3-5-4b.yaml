@@ -62,6 +62,16 @@ spec:
       value: /tmp/hf
     - name: VLLM_CACHE_ROOT
       value: /tmp/vllm-cache
+    # The predictor runs as the modelcar uid (1010), which the runtime image's
+    # passwd does not know: torch's inductor cache-dir lookup asks getpass for
+    # a user name and dies on getpwuid(1010) at `import vllm` unless the name
+    # comes from the environment, so the name and the cache dir are set here.
+    - name: USER
+      value: vllm
+    - name: LOGNAME
+      value: vllm
+    - name: TORCHINDUCTOR_CACHE_DIR
+      value: /tmp/torchinductor
   args:
     - --gpu-memory-utilization=0.90
     - --max-model-len=32768

@@ -69,6 +69,7 @@ LINEUP_24GB = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b")
 RETIRED_24GB = ("qwen3-4b-instruct", "qwen3-8b-fp8", "qwen3-14b")
 # The two four-GPU presets (giantswarm/agent-platform#591): tensor parallel across four L40S.
 FOUR_GPU = ("mistral-small-4", "gpt-oss-120b")
+OCI_PRESETS = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b", "gemma-4-31b", "qwen3-6-35b-a3b", "qwen3-8-27b-l40s", "mistral-small-4", "gpt-oss-120b", "qwen3-8-flash-next-nvfp4")
 # The discovery block this change adds, cut out for the byte-identity check.
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
@@ -259,6 +260,7 @@ else:
         lineup24 = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml")
         lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml")
         fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
+        uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -346,6 +348,17 @@ else:
         head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-flash-next-nvfp4\n", "", head[DISCOVERY], flags=re.M)
         expect("the OCI preset's name cut out of the discovery list once", ncuts, 1)
         print(f"note: the preset qwen3-8-flash-next-nvfp4 ships on this side (#553) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
+    # Every preset served from a model image carries USER, LOGNAME and
+    # TORCHINDUCTOR_CACHE_DIR on this side (giantswarm/agent-platform#591: the
+    # predictor runs as the modelcar uid, which the runtime image's passwd does
+    # not know); a golden from before renders the same ConfigMaps without them,
+    # so those ConfigMaps are left out of the comparison on both sides. Drop this
+    # once GOLDEN_REF carries the change.
+    if not uidenv:
+        for name in OCI_PRESETS:
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: the model-image presets carry the modelcar uid environment on this side (#591) and not on {ref}: their ConfigMaps are left out of the comparison")
     # The four 24 GB presets of the September 2026 line-up ship on this side
     # (giantswarm/agent-platform#591) and the three Qwen3 small presets they
     # replace do not; a golden from before has it the other way round, so the
