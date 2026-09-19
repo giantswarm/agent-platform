@@ -5123,15 +5123,17 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       podSelector: {}
       # The hosts the verification reaches on TCP 443, as Cilium toFQDNs
       # entries (matchName a host; matchPattern with `*` for one label of a
-      # name). The defaults: the platform's registry and the Azure Container
-      # Registry data endpoints a blob read is redirected to
-      # (<registry>.<region>.data.azurecr.io), the Sigstore TUF repository
-      # (the trust root every bundle is verified against) and Rekor (the
-      # transparency log the keyless attestor names). An installation that
-      # verifies images of another registry adds its hosts.
+      # name). The defaults: the platform's registry and the Azure Storage
+      # accounts it redirects a blob read to (the bundle's layer:
+      # <account>.blob.core.windows.net — a registry with dedicated data
+      # endpoints redirects to <registry>.<region>.data.azurecr.io instead
+      # and names that pattern here), the Sigstore TUF repository (the trust
+      # root every bundle is verified against) and Rekor (the transparency
+      # log the keyless attestor names). An installation that verifies images
+      # of another registry adds its hosts.
       hosts:
         - matchName: gsoci.azurecr.io
-        - matchPattern: "*.*.data.azurecr.io"
+        - matchPattern: "*.blob.core.windows.net"
         - matchName: tuf-repo-cdn.sigstore.dev
         - matchName: rekor.sigstore.dev
   # Network policies of the serving namespace, rendered under networkPolicy

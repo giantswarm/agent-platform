@@ -236,7 +236,7 @@ IV_ON = {"enabled": True, "images": IV_IMAGES, "attestors": IV_ATTESTORS, "type"
 EGRESS_SUFFIX = "-model-serving-image-verification-egress"
 EGRESS_DEFAULT_NAMESPACE = "kyverno"
 EGRESS_DEFAULT_SELECTOR = {"app.kubernetes.io/component": "admission-controller", "app.kubernetes.io/instance": "kyverno"}
-EGRESS_DEFAULT_HOSTS = [{"matchName": "gsoci.azurecr.io"}, {"matchPattern": "*.*.data.azurecr.io"},
+EGRESS_DEFAULT_HOSTS = [{"matchName": "gsoci.azurecr.io"}, {"matchPattern": "*.blob.core.windows.net"},
                         {"matchName": "tuf-repo-cdn.sigstore.dev"}, {"matchName": "rekor.sigstore.dev"}]
 EGRESS_OWN = {"enabled": True, "namespace": "policy", "podSelector": {"app": "kyverno-admission"},
               "hosts": [{"matchName": "registry.example.com"}, {"matchPattern": "*.sigstore.example.com"}]}
@@ -933,7 +933,7 @@ def check_image_verification_egress(connectivity: str, cilium: list[dict], docs:
     if "toCIDR" in str(policy["spec"]) or "world" in str(policy["spec"]):
         fail("the egress policy must stay a toFQDNs allow-list: no toCIDR, no world entity")
     ok("the default cilium render carries the Kyverno egress policy: the admission controller in kyverno, DNS through the proxy, "
-       "443 to the registry, its data endpoints, the Sigstore TUF repository and Rekor — a toFQDNs allow-list")
+       "443 to the registry, the storage accounts its blob reads redirect to, the Sigstore TUF repository and Rekor — a toFQDNs allow-list")
     if any(d["metadata"]["name"].endswith(EGRESS_SUFFIX) for d in docs):
         fail("the kubernetes flavour renders the Kyverno egress policy; a NetworkPolicy has no names to allow")
     for description, flags in (("kyvernoEgress.enabled=false", ["--set", "modelServing.imageVerification.kyvernoEgress.enabled=false"]),
