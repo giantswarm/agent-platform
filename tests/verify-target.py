@@ -217,12 +217,18 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries them. METRIC_LABELS_HOLD (#586) is the other hold in force.
         hold_580 = ["--set", "kagent.registry=gsoci.azurecr.io", "--set", "substrate.image.registry=gsoci.azurecr.io/giantswarm/substrate",
                     "--set", "flux-engine.instance.distribution.registry=gsoci.azurecr.io/giantswarm/fluxcd"]
+        # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH
+        # sides: modelServing.imageVerification is on by default now, so a serving
+        # shape under Kyverno renders the image-verification policy that GOLDEN_REF's
+        # defaults do not (both charts mirror the block). Dropped once GOLDEN_REF
+        # carries the switch.
+        hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
         shapes = [
-            ("meta default", meta, [*hold_580, *METRIC_LABELS_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_580, *METRIC_LABELS_HOLD]),
-            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD]),
-            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD]),
+            ("meta default", meta, [*hold_580, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_580, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
