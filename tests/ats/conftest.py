@@ -99,7 +99,7 @@ PODCERT_SIGNERS = {"servicedns.podcert.ate.dev/identity": "service-dns-ca-pool",
 # The CRD charts' CRDs: their templates carry helm.sh/resource-policy: keep, so
 # uninstalling the kagent-crds release leaves the kagent CRDs — and every
 # AgentTemplate and RemoteMCPServer — in place, and uninstalling substrate-crds
-# leaves the three ate.dev CRDs (the Substrate line from v0.0.27-gs.3 on). A
+# leaves the three ate.dev CRDs (the Substrate line's CRD templates carry keep). A
 # consumer's uninstall can therefore always delete its CRs, whatever order a
 # concurrent uninstall finalizes the releases in (giantswarm/agent-platform#385).
 KAGENT_CRDS = {f"{plural}.kagent.dev" for plural in ("agenttemplates", "harnesses", "modelconfigs", "modelproviderconfigs", "remotemcpservers")}

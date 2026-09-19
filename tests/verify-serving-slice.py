@@ -312,7 +312,7 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
     params = docs.get(("AgentgatewayParameters", "models"))
     if not params:
         sys.exit("FAIL: no AgentgatewayParameters models: the controller's default Deployment carries no seccomp profile and is denied by restrict-seccomp-strict")
-    for needle in ("      replicas: 1", "      type: LoadBalancer", "    repository: giantswarm/agentgateway"):
+    for needle in ("      replicas: 1", "      type: LoadBalancer", "    repository: giantswarm/agentgateway-upstream/agentgateway", "    tag: 2.0.0"):
         need(params, needle, "the models data plane parameters")
     if params.count("            seccompProfile:\n              type: RuntimeDefault") + params.count("                seccompProfile:\n                  type: RuntimeDefault") != 2:
         sys.exit(f"FAIL: the models data plane lacks RuntimeDefault seccomp on pod and container:\n{params}")

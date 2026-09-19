@@ -13,8 +13,8 @@ The rules that matter for the ranges in values.yaml (all Masterminds, none npm):
 - a comparator whose version has NO prerelease never admits a prerelease
   version (">=0.11.0 <0.12.0" matches no 0.11.x-anything), which is why a range
   meant to admit prereleases carries a `-0` on its bounds;
-- a prerelease is confined to no patch tuple: ">=0.11.0-gs.1 <0.12.0-0" admits
-  0.11.1-dev.x as well; a ceiling holds the patch only when it names it;
+- a prerelease is confined to no patch tuple: ">=1.0.0-0 <1.1.0-0" admits
+  1.0.1-dev.x as well; a ceiling holds the patch only when it names it;
 - a bare version is an exact match (`=`), `1.x` / `0.2.x` are minor / patch
   ranges without prerelease bounds, comparators are AND-ed by space or comma
   and OR-ed by `||`; Masterminds rejects `*-*`.

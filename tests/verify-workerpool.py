@@ -27,7 +27,7 @@ The one pool is also the platform's failure domain (#472):
     release and the resolved kagent chart's WorkerPool verbatim (they are unset
     by default; an installation sets them);
   - `topologySpreadConstraints` and `podAntiAffinity` are PRUNED SILENTLY by the
-    WorkerPool CRD of every Substrate release before 0.0.30-gs.2 (a structural
+    WorkerPool CRD of every Substrate release before the line's 1.0.0 (a structural
     schema): the render refuses them naming the key, the floor and the range
     while components.substrate.versionRange's floor is below the release that
     carries the fields (agent-platform.substrate.workerPoolSpreadFloor in
@@ -84,14 +84,15 @@ SPREAD = {
                                             "labelSelector": {"matchLabels": {"ate.dev/worker-pool": "kagent-default"}}}}]},
 }
 # The Substrate line's ungated WorkerPool.spec.template fields
-# (pkg/api/v1alpha1/workerpool_types.go; v0.0.30-gs.2 adds the two gated ones);
+# (pkg/api/v1alpha1/workerpool_types.go; the two gated ones are the line's carried patch);
 # the guard names them.
 TEMPLATE_FIELDS = "labels, annotations, nodeSelector, tolerations, priorityClassName, nodeAffinity, resources"
 WORKER_LABEL = "ate.dev/worker-pool"
 SPREAD_FLOOR_RE = re.compile(r'^\{\{- define "agent-platform\.substrate\.workerPoolSpreadFloor" -\}\}(\S*?)\{\{- end -\}\}$', re.M)
-# A range below any release that could carry the spread fields, and one at the
-# floor, for the guard's two branches once the floor is set.
-BELOW_FLOOR_RANGE = ">=0.0.30-gs.1 <0.0.31-0"
+# A range below any release that could carry the spread fields (a synthetic older
+# minor in the stable shape), and one at the floor, for the guard's two branches
+# once the floor is set.
+BELOW_FLOOR_RANGE = ">=0.9.0 <0.10.0-0"
 
 
 def values_file(tmp: str, name: str, template: dict) -> str:
@@ -139,10 +140,10 @@ def render_fails(meta: str, flags: list[str], needle: str, what: str) -> None:
         cc.fail(f"{what} failed the render for the wrong reason (expected {needle!r}):\n{r.stderr}")
 
 
-def next_patch(version: str) -> str:
-    """X.Y.(Z+1) of a version — the ceiling a Substrate range confines itself to (#466)."""
-    x, y, z = version.split("-", 1)[0].split(".")
-    return f"{x}.{y}.{int(z) + 1}"
+def next_minor(version: str) -> str:
+    """X.(Y+1).0 of a version — the ceiling a Substrate range confines itself to (#466)."""
+    x, y, _ = version.split("-", 1)[0].split(".")
+    return f"{x}.{int(y) + 1}.0"
 
 
 def spread_floor(meta: str) -> str:
@@ -265,7 +266,7 @@ def main(meta: str) -> int:
             # worker image is derived from the floor (#466, verify-worker-image.py).
             render_fails(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", "components.substrate.versionRange=0.x"],
                          'components.substrate.versionRange "0.x" does not confine one Substrate release', f"template.{key} with a components.substrate.versionRange without a floor")
-            at_floor, _, _ = kagent_release(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", f"components.substrate.versionRange=>={floor} <{next_patch(floor)}-0"])
+            at_floor, _, _ = kagent_release(meta, ["-f", values_file(tmp, f"spread-{key}", spread), "--set", f"components.substrate.versionRange=>={floor} <{next_minor(floor)}-0"])
             if template_of(at_floor).get(key) != SPREAD[key]:
                 cc.fail(f"template.{key} does not reach the kagent release verbatim with the Substrate range at {floor}: {template_of(at_floor).get(key)!r}")
             print(f"ok: template.{key} fails the render below the Substrate floor {floor} (naming the key, the floor and the range) and reaches the kagent release verbatim from it on")

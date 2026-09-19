@@ -86,6 +86,17 @@ METRIC_LABELS_HOLD = [
     "--set", "gateway.metricLabels.agent_namespace.expression=source.unverifiedWorkload.namespace",
     "--set", "gateway.metricLabels.user.expression=jwt.email",
 ]
+# giantswarm/agent-platform#608: both charts name the agentgateway line's 2.0.0
+# under its nested names in full (the controller and the data plane), and
+# GOLDEN_REF names the flattened controller repository and the v1.5.1-gs.4 data
+# plane. Held equal on BOTH sides of the meta and the connectivity renders;
+# dropped once GOLDEN_REF carries #608.
+AGENTGATEWAY_IMAGES_HOLD = [
+    "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
+    "--set", "agentgateway.controller.image.tag=2.0.0",
+    "--set", "agentgateway.proxy.image.repository=giantswarm/agentgateway-upstream/agentgateway",
+    "--set", "agentgateway.proxy.image.tag=2.0.0",
+]
 # Makefile.custom.mk's WIRING_BACKSTAGE: the portal on, whose CSP carries the avatars host.
 CONN_BACKSTAGE = [
     *VM, "--namespace", "agent-platform",
@@ -204,6 +215,26 @@ def hold_hook_pods(here: str, there: str) -> tuple:
         print("note: #593 hold — the hook pods' resources block (the memory limit and its comment) and the backup's release pre-filter lines are left out of the golden comparison")
     return h, strip(there)
 
+# giantswarm/agent-platform#608: the Substrate range moved from the former
+# `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` shape to `>=1.0.0 <1.1.0-0`, and each side's
+# validateRange refuses the other's shape, so the range cannot be held by --set.
+# The two substrate OCIRepositories' semver and the kagent release's derived
+# worker image (ateom-gvisor:<floor>) are blanked on BOTH sides instead; drop
+# once GOLDEN_REF carries #608.
+SUBSTRATE_RANGE = re.compile(r'(url: oci://gsoci\.azurecr\.io/giantswarm/substrate/helm/substrate(?:-crds)?\n  ref:\n    semver: )"[^"]*"')
+WORKER_IMAGE = re.compile(r"(workerImage: gsoci\.azurecr\.io/giantswarm/substrate/ateom-gvisor:)\S+")
+
+
+def hold_substrate_range(here: str, there: str) -> tuple:
+    """The two meta renders with #608's Substrate range and derived worker image held equal on both sides."""
+    def strip(render: str) -> str:
+        render = SUBSTRATE_RANGE.sub(r'\1"<held: #608>"', render)
+        return WORKER_IMAGE.sub(r"\1<held: #608>", render)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #608 hold — the substrate and substrate-crds ranges and the derived worker image tag are left out of the golden comparison")
+    return h, strip(there)
+
+
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -253,42 +284,33 @@ def check_golden(meta: str, connectivity: str) -> None:
         # defaults' move to gsoci, the kserve 0.4.x ranges and the forwarded
         # imageVerification defaults (#575) are the newest to have reached that
         # point.
-        # The hold for giantswarm/agent-platform#580, applied to BOTH sides: the
-        # kagent line's and the Substrate line's chart sources from gsoci (the
-        # four components' `repository` defaults) and the floors 0.11.0-gs.22
-        # and 0.0.30-gs.5, each line's first native release (the derived
-        # worker image follows the Substrate floor) — meta chart keys only.
-        # Dropped once GOLDEN_REF carries them. METRIC_LABELS_HOLD (#586) is
-        # the other hold in force.
-        hold_580 = ["--set", "components.kagent.repository=oci://gsoci.azurecr.io/giantswarm/kagent/helm",
-                    "--set", "components.kagent-crds.repository=oci://gsoci.azurecr.io/giantswarm/kagent/helm",
-                    "--set", "components.substrate.repository=oci://gsoci.azurecr.io/giantswarm/substrate/helm",
-                    "--set", "components.substrate-crds.repository=oci://gsoci.azurecr.io/giantswarm/substrate/helm",
-                    "--set", "components.substrate.versionRange=>=0.0.30-gs.5 <0.0.31-0",
-                    "--set", "components.substrate-crds.versionRange=>=0.0.30-gs.5 <0.0.31-0",
-                    "--set", "components.kagent.versionRange=>=0.11.0-gs.22 <0.11.1-0",
-                    "--set", "components.kagent-crds.versionRange=>=0.11.0-gs.22 <0.11.1-0"]
+        # The hold for giantswarm/agent-platform#608, applied to BOTH sides: the
+        # kagent line at its decoupled 1.0 range, the agentgateway component
+        # floored at the packaging release that renders a bare tag as written,
+        # the Substrate egress dataplane at the agentgateway line's 2.0.0 — meta
+        # chart keys — and AGENTGATEWAY_IMAGES_HOLD on every render. The
+        # Substrate range cannot be set on both sides (GOLDEN_REF's validateRange
+        # admits the former `-gs.N` shape only, this tree's the stable one), so
+        # hold_substrate_range() blanks it and the worker image derived from it
+        # in both renders. Dropped once GOLDEN_REF carries them. METRIC_LABELS_HOLD
+        # (#586) is the other hold in force.
+        hold_608 = ["--set", "components.kagent.versionRange=>=1.0.0 <1.1.0-0",
+                    "--set", "components.kagent-crds.versionRange=>=1.0.0 <1.1.0-0",
+                    "--set", "components.agentgateway.versionRange=>=2.2.2 <3.0.0-0",
+                    "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0",
+                    *AGENTGATEWAY_IMAGES_HOLD]
         # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH
         # sides: modelServing.imageVerification is on by default now, so a serving
         # shape under Kyverno renders the image-verification policy that GOLDEN_REF's
         # defaults do not (both charts mirror the block). Dropped once GOLDEN_REF
         # carries the switch.
         hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
-        # The hold for the substrate chart's third-party image defaults pinned to
-        # gsoci in the forwarded block (#575, #580; values.yaml substrate.images):
-        # the same four keys on both sides, meta renders only (the connectivity
-        # chart forwards nothing of the block itself). Dropped once GOLDEN_REF
-        # carries them.
-        hold_images = ["--set", "substrate.images.postgres=gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15",
-                       "--set", "substrate.images.rustfs=gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358",
-                       "--set", "substrate.images.awsCli=amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73",
-                       "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway:v1.5.1-gs.4"]
         shapes = [
-            ("meta default", meta, [*hold_580, *METRIC_LABELS_HOLD, *hold_iv, *hold_images]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_580, *METRIC_LABELS_HOLD, *hold_iv, *hold_images]),
-            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv]),
-            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
+            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
@@ -297,6 +319,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)
                 here, there = hold_hook_pods(here, there)
+                here, there = hold_substrate_range(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

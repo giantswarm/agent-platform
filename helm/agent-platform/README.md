@@ -133,13 +133,13 @@ per-agent placement values are gone, capacity is the WorkerPool".
 The pool's `workerImage` — the gVisor worker every actor runs in — is **derived by
 this chart** from `components.substrate.versionRange`'s floor:
 `<substrate.image.registry>/ateom-gvisor:<floor>` (`gsoci.azurecr.io/giantswarm/
-substrate/ateom-gvisor:0.0.30-gs.5` today), merged over the kagent block the chart forwards.
+substrate/ateom-gvisor:1.0.0` today), merged over the kagent block the chart forwards.
 The kagent chart stamps a worker of its own at publish (the Substrate its build was
 published against), and that stamp never reaches the cluster: the atelet the
 substrate release installs and the worker the WorkerPool runs are one Substrate
 release **whatever kagent build the kagent range admits**. Chart 4.15.2 showed
-why — its open kagent range admitted 0.11.0-gs.14, which stamped a 0.0.30 worker
-under the chart's 0.0.27 atelet; Substrate 0.0.30 had renamed the pause bundle,
+why — its open kagent range admitted a build that stamped the next Substrate's
+worker under the chart's older atelet; that Substrate had renamed the pause bundle,
 every golden boot failed on `bundles/_pause/config.json`, every AgentTemplate
 stayed `Ready=False … compiling`, and nothing on any hop named the skew.
 
@@ -150,12 +150,15 @@ What follows from it:
   by a path other than `substrate.image.registry`, which the derived image already
   follows); another tag, or a digest alone, fails the render naming the key, the
   release and the derived image.
-- **The Substrate range confines one release**: an exact version (the BOM's
-  `0.0.30-gs.5`) or `>=X.Y.Z-gs.N <X.Y.(Z+1)-0`. The worker follows the floor and
-  the atelet follows what Flux resolves, so a later `gs.N` of the pinned release may
-  reach the control plane ahead of the worker (the line moves the pin when a patch
-  changes the runtime) and a `0.0.31` never does. `0.x`, `~`, `^`, a `<=` ceiling
-  or a floor alone fail the render (`agent-platform.substrate.validateRange`).
+- **The Substrate range confines one runtime contract**: an exact version (the
+  BOM's `1.0.0`) or `>=X.Y.Z <X.(Y+1).0-0`, the ceiling of the pinned minor. A
+  patch of the line is carried patches or a rebuild on the same upstream pin and
+  never changes the worker and atelet bundle layout; a re-pin onto another
+  upstream release is at least a minor. The worker follows the floor and the
+  atelet follows what Flux resolves, so a later patch of the pinned minor may
+  reach the control plane ahead of the worker and a `1.1.0` never does. `0.x`,
+  `~`, `^`, a `<=` ceiling, a patch ceiling, a floor alone or the former
+  `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` fail the render (`agent-platform.substrate.validateRange`).
 - **A Substrate re-pin is one values change**, `components.substrate.versionRange`
   and `components.substrate-crds.versionRange` together; it **rolls the pool once**
   (the WorkerPool's `workerImage` changes; one worker at a time under the budget, a
@@ -208,7 +211,7 @@ worker is lost, a session paused on it too; the goldens are untouched (a templat
 change re-snapshots nothing). Land it in a quiet window.
 
 **Spread.** `WorkerPool.spec.template` carries `topologySpreadConstraints` and
-`podAntiAffinity` from Substrate `0.0.30-gs.2` (the carried patch
+`podAntiAffinity` from the Substrate line's `1.0.0` on (the carried patch
 giantswarm/giantswarm#37797) — every release before it prunes both silently. The
 render **refuses the two keys** naming the key, the floor and the range while
 `components.substrate.versionRange`'s floor is below that release
@@ -302,7 +305,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.ownedCrds[0] | string | `"mcpservers.muster.giantswarm.io"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agentgateway.versionRange | string | `"2.x"` |  |
+| components.agentgateway.versionRange | string | `">=2.2.2 <3.0.0-0"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
 | components.agentgateway.enabled | bool | `false` |  |
 | components.agentgateway.ownedCrds[0] | string | `"agentgatewaypolicies.agentgateway.dev"` |  |
@@ -323,7 +326,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=0.11.0-gs.22 <0.11.1-0"` |  |
+| components.kagent.versionRange | string | `">=1.0.0 <1.1.0-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -345,19 +348,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=0.11.0-gs.22 <0.11.1-0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.0.0 <1.1.0-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.30-gs.5 <0.0.31-0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.0.0 <1.1.0-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.30-gs.5 <0.0.31-0"` |  |
+| components.substrate.versionRange | string | `">=1.0.0 <1.1.0-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -1033,10 +1036,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.agentgatewayRoute.hostname | string | `""` |  |
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
-| agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-controller"` |  |
+| agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
+| agentgateway.controller.image.tag | string | `"2.0.0"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
-| agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway"` |  |
+| agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
+| agentgateway.proxy.image.tag | string | `"2.0.0"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1253,7 +1258,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.images.postgres | string | `"gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"` |  |
 | substrate.images.rustfs | string | `"gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358"` |  |
 | substrate.images.awsCli | string | `"amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73"` |  |
-| substrate.images.agentgateway | string | `"gsoci.azurecr.io/giantswarm/agentgateway:v1.5.1-gs.4"` |  |
+| substrate.images.agentgateway | string | `"gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0"` |  |
 | substrate.atelet.storageBackend | string | `"s3"` |  |
 | substrate.atelet.nodeSelector | object | `{}` |  |
 | substrate.atelet.tolerations | list | `[]` |  |

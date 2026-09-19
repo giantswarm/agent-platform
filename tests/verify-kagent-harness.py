@@ -11,7 +11,7 @@ agent chart 1.x labels every template agent-platform.giantswarm.io/harness:
 kagent, and that one label is the whole admission contract.
 
 Through 4.7.19 the connectivity chart rendered that Harness from a digest the
-meta chart pinned. Since 4.8.0 the kagent chart (0.11.0-gs.6+) renders it from
+meta chart pinned. Since 4.8.0 the kagent chart renders it from
 its own Go ADK image at the digest stamped into the chart at publish, and the
 meta chart forwards only the GS policy. The chart's own default selector key
 (kagent.dev/harness: kagent) has to go, and Helm merges maps on coalesce: through
@@ -19,7 +19,7 @@ meta chart forwards only the GS policy. The chart's own default selector key
 but a kagent HelmRelease that pre-existed the cut-over is PATCHED, not created,
 and a JSON merge patch removes a null key instead of storing it, so the default
 came back and the live Harness admitted no template (graveler, 2026-09-13,
-giantswarm/agent-platform#418). Since 0.11.0-gs.9 the line's Harness template
+giantswarm/agent-platform#418). The line's Harness template
 drops every selector label whose value is the empty string, and the meta chart
 forwards "" — a value every path stores. This test asserts:
   - the connectivity chart renders NO Harness and reads no kagent.harness key;
@@ -174,7 +174,7 @@ def main(connectivity: str, meta: str) -> int:
     live = merge_patch({"registry": "ghcr.io"}, values)  # a 3.x release: no harness block at all
     forwarded = live["harness"]["allowedAgentTemplates"]["selector"]["matchLabels"]
     coalesced = {**CHART_DEFAULT_SELECTOR, **forwarded}  # Helm coalesce: the release's values win, key by key
-    effective = {k: v for k, v in coalesced.items() if v != ""}  # the line's template drops an empty value (0.11.0-gs.9+)
+    effective = {k: v for k, v in coalesced.items() if v != ""}  # the line's template drops an empty value
     if effective != {HARNESS_LABEL: "kagent"}:
         fail(f"replayed as a patch onto a pre-existing kagent release and coalesced with the chart's default, the Harness selects by "
              f"{effective}; the admission contract is {HARNESS_LABEL}=kagent alone (#418)")

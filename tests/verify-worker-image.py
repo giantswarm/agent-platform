@@ -6,9 +6,9 @@ chart's own Substrate pin, never the kagent build's stamp
 The chart pins Substrate and kagent as two independent ranges, and every kagent
 build stamps into its chart the worker image (`substrateWorkerPool.workerImage`,
 ateom-gvisor) of the Substrate it was published against. Chart 4.15.2 pinned
-Substrate 0.0.27-gs.9 with an open kagent range; kagent 0.11.0-gs.14 moved the
-line to Substrate 0.0.30 and was admitted, so the 0.0.30 worker ran under the
-0.0.27 atelet — the pause bundle had been renamed, every golden boot failed on
+one Substrate release with an open kagent range; a kagent build that moved the
+line to the next Substrate was admitted, so the newer worker ran under the
+older atelet — the pause bundle had been renamed, every golden boot failed on
 `bundles/_pause/config.json`, and nothing on any hop named the skew. The chart
 now DERIVES the worker from `components.substrate.versionRange`'s floor
 (`agent-platform.substrate.workerImage`: `<substrate.image.registry>/ateom-gvisor:
@@ -22,12 +22,13 @@ range to one release (`agent-platform.substrate.validateRange`). Here:
   - an installation's own workerImage stands verbatim while its tag is the pinned
     release; another tag, or a digest without a tag, fails the render naming the
     key, the release and the derived image;
-  - the 4.15.2 shape — the Substrate range at 0.0.27-gs.9, the kagent range as it
-    is — forwards the 0.0.27-gs.9 worker: the worker follows the chart's
+  - the 4.15.2 shape — the Substrate range a minor behind, the kagent range as it
+    is — forwards that minor's worker: the worker follows the chart's
     Substrate, whatever kagent build the range admits;
   - an exact Substrate pin (the BOM shape) derives that version;
-  - a range that does not confine one release (no floor, a ceiling past the next
-    patch, a tilde or caret range, a <= ceiling) fails the render naming the range;
+  - a range that does not confine one runtime contract (no floor, a ceiling past
+    the next minor or at the next patch, a tilde or caret range, a <= ceiling, the
+    former -gs.N shape) fails the render naming the range;
   - the kagent chart the range resolves to renders the forwarded values into the
     one WorkerPool whose spec.workerImage is the derived image, its own stamp
     overridden — and the Substrate that build was published against
@@ -55,9 +56,10 @@ _spec.loader.exec_module(cc)
 KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
 REGISTRY = "gsoci.azurecr.io/giantswarm/substrate"
 WORKER = "ateom-gvisor"
-# The 4.15.2 shape of the skew: the Substrate range one release behind the kagent
-# line's stamp. The atelet of that range and this worker are one release.
-OLD_RANGE = ">=0.0.27-gs.9 <0.0.28-0"
+# The 4.15.2 shape of the skew: the Substrate range a minor behind the kagent
+# line's stamp (a synthetic older minor in the stable shape; the render alone is
+# asserted). The atelet of that range and this worker are one release.
+OLDER_RANGE = ">=0.9.0 <0.10.0-0"
 FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 
 
@@ -68,6 +70,12 @@ def tuple_of(version: str) -> str:
 def next_patch(version: str) -> str:
     x, y, z = tuple_of(version).split(".")
     return f"{x}.{y}.{int(z) + 1}"
+
+
+def next_minor(version: str) -> str:
+    """X.(Y+1).0 of a version — the ceiling a Substrate range confines itself to (#466)."""
+    x, y, _ = tuple_of(version).split(".")
+    return f"{x}.{int(y) + 1}.0"
 
 
 def floor_of(rng: str) -> str:
@@ -108,8 +116,8 @@ def main(meta: str) -> int:
     rng = values_yaml["components"]["substrate"]["versionRange"]
     floor = floor_of(rng)
     derived = f"{REGISTRY}/{WORKER}:{floor}"
-    if rng != f">={floor} <{next_patch(floor)}-0":
-        cc.fail(f"values.yaml's components.substrate.versionRange {rng!r} is not `>={floor} <{next_patch(floor)}-0`: the range confines one Substrate release, the worker image's")
+    if rng != f">={floor} <{next_minor(floor)}-0":
+        cc.fail(f"values.yaml's components.substrate.versionRange {rng!r} is not `>={floor} <{next_minor(floor)}-0`: the range confines the pinned minor of the Substrate line — one runtime contract, the worker image's")
     if values_yaml["components"]["substrate-crds"]["versionRange"] != rng:
         cc.fail(f"components.substrate-crds.versionRange differs from components.substrate.versionRange {rng!r}; the two charts are one release of the line")
 
@@ -133,28 +141,29 @@ def main(meta: str) -> int:
     if worker_image(values) != own:
         cc.fail(f"an installation's own workerImage tagged with the pinned release does not reach the kagent release verbatim: {worker_image(values)!r}")
     print(f"ok: an own workerImage tagged {floor} reaches the kagent release verbatim ({own})")
-    for wrong, what in ((f"{REGISTRY}/{WORKER}:0.0.30-gs.1", "another tag"), (f"{REGISTRY}/{WORKER}@sha256:{'0' * 64}", "a digest without a tag")):
+    for wrong, what in ((f"{REGISTRY}/{WORKER}:{next_patch(floor)}", "another tag"), (f"{REGISTRY}/{WORKER}@sha256:{'0' * 64}", "a digest without a tag")):
         render_fails(meta, ["--set", f"kagent.substrateWorkerPool.workerImage={wrong}"],
                      f"kagent.substrateWorkerPool.workerImage ({wrong}) does not carry the Substrate release this chart pins ({floor}, the floor of components.substrate.versionRange)",
                      f"an own workerImage with {what}")
     print(f"ok: an own workerImage with another tag or a digest alone fails the render naming the key, the pinned release {floor} and the derived image")
 
-    values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={OLD_RANGE}"])
-    old_floor = floor_of(OLD_RANGE)
+    values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={OLDER_RANGE}"])
+    old_floor = floor_of(OLDER_RANGE)
     if worker_image(values) != f"{REGISTRY}/{WORKER}:{old_floor}":
-        cc.fail(f"with the Substrate range at {OLD_RANGE!r} the kagent release carries workerImage {worker_image(values)!r}; expected the {old_floor} worker — the worker follows the chart's Substrate, not the kagent build the range admits (the 4.15.2 skew, #466)")
-    print(f"ok: the 4.15.2 shape (Substrate {OLD_RANGE!r}, the kagent range untouched) forwards the {old_floor} worker — the worker follows the chart's Substrate pin")
+        cc.fail(f"with the Substrate range at {OLDER_RANGE!r} the kagent release carries workerImage {worker_image(values)!r}; expected the {old_floor} worker — the worker follows the chart's Substrate, not the kagent build the range admits (the 4.15.2 skew, #466)")
+    print(f"ok: the 4.15.2 shape (Substrate {OLDER_RANGE!r}, the kagent range untouched) forwards the {old_floor} worker — the worker follows the chart's Substrate pin")
 
     values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={floor}"])
     if worker_image(values) != derived:
         cc.fail(f"an exact Substrate pin {floor!r} (the BOM shape) derives workerImage {worker_image(values)!r}; expected {derived!r}")
     print(f"ok: an exact Substrate pin (the BOM shape) derives the {floor} worker")
 
-    for bad in ("0.x", f">={floor} <{next_patch(next_patch(floor))}-0", f"~{tuple_of(floor)}", f"^{tuple_of(floor)}", f">={floor} <={floor}", f">={floor}", f"<{next_patch(floor)}-0"):
+    for bad in ("0.x", f">={floor} <{next_minor(next_minor(floor))}-0", f">={floor} <{next_patch(floor)}-0", ">=0.0.30-gs.5 <0.0.31-0",
+                f"~{tuple_of(floor)}", f"^{tuple_of(floor)}", f">={floor} <={floor}", f">={floor}", f"<{next_minor(floor)}-0"):
         render_fails(meta, ["--set", f"components.substrate.versionRange={bad}"],
                      f"components.substrate.versionRange {bad!r} does not confine one Substrate release".replace("'", '"'),
                      f"a Substrate range that does not confine one release ({bad})")
-    print("ok: a Substrate range with no floor, a ceiling past the next patch, a ~ or ^ range, a <= ceiling or a floor alone fails the render naming the range")
+    print("ok: a Substrate range with no floor, a ceiling past the next minor or at the next patch, the former -gs.N shape, a ~ or ^ range, a <= ceiling or a floor alone fails the render naming the range")
 
     # --- the kagent chart the range resolves to, with the forwarded values ---
     with tempfile.TemporaryDirectory() as tmp:
