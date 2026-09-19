@@ -73,7 +73,7 @@ Linux machine executor.
 
 **Substrate from the chart under test.** Nothing of Substrate is installed by
 hand: `components.substrate` / `substrate-crds` follow `components.kagent` (the
-Substrate line's charts from `oci://ghcr.io/giantswarm/substrate/helm`), the
+Substrate line's charts from `oci://gsoci.azurecr.io/giantswarm/substrate/helm`), the
 connectivity release's bootstrap hook mints the CA/JWT pools and the
 authentication config, the kagent chart renders the WorkerPool, the
 connectivity chart the platform Harness. What the smoke sets

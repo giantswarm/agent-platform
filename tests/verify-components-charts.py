@@ -57,7 +57,8 @@ for. A RANGE that admits nothing published yet (a line re-pinned ahead of its
 release) is rendered against the newest chart the line has while UNRELEASED
 names the release it waits for (fallback()); the entry goes with the release.
 
-Network: pulls from gsoci.azurecr.io and ghcr.io (three attempts each); the tag
+Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
+chart (three attempts each); the tag
 list comes from the registry's anonymous `/v2/<repo>/tags/list`. Every Helm call
 is bounded (TIMEOUT). PyYAML is in the CI image (the job installs python3-yaml).
 """

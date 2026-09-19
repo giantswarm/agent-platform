@@ -77,7 +77,7 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness", "otel"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
-LINE_REPOSITORY = "oci://ghcr.io/giantswarm/kagent/helm"
+LINE_REPOSITORY = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
 LINE_IMAGES = "giantswarm/kagent"
 HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 # What the release range must admit and refuse, by shape: the line's releases

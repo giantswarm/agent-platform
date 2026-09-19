@@ -254,12 +254,14 @@ def check_golden(meta: str, connectivity: str) -> None:
         # imageVerification defaults (#575) are the newest to have reached that
         # point.
         # The hold for giantswarm/agent-platform#580, applied to BOTH sides: the
-        # kagent line's images, the Substrate line's images (the derived worker
-        # image follows substrate.image.registry) and the Flux controllers from
-        # their gsoci copies — meta chart keys only. Dropped once GOLDEN_REF
-        # carries them. METRIC_LABELS_HOLD (#586) is the other hold in force.
-        hold_580 = ["--set", "kagent.registry=gsoci.azurecr.io", "--set", "substrate.image.registry=gsoci.azurecr.io/giantswarm/substrate",
-                    "--set", "flux-engine.instance.distribution.registry=gsoci.azurecr.io/giantswarm/fluxcd"]
+        # kagent line's and the Substrate line's chart sources from gsoci (the
+        # four components' `repository` defaults) — meta chart keys only.
+        # Dropped once GOLDEN_REF carries them. METRIC_LABELS_HOLD (#586) is
+        # the other hold in force.
+        hold_580 = ["--set", "components.kagent.repository=oci://gsoci.azurecr.io/giantswarm/kagent/helm",
+                    "--set", "components.kagent-crds.repository=oci://gsoci.azurecr.io/giantswarm/kagent/helm",
+                    "--set", "components.substrate.repository=oci://gsoci.azurecr.io/giantswarm/substrate/helm",
+                    "--set", "components.substrate-crds.repository=oci://gsoci.azurecr.io/giantswarm/substrate/helm"]
         # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH
         # sides: modelServing.imageVerification is on by default now, so a serving
         # shape under Kyverno renders the image-verification policy that GOLDEN_REF's

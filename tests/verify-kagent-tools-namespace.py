@@ -32,7 +32,7 @@ names the Deployment and the container. A rename in the kagent line would leave
 the render green and the VPA targeting nothing, so the VPA's targetRef name,
 namespace and containerName must be the rendered controller Deployment's.
 
-Network: ghcr.io (the kagent line's chart). Deliberately stdlib-only: the CI
+Network: gsoci.azurecr.io (the kagent line's chart). Deliberately stdlib-only: the CI
 image has no PyYAML.
 """
 

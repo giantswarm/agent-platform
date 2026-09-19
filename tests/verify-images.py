@@ -90,16 +90,8 @@ INPUTS = ["--set", "global.domain=ci.example.com", "--set", "global.identity.iss
 # publishes it and removes the entry: a regular expression over `<path>=<value>`
 # (the rendered object's kind/name, the field path and the value).
 PENDING = {
-    # The kagent line (giantswarm/kagent-upstream) and the Substrate line
-    # (giantswarm/substrate) publish their charts to ghcr.io and retagger copies
-    # images only; their release charts on gsoci and the switch of the two
-    # chart sources: giantswarm/agent-platform#580. The upstream CloudNativePG
-    # chart likewise, behind a Giant Swarm wrapper release on the same operator
-    # line (giantswarm/agent-platform#580).
-    r"OCIRepository/kagent(-crds)?\.spec\.url=oci://ghcr\.io/giantswarm/kagent/helm/kagent(-crds)?":
-        "the kagent line's charts from gsoci (giantswarm/agent-platform#580)",
-    r"OCIRepository/substrate(-crds)?\.spec\.url=oci://ghcr\.io/giantswarm/substrate/helm/substrate(-crds)?":
-        "the Substrate line's charts from gsoci (giantswarm/agent-platform#580)",
+    # The upstream CloudNativePG chart, behind a Giant Swarm wrapper release on
+    # the same operator line (giantswarm/agent-platform#580).
     r"OCIRepository/cloudnative-pg\.spec\.url=oci://ghcr\.io/cloudnative-pg/charts/cloudnative-pg":
         "the CloudNativePG operator chart from gsoci (giantswarm/agent-platform#580)",
     # The substrate chart's rustfs-bucket-init Job runs Docker Hub's aws-cli by

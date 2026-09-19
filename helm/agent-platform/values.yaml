@@ -445,15 +445,16 @@ components:  # @schema additionalProperties: true
     # The kagent line the platform runs: giantswarm/kagent-upstream, branch
     # giantswarm — upstream kagent main at a pinned commit plus the carried
     # patches (kagent API v2, kagent.dev/v1alpha3; FORK.md there is the ledger
-    # of pin, patches and published digests). Its tag workflow publishes the
-    # charts kagent and kagent-crds to oci://ghcr.io/giantswarm/kagent/helm and
-    # the multi-arch images ghcr.io/giantswarm/kagent/{controller,ui,golang-adk,
-    # claude-harness}: releases as vX.Y.Z-gs.N (X.Y.Z the upstream version the
-    # pin anticipates, N the line's counter from 1) and, on every push to the
-    # consumed branch, dev builds X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7>.
+    # of pin, patches and published digests). Its CircleCI pipeline publishes
+    # the charts kagent and kagent-crds to oci://gsoci.azurecr.io/giantswarm/kagent/helm
+    # and the multi-arch images gsoci.azurecr.io/giantswarm/kagent/{controller,ui,
+    # golang-adk,claude-harness}, signed with the Giant Swarm CircleCI identity:
+    # releases as vX.Y.Z-gs.N (X.Y.Z the upstream version the pin anticipates,
+    # N the line's counter from 1) and, on every push to the consumed branch,
+    # dev builds X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7>.
     # Upstream's chart shape: keys at the chart root, the CRDs as their own
     # chart (kagent-crds below), no values schema.
-    repository: oci://ghcr.io/giantswarm/kagent/helm
+    repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
     # The line's releases of upstream 0.11.0 — 0.11.0-gs.1, 0.11.0-gs.2, … —
     # and nothing else. Flux resolves the range with Masterminds semver: a
     # prerelease compares identifier by identifier (gs.2 > gs.1; `dev` < `gs`,
@@ -463,7 +464,7 @@ components:  # @schema additionalProperties: true
     # so the ceiling holds the patch: 0.11.1-<anything> is out. The range would
     # also admit a bare 0.11.0, the upstream release the line anticipates, if
     # one ever appeared at this OCI path — upstream publishes to
-    # ghcr.io/kagent-dev and the line's tag workflow refuses bare vX.Y.Z tags,
+    # ghcr.io/kagent-dev and the line's releases are vX.Y.Z-gs.N tags only,
     # so none is expected; by design (D2) the later switch to an upstream
     # release is a range change here, not a rename. Re-pinning the line is one
     # values change: this range and kagent-crds' range move together (README
@@ -592,7 +593,7 @@ components:  # @schema additionalProperties: true
     # so a consumer switches kagent on and gets its CRDs; an explicit
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
-    repository: oci://ghcr.io/giantswarm/kagent/helm
+    repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
     versionRange: ">=0.11.0-gs.16 <0.11.1-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
@@ -606,9 +607,10 @@ components:  # @schema additionalProperties: true
     # and a snapshot location — comes from the Giant Swarm Substrate line
     # (giantswarm/substrate, branch giantswarm: the upstream release kagent's
     # go.mod pins plus the carried patches; FORK.md there is the ledger). Its
-    # publish workflow ships the charts substrate-crds and substrate to
-    # oci://ghcr.io/giantswarm/substrate/helm and the images under
-    # ghcr.io/giantswarm/substrate, as dev builds
+    # CircleCI pipeline publishes the charts substrate-crds and substrate to
+    # oci://gsoci.azurecr.io/giantswarm/substrate/helm and the images under
+    # gsoci.azurecr.io/giantswarm/substrate, signed with the Giant Swarm
+    # CircleCI identity, as dev builds
     # 0.0.N-dev.giantswarm.<date>.<time>.h<sha7> on every push and as releases
     # vX.Y.Z-gs.N. Two roster entries, the kagent-crds shape: this one renders
     # the three ate.dev CRDs (WorkerPool, SandboxConfig, CSIDriverConfig) as
@@ -657,7 +659,7 @@ components:  # @schema additionalProperties: true
     # kagent line's own pin moves (README "Agent Substrate"). A mirror sets
     # `repository` here and substrate.image.registry below, which the derived
     # worker image follows.
-    repository: oci://ghcr.io/giantswarm/substrate/helm
+    repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
     versionRange: ">=0.0.30-gs.4 <0.0.31-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
@@ -679,7 +681,7 @@ components:  # @schema additionalProperties: true
     # CNPG connection Secret ate-api-server reads (postgres.databases.substrate)
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
-    repository: oci://ghcr.io/giantswarm/substrate/helm
+    repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
     versionRange: ">=0.0.30-gs.4 <0.0.31-0"
     valuesFrom: substrate
     injectGlobal: false
@@ -2123,16 +2125,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Pin the release-independent name so the controller Service is always
   # `kagent-controller` regardless of the umbrella release name.
   fullnameOverride: kagent
-  # The kagent line's images (components.kagent): the line's tag workflow
-  # publishes ghcr.io/giantswarm/kagent/{controller,ui,golang-adk,claude-harness}
-  # (multi-arch, the upstream repository hierarchy) and retagger copies every
-  # release to gsoci.azurecr.io/giantswarm/kagent/<image>, the same path under
-  # the org's registry with the index digests preserved (giantswarm/retagger#1229),
-  # so the registry is the one value that moves: the repositories and the
-  # digests the chart stamps (the Go ADK and Claude harness images, the
+  # The kagent line's images (components.kagent): the line publishes
+  # gsoci.azurecr.io/giantswarm/kagent/{controller,ui,golang-adk,claude-harness}
+  # (multi-arch, the upstream repository hierarchy under the org's registry,
+  # signed with the Giant Swarm CircleCI identity), releases and dev builds
+  # alike, so the registry is the one value a mirror moves: the repositories
+  # and the digests the chart stamps (the Go ADK and Claude harness images, the
   # kagent-images ConfigMap Substrate's image cache reads) stand as published.
-  # A dev build's images are not copied — the dev channel (README "Dev channel")
-  # sets this back to ghcr.io next to components.kagent*.repository.
+  # The dev channel (README "Dev channel") needs no registry override.
   registry: gsoci.azurecr.io
   # ONE build of the line, named by the chart: the line's tag workflow stamps
   # `tag` (the controller and UI image tag = the chart version) and
@@ -2260,9 +2260,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # the concurrently active agents, and a worker's resources bound a sandbox.
   # workerImage is the gVisor worker of the Substrate release the cluster runs:
   # the Giant Swarm Substrate line (giantswarm/substrate, published as
-  # ghcr.io/giantswarm/substrate/*, tagged with the bare version, every release
-  # copied to gsoci.azurecr.io/giantswarm/substrate/* — substrate.image.registry
-  # below; its FORK.md is the ledger). The chart DERIVES it from components.substrate.versionRange's
+  # gsoci.azurecr.io/giantswarm/substrate/*, tagged with the bare version —
+  # substrate.image.registry below; its FORK.md is the ledger). The chart DERIVES it from components.substrate.versionRange's
   # floor — <substrate.image.registry>/ateom-gvisor:<floor> — so the worker and
   # the atelet are one Substrate release whatever kagent build the kagent range
   # admits (giantswarm/agent-platform#466; the kagent chart's own stamp, the
@@ -4368,7 +4367,7 @@ kagent-crds:  # @schema skipProperties: true; additionalProperties: true
 # Values forwarded verbatim to the substrate component release — the chart of
 # the Giant Swarm Substrate line (giantswarm/substrate, branch giantswarm; keys
 # at the chart root, no schema). The chart's image references are stamped at
-# publish (image.registry ghcr.io/giantswarm/substrate, image.tag the build);
+# publish (image.registry gsoci.azurecr.io/giantswarm/substrate, image.tag the build);
 # an installation that mirrors them sets image.registry here and
 # components.substrate.repository. What Substrate needs and the chart does not
 # render — the CA and JWT pools, the actor-identity trust anchor, ate-api-
@@ -4381,16 +4380,13 @@ kagent-crds:  # @schema skipProperties: true; additionalProperties: true
 substrate:  # @schema skipProperties: true; additionalProperties: true
   # helm-controller creates the target namespace (components.substrate.targetNamespace).
   createNamespace: false
-  # The line's images: published as ghcr.io/giantswarm/substrate/<component>
-  # (the chart's stamp) and copied for every release to
-  # gsoci.azurecr.io/giantswarm/substrate/<component>, the same path under the
-  # org's registry with the digests preserved (giantswarm/retagger#1229). The
-  # registry is the one value that moves: the control plane's images
-  # (<registry>/<component>:<tag>, the tag the chart's stamp) and the derived
-  # worker image (agent-platform.substrate.workerImage, kagent.substrateWorkerPool
-  # above) follow it. A dev build's images are not copied — the dev channel
-  # sets this back to ghcr.io/giantswarm/substrate next to
-  # components.substrate*.repository.
+  # The line's images: published as gsoci.azurecr.io/giantswarm/substrate/<component>
+  # (the chart's stamp; multi-arch, signed with the Giant Swarm CircleCI
+  # identity), releases and dev builds alike. The registry is the one value a
+  # mirror moves: the control plane's images (<registry>/<component>:<tag>,
+  # the tag the chart's stamp) and the derived worker image
+  # (agent-platform.substrate.workerImage, kagent.substrateWorkerPool above)
+  # follow it. The dev channel needs no registry override.
   image:
     registry: gsoci.azurecr.io/giantswarm/substrate
   postgres:

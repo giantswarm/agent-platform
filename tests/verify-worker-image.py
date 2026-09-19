@@ -35,7 +35,7 @@ range to one release (`agent-platform.substrate.validateRange`). Here:
     the meta chart's CI names the day the kagent line moves to another Substrate
     release before the chart's own pin does.
 
-Network: ghcr.io (the kagent chart). Usage: verify-worker-image.py <meta chart dir>
+Network: gsoci.azurecr.io (the kagent chart). Usage: verify-worker-image.py <meta chart dir>
 """
 import importlib.util
 import os

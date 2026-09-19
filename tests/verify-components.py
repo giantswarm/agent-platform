@@ -82,7 +82,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # managers on the lines that speak v1alpha3 (agent-manager 1.x; model-manager
 # 0.x from 0.20.0, dual-version), klaus-gateway 1.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
-KAGENT_LINE = "oci://ghcr.io/giantswarm/kagent/helm"
+KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
 KAGENT_RANGE = ">=0.11.0-gs.16 <0.11.1-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
@@ -91,10 +91,10 @@ KAGENT_RANGE = ">=0.11.0-gs.16 <0.11.1-0"
 # the worker image's tag — the meta chart derives the kagent WorkerPool's
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
-SUBSTRATE_LINE = "oci://ghcr.io/giantswarm/substrate/helm"
+SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
 SUBSTRATE_RANGE = ">=0.0.30-gs.4 <0.0.31-0"
 SUBSTRATE_PIN = "0.0.30-gs.4"  # the range's floor, the BOM pin and the worker image's tag: the bounded golden boot (giantswarm/substrate#39, giantswarm/giantswarm#37801), the worker the fleet already ran under kagent 0.11.0-gs.20's stamp
-WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release copied under its upstream path (giantswarm/retagger#1229)
+WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
     "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),

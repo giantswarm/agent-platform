@@ -42,7 +42,7 @@ The one pool is also the platform's failure domain (#472):
     AlwaysAllow — is gone with enabled: false, and never reaches the kagent
     release (components.kagent.omitKeys).
 
-Network: ghcr.io (the kagent chart). Usage: verify-workerpool.py <meta chart dir>
+Network: gsoci.azurecr.io (the kagent chart). Usage: verify-workerpool.py <meta chart dir>
 """
 import importlib.util
 import os
