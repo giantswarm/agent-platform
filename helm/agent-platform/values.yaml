@@ -5103,13 +5103,21 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # every model pod of the serving namespace — both pod shapes; the modelcar
   # sidecar that carries the weights, the pre-fetch init container KServe
   # runs from the same image and the runtime container alike, since Kyverno
-  # checks every container image of the pod that matches `images`. Off by
-  # default. On, it renders where the cache policies render (policies.enabled
-  # above resolved: Kyverno served) and nowhere else; enabled with an empty
-  # images list, no attestor, a type or a failureAction outside its options
-  # or an unknown key fails the render naming the key.
+  # checks every container image of the pod that matches `images`. On by
+  # default (giantswarm/agent-platform#575): every image a shipped preset's
+  # pod runs from the platform's registry namespace carries the identity
+  # below — the curated model images, the llm-d runtime and sidecars, the
+  # KServe storage-initializer. It renders where the cache policies render
+  # (policies.enabled above resolved: Kyverno served) and nowhere else. An
+  # installation whose model pods run an image under `images` that no
+  # attestor signed — one pushed to the platform's namespace by hand, one
+  # re-signed by a signer of its own — adds that signer to attestors or sets
+  # enabled: false before it upgrades; a pod the rule refuses is denied at
+  # admission with `sigstore bundle verification failed` naming the image.
+  # Enabled with an empty images list, no attestor, a type or a failureAction
+  # outside its options or an unknown key fails the render naming the key.
   imageVerification:
-    enabled: false
+    enabled: true
     # The image references the rule verifies (Kyverno's imageReferences): a
     # full reference or a wildcard pattern — `*` any run of characters, across
     # path segments, tags and digests; `?` one character. A container image

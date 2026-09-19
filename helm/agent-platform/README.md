@@ -1368,7 +1368,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.policies.progressDeadlineSeconds | int | `3600` |  |
 | modelServing.policies.env[0].name | string | `"HF_HUB_DISABLE_XET"` |  |
 | modelServing.policies.env[0].value | string | `"1"` |  |
-| modelServing.imageVerification.enabled | bool | `false` |  |
+| modelServing.imageVerification.enabled | bool | `true` |  |
 | modelServing.imageVerification.images[0] | string | `"gsoci.azurecr.io/giantswarm/*"` |  |
 | modelServing.imageVerification.attestors[0].keyless.issuer | string | `"https://oidc.circleci.com"` |  |
 | modelServing.imageVerification.attestors[0].keyless.subjectRegExp | string | `"^https://circleci\\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$"` |  |

@@ -794,23 +794,27 @@ def image_verification_values(tmp: str, block: dict, *extra: str) -> str:
 
 
 def check_image_verification(connectivity: str, docs: list[dict]) -> None:
-    """modelServing.imageVerification (#552): off by default and without Kyverno; on, one verifyImages rule per shape with the
-    references and the attestor entries verbatim and the knobs as set, accepted by Kyverno's schema and skipping a pod none of
-    whose images match; the guards name their key."""
-    if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in docs):
-        fail("modelServing.imageVerification is off by default, yet the default render carries the image-verification policy")
+    """modelServing.imageVerification (#552, #575): on by default — the default render carries one verifyImages rule per pod
+    shape with the chart's defaults, nothing without Kyverno or with the switch off; an installation's own block reaches every
+    rule verbatim with the knobs as set, accepted by Kyverno's schema and skipping a pod none of whose images match; the guards
+    name their key."""
+    # The default render: the chart's defaults reach the rule — the platform's registry namespace, the Giant Swarm CircleCI
+    # identity as one keyless entry, the Sigstore bundle format (#575) — with the knobs at their defaults.
+    defaults = one(docs, "ClusterPolicy", IV_SUFFIX)
+    if [r["name"] for r in defaults["spec"]["rules"]] != [f"verify-model-images-{s}" for s in SHAPES]:
+        fail(f"the default image-verification policy's rules are {[r['name'] for r in defaults['spec']['rules']]}; expected one per pod shape")
+    for rule in defaults["spec"]["rules"]:
+        v = rule["verifyImages"][0]
+        if v["imageReferences"] != IV_DEFAULT_IMAGES or v["type"] != IV_DEFAULT_TYPE \
+                or v["attestors"] != [{"count": 1, "entries": IV_DEFAULT_ATTESTORS}] \
+                or v["mutateDigest"] is not True or v["required"] is not True or v["failureAction"] != "Enforce":
+            fail(f"{rule['name']}: the default render must carry the defaults — imageReferences {IV_DEFAULT_IMAGES}, type "
+                 f"{IV_DEFAULT_TYPE}, the Giant Swarm CircleCI identity as the one keyless attestor, mutateDigest, required, "
+                 f"Enforce; got\n{yaml.safe_dump(v)}")
+    ok("the default render verifies every image under the platform's registry namespace against the Giant Swarm CircleCI identity "
+       "(issuer https://oidc.circleci.com, subject a pipeline definition) in the Sigstore bundle format — digest pinned, "
+       "a signature required, Enforce, one rule per pod shape")
     with tempfile.TemporaryDirectory(prefix="ap-model-serving-iv-") as tmp:
-        # The switch alone: the chart's defaults reach the rule — the platform's registry namespace, the Giant Swarm
-        # CircleCI identity as one keyless entry, the Sigstore bundle format (#575).
-        defaults = one(render(connectivity, ["--set", "modelServing.imageVerification.enabled=true"]), "ClusterPolicy", IV_SUFFIX)
-        for rule in defaults["spec"]["rules"]:
-            v = rule["verifyImages"][0]
-            if v["imageReferences"] != IV_DEFAULT_IMAGES or v["type"] != IV_DEFAULT_TYPE \
-                    or v["attestors"] != [{"count": 1, "entries": IV_DEFAULT_ATTESTORS}]:
-                fail(f"{rule['name']}: enabled alone must render the defaults — imageReferences {IV_DEFAULT_IMAGES}, type "
-                     f"{IV_DEFAULT_TYPE}, the Giant Swarm CircleCI identity as the one keyless attestor; got\n{yaml.safe_dump(v)}")
-        ok("enabled alone verifies every image under the platform's registry namespace against the Giant Swarm CircleCI identity "
-           "(issuer https://oidc.circleci.com, subject a pipeline definition) in the Sigstore bundle format")
         on = image_verification_values(tmp, {})
         policy = one(render(connectivity, ["-f", on]), "ClusterPolicy", IV_SUFFIX)
         spec = policy["spec"]
@@ -856,9 +860,10 @@ def check_image_verification(connectivity: str, docs: list[dict]) -> None:
         no_kyverno = [flag for i, flag in enumerate(BASE) if flag != "kyverno.io/v1" and not (flag == "--api-versions" and BASE[i + 1] == "kyverno.io/v1")]
         if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["-f", on], no_kyverno)):
             fail("without kyverno.io/v1 served, the image-verification policy still renders")
-        if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["-f", on, "--set", "modelServing.imageVerification.enabled=false"])):
+        if any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["--set", "modelServing.imageVerification.enabled=false"])) \
+                or any(d["metadata"]["name"].endswith(IV_SUFFIX) for d in render(connectivity, ["-f", on, "--set", "modelServing.imageVerification.enabled=false"])):
             fail("modelServing.imageVerification.enabled=false still renders the image-verification policy")
-        ok("nothing renders while disabled or without kyverno.io/v1")
+        ok("nothing renders with the switch off (over the defaults and over an installation's block) or without kyverno.io/v1")
         for description, block, needle in (
             ("an empty images list", {"images": []}, "modelServing.imageVerification.images is empty"),
             ("no attestor", {"attestors": []}, "modelServing.imageVerification.attestors is empty"),

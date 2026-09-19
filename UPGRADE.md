@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (`modelServing.imageVerification` is on by default)
+
+giantswarm/agent-platform#575: both charts' defaults carry `modelServing.imageVerification.enabled: true`. On an installation with the serving switch on and Kyverno served, the connectivity release renders the ClusterPolicy `<release>-model-serving-image-verification` on this upgrade: every container image of a model pod (the model pods of the serving namespace, one rule per pod shape, at CREATE and UPDATE) that matches `gsoci.azurecr.io/giantswarm/*` must carry a Sigstore bundle signature from the Giant Swarm CircleCI identity (issuer `https://oidc.circleci.com`, subject a pipeline definition), is pinned to its digest, and a pod whose image fails is denied. Every image a shipped preset's pod runs carries it — the curated model images, the llm-d runtime and sidecars, the KServe storage-initializer —, so a model served from the shipped presets on the platform's images is admitted as before. Running pods are untouched until they are recreated.
+
+### Operator action
+
+- **None** for an installation serving the shipped presets on the platform's images, and none for an installation that serves from a registry of its own (`modelServing.modelImages.registry`, a `kserve-runtime-configs` image override off `gsoci.azurecr.io/giantswarm/`): an image matching no pattern is left alone.
+- **A model pod that runs an image under `gsoci.azurecr.io/giantswarm/` that the Giant Swarm CircleCI identity did not sign** — one pushed to the namespace by hand, one re-signed by a signer of your own — is refused after the upgrade. Before upgrading, either add that signer as an `attestors` entry (keyless `issuer` + `subject` or `subjectRegExp`, or `keys.publicKeys`; the fleet's entry stays beside it, any one signature admits) or set `modelServing.imageVerification.enabled: false`; the block is mirrored in both charts, set it on the release you compose from.
+- **Recognising a refusal**: the model's Deployment stays at zero ready replicas and its ReplicaSet's `ReplicaFailure` condition (or `kubectl -n <serving namespace> describe rs`) carries Kyverno's admission error, `verify-model-images-<shape> failed to verify image <reference>: … sigstore bundle verification failed: no matching signatures found`; model-manager surfaces it as the model's phase. A pod that was admitted carries the annotation `kyverno.io/verify-images` listing every verified image with its digest, and its container images are digest references.
+- **Recognising it worked**: `kubectl get clusterpolicy <release>-model-serving-image-verification` exists on a cluster with the serving switch on and is Ready; a model loaded after the upgrade runs digest-pinned images.
+
 ## \<current\> → \<next\> (the kagent line's, the Substrate line's and the Flux controllers' images from gsoci)
 
 giantswarm/agent-platform#580: `kagent.registry` is `gsoci.azurecr.io`, `substrate.image.registry` is `gsoci.azurecr.io/giantswarm/substrate` and `flux-engine.instance.distribution.registry` is `gsoci.azurecr.io/giantswarm/fluxcd` — retagger's copies of the two lines' releases and of the Flux 2.9+ controllers under their upstream paths, the same digests as on ghcr.io (giantswarm/retagger#1229). The chart sources of the kagent and Substrate components stay on ghcr.io for now.
