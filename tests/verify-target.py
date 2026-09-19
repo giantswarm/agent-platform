@@ -180,6 +180,30 @@ def hold_llmd_only(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+# The hook Jobs' pod template (giantswarm/agent-platform#593): every hook Job of
+# the meta chart runs with a 512Mi memory limit and carries the comment on why;
+# GOLDEN_REF renders 128Mi and no comment. Held on BOTH sides by the shape of the
+# hook pods' resources block (requests 10m / 32Mi, one memory limit), at any
+# indentation — the self-management hooks are also rendered inside the values of
+# the chart's own release; drop once GOLDEN_REF carries #593.
+HOOK_POD_RESOURCES = re.compile(
+    r"(?:^ +# .*\n){0,9}(^ +resources:\n +requests:\n +cpu: 10m\n +memory: 32Mi\n +limits:\n +memory: )(?:128Mi|512Mi)$", re.M)
+# The same PR moves the storage-version backup's release pre-filter from a plain
+# grep for the version to the JSON-encoded manifest marker (two comment lines and
+# the grep line, at the script's indentation); both shapes are held to one line.
+HOOK_PREFILTER = re.compile(
+    r"(?:^ +# a manifest that names an object at v1alpha2.*\n^ +# mentions the version.*\n)?^( +)grep -qF? '(?:apiVersion: )?kagent\.dev/v1alpha2(?:\\n)?' /tmp/release\.json \|\| continue$", re.M)
+
+
+def hold_hook_pods(here: str, there: str) -> tuple:
+    """The two meta renders with #593's hook Job pod template held equal on both sides."""
+    def strip(render: str) -> str:
+        render = HOOK_POD_RESOURCES.sub(r"\g<1><held: #593>", render)
+        return HOOK_PREFILTER.sub(r"\g<1><held: #593 pre-filter>", render)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #593 hold — the hook pods' resources block (the memory limit and its comment) and the backup's release pre-filter lines are left out of the golden comparison")
+    return h, strip(there)
+
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -264,6 +288,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)
+                here, there = hold_hook_pods(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
