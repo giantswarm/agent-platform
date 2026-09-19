@@ -2352,7 +2352,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		grep -q -e "$$pattern" /tmp/vw-ms.out || { echo "FAIL: the model serving render lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -qE 'serving\.kserve\.io|ClusterServingRuntime|kind: InferenceService|kserve-controller-manager|spec\.runtime|^      runtimes?:' /tmp/vw-ms.out; then echo "FAIL: the serving render carries a classic serving object or key"; grep -nE 'serving\.kserve\.io|ClusterServingRuntime|InferenceService|kserve-controller-manager|runtimes?:' /tmp/vw-ms.out | head; exit 1; fi
-	@[ "$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)" = "12" ] || { echo "FAIL: expected the 12 shipped presets, got $$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)"; exit 1; }
+	@[ "$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)" = "11" ] || { echo "FAIL: expected the 11 shipped presets, got $$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)"; exit 1; }
 	@if grep -q 'kind: NetworkPolicy' /tmp/vw-ms.out; then echo "FAIL: a kubernetes NetworkPolicy rendered under the cilium flavor"; exit 1; fi
 	@if grep -q '^kind: PersistentVolumeClaim' /tmp/vw-ms.out; then echo "FAIL: the cache claim rendered as a release resource (Helm's wait would wait for a Bind only the first predictor brings: #483)"; exit 1; fi
 	@echo "ok: model serving fleet shape"

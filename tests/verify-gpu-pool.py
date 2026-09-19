@@ -255,7 +255,7 @@ else:
         flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
         flashsized = flashnext and "memory: 118Gi" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
         lineup24 = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml")
-        lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/muse-glimmer-30b.yaml")
+        lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -346,16 +346,16 @@ else:
                     side[DISCOVERY], ncuts = re.subn(rf"^ +- {re.escape(name)}\n", "", side[DISCOVERY], flags=re.M)
                     expect(f"the preset {name}'s name cut out of the discovery list once", ncuts, 1)
         print(f"note: the 24 GB line-up ships on this side (#591) and not on {ref}: the new presets' ConfigMaps and discovery entries, and the retired ones' on {ref}, are left out of the comparison")
-    # The 48 GB line-up (giantswarm/agent-platform#591): muse-glimmer-30b,
-    # gemma-4-31b (with its chat-template ConfigMap) and qwen3-6-35b-a3b ship
-    # on this side, qwen3-5-27b, qwen3-coder-next and qwen3-5-35b-a3b no
-    # longer do, and qwen3-8-27b-l40s moved to NVIDIA's model image. A golden
-    # from before carries the retired three and none of the new ones, so each
-    # side's own preset ConfigMaps and discovery names are left out of the
-    # comparison, and the L40S preset's ConfigMap on both sides. Drop this once
-    # GOLDEN_REF carries #591.
+    # The 48 GB line-up (giantswarm/agent-platform#591): gemma-4-31b (with its
+    # chat-template ConfigMap) and qwen3-6-35b-a3b ship on this side,
+    # qwen3-5-27b, qwen3-coder-next and qwen3-5-35b-a3b no longer do, and
+    # qwen3-8-27b-l40s moved to NVIDIA's model image. A golden from before
+    # carries the retired three and neither new one, so each side's own preset
+    # ConfigMaps and discovery names are left out of the comparison, and the
+    # L40S preset's ConfigMap on both sides. Drop this once GOLDEN_REF carries
+    # #591.
     if not lineup:
-        for name in ("muse-glimmer-30b", "gemma-4-31b", "qwen3-6-35b-a3b"):
+        for name in ("gemma-4-31b", "qwen3-6-35b-a3b"):
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             if DISCOVERY in head:
                 head[DISCOVERY], ncuts = re.subn(rf"^ +- {name}\n", "", head[DISCOVERY], flags=re.M)
