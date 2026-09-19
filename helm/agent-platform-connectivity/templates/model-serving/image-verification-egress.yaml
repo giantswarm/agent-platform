@@ -2,7 +2,8 @@
 The egress the image verification needs from Kyverno's admission controller
 (giantswarm/agent-platform#599). A verifyImages rule is evaluated by the
 admission controller itself: it fetches the image's Sigstore bundle from the
-registry (the OCI referrers of the image, the bundle's blob) and verifies it
+registry (the OCI referrers of the image; the bundle's blob, which the registry
+redirects to its storage account) and verifies it
 against the Sigstore trust root (the TUF repository; Rekor for the keyless
 attestor's transparency log). A Kyverno that runs under a network policy
 allowing egress to the API server only — the fleet's Kyverno chart ships exactly

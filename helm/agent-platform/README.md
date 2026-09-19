@@ -1336,7 +1336,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.imageVerification.kyvernoEgress.namespace | string | `"kyverno"` |  |
 | modelServing.imageVerification.kyvernoEgress.podSelector | object | `{}` |  |
 | modelServing.imageVerification.kyvernoEgress.hosts[0].matchName | string | `"gsoci.azurecr.io"` |  |
-| modelServing.imageVerification.kyvernoEgress.hosts[1].matchPattern | string | `"*.*.data.azurecr.io"` |  |
+| modelServing.imageVerification.kyvernoEgress.hosts[1].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | modelServing.imageVerification.kyvernoEgress.hosts[2].matchName | string | `"tuf-repo-cdn.sigstore.dev"` |  |
 | modelServing.imageVerification.kyvernoEgress.hosts[3].matchName | string | `"rekor.sigstore.dev"` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
