@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=0.11.0-gs.16 <0.11.1-0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=0.0.30-gs.4 <0.0.31-0"
-SUBSTRATE_PIN = "0.0.30-gs.4"  # the range's floor, the BOM pin and the worker image's tag: the bounded golden boot (giantswarm/substrate#39, giantswarm/giantswarm#37801), the worker the fleet already ran under kagent 0.11.0-gs.20's stamp
+SUBSTRATE_RANGE = ">=0.0.30-gs.5 <0.0.31-0"
+SUBSTRATE_PIN = "0.0.30-gs.5"  # the range's floor, the BOM pin and the worker image's tag: the line's first release published natively to gsoci from CircleCI, signed (giantswarm/giantswarm#37873); the patches of gs.4 (the bounded golden boot, giantswarm/substrate#39)
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {

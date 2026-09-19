@@ -684,7 +684,7 @@ Fail the render when components.substrate.versionRange could resolve to a
 Substrate release of another X.Y.Z than the one it pins (giantswarm/agent-
 platform#466). The worker image follows the range's FLOOR and the atelet
 follows what Flux RESOLVES, so the two are one runtime only while the range
-confines one release: an exact version (a BOM pin, `0.0.30-gs.4`), or a floor
+confines one release: an exact version (a BOM pin, `0.0.30-gs.5`), or a floor
 with the ceiling of its own patch, `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` — the line's
 later gs.N of that release may reach the control plane ahead of the worker
 (the line moves the pin when a patch changes the runtime), a 0.0.31 never.

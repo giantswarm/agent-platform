@@ -31,7 +31,8 @@
 # render refuses such a pin.
 # substrate and substrate-crds pin the SAME release of the Substrate line
 # (vX.Y.Z-gs.N like kagent's; the floor of components.substrate.versionRange —
-# 0.0.30-gs.4, the bounded golden boot, on upstream Substrate v0.0.29, whose
+# 0.0.30-gs.5, the line's first release published natively to gsoci, with the
+# bounded golden boot, on upstream Substrate v0.0.29, whose
 # router kagent main addresses actors on since kagent-dev/kagent#2802). The
 # pin is also the worker image the kagent WorkerPool runs: the meta chart
 # derives ateom-gvisor:<this pin> for the kagent release, so the kagent pin
@@ -50,8 +51,8 @@ components:
   agent-platform-mcps:         { versionRange: "0.9.0" }
   kagent:                        { versionRange: "0.11.0-gs.16" }
   kagent-crds:                   { versionRange: "0.11.0-gs.16" }
-  substrate:                     { versionRange: "0.0.30-gs.4" }
-  substrate-crds:                { versionRange: "0.0.30-gs.4" }
+  substrate:                     { versionRange: "0.0.30-gs.5" }
+  substrate-crds:                { versionRange: "0.0.30-gs.5" }
   klaus-gateway:                 { versionRange: "1.10.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }

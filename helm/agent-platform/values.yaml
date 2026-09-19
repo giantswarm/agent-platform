@@ -620,7 +620,7 @@ components:  # @schema additionalProperties: true
     # render — agent-platform.validateSubstrate). Both releases land in
     # ate-system (targetNamespace; the chart's Roles name that namespace), and
     # both carry ONE version pin: the same range in the two versionRanges
-    # (>=0.0.30-gs.4 <0.0.31-0, the kagent entry's shape — the line's releases
+    # (>=0.0.30-gs.5 <0.0.31-0, the kagent entry's shape — the line's releases
     # of upstream 0.0.29, from gs.1 the pin kagent main names since
     # kagent-dev/kagent#2802 — its router addresses an actor by the
     # ate-target-actor header, which kagent 0.11.0-gs.14 sets and Substrate
@@ -639,13 +639,15 @@ components:  # @schema additionalProperties: true
     # its trust chain, and from 0.0.30-gs.2 the WorkerPool template's
     # topologySpreadConstraints and podAntiAffinity, giantswarm/giantswarm#37797,
     # next to a paused actor's resume failing fast when its node is gone),
-    # whose floor is 0.0.30-gs.4: gs.2 is the release whose CRD carries the
-    # spread fields (agent-platform.substrate.workerPoolSpreadFloor, the render
-    # guard on kagent.substrateWorkerPool.template), gs.3 makes every pause
-    # durable, gs.4 bounds the golden boot a workload keeps failing
+    # whose floor is 0.0.30-gs.5, the line's first release published natively
+    # to gsoci from CircleCI (the six images and both charts, signed with the
+    # org's identity; the patches of gs.4): gs.2 is the release whose CRD
+    # carries the spread fields (agent-platform.substrate.workerPoolSpreadFloor,
+    # the render guard on kagent.substrateWorkerPool.template), gs.3 makes
+    # every pause durable, gs.4 bounds the golden boot a workload keeps failing
     # (giantswarm/substrate#39, giantswarm/giantswarm#37801: three boots, then
     # GoldenActorNotReady with the workload's last output — the WORKER quotes
-    # it, so the floor is the release the fleet's workers already run). The
+    # it). The
     # worker image the kagent WorkerPool runs is DERIVED from this range's
     # floor (agent-platform.substrate.workerImage: substrate.image.registry,
     # ateom-gvisor, the floor), never taken from the kagent chart's stamp: the
@@ -660,7 +662,7 @@ components:  # @schema additionalProperties: true
     # `repository` here and substrate.image.registry below, which the derived
     # worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.30-gs.4 <0.0.31-0"
+    versionRange: ">=0.0.30-gs.5 <0.0.31-0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -682,7 +684,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=0.0.30-gs.4 <0.0.31-0"
+    versionRange: ">=0.0.30-gs.5 <0.0.31-0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system

@@ -133,7 +133,7 @@ per-agent placement values are gone, capacity is the WorkerPool".
 The pool's `workerImage` — the gVisor worker every actor runs in — is **derived by
 this chart** from `components.substrate.versionRange`'s floor:
 `<substrate.image.registry>/ateom-gvisor:<floor>` (`gsoci.azurecr.io/giantswarm/
-substrate/ateom-gvisor:0.0.30-gs.4` today), merged over the kagent block the chart forwards.
+substrate/ateom-gvisor:0.0.30-gs.5` today), merged over the kagent block the chart forwards.
 The kagent chart stamps a worker of its own at publish (the Substrate its build was
 published against), and that stamp never reaches the cluster: the atelet the
 substrate release installs and the worker the WorkerPool runs are one Substrate
@@ -151,7 +151,7 @@ What follows from it:
   follows); another tag, or a digest alone, fails the render naming the key, the
   release and the derived image.
 - **The Substrate range confines one release**: an exact version (the BOM's
-  `0.0.30-gs.4`) or `>=X.Y.Z-gs.N <X.Y.(Z+1)-0`. The worker follows the floor and
+  `0.0.30-gs.5`) or `>=X.Y.Z-gs.N <X.Y.(Z+1)-0`. The worker follows the floor and
   the atelet follows what Flux resolves, so a later `gs.N` of the pinned release may
   reach the control plane ahead of the worker (the line moves the pin when a patch
   changes the runtime) and a `0.0.31` never does. `0.x`, `~`, `^`, a `<=` ceiling
@@ -351,13 +351,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=0.0.30-gs.4 <0.0.31-0"` |  |
+| components.substrate-crds.versionRange | string | `">=0.0.30-gs.5 <0.0.31-0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=0.0.30-gs.4 <0.0.31-0"` |  |
+| components.substrate.versionRange | string | `">=0.0.30-gs.5 <0.0.31-0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
