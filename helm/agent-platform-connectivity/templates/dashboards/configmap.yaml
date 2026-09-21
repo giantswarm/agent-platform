@@ -1,0 +1,35 @@
+{{- /* The platform's own Grafana boards, one ConfigMap per board, discovered by
+observability-operator through the app.giantswarm.io/kind label and placed by
+the organization and folder annotations. Both annotation values are display
+names that carry a space, so neither can be a label.
+
+Gated on the same resolved global.observability.metrics.serviceMonitor.enabled
+as every monitor of this chart: the operator that picks a ConfigMap up is part
+of the observability platform the monitors write to, and a board over series
+nobody collects is worse than no board.
+
+The boards of a component come from that component's own chart (muster ships
+its own, and agentgateway's is upstream's, vendored in the packaging chart).
+These are the platform's own, across components, which no component chart can
+render. */ -}}
+{{- if and (include "agent-platform.serviceMonitor" .) .Values.dashboards.enabled }}
+{{- $dashboards := .Values.dashboards }}
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+{{- $name := base $path | trimSuffix ".json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "name" $ }}-dashboard-{{ $name }}
+  namespace: {{ $dashboards.namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+    app.giantswarm.io/kind: dashboard
+  annotations:
+    observability.giantswarm.io/organization: {{ $dashboards.organization | quote }}
+    observability.giantswarm.io/folder: {{ $dashboards.folder | quote }}
+data:
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}

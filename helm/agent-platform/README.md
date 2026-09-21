@@ -913,6 +913,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
 | kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
+| dashboards.enabled | bool | `true` |  |
+| dashboards.namespace | string | `""` |  |
+| dashboards.organization | string | `"Shared Org"` |  |
+| dashboards.folder | string | `"Agent Platform"` |  |
 | postgres.enabled | bool | `false` |  |
 | postgres.namespace | string | `"kagent"` |  |
 | postgres.clusterName | string | `"kagent-pg"` |  |
