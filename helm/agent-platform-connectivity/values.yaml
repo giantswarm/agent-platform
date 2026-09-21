@@ -1403,20 +1403,23 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: agentgateway-controller
   image:
     registry: gsoci.azurecr.io
-    tag: v1.2.1
+  # One release of the Giant Swarm line of agentgateway
+  # (github.com/giantswarm/agentgateway-upstream; FORK.md there is the ledger
+  # of pin and patches), the line's own stable semver under its nested names
+  # on gsoci. proxy.image is what this chart renders into the
+  # AgentgatewayParameters of every data plane it declares, repository and
+  # tag in full; controller.image mirrors the meta chart's block, which the
+  # agentgateway release runs and which the meta chart forwards here over
+  # these defaults. Move both together.
   controller:
     image:
-      repository: giantswarm/agentgateway-controller
+      repository: giantswarm/agentgateway-upstream/controller
+      tag: "2.0.0"
   proxy:
     image:
       registry: gsoci.azurecr.io
-      repository: giantswarm/agentgateway
-      # A release of the Giant Swarm line of agentgateway
-      # (github.com/giantswarm/agentgateway-upstream, FORK.md: upstream v1.5.0
-      # rebuilt, scanned and signed there, mirrored into gsoci by the retagger)
-      # — the same release the giantswarm/agentgateway packaging chart pins for
-      # the controller; move both together.
-      tag: v1.5.1-gs.1
+      repository: giantswarm/agentgateway-upstream/agentgateway
+      tag: "2.0.0"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:

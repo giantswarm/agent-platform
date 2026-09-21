@@ -44,10 +44,14 @@ KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent
 # selector.
 # kagent.namespaceOverride=default (the release namespace of `helm template t`) drops the kagent Namespace object from both renders: this branch
 # keeps it (helm.sh/resource-policy: keep), an intended difference to GOLDEN_REF; every other kagent object renders alike on both sides.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default
+# The fifth intended change is the data plane's image, the agentgateway line's release under its nested name (the meta chart forwards the pin, verify-agentgateway-wiring asserts it): both sides render with it set.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set agentgateway.proxy.image.repository=giantswarm/agentgateway-upstream/agentgateway --set agentgateway.proxy.image.tag=2.0.0
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
-GOLDEN_REF ?= origin/main
+# On the 3.x maintenance line the golden is the line's own head: origin/main
+# is the kagent API v2 line (4.x) since 2026-09-11 and no longer renders this
+# chart's default shape.
+GOLDEN_REF ?= origin/release-v3.x
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -354,7 +358,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
-	@grep -q 'semver: "2.x"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not 2.x (the flattened chart line)"; exit 1; }
+	@grep -q 'semver: ">=2.2.2 <3.0.0"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.2.2 <3.0.0 (the flattened chart line, floored at the packaging release that renders a bare image tag as written)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> kagent flattened-chart wiring (0.2.0+): forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out
