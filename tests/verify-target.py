@@ -91,6 +91,14 @@ METRIC_LABELS_HOLD = [
 # GOLDEN_REF names the flattened controller repository and the v1.5.1-gs.4 data
 # plane. Held equal on BOTH sides of the meta and the connectivity renders;
 # dropped once GOLDEN_REF carries #608.
+# giantswarm/giantswarm#36711: the muster board moves to the platform's own
+# Grafana folder and to the organization customers reach, and GOLDEN_REF carries
+# the muster chart's own defaults for both. Held equal on BOTH sides of the meta
+# renders; dropped once GOLDEN_REF carries them.
+MUSTER_DASHBOARD_HOLD = [
+    "--set", "muster.muster.observability.grafanaDashboard.folder=muster",
+    "--set", "muster.muster.observability.grafanaDashboard.giantswarm.organization=Giant Swarm",
+]
 AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
     "--set", "agentgateway.controller.image.tag=2.0.0",
@@ -306,8 +314,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the switch.
         hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
