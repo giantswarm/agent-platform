@@ -2,6 +2,15 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the agentgateway controller at the line's release 2.0.0)
+
+The meta chart names the agentgateway line's release in full — `agentgateway.controller.image` `giantswarm/agentgateway-upstream/controller:2.0.0`, `agentgateway.proxy.image` `giantswarm/agentgateway-upstream/agentgateway:2.0.0` — and `components.agentgateway.versionRange` is `>=2.2.2 <3.0.0`.
+
+- **None** for an installation on the defaults: the `agentgateway` HelmRelease leaves `Ready=False RetriesExceeded` and upgrades to packaging chart 2.3.0 with `gsoci.azurecr.io/giantswarm/agentgateway-upstream/controller:2.0.0` (the upstream pin the `v1.5.1-gs.4` controller ran), and every data plane rolls onto `gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0` — a rolling restart of the edge, a quiet window of seconds.
+- **`agentgateway.controller.image` or `agentgateway.proxy.image` set in your values** (a mirror): name the nested paths `giantswarm/agentgateway-upstream/{controller,agentgateway}` and the bare tag `2.0.0` — the flattened `giantswarm/agentgateway-controller` and `giantswarm/agentgateway` carry the retagger's copies of upstream's releases only, never the line's.
+- **A BOM pin** (`components.agentgateway.versionRange` below `2.2.2`): pin `2.2.2` or higher (`examples/customer-bom.yaml`); an older packaging release prefixes a `v` to the bare tag.
+- **Recognising it worked**: `kubectl -n <gitops namespace> get helmrelease agentgateway` is `Ready=True` on `agentgateway@2.3.0` or later, and `kubectl -n <release namespace> get deploy agentgateway-controller -o jsonpath='{.spec.template.spec.containers[0].image}'` prints `gsoci.azurecr.io/giantswarm/agentgateway-upstream/controller:2.0.0`; the data-plane pods (`kubectl -n <release namespace> get pods -l gateway.networking.k8s.io/gateway-name -o jsonpath='{.items[*].spec.containers[0].image}'`) run `gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0`.
+
 ## \<current\> → \<next\> (kagent follows the wrapper's 0.x line)
 
 `components.kagent.versionRange` is `>=0.2.0 <1.0.0` (was `0.2.x`): the floor stays at the flattened chart the wiring needs, the ceiling moves to the next major, as for the other 0.x components. The `giantswarm/kagent` wrapper released 0.3.0 and 0.3.1 on 2026-09-09 from CI-only changes — a `feat(ci)` title is a minor bump to git-cliff — with a chart identical to 0.2.2 in templates, values and dependencies; the minor-holding range excluded them, and would have excluded every following wrapper release, the next fix included.

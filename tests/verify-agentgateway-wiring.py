@@ -14,6 +14,7 @@ Reads a rendered meta-package manifest. Deliberately stdlib-only: the CI image
 has no PyYAML.
 """
 
+import re
 import sys
 
 VALUES_INDENT = "    "
@@ -49,8 +50,20 @@ def main(path: str) -> int:
         sys.exit("FAIL: agentgateway values still nested under an agentgateway key; the 2.x chart is flat")
     if "enabled" in values:
         sys.exit("FAIL: `enabled` forwarded to the agentgateway chart, whose schema is additionalProperties:false")
-    if "repository: giantswarm/agentgateway-controller" not in values.get("controller", []):
-        sys.exit("FAIL: agentgateway values lost controller.image.repository")
+    images = {}
+    for name in ("controller", "proxy"):
+        block = values.get(name, [])
+        repo = next((l.split(": ", 1)[1] for l in block if l.startswith("repository: ")), None)
+        tag = next((l.split(": ", 1)[1].strip("\"'") for l in block if l.startswith("tag: ")), None)
+        images[name] = (repo, tag)
+    for name, want in (("controller", "giantswarm/agentgateway-upstream/controller"), ("proxy", "giantswarm/agentgateway-upstream/agentgateway")):
+        repo, tag = images[name]
+        if repo != want:
+            sys.exit(f"FAIL: agentgateway {name}.image.repository is {repo!r}, not {want!r}: the agentgateway line's image under its nested name")
+        if not tag or not re.fullmatch(r"\d+\.\d+\.\d+", tag):
+            sys.exit(f"FAIL: agentgateway {name}.image.tag is {tag!r}, not a release of the line's stable semver (a bare X.Y.Z — no v, no -gs.N): the meta chart names the release in full so the packaging chart's defaults cannot move it")
+    if images["controller"][1] != images["proxy"][1]:
+        sys.exit(f"FAIL: the controller ({images['controller'][1]}) and its default data plane ({images['proxy'][1]}) name different releases of the line; they move together")
     return 0
 
 

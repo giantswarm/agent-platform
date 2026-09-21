@@ -303,8 +303,12 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # 2.0.0 flattened the chart: upstream keys moved from `agentgateway.*` to the
     # chart root, so the forwarded block is no longer nested (no valuesKey) and
-    # the 1.x range cannot be used with this wiring.
-    versionRange: "2.x"
+    # the 1.x range cannot be used with this wiring. The floor is the packaging
+    # release that renders the controller's image tag as written (through
+    # 2.2.1 the chart prefixed a `v` to a bare X.Y.Z, and the agentgateway line
+    # publishes no such tag): the agentgateway block below names the line's
+    # release in full, so a packaging release cannot move the images.
+    versionRange: ">=2.2.2 <3.0.0"
     valuesFrom: agentgateway
     enabled: false
     # App-owned CRDs: the wrapper chart ships the agentgateway.dev CRDs (with
@@ -2083,13 +2087,27 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: agentgateway-controller
   image:
     registry: gsoci.azurecr.io
+  # The controller and its default data plane run one release of the Giant Swarm
+  # line of agentgateway (github.com/giantswarm/agentgateway-upstream; FORK.md
+  # there is the ledger of pin and patches), the line's own stable semver under
+  # its nested names gsoci.azurecr.io/giantswarm/agentgateway-upstream/{controller,
+  # agentgateway}, named IN FULL here — repository and tag — so a packaging
+  # release cannot move the images (a value wins over a chart default, and a
+  # default that moved alone to the nested names rendered a tag that existed
+  # only there). The flattened giantswarm/agentgateway{,-controller} carry the
+  # retagger's copies of upstream's releases only, never the line's. The block
+  # is forwarded to the connectivity release too, whose AgentgatewayParameters
+  # render proxy.image into every data plane it declares: the controller and
+  # the data planes move together, here.
   controller:
     image:
-      repository: giantswarm/agentgateway-controller
+      repository: giantswarm/agentgateway-upstream/controller
+      tag: "2.0.0"
   proxy:
     image:
       registry: gsoci.azurecr.io
-      repository: giantswarm/agentgateway
+      repository: giantswarm/agentgateway-upstream/agentgateway
+      tag: "2.0.0"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
