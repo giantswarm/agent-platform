@@ -1860,8 +1860,16 @@ muster:  # @schema skipProperties: true; additionalProperties: true
       # this key must not be set for an older muster.
       grafanaDashboard:
         enabled: auto  # auto | true | false
+        # One folder for every agent platform board, so an operator opens one
+        # place. The chart's own default is a folder named after the component.
+        folder: "Agent Platform"
         giantswarm:
           enabled: true
+          # Shared Org is the organization customers reach; the Giant Swarm
+          # organization is staff-only, and the people who run agents on this
+          # platform are the ones who need its boards. The chart's own default
+          # is the staff organization.
+          organization: "Shared Org"
 
 # Bundled giantswarm/valkey-app for muster's OAuth session storage.
 # Wrapper chart exposes three top-level blocks consumed here:
