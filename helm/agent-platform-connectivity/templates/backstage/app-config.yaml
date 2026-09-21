@@ -61,16 +61,15 @@ data:
         supersedes the image's default img-src. It must therefore carry every
         host the portal's own plugins load images from: the Giant Swarm app-icon
         CDN (the muster plugin's dashboard renders the muster icon from
-        s.giantswarm.io/app-icons/) and this deployment's DiceBear avatars host
-        (agent avatars). Without the CDN entry the browser blocks the icon with a
-        CSP violation and the dashboard shows a broken image. */}}
+        s.giantswarm.io/app-icons/). Without the CDN entry the browser blocks
+        the icon with a CSP violation and the dashboard shows a broken image.
+        Agent avatars need no entry: the portal's backend fetches them from
+        this deployment's DiceBear host and serves them same-origin, so the
+        policy names no host of the installation. */}}
         img-src:
           - "'self'"
           - "data:"
           - https://s.giantswarm.io
-          {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear") }}
-          - https://avatars.{{ $domain }}
-          {{- end }}
       {{- if eq (dig "database" "engine" "" $backstage) "postgresql" }}
       {{- /* backstage.database.engine=postgresql makes the Backstage chart
       deploy the CNPG Cluster, the POSTGRES_* env and the CA mount — but no

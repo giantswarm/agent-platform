@@ -97,7 +97,7 @@ AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.proxy.image.repository=giantswarm/agentgateway-upstream/agentgateway",
     "--set", "agentgateway.proxy.image.tag=2.0.0",
 ]
-# Makefile.custom.mk's WIRING_BACKSTAGE: the portal on, whose CSP carries the avatars host.
+# Makefile.custom.mk's WIRING_BACKSTAGE: the portal on, whose CSP names no host of the installation.
 CONN_BACKSTAGE = [
     *VM, "--namespace", "agent-platform",
     "--set", "global.domain=ci.example.com", "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
@@ -235,6 +235,26 @@ def hold_substrate_range(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+# The portal's CSP names no avatars host any more: the portal's backend fetches
+# the avatars from the DiceBear host and serves them same-origin. GOLDEN_REF
+# renders `- https://avatars.<domain>` under img-src with the component on; the
+# line is dropped on BOTH sides, and with it the app-config checksum the
+# reloader stamps, which follows the ConfigMap's content. Drop once GOLDEN_REF
+# carries the change.
+AVATARS_HOST = re.compile(r"^ +- https://avatars\.\S+\n", re.M)
+APP_CONFIG_CHECKSUM = re.compile(r"(AGENT_PLATFORM_APP_CONFIG_CHECKSUM=)[0-9a-f]{64}")
+
+
+def hold_avatars_host(here: str, there: str) -> tuple:
+    """The two connectivity renders with the portal CSP's avatars host and the app-config checksum held out on both sides."""
+    def strip(render: str) -> str:
+        render = AVATARS_HOST.sub("", render)
+        return APP_CONFIG_CHECKSUM.sub(r"\1<held: avatars>", render)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: avatars hold — the portal CSP's avatars host line and the app-config checksum are left out of the golden comparison")
+    return h, strip(there)
+
+
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -320,6 +340,8 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_llmd_only(here, there)
                 here, there = hold_hook_pods(here, there)
                 here, there = hold_substrate_range(here, there)
+            else:
+                here, there = hold_avatars_host(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
@@ -356,11 +378,15 @@ def check_toggles(meta: str, connectivity: str) -> None:
 
     on = helm(connectivity, CONN_BACKSTAGE)
     off = helm(connectivity, [*CONN_BACKSTAGE, "--set", "components.dicebear.enabled=false"])
-    if "https://avatars.ci.example.com" not in on:
-        sys.exit("FAIL: the portal's CSP lacks the avatars host with dicebear on")
-    if "avatars." in off:
-        sys.exit("FAIL: the portal's CSP still names the avatars host with components.dicebear.enabled=false")
-    ok("connectivity with dicebear off: the avatars host leaves the portal's CSP")
+    # The portal's backend fetches the agents' avatars from the DiceBear host and
+    # serves them same-origin, so the CSP names no host of the installation --
+    # with the component on as much as off.
+    for label, render in (("on", on), ("off", off)):
+        if "avatars." in render:
+            sys.exit(f"FAIL: the portal's CSP names an avatars host with components.dicebear.enabled={label == 'on'}".lower())
+    if "https://s.giantswarm.io" not in on:
+        sys.exit("FAIL: the portal's CSP lacks the app-icon CDN with the portal on (the fixture is stale)")
+    ok("connectivity with dicebear on or off: the portal's CSP names no avatars host")
 
 
 def check_guards(meta: str) -> None:
