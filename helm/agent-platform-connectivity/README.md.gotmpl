@@ -113,9 +113,13 @@ On the installation, after the cutover:
   render refuses a `baseUrl` on any other provider and a `provider` outside the
   CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
   of the enum against the kagent line's CRD.
-- The data-plane `PodMonitor` is gated on the agentgateway component, not on
-  `llmRouting.enabled`, so the MCP path is scraped too and the monitor exists
-  before the cutover.
+- The data plane is scraped by the packaging chart's own `PodMonitor`, under
+  `agentgateway.monitoring.enabled` in the meta chart (the resolved
+  `global.observability.metrics.serviceMonitor.enabled`). It selects the
+  data-plane pods by GatewayClass and is not gated on `llmRouting.enabled`, so
+  the MCP path is scraped too and the monitor exists before the cutover. This
+  chart rendered one of its own, selecting by gateway name; it is gone, because
+  two monitors of the same pods double every data-plane series.
 
 ## Metric labels
 
