@@ -1321,7 +1321,9 @@ answers, but only where the leaf is left at `auto`:
                                mcp-kubernetes.mcpKubernetes.instrumentation
                                .serviceMonitor.enabled and
                                mcp-kubernetes.grafanaDashboards.enabled (its
-                               monitor and the three boards it ships)
+                               monitor and the three boards it ships),
+                               klausGateway.serviceMonitor.enabled (the chart's
+                               own monitor; the chart takes a boolean)
 Two leaves have no `auto` form and are derived directly, off only:
   valkey.valkey.metrics.podMonitor.enabled — the valkey chart's own default is
       on; written false when monitors are off, left absent otherwise so the
@@ -1417,6 +1419,7 @@ connectivity release both read the resolved value. */ -}}
 from auto, and the endpoint and headers the klaus-gateway chart reads emptied
 when it is off (giantswarm/klaus-gateway#263). */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "klausGateway" "observability" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "klausGateway" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- $kgObs := dig "observability" nil (index $v "klausGateway" | default dict) -}}
 {{- if and (kindIs "map" $kgObs) (hasKey $kgObs "enabled") (ne (toString (index $kgObs "enabled")) "true") -}}
 {{- $_ := set $kgObs "otlpEndpoint" "" -}}

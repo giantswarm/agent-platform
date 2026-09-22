@@ -58,7 +58,7 @@ components:
   kagent-crds:                   { versionRange: "1.0.0" }
   substrate:                     { versionRange: "1.0.0" }
   substrate-crds:                { versionRange: "1.0.0" }
-  klaus-gateway:                 { versionRange: "1.10.0" }
+  klaus-gateway:                 { versionRange: "1.20.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.23.0" }

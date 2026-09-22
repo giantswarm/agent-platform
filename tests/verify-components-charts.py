@@ -103,7 +103,10 @@ KAGENT = ["kagent-crds", "kagent"]
 # and the dashboard ConfigMap renders no annotations). Nothing published carries
 # that schema, releases and branch builds alike, so RENDER_AGAINST cannot name
 # one and this check stays red until 2.4.0 exists; both entries go with it.
-UNRELEASED: dict[str, str] = {"agentgateway": "2.4.0"}
+# klaus-gateway waits for the release that opens serviceMonitor.labels
+# (giantswarm/klaus-gateway#316; through 1.19.1 the schema closes the block).
+# Its CI publishes no branch build, so the check stays red until 1.20.0 exists.
+UNRELEASED: dict[str, str] = {"agentgateway": "2.4.0", "klaus-gateway": "1.20.0"}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release. Empty today.

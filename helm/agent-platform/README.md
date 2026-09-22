@@ -376,7 +376,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.klaus-gateway.versionRange | string | `">=1.10.0 <2.0.0"` |  |
+| components.klaus-gateway.versionRange | string | `">=1.20.0 <2.0.0"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
 | components.klaus-gateway.omitKeys[0] | string | `"observability.enabled"` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
@@ -1015,6 +1015,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.observability.enabled | string | `"auto"` |  |
 | klausGateway.observability.otlpEndpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | klausGateway.observability.otlpHeaders.X-Scope-OrgID | string | `"giantswarm"` |  |
+| klausGateway.serviceMonitor.enabled | string | `"auto"` |  |
+| klausGateway.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | klausGateway.slack.enabled | bool | `false` |  |
 | klausGateway.slack.mode | string | `"events"` |  |
 | klausGateway.slack.secretName | string | `""` |  |
