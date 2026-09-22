@@ -279,11 +279,11 @@ gateway:
     # change on an agentgateway bump.
     dataPlaneResources:
       requests:
-        cpu: 100m
+        cpu: 100m  # @schema type: [string, integer]
         memory: 128Mi
         ephemeral-storage: 50Mi
       limits:
-        cpu: 2000m
+        cpu: 2000m  # @schema type: [string, integer]
         memory: 512Mi
         ephemeral-storage: 512Mi
     # === Availability ===

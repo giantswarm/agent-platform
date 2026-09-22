@@ -918,7 +918,8 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@echo "ok: whole resource budget"
 	@echo "--> the budget is a knob: an installation's own limits reach the container, and a millicore value is accepted (the cpu limit IS GOMAXPROCS, rounded up to whole cores)"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.dataPlaneResources.limits.cpu=500m --set gateway.parameters.dataPlaneResources.limits.memory=1Gi >/tmp/vha-res-set.out 2>&1 || { cat /tmp/vha-res-set.out; exit 1; }
-	@$(AGP_DOC) /tmp/vha-res-set.out | awk '/^                limits:$$/{f=1;next} f&&/^                [a-zA-Z]/{exit} f' >/tmp/vha-res-set-limits.out
+	@$(AGP_DOC) /tmp/vha-res-set.out | awk '/^              resources:$$/{f=1;next} f&&/^              [a-zA-Z]/{exit} f' >/tmp/vha-res-set.res
+	@awk '/^                limits:$$/{f=1;next} f&&/^                [a-zA-Z]/{exit} f' /tmp/vha-res-set.res >/tmp/vha-res-set-limits.out
 	@grep -q 'cpu: 500m' /tmp/vha-res-set-limits.out || { echo "FAIL: an installation's cpu limit does not reach the data-plane container"; exit 1; }
 	@grep -q 'memory: 1Gi' /tmp/vha-res-set-limits.out || { echo "FAIL: an installation's memory limit does not reach the data-plane container"; exit 1; }
 	@echo "ok: budget knob"

@@ -1056,7 +1056,10 @@
                                     "additionalProperties": false,
                                     "properties": {
                                         "cpu": {
-                                            "type": "string"
+                                            "type": [
+                                                "string",
+                                                "integer"
+                                            ]
                                         },
                                         "ephemeral-storage": {
                                             "type": "string"
@@ -1071,7 +1074,10 @@
                                     "additionalProperties": false,
                                     "properties": {
                                         "cpu": {
-                                            "type": "string"
+                                            "type": [
+                                                "string",
+                                                "integer"
+                                            ]
                                         },
                                         "ephemeral-storage": {
                                             "type": "string"
