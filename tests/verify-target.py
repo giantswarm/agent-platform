@@ -138,6 +138,19 @@ KLAUS_GATEWAY_MONITOR_HOLD = [
     "--set", "klausGateway.serviceMonitor.enabled=false",
     "--set", "klausGateway.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
 ]
+# giantswarm/vm-manager#73, giantswarm/giantswarm#36711: the vm-manager chart
+# gains its own ServiceMonitor and this tree resolves its `auto` switch and
+# sets the tenant label, keys GOLDEN_REF's vm-manager block does not carry
+# (an open block, so it forwards them as written), and moves the component's
+# floor to the release that opens the keys. Written on BOTH sides so the
+# forwarded values and the range compare equal; dropped once GOLDEN_REF
+# carries them.
+VM_MANAGER_MONITOR_HOLD = [
+    "--set", "components.vm-manager.versionRange=>=0.22.0 <1.0.0",
+    "--set", "vm-manager.serviceMonitor.enabled=false",
+    "--set", "vm-manager.serviceMonitor.interval=60s",
+    "--set", "vm-manager.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
+]
 AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
     "--set", "agentgateway.controller.image.tag=2.0.0",
@@ -406,8 +419,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the switch.
         hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD, *VM_MANAGER_MONITOR_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD, *VM_MANAGER_MONITOR_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
