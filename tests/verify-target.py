@@ -99,6 +99,25 @@ MUSTER_DASHBOARD_HOLD = [
     "--set", "muster.muster.observability.grafanaDashboard.folder=muster",
     "--set", "muster.muster.observability.grafanaDashboard.giantswarm.organization=Giant Swarm",
 ]
+# giantswarm/giantswarm#36711: muster's and Substrate's OTLP endpoints, unset
+# on GOLDEN_REF (the meta chart forwards no otel block for either). Neither
+# key exists on GOLDEN_REF's side at all, so it cannot be held by --set (there
+# is no default to fall back to); the two blocks are cut from the meta
+# renders instead. Dropped once GOLDEN_REF carries them.
+MUSTER_OTEL = re.compile(
+    r"^(\s+)otel:\n\1  endpoint: http://otlp-gateway\.kube-system\.svc:4317\n"
+    r"\1  headers: X-Scope-OrgID=giantswarm\n\1  protocol: grpc\n", re.M)
+SUBSTRATE_OTEL = re.compile(r"^(\s+)otel:\n\1  endpoint: http://otlp-gateway\.kube-system\.svc:4317\n", re.M)
+
+
+def hold_otlp_endpoints(here: str, there: str) -> tuple:
+    """The two meta renders with muster's and Substrate's new OTLP blocks cut out."""
+    def strip(render: str) -> str:
+        render = MUSTER_OTEL.sub("", render)
+        return SUBSTRATE_OTEL.sub("", render)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #36711 hold — muster's and Substrate's OTLP endpoint blocks are left out of the golden comparison")
+    return h, strip(there)
 # giantswarm/agentgateway#60: this tree turns the packaging chart's own
 # monitoring on (its controller ServiceMonitor, proxy PodMonitor and dashboard
 # ConfigMap), which GOLDEN_REF's defaults leave off and whose block it does not
@@ -434,6 +453,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_llmd_only(here, there)
                 here, there = hold_hook_pods(here, there)
                 here, there = hold_substrate_range(here, there)
+                here, there = hold_otlp_endpoints(here, there)
             else:
                 here, there = hold_dataplane_podmonitor(here, there)
             if here != there:
