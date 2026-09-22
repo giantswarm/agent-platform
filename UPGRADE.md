@@ -43,6 +43,18 @@ giantswarm/giantswarm#36711: `components.kserve-llmisvc-crd`, `components.kserve
 - **None** for an installation on the defaults, or with the kserve components off.
 - **A BOM pin** (`components.kserve-*.versionRange` at a `0.4.x` release): pin `0.5.0` for all three. A `0.4.x` pin makes the `kserve-llmisvc-resources` release fail on the new keys.
 - **Recognising it worked**: `kubectl -n <release namespace> get servicemonitor llmisvc-controller-manager` exists when the cluster serves `monitoring.coreos.com/v1`, and `up{job="llmisvc-controller-manager-service"}` is `1` in Mimir for the `giantswarm` tenant.
+## \<current\> → \<next\> (the kagent line and the Substrate line at `1.1.0`: upstream kagent `main@844ea06b` on Substrate v0.2.0-beta4, agentgateway `2.1.0`)
+
+giantswarm/giantswarm#37705: the three lines re-pinned on 2026-09-22. Substrate v0.2.0-beta4 brings gateway credential injection: the egress gateway terminates the actors' TLS, injects every credential (model keys, MCP headers, the skills' git credentials) into the request, and the actor holds only placeholders. kagent `main@844ea06b` compiles against it and moves context compaction from the AgentTemplate to the Harness.
+
+### Operator action
+
+- **None** for an installation on the defaults. The connectivity release's bootstrap hook mints the fifth pool, `egress-mitm-ca-pool`, before the `substrate` release upgrades; the chart's `substrate.image` block carries the split registry and repository; the platform Harness carries the compaction the agent chart used to render.
+- **`substrate.image.registry` set in your values** (a mirror): it must be the registry host alone, `mirror.example.com`, with the path in `substrate.image.repository`. The Substrate chart refuses a registry that carries a path, and the derived worker image follows both values.
+- **AgentTemplates outside the `kagent` namespace**: add that namespace to `substrate.credentialProvider.namespacePolicies` (`atespace` and `allowedNamespaces` both the namespace). Without it the gateway cannot read the agents' Secrets and every model call of those agents fails with the runtime's 401.
+- **A private skill or plugin source with `credentialRef`**: the Secret key must hold `base64("<username>:<token>")` (GitHub: `x-access-token:<token>`), the value the gateway sends as `Authorization: Basic`. Before, it held the raw token. Change the Secret before the AgentTemplate re-admits on the new kagent.
+- **`context.compaction` in an agent chart's values**: the AgentTemplate no longer has the field; the Generic agent chart stops rendering it (its own release) and the platform Harness compacts every admitted agent with `kagent.harness.compaction`. Per-agent opt-out is gone until upstream offers it.
+- **Recognising it worked**: `kubectl -n ate-system get secret egress-mitm-ca-pool` exists; `kubectl -n ate-system get deploy` shows the credential provider next to the control plane; `kubectl -n kagent get harness kagent -o jsonpath='{.spec.kagent.compaction}'` prints the block; one agent turn through a model answers.
 
 ## \<current\> → \<next\> (the three upstream lines at their decoupled releases: kagent `1.0.0`, Substrate `1.0.0`, agentgateway `2.0.0`)
 

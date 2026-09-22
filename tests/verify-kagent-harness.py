@@ -136,6 +136,7 @@ def main(connectivity: str, meta: str) -> int:
         "snapshotLocation": SNAPSHOT,
         "env": [ENV_PROPAGATE, ENV_FLUSH],
         "allowedAgentTemplates": {"selector": {"matchLabels": {HARNESS_LABEL: "kagent", CHART_LABEL: ""}}},
+        "compaction": {"tokenThreshold": 24000, "eventRetentionSize": 4},
     }
     if harness != expected:
         fail(f"the forwarded kagent.harness is not the GS policy alone:\n  got      {harness}\n  expected {expected}\n"

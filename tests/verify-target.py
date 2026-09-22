@@ -392,6 +392,24 @@ def hold_muster_floor(here: str, there: str) -> tuple:
     if t != there:
         print("note: muster#1323 hold — the golden side's muster range is read at the 5.31.4 floor")
     return here, t
+# giantswarm/giantswarm#37705: the Substrate line at 1.1.0 splits image.registry
+# into the registry host and image.repository, and kagent 1.1.0 carries the
+# platform Harness's compaction (kagent.harness.compaction). Both blocks are
+# blanked on BOTH sides; drop once GOLDEN_REF carries them.
+SUBSTRATE_IMAGE_BLOCK = re.compile(r"^( +)image:\n\1  registry: gsoci\.azurecr\.io(?:/giantswarm/substrate)?\n(?:\1  repository: giantswarm/substrate\n)?", re.M)
+CREDENTIAL_PROVIDER_BLOCK = re.compile(r"^( +)credentialProvider:\n(?:\1 .*\n)+", re.M)
+HARNESS_COMPACTION_BLOCK = re.compile(r"^( +)compaction:\n(?:\1  (?:eventRetentionSize|tokenThreshold): \d+\n)+", re.M)
+
+
+def hold_repin_1_1(here: str, there: str) -> tuple:
+    """The two meta renders with #37705's Substrate image block and Harness compaction held equal on both sides."""
+    def strip(render: str) -> str:
+        render = SUBSTRATE_IMAGE_BLOCK.sub(r"\1image: <held: #37705>\n", render)
+        render = CREDENTIAL_PROVIDER_BLOCK.sub("", render)
+        return HARNESS_COMPACTION_BLOCK.sub("", render)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #37705 hold — the substrate image and credentialProvider blocks and the platform Harness's compaction are left out of the golden comparison")
+    return h, strip(there)
 
 
 def drop_new_roster_entries(here: str, there: str) -> tuple:
@@ -561,6 +579,21 @@ def hold_dataplane_podmonitor(here: str, there: str) -> tuple:
 # no `dashboards` key either, so this cannot be held with --set — so the block is
 # dropped from the meta renders' forwarded values and the ConfigMap documents
 # from the connectivity renders. Both go with the line.
+# giantswarm/giantswarm#37705: the bootstrap hook mints a fifth pool,
+# egress-mitm-ca-pool (ECDSA P-256), for the Substrate line at 1.1.0. The hook
+# Job's documents are dropped from BOTH sides; drop once GOLDEN_REF carries it.
+BOOTSTRAP_SOURCE = "# Source: agent-platform-connectivity/templates/substrate/bootstrap.yaml"
+
+
+def hold_substrate_bootstrap(here: str, there: str) -> tuple:
+    """The two connectivity renders with the Substrate bootstrap hook's documents left out."""
+    def strip(render: str) -> str:
+        return "\n---\n".join(d for d in render.split("\n---\n") if BOOTSTRAP_SOURCE not in d)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #37705 hold — the Substrate bootstrap hook (the egress MITM CA pool) is left out of the golden comparison")
+    return h, strip(there)
+
+
 DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
 DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
 
@@ -661,6 +694,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_hook_pods(here, there)
                 here, there = hold_substrate_range(here, there)
                 here, there = hold_muster_floor(here, there)
+                here, there = hold_repin_1_1(here, there)
                 here, there = hold_otlp_endpoints(here, there)
                 here, there = hold_dataplane_sampling(here, there)
             else:
@@ -668,6 +702,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_dataplane_tracing(here, there)
                 here, there = hold_substrate_otlp_egress(here, there)
                 here, there = hold_bootstrap_memory(here, there)
+                here, there = hold_substrate_bootstrap(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

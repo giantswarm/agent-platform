@@ -130,8 +130,8 @@ overwrite would hide a values file that still spells the old key.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation);
     substrateWorkerPool.workerImage from the Substrate release THIS chart pins
-    (agent-platform.substrate.workerImage: the substrate block's image.registry,
-    ateom-gvisor, the floor of components.substrate.versionRange) — never the
+    (agent-platform.substrate.workerImage: the substrate block's image.registry
+    and image.repository, ateom-gvisor, the floor of components.substrate.versionRange) — never the
     worker the kagent build was published against, so the worker and the
     atelet are one Substrate release whatever kagent build the range admits
     (giantswarm/agent-platform#466). An installation's own workerImage stands
@@ -686,15 +686,18 @@ Usage: include "agent-platform.substrate.pinnedVersion" $root
 
 {{/*
 The gVisor worker image of the Substrate release this chart pins:
-<substrate.image.registry>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
-— the registry the substrate block names for the control plane's images (a
-mirror sets it there, once, for both), the tag the atelet's. Every release of
-the line publishes atelet and ateom-gvisor under the same tag.
+<substrate.image.registry>/<substrate.image.repository>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
+— the registry and repository the substrate block names for the control
+plane's images (a mirror sets them there, once, for both), the tag the
+atelet's. Every release of the line publishes atelet and ateom-gvisor under
+the same tag.
 Usage: include "agent-platform.substrate.workerImage" $root
 */}}
 {{- define "agent-platform.substrate.workerImage" -}}
-{{- $registry := dig "image" "registry" "gsoci.azurecr.io/giantswarm/substrate" (.Values.substrate | default dict) -}}
-{{- printf "%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (include "agent-platform.substrate.pinnedVersion" .) -}}
+{{- $image := dig "image" (dict) (.Values.substrate | default dict) -}}
+{{- $registry := dig "registry" "gsoci.azurecr.io" $image -}}
+{{- $repository := dig "repository" "giantswarm/substrate" $image -}}
+{{- printf "%s/%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (trimAll "/" $repository) (include "agent-platform.substrate.pinnedVersion" .) -}}
 {{- end -}}
 
 {{/*

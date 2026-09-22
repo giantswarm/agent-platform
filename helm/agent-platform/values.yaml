@@ -2798,6 +2798,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # Set by a dev loop that runs the platform on a locally built image; it
     # travels only when set (components.kagent.omitEmptyKeys).
     image: ""
+    # Context compaction for every agent the Harness admits
+    # (Harness.spec.kagent.compaction, where kagent-dev/kagent#2790 put it; the
+    # AgentTemplate has no such field). Tail retention: once a prompt passes
+    # tokenThreshold tokens, everything but the newest eventRetentionSize
+    # events is summarised before the next model call. 24 000 leaves room for
+    # a system prompt with skills and the muster meta-tools plus a few tool
+    # results; 4 keeps the last two tool exchanges raw. An empty block leaves
+    # every history uncompacted. Needs the kagent line at 1.1.0 or later; an
+    # earlier chart ignores the key.
+    compaction:
+      tokenThreshold: 24000
+      eventRetentionSize: 4
     # Where Substrate keeps the actors' snapshots for this Harness — the
     # Harness's snapshotPolicy.location: an object-store URL, s3://<bucket>/<prefix>
     # (the prefix keeps one bucket's Harnesses apart). REQUIRED whenever
@@ -4622,9 +4634,9 @@ kagent-crds:  # @schema skipProperties: true; additionalProperties: true
 # Values forwarded verbatim to the substrate component release — the chart of
 # the Giant Swarm Substrate line (giantswarm/substrate, branch giantswarm; keys
 # at the chart root, no schema). The chart's image references are stamped at
-# publish (image.registry gsoci.azurecr.io/giantswarm/substrate, image.tag the build);
-# an installation that mirrors them sets image.registry here and
-# components.substrate.repository. What Substrate needs and the chart does not
+# publish (image.registry gsoci.azurecr.io, image.repository giantswarm/substrate,
+# image.tag the build); an installation that mirrors them sets image.registry
+# here and components.substrate.repository. What Substrate needs and the chart does not
 # render — the CA and JWT pools, the actor-identity trust anchor, ate-api-
 # server's authentication config — the connectivity release's bootstrap hook
 # mints (README "Agent Substrate"); what the cluster must bring — Kubernetes
@@ -4637,13 +4649,16 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   createNamespace: false
   # The line's images: published as gsoci.azurecr.io/giantswarm/substrate/<component>
   # (the chart's stamp; multi-arch, signed with the Giant Swarm CircleCI
-  # identity), releases and dev builds alike. The registry is the one value a
-  # mirror moves: the control plane's images (<registry>/<component>:<tag>,
-  # the tag the chart's stamp) and the derived worker image
+  # identity), releases and dev builds alike. The registry is the host only
+  # and the repository the path under it (the Substrate chart refuses a
+  # registry with a path); a mirror moves the registry, and the control
+  # plane's images (<registry>/<repository>/<component>:<tag>, the tag the
+  # chart's stamp) and the derived worker image
   # (agent-platform.substrate.workerImage, kagent.substrateWorkerPool above)
   # follow it. The dev channel needs no registry override.
   image:
-    registry: gsoci.azurecr.io/giantswarm/substrate
+    registry: gsoci.azurecr.io
+    repository: giantswarm/substrate
   # One PodMonitor per workload that serves metrics: ate-api-server, atelet,
   # atenet-router, atenet-egress, k8s-credential-provider and ate-controller,
   # each pinned to the port name its own pod declares. The fleet's metrics
@@ -4658,6 +4673,18 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
         # Mimir routes a scrape by this label; a monitor without it writes to
         # no tenant of the GS observability platform.
         observability.giantswarm.io/tenant: giantswarm
+  # The credential provider (the Substrate line from 1.1.0): the egress
+  # gateway injects an agent's credentials — model keys, MCP headers, the
+  # skills' git credentials — into the request from Secrets it reads on the
+  # agent's behalf, and it reads a namespace only where a policy allows it.
+  # kagent names the atespace after the AgentTemplate's namespace and the
+  # Secrets live next to the AgentTemplate, so every namespace that hosts
+  # AgentTemplates needs one entry with itself as the allowed namespace. The
+  # default covers the kagent namespace, where the agent charts install.
+  credentialProvider:
+    namespacePolicies:
+      - atespace: kagent
+        allowedNamespaces: [kagent]
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows
     # the platform: with the platform's CNPG Cluster on (postgres.enabled) the
