@@ -3393,6 +3393,34 @@ verify-klausgateway-otlp: ## Assert klaus-gateway's trace export (giantswarm/kla
 	@grep -q 'port: "4317"' /tmp/vko-kagent-pol.out || { echo "FAIL: the kagent controller's OTLP rule lost its port"; exit 1; }
 	@echo "ok: $@"
 
+MUSTER_OTLP_POLICY := muster-otlp-egress
+MUSTER_OTLP_EP := http://otlp-gateway.kube-system.svc:4317
+
+.PHONY: verify-muster-otlp
+verify-muster-otlp: ## Assert muster's OTLP egress (giantswarm/giantswarm#36711): the meta chart forwards muster.muster.observability.otel.endpoint to the connectivity release; the connectivity chart renders -muster-otlp-egress exactly while it is set, selecting muster by name — DNS + the endpoint's namespace on its port in the cilium flavour, a namespaceSelector on the port in the kubernetes one; none with networkPolicy off or the component off.
+	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
+	@helm template t $(CHART_DIR) $(VM) >/tmp/vmo-meta.out 2>&1 || { cat /tmp/vmo-meta.out; exit 1; }
+	@$(PICK) /tmp/vmo-meta.out HelmRelease agent-platform-connectivity >/tmp/vmo-meta-hr.out || { echo "FAIL: no connectivity HelmRelease"; exit 1; }
+	@test "$$(awk '/^    [^ ]/ { a = ($$0 == "    muster:"); b = c = d = 0; next } a && /^      [^ ]/ { b = ($$0 == "      muster:"); c = d = 0; next } b && /^        [^ ]/ { c = ($$0 == "        observability:"); d = 0; next } c && /^          [^ ]/ { d = ($$0 == "          otel:"); next } d && /^            endpoint: / { sub(/^            endpoint: /, ""); print; exit }' /tmp/vmo-meta-hr.out)" = "$(MUSTER_OTLP_EP)" || { echo "FAIL: the connectivity release does not receive muster.muster.observability.otel.endpoint"; exit 1; }
+	@echo "ok: endpoint forwarded"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.muster.observability.otel.endpoint=$(MUSTER_OTLP_EP) >/tmp/vmo-cnp.out 2>&1 || { cat /tmp/vmo-cnp.out; exit 1; }
+	@$(PICK) /tmp/vmo-cnp.out CiliumNetworkPolicy $(MUSTER_OTLP_POLICY) >/tmp/vmo-cnp-pol.out || { echo "FAIL: no CiliumNetworkPolicy $(MUSTER_OTLP_POLICY) with an OTLP endpoint"; exit 1; }
+	@grep -q 'app.kubernetes.io/name: muster$$' /tmp/vmo-cnp-pol.out || { echo "FAIL: the OTLP policy does not select muster"; exit 1; }
+	@grep -q 'io.kubernetes.pod.namespace: kube-system$$' /tmp/vmo-cnp-pol.out || { echo "FAIL: the OTLP policy does not select the endpoint's namespace"; cat /tmp/vmo-cnp-pol.out; exit 1; }
+	@grep -q 'port: "4317"' /tmp/vmo-cnp-pol.out || { echo "FAIL: the OTLP policy is not on 4317"; exit 1; }
+	@grep -q 'k8s-app: kube-dns' /tmp/vmo-cnp-pol.out || { echo "FAIL: the OTLP policy carries no DNS rule"; exit 1; }
+	@if grep -q 'world\|kube-apiserver\|toCIDR' /tmp/vmo-cnp-pol.out; then echo "FAIL: the OTLP policy admits more than DNS and the collector"; exit 1; fi
+	@echo "ok: cilium OTLP policy"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.muster.observability.otel.endpoint=$(MUSTER_OTLP_EP) --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vmo-k8s.out 2>&1 || { cat /tmp/vmo-k8s.out; exit 1; }
+	@$(PICK) /tmp/vmo-k8s.out NetworkPolicy $(MUSTER_OTLP_POLICY) >/tmp/vmo-k8s-pol.out || { echo "FAIL: no NetworkPolicy $(MUSTER_OTLP_POLICY) in the kubernetes flavour"; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: kube-system' /tmp/vmo-k8s-pol.out && grep -q 'port: 4317' /tmp/vmo-k8s-pol.out || { echo "FAIL: the NetworkPolicy does not select the endpoint's namespace on 4317"; cat /tmp/vmo-k8s-pol.out; exit 1; }
+	@echo "ok: kubernetes OTLP policy"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vmo-none.out 2>&1 || { cat /tmp/vmo-none.out; exit 1; }
+	@if grep -q 'name: $(MUSTER_OTLP_POLICY)$$' /tmp/vmo-none.out; then echo "FAIL: the OTLP policy renders without an endpoint"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.muster.observability.otel.endpoint=$(MUSTER_OTLP_EP) --set networkPolicy.enabled=false 2>/dev/null | grep -q 'name: $(MUSTER_OTLP_POLICY)$$' && { echo "FAIL: the OTLP policy renders with networkPolicy.enabled=false"; exit 1; } || true
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.muster.observability.otel.endpoint=$(MUSTER_OTLP_EP) --set components.muster.enabled=false 2>/dev/null | grep -q 'name: $(MUSTER_OTLP_POLICY)$$' && { echo "FAIL: the OTLP policy renders with the component off"; exit 1; } || true
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-storage-version
 verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over (#396): with kagent on, the backup Job (pre-install,pre-upgrade, -7: records the objects of modelconfigs/modelproviderconfigs/remotemcpservers.kagent.dev still stored at v1alpha2 into the migration ConfigMap, sets the crds policy of the HelmRelease the CRDs' Flux labels name to Skip (#416), deletes those CRDs and watches them stay absent for 60 s — a re-created one is deleted again and fails the hook naming the owner) and the restore Job (post-install,post-upgrade, 0: waits for modelconfigs.kagent.dev to serve v1alpha3, re-creates the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3, tolerates AlreadyExists, marks restored-at) as the hook identity in the helm image, the identity at their events; with the engine off (the fleet) the same pair and nothing else; with kagent off none of it; the kagent namespace follows kagent.namespaceOverride; helm lint.
 	@echo "====> $@ ($(CHART_DIR))"
