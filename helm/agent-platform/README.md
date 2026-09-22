@@ -1310,6 +1310,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kserve-runtime-configs.kserve.servingruntime.enabled | bool | `false` |  |
 | gpu-operator.driver.enabled | bool | `false` |  |
 | gpu-operator.toolkit.enabled | bool | `false` |  |
+| gpu-operator.dcgmExporter.serviceMonitor.additionalLabels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | modelServing.kserve.requireApi | bool | `true` | api-versions serving.kserve.io/v1alpha2; false skips it. |
 | modelServing.namespace.name | string | `"model-serving"` |  |
 | modelServing.namespace.create | bool | `true` |  |

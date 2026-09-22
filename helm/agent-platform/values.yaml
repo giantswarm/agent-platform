@@ -4700,6 +4700,14 @@ gpu-operator:  # @schema skipProperties: true; additionalProperties: true
     enabled: false
   toolkit:
     enabled: false
+  # The upstream chart turns the DCGM exporter's ServiceMonitor on by default
+  # with no tenant label (additionalLabels: {}), so an installation that
+  # enables this component picks up a monitor that scrapes into no tenant and
+  # reports no error — the failure klaus-gateway had before agent-platform#621.
+  dcgmExporter:
+    serviceMonitor:
+      additionalLabels:
+        observability.giantswarm.io/tenant: giantswarm
 
 # === Model serving (modelServing) ===
 # Model serving on llm-d, for installs that run local models, rendered by the
