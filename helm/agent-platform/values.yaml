@@ -3876,6 +3876,18 @@ vm-manager:  # @schema skipProperties: true; additionalProperties: true
         requiredAudiences: []
   networkPolicy:
     enabled: false
+  # `auto` (the default) follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled, like every other
+  # monitor of this platform; `true` / `false` force it. `vm_manager_*` (host)
+  # and `vm_guest_*` (the guest systemd report) both come off the one
+  # /metrics the chart's Service already serves.
+  serviceMonitor:
+    enabled: auto  # auto | true | false
+    interval: 60s
+    # Routes the scrape to the right Mimir instance in the GS Observability
+    # Platform.
+    labels:
+      observability.giantswarm.io/tenant: giantswarm
 
 # The wiring the connectivity chart renders for the vm-manager component (it
 # reads this block, not the chart's). Inert while components.vm-manager.enabled

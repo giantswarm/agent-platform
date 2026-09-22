@@ -1136,6 +1136,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
 | vm-manager.networkPolicy.enabled | bool | `false` |  |
+| vm-manager.serviceMonitor.enabled | string | `"auto"` |  |
+| vm-manager.serviceMonitor.interval | string | `"60s"` |  |
+| vm-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | vmManager.podDisruptionBudget.enabled | bool | `true` |  |
 | vmManager.podDisruptionBudget.minAvailable | int | `1` |  |
 | vmManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
