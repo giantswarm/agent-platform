@@ -343,6 +343,12 @@ gateway:
     # the 55 s deadline) rather than carried over. Set
     # `karpenter.sh/do-not-disrupt: "true"` here to trade node churn for them again.
     podAnnotations: {}  # @schema additionalProperties: true
+    # Labels on the data-plane pods, merged onto the generated Deployment's pod
+    # template like podAnnotations. The data plane's OTLP exporter sends no
+    # headers, so a collector that routes by tenant has only the pod to go by:
+    # set `observability.giantswarm.io/tenant` here for the Giant Swarm
+    # otlp-gateway.
+    podLabels: {}  # @schema additionalProperties: true
   # === Metric labels ===
   # Custom Prometheus labels on every metric the data plane emits, from ONE
   # Gateway-scoped AgentgatewayPolicy, <release>-metrics

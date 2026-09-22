@@ -1360,6 +1360,11 @@ gateway:
     # The connectivity chart reads this; the budget on these pods is
     # gateway.parameters.podDisruptionBudget above.
     podAnnotations: {}  # @schema additionalProperties: true
+    # Labels on the data-plane pods. The data plane's OTLP exporter sends no
+    # headers, so the tenant label is how otlp-gateway routes its spans to the
+    # giantswarm Tempo tenant. The connectivity chart reads this.
+    podLabels:  # @schema additionalProperties: true
+      observability.giantswarm.io/tenant: giantswarm
   # === Metric labels ===
   # Custom Prometheus labels on every metric the data plane emits, from ONE
   # Gateway-scoped AgentgatewayPolicy, <release>-metrics

@@ -817,10 +817,10 @@ verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scop
 	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vml-direct.out 2>&1 || { cat /tmp/vml-direct.out; exit 1; }
 	@if grep -q 'frontend:' /tmp/vml-direct.out; then echo "FAIL: a metrics policy rendered in muster-direct, where there is no data plane"; exit 1; fi
 	@echo "ok: empty, held-only, person-only, muster-direct"
-	@echo "--> with llmRouting on the labels stay on the -metrics policy and the LLM policy carries none; one template of the chart carries a frontend section"
+	@echo "--> with llmRouting on the labels stay on the -metrics policy and the LLM policy carries none; one template of the chart carries a frontend.metrics section"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) >/tmp/vml-llm.out 2>&1 || { cat /tmp/vml-llm.out; exit 1; }
 	@[ "$$($(METRICS_POLICIES) /tmp/vml-llm.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: with llmRouting on, the policies with a frontend.metrics section are [$$($(METRICS_POLICIES) /tmp/vml-llm.out | tr '\n' ' ')], not the metrics policy alone"; exit 1; }
-	@[ "$$(grep -lE '^  frontend:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: more than one template of the chart carries a frontend section: $$(grep -lE '^  frontend:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | tr '\n' ' '); a second metrics policy is dropped in silence by the data plane"; exit 1; }
+	@[ "$$(grep -lPz '(?m)^  frontend:\n    metrics:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: more than one template of the chart carries a frontend.metrics section: $$(grep -lPz '(?m)^  frontend:\n    metrics:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | tr '\n' ' '); a second metrics policy is dropped in silence by the data plane"; exit 1; }
 	@echo "ok: one metrics policy, one template"
 	@echo "--> a name YAML 1.1 reads as a boolean is rendered quoted"
 	@helm template t $(CONNECTIVITY_DIR) $(VML_ON) >/tmp/vml-quoted.out 2>&1 || { cat /tmp/vml-quoted.out; exit 1; }
@@ -990,6 +990,43 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@./tests/verify-agentgateway-wiring.py /tmp/vha-meta.out
 	@echo "ok: forwarded + controller replicas"
 	@echo "All data-plane availability behaviors verified."
+
+DPT_VM := $(VM) --set components.agentgateway.enabled=true --set ingress.mode=agentgateway-muster
+DPT_POLICY := agent-platform-connectivity-tracing
+DPT_EGRESS := agent-platform-connectivity-dataplane-otlp-egress
+
+.PHONY: verify-dataplane-tracing
+verify-dataplane-tracing: ## Assert the agentgateway data plane's trace export (giantswarm/giantswarm#36711): the connectivity chart renders the Gateway-scoped -tracing AgentgatewayPolicy (frontend.tracing, url and protocol from gateway.parameters.dataPlaneEnv, global.observability.traces.otlp winning when its endpoint is set) and -dataplane-otlp-egress (DNS + the endpoint's namespace on its port in the cilium flavour, the cluster entity for a host that is not an in-cluster Service, a namespaceSelector in the kubernetes one) exactly while an endpoint is set; none in muster-direct or with no endpoint, no egress policy with networkPolicy off; gateway.parameters.podLabels reaches the pod template; the meta chart forwards the tenant label.
+	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set 'gateway.parameters.podLabels.observability\.giantswarm\.io/tenant=giantswarm' >/tmp/vdt.out 2>&1 || { cat /tmp/vdt.out; exit 1; }
+	@$(PICK) /tmp/vdt.out AgentgatewayPolicy $(DPT_POLICY) >/tmp/vdt-pol.out || { echo "FAIL: no AgentgatewayPolicy $(DPT_POLICY) with the default data-plane endpoint"; exit 1; }
+	@grep -q '^      kind: Gateway$$' /tmp/vdt-pol.out && grep -q '^      name: agentgateway$$' /tmp/vdt-pol.out || { echo "FAIL: the tracing policy does not target the data-plane Gateway"; cat /tmp/vdt-pol.out; exit 1; }
+	@grep -q '^      url: "http://otlp-gateway.kube-system.svc:4317"$$' /tmp/vdt-pol.out && grep -q '^      protocol: GRPC$$' /tmp/vdt-pol.out || { echo "FAIL: the tracing policy does not export to the dataPlaneEnv endpoint over gRPC"; cat /tmp/vdt-pol.out; exit 1; }
+	@$(PICK) /tmp/vdt.out CiliumNetworkPolicy $(DPT_EGRESS) >/tmp/vdt-cnp.out || { echo "FAIL: no CiliumNetworkPolicy $(DPT_EGRESS)"; exit 1; }
+	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vdt-cnp.out && grep -q 'io.kubernetes.pod.namespace: kube-system$$' /tmp/vdt-cnp.out && grep -q 'port: "4317"' /tmp/vdt-cnp.out && grep -q 'k8s-app: kube-dns' /tmp/vdt-cnp.out || { echo "FAIL: the egress policy does not admit DNS and kube-system:4317 for the data-plane pods"; cat /tmp/vdt-cnp.out; exit 1; }
+	@if grep -q 'world\|kube-apiserver\|toCIDR' /tmp/vdt-cnp.out; then echo "FAIL: the egress policy admits more than DNS and the collector"; exit 1; fi
+	@grep -A3 '^      template:$$' /tmp/vdt.out | grep -q '^            observability.giantswarm.io/tenant: giantswarm$$' || { echo "FAIL: gateway.parameters.podLabels does not reach the data-plane pod template"; exit 1; }
+	@echo "ok: defaults"
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set global.observability.traces.otlp.endpoint=https://collector.example.com --set global.observability.traces.otlp.protocol=http/protobuf >/tmp/vdt-global.out 2>&1 || { cat /tmp/vdt-global.out; exit 1; }
+	@$(PICK) /tmp/vdt-global.out AgentgatewayPolicy $(DPT_POLICY) | grep -q '^      url: "https://collector.example.com"$$' || { echo "FAIL: global.observability.traces.otlp.endpoint does not win"; exit 1; }
+	@$(PICK) /tmp/vdt-global.out AgentgatewayPolicy $(DPT_POLICY) | grep -q '^      protocol: HTTP$$' || { echo "FAIL: http/protobuf does not map to HTTP"; exit 1; }
+	@$(PICK) /tmp/vdt-global.out CiliumNetworkPolicy $(DPT_EGRESS) | grep -q 'port: "443"' || { echo "FAIL: an external https collector is not on 443"; exit 1; }
+	@echo "ok: the global endpoint wins"
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vdt-k8s.out 2>&1 || { cat /tmp/vdt-k8s.out; exit 1; }
+	@$(PICK) /tmp/vdt-k8s.out NetworkPolicy $(DPT_EGRESS) >/tmp/vdt-k8s-pol.out || { echo "FAIL: no NetworkPolicy $(DPT_EGRESS) in the kubernetes flavour"; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: kube-system' /tmp/vdt-k8s-pol.out && grep -q 'port: 4317' /tmp/vdt-k8s-pol.out || { echo "FAIL: the NetworkPolicy does not admit kube-system:4317"; cat /tmp/vdt-k8s-pol.out; exit 1; }
+	@echo "ok: kubernetes flavour"
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set 'gateway.parameters.dataPlaneEnv=null' >/tmp/vdt-none.out 2>&1 || { cat /tmp/vdt-none.out; exit 1; }
+	@if grep -q 'name: $(DPT_POLICY)$$\|name: $(DPT_EGRESS)$$' /tmp/vdt-none.out; then echo "FAIL: tracing objects render with no endpoint"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vdt-direct.out 2>&1 || { cat /tmp/vdt-direct.out; exit 1; }
+	@if grep -q 'name: $(DPT_POLICY)$$\|name: $(DPT_EGRESS)$$' /tmp/vdt-direct.out; then echo "FAIL: tracing objects render in muster-direct"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set networkPolicy.enabled=false >/tmp/vdt-nonp.out 2>&1 || { cat /tmp/vdt-nonp.out; exit 1; }
+	@$(PICK) /tmp/vdt-nonp.out AgentgatewayPolicy $(DPT_POLICY) >/dev/null || { echo "FAIL: the tracing policy needs networkPolicy.enabled"; exit 1; }
+	@if grep -q 'name: $(DPT_EGRESS)$$' /tmp/vdt-nonp.out; then echo "FAIL: the egress policy renders with networkPolicy.enabled=false"; exit 1; fi
+	@echo "ok: guards"
+	@helm template t $(CHART_DIR) $(VM) >/tmp/vdt-meta.out 2>&1 || { cat /tmp/vdt-meta.out; exit 1; }
+	@$(PICK) /tmp/vdt-meta.out HelmRelease agent-platform-connectivity | grep -A1 '^        podLabels:$$' | grep -q '^          observability.giantswarm.io/tenant: giantswarm$$' || { echo "FAIL: the meta chart does not forward the data plane's tenant label"; exit 1; }
+	@echo "ok: $@"
 
 # Anthropic prompt caching (giantswarm/giantswarm#37788; the kagent line's carried patch kagent-dev/kagent#2788).
 .PHONY: verify-prompt-caching
