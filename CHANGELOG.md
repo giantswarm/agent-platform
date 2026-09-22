@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **muster's OTLP export reaches the collector: the connectivity chart renders `-muster-otlp-egress`** (giantswarm/giantswarm#36711). muster's own network policy (muster sub-chart) allows egress to the cluster entity on 80/443 only, so with `muster.muster.observability.otel.endpoint` set every export was dropped at the SYN, and no muster span or OTLP log reached Tempo or Loki. The new policy selects muster by name and allows DNS plus the endpoint's namespace on its port (the cluster entity for a host that is not an in-cluster Service), in both policy flavours, through the same `agent-platform.otlpTarget` / `agent-platform.otlpEgressRule` helpers as `-klausgateway-otlp-egress`. It renders exactly while the endpoint is set, with `networkPolicy.enabled` and the muster component on. `make verify-muster-otlp` asserts it. **Every installation with muster on gets one new object**; no pod rolls.
 - model-serving: `gemma-4-31b` serves 8k context on the 48 GB card — vLLM needs 9.5 GiB of KV cache for 32k next to 31.7 GiB of weights and has 7.3, and named 8640 tokens as the ceiling; 32k returns with an fp8 KV cache once that is proven on the L40S (#591).
 - model-serving: `gemma-4-31b` serves 32k context and `qwen3-6-35b-a3b` 16k on the 48 GB card — the 64k the first shipped with needs 12 GiB of KV cache next to 31.7 GiB of weights and vLLM refused to start (`estimated maximum model length is 8624`); the fit check passed it (giantswarm/model-manager#149) (#591).
 
