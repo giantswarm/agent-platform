@@ -506,6 +506,10 @@
                                 }
                             }
                         },
+                        "podLabels": {
+                            "type": "object",
+                            "additionalProperties": true
+                        },
                         "podSecurityContext": {
                             "type": "object",
                             "additionalProperties": false,

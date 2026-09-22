@@ -634,6 +634,32 @@ Rendered as YAML list items.
 {{- end -}}
 
 {{/*
+The OTLP endpoint and protocol the data plane exports to, as JSON
+{endpoint, protocol}: global.observability.traces.otlp when its endpoint is set,
+else the OTEL_EXPORTER_OTLP_ENDPOINT / _PROTOCOL entries of
+gateway.parameters.dataPlaneEnv — the same precedence the parameters apply to
+the env. An empty endpoint means no export.
+Usage: include "agent-platform.dataPlaneOtlp" . | fromJson
+*/}}
+{{- define "agent-platform.dataPlaneOtlp" -}}
+{{- $endpoint := "" -}}
+{{- $protocol := "" -}}
+{{- with .Values.global.observability.traces.otlp -}}
+{{- if .endpoint -}}
+{{- $endpoint = .endpoint -}}
+{{- $protocol = .protocol | default "" -}}
+{{- end -}}
+{{- end -}}
+{{- if not $endpoint -}}
+{{- range (.Values.gateway.parameters.dataPlaneEnv | default list) -}}
+{{- if eq .name "OTEL_EXPORTER_OTLP_ENDPOINT" -}}{{- $endpoint = .value | default "" -}}{{- end -}}
+{{- if eq .name "OTEL_EXPORTER_OTLP_PROTOCOL" -}}{{- $protocol = .value | default "" -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- dict "endpoint" ($endpoint | toString | trim) "protocol" ($protocol | default "grpc" | toString | lower) | toJson -}}
+{{- end -}}
+
+{{/*
 global.identity.issuerUrl, or a render failure. Usage:
   include "agent-platform.issuerUrl" (dict "ctx" . "for" "the kagent JWT policy")
 */}}

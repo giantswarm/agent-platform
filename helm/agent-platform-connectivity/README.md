@@ -791,6 +791,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
+| gateway.parameters.podLabels | object | `{}` |  |
 | gateway.metricLabels.agent.enabled | bool | `true` |  |
 | gateway.metricLabels.agent.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent\"] : source.unverifiedWorkload.serviceAccount"` |  |
 | gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |

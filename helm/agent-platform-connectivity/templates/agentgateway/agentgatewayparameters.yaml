@@ -167,10 +167,16 @@ spec:
     spec:
       replicas: {{ $replicas }}
       template:
-        {{- with .Values.gateway.parameters.podAnnotations }}
+        {{- if or .Values.gateway.parameters.podAnnotations .Values.gateway.parameters.podLabels }}
         metadata:
+          {{- with .Values.gateway.parameters.podLabels }}
+          labels:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.gateway.parameters.podAnnotations }}
           annotations:
             {{- toYaml . | nindent 12 }}
+          {{- end }}
         {{- end }}
         spec:
           automountServiceAccountToken: true

@@ -1096,6 +1096,15 @@
                                 }
                             }
                         },
+                        "podLabels": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "observability.giantswarm.io/tenant": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "podSecurityContext": {
                             "type": "object",
                             "additionalProperties": false,

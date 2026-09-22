@@ -1,0 +1,83 @@
+{{- /* The data plane's trace export. The proxy reads OTEL_EXPORTER_OTLP_* only
+as overrides of a tracing configuration it already has, so the env the
+parameters set starts no exporter on its own: this Gateway-scoped policy is what
+turns tracing on. It takes the endpoint the env names
+(agent-platform.dataPlaneOtlp), so one value keeps moving both. Sampling stays
+at agentgateway's defaults: a request that arrives with a sampled traceparent
+(an agent's turn, a klaus-gateway A2A call) is traced, one without is not. The
+exporter sends no headers; the tenant comes from gateway.parameters.podLabels.
+The egress policies let the export out of the data plane's default-deny
+policy. */ -}}
+{{- if (include "agent-platform.ingress.agentgateway" .) }}
+{{- $otlpCfg := include "agent-platform.dataPlaneOtlp" . | fromJson }}
+{{- if $otlpCfg.endpoint }}
+{{- $otlp := include "agent-platform.otlpTarget" (dict "endpoint" $otlpCfg.endpoint "protocol" $otlpCfg.protocol) | fromJson }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" . }}-tracing
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}
+  frontend:
+    tracing:
+      url: {{ $otlpCfg.endpoint | quote }}
+      protocol: {{ ternary "HTTP" "GRPC" (eq $otlpCfg.protocol "http/protobuf") }}
+{{- if .Values.networkPolicy.enabled }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-dataplane-otlp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- include "agent-platform.otlpEgressRule" (dict "target" $otlp "who" "the data plane's traces go to") | nindent 4 }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-dataplane-otlp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- if $otlp.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $otlp.namespace }}
+        {{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        {{- end }}
+      ports:
+        - port: {{ $otlp.port | int }}
+          protocol: TCP
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

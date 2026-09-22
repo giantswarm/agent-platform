@@ -552,6 +552,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
+| gateway.parameters.podLabels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | gateway.metricLabels.agent.enabled | bool | `true` |  |
 | gateway.metricLabels.agent.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent\"] : source.unverifiedWorkload.serviceAccount"` |  |
 | gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |
