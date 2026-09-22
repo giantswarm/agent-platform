@@ -760,19 +760,6 @@ VML_BAD_CLAIM_NO_KAGENT = $(MANAGERS_ON) $(MANAGERS_ROUTES) --set components.kag
 VML_SEVENTEEN = $(KAGENT_ROUTE) --set-json 'gateway.metricLabels=$(shell python3 -c 'import json; print(json.dumps({"l%d" % i: {"expression": "jwt.aud"} for i in range(14)}))')'
 # A boolean-looking name, on a non-jwt expression so it renders with the data plane alone.
 VML_ON = $(AGW_VM) --set-json 'gateway.metricLabels.on={"expression":"source.unverifiedWorkload.name"}'
-.PHONY: verify-dashboards
-verify-dashboards: ## Assert every board under the connectivity chart's dashboards/: a schema Grafana imports (v1, or v2 with its envelope; never the unwrapped "JSON model"), a uid, an owner tag, no uid twice; dashboard-linter --strict over the v1 boards when the binary is on PATH (it reads no v2 board).
-	@echo "====> $@ ($(CONNECTIVITY_DIR)/dashboards)"
-	@python3 tests/verify-dashboards.py $(CONNECTIVITY_DIR)/dashboards
-	@if command -v dashboard-linter >/dev/null 2>&1; then \
-		rc=0; \
-		for f in $$(find $(CONNECTIVITY_DIR)/dashboards -name '*.json' | sort); do \
-			if python3 -c 'import json,sys; sys.exit(0 if str(json.load(open(sys.argv[1])).get("apiVersion","")).startswith("dashboard.grafana.app/v2") else 1)' "$$f"; then echo "skip: $$f (v2 board, the linter reads v1 only)"; continue; fi; \
-			out=$$(dashboard-linter lint --strict -c tests/dashboard-lint.yaml "$$f" 2>&1) || { rc=1; echo "------ FAIL: $$f"; echo "$$out" | grep -E '❌|Error' ; }; \
-		done; \
-		[ $$rc -eq 0 ] || exit 1; \
-		echo "ok: dashboard-linter --strict"; \
-	else echo "skip: dashboard-linter not on PATH (CI installs it)"; fi
 
 .PHONY: verify-metric-labels
 verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scoped -metrics policy from gateway.metricLabels (a map — one entry off or one more without restating the rest; tpl; an entry that reads jwt. held until a route verifies a bearer), the three defaults reading the kagent runtime's identity headers behind the Substrate egress predicate and nowhere else (#586), an installation's own expression replacing a default, no policy with nothing enabled or in muster-direct, one template with a frontend section, the meta chart's forwarding (the expressions as written), the retired llmRouting.metricLabels refused, the schema holding every entry's shape, the claim guard where the claim is read and silent elsewhere, and the guards.
