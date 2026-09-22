@@ -59,6 +59,12 @@ jobs:
           curl -fsSL --connect-timeout 20 --max-time 180 --retry 5 --retry-delay 10 --retry-all-errors https://github.com/kyverno/kyverno/releases/download/v1.19.1/kyverno-cli_v1.19.1_linux_x86_64.tar.gz | tar xz -C /tmp kyverno
           sudo mv /tmp/kyverno /usr/local/bin/kyverno
           kyverno version
+          # dashboard-linter, pinned: `make verify-dashboards` lints every v1
+          # board the connectivity chart ships (the tarball holds the binary at
+          # its root). The checks are the ones giantswarm/dashboards runs.
+          curl -fsSL --connect-timeout 20 --max-time 180 --retry 5 --retry-delay 10 --retry-all-errors https://github.com/grafana/dashboard-linter/releases/download/v0.3.0/dashboard-linter_0.3.0_linux_amd64.tar.gz | tar xz -C /tmp dashboard-linter
+          sudo mv /tmp/dashboard-linter /usr/local/bin/dashboard-linter
+          dashboard-linter --help >/dev/null
     - run:
         name: verify every render assertion (make verify-all)
         # Every verify-* target of Makefile.custom.mk, which is the set
