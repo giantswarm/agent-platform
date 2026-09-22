@@ -25,7 +25,7 @@ spec:
       control-plane: {{ $c.selector }}
   ingress:
     # The admission and conversion webhooks, called by the kube-apiserver,
-    # and the metrics port.
+    # and the metrics proxy.
     - fromEntities:
         - cluster
         - kube-apiserver
@@ -67,7 +67,7 @@ spec:
   policyTypes: [Ingress, Egress]
   ingress:
     # The admission and conversion webhooks (kube-apiserver), the kubelet
-    # probes and the metrics port: no pod selector fits the callers.
+    # probes and the metrics proxy: no pod selector fits the callers.
     - ports:
         - port: 9443
           protocol: TCP
