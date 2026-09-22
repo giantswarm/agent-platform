@@ -1055,7 +1055,13 @@
                                     "type": "object",
                                     "additionalProperties": false,
                                     "properties": {
+                                        "cpu": {
+                                            "type": "string"
+                                        },
                                         "ephemeral-storage": {
+                                            "type": "string"
+                                        },
+                                        "memory": {
                                             "type": "string"
                                         }
                                     }
@@ -1064,7 +1070,13 @@
                                     "type": "object",
                                     "additionalProperties": false,
                                     "properties": {
+                                        "cpu": {
+                                            "type": "string"
+                                        },
                                         "ephemeral-storage": {
+                                            "type": "string"
+                                        },
+                                        "memory": {
                                             "type": "string"
                                         }
                                     }

@@ -268,10 +268,23 @@ gateway:
     # the `require-emptydir-requests-and-limits` Kyverno policy unless the
     # mounting container declares ephemeral-storage. Merged onto the generated
     # container via AgentgatewayParameters strategic-merge (by container name).
+    # The cpu and memory limits are load-bearing beyond capping the container:
+    # the pod derives GOMEMLIMIT and GOMAXPROCS from this container's own limits
+    # via resourceFieldRef, and an unset limit resolves against the node's
+    # allocatable capacity, not the pod's budget, so the Go runtime would size
+    # its heap target and its thread pool for the whole node. cpu is read as
+    # whole cores rounded up: 2000m is GOMAXPROCS 2. The requests restate what
+    # the controller already injects, so the render is unchanged; stating them
+    # keeps the whole budget in one place, out of reach of a controller default
+    # change on an agentgateway bump.
     dataPlaneResources:
       requests:
+        cpu: 100m
+        memory: 128Mi
         ephemeral-storage: 50Mi
       limits:
+        cpu: 2000m
+        memory: 512Mi
         ephemeral-storage: 512Mi
     # === Availability ===
     # Every MCP call and, with llmRouting on, every model call of the platform

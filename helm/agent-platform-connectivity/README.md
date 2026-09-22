@@ -782,7 +782,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.parameters.dataPlaneEnv[1].value | string | `"grpc"` |  |
 | gateway.parameters.dataPlaneVolumes | list | `[]` |  |
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
+| gateway.parameters.dataPlaneResources.requests.cpu | string | `"100m"` |  |
+| gateway.parameters.dataPlaneResources.requests.memory | string | `"128Mi"` |  |
 | gateway.parameters.dataPlaneResources.requests.ephemeral-storage | string | `"50Mi"` |  |
+| gateway.parameters.dataPlaneResources.limits.cpu | string | `"2000m"` |  |
+| gateway.parameters.dataPlaneResources.limits.memory | string | `"512Mi"` |  |
 | gateway.parameters.dataPlaneResources.limits.ephemeral-storage | string | `"512Mi"` |  |
 | gateway.parameters.replicas | int | `2` |  |
 | gateway.parameters.podDisruptionBudget.enabled | bool | `true` |  |

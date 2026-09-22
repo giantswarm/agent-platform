@@ -521,7 +521,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	elif ! grep -q 'gateway.parameters.dataPlaneEnv' /tmp/ap-sym-neg-conn.out; then \
 		echo "FAIL: the symmetry check failed for the wrong reason"; cat /tmp/ap-sym-neg-conn.out; exit 1; \
 	else echo "ok: a nested meta key the connectivity schema lacks fails, naming gateway.parameters.dataPlaneEnv"; fi
-	@echo "--> mirrored defaults: the meta chart's copy of every networkPolicy fqdns / cidrs list and port, of every leaf of the modelServing namespace, serving, cache, policies, prepull, modelImages and imageVerification blocks and of the clusterManager prewarmPriorityClass block, equals the connectivity chart's default — the forwarded copy shadows the child's (#522, #525, #537, #539, #545, #551, #552, #565)"
+	@echo "--> mirrored defaults: the meta chart's copy of every networkPolicy fqdns / cidrs list and port, of every leaf of the modelServing namespace, serving, cache, policies, prepull, modelImages and imageVerification blocks of the clusterManager prewarmPriorityClass block and of the agentgateway data plane's resource budget, equals the connectivity chart's default — the forwarded copy shadows the child's (#522, #525, #537, #539, #545, #551, #552, #565)"
 	@python3 tests/verify-mirrored-values.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "--> the mirrored-defaults check has teeth: a meta prewarm PriorityClass under another name fails it, naming the path"
 	@python3 -c 'import yaml; v=yaml.safe_load(open("$(CHART_DIR)/values.yaml")); v["clusterManager"]["prewarmPriorityClass"]["name"]="other-placeholder"; yaml.safe_dump(v, open("/tmp/ap-mirror-meta-pc.yaml", "w"))'
@@ -891,7 +891,7 @@ define vha_must_fail_schema
 	else echo "ok: $(1)"; fi
 endef
 .PHONY: verify-dataplane-ha
-verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape: two replicas, a PodDisruptionBudget (maxUnavailable 1 from the template) and a hostname spread by default on the AgentgatewayParameters, the pod selector following gateway.name, one constraint per topologyKeys entry, the knobs off, minAvailable and a percentage passed through — also through the meta chart, where a null never reaches the connectivity defaults — the guards (both budget fields, every zero-eviction budget, a fractional or non-percentage value, spread without a key, the schema minimums and the whenUnsatisfiable enum), none in muster-direct, the meta chart forwarding the keys at the same defaults and two controller replicas.
+verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape: two replicas, a PodDisruptionBudget (maxUnavailable 1 from the template), a hostname spread and a whole resource budget (cpu + memory on BOTH sides, not only ephemeral-storage: GOMEMLIMIT and GOMAXPROCS are resourceFieldRefs on this container's own limits, and an unset limit resolves against the node's allocatable capacity) by default on the AgentgatewayParameters, the pod selector following gateway.name, one constraint per topologyKeys entry, the knobs off, minAvailable and a percentage passed through — also through the meta chart, where a null never reaches the connectivity defaults — the guards (both budget fields, every zero-eviction budget, a fractional or non-percentage value, spread without a key, the schema minimums and the whenUnsatisfiable enum), none in muster-direct, the meta chart forwarding the keys at the same defaults and two controller replicas.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> default: replicas 2, PDB maxUnavailable 1, one hostname spread constraint selecting the data-plane pods"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) >/tmp/vha-on.out 2>&1 || { cat /tmp/vha-on.out; exit 1; }
@@ -905,6 +905,23 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@grep -A10 '^          topologySpreadConstraints:$$' /tmp/vha-params.out | grep -A1 'matchLabelKeys:' | grep -q 'pod-template-hash' || { echo "FAIL: the spread constraint does not carry matchLabelKeys: [pod-template-hash]; a rollout balances the surge pod against the OLD revision's pods, so once those drain both survivors can be left on one node and ScheduleAnyway never moves them back"; exit 1; }
 	@if [ "$$(grep -c 'topologyKey:' /tmp/vha-params.out)" != "1" ]; then echo "FAIL: expected exactly one topologySpreadConstraint by default"; exit 1; fi
 	@echo "ok: default shape"
+	@echo "--> the data-plane container carries a whole budget: cpu and memory on BOTH sides, not only ephemeral-storage"
+	@$(AGP_DOC) /tmp/vha-on.out | awk '/^              resources:$$/{f=1;next} f&&/^              [a-zA-Z]/{exit} f' >/tmp/vha-res.out
+	@awk '/^                limits:$$/{f=1;next} f&&/^                [a-zA-Z]/{exit} f' /tmp/vha-res.out >/tmp/vha-res-limits.out
+	@awk '/^                requests:$$/{f=1;next} f&&/^                [a-zA-Z]/{exit} f' /tmp/vha-res.out >/tmp/vha-res-requests.out
+	@grep -q 'cpu:' /tmp/vha-res-limits.out || { echo "FAIL: the data-plane container has no cpu limit; GOMAXPROCS is a resourceFieldRef on limits.cpu, so an unset limit resolves against the NODE's allocatable capacity and the proxy sizes its thread pool for the whole node"; exit 1; }
+	@grep -q 'memory:' /tmp/vha-res-limits.out || { echo "FAIL: the data-plane container has no memory limit; GOMEMLIMIT is a resourceFieldRef on limits.memory, so an unset limit makes the Go heap target the node's size and nothing caps the proxy under a traffic spike"; exit 1; }
+	@grep -q 'ephemeral-storage:' /tmp/vha-res-limits.out || { echo "FAIL: the data-plane container lost its ephemeral-storage limit; the controller injects a writable /tmp emptyDir without a sizeLimit"; exit 1; }
+	@grep -q 'cpu:' /tmp/vha-res-requests.out || { echo "FAIL: the data-plane container has no cpu request; the scheduler reserves nothing for the proxy every MCP call crosses, so it is first to starve under node CPU pressure"; exit 1; }
+	@grep -q 'memory:' /tmp/vha-res-requests.out || { echo "FAIL: the data-plane container has no memory request"; exit 1; }
+	@grep -q 'ephemeral-storage:' /tmp/vha-res-requests.out || { echo "FAIL: the data-plane container lost its ephemeral-storage request; the require-emptydir-requests-and-limits Kyverno policy denies the pod without it"; exit 1; }
+	@echo "ok: whole resource budget"
+	@echo "--> the budget is a knob: an installation's own limits reach the container, and a millicore value is accepted (the cpu limit IS GOMAXPROCS, rounded up to whole cores)"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.dataPlaneResources.limits.cpu=500m --set gateway.parameters.dataPlaneResources.limits.memory=1Gi >/tmp/vha-res-set.out 2>&1 || { cat /tmp/vha-res-set.out; exit 1; }
+	@$(AGP_DOC) /tmp/vha-res-set.out | awk '/^                limits:$$/{f=1;next} f&&/^                [a-zA-Z]/{exit} f' >/tmp/vha-res-set-limits.out
+	@grep -q 'cpu: 500m' /tmp/vha-res-set-limits.out || { echo "FAIL: an installation's cpu limit does not reach the data-plane container"; exit 1; }
+	@grep -q 'memory: 1Gi' /tmp/vha-res-set-limits.out || { echo "FAIL: an installation's memory limit does not reach the data-plane container"; exit 1; }
+	@echo "ok: budget knob"
 	@echo "--> the pod selector follows gateway.name, and each topologyKeys entry is one constraint"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.name=edge --set-json 'gateway.parameters.spread.topologyKeys=["kubernetes.io/hostname","topology.kubernetes.io/zone"]' >/tmp/vha-two.out 2>&1 || { cat /tmp/vha-two.out; exit 1; }
 	@$(AGP_DOC) /tmp/vha-two.out >/tmp/vha-two-params.out
@@ -987,6 +1004,9 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@grep -A1 '^        podDisruptionBudget:$$' /tmp/vha-meta-gw.out | grep -q 'enabled: true' || { echo "FAIL: the meta chart does not forward the budget switch"; exit 1; }
 	@if grep -A2 '^        podDisruptionBudget:$$' /tmp/vha-meta-gw.out | grep -q 'maxUnavailable'; then echo "FAIL: the meta chart carries a maxUnavailable default; that default belongs to the connectivity template so a null set through the meta chart is not needed"; exit 1; fi
 	@grep -A6 '^        spread:$$' /tmp/vha-meta-gw.out | grep -q 'kubernetes.io/hostname' || { echo "FAIL: the meta chart does not forward the default spread"; exit 1; }
+	@awk '/^        dataPlaneResources:$$/{f=1;next} f&&/^        [a-zA-Z]/{exit} f' /tmp/vha-meta-gw.out | awk '/^          limits:$$/{g=1;next} g&&/^          [a-zA-Z]/{exit} g' >/tmp/vha-meta-res-limits.out
+	@grep -q 'cpu:' /tmp/vha-meta-res-limits.out || { echo "FAIL: the meta chart does not forward a cpu limit for the data plane; its forwarded copy shadows the connectivity default, so an installation's container renders without one"; exit 1; }
+	@grep -q 'memory:' /tmp/vha-meta-res-limits.out || { echo "FAIL: the meta chart does not forward a memory limit for the data plane; its forwarded copy shadows the connectivity default"; exit 1; }
 	@./tests/verify-agentgateway-wiring.py /tmp/vha-meta.out
 	@echo "ok: forwarded + controller replicas"
 	@echo "All data-plane availability behaviors verified."
