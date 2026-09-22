@@ -41,7 +41,7 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 6,
+        "h": 8,
         "w": 24,
         "x": 0,
         "y": 1
@@ -53,7 +53,7 @@
           "showLineNumbers": false,
           "showMiniMap": false
         },
-        "content": "The **Giant Swarm Agent Platform** runs AI agents on your own infrastructure and gives them governed access to curated tools.\n\nThis board is the entry point: is the platform healthy, and what is it doing. Every health panel reads the same series as the alert that pages for it, so a panel and a page cannot disagree.\n\n| Board | What it covers |\n|---|---|\n| **LLM usage** | tokens, cost and latency per agent and per model |\n| **Usage by person** | the same, per signed-in person |\n| **Agentgateway** | the gateway itself: requests, MCP tool calls, control-plane config distribution, runtime |\n| **Muster / MCP Gateway** | the MCP server fleet, tool calls and workflows |\n\nPostgres and Valkey have no board of their own: their rows are below. The full CloudNativePG board lives in the Giant Swarm organization.",
+        "content": "The **Giant Swarm Agent Platform** runs AI agents on your own infrastructure and gives them governed access to curated tools.\n\nThis board is the entry point: is the platform healthy, and what is it doing. Every health panel reads the same series as the alert that pages for it, so a panel and a page cannot disagree.\n\n| Board | What it covers |\n|---|---|\n| **LLM usage** | tokens, cost and latency per agent and per model |\n| **Usage by person** | the same, per signed-in person |\n| **Agentgateway** | the gateway itself: requests, MCP tool calls, control-plane config distribution, runtime |\n| **Muster / MCP Gateway** | the MCP server fleet, tool calls and workflows |\n| **Klaus Gateway** | the channel front door: requests, turns and their phases, Slack streaming |\n| **Valkey** | the platform's key-value stores: memory against the limit, evictions, traffic |\n| **mcp-kubernetes** (administrator, security, cluster operator) | the Kubernetes MCP server, where that component is on |\n\nPostgres has no board of its own: its row is below. The full CloudNativePG board lives in the Giant Swarm organization, for Giant Swarm staff.",
         "mode": "markdown"
       },
       "pluginVersion": "12.1.0",
@@ -67,7 +67,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 7
+        "y": 9
       },
       "id": 3,
       "panels": [],
@@ -108,7 +108,7 @@
         "h": 4,
         "w": 3,
         "x": 0,
-        "y": 8
+        "y": 10
       },
       "id": 4,
       "options": {
@@ -180,7 +180,7 @@
         "h": 4,
         "w": 3,
         "x": 3,
-        "y": 8
+        "y": 10
       },
       "id": 5,
       "options": {
@@ -252,7 +252,7 @@
         "h": 4,
         "w": 3,
         "x": 6,
-        "y": 8
+        "y": 10
       },
       "id": 6,
       "options": {
@@ -320,7 +320,7 @@
         "h": 4,
         "w": 3,
         "x": 9,
-        "y": 8
+        "y": 10
       },
       "id": 7,
       "options": {
@@ -392,7 +392,7 @@
         "h": 4,
         "w": 3,
         "x": 12,
-        "y": 8
+        "y": 10
       },
       "id": 8,
       "options": {
@@ -464,7 +464,7 @@
         "h": 4,
         "w": 3,
         "x": 15,
-        "y": 8
+        "y": 10
       },
       "id": 9,
       "options": {
@@ -536,7 +536,7 @@
         "h": 4,
         "w": 3,
         "x": 18,
-        "y": 8
+        "y": 10
       },
       "id": 10,
       "options": {
@@ -612,7 +612,7 @@
         "h": 4,
         "w": 3,
         "x": 21,
-        "y": 8
+        "y": 10
       },
       "id": 11,
       "options": {
@@ -712,7 +712,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 14
       },
       "id": 12,
       "options": {
@@ -811,7 +811,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 14
       },
       "id": 13,
       "options": {
@@ -854,7 +854,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 21
       },
       "id": 14,
       "panels": [],
@@ -891,7 +891,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 20
+        "y": 22
       },
       "id": 15,
       "options": {
@@ -961,7 +961,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 20
+        "y": 22
       },
       "id": 16,
       "options": {
@@ -1031,7 +1031,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 20
+        "y": 22
       },
       "id": 17,
       "options": {
@@ -1101,7 +1101,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 20
+        "y": 22
       },
       "id": 18,
       "options": {
@@ -1179,7 +1179,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 20
+        "y": 22
       },
       "id": 19,
       "options": {
@@ -1249,7 +1249,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 20
+        "y": 22
       },
       "id": 20,
       "options": {
@@ -1349,7 +1349,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 26
       },
       "id": 21,
       "options": {
@@ -1450,7 +1450,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 26
       },
       "id": 22,
       "options": {
@@ -1493,7 +1493,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 33
       },
       "id": 23,
       "panels": [],
@@ -1564,7 +1564,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 32
+        "y": 34
       },
       "id": 24,
       "options": {
@@ -1663,7 +1663,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 32
+        "y": 34
       },
       "id": 25,
       "options": {
@@ -1762,7 +1762,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 32
+        "y": 34
       },
       "id": 26,
       "options": {
@@ -1805,7 +1805,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 41
       },
       "id": 27,
       "panels": [],
@@ -1876,7 +1876,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 40
+        "y": 42
       },
       "id": 28,
       "options": {
@@ -1911,7 +1911,14 @@
         }
       ],
       "title": "Memory used against the limit",
-      "type": "timeseries"
+      "type": "timeseries",
+      "links": [
+        {
+          "title": "Valkey board",
+          "url": "/d/agent-platform-valkey/valkey?${__url_time_range}&var-cluster=${cluster}",
+          "targetBlank": false
+        }
+      ]
     },
     {
       "datasource": {
@@ -1975,7 +1982,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 40
+        "y": 42
       },
       "id": 29,
       "options": {
@@ -2010,7 +2017,14 @@
         }
       ],
       "title": "Connected clients",
-      "type": "timeseries"
+      "type": "timeseries",
+      "links": [
+        {
+          "title": "Valkey board",
+          "url": "/d/agent-platform-valkey/valkey?${__url_time_range}&var-cluster=${cluster}",
+          "targetBlank": false
+        }
+      ]
     },
     {
       "datasource": {
@@ -2074,7 +2088,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 40
+        "y": 42
       },
       "id": 30,
       "options": {
@@ -2109,7 +2123,14 @@
         }
       ],
       "title": "Keys evicted per second",
-      "type": "timeseries"
+      "type": "timeseries",
+      "links": [
+        {
+          "title": "Valkey board",
+          "url": "/d/agent-platform-valkey/valkey?${__url_time_range}&var-cluster=${cluster}",
+          "targetBlank": false
+        }
+      ]
     }
   ],
   "preload": false,

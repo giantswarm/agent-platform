@@ -8,28 +8,42 @@ as every monitor of this chart: the operator that picks a ConfigMap up is part
 of the observability platform the monitors write to, and a board over series
 nobody collects is worse than no board.
 
+dashboards/*.json render whenever the gate is open. dashboards/llm-routing/*.json
+render only with llmRouting on: they read the GenAI series the LLM listener
+alone produces, and a board over a listener that does not exist is "No data" on
+every panel.
+
 The boards of a component come from that component's own chart (muster ships
 its own, and agentgateway's is upstream's, vendored in the packaging chart).
 These are the platform's own, across components, which no component chart can
 render. */ -}}
-{{- if and (include "agent-platform.serviceMonitor" .) .Values.dashboards.enabled }}
-{{- $dashboards := .Values.dashboards }}
-{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
-{{- $name := base $path | trimSuffix ".json" }}
+{{- define "agent-platform.dashboardConfigMap" -}}
+{{- $root := index . 0 -}}
+{{- $path := index . 1 -}}
+{{- $dashboards := $root.Values.dashboards -}}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "name" $ }}-dashboard-{{ $name }}
-  namespace: {{ $dashboards.namespace | default $.Release.Namespace }}
+  name: {{ include "name" $root }}-dashboard-{{ base $path | trimSuffix ".json" }}
+  namespace: {{ $dashboards.namespace | default $root.Release.Namespace }}
   labels:
-    {{- include "labels.common" $ | nindent 4 }}
+    {{- include "labels.common" $root | nindent 4 }}
     app.giantswarm.io/kind: dashboard
   annotations:
     observability.giantswarm.io/organization: {{ $dashboards.organization | quote }}
     observability.giantswarm.io/folder: {{ $dashboards.folder | quote }}
 data:
   {{ base $path }}: |-
-{{ $.Files.Get $path | indent 4 }}
+{{ $root.Files.Get $path | indent 4 }}
+{{- end -}}
+{{- if and (include "agent-platform.serviceMonitor" .) .Values.dashboards.enabled }}
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+{{ include "agent-platform.dashboardConfigMap" (list $ $path) }}
+{{- end }}
+{{- if .Values.llmRouting.enabled }}
+{{- range $path, $_ := .Files.Glob "dashboards/llm-routing/*.json" }}
+{{ include "agent-platform.dashboardConfigMap" (list $ $path) }}
+{{- end }}
 {{- end }}
 {{- end }}
