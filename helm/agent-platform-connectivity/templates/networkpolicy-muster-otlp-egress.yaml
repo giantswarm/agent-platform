@@ -1,0 +1,61 @@
+{{- if and .Values.networkPolicy.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
+{{- $otlpEndpoint := dig "muster" "observability" "otel" "endpoint" "" (.Values.muster | default dict) | toString | trim }}
+{{- if $otlpEndpoint }}
+{{- $otlpProtocol := dig "muster" "observability" "otel" "protocol" "grpc" (.Values.muster | default dict) }}
+{{- $otlp := include "agent-platform.otlpTarget" (dict "endpoint" $otlpEndpoint "protocol" $otlpProtocol) | fromJson }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+# Egress from muster to the OTLP gateway its traces and logs go to
+# (muster.muster.observability.otel.endpoint). Muster's own policy (muster
+# sub-chart) is default-deny egress and opens the cluster entity on 80/443
+# only, so without this rule every export is dropped at the SYN. Cilium
+# policies are additive: this supplements muster's policy the way
+# -muster-mcp-egress does. muster runs as its own release, so it is selected
+# by name only.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "agent-platform.musterFullname" . }}-otlp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- include "agent-platform.otlpEgressRule" (dict "target" $otlp "who" "muster's traces and logs go to") | nindent 4 }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agent-platform.musterFullname" . }}-otlp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- if $otlp.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $otlp.namespace }}
+        {{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        {{- end }}
+      ports:
+        - port: {{ $otlp.port | int }}
+          protocol: TCP
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}
