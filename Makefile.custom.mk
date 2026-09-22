@@ -89,6 +89,17 @@ GOLDEN_REF ?= origin/main
 # is on by default with no backend (giantswarm/agent-platform#329), an intended difference
 # held equal on both sides — a chart that predates the default accepts the key. Empty this
 # once GOLDEN_REF carries the line.
+# The platform's own board ConfigMaps are dropped from a golden render by name,
+# never by a value: GOLDEN_REF's schema has no `dashboards` key, so --set on it
+# fails the render outright and every document then reads as added
+# (giantswarm/giantswarm#36711). One name per board; the list goes with the line.
+DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview
+# Drop those documents from a rendered manifest in place, by metadata.name, and
+# keep the leading document separator whatever was dropped — a stripped first
+# document would otherwise read as a one-line diff of its own.
+define drop_dashboards
+	@python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' $(1) "$(DASHBOARDS_GOLDEN_DROP)"
+endef
 WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
@@ -99,7 +110,7 @@ WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false
 # on (templates/kagent/harness.yaml — a new object with no 3.x counterpart; its
 # shape is asserted by verify-kagent-harness / verify-kagent-crds). Empty this
 # list once GOLDEN_REF carries the line.
-GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP)
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -228,7 +239,7 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		$(GOLDEN_RETIRED) $$out/golden; \
 		helm template t $(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN) >$$out/head 2>&1 \
 			|| { echo "FAIL: the working-tree render failed"; cat $$out/head; exit 1; }; \
-		for f in golden head; do python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).rstrip("\n"); open(sys.argv[1],"w").write(out+"\n")' $$out/$$f "$(GOLDEN_EXCLUDE)"; done; \
+		for f in golden head; do python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' $$out/$$f "$(GOLDEN_EXCLUDE)"; done; \
 		if diff -u $$out/golden $$out/head; then echo "ok: default render unchanged (excluding $(GOLDEN_EXCLUDE))"; \
 		else echo "FAIL: the default render drifted from $(GOLDEN_REF)"; exit 1; fi; \
 	fi
@@ -2439,6 +2450,8 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		for flavor in cilium kubernetes; do \
 			helm template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-pg-new-$$flavor.out; \
 			helm template t /tmp/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >/tmp/vw-pg-old-$$flavor.out; \
+			python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' /tmp/vw-pg-new-$$flavor.out "$(DASHBOARDS_GOLDEN_DROP)"; \
+			python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' /tmp/vw-pg-old-$$flavor.out "$(DASHBOARDS_GOLDEN_DROP)"; \
 			diff -u /tmp/vw-pg-old-$$flavor.out /tmp/vw-pg-new-$$flavor.out || { echo "FAIL: the $$flavor render changed with postgres.imagePullSecrets and .affinity unset"; git worktree remove --force /tmp/vw-pg-ref; exit 1; }; \
 		done; \
 		git worktree remove --force /tmp/vw-pg-ref; \

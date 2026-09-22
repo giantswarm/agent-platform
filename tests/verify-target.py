@@ -303,6 +303,43 @@ def hold_dataplane_podmonitor(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+# giantswarm/giantswarm#36711: the platform's own board ConfigMaps and the
+# dashboards block that configures them. GOLDEN_REF has neither — its schema has
+# no `dashboards` key either, so this cannot be held with --set — so the block is
+# dropped from the meta renders' forwarded values and the ConfigMap documents
+# from the connectivity renders. Both go with the line.
+DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
+DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
+
+
+def drop_mapping(render: str, key: re.Pattern) -> str:
+    """The render without the mapping `key` names: its line and every line
+    indented deeper than it."""
+    out, lines, i = [], render.split("\n"), 0
+    while i < len(lines):
+        if m := key.match(lines[i]):
+            indent = len(m.group(1))
+            i += 1
+            while i < len(lines) and (not lines[i].strip()
+                                      or len(lines[i]) - len(lines[i].lstrip(" ")) > indent):
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
+def hold_dashboards(here: str, there: str, is_meta: bool) -> tuple:
+    """The two renders with the platform's own boards left out of the comparison."""
+    def strip(render: str) -> str:
+        if is_meta:
+            return drop_mapping(render, DASHBOARDS_KEY)
+        return "\n---\n".join(d for d in render.split("\n---\n") if DASHBOARDS_CONFIGMAP not in d)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #36711 hold — the platform's own dashboards block and board ConfigMaps are left out of the golden comparison")
+    return h, strip(there)
+
+
 def check_golden(meta: str, connectivity: str) -> None:
     ref = os.environ.get("GOLDEN_REF", "origin/main")
     if not ref:
@@ -354,6 +391,7 @@ def check_golden(meta: str, connectivity: str) -> None:
         for label, chart, flags in shapes:
             here = helm(chart, flags)
             there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
+            here, there = hold_dashboards(here, there, chart == meta)
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)

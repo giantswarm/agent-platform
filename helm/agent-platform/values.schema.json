@@ -815,6 +815,24 @@
                 }
             }
         },
+        "dashboards": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "folder": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "organization": {
+                    "type": "string"
+                }
+            }
+        },
         "dicebear": {
             "type": "object",
             "additionalProperties": true

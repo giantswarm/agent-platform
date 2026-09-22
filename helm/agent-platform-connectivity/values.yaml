@@ -652,6 +652,38 @@ hooks:
 #         valkey-password: REPLACE_ME
 extraObjects: []
 
+# === The platform's own Grafana boards ===
+# One ConfigMap per JSON under the chart's dashboards/ directory
+# (templates/dashboards/configmap.yaml), discovered by observability-operator
+# through the app.giantswarm.io/kind: dashboard label and placed by the
+# organization and folder annotations.
+#
+# Shipped: `overview.json` — Overview (uid agent-platform-overview), the folder's
+# entry point. Its component-health panels read the same series as the alerts
+# that page for them (agent-platform.rules.yml in giantswarm/prometheus-rules),
+# so a panel and a page cannot disagree, and it carries the Postgres and Valkey
+# rows, which have no board of their own.
+#
+# A component's own board comes from that component's chart: muster ships its
+# own and agentgateway's is upstream's, vendored in the packaging chart. These
+# are the platform's own, across components, which no component chart can render.
+dashboards:
+  # The ConfigMaps render under the resolved
+  # global.observability.metrics.serviceMonitor.enabled as well: the operator
+  # that picks them up is part of the observability platform the monitors write
+  # to, and a board over series nobody collects is worse than no board.
+  enabled: true
+  # Namespace for the ConfigMaps. Empty renders into the release namespace.
+  namespace: ""
+  # The Grafana organization display name, which must match an existing
+  # organization. `Shared Org` is the one every logged-in customer reaches as a
+  # Viewer and it carries the observability data of Giant Swarm managed
+  # components; `Giant Swarm` is staff-only.
+  organization: "Shared Org"
+  # The Grafana folder, `/`-separated to nest. One folder for every board of
+  # the platform, so an operator opens one place.
+  folder: "Agent Platform"
+
 # Dicebear avatar service values. Consumed by the dicebear component chart and
 # forwarded here via forwardAllValues; declared so the schema accepts the block.
 dicebear: {}  # @schema skipProperties: true; additionalProperties: true

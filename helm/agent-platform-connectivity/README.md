@@ -874,6 +874,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | hooks.opensslImage.repository | string | `"giantswarm/alpine-openssl"` |  |
 | hooks.opensslImage.tag | string | `"3.5.8"` |  |
 | extraObjects | list | `[]` |  |
+| dashboards.enabled | bool | `true` |  |
+| dashboards.namespace | string | `""` |  |
+| dashboards.organization | string | `"Shared Org"` |  |
+| dashboards.folder | string | `"Agent Platform"` |  |
 | dicebear | object | `{}` |  |
 | muster.enabled | bool | `true` |  |
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
