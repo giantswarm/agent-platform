@@ -93,7 +93,7 @@ GOLDEN_REF ?= origin/main
 # never by a value: GOLDEN_REF's schema has no `dashboards` key, so --set on it
 # fails the render outright and every document then reads as added
 # (giantswarm/giantswarm#36711). One name per board; the list goes with the line.
-DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview
+DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview agent-platform-connectivity-dashboard-usage-by-person agent-platform-connectivity-dashboard-klaus-gateway agent-platform-connectivity-dashboard-valkey agent-platform-connectivity-dashboard-llm-usage
 # Drop those documents from a rendered manifest in place, by metadata.name, and
 # keep the leading document separator whatever was dropped — a stripped first
 # document would otherwise read as a one-line diff of its own.
@@ -565,6 +565,8 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 		if grep -qE -- "$$pattern" /tmp/vl-off.out; then echo "FAIL: llmRouting is off but the render still contains $$pattern"; exit 1; fi; \
 	done
 	@if grep -qE '^      port: 8081$$' /tmp/vl-off.out; then echo "FAIL: the LLM listener renders with llmRouting off"; exit 1; fi
+	@if grep -q 'name: agent-platform-connectivity-dashboard-llm-usage$$' /tmp/vl-off.out; then echo "FAIL: the LLM usage board renders with llmRouting off; every panel of it reads a series the LLM listener alone produces"; exit 1; fi
+	@grep -q 'name: agent-platform-connectivity-dashboard-usage-by-person$$' /tmp/vl-off.out || { echo "FAIL: the Usage by person board is gated on llmRouting; it reads the data plane's request series, which exist without the LLM listener"; exit 1; }
 	@echo "ok: nothing of the LLM path renders"
 	@echo "--> off, agentgateway on: the Gateway's metrics policy renders all the same (the labels are not the LLM path's)"
 	@grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vl-off.out || { echo "FAIL: the -metrics policy is gated on llmRouting; the controller route's metrics would carry no agent label without LLM routing"; exit 1; }
@@ -587,6 +589,8 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@grep -A3 '^  ai:' /tmp/vl-on.out | grep -q 'anthropic: {}' || { echo "FAIL: the AI backend is not the Anthropic provider with its defaults"; exit 1; }
 	@if grep -q 'policies:' /tmp/vl-on.out; then echo "FAIL: the AI backend carries backend policies; the gateway must hold no credential"; exit 1; fi
 	@echo "ok: listener + pinned route + credential-free AI backend"
+	@grep -q 'name: agent-platform-connectivity-dashboard-llm-usage$$' /tmp/vl-on.out || { echo "FAIL: llmRouting is on and the LLM usage board does not render"; exit 1; }
+	@echo "ok: LLM usage board with the listener"
 	@echo "--> the LLM route matches the provider path prefixes, never a bare / (the MCP catch-all wins that tie)"
 	@grep -A6 'sectionName: llm' /tmp/vl-on.out | grep -q 'value: "/v1"' || { echo "FAIL: the LLM route does not match the provider path prefix"; exit 1; }
 	@if grep -A6 'sectionName: llm' /tmp/vl-on.out | grep -qE 'value: "?/"?$$'; then \
@@ -756,6 +760,7 @@ VML_BAD_CLAIM_NO_KAGENT = $(MANAGERS_ON) $(MANAGERS_ROUTES) --set components.kag
 VML_SEVENTEEN = $(KAGENT_ROUTE) --set-json 'gateway.metricLabels=$(shell python3 -c 'import json; print(json.dumps({"l%d" % i: {"expression": "jwt.aud"} for i in range(14)}))')'
 # A boolean-looking name, on a non-jwt expression so it renders with the data plane alone.
 VML_ON = $(AGW_VM) --set-json 'gateway.metricLabels.on={"expression":"source.unverifiedWorkload.name"}'
+
 .PHONY: verify-metric-labels
 verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scoped -metrics policy from gateway.metricLabels (a map — one entry off or one more without restating the rest; tpl; an entry that reads jwt. held until a route verifies a bearer), the three defaults reading the kagent runtime's identity headers behind the Substrate egress predicate and nowhere else (#586), an installation's own expression replacing a default, no policy with nothing enabled or in muster-direct, one template with a frontend section, the meta chart's forwarding (the expressions as written), the retired llmRouting.metricLabels refused, the schema holding every entry's shape, the claim guard where the claim is read and silent elsewhere, and the guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
@@ -1677,7 +1682,7 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> both components off render nothing of theirs (agent-manager is off by default; model-manager is on since giantswarm/agent-platform#329)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.model-manager.enabled=false >/tmp/vmg-off.out 2>&1 || { cat /tmp/vmg-off.out; exit 1; }
-	@if grep -qE 'model-manager|agent-manager' /tmp/vmg-off.out; then echo "FAIL: model-manager / agent-manager objects render while the components are off"; grep -nE 'model-manager|agent-manager' /tmp/vmg-off.out | head; exit 1; else echo "ok: inert while off"; fi
+	@if grep -vE '^\s+"' /tmp/vmg-off.out | grep -qE 'model-manager|agent-manager'; then echo "FAIL: model-manager / agent-manager objects render while the components are off (the boards' JSON payloads, which name the managers in prose, are not objects and are skipped)"; grep -vE '^\s+"' /tmp/vmg-off.out | grep -nE 'model-manager|agent-manager' | head; exit 1; else echo "ok: inert while off"; fi
 	@echo "--> the default (giantswarm/agent-platform#329): model-manager on with no backend — its policies render without a model-server or Hub egress, no endpoint is required"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >/tmp/vmg-default.out 2>&1 || { cat /tmp/vmg-default.out; exit 1; }
 	@for n in model-manager-ingress model-manager-egress muster-to-model-manager; do \

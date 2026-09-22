@@ -18,7 +18,7 @@ that one component observes every model call. The data plane then emits GenAI
 metrics for each request — tokens by type, cost in USD, request duration and
 time to first token — with the calling agent as a label (`gateway.metricLabels`,
 the Gateway's one metrics policy; see [Metric labels](#metric-labels)). The
-`agent-platform` Grafana dashboard in `giantswarm/dashboards` reads them.
+`LLM usage` board this chart ships (`dashboards/llm-routing/llm-usage.json`) reads them.
 
 The gateway holds no provider credential. Agent pods keep their own
 `ANTHROPIC_API_KEY`, and the client `x-api-key` header passes through
