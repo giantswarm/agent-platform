@@ -63,7 +63,7 @@ components:
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.23.0" }
   agent-manager:                 { versionRange: "1.0.0" }
-  vm-manager:                    { versionRange: "0.20.2" }
+  vm-manager:                    { versionRange: "0.22.0" }
   # The cluster write surface (components.cluster-manager, off by default): 0.4.2
   # is the first release with the muster registration and the identity contract
   # that also tolerates a cluster without the Cluster API group.

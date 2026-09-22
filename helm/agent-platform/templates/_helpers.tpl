@@ -1323,7 +1323,8 @@ answers, but only where the leaf is left at `auto`:
                                mcp-kubernetes.grafanaDashboards.enabled (its
                                monitor and the three boards it ships),
                                klausGateway.serviceMonitor.enabled (the chart's
-                               own monitor; the chart takes a boolean)
+                               own monitor; the chart takes a boolean),
+                               vm-manager.serviceMonitor.enabled
 Two leaves have no `auto` form and are derived directly, off only:
   valkey.valkey.metrics.podMonitor.enabled — the valkey chart's own default is
       on; written false when monitors are off, left absent otherwise so the
@@ -1386,6 +1387,7 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "grafanaDashboards" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "tracing" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "logging" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "vm-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- /* valkey PodMonitor: the chart's own default is on, so only "off" is written. */ -}}
 {{- if not $monitors -}}
 {{- $metrics := dig "valkey" "metrics" nil (index $v "valkey" | default dict) -}}

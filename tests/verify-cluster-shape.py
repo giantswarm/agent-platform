@@ -71,6 +71,11 @@ ON = [
     "--set", "components.modelServing.enabled=true",
     "--set", "components.kserve-llmisvc-crd.enabled=true",
     "--set", "components.kserve-llmisvc-resources.enabled=true",
+    # oauth off: the ServiceMonitor gate this suite exercises does not depend
+    # on it, and turning it on needs global.domain or vm-manager.oauth.baseURL,
+    # neither of which any other case here sets.
+    "--set", "components.vm-manager.enabled=true",
+    "--set", "vm-manager.oauth.enabled=false",
 ]
 # The fleet's values, written out: what `auto` has to resolve to under FLEET_APIS.
 EXPLICIT_FLEET_KNOBS = [
@@ -92,6 +97,7 @@ EXPLICIT_FLEET_COPIES = [
     "--set", "kagent.otel.logging.enabled=true",
     "--set", "kagent.oauth2-proxy.metrics.serviceMonitor.enabled=true",
     "--set", "agentgateway.monitoring.enabled=true",
+    "--set", "vm-manager.serviceMonitor.enabled=true",
 ]
 EXPLICIT_VANILLA_KNOBS = [
     "--set", "kyvernoPolicies.enabled=false",
@@ -246,6 +252,9 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     got = leaf(hr["dicebear"], ["route", "enabled"])
     expect(got == yes(envoy), f"{where} dicebear route.enabled = {got!r}, want {yes(envoy)!r}")
 
+    got = leaf(hr["vm-manager"], ["serviceMonitor", "enabled"])
+    expect(got == yes(monitors), f"{where} vm-manager values serviceMonitor.enabled = {got!r}, want {yes(monitors)!r}")
+
     # The connectivity chart on its own, same served groups: the matching objects.
     # kagent.serviceMonitor is off by default (the kagent line serves no
     # /metrics), so the one ServiceMonitor the gate can produce is switched on
@@ -310,7 +319,8 @@ def main(meta: str, connectivity: str) -> int:
            and leaf(m["kagent"], ["otel", "tracing", "enabled"]) == "false"
            and OTLP_HEADER not in "\n".join(m["kagent"])
            and leaf(m["agentgateway"], ["monitoring", "enabled"]) == "false"
-           and leaf(m["valkey"], ["valkey", "metrics", "podMonitor", "enabled"]) == "false",
+           and leaf(m["valkey"], ["valkey", "metrics", "podMonitor", "enabled"]) == "false"
+           and leaf(m["vm-manager"], ["serviceMonitor", "enabled"]) == "false",
            "global.observability.metrics.serviceMonitor.enabled=false with monitoring served did not reach every copy")
     rendered = render(connectivity, [*PARENT_REF, *ON, *fleet, "--set", "global.observability.metrics.serviceMonitor.enabled=false"])
     expect("kind: ServiceMonitor" not in rendered and "enablePodMonitor" not in rendered,

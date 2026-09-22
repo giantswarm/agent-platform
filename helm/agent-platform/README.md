@@ -404,7 +404,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.vm-manager.versionRange | string | `">=0.20.2 <1.0.0"` |  |
+| components.vm-manager.versionRange | string | `">=0.22.0 <1.0.0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
@@ -1136,6 +1136,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
 | vm-manager.networkPolicy.enabled | bool | `false` |  |
+| vm-manager.serviceMonitor.enabled | string | `"auto"` |  |
+| vm-manager.serviceMonitor.interval | string | `"60s"` |  |
+| vm-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | vmManager.podDisruptionBudget.enabled | bool | `true` |  |
 | vmManager.podDisruptionBudget.minAvailable | int | `1` |  |
 | vmManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
