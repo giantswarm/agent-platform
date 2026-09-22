@@ -674,7 +674,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.muster.observability.metrics.prometheus.prometheusRule.enabled | string | `"auto"` |  |
 | muster.muster.observability.metrics.prometheus.prometheusRule.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | muster.muster.observability.grafanaDashboard.enabled | string | `"auto"` |  |
+| muster.muster.observability.grafanaDashboard.folder | string | `"Agent Platform"` |  |
 | muster.muster.observability.grafanaDashboard.giantswarm.enabled | bool | `true` |  |
+| muster.muster.observability.grafanaDashboard.giantswarm.organization | string | `"Shared Org"` |  |
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.podDisruptionBudget.enabled | bool | `true` |  |
