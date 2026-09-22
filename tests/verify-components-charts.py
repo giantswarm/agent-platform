@@ -104,13 +104,13 @@ KAGENT = ["kagent-crds", "kagent"]
 # that schema, releases and branch builds alike, so RENDER_AGAINST cannot name
 # one and this check stays red until 2.4.0 exists; both entries go with it.
 # klaus-gateway waits for the release that opens serviceMonitor.labels
-# (giantswarm/klaus-gateway#316; through 1.19.1 the schema closes the block).
-# Its CI publishes no branch build, so the check stays red until 1.20.0 exists.
+# (giantswarm/klaus-gateway#316; through 1.19.1 the schema closes the block);
+# RENDER_AGAINST names that PR's branch build, which carries the schema.
 UNRELEASED: dict[str, str] = {"agentgateway": "2.4.0", "klaus-gateway": "1.20.0"}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
-# value the meta chart forwards. The entry goes with the release. Empty today.
-RENDER_AGAINST: dict[str, str] = {}
+# value the meta chart forwards. The entry goes with the release.
+RENDER_AGAINST: dict[str, str] = {"klaus-gateway": "1.19.2-dev.feat-servi--itor-labels.2026-09-22.12-12-32.hf3c302d"}
 # An exact version, prerelease included (a dev build is one) — what a BOM
 # line may carry; a range is not a version this check can render "the pin" at.
 EXACT_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
@@ -234,7 +234,9 @@ def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> st
     """The chart to render a RANGE against while nothing the constraint admits is
     published: the kagent build the values name (the kagent range's floor — the
     chart version of the same build), the branch build RENDER_AGAINST names, else
-    the newest release tag. Only for a range UNRELEASED names; never for a pin."""
+    the newest release tag. Only for a range UNRELEASED names, or for a BOM pin
+    that IS the version UNRELEASED names — the one release the range waits for;
+    any other unpublished pin fails, because no installation on it can install."""
     if name not in UNRELEASED:
         fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED)")
     chosen = kagent_tag if name in KAGENT else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
@@ -369,6 +371,8 @@ def main(meta: str) -> int:
             tags = registry_tags(url)
             version_range = fluxsemver.resolve(tags, rng) or fallback(name, rng, tags, kagent_tag)
             version_pin = fluxsemver.resolve(tags, pin)
+            if not version_pin and pin == UNRELEASED.get(name):
+                version_pin = fallback(name, pin, tags, kagent_tag)
             if not version_pin:
                 fail(f"{name}: the BOM pins {pin!r}, which {url} does not publish — no installation on this BOM can install it")
             axes = [("range", rng, version_range, values_range), ("BOM pin", pin, version_pin, values_pin)]
