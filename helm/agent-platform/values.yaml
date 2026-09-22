@@ -4385,6 +4385,17 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
 mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: mcp-kubernetes
   mcpKubernetes:
+    instrumentation:
+      # The chart serves /metrics on its own port whatever this holds
+      # (mcpKubernetes.metrics, on by default); this renders the monitor that
+      # collects it. `auto` follows the resolved
+      # global.observability.metrics.serviceMonitor.enabled.
+      serviceMonitor:
+        enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+        labels:
+          # Mimir routes a scrape by this label; a monitor without it writes to
+          # no tenant of the GS observability platform.
+          observability.giantswarm.io/tenant: giantswarm
     oauth:
       enabled: true
       provider: dex
@@ -4392,6 +4403,17 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
       sso:
         allowPrivateIPs: true
       enableDownstreamOAuth: true
+  # The three boards the chart ships (administrator, security, cluster
+  # operator), into the platform's own folder. `auto` follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled: the operator that picks
+  # a board up is part of the platform the monitor writes to. Both annotation
+  # values carry a space, so neither can be a label.
+  grafanaDashboards:
+    enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+    folder: "Agent Platform"
+    giantswarm:
+      enabled: true
+      organization: "Shared Org"
   # --- Wiring (read by the connectivity chart, not passed to the mcp-kubernetes chart) ---
   # Audience the forwarded IdP id_token must carry on top of the platform
   # client's so the kube-apiserver accepts it: muster requests this
