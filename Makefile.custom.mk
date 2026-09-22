@@ -3401,7 +3401,7 @@ verify-muster-otlp: ## Assert muster's OTLP egress (giantswarm/giantswarm#36711)
 	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
 	@helm template t $(CHART_DIR) $(VM) >/tmp/vmo-meta.out 2>&1 || { cat /tmp/vmo-meta.out; exit 1; }
 	@$(PICK) /tmp/vmo-meta.out HelmRelease agent-platform-connectivity >/tmp/vmo-meta-hr.out || { echo "FAIL: no connectivity HelmRelease"; exit 1; }
-	@python3 -c 'import sys,yaml; d=next(x for x in yaml.safe_load_all(open("/tmp/vmo-meta-hr.out")) if x and x.get("kind")=="HelmRelease"); sys.exit(0 if d["spec"]["values"]["muster"]["muster"]["observability"]["otel"]["endpoint"]=="$(MUSTER_OTLP_EP)" else 1)' || { echo "FAIL: the connectivity release does not receive muster's OTLP endpoint"; exit 1; }
+	@test "$$(awk '/^    [^ ]/ { a = ($$0 == "    muster:"); b = c = d = 0; next } a && /^      [^ ]/ { b = ($$0 == "      muster:"); c = d = 0; next } b && /^        [^ ]/ { c = ($$0 == "        observability:"); d = 0; next } c && /^          [^ ]/ { d = ($$0 == "          otel:"); next } d && /^            endpoint: / { sub(/^            endpoint: /, ""); print; exit }' /tmp/vmo-meta-hr.out)" = "$(MUSTER_OTLP_EP)" || { echo "FAIL: the connectivity release does not receive muster.muster.observability.otel.endpoint"; exit 1; }
 	@echo "ok: endpoint forwarded"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.muster.observability.otel.endpoint=$(MUSTER_OTLP_EP) >/tmp/vmo-cnp.out 2>&1 || { cat /tmp/vmo-cnp.out; exit 1; }
 	@$(PICK) /tmp/vmo-cnp.out CiliumNetworkPolicy $(MUSTER_OTLP_POLICY) >/tmp/vmo-cnp-pol.out || { echo "FAIL: no CiliumNetworkPolicy $(MUSTER_OTLP_POLICY) with an OTLP endpoint"; exit 1; }
