@@ -14,8 +14,9 @@ D3). Each case below pins one property of the component's render:
 - on: ONE OCIRepository (the catalog's gpu-operator chart on 1.x) and ONE
   HelmRelease into kube-system — release history there too, crds CreateReplace on
   install and upgrade, no dependsOn, no global — with the values nested under the
-  wrapper's subchart key: the Flatcar row, driver and toolkit off; switching the
-  component on changes nothing else of the render but the roster entry;
+  wrapper's subchart key: the Flatcar row, driver and toolkit off, plus the
+  DCGM exporter ServiceMonitor's tenant label; switching the component on
+  changes nothing else of the render but the roster entry;
 - the second row: gpu-operator.toolkit.enabled=true reaches the release, the
   driver stays off;
 - the target knob stamps spec.kubeConfig.secretRef onto the release like every
@@ -46,7 +47,17 @@ GUARD_APIS = [
     "--api-versions", "helm.toolkit.fluxcd.io/v2",
     "--api-versions", "application.giantswarm.io/v1alpha1",
 ]
-FLATCAR_ROW = f"    {NAME}:\n      driver:\n        enabled: false\n      toolkit:\n        enabled: false\n"
+FLATCAR_ROW = (
+    f"    {NAME}:\n"
+    "      dcgmExporter:\n"
+    "        serviceMonitor:\n"
+    "          additionalLabels:\n"
+    "            observability.giantswarm.io/tenant: giantswarm\n"
+    "      driver:\n"
+    "        enabled: false\n"
+    "      toolkit:\n"
+    "        enabled: false\n"
+)
 
 
 def fail(msg: str) -> None:
