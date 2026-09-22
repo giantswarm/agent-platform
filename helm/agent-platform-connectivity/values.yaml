@@ -1168,21 +1168,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # stable human identity and matches muster's trusted-issuer subjectClaim,
       # so UI (oauth2-proxy) and A2A sessions key identically.
       userIdClaim: email
-    # Expose controller-runtime Prometheus metrics on :8080 (HTTP, no TLS).
-    # The default --metrics-bind-address is "0" (disabled) and the chart never
-    # sets it. We enable it here and wire a ServiceMonitor via extraObjects.
-    # metrics-secure=false avoids needing a cert for the in-cluster scrape.
     # X-Scope-OrgID routes OTLP traces and logs to the correct Loki/Tempo
     # tenant. The configmap template has no headers field so we inject via env.
+    # METRICS_BIND_ADDRESS and METRICS_SECURE are not set here: the kagent
+    # chart renders both from controller.metrics, and a second entry of the
+    # same name would render the variable twice.
     env:
-      - name: METRICS_BIND_ADDRESS
-        value: ":8080"
-      # false: HTTP scrape, no cert needed. The network policy on port 8083
-      # already restricts access; HTTP on :8080 is acceptable for in-cluster
-      # scraping. Set to "true" + configure ServiceMonitor tlsConfig with a
-      # cert-manager-issued CA if HTTPS is required.
-      - name: METRICS_SECURE
-        value: "false"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: "X-Scope-OrgID=giantswarm"
     # VerticalPodAutoscaler on the controller Deployment (templates/kagent/
@@ -1278,21 +1269,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       apiKeySecretRef: kagent-anthropic
       apiKeySecretKey: ANTHROPIC_API_KEY
       apiKey: ""  # Set per-cluster in secret-values; chart creates the Secret
-
-  # The controller metrics Service and ServiceMonitor (templates/kagent/
-  # servicemonitor.yaml), under the global.observability.metrics.serviceMonitor
-  # gate (monitoring.coreos.com/v1). Off: the kagent line's controller serves
-  # no Prometheus /metrics, so the monitor would scrape a refused port and sit
-  # at up=0; nothing reads those metrics (the fleet's KagentControllerDown rule
-  # reads the Deployment's kube-state-metrics series). Back to true when
-  # upstream serves them.
-  serviceMonitor:
-    enabled: false
-    interval: 60s
-    # Extra labels on the ServiceMonitor metadata. The tenant label routes
-    # metrics to the correct Mimir instance in the GS Observability Platform.
-    labels:
-      observability.giantswarm.io/tenant: giantswarm
 
   # OTel — traces and logs to the GS Observability Platform OTLP gateway.
   # X-Scope-OrgID header routes to the correct Loki/Tempo tenant.

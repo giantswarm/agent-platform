@@ -343,9 +343,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[4] | string | `"modelConfigs"` |  |
 | components.kagent.omitKeys[5] | string | `"oauth2ProxyIngress"` |  |
 | components.kagent.omitKeys[6] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[7] | string | `"serviceMonitor"` |  |
-| components.kagent.omitKeys[8] | string | `"uiRoute"` |  |
-| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[8] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
@@ -758,7 +757,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.vpa.minAllowed.memory | string | `"128Mi"` |  |
 | kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
 | kagent.controller.vpa.maxAllowed.memory | string | `"1280Mi"` |  |
-| kagent.controller.metrics.enabled | bool | `false` |  |
+| kagent.controller.metrics.enabled | bool | `true` |  |
+| kagent.controller.metrics.bindAddress | string | `":8080"` |  |
+| kagent.controller.metrics.secureServing | bool | `false` |  |
+| kagent.controller.metrics.service.port | int | `8080` |  |
+| kagent.controller.metrics.serviceMonitor.enabled | string | `"auto"` |  |
+| kagent.controller.metrics.serviceMonitor.interval | string | `"60s"` |  |
+| kagent.controller.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.ui.image.repository | string | `"giantswarm/kagent/ui"` |  |
@@ -794,9 +799,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.apiKey | string | `""` |  |
 | kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
 | kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
-| kagent.serviceMonitor.enabled | bool | `false` |  |
-| kagent.serviceMonitor.interval | string | `"60s"` |  |
-| kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.otel.tracing.enabled | string | `"auto"` |  |
 | kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |
@@ -1289,6 +1291,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent-crds.substrate.enabled | bool | `false` |  |
 | substrate.createNamespace | bool | `false` |  |
 | substrate.image.registry | string | `"gsoci.azurecr.io/giantswarm/substrate"` |  |
+| substrate.metrics.podMonitor.enabled | string | `"auto"` |  |
+| substrate.metrics.podMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
 | substrate.postgres.connectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
