@@ -106,10 +106,11 @@ LINE = {
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
     "model-manager": (GSOCI, ">=0.23.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
-    # 0.20.2 is the first vm-manager release from the generated CircleCI
-    # pipeline with its guest image artifact (gsoci, the catalog). muster
-    # alone: the MCPServer CR.
-    "vm-manager": (GSOCI, ">=0.20.2 <1.0.0", ["muster"]),
+    # 0.22.0 carries serviceMonitor.enabled / .labels (giantswarm/vm-manager#73,
+    # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
+    # from the generated CircleCI pipeline with its guest image artifact
+    # (gsoci, the catalog). muster alone: the MCPServer CR.
+    "vm-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster"]),
     # 0.4.2 is the first cluster-manager release with the muster registration and
     # the identity contract the meta chart forwards that also tolerates a cluster
     # without the Cluster API group. muster alone: the MCPServer CR.
