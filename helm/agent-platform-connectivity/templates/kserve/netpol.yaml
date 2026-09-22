@@ -3,8 +3,8 @@
 Network policy of the llm-d controller in the release namespace — the
 kserve-llmisvc-resources release targets the same namespace as this one. It is
 an admission webhook + controller: the kube-apiserver calls its webhook port
-(9443), the kubelet probes its health port (8081), a metrics scraper the
-kube-rbac-proxy (8443); it talks to DNS and the Kubernetes API and nothing
+(9443), the kubelet probes its health port (8081), a metrics scraper its
+metrics port (8443); it talks to DNS and the Kubernetes API and nothing
 else. The API server has no pod identity a NetworkPolicy could select, so the
 webhook and probe ports admit every source in the kubernetes flavor and the
 cluster/host entities in the cilium flavor.
@@ -25,7 +25,7 @@ spec:
       control-plane: {{ $c.selector }}
   ingress:
     # The admission and conversion webhooks, called by the kube-apiserver,
-    # and the metrics proxy.
+    # and the metrics port.
     - fromEntities:
         - cluster
         - kube-apiserver
@@ -67,7 +67,7 @@ spec:
   policyTypes: [Ingress, Egress]
   ingress:
     # The admission and conversion webhooks (kube-apiserver), the kubelet
-    # probes and the metrics proxy: no pod selector fits the callers.
+    # probes and the metrics port: no pod selector fits the callers.
     - ports:
         - port: 9443
           protocol: TCP

@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the kserve components on `0.5.x`, the llm-d controller's ServiceMonitor)
+
+giantswarm/giantswarm#36711: `components.kserve-llmisvc-crd`, `components.kserve-llmisvc-resources` and `components.kserve-runtime-configs` move from `0.4.x` to `0.5.x`. The meta chart forwards `kserve.llmisvc.controller.metricsSecure` and `.serviceMonitor` to the controller, and the `0.4.x` schema rejects both keys.
+
+### Operator action
+
+- **None** for an installation on the defaults, or with the kserve components off.
+- **A BOM pin** (`components.kserve-*.versionRange` at a `0.4.x` release): pin `0.5.0` for all three. A `0.4.x` pin makes the `kserve-llmisvc-resources` release fail on the new keys.
+- **Recognising it worked**: `kubectl -n <release namespace> get servicemonitor llmisvc-controller-manager` exists when the cluster serves `monitoring.coreos.com/v1`, and `up{job="llmisvc-controller-manager-service"}` is `1` in Mimir for the `giantswarm` tenant.
+
 ## \<current\> → \<next\> (the three upstream lines at their decoupled releases: kagent `1.0.0`, Substrate `1.0.0`, agentgateway `2.0.0`)
 
 giantswarm/agent-platform#608: the kagent line, the Substrate line and the agentgateway line release stable semver of their own, decoupled from the upstream versions their `FORK.md`s record, and publish nothing more under the former `vX.Y.Z-gs.N` scheme. `components.kagent*.versionRange` and `components.substrate*.versionRange` are `>=1.0.0 <1.1.0`; the agentgateway line's `2.0.0` is named in full under its nested names — `agentgateway.controller.image` `giantswarm/agentgateway-upstream/controller:2.0.0` and `agentgateway.proxy.image` `giantswarm/agentgateway-upstream/agentgateway:2.0.0` in both charts, `substrate.images.agentgateway` the same data plane for Substrate's egress gateway — and `components.agentgateway.versionRange` is `>=2.2.2 <3.0.0`, the packaging release that renders a bare image tag as written. The range shape follows the scheme: a patch of a line is carried patches or a rebuild on the same upstream pin and never changes a runtime contract, a re-pin onto another upstream release is at least a minor, so a range's ceiling is the next minor with no `-0` — `agent-platform.substrate.validateRange` admits an exact version or `>=X.Y.Z <X.(Y+1).0` and refuses a `-0` bound and the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0`, and `agent-platform.substrate.workerPoolSpreadFloor` is `1.0.0`.
