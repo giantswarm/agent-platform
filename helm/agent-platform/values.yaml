@@ -927,12 +927,12 @@ components:  # @schema additionalProperties: true
     # one Helm release Secret; as its own release it does.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The kserve charts come from one repository and move together; the
-    # forwarded blocks below assume the 0.4.x key shape (createSharedResources,
-    # controller.deploymentMode), so the range holds the line. 0.4.x is the
-    # first line whose every image default is a gsoci reference
-    # (giantswarm/agent-platform#575); from 0.4.1 the storage-initializer's
-    # resources follow kserve.storage.resources.
-    versionRange: "0.4.x"
+    # forwarded blocks below assume the 0.5.x key shape (createSharedResources,
+    # controller.deploymentMode, llmisvc.controller.metricsSecure and
+    # .serviceMonitor, giantswarm/kserve#88), so the range holds the line.
+    # Every image default is a gsoci reference (giantswarm/agent-platform#575)
+    # and the storage-initializer's resources follow kserve.storage.resources.
+    versionRange: "0.5.x"
     valuesFrom: kserve-llmisvc-crd
     enabled: false
     ownedCrds:
@@ -948,7 +948,7 @@ components:  # @schema additionalProperties: true
     # (kserve-llmisvc-resources.kserve.createSharedResources below) — and
     # ships the Gateway API Inference Extension CRDs as templates.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.4.x"
+    versionRange: "0.5.x"
     valuesFrom: kserve-llmisvc-resources
     enabled: false
     # Its webhook configurations and the shared objects need the CRDs
@@ -971,7 +971,7 @@ components:  # @schema additionalProperties: true
     # LLMInferenceService CRDs only (the configs are CRs of theirs), not the
     # controller.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.4.x"
+    versionRange: "0.5.x"
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
@@ -4678,6 +4678,21 @@ kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties:
       # with the controller. A cluster that already has them (an inference
       # gateway installed them) sets this false: Helm cannot adopt them.
       createGIECRDs: true
+      controller:
+        # Plain HTTP on :8443. The secure mode authenticates the scraper with a
+        # TokenReview and authorizes it with a SubjectAccessReview, which the
+        # fleet's metrics collector does not do.
+        metricsSecure: false
+        # `auto` (the default) follows the resolved
+        # global.observability.metrics.serviceMonitor.enabled, like every other
+        # monitor of this platform; `true` / `false` force it.
+        serviceMonitor:
+          enabled: auto  # auto | true | false
+          interval: 60s
+          # Routes the scrape to the right Mimir instance in the GS
+          # Observability Platform.
+          labels:
+            observability.giantswarm.io/tenant: giantswarm
 
 # === The well-known LLMInferenceServiceConfigs (components.kserve-runtime-configs) ===
 # Forwarded to the kserve-runtime-configs release. llmisvcConfigs on: the

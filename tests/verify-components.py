@@ -63,10 +63,10 @@ NEW = {
     "backstage": (GSOCI, ">=1.0.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
     "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://ghcr.io/cloudnative-pg/charts", "0.29.x", [], None),
-    "kserve-llmisvc-crd": (GSOCI, "0.4.x", [], None),
+    "kserve-llmisvc-crd": (GSOCI, "0.5.x", [], None),
     # The one KServe controller: it renders the control plane's shared objects
     # itself, since the classic controller (kserve-resources) is gone.
-    "kserve-llmisvc-resources": (GSOCI, "0.4.x", ["kserve-llmisvc-crd"], "createSharedResources: true"),
+    "kserve-llmisvc-resources": (GSOCI, "0.5.x", ["kserve-llmisvc-crd"], "createSharedResources: true"),
 }
 
 # The wiring chart has no range of its own: released off the same tag as the
