@@ -1829,6 +1829,18 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     # meta chart replaces them before it forwards the block); an explicit
     # true / false wins.
     observability:
+      # OTLP traces and logs to the same collector kagent, agentgateway and
+      # klaus-gateway use; X-Scope-OrgID routes to the giantswarm Loki/Tempo
+      # tenant. giantswarm/giantswarm#36711: until now this stayed empty, so
+      # the two spans per MCP tool call muster's docs describe reached
+      # nothing. Metrics stay on the ServiceMonitor scrape below —
+      # muster.observability.metrics.exporter empty defers to serviceMonitor
+      # when it is enabled, so setting this endpoint does not also push
+      # metrics over OTLP.
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        protocol: grpc
+        headers: "X-Scope-OrgID=giantswarm"
       metrics:
         prometheus:
           serviceMonitor:
@@ -4520,6 +4532,20 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # snapshot store (s3://ate-snapshots). Off (the default),
     # kagent.harness.snapshotLocation names the installation's own store.
     enabled: false
+  # OTLP export for ate-api-server, ate-controller, atenet-router and atelet
+  # (the chart's `substrate.otel.env` helper reads this single endpoint as
+  # the fallback for the per-signal traces / metrics / logs endpoints below,
+  # all `enabled: true` in the chart's own defaults). Same collector as
+  # kagent, agentgateway and klaus-gateway. giantswarm/giantswarm#36711:
+  # until now this stayed empty and all three signals went nowhere.
+  #
+  # The chart has no OTLP-headers key for any of the four components (only
+  # atelet.extraEnv / ateApiServer.extraEnv exist, and ate-controller /
+  # atenet-router have neither), so X-Scope-OrgID cannot be set here the way
+  # it is for kagent below — every Substrate span, metric and log point
+  # reaches the collector untenanted until the chart grows one.
+  otel:
+    endpoint: http://otlp-gateway.kube-system.svc:4317
   # The chart's own third-party image defaults, pinned to their gsoci copies
   # (giantswarm/agent-platform#575, #580). The chart names Docker Hub —
   # `postgres:18-alpine@…`, `rustfs/rustfs:…`, `amazon/aws-cli:…`, short names
