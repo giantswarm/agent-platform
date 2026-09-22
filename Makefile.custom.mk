@@ -1695,7 +1695,7 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> both components off render nothing of theirs (agent-manager is off by default; model-manager is on since giantswarm/agent-platform#329)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.model-manager.enabled=false >/tmp/vmg-off.out 2>&1 || { cat /tmp/vmg-off.out; exit 1; }
-	@if grep -qE 'model-manager|agent-manager' /tmp/vmg-off.out; then echo "FAIL: model-manager / agent-manager objects render while the components are off"; grep -nE 'model-manager|agent-manager' /tmp/vmg-off.out | head; exit 1; else echo "ok: inert while off"; fi
+	@if grep -vE '^\s+"' /tmp/vmg-off.out | grep -qE 'model-manager|agent-manager'; then echo "FAIL: model-manager / agent-manager objects render while the components are off (the boards' JSON payloads, which name the managers in prose, are not objects and are skipped)"; grep -vE '^\s+"' /tmp/vmg-off.out | grep -nE 'model-manager|agent-manager' | head; exit 1; else echo "ok: inert while off"; fi
 	@echo "--> the default (giantswarm/agent-platform#329): model-manager on with no backend — its policies render without a model-server or Hub egress, no endpoint is required"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >/tmp/vmg-default.out 2>&1 || { cat /tmp/vmg-default.out; exit 1; }
 	@for n in model-manager-ingress model-manager-egress muster-to-model-manager; do \
