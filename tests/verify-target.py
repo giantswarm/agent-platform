@@ -114,6 +114,19 @@ AGENTGATEWAY_MONITORING_HOLD = [
     "--set", "agentgateway.monitoring.grafanaDashboard.annotations.observability\\.giantswarm\\.io/organization=Shared Org",
     "--set", "agentgateway.monitoring.grafanaDashboard.annotations.observability\\.giantswarm\\.io/folder=Agent Platform",
 ]
+# giantswarm/giantswarm#36711: this tree turns the mcp-kubernetes chart's own
+# ServiceMonitor and its three Grafana boards on, which GOLDEN_REF's defaults
+# leave off and whose keys it does not carry at all. The whole block is written
+# on BOTH sides so the forwarded values compare equal; dropped once GOLDEN_REF
+# carries it.
+MCP_KUBERNETES_MONITORING_HOLD = [
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.enabled=false",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
+    "--set", "mcp-kubernetes.grafanaDashboards.enabled=false",
+    "--set", "mcp-kubernetes.grafanaDashboards.folder=Agent Platform",
+    "--set", "mcp-kubernetes.grafanaDashboards.giantswarm.enabled=true",
+    "--set", "mcp-kubernetes.grafanaDashboards.giantswarm.organization=Shared Org",
+]
 AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
     "--set", "agentgateway.controller.image.tag=2.0.0",
@@ -382,8 +395,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the switch.
         hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),

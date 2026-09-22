@@ -1257,11 +1257,17 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.backstage.extraVolumeMounts[0].mountPath | string | `"/etc/agent-platform/idp-ca"` |  |
 | backstage.backstage.extraVolumeMounts[0].readOnly | bool | `true` |  |
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.enabled | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.provider | string | `"dex"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.allowPrivateURLs | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enableDownstreamOAuth | bool | `true` |  |
+| mcp-kubernetes.grafanaDashboards.enabled | string | `"auto"` |  |
+| mcp-kubernetes.grafanaDashboards.folder | string | `"Agent Platform"` |  |
+| mcp-kubernetes.grafanaDashboards.giantswarm.enabled | bool | `true` |  |
+| mcp-kubernetes.grafanaDashboards.giantswarm.organization | string | `"Shared Org"` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds.kmcp.enabled | bool | `false` |  |
