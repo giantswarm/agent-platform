@@ -685,10 +685,10 @@ components:  # @schema additionalProperties: true
     # grpc:// target), AgentTemplate discovery, one AgentInstance per thread
     # (giantswarm/klaus-gateway#234). A 0.x gateway talks REST to the 0.10
     # controller and gets 404s on this line; the 3.x meta chart keeps 0.x.
-    # The floor is 1.10.0: the chart's closed observability block takes the
-    # otlpHeaders knob the meta chart forwards by default from there
-    # (giantswarm/klaus-gateway#263); an older chart's schema refuses it.
-    versionRange: ">=1.10.0 <2.0.0"
+    # The floor is 1.20.0: the chart's closed serviceMonitor block takes the
+    # labels the meta chart forwards by default from there (the tenant label,
+    # giantswarm/klaus-gateway#316); an older chart's schema refuses them.
+    versionRange: ">=1.20.0 <2.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
@@ -3326,6 +3326,18 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     otlpEndpoint: http://otlp-gateway.kube-system.svc:4317
     otlpHeaders:
       X-Scope-OrgID: giantswarm
+
+  # The chart's own ServiceMonitor over the gateway's admin port
+  # (klaus_gateway_* requests, turns and their phases, Slack streaming). `auto`
+  # follows the resolved global.observability.metrics.serviceMonitor.enabled,
+  # resolved by the meta chart before forwarding; the klaus-gateway chart takes
+  # a boolean. Mimir routes the scrape by the tenant label; a monitor without
+  # it writes to no tenant of the GS observability platform (klaus-gateway
+  # 1.20.0 or later for the labels knob).
+  serviceMonitor:
+    enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+    labels:
+      observability.giantswarm.io/tenant: giantswarm
 
   # Slack channel adapter. Provide a Secret with bot-token / signing-secret /
   # app-token before setting enabled: true.
