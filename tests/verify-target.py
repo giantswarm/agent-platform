@@ -99,6 +99,21 @@ MUSTER_DASHBOARD_HOLD = [
     "--set", "muster.muster.observability.grafanaDashboard.folder=muster",
     "--set", "muster.muster.observability.grafanaDashboard.giantswarm.organization=Giant Swarm",
 ]
+# giantswarm/agentgateway#60: this tree turns the packaging chart's own
+# monitoring on (its controller ServiceMonitor, proxy PodMonitor and dashboard
+# ConfigMap), which GOLDEN_REF's defaults leave off and whose block it does not
+# carry at all. The whole block is written on BOTH sides so the forwarded values
+# compare equal; dropped once GOLDEN_REF carries it.
+AGENTGATEWAY_MONITORING_HOLD = [
+    "--set", "agentgateway.monitoring.enabled=false",
+    "--set", "agentgateway.monitoring.serviceMonitor.enabled=true",
+    "--set", "agentgateway.monitoring.serviceMonitor.interval=60s",
+    "--set", "agentgateway.monitoring.serviceMonitor.extraLabels.observability\\.giantswarm\\.io/tenant=giantswarm",
+    "--set", "agentgateway.monitoring.grafanaDashboard.enabled=true",
+    "--set", "agentgateway.monitoring.grafanaDashboard.labels.app\\.giantswarm\\.io/kind=dashboard",
+    "--set", "agentgateway.monitoring.grafanaDashboard.annotations.observability\\.giantswarm\\.io/organization=Shared Org",
+    "--set", "agentgateway.monitoring.grafanaDashboard.annotations.observability\\.giantswarm\\.io/folder=Agent Platform",
+]
 AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
     "--set", "agentgateway.controller.image.tag=2.0.0",
@@ -272,6 +287,22 @@ def drop_new_roster_entries(here: str, there: str) -> tuple:
     return strip(here), strip(there)
 
 
+# giantswarm/agentgateway#60: this chart's own data-plane PodMonitor is gone —
+# the packaging chart's own monitor is the one scrape path, and two monitors of
+# the same pods double every data-plane series. GOLDEN_REF still renders it, so
+# the document is dropped from BOTH sides; dropped once GOLDEN_REF carries it.
+PODMONITOR_SOURCE = "# Source: agent-platform-connectivity/templates/agentgateway/podmonitor.yaml"
+
+
+def hold_dataplane_podmonitor(here: str, there: str) -> tuple:
+    """The two connectivity renders with this chart's retired PodMonitor left out."""
+    def strip(render: str) -> str:
+        return "\n---\n".join(d for d in render.split("\n---\n") if PODMONITOR_SOURCE not in d)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: agentgateway#60 hold — this chart's retired data-plane PodMonitor is left out of the golden comparison")
+    return h, strip(there)
+
+
 def check_golden(meta: str, connectivity: str) -> None:
     ref = os.environ.get("GOLDEN_REF", "origin/main")
     if not ref:
@@ -304,7 +335,7 @@ def check_golden(meta: str, connectivity: str) -> None:
         # (#586) is the other hold in force.
         hold_608 = ["--set", "components.kagent.versionRange=>=1.0.0 <1.1.0",
                     "--set", "components.kagent-crds.versionRange=>=1.0.0 <1.1.0",
-                    "--set", "components.agentgateway.versionRange=>=2.2.2 <3.0.0",
+                    "--set", "components.agentgateway.versionRange=>=2.4.0 <3.0.0",
                     "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0",
                     *AGENTGATEWAY_IMAGES_HOLD]
         # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH
@@ -314,8 +345,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the switch.
         hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
@@ -328,6 +359,8 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_llmd_only(here, there)
                 here, there = hold_hook_pods(here, there)
                 here, there = hold_substrate_range(here, there)
+            else:
+                here, there = hold_dataplane_podmonitor(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

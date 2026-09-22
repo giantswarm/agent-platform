@@ -308,7 +308,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.ownedCrds[0] | string | `"mcpservers.muster.giantswarm.io"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agentgateway.versionRange | string | `">=2.2.2 <3.0.0"` |  |
+| components.agentgateway.versionRange | string | `">=2.4.0 <3.0.0"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
 | components.agentgateway.enabled | bool | `false` |  |
 | components.agentgateway.ownedCrds[0] | string | `"agentgatewaypolicies.agentgateway.dev"` |  |
@@ -1059,6 +1059,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.resources.requests.memory | string | `"128Mi"` |  |
 | agentgateway.resources.limits.cpu | string | `"500m"` |  |
 | agentgateway.resources.limits.memory | string | `"512Mi"` |  |
+| agentgateway.monitoring.enabled | string | `"auto"` |  |
+| agentgateway.monitoring.serviceMonitor.enabled | bool | `true` |  |
+| agentgateway.monitoring.serviceMonitor.interval | string | `"60s"` |  |
+| agentgateway.monitoring.serviceMonitor.extraLabels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| agentgateway.monitoring.grafanaDashboard.enabled | bool | `true` |  |
+| agentgateway.monitoring.grafanaDashboard.labels."app.giantswarm.io/kind" | string | `"dashboard"` |  |
+| agentgateway.monitoring.grafanaDashboard.annotations."observability.giantswarm.io/organization" | string | `"Shared Org"` |  |
+| agentgateway.monitoring.grafanaDashboard.annotations."observability.giantswarm.io/folder" | string | `"Agent Platform"` |  |
 | agentSandbox.podSecurity.enabled | string | `"auto"` |  |
 | agentSandbox.podSecurity.namespace | string | `"agent-sandbox-system"` |  |
 | agentSandbox.podSecurity.podSecurityContext.runAsNonRoot | bool | `true` |  |

@@ -11,7 +11,8 @@ the connectivity chart's VerticalPodAutoscaler on the kagent controller, held
 back from the kagent release). The
 meta chart resolves them once from .Capabilities.APIVersions and derives the
 component copies (muster's flavor and monitors, valkey's Cilium policy and
-PodMonitor, kagent's OTel exporters, oauth2-proxy monitor and OTLP header) before
+PodMonitor, kagent's OTel exporters, oauth2-proxy monitor and OTLP header,
+agentgateway's own monitoring gate) before
 it inlines each component's values. `helm template --api-versions ...` stands in
 for a cluster that serves those groups; no flag is the vanilla cluster.
 
@@ -90,6 +91,7 @@ EXPLICIT_FLEET_COPIES = [
     "--set", "kagent.otel.tracing.enabled=true",
     "--set", "kagent.otel.logging.enabled=true",
     "--set", "kagent.oauth2-proxy.metrics.serviceMonitor.enabled=true",
+    "--set", "agentgateway.monitoring.enabled=true",
 ]
 EXPLICIT_VANILLA_KNOBS = [
     "--set", "kyvernoPolicies.enabled=false",
@@ -307,6 +309,7 @@ def main(meta: str, connectivity: str) -> int:
     expect(leaf(m["muster"], ["muster", "observability", "metrics", "prometheus", "serviceMonitor", "enabled"]) == "false"
            and leaf(m["kagent"], ["otel", "tracing", "enabled"]) == "false"
            and OTLP_HEADER not in "\n".join(m["kagent"])
+           and leaf(m["agentgateway"], ["monitoring", "enabled"]) == "false"
            and leaf(m["valkey"], ["valkey", "metrics", "podMonitor", "enabled"]) == "false",
            "global.observability.metrics.serviceMonitor.enabled=false with monitoring served did not reach every copy")
     rendered = render(connectivity, [*PARENT_REF, *ON, *fleet, "--set", "global.observability.metrics.serviceMonitor.enabled=false"])
@@ -332,6 +335,7 @@ def main(meta: str, connectivity: str) -> int:
            and leaf(m["muster"], ["networkPolicy", "flavor"]) == "cilium"
            and leaf(m["valkey"], ["ciliumNetworkPolicy", "enabled"]) == "true"
            and leaf(m["valkey"], ["valkey", "metrics", "podMonitor", "enabled"]) is None
+           and leaf(m["agentgateway"], ["monitoring", "enabled"]) == "true"
            and OTLP_HEADER in "\n".join(m["kagent"]),
            "explicit true values on a vanilla render did not win over detection")
     c = kinds(render(connectivity, [*PARENT_REF, *ON, "--set", "kyvernoPolicies.enabled=true", "--set", "networkPolicy.flavor=cilium"]))

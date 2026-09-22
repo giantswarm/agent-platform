@@ -97,8 +97,13 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists. Empty
-# today: every range resolves to a published chart.
-UNRELEASED: dict[str, str] = {}
+# today: agentgateway waits for the release that opens its monitoring values
+# (giantswarm/agentgateway#60 — through 2.3.0 the schema closes
+# monitoring.serviceMonitor.extraLabels and monitoring.grafanaDashboard.labels
+# and the dashboard ConfigMap renders no annotations). Nothing published carries
+# that schema, releases and branch builds alike, so RENDER_AGAINST cannot name
+# one and this check stays red until 2.4.0 exists; both entries go with it.
+UNRELEASED: dict[str, str] = {"agentgateway": "2.4.0"}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release. Empty today.

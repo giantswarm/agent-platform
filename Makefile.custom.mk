@@ -427,7 +427,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py /tmp/ap-flux.out
-	@grep -q 'semver: ">=2.2.2 <3.0.0"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.2.2 <3.0.0 (the flattened chart line, floored at the packaging release that renders a bare image tag as written — giantswarm/agent-platform#608)"; exit 1; }
+	@grep -q 'semver: ">=2.4.0 <3.0.0"' /tmp/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.4.0 <3.0.0 (the flattened chart line, floored at the packaging release whose monitoring values this chart sets — giantswarm/agentgateway#60)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py /tmp/ap-flux.out
@@ -558,11 +558,16 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@echo "--> off, agentgateway on: the Gateway's metrics policy renders all the same (the labels are not the LLM path's)"
 	@grep -q 'name: agent-platform-connectivity-metrics$$' /tmp/vl-off.out || { echo "FAIL: the -metrics policy is gated on llmRouting; the controller route's metrics would carry no agent label without LLM routing"; exit 1; }
 	@echo "ok: metrics policy independent of llmRouting"
-	@echo "--> off, agentgateway on: the data-plane PodMonitor still renders (the MCP path is scraped too)"
-	@grep -q 'kind: PodMonitor' /tmp/vl-off.out || { echo "FAIL: the data-plane PodMonitor is gated on llmRouting; the MCP path would never be scraped"; exit 1; }
-	@grep -A12 'agentgateway-dataplane' /tmp/vl-off.out | grep -q 'observability.giantswarm.io/tenant: giantswarm' || { echo "FAIL: the PodMonitor lost the tenant label; alloy-metrics would ignore it"; exit 1; }
+	@echo "--> off, agentgateway on: this chart renders no PodMonitor of its own (the packaging chart's is the one scrape path) and the data-plane policy still admits the scrape port"
+	@if grep -q 'kind: PodMonitor' /tmp/vl-off.out; then echo "FAIL: this chart renders a data-plane PodMonitor again; with the packaging chart's own monitor on, two monitors of the same pods double every data-plane series"; exit 1; fi
 	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-off.out | grep -q '"15020"' || { echo "FAIL: the data-plane policy does not admit the scrape port; the PodMonitor target reports up=0 and every metric is lost"; exit 1; }
-	@echo "ok: PodMonitor + tenant label + scrape port"
+	@echo "ok: no monitor of our own + scrape port"
+	@echo "--> off: the meta chart still turns the packaging chart's monitoring on (the MCP path's HTTP and tool-call series are not the LLM path's)"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --api-versions monitoring.coreos.com/v1 >/tmp/vl-mon.out 2>&1 || { cat /tmp/vl-mon.out; exit 1; }
+	@grep -A4 '^      monitoring:$$' /tmp/vl-mon.out | grep -q 'enabled: true' || { echo "FAIL: agentgateway.monitoring.enabled did not resolve on with monitoring served; the gateway would have no scrape and no board"; exit 1; }
+	@grep -q 'observability.giantswarm.io/folder: Agent Platform' /tmp/vl-mon.out || { echo "FAIL: the dashboard ConfigMap lost its folder annotation; the board lands in the organization's General folder"; exit 1; }
+	@grep -q 'observability.giantswarm.io/organization: Shared Org' /tmp/vl-mon.out || { echo "FAIL: the dashboard ConfigMap lost its organization annotation; customers would not see the board"; exit 1; }
+	@echo "ok: monitoring on, board in Shared Org / Agent Platform"
 	@echo "--> on: the llm listener, the pinned route, the AI backend, the Gateway policy and the price catalog"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) >/tmp/vl-on.out 2>&1 || { cat /tmp/vl-on.out; exit 1; }
 	@grep -q 'name: llm' /tmp/vl-on.out || { echo "FAIL: no llm listener on the Gateway"; exit 1; }

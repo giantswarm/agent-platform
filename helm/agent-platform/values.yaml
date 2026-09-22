@@ -401,7 +401,15 @@ components:  # @schema additionalProperties: true
     # 2.2.1 the chart prefixed a `v` to a bare X.Y.Z, and the agentgateway line
     # publishes no such tag): the agentgateway block below names the line's
     # release in full, and no chart this range admits renders it unpullable.
-    versionRange: ">=2.2.2 <3.0.0"
+    # The floor is 2.4.0 since the agentgateway block turns the packaging
+    # chart's own monitoring on: through 2.3.0 that chart's values schema closed
+    # `monitoring.serviceMonitor.extraLabels` and
+    # `monitoring.grafanaDashboard.labels` against their concrete defaults and
+    # rendered no annotations on the dashboard ConfigMap, so the tenant label,
+    # the discovery label and the organization and folder annotations were all
+    # refused or dropped (giantswarm/agentgateway#60). Pin first: this floor
+    # moves with the release, and the values below only work above it.
+    versionRange: ">=2.4.0 <3.0.0"
     valuesFrom: agentgateway
     enabled: false
     # The slice profiles set this per target: on for a workload cluster, off
@@ -3467,6 +3475,48 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     limits:
       cpu: 500m
       memory: 512Mi
+  # The packaging chart's own monitor objects and dashboard, off in its
+  # defaults. What this turns on:
+  #   - the controller ServiceMonitor, which nothing scraped before: the XDS
+  #     panels of the board read it, and it is the only view of the control
+  #     plane that serves the data planes their config.
+  #   - the proxy PodMonitor, upstream's, selecting the data-plane pods by
+  #     GatewayClass. This chart rendered one of its own selecting by gateway
+  #     name; both matched the same pods, so it is gone (a second monitor of
+  #     the same targets doubles every data-plane series).
+  #   - the Grafana dashboard ConfigMap, upstream's own board (Overview,
+  #     Requests, LLM, MCP, Latency, XDS, Runtime), vendored in the packaging
+  #     chart and never rendered until now. It reads the MCP tool-call and
+  #     runtime series this platform collects and had no consumer, and it is
+  #     upstream's to maintain: an upstream bump carries its fixes.
+  # The board the platform writes itself (LLM cost per agent and per person)
+  # stays in giantswarm/dashboards; this one is the gateway's own health.
+  monitoring:
+    # `auto` (the default) follows the resolved
+    # global.observability.metrics.serviceMonitor.enabled, like every other
+    # monitor of this chart; `true` / `false` force it.
+    enabled: auto  # auto | true | false
+    serviceMonitor:
+      enabled: true
+      # 60s, the fleet's interval. The packaging chart's default is 15s, which
+      # on the Runtime row's per-pod series is four times the samples for a
+      # board nobody watches at that resolution.
+      interval: 60s
+      # On the ServiceMonitor AND the PodMonitor: the tenant label routes both
+      # to the right Mimir instance in the GS Observability Platform.
+      extraLabels:
+        observability.giantswarm.io/tenant: giantswarm
+    grafanaDashboard:
+      enabled: true
+      labels:
+        # observability-operator discovers a dashboard ConfigMap by this label.
+        app.giantswarm.io/kind: dashboard
+      annotations:
+        # Organization and folder are display names and carry a space, so they
+        # cannot be labels. Shared Org is the organization customers reach;
+        # every agent platform board lands in the one folder.
+        observability.giantswarm.io/organization: "Shared Org"
+        observability.giantswarm.io/folder: "Agent Platform"
 
 # agent-sandbox controller (kubernetes-sigs/agent-sandbox) — the Sandbox runtime
 # that kagent's SandboxAgent delegates pod isolation to. Opt-in through

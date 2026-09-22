@@ -1314,7 +1314,10 @@ answers, but only where the leaf is left at `auto`:
                                same observability platform),
                                kagent.oauth2-proxy.metrics.serviceMonitor.enabled,
                                kagent.otel.tracing.enabled / .logging.enabled (the
-                               OTLP gateway they export to is part of that platform)
+                               OTLP gateway they export to is part of that platform),
+                               agentgateway.monitoring.enabled (the packaging
+                               chart's own gate over its controller ServiceMonitor,
+                               proxy PodMonitor and dashboard ConfigMap)
 Two leaves have no `auto` form and are derived directly, off only:
   valkey.valkey.metrics.podMonitor.enabled — the valkey chart's own default is
       on; written false when monitors are off, left absent otherwise so the
@@ -1372,6 +1375,7 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "metrics" "prometheus" "prometheusRule" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "grafanaDashboard" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "oauth2-proxy" "metrics" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "agentgateway" "monitoring" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "tracing" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "logging" "enabled") "value" $monitors) -}}
 {{- /* valkey PodMonitor: the chart's own default is on, so only "off" is written. */ -}}
