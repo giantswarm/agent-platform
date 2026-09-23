@@ -327,6 +327,7 @@ spec:
   {{- if $c.insecure }}
   insecure: true
   {{- end }}
+  {{- include "agent-platform.chartLayerSelector" $root | nindent 2 }}
   ref:
     semver: {{ required (printf "components.%s.versionRange is required" $key) $semver | quote }}
     {{- with $c.semverFilter }}

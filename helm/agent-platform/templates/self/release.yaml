@@ -44,6 +44,7 @@ spec:
   {{- if .Values.gitops.self.insecure }}
   insecure: true
   {{- end }}
+  {{- include "agent-platform.chartLayerSelector" . | nindent 2 }}
   ref:
     semver: {{ include "agent-platform.self.versionRange" . | quote }}
     {{- with .Values.gitops.self.semverFilter }}
