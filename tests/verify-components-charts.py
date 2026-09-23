@@ -96,21 +96,12 @@ HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
-# line has (see fallback()); the entry goes when the release exists. Empty
-# today: agentgateway waits for the release that opens its monitoring values
-# (giantswarm/agentgateway#60 — through 2.3.0 the schema closes
-# monitoring.serviceMonitor.extraLabels and monitoring.grafanaDashboard.labels
-# and the dashboard ConfigMap renders no annotations). Nothing published carries
-# that schema, releases and branch builds alike, so RENDER_AGAINST cannot name
-# one and this check stays red until 2.4.0 exists; both entries go with it.
-# klaus-gateway waits for the release that opens serviceMonitor.labels
-# (giantswarm/klaus-gateway#316; through 1.19.1 the schema closes the block);
-# RENDER_AGAINST names that PR's branch build, which carries the schema.
-UNRELEASED: dict[str, str] = {"agentgateway": "2.4.0", "klaus-gateway": "1.20.0"}
+# line has (see fallback()); the entry goes when the release exists.
+UNRELEASED: dict[str, str] = {}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
-RENDER_AGAINST: dict[str, str] = {"klaus-gateway": "1.19.2-dev.feat-servi--itor-labels.2026-09-22.12-12-32.hf3c302d"}
+RENDER_AGAINST: dict[str, str] = {}
 # An exact version, prerelease included (a dev build is one) — what a BOM
 # line may carry; a range is not a version this check can render "the pin" at.
 EXACT_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
