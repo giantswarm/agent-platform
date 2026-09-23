@@ -1153,7 +1153,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # eviction the budget refuses — the pod keeps its requests until its next
     # roll. RequestsOnly leaves the chart's limits alone; minAllowed is the
     # chart's requests (100m / 128Mi) and maxAllowed stays a step under its
-    # limits (2 / 512Mi): a Burstable pod whose requests reach its limits on
+    # limits (2 / 1536Mi, set by the meta chart's kagent.controller.resources):
+    # a Burstable pod whose requests reach its limits on
     # both resources would become Guaranteed, and Kubernetes refuses a resize
     # that changes the QoS class — so maxAllowed must never equal the limits.
     # The render refuses an updateMode or controlledValues outside the API's
@@ -1167,7 +1168,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         memory: 128Mi
       maxAllowed:
         cpu: 1900m
-        memory: 480Mi
+        memory: 1280Mi
 
   ui:
     image:

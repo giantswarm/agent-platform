@@ -188,6 +188,20 @@ KSERVE_MONITOR_HOLD = [
     "--set", "kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.interval=60s",
     "--set", "kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
 ]
+# giantswarm/agent-platform#455 follow-up: this tree sets the kagent
+# controller's resources (the memory limit raised to 1536Mi), a key GOLDEN_REF's
+# kagent.controller block does not carry (an open block, so it forwards it as
+# written), and moves the VPA's memory cap to 1280Mi. Written on BOTH sides so
+# the forwarded values and the rendered VPA compare equal; dropped once
+# GOLDEN_REF carries them.
+KAGENT_CONTROLLER_RESOURCES_HOLD = [
+    "--set", "kagent.controller.resources.requests.cpu=100m",
+    "--set", "kagent.controller.resources.requests.memory=128Mi",
+    "--set", "kagent.controller.resources.limits.cpu=2",
+    "--set", "kagent.controller.resources.limits.memory=1536Mi",
+    "--set", "kagent.controller.vpa.maxAllowed.memory=1280Mi",
+]
+KAGENT_VPA_CAP_HOLD = ["--set", "kagent.controller.vpa.maxAllowed.memory=1280Mi"]
 AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
     "--set", "agentgateway.controller.image.tag=2.0.0",
@@ -471,11 +485,11 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the switch.
         hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD]),
-            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
-            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD]),
+            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),
+            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)

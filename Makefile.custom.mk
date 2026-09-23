@@ -81,7 +81,10 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # default with no backend, so the default render carries its wiring. Both sides
 # render with the component off (a chart that predates the default accepts the
 # key), and verify-managers asserts the default shape and the static forms.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false
+# The tenth (giantswarm/agent-platform#455 follow-up): the kagent controller
+# VPA's memory cap moves from 480Mi to 1280Mi. Both sides render with the new
+# cap (the key exists on both sides), and verify-kagent-vpa asserts the default.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -1376,8 +1379,8 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 100m' || { echo "FAIL: minAllowed.cpu is not the chart's request (100m)"; cat /tmp/vk-vpa.out; exit 1; }
 	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 128Mi' || { echo "FAIL: minAllowed.memory is not the chart's request (128Mi)"; cat /tmp/vk-vpa.out; exit 1; }
 	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 1900m' || { echo "FAIL: maxAllowed.cpu is not a step under the chart's limit (1900m)"; cat /tmp/vk-vpa.out; exit 1; }
-	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 480Mi' || { echo "FAIL: maxAllowed.memory is not a step under the chart's limit (480Mi)"; cat /tmp/vk-vpa.out; exit 1; }
-	@echo "ok: VerticalPodAutoscaler kagent-controller on Deployment kagent-controller — InPlaceOrRecreate, RequestsOnly, 100m/128Mi to 1900m/480Mi"
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 1280Mi' || { echo "FAIL: maxAllowed.memory is not a step under the controller's limit (1280Mi)"; cat /tmp/vk-vpa.out; exit 1; }
+	@echo "ok: VerticalPodAutoscaler kagent-controller on Deployment kagent-controller — InPlaceOrRecreate, RequestsOnly, 100m/128Mi to 1900m/1280Mi"
 	@echo "--> vanilla (no autoscaling.k8s.io/v1): auto resolves off"
 	@helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) >/tmp/vk-vanilla.out 2>&1 || { cat /tmp/vk-vanilla.out; exit 1; }
 	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-vanilla.out; then echo "FAIL: a VerticalPodAutoscaler renders without autoscaling.k8s.io/v1 served"; exit 1; fi
@@ -1420,6 +1423,7 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@$(PICK) /tmp/vk-meta.out HelmRelease kagent >/tmp/vk-meta-kagent.out || { echo "FAIL: no kagent HelmRelease in the meta render"; exit 1; }
 	@if grep -q 'vpa:' /tmp/vk-meta-kagent.out; then echo "FAIL: kagent.controller.vpa travels on the kagent HelmRelease (components.kagent.omitKeys)"; exit 1; fi
 	@grep -q '^      pdb:$$' /tmp/vk-meta-kagent.out || { echo "FAIL: the rest of kagent.controller vanished from the kagent HelmRelease with the vpa hold-back"; exit 1; }
+	@python3 -c 'import sys,yaml; d=[x for x in yaml.safe_load_all(open(sys.argv[1])) if x][0]; r=d["spec"]["values"]["controller"]["resources"]; assert r=={"requests":{"cpu":"100m","memory":"128Mi"},"limits":{"cpu":2,"memory":"1536Mi"}}, r; print("ok: the kagent HelmRelease carries the controller limits 2 / 1536Mi the VPA cap sits under")' /tmp/vk-meta-kagent.out || { echo "FAIL: kagent.controller.resources did not reach the kagent HelmRelease as 100m/128Mi requests, 2/1536Mi limits"; exit 1; }
 	@$(PICK) /tmp/vk-meta.out HelmRelease agent-platform-connectivity >/tmp/vk-meta-conn.out || { echo "FAIL: no agent-platform-connectivity HelmRelease in the meta render"; exit 1; }
 	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn.out | grep -q '^          enabled: true$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to true with the API served"; exit 1; }
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_VANILLA) >/tmp/vk-meta-vanilla.out 2>&1 || { cat /tmp/vk-meta-vanilla.out; exit 1; }

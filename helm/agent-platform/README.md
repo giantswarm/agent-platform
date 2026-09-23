@@ -256,7 +256,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 
 ## The kagent controller's requests follow a VerticalPodAutoscaler
 
-`kagent.controller.vpa` (giantswarm/agent-platform#455) puts a `VerticalPodAutoscaler` on the kagent controller, rendered by the connectivity chart in the kagent namespace (the kagent chart has no VPA knob; the same pattern as the muster-valkey budget). `enabled: auto` renders it where the cluster serves `autoscaling.k8s.io/v1` — resolved once here with the other cluster-shape knobs, an explicit `true` / `false` wins. The mode is `InPlaceOrRecreate`: with one replica behind the budget above an evicting mode could never apply, so the running pod's requests are resized in place, with no eviction and no roll; a resize that cannot apply in place falls back to an eviction the budget refuses, and the pod keeps its requests until its next roll. Only requests move (`controlledValues: RequestsOnly`), between the chart's requests (`minAllowed` 100m / 128Mi) and a step under its limits (`maxAllowed` 1900m / 480Mi — requests equal to the limits would change the pod's QoS class, which no resize may do). The key is held back from the kagent release (`components.kagent.omitKeys`); the connectivity chart's README carries the guards and the opt-outs.
+`kagent.controller.vpa` (giantswarm/agent-platform#455) puts a `VerticalPodAutoscaler` on the kagent controller, rendered by the connectivity chart in the kagent namespace (the kagent chart has no VPA knob; the same pattern as the muster-valkey budget). `enabled: auto` renders it where the cluster serves `autoscaling.k8s.io/v1` — resolved once here with the other cluster-shape knobs, an explicit `true` / `false` wins. The mode is `InPlaceOrRecreate`: with one replica behind the budget above an evicting mode could never apply, so the running pod's requests are resized in place, with no eviction and no roll; a resize that cannot apply in place falls back to an eviction the budget refuses, and the pod keeps its requests until its next roll. Only requests move (`controlledValues: RequestsOnly`), between the chart's requests (`minAllowed` 100m / 128Mi) and a step under its limits (`maxAllowed` 1900m / 1280Mi, under the `2` / `1536Mi` limits of `kagent.controller.resources` — requests equal to the limits would change the pod's QoS class, which no resize may do). The key is held back from the kagent release (`components.kagent.omitKeys`); the connectivity chart's README carries the guards and the opt-outs.
 
 ## Values
 
@@ -741,13 +741,17 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.pdb.minAvailable | int | `1` |  |
 | kagent.controller.pdb.maxUnavailable | string | `""` |  |
 | kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
+| kagent.controller.resources.requests.cpu | string | `"100m"` |  |
+| kagent.controller.resources.requests.memory | string | `"128Mi"` |  |
+| kagent.controller.resources.limits.cpu | int | `2` |  |
+| kagent.controller.resources.limits.memory | string | `"1536Mi"` |  |
 | kagent.controller.vpa.enabled | string | `"auto"` |  |
 | kagent.controller.vpa.updateMode | string | `"InPlaceOrRecreate"` |  |
 | kagent.controller.vpa.controlledValues | string | `"RequestsOnly"` |  |
 | kagent.controller.vpa.minAllowed.cpu | string | `"100m"` |  |
 | kagent.controller.vpa.minAllowed.memory | string | `"128Mi"` |  |
 | kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
-| kagent.controller.vpa.maxAllowed.memory | string | `"480Mi"` |  |
+| kagent.controller.vpa.maxAllowed.memory | string | `"1280Mi"` |  |
 | kagent.controller.metrics.enabled | bool | `false` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
