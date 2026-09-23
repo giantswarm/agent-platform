@@ -58,11 +58,12 @@ components:
   kagent-crds:                   { versionRange: "1.0.0" }
   substrate:                     { versionRange: "1.0.2" }
   substrate-crds:                { versionRange: "1.0.2" }
-  # 2.0.0 is the Slack-only gateway (giantswarm/klaus-gateway#319): the meta
-  # chart forwards no lifecycle.driver any more, and a 1.x gateway without it
-  # falls back to its own default (operator, with no operatorMCPURL) and never
-  # starts. Running on graveler, glean and gazelle.
-  klaus-gateway:                 { versionRange: "2.0.0" }
+  # 3.3.0 names a failed turn's class (tools, platform, model, policy) in the
+  # thread, the turn record and the turn metric, and sends a tool-set or
+  # platform failure once more (giantswarm/klaus-gateway#329). Nothing below
+  # 2.0.0 starts: the meta chart forwards no lifecycle.driver
+  # (giantswarm/klaus-gateway#319).
+  klaus-gateway:                 { versionRange: "3.3.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "0.23.0" }
