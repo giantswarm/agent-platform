@@ -631,7 +631,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.0.2 <1.1.0"
+    versionRange: ">=1.0.3 <1.1.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -653,7 +653,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.0.2 <1.1.0"
+    versionRange: ">=1.0.3 <1.1.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -3540,7 +3540,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   controller:
     image:
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.1.1"
+      tag: "2.1.2"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -3564,7 +3564,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.1.1"
+      tag: "2.1.2"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -4646,7 +4646,7 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # stable semver under its nested name on gsoci — the same release the
     # agentgateway block above names for the controller and the data plane.
     # The three move together; this one moves with the Substrate pin.
-    agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.1
+    agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.2
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3
