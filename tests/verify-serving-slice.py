@@ -312,7 +312,13 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
     params = docs.get(("AgentgatewayParameters", "models"))
     if not params:
         sys.exit("FAIL: no AgentgatewayParameters models: the controller's default Deployment carries no seccomp profile and is denied by restrict-seccomp-strict")
-    for needle in ("      replicas: 1", "      type: LoadBalancer", "    repository: giantswarm/agentgateway-upstream/agentgateway", "    tag: 2.0.0"):
+    # The models data plane runs the release of the agentgateway line the
+    # platform's data planes run: agentgateway.proxy.image of the connectivity
+    # values, read here so the pin moves in one place.
+    proxy = re.search(r"^  proxy:\n    image:\n(?:      \w+: .*\n)*?      repository: (\S+)\n      tag: \"?([^\"\n]+)\"?", open(f"{connectivity}/values.yaml", encoding="utf-8").read(), re.M)
+    if not proxy:
+        sys.exit("FAIL: agentgateway.proxy.image (repository, tag) not found in the connectivity values")
+    for needle in ("      replicas: 1", "      type: LoadBalancer", f"    repository: {proxy.group(1)}", f"    tag: {proxy.group(2)}"):
         need(params, needle, "the models data plane parameters")
     if params.count("            seccompProfile:\n              type: RuntimeDefault") + params.count("                seccompProfile:\n                  type: RuntimeDefault") != 2:
         sys.exit(f"FAIL: the models data plane lacks RuntimeDefault seccomp on pod and container:\n{params}")
