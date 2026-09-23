@@ -495,8 +495,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # hold_substrate_range() blanks it and the worker image derived from it
         # in both renders. Dropped once GOLDEN_REF carries them. METRIC_LABELS_HOLD
         # (#586) is the other hold in force.
-        hold_608 = ["--set", "components.kagent.versionRange=>=1.0.0 <1.1.0",
-                    "--set", "components.kagent-crds.versionRange=>=1.0.0 <1.1.0",
+        hold_608 = ["--set", "components.kagent.versionRange=>=1.0.2 <1.1.0",
+                    "--set", "components.kagent-crds.versionRange=>=1.0.2 <1.1.0",
                     "--set", "components.agentgateway.versionRange=>=2.4.0 <3.0.0",
                     "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.1",
                     *AGENTGATEWAY_IMAGES_HOLD]
