@@ -3529,6 +3529,38 @@ verify-muster-otlp: ## Assert muster's OTLP egress (giantswarm/giantswarm#36711)
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set muster.muster.observability.otel.endpoint=$(MUSTER_OTLP_EP) --set components.muster.enabled=false 2>/dev/null | grep -q 'name: $(MUSTER_OTLP_POLICY)$$' && { echo "FAIL: the OTLP policy renders with the component off"; exit 1; } || true
 	@echo "ok: $@"
 
+SUBSTRATE_OTLP_EXPORTERS := substrate-ate-api-server substrate-ate-controller substrate-atelet substrate-atenet-router
+SUBSTRATE_OTLP_VM := $(VM) --set components.substrate.enabled=true --set substrate.otel.endpoint=$(MUSTER_OTLP_EP)
+
+.PHONY: verify-substrate-otlp
+verify-substrate-otlp: ## Assert Substrate's OTLP export reaches a tenant (giantswarm/giantswarm#36711): the meta chart forwards substrate.otel.endpoint to the connectivity release and substrate.podLabels (the observability.giantswarm.io/tenant label otlp-gateway routes a headerless export by) to the substrate release; the connectivity chart's policies of the four exporters (ate-api-server, ate-controller, atelet, atenet-router) each open the endpoint's namespace on its port, no cluster-wide 4317 rule remains, a signal's own endpoint adds its destination and a disabled signal's does not, an endpoint that is not an in-cluster Service is the cluster entity on its port, and no endpoint opens nothing.
+	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
+	@helm template t $(CHART_DIR) $(VM) $(SUBSTRATE_ON) >/tmp/vso-meta.out 2>&1 || { cat /tmp/vso-meta.out; exit 1; }
+	@$(PICK) /tmp/vso-meta.out HelmRelease substrate | grep -A1 '^    podLabels:$$' | grep -q '^      observability.giantswarm.io/tenant: giantswarm$$' || { echo "FAIL: the substrate release does not receive the tenant pod label"; exit 1; }
+	@$(PICK) /tmp/vso-meta.out HelmRelease agent-platform-connectivity | grep -A1 '^      otel:$$' | grep -q '^        endpoint: $(MUSTER_OTLP_EP)$$' || { echo "FAIL: the connectivity release does not receive substrate.otel.endpoint"; exit 1; }
+	@echo "ok: meta chart forwards the endpoint and the tenant label"
+	@helm template t $(CONNECTIVITY_DIR) $(SUBSTRATE_OTLP_VM) >/tmp/vso.out 2>&1 || { cat /tmp/vso.out; exit 1; }
+	@for p in $(SUBSTRATE_OTLP_EXPORTERS); do \
+		$(PICK) /tmp/vso.out CiliumNetworkPolicy $$p >/tmp/vso-pol.out || { echo "FAIL: no CiliumNetworkPolicy $$p"; exit 1; }; \
+		grep -B1 -A4 '^        - matchLabels:$$' /tmp/vso-pol.out | grep -A4 'io.kubernetes.pod.namespace: kube-system$$' | grep -q 'port: "4317"' || { echo "FAIL: $$p does not open kube-system:4317"; cat /tmp/vso-pol.out; exit 1; }; \
+		if grep -B6 'port: "4317"' /tmp/vso-pol.out | grep -q -- '- cluster$$'; then echo "FAIL: $$p still opens 4317 to the whole cluster"; exit 1; fi; \
+	done
+	@if $(PICK) /tmp/vso.out CiliumNetworkPolicy substrate-atenet-egress | grep -q 'port: "4317"'; then echo "FAIL: atenet-egress exports nothing of its own, yet opens 4317 with kagent off"; exit 1; fi
+	@echo "ok: the four exporters open the endpoint"
+	@helm template t $(CONNECTIVITY_DIR) $(SUBSTRATE_OTLP_VM) --set substrate.otel.traces.endpoint=http://tempo-gw.tracing.svc:4317 >/tmp/vso-sig.out 2>&1 || { cat /tmp/vso-sig.out; exit 1; }
+	@$(PICK) /tmp/vso-sig.out CiliumNetworkPolicy substrate-atelet | grep -q 'io.kubernetes.pod.namespace: tracing$$' || { echo "FAIL: a signal's own endpoint does not add its destination"; exit 1; }
+	@$(PICK) /tmp/vso-sig.out CiliumNetworkPolicy substrate-atelet | grep -q 'io.kubernetes.pod.namespace: kube-system$$' || { echo "FAIL: the other signals' shared endpoint is gone"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(SUBSTRATE_OTLP_VM) --set substrate.otel.traces.endpoint=http://tempo-gw.tracing.svc:4317 --set substrate.otel.traces.enabled=false >/tmp/vso-off.out 2>&1 || { cat /tmp/vso-off.out; exit 1; }
+	@if $(PICK) /tmp/vso-off.out CiliumNetworkPolicy substrate-atelet | grep -q 'io.kubernetes.pod.namespace: tracing$$'; then echo "FAIL: a disabled signal's endpoint is opened"; exit 1; fi
+	@echo "ok: per-signal endpoints"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.substrate.enabled=true --set substrate.otel.endpoint=https://collector.example.com >/tmp/vso-ext.out 2>&1 || { cat /tmp/vso-ext.out; exit 1; }
+	@$(PICK) /tmp/vso-ext.out CiliumNetworkPolicy substrate-ate-controller | grep -A4 -- '- cluster$$' | grep -q 'port: "443"' || { echo "FAIL: an external collector is not the cluster entity on 443"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.substrate.enabled=true >/tmp/vso-none.out 2>&1 || { cat /tmp/vso-none.out; exit 1; }
+	@for p in $(SUBSTRATE_OTLP_EXPORTERS); do \
+		if $(PICK) /tmp/vso-none.out CiliumNetworkPolicy $$p | grep -q 'OTLP gateway\|port: "4317"'; then echo "FAIL: $$p opens an OTLP destination with no endpoint"; exit 1; fi; \
+	done
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-storage-version
 verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over (#396): with kagent on, the backup Job (pre-install,pre-upgrade, -7: records the objects of modelconfigs/modelproviderconfigs/remotemcpservers.kagent.dev still stored at v1alpha2 into the migration ConfigMap, sets the crds policy of the HelmRelease the CRDs' Flux labels name to Skip (#416), deletes those CRDs and watches them stay absent for 60 s — a re-created one is deleted again and fails the hook naming the owner) and the restore Job (post-install,post-upgrade, 0: waits for modelconfigs.kagent.dev to serve v1alpha3, re-creates the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3, tolerates AlreadyExists, marks restored-at) as the hook identity in the helm image, the identity at their events; with the engine off (the fleet) the same pair and nothing else; with kagent off none of it; the kagent namespace follows kagent.namespaceOverride; helm lint.
 	@echo "====> $@ ($(CHART_DIR))"

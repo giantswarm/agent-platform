@@ -454,6 +454,27 @@ def hold_dataplane_tracing(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+# giantswarm/giantswarm#36711: Substrate's OTLP egress follows substrate.otel
+# (agent-platform.substrate.otlpEgress). GOLDEN_REF opens 4317 to the cluster
+# entity for ate-api-server alone, whatever the endpoint; the renders here set
+# no endpoint, so that rule is cut from GOLDEN_REF and the derived rules from
+# this tree. Dropped once GOLDEN_REF carries the helper.
+SUBSTRATE_OTLP_OLD = re.compile(
+    r"(\n\s+# cluster's IRSA token exchange with STS); the OTLP gateway\.(\n(?:.*\n){6}?)"
+    r"\s+- toEntities:\n\s+- cluster\n\s+toPorts:\n\s+- ports:\n\s+- port: \"4317\"\n\s+protocol: TCP\n")
+SUBSTRATE_OTLP_NEW = re.compile(
+    r"^(\s+)# The OTLP gateway Substrate's exporters send to \(.*\)\.\n(?:\1(?:- |  ).*\n)+", re.M)
+
+
+def hold_substrate_otlp_egress(here: str, there: str) -> tuple:
+    """The two connectivity renders with Substrate's OTLP egress rules left out."""
+    h = SUBSTRATE_OTLP_NEW.sub("", here)
+    t = SUBSTRATE_OTLP_OLD.sub(r"\1.\2", there)
+    if h != here or t != there:
+        print("note: #36711 hold — Substrate's OTLP egress rules are left out of the golden comparison")
+    return h, t
+
+
 def hold_dataplane_podmonitor(here: str, there: str) -> tuple:
     """The two connectivity renders with this chart's retired PodMonitor left out."""
     def strip(render: str) -> str:
@@ -571,6 +592,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             else:
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)
+                here, there = hold_substrate_otlp_egress(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

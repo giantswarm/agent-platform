@@ -2115,6 +2115,38 @@ Usage: include "agent-platform.kagent.otlpTargets" . | fromJsonArray
 {{- end -}}
 
 {{/*
+The cilium egress rules to the OTLP gateways Substrate's control plane exports
+to (ate-api-server, ate-controller, atelet and the atenet router), one per
+distinct destination of the signals that are on. A signal exports when it is
+enabled (the substrate chart's default) and resolves to an endpoint: its own
+substrate.otel.<signal>.endpoint, else substrate.otel.endpoint — the chart's
+substrate.otel.signalEndpoint. The chart's exporters speak gRPC only. Empty
+when no signal has an endpoint.
+*/}}
+{{- define "agent-platform.substrate.otlpEgress" -}}
+{{- $otel := dig "otel" dict (.Values.substrate | default dict) -}}
+{{- $seen := dict -}}
+{{- $first := true -}}
+{{- range $signal := list "traces" "metrics" "logs" -}}
+{{- $cfg := index $otel $signal | default dict -}}
+{{- if ne (toString (dig "enabled" true $cfg)) "false" -}}
+{{- $endpoint := $cfg.endpoint | default $otel.endpoint | default "" | toString | trim -}}
+{{- if $endpoint -}}
+{{- $t := include "agent-platform.otlpTarget" (dict "endpoint" $endpoint "protocol" "grpc") | fromJson -}}
+{{- $key := printf "%s:%s" $t.namespace $t.port -}}
+{{- if not (hasKey $seen $key) -}}
+{{- $_ := set $seen $key true -}}
+{{- if not $first }}
+{{ end -}}
+{{- $first = false -}}
+{{- include "agent-platform.otlpEgressRule" (dict "target" $t "who" "Substrate's exporters send to") -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The cilium egress rules to the OTLP gateways kagent's exporters send to
 (agent-platform.kagent.otlpTargets), one per destination
 (agent-platform.otlpEgressRule). Nothing when both signals are off (an empty

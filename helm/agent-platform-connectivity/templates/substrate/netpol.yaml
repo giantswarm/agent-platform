@@ -32,6 +32,9 @@ what (the substrate chart's arguments and Service definitions):
         store :9000.
   ate-controller, dns, podcertificate-controller ──▶ the apiserver (and
         ate-controller ──▶ ate-api :443); dns answers the actors' lookups.
+  ate-api-server, ate-controller, atelet, atenet-router ──▶ the OTLP gateway
+        substrate.otel names (agent-platform.substrate.otlpEgress); atenet-egress
+        exports nothing.
   Prometheus scrapes the annotated pods (atelet 9090, ate-api-server 9090,
   ate-controller 8080, atenet-router 9090, the agentgateway sidecars 15020) —
   admitted from the cluster entity, as the platform's other metrics ports are.
@@ -176,19 +179,16 @@ spec:
               protocol: TCP
     {{- end }}
     # The snapshot store: an S3 (or S3-compatible) endpoint, and a CAPA
-    # cluster's IRSA token exchange with STS; the OTLP gateway.
+    # cluster's IRSA token exchange with STS.
     - toEntities:
         - world
       toPorts:
         - ports:
             - port: "443"
               protocol: TCP
-    - toEntities:
-        - cluster
-      toPorts:
-        - ports:
-            - port: "4317"
-              protocol: TCP
+    {{- with include "agent-platform.substrate.otlpEgress" . }}
+    {{- . | nindent 4 }}
+    {{- end }}
     {{- if $rustfs }}
     - toEndpoints:
         - matchLabels:
@@ -242,6 +242,9 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    {{- with include "agent-platform.substrate.otlpEgress" . }}
+    {{- . | nindent 4 }}
+    {{- end }}
 ---
 # atelet: the per-node agent. Its gRPC API (hostPort 8085, mTLS with the pod
 # identity CA) is driven by ate-api-server; the source of hostPort traffic is
@@ -289,6 +292,9 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    {{- with include "agent-platform.substrate.otlpEgress" . }}
+    {{- . | nindent 4 }}
+    {{- end }}
     {{- if $rustfs }}
     - toEndpoints:
         - matchLabels:
@@ -375,6 +381,9 @@ spec:
               protocol: TCP
             - port: "8443"
               protocol: TCP
+    {{- with include "agent-platform.substrate.otlpEgress" . }}
+    {{- . | nindent 4 }}
+    {{- end }}
 ---
 # atenet-egress: the actors' egress gateway. The worker pods' tunnels come in
 # on 8443; every connection an actor opens leaves from here, so this is where
