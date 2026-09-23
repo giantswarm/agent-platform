@@ -196,16 +196,22 @@ spec:
 {{- $klausgatewayPort := "8080" }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
-# Egress from the agentgateway data-plane to klaus-gateway. The channel paths
-# (/v1, /web, /cli/v1, and /channels/slack when slack.enabled) are served on the
-# agentgateway data-plane Gateway and forwarded to the klaus-gateway Service. The
-# data-plane runs in Cilium default-deny egress (see the -dataplane policy), whose
-# cluster allowance only covers 80/443 — klaus-gateway listens on 8080, so without
-# this rule the data-plane → klaus-gateway connection is dropped and the request
-# fails with a 503 UpstreamFailure ("Connect: deadline has elapsed"). For Slack
-# this means inbound events (delivered to the public hostname, routed through the
+# Egress from the agentgateway data-plane to klaus-gateway. The channel path
+# (/channels/slack) is served on the agentgateway data-plane Gateway and
+# forwarded to the klaus-gateway Service. The data-plane runs in Cilium
+# default-deny egress (see the -dataplane policy), whose cluster allowance only
+# covers 80/443 — klaus-gateway listens on 8080, so without this rule the
+# data-plane → klaus-gateway connection is dropped and the request fails with a
+# 503 UpstreamFailure ("Connect: deadline has elapsed"). For Slack this means
+# inbound events (delivered to the public hostname, routed through the
 # data-plane) never reach the gateway, so the bot never replies. Mirrors the
 # -dataplane-to-kagent allowance.
+#
+# The allowance is deliberately gated on agentgatewayRoute.enabled ALONE, not
+# also on slack.enabled the way route.yaml is: it is the marker
+# tests/verify-component-enablement.py reads for this component's wiring, and a
+# rule to a Service that is not routed to yet admits nothing on its own. Turning
+# the Slack adapter on must not need a second connectivity change.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

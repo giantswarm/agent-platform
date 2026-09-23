@@ -1,11 +1,13 @@
-{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled }}
+{{- /*
+The gateway serves Slack only: /channels/slack is its whole channel surface, so
+the route has nothing to publish while the Slack adapter is off and renders
+only with it on.
+*/ -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled .Values.klausGateway.slack.enabled }}
 {{- $route := .Values.klausGateway.agentgatewayRoute }}
 {{- $ns := .Values.klausGateway.namespaceOverride | default .Release.Namespace }}
 {{- $fullname := .Values.klausGateway.fullnameOverride | default "klaus-gateway" }}
-{{- $paths := list "/v1" "/web" "/cli/v1" }}
-{{- if .Values.klausGateway.slack.enabled }}
-{{- $paths = append $paths "/channels/slack" }}
-{{- end }}
+{{- $paths := list "/channels/slack" }}
 # AgentgatewayBackend — registers klausgateway as an agentgateway backend.
 # klausgateway itself has no auth middleware; the agentgateway JWT policy
 # (AgentgatewayPolicy) enforces authentication before forwarding.

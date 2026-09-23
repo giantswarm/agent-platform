@@ -2,6 +2,18 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the `klausGateway` keys the Slack-only gateway ignores are no longer forwarded)
+
+giantswarm/klaus-gateway#319: klaus-gateway 2.0.0 serves Slack only, `components.klaus-gateway.versionRange` is `>=2.0.0 <3.0.0`, and this chart stops forwarding the six keys that served the removed paths — `klausGateway.cli`, `klausGateway.lifecycle`, `klausGateway.upstream`, `klausGateway.agentgateway`, `klausGateway.routing.defaultTTL` and `klausGateway.a2a.saToken`. The klaus-gateway `HTTPRoute` the connectivity chart renders (`klausGateway.agentgatewayRoute.enabled`) drops `/v1`, `/web` and `/cli/v1`, which answer 404 on 2.x, and carries `/channels/slack` alone; with `klausGateway.slack.enabled` off it now renders nothing at all, the route having nothing left to publish. The OBO route (`/auth/slack/`, `/connectors/complete`) is untouched.
+
+### Operator action
+
+- **None** for an installation on the defaults. The klaus-gateway release loses six values it did nothing with; the pod does not roll on them alone.
+- **An installation whose own values still set one of the six keys** (the `agent-platform` patch in giantswarm-configs): the key keeps travelling to the release and is still accepted as a no-op by the 2.x chart. Drop it from your values before klaus-gateway's next major, which deletes the keys from its schema — a values file that still sets one then fails the release.
+- **An installation on the BOM** (`examples/customer-bom.yaml`): the pin moves from `1.20.0` to `2.0.0`, the Slack-only release. Flux upgrades the klaus-gateway release once; a Slack turn in flight ends with the pod, so land it in a quiet window.
+- **An installation with its own pin below `2.0.0`** (`components.klaus-gateway.versionRange` set in your values, which replaces the chart's range — the render accepts it, nothing checks it): **move the pin to `2.0.0`**, and act before you take this release. A 1.x chart reads the six keys, and with none forwarded it falls back to its own defaults — `lifecycle.driver: operator` with no `operatorMCPURL`, where this chart forwarded `static` — and the pod does not start. Moving the pin is the fix; `klausGateway.lifecycle.driver: static` in your own values holds a 1.x gateway up in the meantime. The other five defaults match what this chart forwarded, so they change nothing.
+- **Recognising it worked**: `kubectl -n <release namespace> get helmrelease klaus-gateway -o jsonpath='{.spec.values.cli}{.spec.values.lifecycle}{.spec.values.upstream}{.spec.values.agentgateway}{.spec.values.routing.defaultTTL}{.spec.values.a2a.saToken}'` prints nothing, and with the route on, `kubectl -n <release namespace> get httproute klausgateway -o jsonpath='{.spec.rules[*].matches[*].path.value}'` prints `/channels/slack`.
+
 ## \<current\> → \<next\> (the kagent controller's memory limit is `1536Mi`; the VPA's cap is `1280Mi`)
 
 The meta chart sets `kagent.controller.resources`: the kagent chart's defaults, with the memory limit raised from `512Mi` to `1536Mi`. `kagent.controller.vpa.maxAllowed.memory` moves from `480Mi` to `1280Mi` in both charts, a step under the new limit.

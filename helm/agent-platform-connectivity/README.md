@@ -1258,12 +1258,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.backup.crossplane.azure.subnetName | string | `"node-subnet"` |  |
 | postgres.backup.crossplane.azure.privateDnsZoneRef | string | `""` |  |
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
-| klausGateway.agentgateway.enabled | bool | `false` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
-| klausGateway.routing.defaultTTL | string | `"24h"` |  |
-| klausGateway.lifecycle.driver | string | `"static"` |  |
-| klausGateway.lifecycle.staticInstances | string | `""` |  |
-| klausGateway.upstream.agentgatewayURL | string | `""` |  |
 | klausGateway.observability.otlpEndpoint | string | `""` |  |
 | klausGateway.slack.enabled | bool | `false` |  |
 | klausGateway.slack.mode | string | `"events"` |  |
@@ -1280,12 +1275,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | klausGateway.reviews.enabled | bool | `false` |  |
 | klausGateway.reviews.audience | string | `"klaus-gateway"` |  |
 | klausGateway.reviews.allowedCallers | list | `[]` |  |
-| klausGateway.cli.enabled | bool | `false` |  |
 | klausGateway.a2a.enabled | bool | `false` |  |
 | klausGateway.a2a.defaultAgent | string | `""` |  |
 | klausGateway.a2a.url | string | `"grpc://agentgateway.agent-platform.svc.cluster.local:8080"` |  |
-| klausGateway.a2a.saToken.enabled | bool | `false` |  |
-| klausGateway.a2a.saToken.audience | string | `"kagent"` |  |
 | klausGateway.agentgatewayRoute.enabled | bool | `false` |  |
 | klausGateway.agentgatewayRoute.hostname | string | `""` |  |
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |

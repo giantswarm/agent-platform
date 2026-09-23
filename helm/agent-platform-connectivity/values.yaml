@@ -1939,19 +1939,14 @@ postgres:
         subnetName: node-subnet
         privateDnsZoneRef: ""
 
-# Klaus Gateway — channel front door (Slack, CLI, web) for Klaus instances.
-# Disabled by default; set components.klaus-gateway.enabled: true to deploy.
-# The chart's own agentgateway sub-dependency is disabled here because the
-# umbrella already manages the agentgateway controller via the `agentgateway`
-# dependency above; set upstream.agentgatewayURL to the data-plane service
-# URL once the agentgateway deployment is known (typically post-install).
+# Klaus Gateway — the Slack front door of the kagent agents. Disabled by
+# default; set components.klaus-gateway.enabled: true to deploy. This chart's
+# wiring reads these keys; the klaus-gateway release itself gets the meta
+# chart's copy of the block. Every key here is one the wiring reads and a key
+# of the klaus-gateway 2.x chart, which serves Slack only.
 klausGateway:  # @schema skipProperties: true; additionalProperties: true
   image:
     registry: gsoci.azurecr.io
-
-  # Do not deploy a second agentgateway; reuse the umbrella's.
-  agentgateway:
-    enabled: false
 
   # Routing store (klaus-gateway 1.6.0): "memory" loses the thread bindings on
   # a gateway restart; "valkey" keeps them in the platform's own Valkey
@@ -1963,19 +1958,6 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # team-review endpoint's TokenReview (reviews.enabled).
   routing:
     store: memory
-    defaultTTL: "24h"
-
-  # Lifecycle driver. agent-platform bundles kagent, not klaus-operator, so
-  # "static" is the correct default. Populate staticInstances with
-  # name=baseURL pairs pointing at kagent agent services per-cluster.
-  lifecycle:
-    driver: static
-    staticInstances: ""
-
-  # Point at the bundled agentgateway data-plane service once deployed.
-  # Empty disables proxying; the gateway talks directly to instance BaseURLs.
-  upstream:
-    agentgatewayURL: ""
 
   # OTLP trace export. Set to the cluster OTLP gateway endpoint to enable.
   observability:
@@ -2051,10 +2033,6 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # The ServiceAccounts that may post, as system:serviceaccount:<namespace>:<name>.
     allowedCallers: []
 
-  # CLI channel adapter (remote klausctl users). Off by default.
-  cli:
-    enabled: false
-
   # A2A client adapter. Routes channel turns to a kagent A2A endpoint.
   # defaultAgent is the fallback agentRef when the channel does not supply one.
   # Omit defaultAgent to require callers to pass agentRef explicitly.
@@ -2069,12 +2047,10 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # lf.a2a.v1.A2AService with the person's Dex id_token as authorization.
     # Adjust the namespace if the release is deployed outside agent-platform.
     url: "grpc://agentgateway.agent-platform.svc.cluster.local:8080"
-    saToken:
-      enabled: false
-      audience: kagent
 
-  # Agentgateway route — exposes /v1, /web, /cli/v1 on the agentgateway
-  # data-plane Gateway (agentgateway-* ingress modes only).
+  # Agentgateway route — exposes the Slack channel path (/channels/slack, with
+  # slack.enabled) on the agentgateway data-plane Gateway (agentgateway-*
+  # ingress modes only).
   agentgatewayRoute:
     enabled: false
     # Hostname on which the agentgateway Gateway will match these paths.
