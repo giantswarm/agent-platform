@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`components.klaus-gateway.versionRange` admits the 3.x line (`>=2.0.0 <4.0.0`)** (giantswarm/klaus-gateway#319). klaus-gateway 3.0.0 deletes the values keys the 2.x chart accepted as no-ops for the removed web and CLI channels; this chart forwards none of them since 4.62.0, so the installations roll to 3.x unchanged.
 - **`valkey.valkey.auth.usersExistingSecretChecksum` is documented** (giantswarm/valkey-app#72, giantswarm/giantswarm-platform-manager#212). From valkey-app 0.1.5 the Valkey chart renders that value verbatim as the pod's `checksum/users-secret` annotation, so a password rotated in `usersExistingSecret` restarts the Valkey when the mark changes with it. The key passes through the open `valkey` block as it always did and this chart sets no default for it, so no installation's render changes; `components.valkey.versionRange` (`0.x`) picks the release up on its own, nothing is pinned. muster's own mark is giantswarm/muster#1315.
 
 - **The kagent controller's memory limit is `1536Mi`, and its VPA can recommend up to `1280Mi`: `kagent.controller.resources`, `kagent.controller.vpa.maxAllowed.memory`** (giantswarm/agent-platform#455 follow-up). The meta chart sets the controller's resources to the kagent chart's defaults with the memory limit raised from `512Mi`, and the VPA's memory cap moves from `480Mi` to `1280Mi` in both charts. `make verify-kagent-vpa` asserts the limits on the kagent release and the new cap. UPGRADE.md.

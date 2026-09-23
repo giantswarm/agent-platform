@@ -122,7 +122,7 @@ LINE = {
     # lifecycle.driver, and a 1.x gateway without one falls back to operator
     # with no operatorMCPURL and does not start. The ceiling stops before the
     # major that deletes the six no-op keys from that chart's schema.
-    "klaus-gateway": (GSOCI, ">=2.0.0 <3.0.0", []),
+    "klaus-gateway": (GSOCI, ">=2.0.0 <4.0.0", []),
 }
 
 # The kagent.dev API version the 4.x line serves, pinned into both managers'

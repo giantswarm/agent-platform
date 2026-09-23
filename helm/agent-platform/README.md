@@ -376,7 +376,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.klaus-gateway.versionRange | string | `">=2.0.0 <3.0.0"` |  |
+| components.klaus-gateway.versionRange | string | `">=2.0.0 <4.0.0"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
 | components.klaus-gateway.omitKeys[0] | string | `"observability.enabled"` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
