@@ -165,6 +165,13 @@ KLAUS_GATEWAY_DROPPED_KEYS_GOLDEN_ONLY = [
     "--set", "klausGateway.routing.defaultTTL=null",
     "--set", "klausGateway.a2a.saToken=null",
 ]
+# giantswarm/klaus-gateway#319: the component's floor is the Slack-only release,
+# because the values above no longer start a 1.x gateway; GOLDEN_REF stops at
+# 1.20.0. Written on BOTH sides so the range compares equal; dropped once
+# GOLDEN_REF carries the floor.
+KLAUS_GATEWAY_FLOOR_HOLD = [
+    "--set", "components.klaus-gateway.versionRange=>=2.0.0 <3.0.0",
+]
 # giantswarm/vm-manager#73, giantswarm/giantswarm#36711: the vm-manager chart
 # gains its own ServiceMonitor and this tree resolves its `auto` switch and
 # sets the tenant label, keys GOLDEN_REF's vm-manager block does not carry
@@ -524,8 +531,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # Applied to the GOLDEN render only (see the list's comment).
         golden_only = {meta: KLAUS_GATEWAY_DROPPED_KEYS_GOLDEN_ONLY, connectivity: []}
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),

@@ -680,23 +680,22 @@ components:  # @schema additionalProperties: true
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # klaus-gateway 1.x speaks kagent API v2: A2A v1 over gRPC through the
-    # controller GRPCRoute this line renders (klausGateway.a2a.url is a
-    # grpc:// target), AgentTemplate discovery, one AgentInstance per thread
+    # The line speaks kagent API v2: A2A v1 over gRPC through the controller
+    # GRPCRoute this line renders (klausGateway.a2a.url is a grpc:// target),
+    # AgentTemplate discovery, one AgentInstance per thread
     # (giantswarm/klaus-gateway#234). A 0.x gateway talks REST to the 0.10
     # controller and gets 404s on this line; the 3.x meta chart keeps 0.x.
-    # The floor is 1.20.0: the chart's closed serviceMonitor block takes the
-    # labels the meta chart forwards by default from there (the tenant label,
-    # giantswarm/klaus-gateway#316); an older chart's schema refuses them.
-    # The ceiling admits the 2.x line: 2.0.0 is the Slack-only gateway
-    # (giantswarm/klaus-gateway#319, PR #320) — the web and CLI channels, the
-    # /v1 front door and the Klaus instance path are gone. The keys that served
-    # them (cli, lifecycle, upstream, agentgateway, routing.defaultTTL,
-    # a2a.saToken) are no-ops on 2.x and this block no longer forwards them; a
-    # 1.x gateway simply keeps its own defaults for them. The next major of
-    # that chart deletes them from its schema, which is when this ceiling
-    # moves.
-    versionRange: ">=1.20.0 <3.0.0"
+    # The floor is 2.0.0, the Slack-only gateway (giantswarm/klaus-gateway#319,
+    # PR #320): the web and CLI channels, the /v1 front door and the Klaus
+    # instance path are gone there, and the keys that served them (cli,
+    # lifecycle, upstream, agentgateway, routing.defaultTTL, a2a.saToken) are
+    # no-ops this block does not forward. That is what puts the floor at 2.0.0
+    # rather than 1.20.0: a 1.x gateway reads lifecycle.driver, and with none
+    # forwarded it falls back to its own default (operator, no operatorMCPURL)
+    # and does not start — UPGRADE.md, "the `klausGateway` keys the Slack-only
+    # gateway ignores are no longer forwarded". The ceiling stops before the
+    # next major of that chart, which deletes the six keys from its schema.
+    versionRange: ">=2.0.0 <3.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
@@ -3331,12 +3330,11 @@ postgres:
         privateDnsZoneRef: ""
 
 # Klaus Gateway — the Slack front door of the kagent agents. Disabled by
-# default; set components.klaus-gateway.enabled: true to deploy. This whole
+# default; set components.klaus-gateway.enabled: true to deploy. The whole
 # block is forwarded to the klaus-gateway release verbatim (valuesFrom), so
-# every key here is one of that chart's own — klaus-gateway 2.0.0 serves Slack
-# only (giantswarm/klaus-gateway#319) and the keys of the removed web and CLI
-# channels (cli, lifecycle, upstream, agentgateway, routing.defaultTTL,
-# a2a.saToken) are no longer forwarded.
+# every key here is a key of the klaus-gateway 2.x chart, which serves Slack
+# only: there is no web or CLI channel, no /v1 front door and no Klaus
+# instance path to configure.
 klausGateway:  # @schema skipProperties: true; additionalProperties: true
   image:
     registry: gsoci.azurecr.io

@@ -1,8 +1,7 @@
 {{- /*
-The gateway serves Slack only since klaus-gateway 2.0.0
-(giantswarm/klaus-gateway#319): /v1, /web and /cli/v1 are gone and answer 404,
-so /channels/slack is the whole channel surface and the route has nothing to
-publish while the Slack adapter is off.
+The gateway serves Slack only: /channels/slack is its whole channel surface, so
+the route has nothing to publish while the Slack adapter is off and renders
+only with it on.
 */ -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled .Values.klausGateway.slack.enabled }}
 {{- $route := .Values.klausGateway.agentgatewayRoute }}

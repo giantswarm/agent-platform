@@ -80,7 +80,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # repository, versionRange, dependsOn with every component on): the kagent line's
 # two charts on the line's release range (one build, kagent after its CRDs), the
 # managers on the lines that speak v1alpha3 (agent-manager 1.x; model-manager
-# 0.x from 0.20.0, dual-version), klaus-gateway 1.x (A2A v1 over gRPC). kagent-crds
+# 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
 KAGENT_RANGE = ">=1.0.0 <1.1.0"
@@ -115,15 +115,14 @@ LINE = {
     # the identity contract the meta chart forwards that also tolerates a cluster
     # without the Cluster API group. muster alone: the MCPServer CR.
     "cluster-manager": (GSOCI, ">=0.4.2 <1.0.0", ["muster"]),
-    # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
-    # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
-    # REST client and belongs to the 3.x meta chart. The floor is 1.10.0, the
-    # first chart whose observability block takes the otlpHeaders knob the meta
-    # chart forwards by default (giantswarm/klaus-gateway#263). The ceiling
-    # admits the 2.x Slack-only line (giantswarm/klaus-gateway#319); the
-    # klausGateway block no longer forwards the keys that served the removed
-    # channels, which that line accepts only as no-ops.
-    "klaus-gateway": (GSOCI, ">=1.20.0 <3.0.0", []),
+    # Swarmgeist on the line: the line speaks A2A v1 over gRPC to the controller
+    # GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10 REST client and
+    # belongs to the 3.x meta chart. The floor is 2.0.0, the Slack-only line
+    # (giantswarm/klaus-gateway#319): the klausGateway block forwards no
+    # lifecycle.driver, and a 1.x gateway without one falls back to operator
+    # with no operatorMCPURL and does not start. The ceiling stops before the
+    # major that deletes the six no-op keys from that chart's schema.
+    "klaus-gateway": (GSOCI, ">=2.0.0 <3.0.0", []),
 }
 
 # The kagent.dev API version the 4.x line serves, pinned into both managers'

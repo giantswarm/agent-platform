@@ -1940,13 +1940,10 @@ postgres:
         privateDnsZoneRef: ""
 
 # Klaus Gateway — the Slack front door of the kagent agents. Disabled by
-# default; set components.klaus-gateway.enabled: true to deploy.
-# The wiring reads these keys; the klaus-gateway release itself gets the meta
-# chart's copy of the block. klaus-gateway 2.0.0 serves Slack only
-# (giantswarm/klaus-gateway#319), so the keys of the removed channels — cli,
-# lifecycle, upstream, agentgateway, routing.defaultTTL and a2a.saToken — are
-# gone from here too: no template of this chart read them, and the meta chart
-# forwards them no more.
+# default; set components.klaus-gateway.enabled: true to deploy. This chart's
+# wiring reads these keys; the klaus-gateway release itself gets the meta
+# chart's copy of the block. Every key here is one the wiring reads and a key
+# of the klaus-gateway 2.x chart, which serves Slack only.
 klausGateway:  # @schema skipProperties: true; additionalProperties: true
   image:
     registry: gsoci.azurecr.io
