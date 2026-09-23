@@ -695,7 +695,11 @@ components:  # @schema additionalProperties: true
     # and does not start — UPGRADE.md, "the `klausGateway` keys the Slack-only
     # gateway ignores are no longer forwarded". The ceiling stops before the
     # next major of that chart, which deletes the six keys from its schema.
-    versionRange: ">=2.0.0 <3.0.0"
+    # The ceiling admits the 3.x line: 3.0.0 deletes the values keys the 2.x
+    # chart accepted as no-ops for the removed web and CLI channels
+    # (giantswarm/klaus-gateway#319, PR B); this chart (>= 4.62.0) forwards none
+    # of them, so the 3.x chart rolls unchanged.
+    versionRange: ">=2.0.0 <4.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
