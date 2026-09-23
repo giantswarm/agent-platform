@@ -54,8 +54,8 @@ components:
   agentgateway:                  { versionRange: "2.4.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "1.0.0" }
-  kagent-crds:                   { versionRange: "1.0.0" }
+  kagent:                        { versionRange: "1.0.2" }
+  kagent-crds:                   { versionRange: "1.0.2" }
   substrate:                     { versionRange: "1.0.2" }
   substrate-crds:                { versionRange: "1.0.2" }
   # 2.0.0 is the Slack-only gateway (giantswarm/klaus-gateway#319): the meta
