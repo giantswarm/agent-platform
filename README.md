@@ -624,6 +624,8 @@ muster:
 
 ACL authentication is enabled by default for the `default` user (`~* &* +@all`), with the cleartext password read from `valkey-password` in the operator-supplied Secret. Muster sends `AUTH <password>` against the default user, which is the standard backwards-compatible form.
 
+Valkey reads the password once, when its pod starts. A password rotated in the Secret reaches it through `valkey.valkey.auth.usersExistingSecretChecksum`, a mark the Valkey chart (0.1.5 and later) renders verbatim as the pod's `checksum/users-secret` annotation: change it in the same change that rotates the Secret and the pod restarts onto the new password. Empty (the default), a rotation alone leaves the running Valkey on the old password until a hand-run restart. muster itself reads the same Secret at start and carries no such mark yet (giantswarm/muster#1315).
+
 Operators with an out-of-band Valkey leave `components.valkey.enabled: false` and override `muster.muster.oauth.server.storage.valkey.url` to point at the external endpoint. See [UPGRADE.md](./UPGRADE.md) for migration notes from a previously-existing standalone Valkey.
 
 ### Bundled MCP servers
