@@ -701,7 +701,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.valkey.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
-| valkey.valkey.auth.usersExistingSecretChecksum | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |
 | valkey.valkey.auth.aclUsers.default.passwordKey | string | `""` |  |
 | valkey.valkey.dataStorage.enabled | bool | `true` |  |

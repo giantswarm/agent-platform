@@ -1991,14 +1991,15 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
       # Secret so muster and Valkey read one value. The inline alternative,
       # aclUsers.default.password, lands in the HelmRelease values and Helm
       # release storage (gitops.forbidInlineSecrets rejects it).
+      # Valkey reads the password once, at start. A rotation reaches the pod
+      # through usersExistingSecretChecksum (valkey-app 0.1.5 and later), a
+      # mark the Valkey chart renders verbatim as the pod's
+      # checksum/users-secret annotation: set it in the same change that
+      # rotates the Secret (a hash over the new data, a counter, a date) and
+      # the pod restarts onto the new password. Not set here: without a mark a
+      # rotation alone leaves the pod on the old password until a hand-run
+      # restart, and a default would only change every installation's render.
       usersExistingSecret: ""
-      # A mark of that Secret's revision, rendered verbatim as the Valkey
-      # pod's checksum/users-secret annotation (valkey-app 0.1.5). Valkey
-      # reads the password once, at start: change the mark in the same change
-      # that rotates the Secret (a hash over the new data, a counter, a date)
-      # and the pod restarts onto the new password; empty, a rotation alone
-      # leaves it on the old one until a hand-run restart.
-      usersExistingSecretChecksum: ""
       aclUsers:
         default:
           permissions: "~* &* +@all"
