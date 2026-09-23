@@ -170,7 +170,8 @@ KLAUS_GATEWAY_DROPPED_KEYS_GOLDEN_ONLY = [
 # 1.20.0. Written on BOTH sides so the range compares equal; dropped once
 # GOLDEN_REF carries the floor.
 KLAUS_GATEWAY_FLOOR_HOLD = [
-    "--set", "components.klaus-gateway.versionRange=>=2.0.0 <3.0.0",
+    # The ceiling admits the 3.x line (giantswarm/klaus-gateway#319, PR B).
+    "--set", "components.klaus-gateway.versionRange=>=2.0.0 <4.0.0",
 ]
 # giantswarm/vm-manager#73, giantswarm/giantswarm#36711: the vm-manager chart
 # gains its own ServiceMonitor and this tree resolves its `auto` switch and
