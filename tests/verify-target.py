@@ -382,6 +382,20 @@ def drop_new_roster_entries(here: str, there: str) -> tuple:
 PODMONITOR_SOURCE = "# Source: agent-platform-connectivity/templates/agentgateway/podmonitor.yaml"
 
 
+# giantswarm/agent-platform#634: the model catalog prices claude-opus-5-5, a key
+# GOLDEN_REF's closed anthropic.models map refuses, so it cannot be held by --set
+# and is cut from every render instead. Dropped once GOLDEN_REF carries it.
+OPUS_5_5_PRICE = re.compile(r"^(\s+)claude-opus-5-5:\n\1  rates:\n(?:\1    \w+: \"[\d.]+\"\n){4}", re.M)
+
+
+def hold_opus_5_5_price(here: str, there: str) -> tuple:
+    """Both renders with the claude-opus-5-5 catalog entry cut out."""
+    h, t = OPUS_5_5_PRICE.sub("", here), OPUS_5_5_PRICE.sub("", there)
+    if h != here or t != there:
+        print("note: #634 hold — the claude-opus-5-5 catalog entry is left out of the golden comparison")
+    return h, t
+
+
 # giantswarm/giantswarm#36711: the data plane's trace export — the Gateway-scoped
 # tracing policy and its egress policy, new objects GOLDEN_REF does not render.
 # Dropped from BOTH sides; dropped once GOLDEN_REF carries them.
@@ -495,6 +509,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             here = helm(chart, flags)
             there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
             here, there = hold_dashboards(here, there, chart == meta)
+            here, there = hold_opus_5_5_price(here, there)
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)
