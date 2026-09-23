@@ -1055,7 +1055,16 @@
                                     "type": "object",
                                     "additionalProperties": false,
                                     "properties": {
+                                        "cpu": {
+                                            "type": [
+                                                "string",
+                                                "integer"
+                                            ]
+                                        },
                                         "ephemeral-storage": {
+                                            "type": "string"
+                                        },
+                                        "memory": {
                                             "type": "string"
                                         }
                                     }
@@ -1064,7 +1073,16 @@
                                     "type": "object",
                                     "additionalProperties": false,
                                     "properties": {
+                                        "cpu": {
+                                            "type": [
+                                                "string",
+                                                "integer"
+                                            ]
+                                        },
                                         "ephemeral-storage": {
+                                            "type": "string"
+                                        },
+                                        "memory": {
                                             "type": "string"
                                         }
                                     }
