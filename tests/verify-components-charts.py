@@ -57,6 +57,16 @@ for. A RANGE that admits nothing published yet (a line re-pinned ahead of its
 release) is rendered against the newest chart the line has while UNRELEASED
 names the release it waits for (fallback()); the entry goes with the release.
 
+`--strict` is the tag pipeline's run (giantswarm/agent-platform#624): a release
+naming a chart nobody can pull is a release nobody can install, so UNRELEASED and
+RENDER_AGAINST do not apply, and a range that admits nothing published, or a BOM
+pin that is not published, FAILS naming the component and the version the
+release waits for — the range's floor. A GitHub release or a tag of the
+component is not evidence its chart exists; a tag pipeline that failed after
+tagging (klaus-gateway 1.20.0) leaves neither chart nor image. A release refused
+this way is recovered by rerunning the tag's workflow from failed once the chart
+is out; the branch pipeline keeps rendering against the fallbacks.
+
 Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
 chart (three attempts each); the tag
 list comes from the registry's anonymous `/v2/<repo>/tags/list`. Every Helm call
@@ -105,6 +115,27 @@ RENDER_AGAINST: dict[str, str] = {}
 # An exact version, prerelease included (a dev build is one) — what a BOM
 # line may carry; a range is not a version this check can render "the pin" at.
 EXACT_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
+# --strict: the tag pipeline's run — no fallback, a release that names an
+# unpublished chart fails (main() sets it from the command line).
+STRICT = False
+
+
+def floor(constraint: str) -> str:
+    """The lowest version a constraint admits, as the release it waits for: the
+    `>=` bound of a range, an exact version itself."""
+    m = re.search(r">=\s*v?([0-9A-Za-z.+-]+)", constraint)
+    return m.group(1) if m else constraint.strip()
+
+
+def waits_for(name: str, url: str, constraint: str, tags: list[str]) -> str:
+    """The FAIL line of the strict run: which component, which version, what is
+    published instead, and how the release is recovered."""
+    newest = fluxsemver.resolve(tags, ">=0.0.0")
+    return (
+        f"{name}: nothing published at {url} satisfies {constraint!r}; the release waits for {name} {floor(constraint)} "
+        f"(the newest published chart is {newest or 'none'}). A GitHub release or a tag of the component is not its chart: "
+        f"once `devctl release wait` on it exits 0, rerun this tag's workflow from failed — no new tag"
+    )
 QUICKSTART = [
     "--set", "global.domain=example.com",
     "--set", "global.identity.issuerUrl=https://dex.example.com",
@@ -221,15 +252,18 @@ def registry_tags(url: str) -> list[str]:
     fail(f"the tag list of {url} did not end after 100 pages")
 
 
-def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
+def fallback(name: str, url: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
     """The chart to render a RANGE against while nothing the constraint admits is
     published: the kagent build the values name (the kagent range's floor — the
     chart version of the same build), the branch build RENDER_AGAINST names, else
     the newest release tag. Only for a range UNRELEASED names, or for a BOM pin
     that IS the version UNRELEASED names — the one release the range waits for;
-    any other unpublished pin fails, because no installation on it can install."""
+    any other unpublished pin fails, because no installation on it can install.
+    Under --strict there is no fallback: the release waits for the floor."""
+    if STRICT:
+        fail(waits_for(name, url, constraint, tags))
     if name not in UNRELEASED:
-        fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED)")
+        fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED); the release would wait for {name} {floor(constraint)}")
     chosen = kagent_tag if name in KAGENT else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
     if not chosen or chosen not in tags:
         fail(f"no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
@@ -338,6 +372,8 @@ def main(meta: str) -> int:
     kagent_oci = wide.get(("OCIRepository", charts.get("kagent", "kagent")))
     kagent_tag = source(kagent_oci)[1].split()[0].lstrip(">=") if kagent_oci else ""  # the range's floor = the build the values name
     print(f"--> {len(components)} components (the meta chart's roster): {len(pins)} pinned by the BOM, {len(released)} released with the chart")
+    if STRICT:
+        print("--> strict (the tag pipeline): every range and every BOM pin must resolve to a published chart; UNRELEASED and RENDER_AGAINST do not apply")
     with tempfile.TemporaryDirectory() as tmp:
         for name in sorted(components):
             chart = charts[name]
@@ -360,12 +396,13 @@ def main(meta: str) -> int:
             if pin != pins[name]:
                 fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
             tags = registry_tags(url)
-            version_range = fluxsemver.resolve(tags, rng) or fallback(name, rng, tags, kagent_tag)
+            version_range = fluxsemver.resolve(tags, rng) or fallback(name, url, rng, tags, kagent_tag)
             version_pin = fluxsemver.resolve(tags, pin)
-            if not version_pin and pin == UNRELEASED.get(name):
-                version_pin = fallback(name, pin, tags, kagent_tag)
+            if not version_pin and pin == UNRELEASED.get(name) and not STRICT:
+                version_pin = fallback(name, url, pin, tags, kagent_tag)
             if not version_pin:
-                fail(f"{name}: the BOM pins {pin!r}, which {url} does not publish — no installation on this BOM can install it")
+                fail(f"{name}: the BOM pins {pin!r}, which {url} does not publish — no installation on this BOM can install it"
+                     + (f"; {waits_for(name, url, pin, tags)}" if STRICT else ""))
             axes = [("range", rng, version_range, values_range), ("BOM pin", pin, version_pin, values_pin)]
             if version_range == version_pin and values_range == values_pin:
                 axes = [("range = BOM pin", f"{rng} = {pin}", version_range, values_range)]
@@ -377,4 +414,8 @@ def main(meta: str) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    args = [a for a in sys.argv[1:] if a != "--strict"]
+    STRICT = len(args) != len(sys.argv) - 1
+    if len(args) != 1:
+        sys.exit(f"usage: {sys.argv[0]} <meta chart dir> [--strict]")
+    sys.exit(main(args[0]))

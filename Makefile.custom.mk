@@ -1227,6 +1227,20 @@ verify-components: ## Assert the roster: the standalone chart's extras (backstag
 	@python3 tests/verify-components.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "component roster verified."
 
+# The tag pipeline's run of the same check (giantswarm/agent-platform#624): a
+# release whose range or BOM pin names a chart nobody can pull is a release nobody
+# can install, so the fallbacks (UNRELEASED, RENDER_AGAINST) do not apply there and
+# the check fails naming the component and the version it waits for. Not part of
+# verify-all: a branch renders against the fallbacks on purpose, so the PR can land
+# before the component release; .circleci/custom.yml runs this on tags, before the
+# connectivity push (the meta chart's push-chart-release gates on it through the
+# generated pipeline's chart release gate).
+.PHONY: verify-release-floors
+verify-release-floors: ## Assert, on a release tag, that every component range and every BOM pin resolves to a chart that is pullable from its registry — no UNRELEASED/RENDER_AGAINST fallback; a floor or pin nobody can pull fails naming the component and the version the release waits for (rerun the tag's workflow from failed once it is out). Network: gsoci.azurecr.io (ghcr.io for the CloudNativePG chart).
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-components-charts.py $(CHART_DIR) --strict
+	@echo "every component floor and BOM pin is published; the release is installable."
+
 .PHONY: verify-components-charts
 verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, resolved the way Flux does; a chart released with the meta chart (releasedWithChart) from the working tree. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. Network: gsoci.azurecr.io (ghcr.io for the CloudNativePG chart).
 	@echo "====> $@ ($(CHART_DIR))"
@@ -3744,7 +3758,10 @@ VERIFY_MK := $(lastword $(MAKEFILE_LIST))
 # verify target already chains as a prerequisite.
 VERIFY_ALL_DEFINED := $(sort $(shell sed -n 's/^\(verify-[a-z0-9-]*\):.*/\1/p' $(VERIFY_MK)))
 VERIFY_CHAINED := $(sort $(shell sed -n 's/^verify-[a-z0-9-]*: *\(verify-.*\)$$/\1/p' $(VERIFY_MK)))
-VERIFY_TARGETS := $(filter-out verify-all $(VERIFY_CHAINED),$(VERIFY_ALL_DEFINED))
+# verify-release-floors is the tag pipeline's, not a branch assertion: a branch
+# renders against UNRELEASED and RENDER_AGAINST by design (giantswarm/agent-platform#624).
+VERIFY_RELEASE_ONLY := verify-release-floors
+VERIFY_TARGETS := $(filter-out verify-all $(VERIFY_CHAINED) $(VERIFY_RELEASE_ONLY),$(VERIFY_ALL_DEFINED))
 
 .PHONY: verify-all
 verify-all: ## Run every verify-* target of this file, the set CI runs. Some resolve a component chart over the network.
