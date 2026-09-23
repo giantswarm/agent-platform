@@ -688,7 +688,14 @@ components:  # @schema additionalProperties: true
     # The floor is 1.20.0: the chart's closed serviceMonitor block takes the
     # labels the meta chart forwards by default from there (the tenant label,
     # giantswarm/klaus-gateway#316); an older chart's schema refuses them.
-    versionRange: ">=1.20.0 <2.0.0"
+    # The ceiling admits the 2.x line: 2.0.0 is the Slack-only gateway
+    # (giantswarm/klaus-gateway#319, PR #320) — the web and CLI channels, the
+    # /v1 front door and the Klaus instance path are gone, and the values keys
+    # this block still forwards for them (cli, lifecycle, upstream,
+    # agentgateway, routing.defaultTTL, a2a.saToken) are accepted as no-ops
+    # until the next major of that chart. They stay forwarded here until the
+    # 2.x line has rolled; a later change drops them.
+    versionRange: ">=1.20.0 <3.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's

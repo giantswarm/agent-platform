@@ -157,7 +157,9 @@ MCP_KUBERNETES_MONITORING_HOLD = [
 # the labels key. Written on BOTH sides so the forwarded values and the range
 # compare equal; dropped once GOLDEN_REF carries them.
 KLAUS_GATEWAY_MONITOR_HOLD = [
-    "--set", "components.klaus-gateway.versionRange=>=1.20.0 <2.0.0",
+    # The ceiling admits the 2.x Slack-only line (giantswarm/klaus-gateway#319);
+    # GOLDEN_REF stops at <2.0.0, so the range is written on both sides.
+    "--set", "components.klaus-gateway.versionRange=>=1.20.0 <3.0.0",
     "--set", "klausGateway.serviceMonitor.enabled=false",
     "--set", "klausGateway.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
 ]

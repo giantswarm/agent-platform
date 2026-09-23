@@ -119,8 +119,10 @@ LINE = {
     # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
     # REST client and belongs to the 3.x meta chart. The floor is 1.10.0, the
     # first chart whose observability block takes the otlpHeaders knob the meta
-    # chart forwards by default (giantswarm/klaus-gateway#263).
-    "klaus-gateway": (GSOCI, ">=1.20.0 <2.0.0", []),
+    # chart forwards by default (giantswarm/klaus-gateway#263). The ceiling
+    # admits the 2.x Slack-only line (giantswarm/klaus-gateway#319): the keys
+    # forwarded for the removed channels are no-ops there.
+    "klaus-gateway": (GSOCI, ">=1.20.0 <3.0.0", []),
 }
 
 # The kagent.dev API version the 4.x line serves, pinned into both managers'
