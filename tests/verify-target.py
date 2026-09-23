@@ -371,6 +371,21 @@ def drop_new_roster_entries(here: str, there: str) -> tuple:
 PODMONITOR_SOURCE = "# Source: agent-platform-connectivity/templates/agentgateway/podmonitor.yaml"
 
 
+# giantswarm/agent-platform#649: every OCIRepository selects the Helm chart
+# layer, three lines between `url:` and `ref:` that GOLDEN_REF does not render.
+# Cut from BOTH sides before the other holds, whose OCIRepository patterns read
+# `ref:` right after `url:`; dropped once GOLDEN_REF carries it.
+CHART_LAYER_SELECTOR = re.compile(r"^(\s+)layerSelector:\n\1  mediaType: application/vnd\.cncf\.helm\.chart\.content\.v1\.tar\+gzip\n\1  operation: copy\n", re.M)
+
+
+def hold_chart_layer_selector(here: str, there: str) -> tuple:
+    """Both renders with the OCIRepositories' layerSelector cut out."""
+    h, t = CHART_LAYER_SELECTOR.sub("", here), CHART_LAYER_SELECTOR.sub("", there)
+    if h != here or t != there:
+        print("note: #649 hold — the OCIRepositories' layerSelector is left out of the golden comparison")
+    return h, t
+
+
 # giantswarm/agent-platform#634: the model catalog prices claude-opus-5-5, a key
 # GOLDEN_REF's closed anthropic.models map refuses, so it cannot be held by --set
 # and is cut from every render instead. Dropped once GOLDEN_REF carries it.
@@ -495,10 +510,10 @@ def check_golden(meta: str, connectivity: str) -> None:
         # hold_substrate_range() blanks it and the worker image derived from it
         # in both renders. Dropped once GOLDEN_REF carries them. METRIC_LABELS_HOLD
         # (#586) is the other hold in force.
-        hold_608 = ["--set", "components.kagent.versionRange=>=1.0.0 <1.1.0",
-                    "--set", "components.kagent-crds.versionRange=>=1.0.0 <1.1.0",
+        hold_608 = ["--set", "components.kagent.versionRange=>=1.0.2 <1.1.0",
+                    "--set", "components.kagent-crds.versionRange=>=1.0.2 <1.1.0",
                     "--set", "components.agentgateway.versionRange=>=2.4.0 <3.0.0",
-                    "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.1",
+                    "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.2",
                     *AGENTGATEWAY_IMAGES_HOLD]
         # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH
         # sides: modelServing.imageVerification is on by default now, so a serving
@@ -522,6 +537,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             here = helm(chart, flags)
             there = helm(os.path.join(tree, chart),
                          [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags] + golden_only[chart])
+            here, there = hold_chart_layer_selector(here, there)
             here, there = hold_dashboards(here, there, chart == meta)
             here, there = hold_opus_5_5_price(here, there)
             here, there = hold_dataplane_buffer(here, there)

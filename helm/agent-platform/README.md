@@ -329,7 +329,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.0.0 <1.1.0"` |  |
+| components.kagent.versionRange | string | `">=1.0.2 <1.1.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -351,19 +351,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.0.0 <1.1.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.0.2 <1.1.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.0.2 <1.1.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.0.3 <1.1.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.0.2 <1.1.0"` |  |
+| components.substrate.versionRange | string | `">=1.0.3 <1.1.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -1057,11 +1057,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.1.1"` |  |
+| agentgateway.controller.image.tag | string | `"2.1.2"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.1.1"` |  |
+| agentgateway.proxy.image.tag | string | `"2.1.2"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1296,7 +1296,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.images.postgres | string | `"gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"` |  |
 | substrate.images.rustfs | string | `"gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358"` |  |
 | substrate.images.awsCli | string | `"amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73"` |  |
-| substrate.images.agentgateway | string | `"gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.1"` |  |
+| substrate.images.agentgateway | string | `"gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.2"` |  |
 | substrate.atelet.storageBackend | string | `"s3"` |  |
 | substrate.atelet.nodeSelector | object | `{}` |  |
 | substrate.atelet.tolerations | list | `[]` |  |
