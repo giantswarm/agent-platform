@@ -67,12 +67,14 @@ REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networ
             "modelServing.prepull.images", "modelServing.prepull.modelPresets", "modelServing.prepull.nodeSelector", "modelServing.modelImages.registry",
             "modelServing.imageVerification.failureAction", "modelServing.imageVerification.images", "modelServing.imageVerification.attestors",
             "modelServing.serving.gpuResourceName",
-            "modelServing.namespace.keep"}
+            "modelServing.namespace.keep",
+            "gateway.parameters.dataPlaneResources.limits.cpu", "gateway.parameters.dataPlaneResources.limits.memory"}
 MIRRORED = ("fqdns", "cidrs", "port")
 # Blocks the meta chart mirrors leaf for leaf (#537, #539, #545, #551, #552, #565).
 SUBTREES = (("modelServing", "namespace"), ("modelServing", "serving"), ("modelServing", "cache"), ("modelServing", "policies"), ("modelServing", "prepull"), ("modelServing", "modelImages"),
             ("modelServing", "imageVerification"),
-            ("clusterManager", "prewarmPriorityClass"))
+            ("clusterManager", "prewarmPriorityClass"),
+            ("gateway", "parameters", "dataPlaneResources"))
 
 
 def leaves(tree: dict, path: tuple[str, ...] = ()):
@@ -121,7 +123,7 @@ def main() -> int:
         sys.exit(f"FAIL: the connectivity chart no longer declares {sorted(missing)}; this check would pass vacuously")
     if drift:
         sys.exit("FAIL: a mirrored default differs between the charts — the meta chart forwards its copy, which shadows the connectivity default:\n  " + "\n  ".join(drift))
-    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing namespace, serving, cache, policies, prepull, modelImages and imageVerification blocks, the clusterManager prewarmPriorityClass block) are equal in both charts ({', '.join(sorted(compared))})")
+    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing namespace, serving, cache, policies, prepull, modelImages and imageVerification blocks, the clusterManager prewarmPriorityClass block, the agentgateway data plane's resource budget) are equal in both charts ({', '.join(sorted(compared))})")
     return 0
 
 
