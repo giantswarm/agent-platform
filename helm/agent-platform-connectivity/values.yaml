@@ -532,6 +532,8 @@ llmRouting:
             rates: {input: "5", output: "25", cacheRead: "0.5", cacheWrite: "6.25"}
           claude-opus-5:
             rates: {input: "5", output: "25", cacheRead: "0.5", cacheWrite: "6.25"}
+          claude-opus-5-5:
+            rates: {input: "4", output: "20", cacheRead: "0.2", cacheWrite: "5"}
           claude-sonnet-4-5:
             rates: {input: "3", output: "15", cacheRead: "0.3", cacheWrite: "3.75"}
           claude-sonnet-4-6:
