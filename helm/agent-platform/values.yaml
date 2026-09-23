@@ -1659,7 +1659,7 @@ kyvernoPolicies:
 # Where the platform's single-replica stateful pods run: muster (the MCP
 # aggregator, hostNetwork), muster-valkey (muster's OAuth token store, an RWO
 # volume), the kagent controller (every streaming turn) and klaus-gateway (the
-# Slack/CLI/web turns in flight, an RWO volume). #431's guards
+# Slack turns in flight, an RWO volume). #431's guards
 # (karpenter.sh/do-not-disrupt, PodDisruptionBudget minAvailable: 1) hold off
 # Karpenter's VOLUNTARY disruption — consolidation, drift, expiry. They do
 # nothing against a spot reclaim: the instance goes two minutes after the
@@ -3306,22 +3306,23 @@ postgres:
         subnetName: node-subnet
         privateDnsZoneRef: ""
 
-# Klaus Gateway — channel front door (Slack, CLI, web) for Klaus instances.
-# Disabled by default; set components.klaus-gateway.enabled: true to deploy.
-# The chart's own agentgateway sub-dependency is disabled here because the
-# umbrella already manages the agentgateway controller via the `agentgateway`
-# dependency above; set upstream.agentgatewayURL to the data-plane service
-# URL once the agentgateway deployment is known (typically post-install).
+# Klaus Gateway — the Slack front door of the kagent agents. Disabled by
+# default; set components.klaus-gateway.enabled: true to deploy. This whole
+# block is forwarded to the klaus-gateway release verbatim (valuesFrom), so
+# every key here is one of that chart's own — klaus-gateway 2.0.0 serves Slack
+# only (giantswarm/klaus-gateway#319) and the keys of the removed web and CLI
+# channels (cli, lifecycle, upstream, agentgateway, routing.defaultTTL,
+# a2a.saToken) are no longer forwarded.
 klausGateway:  # @schema skipProperties: true; additionalProperties: true
   image:
     registry: gsoci.azurecr.io
 
   # Voluntary disruption (giantswarm/agent-platform#431): the gateway pod
-  # carries the Slack turns in flight and the OBO link store. The
-  # annotation keeps Karpenter's consolidation away from its node (set "false"
-  # to opt out); the chart's budget refuses voluntary evictions of the single
-  # replica (Karpenter: DisruptionBlocked; a node drain waits for its drain
-  # timeout), AlwaysAllow keeps a pod that is not Ready evictable. Both knobs
+  # carries the Slack turns in flight and the OBO link store. The annotation
+  # keeps Karpenter's consolidation away from its node (set "false" to opt
+  # out); the chart's budget refuses voluntary evictions of the single replica
+  # (Karpenter: DisruptionBlocked; a node drain waits for its drain timeout),
+  # AlwaysAllow keeps a pod that is not Ready evictable. Both knobs
   # need klaus-gateway chart 1.1.0 or later (giantswarm/klaus-gateway#241);
   # the 1.x range above resolves it. `podDisruptionBudget.enabled: false`
   # removes the budget.
