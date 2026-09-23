@@ -1288,15 +1288,21 @@ gateway:
     # container via AgentgatewayParameters strategic-merge (by container name).
     # The connectivity chart reads it; these are its defaults, so the render is
     # unchanged until an installation overrides them.
-    # The cpu and memory limits are load-bearing beyond capping the container:
-    # the pod derives GOMEMLIMIT and GOMAXPROCS from this container's own limits
-    # via resourceFieldRef, and an unset limit resolves against the node's
-    # allocatable capacity, not the pod's budget, so the Go runtime would size
-    # its heap target and its thread pool for the whole node. cpu is read as
-    # whole cores rounded up: 2000m is GOMAXPROCS 2. The requests restate what
-    # the controller already injects, so the render is unchanged; stating them
-    # keeps the whole budget in one place, out of reach of a controller default
-    # change on an agentgateway bump.
+    # The cpu limit is load-bearing beyond capping the container: the generated
+    # pod carries CPU_LIMIT as a resourceFieldRef on this container's own
+    # limits.cpu, and a resourceFieldRef against an unset limit resolves to the
+    # NODE's allocatable capacity, not the pod's budget. The data plane sized
+    # its worker threads for the node it happened to land on (on gazelle, a 3.4
+    # CPU node gave CPU_LIMIT 4). It is read as whole cores rounded up, so this
+    # value is what the proxy sees: 2000m is CPU_LIMIT 2.
+    # The memory limit feeds no env var — the container is Rust, and the pod
+    # carries no GOMEMLIMIT/GOMAXPROCS — so it is a plain cgroup ceiling. At
+    # 512Mi it is roughly 15x the working set observed on gazelle (12-33 MiB
+    # across both replicas), which is the headroom an OOM kill would otherwise
+    # come out of.
+    # The requests restate what the controller already injects, so the render is
+    # unchanged; stating them keeps the whole budget in one place, out of reach
+    # of a controller default change on an agentgateway bump.
     dataPlaneResources:
       requests:
         cpu: 100m  # @schema type: [string, integer]
@@ -2224,6 +2230,19 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       minAvailable: 1
       maxUnavailable: ""
       unhealthyPodEvictionPolicy: AlwaysAllow
+    # The kagent chart's defaults with the memory limit raised from 512Mi
+    # (giantswarm/agent-platform#455 follow-up): on gazelle the controller's
+    # working set reached 507-511Mi on seven of eighteen pods in eight days and
+    # the container was OOMKilled, and the VPA below recommended ~1.15Gi
+    # uncapped. RequestsOnly leaves this limit alone, so the VPA cannot lift it;
+    # vpa.maxAllowed.memory stays a step under it.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 2
+        memory: 1536Mi
     # VerticalPodAutoscaler on the controller Deployment, rendered by the
     # connectivity chart in the kagent namespace (the kagent chart has no VPA
     # knob; the #439 pattern of the muster-valkey budget). `auto` (the
@@ -2237,10 +2256,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # falls back to an eviction the budget refuses — the pod keeps its
     # requests until its next roll. RequestsOnly leaves the chart's limits
     # alone; minAllowed is the chart's requests (100m / 128Mi) and maxAllowed
-    # stays a step under its limits (2 / 512Mi): a Burstable pod whose
-    # requests reach its limits on both resources would become Guaranteed,
-    # and Kubernetes refuses a resize that changes the QoS class — so
-    # maxAllowed must never equal the limits. Never forwarded to the kagent
+    # stays a step under its limits (2 / 1536Mi, `resources` above): a
+    # Burstable pod whose requests reach its limits on both resources would
+    # become Guaranteed, and Kubernetes refuses a resize that changes the QoS
+    # class — so maxAllowed must never equal the limits. Never forwarded to the kagent
     # release (components.kagent.omitKeys).
     vpa:
       enabled: auto  # auto | true | false
@@ -2251,7 +2270,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         memory: 128Mi
       maxAllowed:
         cpu: 1900m
-        memory: 480Mi
+        memory: 1280Mi
     # The kagent line serves no Prometheus /metrics: the controller binds its
     # metrics server to "0", and the upstream chart's controller.metrics knob
     # renders a Service and the METRICS_* env to that dead port. Explicitly

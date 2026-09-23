@@ -268,15 +268,21 @@ gateway:
     # the `require-emptydir-requests-and-limits` Kyverno policy unless the
     # mounting container declares ephemeral-storage. Merged onto the generated
     # container via AgentgatewayParameters strategic-merge (by container name).
-    # The cpu and memory limits are load-bearing beyond capping the container:
-    # the pod derives GOMEMLIMIT and GOMAXPROCS from this container's own limits
-    # via resourceFieldRef, and an unset limit resolves against the node's
-    # allocatable capacity, not the pod's budget, so the Go runtime would size
-    # its heap target and its thread pool for the whole node. cpu is read as
-    # whole cores rounded up: 2000m is GOMAXPROCS 2. The requests restate what
-    # the controller already injects, so the render is unchanged; stating them
-    # keeps the whole budget in one place, out of reach of a controller default
-    # change on an agentgateway bump.
+    # The cpu limit is load-bearing beyond capping the container: the generated
+    # pod carries CPU_LIMIT as a resourceFieldRef on this container's own
+    # limits.cpu, and a resourceFieldRef against an unset limit resolves to the
+    # NODE's allocatable capacity, not the pod's budget. The data plane sized
+    # its worker threads for the node it happened to land on (on gazelle, a 3.4
+    # CPU node gave CPU_LIMIT 4). It is read as whole cores rounded up, so this
+    # value is what the proxy sees: 2000m is CPU_LIMIT 2.
+    # The memory limit feeds no env var — the container is Rust, and the pod
+    # carries no GOMEMLIMIT/GOMAXPROCS — so it is a plain cgroup ceiling. At
+    # 512Mi it is roughly 15x the working set observed on gazelle (12-33 MiB
+    # across both replicas), which is the headroom an OOM kill would otherwise
+    # come out of.
+    # The requests restate what the controller already injects, so the render is
+    # unchanged; stating them keeps the whole budget in one place, out of reach
+    # of a controller default change on an agentgateway bump.
     dataPlaneResources:
       requests:
         cpu: 100m  # @schema type: [string, integer]
@@ -1147,7 +1153,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # eviction the budget refuses — the pod keeps its requests until its next
     # roll. RequestsOnly leaves the chart's limits alone; minAllowed is the
     # chart's requests (100m / 128Mi) and maxAllowed stays a step under its
-    # limits (2 / 512Mi): a Burstable pod whose requests reach its limits on
+    # limits (2 / 1536Mi, set by the meta chart's kagent.controller.resources):
+    # a Burstable pod whose requests reach its limits on
     # both resources would become Guaranteed, and Kubernetes refuses a resize
     # that changes the QoS class — so maxAllowed must never equal the limits.
     # The render refuses an updateMode or controlledValues outside the API's
@@ -1161,7 +1168,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         memory: 128Mi
       maxAllowed:
         cpu: 1900m
-        memory: 480Mi
+        memory: 1280Mi
 
   ui:
     image:

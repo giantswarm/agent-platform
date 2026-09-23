@@ -81,7 +81,10 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # default with no backend, so the default render carries its wiring. Both sides
 # render with the component off (a chart that predates the default accepts the
 # key), and verify-managers asserts the default shape and the static forms.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false
+# The tenth (giantswarm/agent-platform#455 follow-up): the kagent controller
+# VPA's memory cap moves from 480Mi to 1280Mi. Both sides render with the new
+# cap (the key exists on both sides), and verify-kagent-vpa asserts the default.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -891,7 +894,7 @@ define vha_must_fail_schema
 	else echo "ok: $(1)"; fi
 endef
 .PHONY: verify-dataplane-ha
-verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape: two replicas, a PodDisruptionBudget (maxUnavailable 1 from the template), a hostname spread and a whole resource budget (cpu + memory on BOTH sides, not only ephemeral-storage: GOMEMLIMIT and GOMAXPROCS are resourceFieldRefs on this container's own limits, and an unset limit resolves against the node's allocatable capacity) by default on the AgentgatewayParameters, the pod selector following gateway.name, one constraint per topologyKeys entry, the knobs off, minAvailable and a percentage passed through — also through the meta chart, where a null never reaches the connectivity defaults — the guards (both budget fields, every zero-eviction budget, a fractional or non-percentage value, spread without a key, the schema minimums and the whenUnsatisfiable enum), none in muster-direct, the meta chart forwarding the keys at the same defaults and two controller replicas.
+verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape: two replicas, a PodDisruptionBudget (maxUnavailable 1 from the template), a hostname spread and a whole resource budget (cpu + memory on BOTH sides, not only ephemeral-storage: CPU_LIMIT is a resourceFieldRef on this container's own limits.cpu, and an unset limit resolves against the node's allocatable capacity) by default on the AgentgatewayParameters, the pod selector following gateway.name, one constraint per topologyKeys entry, the knobs off, minAvailable and a percentage passed through — also through the meta chart, where a null never reaches the connectivity defaults — the guards (both budget fields, every zero-eviction budget, a fractional or non-percentage value, spread without a key, the schema minimums and the whenUnsatisfiable enum), none in muster-direct, the meta chart forwarding the keys at the same defaults and two controller replicas.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> default: replicas 2, PDB maxUnavailable 1, one hostname spread constraint selecting the data-plane pods"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) >/tmp/vha-on.out 2>&1 || { cat /tmp/vha-on.out; exit 1; }
@@ -909,14 +912,14 @@ verify-dataplane-ha: ## Assert the agentgateway data plane's availability shape:
 	@$(AGP_DOC) /tmp/vha-on.out | awk '/^              resources:$$/{f=1;next} f&&/^              [a-zA-Z]/{exit} f' >/tmp/vha-res.out
 	@awk '/^                limits:$$/{f=1;next} f&&/^                [a-zA-Z]/{exit} f' /tmp/vha-res.out >/tmp/vha-res-limits.out
 	@awk '/^                requests:$$/{f=1;next} f&&/^                [a-zA-Z]/{exit} f' /tmp/vha-res.out >/tmp/vha-res-requests.out
-	@grep -q 'cpu:' /tmp/vha-res-limits.out || { echo "FAIL: the data-plane container has no cpu limit; GOMAXPROCS is a resourceFieldRef on limits.cpu, so an unset limit resolves against the NODE's allocatable capacity and the proxy sizes its thread pool for the whole node"; exit 1; }
-	@grep -q 'memory:' /tmp/vha-res-limits.out || { echo "FAIL: the data-plane container has no memory limit; GOMEMLIMIT is a resourceFieldRef on limits.memory, so an unset limit makes the Go heap target the node's size and nothing caps the proxy under a traffic spike"; exit 1; }
+	@grep -q 'cpu:' /tmp/vha-res-limits.out || { echo "FAIL: the data-plane container has no cpu limit; the generated pod carries CPU_LIMIT as a resourceFieldRef on limits.cpu, so an unset limit resolves against the NODE's allocatable capacity and the proxy sizes its worker threads for whatever node it lands on"; exit 1; }
+	@grep -q 'memory:' /tmp/vha-res-limits.out || { echo "FAIL: the data-plane container has no memory limit; nothing caps the proxy every MCP call crosses before it threatens the node it runs on"; exit 1; }
 	@grep -q 'ephemeral-storage:' /tmp/vha-res-limits.out || { echo "FAIL: the data-plane container lost its ephemeral-storage limit; the controller injects a writable /tmp emptyDir without a sizeLimit"; exit 1; }
 	@grep -q 'cpu:' /tmp/vha-res-requests.out || { echo "FAIL: the data-plane container has no cpu request; the scheduler reserves nothing for the proxy every MCP call crosses, so it is first to starve under node CPU pressure"; exit 1; }
 	@grep -q 'memory:' /tmp/vha-res-requests.out || { echo "FAIL: the data-plane container has no memory request"; exit 1; }
 	@grep -q 'ephemeral-storage:' /tmp/vha-res-requests.out || { echo "FAIL: the data-plane container lost its ephemeral-storage request; the require-emptydir-requests-and-limits Kyverno policy denies the pod without it"; exit 1; }
 	@echo "ok: whole resource budget"
-	@echo "--> the budget is a knob: an installation's own limits reach the container, and a millicore value is accepted (the cpu limit IS GOMAXPROCS, rounded up to whole cores)"
+	@echo "--> the budget is a knob: an installation's own limits reach the container, and a millicore value is accepted (the cpu limit IS what CPU_LIMIT resolves to, rounded up to whole cores)"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set gateway.parameters.dataPlaneResources.limits.cpu=500m --set gateway.parameters.dataPlaneResources.limits.memory=1Gi >/tmp/vha-res-set.out 2>&1 || { cat /tmp/vha-res-set.out; exit 1; }
 	@$(AGP_DOC) /tmp/vha-res-set.out | awk '/^              resources:$$/{f=1;next} f&&/^              [a-zA-Z]/{exit} f' >/tmp/vha-res-set.res
 	@awk '/^                limits:$$/{f=1;next} f&&/^                [a-zA-Z]/{exit} f' /tmp/vha-res-set.res >/tmp/vha-res-set-limits.out
@@ -1376,8 +1379,8 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 100m' || { echo "FAIL: minAllowed.cpu is not the chart's request (100m)"; cat /tmp/vk-vpa.out; exit 1; }
 	@grep -A2 '^        minAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 128Mi' || { echo "FAIL: minAllowed.memory is not the chart's request (128Mi)"; cat /tmp/vk-vpa.out; exit 1; }
 	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'cpu: 1900m' || { echo "FAIL: maxAllowed.cpu is not a step under the chart's limit (1900m)"; cat /tmp/vk-vpa.out; exit 1; }
-	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 480Mi' || { echo "FAIL: maxAllowed.memory is not a step under the chart's limit (480Mi)"; cat /tmp/vk-vpa.out; exit 1; }
-	@echo "ok: VerticalPodAutoscaler kagent-controller on Deployment kagent-controller — InPlaceOrRecreate, RequestsOnly, 100m/128Mi to 1900m/480Mi"
+	@grep -A2 '^        maxAllowed:$$' /tmp/vk-vpa.out | grep -q 'memory: 1280Mi' || { echo "FAIL: maxAllowed.memory is not a step under the controller's limit (1280Mi)"; cat /tmp/vk-vpa.out; exit 1; }
+	@echo "ok: VerticalPodAutoscaler kagent-controller on Deployment kagent-controller — InPlaceOrRecreate, RequestsOnly, 100m/128Mi to 1900m/1280Mi"
 	@echo "--> vanilla (no autoscaling.k8s.io/v1): auto resolves off"
 	@helm template t $(CONNECTIVITY_DIR) $(VPA_VANILLA) >/tmp/vk-vanilla.out 2>&1 || { cat /tmp/vk-vanilla.out; exit 1; }
 	@if grep -q '^kind: VerticalPodAutoscaler' /tmp/vk-vanilla.out; then echo "FAIL: a VerticalPodAutoscaler renders without autoscaling.k8s.io/v1 served"; exit 1; fi
@@ -1420,6 +1423,7 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@$(PICK) /tmp/vk-meta.out HelmRelease kagent >/tmp/vk-meta-kagent.out || { echo "FAIL: no kagent HelmRelease in the meta render"; exit 1; }
 	@if grep -q 'vpa:' /tmp/vk-meta-kagent.out; then echo "FAIL: kagent.controller.vpa travels on the kagent HelmRelease (components.kagent.omitKeys)"; exit 1; fi
 	@grep -q '^      pdb:$$' /tmp/vk-meta-kagent.out || { echo "FAIL: the rest of kagent.controller vanished from the kagent HelmRelease with the vpa hold-back"; exit 1; }
+	@python3 -c 'import sys,yaml; d=[x for x in yaml.safe_load_all(open(sys.argv[1])) if x][0]; r=d["spec"]["values"]["controller"]["resources"]; assert r=={"requests":{"cpu":"100m","memory":"128Mi"},"limits":{"cpu":2,"memory":"1536Mi"}}, r; print("ok: the kagent HelmRelease carries the controller limits 2 / 1536Mi the VPA cap sits under")' /tmp/vk-meta-kagent.out || { echo "FAIL: kagent.controller.resources did not reach the kagent HelmRelease as 100m/128Mi requests, 2/1536Mi limits"; exit 1; }
 	@$(PICK) /tmp/vk-meta.out HelmRelease agent-platform-connectivity >/tmp/vk-meta-conn.out || { echo "FAIL: no agent-platform-connectivity HelmRelease in the meta render"; exit 1; }
 	@grep -A9 '^        vpa:$$' /tmp/vk-meta-conn.out | grep -q '^          enabled: true$$' || { echo "FAIL: the connectivity HelmRelease does not carry kagent.controller.vpa.enabled resolved to true with the API served"; exit 1; }
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(VPA_VANILLA) >/tmp/vk-meta-vanilla.out 2>&1 || { cat /tmp/vk-meta-vanilla.out; exit 1; }

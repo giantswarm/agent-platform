@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the kagent controller's memory limit is `1536Mi`; the VPA's cap is `1280Mi`)
+
+The meta chart sets `kagent.controller.resources`: the kagent chart's defaults, with the memory limit raised from `512Mi` to `1536Mi`. `kagent.controller.vpa.maxAllowed.memory` moves from `480Mi` to `1280Mi` in both charts, a step under the new limit.
+
+### Operator action
+
+- **None** for an installation on the defaults. The change to the Deployment's pod template rolls the controller pod once. A turn in flight on the controller is lost, so land it in a quiet window.
+- **An installation that sets `kagent.controller.resources` itself** keeps its own values. If its memory limit is `1280Mi` or less, also set `kagent.controller.vpa.maxAllowed.memory` under that limit.
+- **Recognising it worked**: `kubectl -n kagent get deploy kagent-controller -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}'` reads `1536Mi`, and `kubectl -n kagent get vpa kagent-controller -o jsonpath='{.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory}'` reads `1280Mi`.
+
 ## \<current\> → \<next\> (the kserve components on `0.5.x`, the llm-d controller's ServiceMonitor)
 
 giantswarm/giantswarm#36711: `components.kserve-llmisvc-crd`, `components.kserve-llmisvc-resources` and `components.kserve-runtime-configs` move from `0.4.x` to `0.5.x`. The meta chart forwards `kserve.llmisvc.controller.metricsSecure` and `.serviceMonitor` to the controller, and the `0.4.x` schema rejects both keys.
