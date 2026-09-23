@@ -391,6 +391,25 @@ def hold_opus_5_5_price(here: str, there: str) -> tuple:
 TRACING_SOURCE = "# Source: agent-platform-connectivity/templates/agentgateway/tracing.yaml"
 
 
+# giantswarm/agent-platform#630: the data plane's buffer — gateway.http.maxBufferSize,
+# a key GOLDEN_REF's closed gateway block refuses (so it cannot be held by --set),
+# forwarded by the meta chart to the connectivity release and rendered by the
+# connectivity chart as the Gateway-scoped -http policy, a new object. Both are
+# cut from BOTH sides; dropped once GOLDEN_REF carries them.
+HTTP_BUFFER_VALUE = re.compile(r"^(\s+)http:\n\1  maxBufferSize: 8Mi\n", re.M)
+HTTP_POLICY_SOURCE = "# Source: agent-platform-connectivity/templates/agentgateway/http-policy.yaml"
+
+
+def hold_dataplane_buffer(here: str, there: str) -> tuple:
+    """Both renders with the forwarded buffer size and the -http policy left out."""
+    def strip(render: str) -> str:
+        docs = [d for d in render.split("\n---\n") if HTTP_POLICY_SOURCE not in d]
+        return HTTP_BUFFER_VALUE.sub("", "\n---\n".join(docs))
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #630 hold — the data plane's buffer size (gateway.http.maxBufferSize) and the -http policy are left out of the golden comparison")
+    return h, strip(there)
+
+
 def hold_dataplane_tracing(here: str, there: str) -> tuple:
     """The two connectivity renders with the data plane's tracing objects left out."""
     def strip(render: str) -> str:
@@ -499,6 +518,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
             here, there = hold_dashboards(here, there, chart == meta)
             here, there = hold_opus_5_5_price(here, there)
+            here, there = hold_dataplane_buffer(here, there)
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)
