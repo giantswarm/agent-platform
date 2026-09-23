@@ -43,6 +43,22 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
 
 {{/*
+The layer an OCIRepository of this chart takes from the artifact: the Helm
+chart, copied as-is for the HelmRelease's chartRef (the form Flux documents).
+Without a selector source-controller extracts layers[0], and a signed chart
+carries a second layer, its provenance, which `helm push` orders by digest: on
+roughly every other signed release the provenance comes first and the
+OCIRepository fails with "requires gzip-compressed body" (cloudnative-pg 0.29.1,
+giantswarm/agent-platform#649). The artifact revision stays <tag>@<manifest
+digest>, so the chart version helm-controller derives from it does not change.
+*/}}
+{{- define "agent-platform.chartLayerSelector" -}}
+layerSelector:
+  mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+  operation: copy
+{{- end -}}
+
+{{/*
 Whether a component is enabled — reads `components.<name>.enabled`, the single
 on/off switch. `name` is the components.<key> name, which equals the component's
 chart name and is therefore what a dependsOn entry references. A component with
