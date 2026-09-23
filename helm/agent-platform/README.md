@@ -591,6 +591,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.output | string | `"25"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.cacheRead | string | `"0.5"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.cacheWrite | string | `"6.25"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.input | string | `"4"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.output | string | `"20"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.cacheRead | string | `"0.2"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.cacheWrite | string | `"5"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.input | string | `"3"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.output | string | `"15"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.cacheRead | string | `"0.3"` |  |
