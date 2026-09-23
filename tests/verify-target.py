@@ -88,7 +88,12 @@ CONN_BACKSTAGE = [
 
 
 def helm(chart: str, flags: list[str], expect_failure: bool = False) -> str:
-    result = subprocess.run([HELM, "template", "t", chart, *flags], capture_output=True, text=True, check=False)
+    try:
+        result = subprocess.run([HELM, "template", "t", chart, *flags], capture_output=True, text=True, check=False)
+    except OSError as e:
+        # HELM names nothing runnable. Say so once, here, rather than in a
+        # traceback from whichever check happens to render first.
+        sys.exit(f"FAIL: cannot run the helm binary HELM={HELM!r}: {e.strerror}")
     if expect_failure:
         if result.returncode == 0:
             sys.exit(f"FAIL: render of {chart} {' '.join(flags)} succeeded, a failure was expected")
@@ -160,16 +165,48 @@ GOLDEN_SHAPES = [
 ]
 
 
+# A block scalar's header: `key: |`, `key: |-`, `key: >`, and so on. Its content
+# is every following line that is blank or indented deeper than the header.
+BLOCK_SCALAR = re.compile(r"^(\s*)\S.*[|>][-+]?\d*$")
+
+
 def normalize(render: str) -> str:
-    """The render as it is committed: trailing whitespace off every line and runs
-    of blank lines collapsed.
+    """The render as it is committed: trailing whitespace off every line, and
+    blank lines dropped OUTSIDE block scalars.
 
     This is the whole difference between `helm template` on the 3.17.x CI pins
-    and on a 4.x a developer is likely to have — measured, not assumed: the two
-    binaries render these charts identically once it is applied. Normalizing
-    here is what lets the committed file be the baseline for both.
+    and on a 4.x a developer is likely to have — measured, not assumed, over all
+    five shapes: the two binaries render these charts identically once it is
+    applied.
+
+    A blank line INSIDE a block scalar is content — a hook Job's script, a
+    dashboard's JSON — so it is kept and a change to one fails the check;
+    the blank lines that TRAIL a scalar are where the two helm minors disagree,
+    so those go. Collapsing them too would have left a drift detector with a blind
+    spot exactly where the rendered text is a program.
     """
-    return re.sub(r"\n{2,}", "\n", "\n".join(l.rstrip() for l in render.split("\n"))).strip() + "\n"
+    out: list[str] = []
+    pending: list[str] = []  # blank lines inside a scalar, kept only if content follows
+    content_indent: int | None = None
+    for line in (l.rstrip() for l in render.split("\n")):
+        if content_indent is not None:
+            if line == "":
+                pending.append(line)
+                continue
+            if len(line) - len(line.lstrip()) >= content_indent:
+                out.extend(pending)
+                pending = []
+                out.append(line)
+                continue
+            pending = []  # the scalar ended: its trailing blanks are the helm 3/4 difference
+            content_indent = None
+        if line == "":
+            continue
+        out.append(line)
+        header = BLOCK_SCALAR.match(line)
+        if header:
+            content_indent = len(header.group(1)) + 1
+    return "\n".join(out).strip() + "\n"
 
 
 # The helm minor the committed renders were produced with, and the one CI pins
@@ -182,17 +219,19 @@ HELM_PIN = "v3.17"
 
 
 def require_pinned_helm(what: str) -> None:
-    result = subprocess.run([HELM, "version", "--short"], capture_output=True, text=True)
-    version = result.stdout.strip()
+    try:
+        version = subprocess.run([HELM, "version", "--short"], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        version = ""  # HELM names nothing runnable; the message below says what to point it at
     if not version.startswith(HELM_PIN):
         sys.exit(
             f"FAIL: {what} needs helm {HELM_PIN}.x, the version CI pins and the committed renders "
             f"were produced with; this is {version or 'not a helm binary'}. helm 3 and helm 4 disagree "
             "on whether a null-valued key survives into a forwarded values tree, so the bytes would "
             f"differ for that reason alone. Point HELM at a {HELM_PIN}.x binary:\n"
-            f"    curl -fsSL https://get.helm.sh/helm-{HELM_PIN}.3-$(uname -s | tr A-Z a-z)-"
-            "$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar xz -C /tmp\n"
-            "    make verify-target HELM=/tmp/*/helm"
+            f"    plat=$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')\n"
+            f"    curl -fsSL https://get.helm.sh/helm-{HELM_PIN}.3-$plat.tar.gz | tar xz -C /tmp\n"
+            '    make verify-target HELM="/tmp/$plat/helm"'
         )
 
 
