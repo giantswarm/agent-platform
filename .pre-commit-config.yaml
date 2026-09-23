@@ -2,7 +2,7 @@
 #
 #    devctl
 #
-#    https://github.com/giantswarm/devctl/blob/6dc24309a46587e01ddebe9fd12fb961e108b873/pkg/gen/input/precommit/internal/file/pre-commit-config.yaml.template
+#    https://github.com/giantswarm/devctl/blob/19d53497d2de1bfdea8df623fc2d4c96be521bf6/pkg/gen/input/precommit/internal/file/pre-commit-config.yaml.template
 #
 minimum_pre_commit_version: '2.17'
 default_install_hook_types: [pre-commit, commit-msg]
@@ -38,26 +38,16 @@ repos:
         stages: [commit-msg]
         args: [--strict]
 
-  # Helm chart schema for agent-platform: generate -> fix $ref -> normalize, as ONE hook.
+  # Helm chart schema for agent-platform: verify helm/agent-platform/values.schema.json is up to date.
   #
-  # This single local hook deliberately runs the whole schema pipeline. pre-commit does
-  # NOT feed hooks into each other: it runs each hook independently against the file on
-  # disk and fails the run if any hook modified it. So for a multi-fixer setup to pass,
-  # all fixers must agree on ONE resting format. Splitting these steps into separate
-  # hooks gives them rival resting formats and `pre-commit run -a` can then never
-  # converge -- reruns just ping-pong between formats and one hook always fails:
-  #
-  #   * `helm schema` regenerates the schema from values.yaml wholesale, in the
-  #     generator's own key ordering, and does not preserve existing formatting.
-  #   * `schemalint normalize` rewrites it into schemalint's canonical key ordering
-  #     (and unicode escaping), which is NOT the generator's ordering.
-  #   * the $ref fix below rewrites the generator's output again.
-  #
-  # Chained here, `schemalint normalize` is always the LAST writer, so the normalized
-  # form is the single resting format and the committed file is a fixed point -- the
-  # hook is a no-op on an already-processed schema and the run is clean. Read-only
-  # `schemalint-verify` then checks that resting format (it never rewrites, so it is not
-  # part of the conflict). See giantswarm/giantswarm#37267.
+  # `devctl gen precommit` now generates and writes helm/agent-platform/values.schema.json itself
+  # (running the same generate -> fix $ref -> normalize pipeline in-process, see
+  # giantswarm/devctl#2195), so this hook is READ-ONLY: it reproduces that pipeline to a
+  # scratch file and diffs it against the committed one, but never writes the committed
+  # file. A hook that regenerated files in place used to fight `schemalint-verify` and
+  # itself over key ordering, because pre-commit runs each hook independently against the
+  # file on disk and fails the run if any hook modifies it (giantswarm/giantswarm#37267);
+  # a read-only check has no resting format to fight over.
   #
   # The `$ref` step works around a generator bug: with `noAdditionalProperties: true` it
   # emits `additionalProperties: false` as a sibling of every bare `$ref`. Per JSON Schema
@@ -71,22 +61,22 @@ repos:
   # `additionalProperties` and set `unevaluatedProperties: false`.
   # Upstream bug: https://github.com/losisin/helm-values-schema-json/issues/317
   #
-  # This replaces both the external `losisin/helm-values-schema-json` hook and the
-  # separate `schemalint-normalize` hook. BOTH binaries are installed and pinned by the
-  # hook itself (`additional_dependencies`, hence `language: golang`), so the pipeline
-  # runs the same versions on a developer machine and in CI.
+  # BOTH binaries are installed and pinned by the hook itself (`additional_dependencies`,
+  # hence `language: golang`), at the exact versions devctl's own go.mod requires (stamped
+  # in by the generator, not hardcoded here), so this reproduction runs the same versions
+  # devctl used to write the committed file.
   #
   # `helm-values-schema-json` is the module behind the `helm schema` plugin -- the very
-  # same binary, called directly, so nothing here depends on a helm plugin any more. It
-  # used to: the hook called a bare `helm schema`, resolved from whatever the developer
-  # had in their global helm plugin dir, while CI pinned a version in a different file.
-  # The old guard only checked that *a* plugin existed, never which version, so a wrong
-  # version printed "Passed" locally while rewriting the committed schema (v2.6.0 alone
-  # strips 41 lines from hello-world-app's) and CI then rejected it.
+  # same binary, called directly, so nothing here depends on a helm plugin. It used to:
+  # the hook called a bare `helm schema`, resolved from whatever the developer had in
+  # their global helm plugin dir, while CI pinned a version in a different file. The old
+  # guard only checked that *a* plugin existed, never which version, so a wrong version
+  # printed "Passed" locally while rewriting the committed schema (v2.6.0 alone strips 41
+  # lines from hello-world-app's) and CI then rejected it.
   - repo: local
     hooks:
       - id: helm-schema-agent-platform
-        name: "generate + fix + normalize helm/agent-platform/values.schema.json"
+        name: "verify helm/agent-platform/values.schema.json is up to date"
         language: golang
         additional_dependencies: ['github.com/giantswarm/schemalint/v2@v2.6.3', 'github.com/losisin/helm-values-schema-json/v2@v2.6.0']
         files: ^helm/agent-platform/(values\.yaml|\.schema\.yaml|values\.schema\.json|zz_generated\.app-platform\.values\.yaml)$
@@ -94,7 +84,17 @@ repos:
         require_serial: true
         entry: sh -c
         args:
-          - 'helm-values-schema-json --config helm/agent-platform/.schema.yaml && python3 -c ''import json,sys; h=lambda o: {**{k:v for k,v in o.items() if k!="additionalProperties"},"unevaluatedProperties":False} if ("$ref" in o and o.get("additionalProperties") is False) else o; p=sys.argv[1]; f=open(p,encoding="utf-8"); d=json.load(f,object_hook=h); f.close(); f=open(p,"w",encoding="utf-8"); json.dump(d,f); f.close()'' helm/agent-platform/values.schema.json && schemalint normalize helm/agent-platform/values.schema.json -o helm/agent-platform/values.schema.json --force'
+          - |
+            set -e
+            tmp=$(mktemp)
+            trap 'rm -f "$tmp"' EXIT
+            helm-values-schema-json --config helm/agent-platform/.schema.yaml -o "$tmp"
+            python3 -c 'import json,sys; h=lambda o: {**{k:v for k,v in o.items() if k!="additionalProperties"},"unevaluatedProperties":False} if ("$ref" in o and o.get("additionalProperties") is False) else o; p=sys.argv[1]; f=open(p,encoding="utf-8"); d=json.load(f,object_hook=h); f.close(); f=open(p,"w",encoding="utf-8"); json.dump(d,f); f.close()' "$tmp"
+            schemalint normalize "$tmp" -o "$tmp" --force
+            if ! diff -u helm/agent-platform/values.schema.json "$tmp"; then
+              echo "helm/agent-platform/values.schema.json is out of date -- run 'devctl gen precommit' and commit the result" >&2
+              exit 1
+            fi
   - repo: https://github.com/giantswarm/schemalint
     rev: v2.6.3
     hooks:
@@ -103,26 +103,16 @@ repos:
         args:
           - helm/agent-platform/values.schema.json
 
-  # Helm chart schema for agent-platform-connectivity: generate -> fix $ref -> normalize, as ONE hook.
+  # Helm chart schema for agent-platform-connectivity: verify helm/agent-platform-connectivity/values.schema.json is up to date.
   #
-  # This single local hook deliberately runs the whole schema pipeline. pre-commit does
-  # NOT feed hooks into each other: it runs each hook independently against the file on
-  # disk and fails the run if any hook modified it. So for a multi-fixer setup to pass,
-  # all fixers must agree on ONE resting format. Splitting these steps into separate
-  # hooks gives them rival resting formats and `pre-commit run -a` can then never
-  # converge -- reruns just ping-pong between formats and one hook always fails:
-  #
-  #   * `helm schema` regenerates the schema from values.yaml wholesale, in the
-  #     generator's own key ordering, and does not preserve existing formatting.
-  #   * `schemalint normalize` rewrites it into schemalint's canonical key ordering
-  #     (and unicode escaping), which is NOT the generator's ordering.
-  #   * the $ref fix below rewrites the generator's output again.
-  #
-  # Chained here, `schemalint normalize` is always the LAST writer, so the normalized
-  # form is the single resting format and the committed file is a fixed point -- the
-  # hook is a no-op on an already-processed schema and the run is clean. Read-only
-  # `schemalint-verify` then checks that resting format (it never rewrites, so it is not
-  # part of the conflict). See giantswarm/giantswarm#37267.
+  # `devctl gen precommit` now generates and writes helm/agent-platform-connectivity/values.schema.json itself
+  # (running the same generate -> fix $ref -> normalize pipeline in-process, see
+  # giantswarm/devctl#2195), so this hook is READ-ONLY: it reproduces that pipeline to a
+  # scratch file and diffs it against the committed one, but never writes the committed
+  # file. A hook that regenerated files in place used to fight `schemalint-verify` and
+  # itself over key ordering, because pre-commit runs each hook independently against the
+  # file on disk and fails the run if any hook modifies it (giantswarm/giantswarm#37267);
+  # a read-only check has no resting format to fight over.
   #
   # The `$ref` step works around a generator bug: with `noAdditionalProperties: true` it
   # emits `additionalProperties: false` as a sibling of every bare `$ref`. Per JSON Schema
@@ -136,22 +126,22 @@ repos:
   # `additionalProperties` and set `unevaluatedProperties: false`.
   # Upstream bug: https://github.com/losisin/helm-values-schema-json/issues/317
   #
-  # This replaces both the external `losisin/helm-values-schema-json` hook and the
-  # separate `schemalint-normalize` hook. BOTH binaries are installed and pinned by the
-  # hook itself (`additional_dependencies`, hence `language: golang`), so the pipeline
-  # runs the same versions on a developer machine and in CI.
+  # BOTH binaries are installed and pinned by the hook itself (`additional_dependencies`,
+  # hence `language: golang`), at the exact versions devctl's own go.mod requires (stamped
+  # in by the generator, not hardcoded here), so this reproduction runs the same versions
+  # devctl used to write the committed file.
   #
   # `helm-values-schema-json` is the module behind the `helm schema` plugin -- the very
-  # same binary, called directly, so nothing here depends on a helm plugin any more. It
-  # used to: the hook called a bare `helm schema`, resolved from whatever the developer
-  # had in their global helm plugin dir, while CI pinned a version in a different file.
-  # The old guard only checked that *a* plugin existed, never which version, so a wrong
-  # version printed "Passed" locally while rewriting the committed schema (v2.6.0 alone
-  # strips 41 lines from hello-world-app's) and CI then rejected it.
+  # same binary, called directly, so nothing here depends on a helm plugin. It used to:
+  # the hook called a bare `helm schema`, resolved from whatever the developer had in
+  # their global helm plugin dir, while CI pinned a version in a different file. The old
+  # guard only checked that *a* plugin existed, never which version, so a wrong version
+  # printed "Passed" locally while rewriting the committed schema (v2.6.0 alone strips 41
+  # lines from hello-world-app's) and CI then rejected it.
   - repo: local
     hooks:
       - id: helm-schema-agent-platform-connectivity
-        name: "generate + fix + normalize helm/agent-platform-connectivity/values.schema.json"
+        name: "verify helm/agent-platform-connectivity/values.schema.json is up to date"
         language: golang
         additional_dependencies: ['github.com/giantswarm/schemalint/v2@v2.6.3', 'github.com/losisin/helm-values-schema-json/v2@v2.6.0']
         files: ^helm/agent-platform-connectivity/(values\.yaml|\.schema\.yaml|values\.schema\.json|zz_generated\.app-platform\.values\.yaml)$
@@ -159,7 +149,17 @@ repos:
         require_serial: true
         entry: sh -c
         args:
-          - 'helm-values-schema-json --config helm/agent-platform-connectivity/.schema.yaml && python3 -c ''import json,sys; h=lambda o: {**{k:v for k,v in o.items() if k!="additionalProperties"},"unevaluatedProperties":False} if ("$ref" in o and o.get("additionalProperties") is False) else o; p=sys.argv[1]; f=open(p,encoding="utf-8"); d=json.load(f,object_hook=h); f.close(); f=open(p,"w",encoding="utf-8"); json.dump(d,f); f.close()'' helm/agent-platform-connectivity/values.schema.json && schemalint normalize helm/agent-platform-connectivity/values.schema.json -o helm/agent-platform-connectivity/values.schema.json --force'
+          - |
+            set -e
+            tmp=$(mktemp)
+            trap 'rm -f "$tmp"' EXIT
+            helm-values-schema-json --config helm/agent-platform-connectivity/.schema.yaml -o "$tmp"
+            python3 -c 'import json,sys; h=lambda o: {**{k:v for k,v in o.items() if k!="additionalProperties"},"unevaluatedProperties":False} if ("$ref" in o and o.get("additionalProperties") is False) else o; p=sys.argv[1]; f=open(p,encoding="utf-8"); d=json.load(f,object_hook=h); f.close(); f=open(p,"w",encoding="utf-8"); json.dump(d,f); f.close()' "$tmp"
+            schemalint normalize "$tmp" -o "$tmp" --force
+            if ! diff -u helm/agent-platform-connectivity/values.schema.json "$tmp"; then
+              echo "helm/agent-platform-connectivity/values.schema.json is out of date -- run 'devctl gen precommit' and commit the result" >&2
+              exit 1
+            fi
   - repo: https://github.com/giantswarm/schemalint
     rev: v2.6.3
     hooks:
