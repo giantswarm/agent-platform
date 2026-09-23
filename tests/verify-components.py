@@ -120,8 +120,9 @@ LINE = {
     # REST client and belongs to the 3.x meta chart. The floor is 1.10.0, the
     # first chart whose observability block takes the otlpHeaders knob the meta
     # chart forwards by default (giantswarm/klaus-gateway#263). The ceiling
-    # admits the 2.x Slack-only line (giantswarm/klaus-gateway#319): the keys
-    # forwarded for the removed channels are no-ops there.
+    # admits the 2.x Slack-only line (giantswarm/klaus-gateway#319); the
+    # klausGateway block no longer forwards the keys that served the removed
+    # channels, which that line accepts only as no-ops.
     "klaus-gateway": (GSOCI, ">=1.20.0 <3.0.0", []),
 }
 

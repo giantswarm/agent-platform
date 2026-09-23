@@ -690,11 +690,12 @@ components:  # @schema additionalProperties: true
     # giantswarm/klaus-gateway#316); an older chart's schema refuses them.
     # The ceiling admits the 2.x line: 2.0.0 is the Slack-only gateway
     # (giantswarm/klaus-gateway#319, PR #320) — the web and CLI channels, the
-    # /v1 front door and the Klaus instance path are gone, and the values keys
-    # this block still forwards for them (cli, lifecycle, upstream,
-    # agentgateway, routing.defaultTTL, a2a.saToken) are accepted as no-ops
-    # until the next major of that chart. They stay forwarded here until the
-    # 2.x line has rolled; a later change drops them.
+    # /v1 front door and the Klaus instance path are gone. The keys that served
+    # them (cli, lifecycle, upstream, agentgateway, routing.defaultTTL,
+    # a2a.saToken) are no-ops on 2.x and this block no longer forwards them; a
+    # 1.x gateway simply keeps its own defaults for them. The next major of
+    # that chart deletes them from its schema, which is when this ceiling
+    # moves.
     versionRange: ">=1.20.0 <3.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
@@ -3314,7 +3315,7 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     registry: gsoci.azurecr.io
 
   # Voluntary disruption (giantswarm/agent-platform#431): the gateway pod
-  # carries the Slack/CLI/web turns in flight and the OBO link store. The
+  # carries the Slack turns in flight and the OBO link store. The
   # annotation keeps Karpenter's consolidation away from its node (set "false"
   # to opt out); the chart's budget refuses voluntary evictions of the single
   # replica (Karpenter: DisruptionBlocked; a node drain waits for its drain
@@ -3329,10 +3330,6 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     minAvailable: 1
     unhealthyPodEvictionPolicy: AlwaysAllow
 
-  # Do not deploy a second agentgateway; reuse the umbrella's.
-  agentgateway:
-    enabled: false
-
   # Routing store: the binding of every thread to its agent instance and the
   # record of the turn in flight (klaus-gateway 1.6.0). "memory" loses both on
   # a gateway restart. "valkey" keeps them in the platform's own Valkey
@@ -3346,23 +3343,10 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # for the Secret link store (obo.store: secret).
   routing:
     store: memory
-    defaultTTL: "24h"
     # valkey:
     #   url: ""             # default: <valkey.valkey.fullnameOverride>:6379
     #   existingSecret: ""  # default: valkey.valkey.auth.usersExistingSecret
     #   passwordKey: ""     # default: valkey.valkey.auth.aclUsers.default.passwordKey
-
-  # Lifecycle driver. agent-platform bundles kagent, not klaus-operator, so
-  # "static" is the correct default. Populate staticInstances with
-  # name=baseURL pairs pointing at kagent agent services per-cluster.
-  lifecycle:
-    driver: static
-    staticInstances: ""
-
-  # Point at the bundled agentgateway data-plane service once deployed.
-  # Empty disables proxying; the gateway talks directly to instance BaseURLs.
-  upstream:
-    agentgatewayURL: ""
 
   # OTel traces to the GS Observability Platform's OTLP gateway, the tenant
   # header selecting the Loki/Tempo tenant — the target kagent's exporters send
@@ -3473,10 +3457,6 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     connectors:
       enabled: false
 
-  # CLI channel adapter (remote klausctl users). Off by default.
-  cli:
-    enabled: false
-
   # A2A client adapter. Routes channel turns to a kagent A2A endpoint.
   # defaultAgent is the fallback agentRef when the channel does not supply one.
   # Omit defaultAgent to require callers to pass agentRef explicitly.
@@ -3495,12 +3475,10 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # iconUrl. "{agent}" is replaced with the agentRef. Empty disables the fallback.
     # Example: https://avatars.{codename}.{base}/v1/{agent}.png
     fallbackIconUrlTemplate: ""
-    saToken:
-      enabled: false
-      audience: kagent
 
-  # Agentgateway route — exposes /v1, /web, /cli/v1 on the agentgateway
-  # data-plane Gateway (agentgateway-* ingress modes only).
+  # Agentgateway route — exposes the Slack channel path (/channels/slack, with
+  # slack.enabled) on the agentgateway data-plane Gateway (agentgateway-*
+  # ingress modes only).
   agentgatewayRoute:
     enabled: false
     # Hostname on which the agentgateway Gateway will match these paths.

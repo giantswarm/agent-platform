@@ -2047,8 +2047,9 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
       enabled: false
       audience: kagent
 
-  # Agentgateway route — exposes /v1, /web, /cli/v1 on the agentgateway
-  # data-plane Gateway (agentgateway-* ingress modes only).
+  # Agentgateway route — exposes the Slack channel path (/channels/slack, with
+  # slack.enabled) on the agentgateway data-plane Gateway (agentgateway-*
+  # ingress modes only).
   agentgatewayRoute:
     enabled: false
     # Hostname on which the agentgateway Gateway will match these paths.

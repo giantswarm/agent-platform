@@ -1018,12 +1018,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.podDisruptionBudget.enabled | bool | `true` |  |
 | klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
 | klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
-| klausGateway.agentgateway.enabled | bool | `false` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
-| klausGateway.routing.defaultTTL | string | `"24h"` |  |
-| klausGateway.lifecycle.driver | string | `"static"` |  |
-| klausGateway.lifecycle.staticInstances | string | `""` |  |
-| klausGateway.upstream.agentgatewayURL | string | `""` |  |
 | klausGateway.observability.enabled | string | `"auto"` |  |
 | klausGateway.observability.otlpEndpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | klausGateway.observability.otlpHeaders.X-Scope-OrgID | string | `"giantswarm"` |  |
@@ -1048,13 +1043,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.obo.stateKey | string | `""` |  |
 | klausGateway.obo.storeKey | string | `""` |  |
 | klausGateway.obo.connectors.enabled | bool | `false` |  |
-| klausGateway.cli.enabled | bool | `false` |  |
 | klausGateway.a2a.enabled | bool | `false` |  |
 | klausGateway.a2a.defaultAgent | string | `""` |  |
 | klausGateway.a2a.url | string | `"grpc://agentgateway.agent-platform.svc.cluster.local:8080"` |  |
 | klausGateway.a2a.fallbackIconUrlTemplate | string | `""` |  |
-| klausGateway.a2a.saToken.enabled | bool | `false` |  |
-| klausGateway.a2a.saToken.audience | string | `"kagent"` |  |
 | klausGateway.agentgatewayRoute.enabled | bool | `false` |  |
 | klausGateway.agentgatewayRoute.hostname | string | `""` |  |
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |

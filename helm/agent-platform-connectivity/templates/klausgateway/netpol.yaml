@@ -196,10 +196,10 @@ spec:
 {{- $klausgatewayPort := "8080" }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
-# Egress from the agentgateway data-plane to klaus-gateway. The channel paths
-# (/v1, /web, /cli/v1, and /channels/slack when slack.enabled) are served on the
-# agentgateway data-plane Gateway and forwarded to the klaus-gateway Service. The
-# data-plane runs in Cilium default-deny egress (see the -dataplane policy), whose
+# Egress from the agentgateway data-plane to klaus-gateway. The channel path
+# (/channels/slack, with slack.enabled) is served on the agentgateway data-plane
+# Gateway and forwarded to the klaus-gateway Service. The data-plane runs in
+# Cilium default-deny egress (see the -dataplane policy), whose
 # cluster allowance only covers 80/443 — klaus-gateway listens on 8080, so without
 # this rule the data-plane → klaus-gateway connection is dropped and the request
 # fails with a 503 UpstreamFailure ("Connect: deadline has elapsed"). For Slack

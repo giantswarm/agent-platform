@@ -163,6 +163,21 @@ KLAUS_GATEWAY_MONITOR_HOLD = [
     "--set", "klausGateway.serviceMonitor.enabled=false",
     "--set", "klausGateway.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
 ]
+# giantswarm/klaus-gateway#319: the meta chart no longer forwards the six
+# klausGateway keys the Slack-only gateway accepts only as no-ops, so the head
+# renders LACK the lines GOLDEN_REF still carries. A hold written on both sides
+# cannot express that — on head a `--set <key>=null` inserts `key: null` where
+# nothing stands — so this one is applied to the GOLDEN side alone, where
+# `null` deletes the key from the forwarded tree. Drop it once GOLDEN_REF
+# carries the removal.
+KLAUS_GATEWAY_DROPPED_KEYS_GOLDEN_ONLY = [
+    "--set", "klausGateway.cli=null",
+    "--set", "klausGateway.lifecycle=null",
+    "--set", "klausGateway.upstream=null",
+    "--set", "klausGateway.agentgateway=null",
+    "--set", "klausGateway.routing.defaultTTL=null",
+    "--set", "klausGateway.a2a.saToken=null",
+]
 # giantswarm/vm-manager#73, giantswarm/giantswarm#36711: the vm-manager chart
 # gains its own ServiceMonitor and this tree resolves its `auto` switch and
 # sets the tenant label, keys GOLDEN_REF's vm-manager block does not carry
@@ -486,6 +501,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # defaults do not (both charts mirror the block). Dropped once GOLDEN_REF
         # carries the switch.
         hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
+        # Applied to the GOLDEN render only (see the list's comment).
+        golden_only = {meta: KLAUS_GATEWAY_DROPPED_KEYS_GOLDEN_ONLY, connectivity: []}
         shapes = [
             ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD]),
             ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *KLAUS_GATEWAY_MONITOR_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD]),
@@ -495,7 +512,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
-            there = helm(os.path.join(tree, chart), [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags])
+            there = helm(os.path.join(tree, chart),
+                         [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags] + golden_only[chart])
             here, there = hold_dashboards(here, there, chart == meta)
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
