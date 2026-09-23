@@ -1079,6 +1079,30 @@
                                                         }
                                                     }
                                                 },
+                                                "claude-opus-5-5": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "rates": {
+                                                            "type": "object",
+                                                            "additionalProperties": false,
+                                                            "properties": {
+                                                                "cacheRead": {
+                                                                    "type": "string"
+                                                                },
+                                                                "cacheWrite": {
+                                                                    "type": "string"
+                                                                },
+                                                                "input": {
+                                                                    "type": "string"
+                                                                },
+                                                                "output": {
+                                                                    "type": "string"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
                                                 "claude-sonnet-4-5": {
                                                     "type": "object",
                                                     "additionalProperties": false,
