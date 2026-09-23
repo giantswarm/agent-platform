@@ -1057,11 +1057,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.0.0"` |  |
+| agentgateway.controller.image.tag | string | `"2.1.1"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.0.0"` |  |
+| agentgateway.proxy.image.tag | string | `"2.1.1"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
