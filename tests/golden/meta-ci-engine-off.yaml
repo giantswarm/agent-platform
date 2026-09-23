@@ -1,0 +1,3243 @@
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agent-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: agent-manager
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: agent-manager
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+    - name: kagent
+  values:
+    agentChart:
+      ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
+      semver: 1.x
+    flux:
+      helmReleaseServiceAccount: kagent-flux
+    fullnameOverride: agent-manager
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    kagent:
+      apiVersion: v1alpha3
+      namespace: kagent
+    mcp:
+      enabled: true
+    muster:
+      mcpServer:
+        auth:
+          forwardToken: true
+          requiredAudiences:
+          - dex-k8s-authenticator
+        enabled: true
+      url: http://muster.default.svc.cluster.local:8090/mcp
+    networkPolicy:
+      enabled: false
+    oauth:
+      dex:
+        allowPrivateURLs: true
+      downstream:
+        enabled: true
+      enabled: true
+      provider: dex
+      sso:
+        allowPrivateIPs: true
+    skills:
+      repositories:
+      - https://github.com/giantswarm/agent-skills
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agent-platform-connectivity
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: agent-platform-connectivity
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: agent-platform-connectivity
+    namespace: default
+  install:
+    createNamespace: true
+    disableWaitForJobs: true
+    remediation:
+      retries: 5
+  upgrade:
+    disableWaitForJobs: true
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+    - name: agentgateway
+    - name: substrate-crds
+    - name: kagent-crds
+  values:
+    agent-manager:
+      agentChart:
+        ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
+        semver: 1.x
+      fullnameOverride: agent-manager
+      kagent:
+        apiVersion: v1alpha3
+        namespace: kagent
+      mcp:
+        enabled: true
+      muster:
+        mcpServer:
+          auth:
+            forwardToken: true
+            requiredAudiences:
+            - dex-k8s-authenticator
+          enabled: true
+      networkPolicy:
+        enabled: false
+      oauth:
+        dex:
+          allowPrivateURLs: true
+        downstream:
+          enabled: true
+        enabled: true
+        provider: dex
+        sso:
+          allowPrivateIPs: true
+      skills:
+        repositories:
+        - https://github.com/giantswarm/agent-skills
+    agent-platform-mcps:
+      agentgateway:
+        enabled: true
+        musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
+        viaMuster: false
+      mcpServers: []
+    agentManager:
+      flux:
+        requireApi: false
+      migration:
+        dryRun: false
+        enabled: true
+        githubToken:
+          key: token
+          secretName: kagent-skills-token
+        gitopsNamespaces: []
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/agent-manager
+          tag: 1.1.7
+      networkPolicy:
+        egress:
+          cidrs: []
+          fqdns:
+          - matchPattern: '*.blob.core.windows.net'
+          - matchName: api.github.com
+        ingress:
+          additionalPeers: []
+      podDisruptionBudget:
+        enabled: true
+        maxUnavailable: null
+        minAvailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+      route:
+        enabled: false
+        hostname: ""
+        jwtAuthentication:
+          enabled: false
+          issuer: ""
+          jwks:
+            host: dex.giantswarm.svc.cluster.local
+            path: /keys
+            port: 5556
+            tls:
+              caSecretName: ""
+              enabled: false
+          mode: Strict
+        parentRef:
+          name: giantswarm-default
+          namespace: envoy-gateway-system
+        pathPrefix: /agent-manager
+    agentSandbox:
+      podSecurity:
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        enabled: false
+        namespace: agent-sandbox-system
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+    agentgateway:
+      controller:
+        image:
+          repository: giantswarm/agentgateway-upstream/controller
+          tag: 2.0.0
+        replicaCount: 2
+      fullnameOverride: agentgateway-controller
+      image:
+        registry: gsoci.azurecr.io
+      monitoring:
+        enabled: false
+        grafanaDashboard:
+          annotations:
+            observability.giantswarm.io/folder: Agent Platform
+            observability.giantswarm.io/organization: Shared Org
+          enabled: true
+          labels:
+            app.giantswarm.io/kind: dashboard
+        serviceMonitor:
+          enabled: true
+          extraLabels:
+            observability.giantswarm.io/tenant: giantswarm
+          interval: 60s
+      podAnnotations:
+        application.giantswarm.io/team: bumblebee
+      podSecurityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      proxy:
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/agentgateway-upstream/agentgateway
+          tag: 2.0.0
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 50m
+          memory: 128Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+    backstage:
+      backstage:
+        args:
+        - --config
+        - app-config.yaml
+        - --config
+        - app-config.production.yaml
+        extraAppConfig:
+        - configMapRef: agent-platform-backstage-app-config
+          filename: app-config.agent-platform.yaml
+        extraEnvVars:
+        - name: AUTH_SESSION_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: backstage-session-secret
+              name: '{{ .Values.global.identity.existingSecret }}'
+        - name: AGENT_PLATFORM_OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: dex-client-secret
+              name: '{{ .Values.global.identity.existingSecret }}'
+        - name: NODE_EXTRA_CA_CERTS
+          value: '{{ with (dig "identity" "ca" "secretName" "" .Values.global) }}/etc/agent-platform/idp-ca/{{
+            dig "identity" "ca" "key" "ca.crt" $.Values.global }}{{ end }}'
+        extraVolumeMounts:
+        - mountPath: /etc/agent-platform/idp-ca
+          name: idp-ca
+          readOnly: true
+        extraVolumes:
+        - name: idp-ca
+          secret:
+            optional: true
+            secretName: '{{ dig "identity" "ca" "secretName" "" .Values.global | default
+              "agent-platform-idp-ca" }}'
+      catalogs:
+        version: v0.6.0
+      configReload:
+        enabled: true
+        image:
+          name: giantswarm/kubectl
+          registry: gsoci.azurecr.io
+          version: v1.37.0
+      disabledExtensions:
+      - page:gs/clusters
+      - nav-item:gs/clusters
+      - page:gs/deployments
+      - nav-item:gs/deployments
+      - page:gs/installations
+      - nav-item:gs/installations
+      - page:flux
+      - nav-item:flux
+      - page:ai-chat
+      - api:ai-chat/service
+      - api:ai-chat/drawer
+      - app-root-element:ai-chat/drawer
+      enabledExtensions: []
+      extraScopes:
+      - federated:id
+      - audience:server:client_id:dex-k8s-authenticator
+      hostname: ""
+      ingress:
+        enabled: false
+      installationName: agent-platform
+      parentRefs: []
+      resources:
+        verticalPodAutoscaler:
+          enabled: false
+      skillsRepositories:
+      - https://github.com/giantswarm/agent-skills
+      startUrlSearchParams: {}
+    cloudnative-pg: {}
+    components:
+      agent-manager:
+        enabled: true
+      agent-platform-connectivity:
+        enabled: true
+      agent-platform-mcps:
+        enabled: true
+      agent-sandbox:
+        enabled: true
+      agentgateway:
+        enabled: true
+      backstage:
+        enabled: false
+      cloudnative-pg:
+        enabled: false
+      cluster-manager:
+        enabled: false
+      dicebear:
+        enabled: true
+      flux:
+        enabled: false
+      gpu-operator:
+        enabled: false
+      kagent:
+        enabled: true
+      kagent-crds:
+        enabled: true
+      klaus-gateway:
+        enabled: true
+      kserve-llmisvc-crd:
+        enabled: false
+      kserve-llmisvc-resources:
+        enabled: false
+      kserve-runtime-configs:
+        enabled: false
+      mcp-kubernetes:
+        enabled: false
+      model-manager:
+        enabled: true
+      modelServing:
+        enabled: false
+      muster:
+        enabled: true
+      substrate:
+        enabled: true
+      substrate-crds:
+        enabled: true
+      valkey:
+        enabled: true
+      vm-manager:
+        enabled: true
+    dashboards:
+      enabled: true
+      folder: Agent Platform
+      namespace: ""
+      organization: Shared Org
+    dicebear:
+      route:
+        enabled: false
+        hostnames: []
+        parentRefs: []
+    extraObjects: []
+    gateway:
+      gatewayClassName: agentgateway
+      jwksEgress:
+        enabled: false
+        external:
+          cidrs: []
+          fqdns: []
+          port: 443
+        namespace: giantswarm
+        podSelector: {}
+        port: 5556
+      listeners:
+      - allowedRoutes:
+          namespaces:
+            from: Same
+        name: http
+        port: 8080
+        protocol: HTTP
+      metricLabels:
+        agent:
+          enabled: true
+          expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent"]
+            : source.unverifiedWorkload.serviceAccount'
+        agent_namespace:
+          enabled: true
+          expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-namespace"]
+            : source.unverifiedWorkload.namespace'
+        user:
+          enabled: true
+          expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-user"]
+            : jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
+      name: agentgateway
+      parameters:
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        dataPlaneEnv:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otlp-gateway.kube-system.svc:4317
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: grpc
+        dataPlaneResources:
+          limits:
+            cpu: 2000m
+            ephemeral-storage: 512Mi
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            ephemeral-storage: 50Mi
+            memory: 128Mi
+        dataPlaneVolumeMounts: []
+        dataPlaneVolumes: []
+        enabled: true
+        name: ""
+        podAnnotations: {}
+        podDisruptionBudget:
+          enabled: true
+        podLabels:
+          observability.giantswarm.io/tenant: giantswarm
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        replicas: 2
+        serviceType: ClusterIP
+        spread:
+          enabled: true
+          maxSkew: 1
+          topologyKeys:
+          - kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+    gatewayApi:
+      gateway:
+        create: false
+        serviceType: LoadBalancer
+        tls:
+          secretName: ""
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    hooks:
+      kubectlImage:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/alpine-k8s
+        tag: 1.37.0
+      opensslImage:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/alpine-openssl
+        tag: 3.5.8
+    ingress:
+      backendTrafficPolicy:
+        annotations: {}
+        enabled: false
+        labels: {}
+        timeout: 0s
+      hostnames: []
+      httpRoute:
+        annotations: {}
+        labels: {}
+        mcp:
+          annotations: {}
+          labels: {}
+        muster:
+          annotations: {}
+          labels: {}
+        timeouts: {}
+      mode: muster-direct
+      parentRefs: []
+    kagent:
+      controller:
+        agentImage:
+          repository: giantswarm/kagent/golang-adk
+        auth:
+          mode: trusted-proxy
+          userIdClaim: email
+        env: []
+        image:
+          repository: giantswarm/kagent/controller
+        metrics:
+          enabled: false
+        pdb:
+          enabled: true
+          maxUnavailable: ""
+          minAvailable: 1
+          unhealthyPodEvictionPolicy: AlwaysAllow
+        podAnnotations:
+          karpenter.sh/do-not-disrupt: "true"
+        resources:
+          limits:
+            cpu: 2
+            memory: 1536Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        substrate:
+          ateApiEndpoint: dns:///api.ate-system.svc:443
+          atenetRouterURL: http://atenet-router.ate-system.svc:80
+          defaultWorkerPool:
+            name: kagent-default
+          enabled: true
+        vpa:
+          controlledValues: RequestsOnly
+          enabled: false
+          maxAllowed:
+            cpu: 1900m
+            memory: 1280Mi
+          minAllowed:
+            cpu: 100m
+            memory: 128Mi
+          updateMode: InPlaceOrRecreate
+      controllerRoute:
+        enabled: false
+        grpc:
+          services:
+            kagent.api.v1alpha1.AgentInstanceService: []
+            kagent.api.v1alpha1.AgentTemplateService: []
+            kagent.api.v1alpha1.ModelService: []
+            kagent.api.v1alpha1.SystemService: []
+            lf.a2a.v1.A2AService: []
+        hostname: ""
+        jwtAuthentication:
+          enabled: true
+          issuer: ""
+          jwks:
+            host: dex.giantswarm.svc.cluster.local
+            path: /keys
+            port: 5556
+            tls:
+              caSecretName: ""
+              enabled: false
+          mode: Strict
+        parentRef:
+          name: giantswarm-default
+          namespace: envoy-gateway-system
+      database:
+        postgres:
+          bundled:
+            image:
+              name: pgvector
+              repository: pgvector
+              tag: pg18-trixie
+          vectorEnabled: true
+      fluxServiceAccountName: kagent-flux
+      fullnameOverride: kagent
+      grafana-mcp:
+        enabled: false
+      harness:
+        allowedAgentTemplates:
+          selector:
+            matchLabels:
+              agent-platform.giantswarm.io/harness: kagent
+              kagent.dev/harness: ""
+        create: true
+        env:
+        - name: KAGENT_PROPAGATE_TOKEN
+          value: "true"
+        - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
+          value: "500"
+        image: ""
+        snapshotLocation: s3://ci-agent-snapshots/agents
+        snapshotStore:
+          crossplane:
+            aws:
+              accountId: ""
+              bucketName: ""
+              lifecycleDays: 30
+              oidcProvider: ""
+              roleName: ""
+            capz:
+              containerName: ""
+              lifecycleDays: 30
+              replicationType: LRS
+              resourceGroup: ""
+              storageAccountName: ""
+              subscriptionId: ""
+              workloadIdentity:
+                identityName: ""
+                oidcIssuerUrl: ""
+                providerKubernetes:
+                  providerConfigRef: ""
+                  serviceAccount:
+                    name: ""
+                    namespace: crossplane
+            enabled: false
+            observeOnly: false
+            provider: aws
+            providerConfigRef: ""
+            region: ""
+            tags: {}
+          prefix: kagent
+          s3proxy:
+            azure:
+              account: ""
+              accountKeySecretRef:
+                key: ""
+                name: ""
+              container: ""
+              endpoint: ""
+            enabled: false
+            image:
+              repository: gsoci.azurecr.io/giantswarm/s3proxy
+              tag: 4.1.1
+            javaOpts: -XX:MaxRAMPercentage=70
+            replicas: 2
+            resources:
+              limits:
+                ephemeral-storage: 1Gi
+                memory: 1Gi
+              requests:
+                cpu: 250m
+                ephemeral-storage: 256Mi
+                memory: 1Gi
+      kagent-tools:
+        enabled: false
+        namespaceOverride: kagent
+      kmcp:
+        enabled: false
+        namespaceOverride: kagent
+      modelConfigs: []
+      namespaceOverride: kagent
+      oauth2-proxy:
+        config:
+          clientID: ""
+          clientSecret: ""
+          cookieSecret: ""
+          existingSecret: ""
+        enabled: false
+        extraArgs:
+          approval-prompt: auto
+          cookie-refresh: 10m
+          cookie-samesite: lax
+          cookie-secure: true
+          custom-templates-dir: /templates
+          email-domain: '*'
+          oidc-issuer-url: $(OIDC_ISSUER_URL)
+          pass-authorization-header: true
+          provider: oidc
+          redirect-url: $(OIDC_REDIRECT_URL)
+          reverse-proxy: true
+          scope: openid profile email groups offline_access
+          set-authorization-header: true
+          skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
+          skip-auth-route: ^/(health|login)$
+          skip-jwt-bearer-tokens: true
+          upstream: $(UPSTREAM_URL)
+        extraEnv:
+        - name: OIDC_ISSUER_URL
+          value: ""
+        - name: OIDC_REDIRECT_URL
+          value: ""
+        - name: UPSTREAM_URL
+          value: http://kagent-ui:8080
+        extraVolumeMounts:
+        - mountPath: /templates
+          name: custom-templates
+          readOnly: true
+        extraVolumes:
+        - configMap:
+            name: kagent-oauth2-proxy-templates
+          name: custom-templates
+        fullnameOverride: kagent-oauth2-proxy
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: false
+            interval: 60s
+            labels:
+              observability.giantswarm.io/tenant: giantswarm
+        namespaceOverride: kagent
+        redis:
+          enabled: false
+        service:
+          portNumber: 4180
+          type: ClusterIP
+        sessionStorage:
+          type: cookie
+      otel:
+        logging:
+          enabled: false
+          exporter:
+            otlp:
+              endpoint: http://otlp-gateway.kube-system.svc:4317
+              insecure: true
+        tracing:
+          enabled: false
+          exporter:
+            otlp:
+              endpoint: http://otlp-gateway.kube-system.svc:4317
+              insecure: true
+              protocol: grpc
+      podSecurityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      providers:
+        anthropic:
+          apiKey: ""
+          apiKeySecretKey: ANTHROPIC_API_KEY
+          apiKeySecretRef: kagent-anthropic
+          config:
+            cacheTTL: 5m
+            promptCaching: true
+          model: claude-sonnet-4-6
+          provider: Anthropic
+        default: anthropic
+      registry: gsoci.azurecr.io
+      remoteMcpServers: []
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      serviceMonitor:
+        enabled: false
+        interval: 60s
+        labels:
+          observability.giantswarm.io/tenant: giantswarm
+      substrateWorkerPool:
+        create: true
+        name: kagent-default
+        podDisruptionBudget:
+          enabled: true
+          maxUnavailable: 1
+          minAvailable: null
+          unhealthyPodEvictionPolicy: AlwaysAllow
+        replicas: 4
+        sandboxClass: gvisor
+        template:
+          nodeSelector:
+            kubernetes.io/arch: amd64
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+        workerImage: ""
+      ui:
+        image:
+          repository: giantswarm/kagent/ui
+      uiRoute:
+        backendTrafficPolicy:
+          annotations: {}
+          enabled: true
+          labels: {}
+          timeout: 60s
+        enabled: false
+        hostname: ""
+        parentRef:
+          name: giantswarm-default
+          namespace: envoy-gateway-system
+    kagent-crds:
+      kmcp:
+        enabled: false
+      substrate:
+        enabled: false
+    klausGateway:
+      a2a:
+        defaultAgent: ""
+        enabled: false
+        fallbackIconUrlTemplate: ""
+        saToken:
+          audience: kagent
+          enabled: false
+        url: grpc://agentgateway.agent-platform.svc.cluster.local:8080
+      agentgateway:
+        enabled: false
+      agentgatewayRoute:
+        enabled: false
+        hostname: ""
+      cli:
+        enabled: false
+      image:
+        registry: gsoci.azurecr.io
+      lifecycle:
+        driver: static
+        staticInstances: ""
+      obo:
+        callbackBaseUrl: ""
+        connectors:
+          enabled: false
+        enabled: false
+        existingSecret: ""
+        musterUrl: ""
+        persistence:
+          enabled: false
+          size: 64Mi
+        stateKey: ""
+        storeKey: ""
+        storePath: ""
+      observability:
+        enabled: false
+        otlpEndpoint: ""
+        otlpHeaders: {}
+      podAnnotations:
+        karpenter.sh/do-not-disrupt: "true"
+      podDisruptionBudget:
+        enabled: true
+        minAvailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+      routing:
+        defaultTTL: 24h
+        store: memory
+      serviceMonitor:
+        enabled: false
+        labels:
+          observability.giantswarm.io/tenant: giantswarm
+      slack:
+        appToken: ""
+        botToken: ""
+        channelAllowlist: []
+        channelMode: ""
+        dmMode: ""
+        enabled: false
+        mode: events
+        secretName: ""
+        signingSecret: ""
+      upstream:
+        agentgatewayURL: ""
+    kserve-llmisvc-crd: {}
+    kserve-llmisvc-resources:
+      kserve:
+        controller:
+          deploymentMode: Standard
+          gateway:
+            disableIngressCreation: true
+        createSharedResources: true
+        llmisvc:
+          controller:
+            metricsSecure: false
+            serviceMonitor:
+              enabled: false
+              interval: 60s
+              labels:
+                observability.giantswarm.io/tenant: giantswarm
+          createGIECRDs: true
+    kyvernoPolicies:
+      enabled: false
+      policyExceptionNamespace: policy-exceptions
+      rules:
+        adding-capabilities: disallow-capabilities
+        adding-capabilities-strict: disallow-capabilities-strict
+        app-armor: restrict-apparmor-profiles
+        check-seccomp: restrict-seccomp
+        check-seccomp-strict: restrict-seccomp-strict
+        host-path: disallow-host-path
+        host-ports-none: disallow-host-ports
+        privilege-escalation: disallow-privilege-escalation
+        privileged-containers: disallow-privileged-containers
+        require-drop-all: disallow-capabilities-strict
+        restricted-volumes: restrict-volume-types
+        run-as-non-root: require-run-as-nonroot
+        run-as-non-root-user: require-run-as-non-root-user
+    llmRouting:
+      backend:
+        name: anthropic
+        provider: anthropic
+      enabled: false
+      listener:
+        name: llm
+        port: 8081
+      modelCatalog:
+        enabled: true
+        key: catalog.json
+        name: ""
+        providers:
+          anthropic:
+            models:
+              claude-fable-5-1:
+                rates:
+                  cacheRead: "0.25"
+                  cacheWrite: "12.5"
+                  input: "10"
+                  output: "50"
+              claude-haiku-4-5:
+                rates:
+                  cacheRead: "0.1"
+                  cacheWrite: "1.25"
+                  input: "1"
+                  output: "5"
+              claude-opus-4-5:
+                rates:
+                  cacheRead: "0.5"
+                  cacheWrite: "6.25"
+                  input: "5"
+                  output: "25"
+              claude-opus-5:
+                rates:
+                  cacheRead: "0.5"
+                  cacheWrite: "6.25"
+                  input: "5"
+                  output: "25"
+              claude-sonnet-4-5:
+                rates:
+                  cacheRead: "0.3"
+                  cacheWrite: "3.75"
+                  input: "3"
+                  output: "15"
+              claude-sonnet-4-6:
+                rates:
+                  cacheRead: "0.3"
+                  cacheWrite: "3.75"
+                  input: "3"
+                  output: "15"
+              claude-sonnet-5:
+                rates:
+                  cacheRead: "0.2"
+                  cacheWrite: "2.5"
+                  input: "2"
+                  output: "10"
+      modelConfigPolicy:
+        enabled: true
+      pathPrefixes:
+      - /v1
+      routes:
+        '*': Passthrough
+        /v1/messages: Messages
+        /v1/messages/count_tokens: AnthropicTokenCount
+    mcp-kubernetes:
+      fullnameOverride: mcp-kubernetes
+      grafanaDashboards:
+        enabled: false
+        folder: Agent Platform
+        giantswarm:
+          enabled: true
+          organization: Shared Org
+      kubernetesAudience: dex-k8s-authenticator
+      mcpKubernetes:
+        instrumentation:
+          serviceMonitor:
+            enabled: false
+            labels:
+              observability.giantswarm.io/tenant: giantswarm
+        oauth:
+          allowPrivateURLs: true
+          enableDownstreamOAuth: true
+          enabled: true
+          provider: dex
+          sso:
+            allowPrivateIPs: true
+    model-manager:
+      fullnameOverride: model-manager
+      kagent:
+        apiVersion: v1alpha3
+        disableWiring: false
+        namespace: kagent
+      lemonade:
+        agentHost: ""
+        endpoint: ""
+      lmstudio:
+        agentHost: ""
+        endpoint: ""
+      mcp:
+        enabled: true
+      muster:
+        mcpServer:
+          auth:
+            forwardToken: true
+            requiredAudiences:
+            - dex-k8s-authenticator
+          enabled: true
+      networkPolicy:
+        enabled: false
+      oauth:
+        dex:
+          allowPrivateURLs: true
+        downstream:
+          enabled: true
+        enabled: true
+        provider: dex
+        sso:
+          allowPrivateIPs: true
+      ollama:
+        agentHost: ""
+        endpoint: ""
+    modelManager:
+      kserve:
+        requireApi: true
+      networkPolicy:
+        egress:
+          cidrs: []
+          fqdns: []
+        huggingFace:
+          cidrs: []
+          fqdns:
+          - matchName: huggingface.co
+          - matchPattern: '*.huggingface.co'
+          - matchPattern: '*.hf.co'
+          - matchPattern: '*.*.hf.co'
+          - matchPattern: '*.*.*.hf.co'
+        ingress:
+          additionalPeers: []
+        registeredBackends: []
+      route:
+        enabled: false
+        hostname: ""
+        jwtAuthentication:
+          enabled: false
+          issuer: ""
+          jwks:
+            host: dex.giantswarm.svc.cluster.local
+            path: /keys
+            port: 5556
+            tls:
+              caSecretName: ""
+              enabled: false
+          mode: Strict
+        parentRef:
+          name: giantswarm-default
+          namespace: envoy-gateway-system
+        pathPrefix: /model-manager
+    muster:
+      crds:
+        install: false
+      enabled: true
+      fullnameOverride: muster
+      gatewayAPI:
+        enabled: false
+      image:
+        registry: gsoci.azurecr.io
+      muster:
+        oauth:
+          server:
+            baseUrl: ""
+            dex:
+              clientId: ""
+              issuerUrl: ""
+            enabled: true
+            existingSecret: ""
+            storage:
+              type: valkey
+              valkey:
+                secretKeyPassword: valkey-password
+                url: muster-valkey:6379
+        observability:
+          grafanaDashboard:
+            enabled: false
+            folder: Agent Platform
+            giantswarm:
+              enabled: true
+              organization: Shared Org
+          metrics:
+            prometheus:
+              prometheusRule:
+                enabled: false
+                labels:
+                  observability.giantswarm.io/tenant: giantswarm
+              serviceMonitor:
+                enabled: false
+                interval: 60s
+                labels:
+                  observability.giantswarm.io/tenant: giantswarm
+          otel:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            headers: X-Scope-OrgID=giantswarm
+            protocol: grpc
+        toolsetPresets:
+          agent-platform:
+            description: The platform's own management surface — agent-manager, model-manager,
+              vm-manager, cluster-manager and muster's core tools.
+            include:
+            - label: agent-platform.giantswarm.io/tool-group=agent-platform
+            - pattern: core_*
+          infrastructure:
+            description: The servers for the infrastructure underneath the platform (Giant
+              Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
+            include:
+            - label: agent-platform.giantswarm.io/tool-group=infrastructure
+      networkPolicy:
+        cilium:
+          allowClusterIngress: true
+        enabled: true
+        flavor: kubernetes
+      podAnnotations:
+        application.giantswarm.io/team: bumblebee
+        karpenter.sh/do-not-disrupt: "true"
+      podDisruptionBudget:
+        enabled: true
+        minAvailable: 1
+      rbac:
+        mcpServerEditor:
+          subjects:
+          - apiGroup: rbac.authorization.k8s.io
+            kind: Group
+            name: giantswarm-ad:giantswarm-admins
+          - apiGroup: rbac.authorization.k8s.io
+            kind: Group
+            name: giantswarm-github:giantswarm:giantswarm-admins
+        workflowEditor:
+          subjects:
+          - apiGroup: rbac.authorization.k8s.io
+            kind: Group
+            name: giantswarm-ad:giantswarm-admins
+          - apiGroup: rbac.authorization.k8s.io
+            kind: Group
+            name: giantswarm-github:giantswarm:giantswarm-admins
+    networkPolicy:
+      additionalEgressCIDRs: []
+      additionalEgressFQDNs: []
+      enabled: true
+      flavor: kubernetes
+      kubernetes:
+        apiServerCIDR: 0.0.0.0/0
+        worldExcludedCIDRs:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+      musterInClusterMcpPorts:
+      - 8080
+      - 8443
+    postgres:
+      affinity: {}
+      applicationDatabase:
+        ensure: present
+        name: kagent
+        owner: kagent
+        schema: kagent
+      backup:
+        crossplane:
+          aws:
+            accountId: ""
+            bucketName: ""
+            lifecycleDays: 45
+            oidcProvider: ""
+            roleName: ""
+          azure:
+            containerName: ""
+            lifecycleDays: 45
+            private: false
+            privateDnsZoneRef: ""
+            replicationType: LRS
+            resourceGroup: ""
+            storageAccountName: ""
+            subnetName: node-subnet
+            subscriptionId: ""
+            vnetName: ""
+          enabled: false
+          observeOnly: false
+          provider: aws
+          providerConfigRef: ""
+          region: ""
+          tags: {}
+        enabled: false
+        immediate: true
+        method: plugin
+        networkPolicy:
+          cidrs: []
+          fqdns: []
+          ports:
+          - "443"
+        objectStore:
+          azure:
+            connectionString:
+              key: ""
+              name: ""
+            inheritFromAzureAD: false
+            storageAccount:
+              key: ""
+              name: ""
+            storageKey:
+              key: ""
+              name: ""
+          data:
+            compression: gzip
+          destinationPath: ""
+          endpointURL: ""
+          existingName: ""
+          retentionPolicy: 30d
+          s3:
+            accessKeyId:
+              key: ACCESS_KEY_ID
+              name: ""
+            inheritFromIAMRole: false
+            secretAccessKey:
+              key: ACCESS_SECRET_KEY
+              name: ""
+          sidecar:
+            resources: {}
+          wal:
+            compression: gzip
+            maxParallel: 1
+        schedule: 0 0 2 * * *
+        serverName: ""
+        serviceAccount:
+          annotations: {}
+        suspend: false
+        volumeSnapshot:
+          className: ""
+          online: true
+          walClassName: ""
+      clusterName: kagent-pg
+      databases:
+        kagent-v2:
+          component: kagent
+          enabled: true
+          extensions:
+          - vector
+          name: kagent_v2
+          reclaimPolicy: retain
+          secretNamespaces: []
+        substrate:
+          component: substrate
+          enabled: true
+          extensions: []
+          name: substrate
+          reclaimPolicy: retain
+          secretNamespaces:
+          - ate-system
+      enabled: false
+      image:
+        name: ""
+      imagePullSecrets: []
+      instances: 3
+      namespace: kagent
+      sessionsDatabase:
+        enabled: false
+        name: sessions
+        owner: sessions
+      storage:
+        size: 20Gi
+        storageClass: ""
+      vector:
+        enabled: false
+        extensionImage:
+          reference: ""
+    substrate:
+      atelet:
+        affinity: {}
+        extraEnv: []
+        imageCache:
+          pinnedImages: []
+        nodeSelector: {}
+        storageBackend: s3
+        tolerations: []
+      createNamespace: false
+      image:
+        registry: gsoci.azurecr.io/giantswarm/substrate
+      images:
+        agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0
+        awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+        postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+        rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+      postgres:
+        connectionString: ""
+        enabled: true
+        schema: public
+      rustfs:
+        enabled: false
+    substrate-crds: {}
+    valkey:
+      ciliumNetworkPolicy:
+        enabled: false
+      podDisruptionBudget:
+        enabled: true
+        maxUnavailable: null
+        minAvailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+      valkey:
+        auth:
+          aclUsers:
+            default:
+              passwordKey: ""
+              permissions: ~* &* +@all
+          enabled: true
+          usersExistingSecret: ""
+        dataStorage:
+          enabled: true
+          requestedSize: 1Gi
+        deploymentStrategy: Recreate
+        fullnameOverride: muster-valkey
+        metrics:
+          exporter:
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
+          podMonitor:
+            enabled: false
+        podAnnotations:
+          karpenter.sh/do-not-disrupt: "true"
+        podSecurityContext:
+          fsGroup: 1000
+          runAsGroup: 1000
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        replicaCount: 1
+        resources:
+          limits:
+            cpu: 200m
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        valkeyConfig: |
+          maxmemory 640mb
+          maxmemory-policy volatile-lru
+      vpa:
+        enabled: false
+    vm-manager:
+      fullnameOverride: vm-manager
+      muster:
+        mcpServer:
+          auth:
+            forwardToken: true
+            requiredAudiences: []
+          enabled: true
+      networkPolicy:
+        enabled: false
+      oauth:
+        dex:
+          allowPrivateURLs: true
+        enabled: true
+        provider: dex
+        sso:
+          allowPrivateIPs: true
+      persistence:
+        create: false
+        existingClaim: ""
+      serviceMonitor:
+        enabled: false
+        interval: 60s
+        labels:
+          observability.giantswarm.io/tenant: giantswarm
+    vmManager:
+      networkPolicy:
+        guestEgress:
+          cidrs:
+          - 0.0.0.0/0
+          except: []
+        ingress:
+          additionalPeers: []
+      podDisruptionBudget:
+        enabled: true
+        maxUnavailable: null
+        minAvailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agent-platform-mcps
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: agent-platform-mcps
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: agent-platform-mcps
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+    - name: agentgateway
+  values:
+    agentgateway:
+      enabled: true
+      musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
+      viaMuster: false
+    mcpServers: []
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agent-sandbox
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: agent-sandbox
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: agent-sandbox
+    namespace: default
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: agent-platform-connectivity
+  values:
+    {}
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agentgateway
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: agentgateway
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: agentgateway
+    namespace: default
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  values:
+    controller:
+      image:
+        repository: giantswarm/agentgateway-upstream/controller
+        tag: 2.0.0
+      replicaCount: 2
+    fullnameOverride: agentgateway-controller
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    image:
+      registry: gsoci.azurecr.io
+    monitoring:
+      enabled: false
+      grafanaDashboard:
+        annotations:
+          observability.giantswarm.io/folder: Agent Platform
+          observability.giantswarm.io/organization: Shared Org
+        enabled: true
+        labels:
+          app.giantswarm.io/kind: dashboard
+      serviceMonitor:
+        enabled: true
+        extraLabels:
+          observability.giantswarm.io/tenant: giantswarm
+        interval: 60s
+    podAnnotations:
+      application.giantswarm.io/team: bumblebee
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    proxy:
+      image:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/agentgateway-upstream/agentgateway
+        tag: 2.0.0
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 50m
+        memory: 128Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: dicebear
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: dicebear
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: dicebear
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    route:
+      enabled: false
+      hostnames: []
+      parentRefs: []
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kagent
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: kagent
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: kagent
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  driftDetection:
+    mode: enabled
+  dependsOn:
+    - name: kagent-crds
+    - name: substrate-crds
+    - name: substrate
+    - name: agent-platform-connectivity
+  values:
+    controller:
+      agentImage:
+        repository: giantswarm/kagent/golang-adk
+      auth:
+        mode: trusted-proxy
+        userIdClaim: email
+      env: []
+      image:
+        repository: giantswarm/kagent/controller
+      metrics:
+        enabled: false
+      pdb:
+        enabled: true
+        maxUnavailable: ""
+        minAvailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+      podAnnotations:
+        karpenter.sh/do-not-disrupt: "true"
+      resources:
+        limits:
+          cpu: 2
+          memory: 1536Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      substrate:
+        ateApiEndpoint: dns:///api.ate-system.svc:443
+        atenetRouterURL: http://atenet-router.ate-system.svc:80
+        defaultWorkerPool:
+          name: kagent-default
+        enabled: true
+    database:
+      postgres:
+        bundled:
+          image:
+            name: pgvector
+            repository: pgvector
+            tag: pg18-trixie
+        vectorEnabled: true
+    fullnameOverride: kagent
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    grafana-mcp:
+      enabled: false
+    harness:
+      allowedAgentTemplates:
+        selector:
+          matchLabels:
+            agent-platform.giantswarm.io/harness: kagent
+            kagent.dev/harness: ""
+      create: true
+      env:
+      - name: KAGENT_PROPAGATE_TOKEN
+        value: "true"
+      - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
+        value: "500"
+      snapshotLocation: s3://ci-agent-snapshots/agents
+    kagent-tools:
+      enabled: false
+      namespaceOverride: kagent
+    kmcp:
+      enabled: false
+      namespaceOverride: kagent
+    namespaceOverride: kagent
+    oauth2-proxy:
+      config:
+        clientID: ""
+        clientSecret: ""
+        cookieSecret: ""
+        existingSecret: ""
+      enabled: false
+      extraArgs:
+        approval-prompt: auto
+        cookie-refresh: 10m
+        cookie-samesite: lax
+        cookie-secure: true
+        custom-templates-dir: /templates
+        email-domain: '*'
+        oidc-issuer-url: $(OIDC_ISSUER_URL)
+        pass-authorization-header: true
+        provider: oidc
+        redirect-url: $(OIDC_REDIRECT_URL)
+        reverse-proxy: true
+        scope: openid profile email groups offline_access
+        set-authorization-header: true
+        skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
+        skip-auth-route: ^/(health|login)$
+        skip-jwt-bearer-tokens: true
+        upstream: $(UPSTREAM_URL)
+      extraEnv:
+      - name: OIDC_ISSUER_URL
+        value: ""
+      - name: OIDC_REDIRECT_URL
+        value: ""
+      - name: UPSTREAM_URL
+        value: http://kagent-ui:8080
+      extraVolumeMounts:
+      - mountPath: /templates
+        name: custom-templates
+        readOnly: true
+      extraVolumes:
+      - configMap:
+          name: kagent-oauth2-proxy-templates
+        name: custom-templates
+      fullnameOverride: kagent-oauth2-proxy
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: false
+          interval: 60s
+          labels:
+            observability.giantswarm.io/tenant: giantswarm
+      namespaceOverride: kagent
+      redis:
+        enabled: false
+      service:
+        portNumber: 4180
+        type: ClusterIP
+      sessionStorage:
+        type: cookie
+    otel:
+      logging:
+        enabled: false
+        exporter:
+          otlp:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            insecure: true
+      tracing:
+        enabled: false
+        exporter:
+          otlp:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            insecure: true
+            protocol: grpc
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    providers:
+      anthropic:
+        apiKey: ""
+        apiKeySecretKey: ANTHROPIC_API_KEY
+        apiKeySecretRef: kagent-anthropic
+        config:
+          cacheTTL: 5m
+          promptCaching: true
+        model: claude-sonnet-4-6
+        provider: Anthropic
+      default: anthropic
+    registry: gsoci.azurecr.io
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    substrateWorkerPool:
+      create: true
+      name: kagent-default
+      replicas: 4
+      sandboxClass: gvisor
+      template:
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        resources:
+          limits:
+            cpu: "2"
+            memory: 2Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.0.0
+    ui:
+      image:
+        repository: giantswarm/kagent/ui
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kagent-crds
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: kagent-crds
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: kagent-crds
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    kmcp:
+      enabled: false
+    substrate:
+      enabled: false
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: klaus-gateway
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: klaus-gateway
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: klaus-gateway
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    a2a:
+      defaultAgent: ""
+      enabled: false
+      fallbackIconUrlTemplate: ""
+      saToken:
+        audience: kagent
+        enabled: false
+      url: grpc://agentgateway.agent-platform.svc.cluster.local:8080
+    agentgateway:
+      enabled: false
+    agentgatewayRoute:
+      enabled: false
+      hostname: ""
+    cli:
+      enabled: false
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    image:
+      registry: gsoci.azurecr.io
+    lifecycle:
+      driver: static
+      staticInstances: ""
+    obo:
+      callbackBaseUrl: ""
+      connectors:
+        enabled: false
+      enabled: false
+      existingSecret: ""
+      musterUrl: ""
+      persistence:
+        enabled: false
+        size: 64Mi
+      stateKey: ""
+      storeKey: ""
+      storePath: ""
+    observability:
+      otlpEndpoint: ""
+      otlpHeaders: {}
+    podAnnotations:
+      karpenter.sh/do-not-disrupt: "true"
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+      unhealthyPodEvictionPolicy: AlwaysAllow
+    routing:
+      defaultTTL: 24h
+      store: memory
+    serviceMonitor:
+      enabled: false
+      labels:
+        observability.giantswarm.io/tenant: giantswarm
+    slack:
+      appToken: ""
+      botToken: ""
+      channelAllowlist: []
+      channelMode: ""
+      dmMode: ""
+      enabled: false
+      mode: events
+      secretName: ""
+      signingSecret: ""
+    upstream:
+      agentgatewayURL: ""
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: model-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: model-manager
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: model-manager
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+    - name: kagent
+  values:
+    fullnameOverride: model-manager
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    kagent:
+      apiVersion: v1alpha3
+      disableWiring: false
+      namespace: kagent
+    lemonade:
+      agentHost: ""
+      endpoint: ""
+    lmstudio:
+      agentHost: ""
+      endpoint: ""
+    mcp:
+      enabled: true
+    muster:
+      mcpServer:
+        auth:
+          forwardToken: true
+          requiredAudiences:
+          - dex-k8s-authenticator
+        enabled: true
+    networkPolicy:
+      enabled: false
+    oauth:
+      dex:
+        allowPrivateURLs: true
+      downstream:
+        enabled: true
+      enabled: true
+      provider: dex
+      sso:
+        allowPrivateIPs: true
+    ollama:
+      agentHost: ""
+      endpoint: ""
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: muster
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: muster
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: muster
+    namespace: default
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  driftDetection:
+    mode: enabled
+  values:
+    crds:
+      install: false
+    enabled: true
+    fullnameOverride: muster
+    gatewayAPI:
+      enabled: false
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    image:
+      registry: gsoci.azurecr.io
+    muster:
+      oauth:
+        server:
+          baseUrl: ""
+          dex:
+            clientId: ""
+            issuerUrl: ""
+          enabled: true
+          existingSecret: ""
+          storage:
+            type: valkey
+            valkey:
+              secretKeyPassword: valkey-password
+              url: muster-valkey:6379
+      observability:
+        grafanaDashboard:
+          enabled: false
+          folder: Agent Platform
+          giantswarm:
+            enabled: true
+            organization: Shared Org
+        metrics:
+          prometheus:
+            prometheusRule:
+              enabled: false
+              labels:
+                observability.giantswarm.io/tenant: giantswarm
+            serviceMonitor:
+              enabled: false
+              interval: 60s
+              labels:
+                observability.giantswarm.io/tenant: giantswarm
+        otel:
+          endpoint: http://otlp-gateway.kube-system.svc:4317
+          headers: X-Scope-OrgID=giantswarm
+          protocol: grpc
+      toolsetPresets:
+        agent-platform:
+          description: The platform's own management surface — agent-manager, model-manager,
+            vm-manager, cluster-manager and muster's core tools.
+          include:
+          - label: agent-platform.giantswarm.io/tool-group=agent-platform
+          - pattern: core_*
+        infrastructure:
+          description: The servers for the infrastructure underneath the platform (Giant
+            Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
+          include:
+          - label: agent-platform.giantswarm.io/tool-group=infrastructure
+    networkPolicy:
+      cilium:
+        allowClusterIngress: true
+      enabled: true
+      flavor: kubernetes
+    podAnnotations:
+      application.giantswarm.io/team: bumblebee
+      karpenter.sh/do-not-disrupt: "true"
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    rbac:
+      mcpServerEditor:
+        subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+      workflowEditor:
+        subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: substrate
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: substrate
+  targetNamespace: ate-system
+  storageNamespace: ate-system
+  chartRef:
+    kind: OCIRepository
+    name: substrate
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: substrate-crds
+    - name: agent-platform-connectivity
+  valuesFrom:
+    - kind: ConfigMap
+      name: kagent-images
+      optional: true
+      valuesKey: substrate-values.yaml
+  values:
+    atelet:
+      affinity: {}
+      extraEnv: []
+      nodeSelector: {}
+      storageBackend: s3
+      tolerations: []
+    createNamespace: false
+    image:
+      registry: gsoci.azurecr.io/giantswarm/substrate
+    images:
+      agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0
+      awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+      postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+      rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
+    otel:
+      endpoint: http://otlp-gateway.kube-system.svc:4317
+    postgres:
+      connectionString: ""
+      enabled: true
+      schema: public
+    rustfs:
+      enabled: false
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: substrate-crds
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: substrate-crds
+  targetNamespace: ate-system
+  storageNamespace: ate-system
+  chartRef:
+    kind: OCIRepository
+    name: substrate-crds
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    {}
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: valkey
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: valkey
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: valkey
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    ciliumNetworkPolicy:
+      enabled: false
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    valkey:
+      auth:
+        aclUsers:
+          default:
+            passwordKey: ""
+            permissions: ~* &* +@all
+        enabled: true
+        usersExistingSecret: ""
+      dataStorage:
+        enabled: true
+        requestedSize: 1Gi
+      deploymentStrategy: Recreate
+      fullnameOverride: muster-valkey
+      metrics:
+        exporter:
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+        podMonitor:
+          enabled: false
+      podAnnotations:
+        karpenter.sh/do-not-disrupt: "true"
+      podSecurityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      replicaCount: 1
+      resources:
+        limits:
+          cpu: 200m
+          memory: 1Gi
+        requests:
+          cpu: 50m
+          memory: 256Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      valkeyConfig: |
+        maxmemory 640mb
+        maxmemory-policy volatile-lru
+    vpa:
+      enabled: false
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: vm-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: vm-manager
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: vm-manager
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+  values:
+    fullnameOverride: vm-manager
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    muster:
+      mcpServer:
+        auth:
+          forwardToken: true
+          requiredAudiences: []
+        enabled: true
+    networkPolicy:
+      enabled: false
+    oauth:
+      dex:
+        allowPrivateURLs: true
+      enabled: true
+      provider: dex
+      sso:
+        allowPrivateIPs: true
+    persistence:
+      create: false
+      existingClaim: ""
+    serviceMonitor:
+      enabled: false
+      interval: 60s
+      labels:
+        observability.giantswarm.io/tenant: giantswarm
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agent-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent-manager
+  ref:
+    semver: "1.x"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agent-platform-connectivity
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-connectivity
+  ref:
+    semver: "1.1.35"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agent-platform-mcps
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-mcps
+  ref:
+    semver: "0.x"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agent-sandbox
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent-sandbox
+  ref:
+    semver: "0.x"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agentgateway
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agentgateway
+  ref:
+    semver: ">=2.4.0 <3.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: dicebear
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/dicebear
+  ref:
+    semver: "0.x"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: kagent
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent
+  ref:
+    semver: ">=1.0.0 <1.1.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: kagent-crds
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent-crds
+  ref:
+    semver: ">=1.0.0 <1.1.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: klaus-gateway
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/klaus-gateway
+  ref:
+    semver: ">=1.20.0 <3.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: model-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/model-manager
+  ref:
+    semver: ">=0.23.0 <2.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: muster
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/muster
+  ref:
+    semver: ">=5.12.0 <6.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: substrate
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate
+  ref:
+    semver: ">=1.0.0 <1.1.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: substrate-crds
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate-crds
+  ref:
+    semver: ">=1.0.0 <1.1.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: valkey
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/valkey
+  ref:
+    semver: "0.x"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: vm-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/vm-manager
+  ref:
+    semver: ">=0.22.0 <1.0.0"
+---
+# Source: agent-platform/templates/hooks/netpol.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: t-hooks
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: "t"
+      app.kubernetes.io/component: hooks
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "0.0.0.0/0"
+---
+# Source: agent-platform/templates/hooks/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: t-hooks
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+# Source: agent-platform/templates/hooks/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: t-hooks
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: t-hooks
+    namespace: default
+---
+# Source: agent-platform/templates/hooks/kagent-crds-storage-version.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t-kagent-storage-version-backup
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-7"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    agent-platform.giantswarm.io/about: "record the objects of the kagent CRDs still stored at v1alpha2 (modelconfigs, modelproviderconfigs, remotemcpservers) into the migration ConfigMap, stop the HelmRelease that applied them from applying them again (crds: Skip) and delete those CRDs, so kagent-crds installs them at v1alpha3"
+spec:
+  # kubectl waits up to 5 minutes for the deletions it requested; the Job gives
+  # up after 10 and Helm's --timeout bounds the whole event. Two retries cover a
+  # transient API error; a hook that still fails aborts the operation before
+  # Helm deletes anything (a failed pre-delete hook leaves the release
+  # `uninstalling` and the platform untouched).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # hook-succeeded removes a finished Job; a failed one is kept for an hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: "agent-platform"
+        app.kubernetes.io/name: "agent-platform"
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "0.1.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "agent-platform-1.1.35"
+        app.kubernetes.io/component: hooks
+    spec:
+      serviceAccountName: t-hooks
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sh
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              ns="kagent"
+              cm="kagent-storage-version-migration"
+              rel="t"
+              stale="v1alpha2"
+              mkdir -p /tmp/record
+              recorded=0
+              for crd in modelconfigs.kagent.dev modelproviderconfigs.kagent.dev remotemcpservers.kagent.dev; do
+                stored="$(kubectl get customresourcedefinitions.apiextensions.k8s.io "$crd" -o jsonpath='{.status.storedVersions}' --ignore-not-found)"
+                case "$stored" in
+                  "") echo "$crd: absent; nothing to migrate"; continue ;;
+                  *"\"$stale\""*) ;;
+                  *) echo "$crd: stores $stored, no $stale; left as it is"; continue ;;
+                esac
+                kubectl get "$crd" -A -o json > /tmp/raw.json
+                jq -c '[.items[] | del(.status, .metadata.managedFields, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.generation)]' /tmp/raw.json > "/tmp/record/${crd%%.*}.json"
+                echo "$crd: stores $stored: $(jq length "/tmp/record/${crd%%.*}.json") objects recorded"
+                recorded=$((recorded + 1))
+              done
+              if [ "$recorded" -eq 0 ]; then
+                echo "no kagent CRD stores $stale: nothing to migrate"
+              else
+                # the record, written before anything is deleted: one ConfigMap in the kagent
+                # namespace, replaced whole on every run that records (a fresh record per
+                # migration; a run that finds nothing at v1alpha2 leaves it alone)
+                kubectl create configmap "$cm" -n "$ns" --from-file=/tmp/record --dry-run=client -o json > /tmp/cm-raw.json
+                jq --arg at "$(date -u +%FT%TZ)" --arg rel "$rel" '.data["recorded-at"] = $at | .metadata.labels = {"app.kubernetes.io/instance": $rel, "app.kubernetes.io/component": "kagent-storage-version-migration", "app.kubernetes.io/managed-by": "agent-platform-hooks"}' /tmp/cm-raw.json > /tmp/cm.json
+                kubectl delete configmap "$cm" -n "$ns" --ignore-not-found
+                kubectl create -f /tmp/cm.json
+                echo "recorded into ConfigMap $ns/$cm ($(wc -c < /tmp/cm.json | tr -d ' ') bytes)"
+                # the owners first (giantswarm/agent-platform#416): the HelmRelease a CRD's
+                # helm.toolkit.fluxcd.io labels name applied it through its crds policy and
+                # re-applies its chart's crds/ on every retry — Skip on both events, before
+                # the CRD goes; the meta upgrade's manifest carries no crds policy for the
+                # kagent release: a client-side apply (helm-controller) drops the patch, a
+                # server-side one leaves it on a release whose 4.x chart has no crds/
+                : > /tmp/owners.txt
+                for f in /tmp/record/*.json; do
+                  crd="$(basename "$f" .json).kagent.dev"
+                  kubectl get customresourcedefinitions.apiextensions.k8s.io "$crd" -o jsonpath='{.metadata.labels.helm\.toolkit\.fluxcd\.io/namespace}|{.metadata.labels.helm\.toolkit\.fluxcd\.io/name}{"\n"}' >> /tmp/owners.txt
+                done
+                sort -u /tmp/owners.txt | while IFS='|' read -r ons oname; do
+                  [ -n "$oname" ] || continue
+                  if [ -z "$ons" ]; then echo "HelmRelease $oname (no helm.toolkit.fluxcd.io/namespace label): cannot be reached; the watch below catches a re-creation"; continue; fi
+                  policy="$(kubectl get helmreleases.helm.toolkit.fluxcd.io -n "$ons" "$oname" -o jsonpath='{.spec.install.crds}/{.spec.upgrade.crds}' --ignore-not-found)"
+                  if [ -z "$policy" ]; then echo "HelmRelease $ons/$oname (named by the CRDs' labels) is gone; nothing to stop"; continue; fi
+                  kubectl patch helmreleases.helm.toolkit.fluxcd.io -n "$ons" "$oname" --type merge -p '{"spec":{"install":{"crds":"Skip"},"upgrade":{"crds":"Skip"}}}' >/dev/null
+                  echo "HelmRelease $ons/$oname applied the CRDs (install/upgrade crds policy $policy): set to Skip/Skip so it cannot re-apply them; this upgrade's manifest carries no crds policy for it (inert on the 4.x chart if the apply keeps the patch)"
+                done
+                for f in /tmp/record/*.json; do
+                  crd="$(basename "$f" .json).kagent.dev"
+                  kubectl delete customresourcedefinitions.apiextensions.k8s.io "$crd" --wait --timeout=3m
+                  echo "$crd deleted, its objects with it; kagent-crds installs it at v1alpha3"
+                done
+                # they stay gone: 60 s of checks (a reconcile of the owner in flight when
+                # the patch landed applies its crds/ once more); one that comes back is
+                # deleted again and fails the hook naming the owner — Flux retries the
+                # upgrade, the next backup finds the CRDs absent
+                deadline=$(( $(date +%s) + 60 ))
+                while :; do
+                  back=""
+                  for f in /tmp/record/*.json; do
+                    crd="$(basename "$f" .json).kagent.dev"
+                    state="$(kubectl get customresourcedefinitions.apiextensions.k8s.io "$crd" -o jsonpath='{.metadata.creationTimestamp} by HelmRelease {.metadata.labels.helm\.toolkit\.fluxcd\.io/namespace}/{.metadata.labels.helm\.toolkit\.fluxcd\.io/name} (labels {.metadata.labels})' --ignore-not-found)"
+                    [ -n "$state" ] || continue
+                    back="$back $crd"
+                    echo "$crd re-created at $state" >&2
+                    kubectl delete customresourcedefinitions.apiextensions.k8s.io "$crd" --wait --timeout=3m
+                  done
+                  if [ -n "$back" ]; then
+                    echo "re-created after the backup deleted them:$back — deleted again; something still applies the 0.x kagent CRDs (the HelmRelease named above: suspend it or fix its values), then reconcile this release again — the record $ns/$cm is kept and the next backup finds the CRDs absent" >&2
+                    exit 1
+                  fi
+                  [ "$(date +%s)" -lt "$deadline" ] || break
+                  sleep 5
+                done
+                echo "the deleted CRDs stayed absent for 60 s"
+              fi
+              # on every run: the Helm release manifests that still name the three kinds at v1alpha2
+              kinds='(^|\n)kind: (ModelConfig|ModelProviderConfig|RemoteMCPServer)\n'
+              rewritten=0
+              # the server-side Table (NAMESPACE NAME TYPE DATA AGE): names only, no payload
+              kubectl get secrets -A -l owner=helm --field-selector type=helm.sh/release.v1 --no-headers --chunk-size=100 | awk '{print $1, $2}' > /tmp/releases.txt
+              while read -r sns sname; do
+                [ -n "$sname" ] || continue
+                kubectl get secret -n "$sns" "$sname" -o jsonpath='{.data.release}' > /tmp/release.b64
+                base64 -d < /tmp/release.b64 | base64 -d | gzip -dc > /tmp/release.json
+                # a manifest that names an object at v1alpha2, not a release that merely
+                # mentions the version (this chart's own hook script, stored under .hooks[])
+                grep -qF 'apiVersion: kagent.dev/v1alpha2\n' /tmp/release.json || continue
+                n="$(jq -r --arg k "$kinds" '[.manifest | split("\n---\n")[] | select(test($k) and test("apiVersion: kagent.dev/v1alpha2\n"))] | length' /tmp/release.json)"
+                [ "$n" -gt 0 ] || continue
+                jq --arg k "$kinds" '.manifest |= (split("\n---\n") | map(if test($k) then gsub("apiVersion: kagent.dev/v1alpha2\n"; "apiVersion: kagent.dev/v1alpha3\n") else . end) | join("\n---\n"))' /tmp/release.json > /tmp/release-new.json
+                printf '{"data":{"release":"%s"}}' "$(gzip -c /tmp/release-new.json | base64 | tr -d '\n' | base64 | tr -d '\n')" > /tmp/release-patch.json
+                kubectl patch secret -n "$sns" "$sname" --type merge --patch-file /tmp/release-patch.json >/dev/null
+                echo "release $sns/$(jq -r .name /tmp/release.json) revision $(jq -r .version /tmp/release.json): $n objects re-pointed to kagent.dev/v1alpha3 in Helm's stored manifest (Helm reads it back through a served version on the next upgrade)"
+                rewritten=$((rewritten + 1))
+              done < /tmp/releases.txt
+              echo "$(wc -l < /tmp/releases.txt | tr -d ' ') Helm release Secrets scanned, $rewritten re-pointed"
+          env:
+            # kubectl keeps its discovery cache and helm its cache and config
+            # under $HOME; the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # The requests stay small: a hook is a burst of kubectl runs. The limit
+          # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
+          # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
+          # and nothing a hook does scales with the cluster (the storage-version
+          # backup reads the release Secrets one at a time and parses only a
+          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # 128Mi three seconds into its first kubectl calls on a busy node
+          # (giantswarm/agent-platform#593); 512Mi is four times that pod's
+          # whole budget and is never approached in a normal run.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Source: agent-platform/templates/hooks/kagent-crds-storage-version.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t-kagent-storage-version-restore
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    agent-platform.giantswarm.io/about: "re-create the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3 once kagent-crds serves it; the chart-rendered ones come back from their releases"
+spec:
+  # kubectl waits up to 5 minutes for the deletions it requested; the Job gives
+  # up after 10 and Helm's --timeout bounds the whole event. Two retries cover a
+  # transient API error; a hook that still fails aborts the operation before
+  # Helm deletes anything (a failed pre-delete hook leaves the release
+  # `uninstalling` and the platform untouched).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # hook-succeeded removes a finished Job; a failed one is kept for an hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: "agent-platform"
+        app.kubernetes.io/name: "agent-platform"
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "0.1.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "agent-platform-1.1.35"
+        app.kubernetes.io/component: hooks
+    spec:
+      serviceAccountName: t-hooks
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sh
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              ns="kagent"
+              cm="kagent-storage-version-migration"
+              crd="modelconfigs.kagent.dev"
+              version="v1alpha3"
+              kubectl get configmap "$cm" -n "$ns" -o json --ignore-not-found > /tmp/cm.json
+              if [ ! -s /tmp/cm.json ]; then
+                echo "no ConfigMap $ns/$cm: nothing was recorded, nothing to restore"
+                exit 0
+              fi
+              restored="$(jq -r '.data["restored-at"] // ""' /tmp/cm.json)"
+              if [ -n "$restored" ]; then
+                echo "ConfigMap $ns/$cm: restored at $restored; nothing to do (the record stays until it is deleted)"
+                exit 0
+              fi
+              for k in remotemcpservers modelproviderconfigs; do
+                n="$(jq -r --arg k "$k.json" '.data[$k] // "[]" | fromjson | length' /tmp/cm.json)"
+                [ "$n" = 0 ] || echo "recorded, not restored: $n $k (the 4.x charts render their own; the record is $ns/$cm)"
+              done
+              jq -r '.data["modelconfigs.json"] // "[]"' /tmp/cm.json > /tmp/modelconfigs.json
+              jq -c '[.[] | select(.metadata.annotations["meta.helm.sh/release-name"] == null)]' /tmp/modelconfigs.json > /tmp/unowned.json
+              total="$(jq length /tmp/modelconfigs.json)"
+              n="$(jq length /tmp/unowned.json)"
+              echo "$total ModelConfigs recorded, $n owned by no Helm release (the other $((total - n)) come back from their releases)"
+              if [ "$n" -gt 0 ]; then
+                deadline=$(( $(date +%s) + 480 ))
+                while :; do
+                  state="$(kubectl get customresourcedefinitions.apiextensions.k8s.io "$crd" -o jsonpath='{.status.conditions[?(@.type=="Established")].status} {.spec.versions[*].name}' --ignore-not-found)"
+                  case "$state" in True*"$version"*) break ;; esac
+                  if [ "$(date +%s)" -ge "$deadline" ]; then
+                    echo "$crd is not Established serving $version after 480 s (${state:-absent}): the kagent-crds release has not installed it; the record stays, the next upgrade retries" >&2
+                    exit 1
+                  fi
+                  echo "$(date -u +%FT%TZ) waiting for $crd to be Established serving $version (${state:-absent})"
+                  sleep 10
+                done
+              fi
+              i=0; created=0; present=0
+              while [ "$i" -lt "$n" ]; do
+                jq -c --arg v "kagent.dev/$version" --argjson i "$i" '.[$i] | {apiVersion: $v, kind, metadata: (.metadata | {name, namespace, labels, annotations} | with_entries(select(.value != null))), spec}' /tmp/unowned.json > /tmp/obj.json
+                ref="$(jq -r '"\(.metadata.namespace)/\(.metadata.name)"' /tmp/obj.json)"
+                if out="$(kubectl create -f /tmp/obj.json 2>&1)"; then
+                  echo "ModelConfig $ref: re-created at kagent.dev/$version"; created=$((created + 1))
+                else
+                  case "$out" in
+                    *AlreadyExists*) echo "ModelConfig $ref: already present (re-created by its owner)"; present=$((present + 1)) ;;
+                    *) echo "ModelConfig $ref: $out" >&2; exit 1 ;;
+                  esac
+                fi
+                i=$((i + 1))
+              done
+              kubectl patch configmap "$cm" -n "$ns" --type merge -p "{\"data\":{\"restored-at\":\"$(date -u +%FT%TZ)\"}}"
+              echo "restored: $created re-created, $present already present, $((total - n)) chart-owned left to their releases; the record $ns/$cm stays (UPGRADE.md says when to delete it)"
+          env:
+            # kubectl keeps its discovery cache and helm its cache and config
+            # under $HOME; the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # The requests stay small: a hook is a burst of kubectl runs. The limit
+          # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
+          # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
+          # and nothing a hook does scales with the cluster (the storage-version
+          # backup reads the release Secrets one at a time and parses only a
+          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # 128Mi three seconds into its first kubectl calls on a busy node
+          # (giantswarm/agent-platform#593); 512Mi is four times that pod's
+          # whole budget and is never approached in a normal run.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

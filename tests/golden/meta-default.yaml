@@ -1,0 +1,2877 @@
+---
+# Source: agent-platform/charts/flux-engine/templates/operator.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-operator
+  namespace: default
+  labels:
+    app.kubernetes.io/name: "flux-engine"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/part-of: agent-platform
+    app.kubernetes.io/version: "v0.60.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "flux-engine-0.1.0"
+automountServiceAccountToken: true
+---
+# Source: agent-platform/charts/flux-engine/templates/tenant.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-platform-flux
+  namespace: default
+  labels:
+    app.kubernetes.io/name: "flux-engine"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/part-of: agent-platform
+    app.kubernetes.io/version: "v0.60.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "flux-engine-0.1.0"
+automountServiceAccountToken: false
+---
+# Source: agent-platform/templates/self/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: t-self
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: self-management
+---
+# Source: agent-platform/charts/flux-engine/templates/operator.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-platform-flux-operator
+  labels:
+    app.kubernetes.io/name: "flux-engine"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/part-of: agent-platform
+    app.kubernetes.io/version: "v0.60.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "flux-engine-0.1.0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: flux-operator
+    namespace: default
+---
+# Source: agent-platform/charts/flux-engine/templates/tenant.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-platform-flux
+  labels:
+    app.kubernetes.io/name: "flux-engine"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/part-of: agent-platform
+    app.kubernetes.io/version: "v0.60.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "flux-engine-0.1.0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: agent-platform-flux
+    namespace: default
+---
+# Source: agent-platform/templates/self/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: t-self
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: self-management
+rules:
+  # Helm storage (read) and the values Secret (write, delete on teardown).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The detached resumer Job.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete"]
+  # Suspend and resume the self HelmRelease.
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "patch"]
+---
+# Source: agent-platform/templates/self/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: t-self
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: self-management
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: t-self
+subjects:
+  - kind: ServiceAccount
+    name: t-self
+    namespace: default
+---
+# Source: agent-platform/charts/flux-engine/templates/operator.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: flux-operator
+  namespace: default
+  labels:
+    app.kubernetes.io/name: "flux-engine"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/part-of: agent-platform
+    app.kubernetes.io/version: "v0.60.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "flux-engine-0.1.0"
+spec:
+  ports:
+    - port: 8080
+      targetPort: http-metrics
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: flux-operator
+    app.kubernetes.io/instance: "t"
+---
+# Source: agent-platform/charts/flux-engine/templates/operator.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flux-operator
+  namespace: default
+  labels:
+    app.kubernetes.io/name: "flux-engine"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/part-of: agent-platform
+    app.kubernetes.io/version: "v0.60.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "flux-engine-0.1.0"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flux-operator
+      app.kubernetes.io/instance: "t"
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+      labels:
+        app.kubernetes.io/name: flux-operator
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/part-of: agent-platform
+        app.kubernetes.io/version: "v0.60.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "flux-engine-0.1.0"
+    spec:
+      serviceAccountName: flux-operator
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "gsoci.azurecr.io/giantswarm/flux-operator:v0.60.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - --log-level=info
+          env:
+            - name: RUNTIME_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REPORTING_INTERVAL
+              value: "5m"
+            # 0 disables the Flux Status web server (the upstream chart's web.enabled=false).
+            - name: WEB_SERVER_PORT
+              value: "0"
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http-metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: temp
+              mountPath: /tmp
+      volumes:
+        - name: temp
+          emptyDir: {}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                - linux
+---
+# Source: agent-platform/charts/flux-engine/templates/fluxinstance.yaml
+apiVersion: fluxcd.controlplane.io/v1
+kind: FluxInstance
+metadata:
+  name: flux
+  namespace: default
+  labels:
+    app.kubernetes.io/name: "flux-engine"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/part-of: agent-platform
+    app.kubernetes.io/version: "v0.60.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "flux-engine-0.1.0"
+  annotations:
+    fluxcd.controlplane.io/reconcileEvery: "1h"
+    fluxcd.controlplane.io/reconcileTimeout: "5m"
+spec:
+  distribution:
+    version: "2.x"
+    registry: "gsoci.azurecr.io/giantswarm/fluxcd"
+  components:
+    - source-controller
+    - helm-controller
+  cluster:
+    type: kubernetes
+    multitenant: true
+    tenantDefaultServiceAccount: default
+    networkPolicy: false
+    domain: cluster.local
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agent-platform-connectivity
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: agent-platform-connectivity
+  targetNamespace: default
+  serviceAccountName: agent-platform-flux
+  chartRef:
+    kind: OCIRepository
+    name: agent-platform-connectivity
+    namespace: default
+  install:
+    createNamespace: true
+    disableWaitForJobs: true
+    remediation:
+      retries: 5
+  upgrade:
+    disableWaitForJobs: true
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+  values:
+    agent-manager:
+      agentChart:
+        ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
+        semver: 1.x
+      fullnameOverride: agent-manager
+      kagent:
+        apiVersion: v1alpha3
+        namespace: kagent
+      mcp:
+        enabled: true
+      muster:
+        mcpServer:
+          auth:
+            forwardToken: true
+            requiredAudiences:
+            - dex-k8s-authenticator
+          enabled: true
+      networkPolicy:
+        enabled: false
+      oauth:
+        dex:
+          allowPrivateURLs: true
+        downstream:
+          enabled: true
+        enabled: true
+        provider: dex
+        sso:
+          allowPrivateIPs: true
+      skills:
+        repositories:
+        - https://github.com/giantswarm/agent-skills
+    agent-platform-mcps:
+      agentgateway:
+        enabled: true
+        musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
+        viaMuster: false
+      mcpServers: []
+    agentManager:
+      flux:
+        requireApi: false
+      migration:
+        dryRun: false
+        enabled: true
+        githubToken:
+          key: token
+          secretName: kagent-skills-token
+        gitopsNamespaces: []
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/agent-manager
+          tag: 1.1.7
+      networkPolicy:
+        egress:
+          cidrs: []
+          fqdns:
+          - matchPattern: '*.blob.core.windows.net'
+          - matchName: api.github.com
+        ingress:
+          additionalPeers: []
+      podDisruptionBudget:
+        enabled: true
+        maxUnavailable: null
+        minAvailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+      route:
+        enabled: false
+        hostname: ""
+        jwtAuthentication:
+          enabled: false
+          issuer: ""
+          jwks:
+            host: dex.giantswarm.svc.cluster.local
+            path: /keys
+            port: 5556
+            tls:
+              caSecretName: ""
+              enabled: false
+          mode: Strict
+        parentRef:
+          name: giantswarm-default
+          namespace: envoy-gateway-system
+        pathPrefix: /agent-manager
+    agentSandbox:
+      podSecurity:
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        enabled: false
+        namespace: agent-sandbox-system
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+    agentgateway:
+      controller:
+        image:
+          repository: giantswarm/agentgateway-upstream/controller
+          tag: 2.0.0
+        replicaCount: 2
+      fullnameOverride: agentgateway-controller
+      image:
+        registry: gsoci.azurecr.io
+      monitoring:
+        enabled: false
+        grafanaDashboard:
+          annotations:
+            observability.giantswarm.io/folder: Agent Platform
+            observability.giantswarm.io/organization: Shared Org
+          enabled: true
+          labels:
+            app.giantswarm.io/kind: dashboard
+        serviceMonitor:
+          enabled: true
+          extraLabels:
+            observability.giantswarm.io/tenant: giantswarm
+          interval: 60s
+      podAnnotations:
+        application.giantswarm.io/team: bumblebee
+      podSecurityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      proxy:
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/agentgateway-upstream/agentgateway
+          tag: 2.0.0
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 50m
+          memory: 128Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+    backstage:
+      backstage:
+        args:
+        - --config
+        - app-config.yaml
+        - --config
+        - app-config.production.yaml
+        extraAppConfig:
+        - configMapRef: agent-platform-backstage-app-config
+          filename: app-config.agent-platform.yaml
+        extraEnvVars:
+        - name: AUTH_SESSION_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: backstage-session-secret
+              name: '{{ .Values.global.identity.existingSecret }}'
+        - name: AGENT_PLATFORM_OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: dex-client-secret
+              name: '{{ .Values.global.identity.existingSecret }}'
+        - name: NODE_EXTRA_CA_CERTS
+          value: '{{ with (dig "identity" "ca" "secretName" "" .Values.global) }}/etc/agent-platform/idp-ca/{{
+            dig "identity" "ca" "key" "ca.crt" $.Values.global }}{{ end }}'
+        extraVolumeMounts:
+        - mountPath: /etc/agent-platform/idp-ca
+          name: idp-ca
+          readOnly: true
+        extraVolumes:
+        - name: idp-ca
+          secret:
+            optional: true
+            secretName: '{{ dig "identity" "ca" "secretName" "" .Values.global | default
+              "agent-platform-idp-ca" }}'
+      catalogs:
+        version: v0.6.0
+      configReload:
+        enabled: true
+        image:
+          name: giantswarm/kubectl
+          registry: gsoci.azurecr.io
+          version: v1.37.0
+      disabledExtensions:
+      - page:gs/clusters
+      - nav-item:gs/clusters
+      - page:gs/deployments
+      - nav-item:gs/deployments
+      - page:gs/installations
+      - nav-item:gs/installations
+      - page:flux
+      - nav-item:flux
+      - page:ai-chat
+      - api:ai-chat/service
+      - api:ai-chat/drawer
+      - app-root-element:ai-chat/drawer
+      enabledExtensions: []
+      extraScopes:
+      - federated:id
+      - audience:server:client_id:dex-k8s-authenticator
+      hostname: ""
+      ingress:
+        enabled: false
+      installationName: agent-platform
+      parentRefs: []
+      resources:
+        verticalPodAutoscaler:
+          enabled: false
+      skillsRepositories:
+      - https://github.com/giantswarm/agent-skills
+      startUrlSearchParams: {}
+    cloudnative-pg: {}
+    components:
+      agent-manager:
+        enabled: false
+      agent-platform-connectivity:
+        enabled: true
+      agent-platform-mcps:
+        enabled: false
+      agent-sandbox:
+        enabled: false
+      agentgateway:
+        enabled: false
+      backstage:
+        enabled: false
+      cloudnative-pg:
+        enabled: false
+      cluster-manager:
+        enabled: false
+      dicebear:
+        enabled: true
+      flux:
+        enabled: true
+      gpu-operator:
+        enabled: false
+      kagent:
+        enabled: false
+      kagent-crds:
+        enabled: false
+      klaus-gateway:
+        enabled: false
+      kserve-llmisvc-crd:
+        enabled: false
+      kserve-llmisvc-resources:
+        enabled: false
+      kserve-runtime-configs:
+        enabled: false
+      mcp-kubernetes:
+        enabled: false
+      model-manager:
+        enabled: true
+      modelServing:
+        enabled: false
+      muster:
+        enabled: true
+      substrate:
+        enabled: false
+      substrate-crds:
+        enabled: false
+      valkey:
+        enabled: true
+      vm-manager:
+        enabled: false
+    dashboards:
+      enabled: true
+      folder: Agent Platform
+      namespace: ""
+      organization: Shared Org
+    dicebear:
+      route:
+        enabled: false
+        hostnames: []
+        parentRefs: []
+    extraObjects: []
+    gateway:
+      gatewayClassName: agentgateway
+      jwksEgress:
+        enabled: false
+        external:
+          cidrs: []
+          fqdns: []
+          port: 443
+        namespace: giantswarm
+        podSelector: {}
+        port: 5556
+      listeners:
+      - allowedRoutes:
+          namespaces:
+            from: Same
+        name: http
+        port: 8080
+        protocol: HTTP
+      metricLabels:
+        agent:
+          enabled: true
+          expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent"]
+            : source.unverifiedWorkload.serviceAccount'
+        agent_namespace:
+          enabled: true
+          expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-namespace"]
+            : source.unverifiedWorkload.namespace'
+        user:
+          enabled: true
+          expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-user"]
+            : jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
+      name: agentgateway
+      parameters:
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        dataPlaneEnv:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otlp-gateway.kube-system.svc:4317
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: grpc
+        dataPlaneResources:
+          limits:
+            cpu: 2000m
+            ephemeral-storage: 512Mi
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            ephemeral-storage: 50Mi
+            memory: 128Mi
+        dataPlaneVolumeMounts: []
+        dataPlaneVolumes: []
+        enabled: true
+        name: ""
+        podAnnotations: {}
+        podDisruptionBudget:
+          enabled: true
+        podLabels:
+          observability.giantswarm.io/tenant: giantswarm
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        replicas: 2
+        serviceType: ClusterIP
+        spread:
+          enabled: true
+          maxSkew: 1
+          topologyKeys:
+          - kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+    gatewayApi:
+      gateway:
+        create: false
+        serviceType: LoadBalancer
+        tls:
+          secretName: ""
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    hooks:
+      kubectlImage:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/alpine-k8s
+        tag: 1.37.0
+      opensslImage:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/alpine-openssl
+        tag: 3.5.8
+    ingress:
+      backendTrafficPolicy:
+        annotations: {}
+        enabled: false
+        labels: {}
+        timeout: 0s
+      hostnames: []
+      httpRoute:
+        annotations: {}
+        labels: {}
+        mcp:
+          annotations: {}
+          labels: {}
+        muster:
+          annotations: {}
+          labels: {}
+        timeouts: {}
+      mode: muster-direct
+      parentRefs: []
+    kagent:
+      controller:
+        agentImage:
+          repository: giantswarm/kagent/golang-adk
+        auth:
+          mode: trusted-proxy
+          userIdClaim: email
+        env: []
+        image:
+          repository: giantswarm/kagent/controller
+        metrics:
+          enabled: false
+        pdb:
+          enabled: true
+          maxUnavailable: ""
+          minAvailable: 1
+          unhealthyPodEvictionPolicy: AlwaysAllow
+        podAnnotations:
+          karpenter.sh/do-not-disrupt: "true"
+        resources:
+          limits:
+            cpu: 2
+            memory: 1536Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        substrate:
+          ateApiEndpoint: dns:///api.ate-system.svc:443
+          atenetRouterURL: http://atenet-router.ate-system.svc:80
+          defaultWorkerPool:
+            name: kagent-default
+          enabled: true
+        vpa:
+          controlledValues: RequestsOnly
+          enabled: false
+          maxAllowed:
+            cpu: 1900m
+            memory: 1280Mi
+          minAllowed:
+            cpu: 100m
+            memory: 128Mi
+          updateMode: InPlaceOrRecreate
+      controllerRoute:
+        enabled: false
+        grpc:
+          services:
+            kagent.api.v1alpha1.AgentInstanceService: []
+            kagent.api.v1alpha1.AgentTemplateService: []
+            kagent.api.v1alpha1.ModelService: []
+            kagent.api.v1alpha1.SystemService: []
+            lf.a2a.v1.A2AService: []
+        hostname: ""
+        jwtAuthentication:
+          enabled: true
+          issuer: ""
+          jwks:
+            host: dex.giantswarm.svc.cluster.local
+            path: /keys
+            port: 5556
+            tls:
+              caSecretName: ""
+              enabled: false
+          mode: Strict
+        parentRef:
+          name: giantswarm-default
+          namespace: envoy-gateway-system
+      database:
+        postgres:
+          bundled:
+            image:
+              name: pgvector
+              repository: pgvector
+              tag: pg18-trixie
+          vectorEnabled: true
+      fluxServiceAccountName: kagent-flux
+      fullnameOverride: kagent
+      grafana-mcp:
+        enabled: false
+      harness:
+        allowedAgentTemplates:
+          selector:
+            matchLabels:
+              agent-platform.giantswarm.io/harness: kagent
+              kagent.dev/harness: ""
+        create: true
+        env:
+        - name: KAGENT_PROPAGATE_TOKEN
+          value: "true"
+        - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
+          value: "500"
+        image: ""
+        snapshotLocation: ""
+        snapshotStore:
+          crossplane:
+            aws:
+              accountId: ""
+              bucketName: ""
+              lifecycleDays: 30
+              oidcProvider: ""
+              roleName: ""
+            capz:
+              containerName: ""
+              lifecycleDays: 30
+              replicationType: LRS
+              resourceGroup: ""
+              storageAccountName: ""
+              subscriptionId: ""
+              workloadIdentity:
+                identityName: ""
+                oidcIssuerUrl: ""
+                providerKubernetes:
+                  providerConfigRef: ""
+                  serviceAccount:
+                    name: ""
+                    namespace: crossplane
+            enabled: false
+            observeOnly: false
+            provider: aws
+            providerConfigRef: ""
+            region: ""
+            tags: {}
+          prefix: kagent
+          s3proxy:
+            azure:
+              account: ""
+              accountKeySecretRef:
+                key: ""
+                name: ""
+              container: ""
+              endpoint: ""
+            enabled: false
+            image:
+              repository: gsoci.azurecr.io/giantswarm/s3proxy
+              tag: 4.1.1
+            javaOpts: -XX:MaxRAMPercentage=70
+            replicas: 2
+            resources:
+              limits:
+                ephemeral-storage: 1Gi
+                memory: 1Gi
+              requests:
+                cpu: 250m
+                ephemeral-storage: 256Mi
+                memory: 1Gi
+      kagent-tools:
+        enabled: false
+        namespaceOverride: kagent
+      kmcp:
+        enabled: false
+        namespaceOverride: kagent
+      modelConfigs: []
+      namespaceOverride: kagent
+      oauth2-proxy:
+        config:
+          clientID: ""
+          clientSecret: ""
+          cookieSecret: ""
+          existingSecret: ""
+        enabled: false
+        extraArgs:
+          approval-prompt: auto
+          cookie-refresh: 10m
+          cookie-samesite: lax
+          cookie-secure: true
+          custom-templates-dir: /templates
+          email-domain: '*'
+          oidc-issuer-url: $(OIDC_ISSUER_URL)
+          pass-authorization-header: true
+          provider: oidc
+          redirect-url: $(OIDC_REDIRECT_URL)
+          reverse-proxy: true
+          scope: openid profile email groups offline_access
+          set-authorization-header: true
+          skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
+          skip-auth-route: ^/(health|login)$
+          skip-jwt-bearer-tokens: true
+          upstream: $(UPSTREAM_URL)
+        extraEnv:
+        - name: OIDC_ISSUER_URL
+          value: ""
+        - name: OIDC_REDIRECT_URL
+          value: ""
+        - name: UPSTREAM_URL
+          value: http://kagent-ui:8080
+        extraVolumeMounts:
+        - mountPath: /templates
+          name: custom-templates
+          readOnly: true
+        extraVolumes:
+        - configMap:
+            name: kagent-oauth2-proxy-templates
+          name: custom-templates
+        fullnameOverride: kagent-oauth2-proxy
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: false
+            interval: 60s
+            labels:
+              observability.giantswarm.io/tenant: giantswarm
+        namespaceOverride: kagent
+        redis:
+          enabled: false
+        service:
+          portNumber: 4180
+          type: ClusterIP
+        sessionStorage:
+          type: cookie
+      otel:
+        logging:
+          enabled: false
+          exporter:
+            otlp:
+              endpoint: http://otlp-gateway.kube-system.svc:4317
+              insecure: true
+        tracing:
+          enabled: false
+          exporter:
+            otlp:
+              endpoint: http://otlp-gateway.kube-system.svc:4317
+              insecure: true
+              protocol: grpc
+      podSecurityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      providers:
+        anthropic:
+          apiKey: ""
+          apiKeySecretKey: ANTHROPIC_API_KEY
+          apiKeySecretRef: kagent-anthropic
+          config:
+            cacheTTL: 5m
+            promptCaching: true
+          model: claude-sonnet-4-6
+          provider: Anthropic
+        default: anthropic
+      registry: gsoci.azurecr.io
+      remoteMcpServers: []
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      serviceMonitor:
+        enabled: false
+        interval: 60s
+        labels:
+          observability.giantswarm.io/tenant: giantswarm
+      substrateWorkerPool:
+        create: true
+        name: kagent-default
+        podDisruptionBudget:
+          enabled: true
+          maxUnavailable: 1
+          minAvailable: null
+          unhealthyPodEvictionPolicy: AlwaysAllow
+        replicas: 4
+        sandboxClass: gvisor
+        template:
+          nodeSelector:
+            kubernetes.io/arch: amd64
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+        workerImage: ""
+      ui:
+        image:
+          repository: giantswarm/kagent/ui
+      uiRoute:
+        backendTrafficPolicy:
+          annotations: {}
+          enabled: true
+          labels: {}
+          timeout: 60s
+        enabled: false
+        hostname: ""
+        parentRef:
+          name: giantswarm-default
+          namespace: envoy-gateway-system
+    kagent-crds:
+      kmcp:
+        enabled: false
+      substrate:
+        enabled: false
+    klausGateway:
+      a2a:
+        defaultAgent: ""
+        enabled: false
+        fallbackIconUrlTemplate: ""
+        saToken:
+          audience: kagent
+          enabled: false
+        url: grpc://agentgateway.agent-platform.svc.cluster.local:8080
+      agentgateway:
+        enabled: false
+      agentgatewayRoute:
+        enabled: false
+        hostname: ""
+      cli:
+        enabled: false
+      image:
+        registry: gsoci.azurecr.io
+      lifecycle:
+        driver: static
+        staticInstances: ""
+      obo:
+        callbackBaseUrl: ""
+        connectors:
+          enabled: false
+        enabled: false
+        existingSecret: ""
+        musterUrl: ""
+        persistence:
+          enabled: false
+          size: 64Mi
+        stateKey: ""
+        storeKey: ""
+        storePath: ""
+      observability:
+        enabled: false
+        otlpEndpoint: ""
+        otlpHeaders: {}
+      podAnnotations:
+        karpenter.sh/do-not-disrupt: "true"
+      podDisruptionBudget:
+        enabled: true
+        minAvailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+      routing:
+        defaultTTL: 24h
+        store: memory
+      serviceMonitor:
+        enabled: false
+        labels:
+          observability.giantswarm.io/tenant: giantswarm
+      slack:
+        appToken: ""
+        botToken: ""
+        channelAllowlist: []
+        channelMode: ""
+        dmMode: ""
+        enabled: false
+        mode: events
+        secretName: ""
+        signingSecret: ""
+      upstream:
+        agentgatewayURL: ""
+    kserve-llmisvc-crd: {}
+    kserve-llmisvc-resources:
+      kserve:
+        controller:
+          deploymentMode: Standard
+          gateway:
+            disableIngressCreation: true
+        createSharedResources: true
+        llmisvc:
+          controller:
+            metricsSecure: false
+            serviceMonitor:
+              enabled: false
+              interval: 60s
+              labels:
+                observability.giantswarm.io/tenant: giantswarm
+          createGIECRDs: true
+    kyvernoPolicies:
+      enabled: false
+      policyExceptionNamespace: policy-exceptions
+      rules:
+        adding-capabilities: disallow-capabilities
+        adding-capabilities-strict: disallow-capabilities-strict
+        app-armor: restrict-apparmor-profiles
+        check-seccomp: restrict-seccomp
+        check-seccomp-strict: restrict-seccomp-strict
+        host-path: disallow-host-path
+        host-ports-none: disallow-host-ports
+        privilege-escalation: disallow-privilege-escalation
+        privileged-containers: disallow-privileged-containers
+        require-drop-all: disallow-capabilities-strict
+        restricted-volumes: restrict-volume-types
+        run-as-non-root: require-run-as-nonroot
+        run-as-non-root-user: require-run-as-non-root-user
+    llmRouting:
+      backend:
+        name: anthropic
+        provider: anthropic
+      enabled: false
+      listener:
+        name: llm
+        port: 8081
+      modelCatalog:
+        enabled: true
+        key: catalog.json
+        name: ""
+        providers:
+          anthropic:
+            models:
+              claude-fable-5-1:
+                rates:
+                  cacheRead: "0.25"
+                  cacheWrite: "12.5"
+                  input: "10"
+                  output: "50"
+              claude-haiku-4-5:
+                rates:
+                  cacheRead: "0.1"
+                  cacheWrite: "1.25"
+                  input: "1"
+                  output: "5"
+              claude-opus-4-5:
+                rates:
+                  cacheRead: "0.5"
+                  cacheWrite: "6.25"
+                  input: "5"
+                  output: "25"
+              claude-opus-5:
+                rates:
+                  cacheRead: "0.5"
+                  cacheWrite: "6.25"
+                  input: "5"
+                  output: "25"
+              claude-sonnet-4-5:
+                rates:
+                  cacheRead: "0.3"
+                  cacheWrite: "3.75"
+                  input: "3"
+                  output: "15"
+              claude-sonnet-4-6:
+                rates:
+                  cacheRead: "0.3"
+                  cacheWrite: "3.75"
+                  input: "3"
+                  output: "15"
+              claude-sonnet-5:
+                rates:
+                  cacheRead: "0.2"
+                  cacheWrite: "2.5"
+                  input: "2"
+                  output: "10"
+      modelConfigPolicy:
+        enabled: true
+      pathPrefixes:
+      - /v1
+      routes:
+        '*': Passthrough
+        /v1/messages: Messages
+        /v1/messages/count_tokens: AnthropicTokenCount
+    mcp-kubernetes:
+      fullnameOverride: mcp-kubernetes
+      grafanaDashboards:
+        enabled: false
+        folder: Agent Platform
+        giantswarm:
+          enabled: true
+          organization: Shared Org
+      kubernetesAudience: dex-k8s-authenticator
+      mcpKubernetes:
+        instrumentation:
+          serviceMonitor:
+            enabled: false
+            labels:
+              observability.giantswarm.io/tenant: giantswarm
+        oauth:
+          allowPrivateURLs: true
+          enableDownstreamOAuth: true
+          enabled: true
+          provider: dex
+          sso:
+            allowPrivateIPs: true
+    model-manager:
+      fullnameOverride: model-manager
+      kagent:
+        apiVersion: v1alpha3
+        disableWiring: false
+        namespace: kagent
+      lemonade:
+        agentHost: ""
+        endpoint: ""
+      lmstudio:
+        agentHost: ""
+        endpoint: ""
+      mcp:
+        enabled: true
+      muster:
+        mcpServer:
+          auth:
+            forwardToken: true
+            requiredAudiences:
+            - dex-k8s-authenticator
+          enabled: true
+      networkPolicy:
+        enabled: false
+      oauth:
+        dex:
+          allowPrivateURLs: true
+        downstream:
+          enabled: true
+        enabled: true
+        provider: dex
+        sso:
+          allowPrivateIPs: true
+      ollama:
+        agentHost: ""
+        endpoint: ""
+    modelManager:
+      kserve:
+        requireApi: true
+      networkPolicy:
+        egress:
+          cidrs: []
+          fqdns: []
+        huggingFace:
+          cidrs: []
+          fqdns:
+          - matchName: huggingface.co
+          - matchPattern: '*.huggingface.co'
+          - matchPattern: '*.hf.co'
+          - matchPattern: '*.*.hf.co'
+          - matchPattern: '*.*.*.hf.co'
+        ingress:
+          additionalPeers: []
+        registeredBackends: []
+      route:
+        enabled: false
+        hostname: ""
+        jwtAuthentication:
+          enabled: false
+          issuer: ""
+          jwks:
+            host: dex.giantswarm.svc.cluster.local
+            path: /keys
+            port: 5556
+            tls:
+              caSecretName: ""
+              enabled: false
+          mode: Strict
+        parentRef:
+          name: giantswarm-default
+          namespace: envoy-gateway-system
+        pathPrefix: /model-manager
+    muster:
+      crds:
+        install: false
+      enabled: true
+      fullnameOverride: muster
+      gatewayAPI:
+        enabled: false
+      image:
+        registry: gsoci.azurecr.io
+      muster:
+        oauth:
+          server:
+            baseUrl: ""
+            dex:
+              clientId: ""
+              issuerUrl: ""
+            enabled: true
+            existingSecret: ""
+            storage:
+              type: valkey
+              valkey:
+                secretKeyPassword: valkey-password
+                url: muster-valkey:6379
+        observability:
+          grafanaDashboard:
+            enabled: false
+            folder: Agent Platform
+            giantswarm:
+              enabled: true
+              organization: Shared Org
+          metrics:
+            prometheus:
+              prometheusRule:
+                enabled: false
+                labels:
+                  observability.giantswarm.io/tenant: giantswarm
+              serviceMonitor:
+                enabled: false
+                interval: 60s
+                labels:
+                  observability.giantswarm.io/tenant: giantswarm
+          otel:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            headers: X-Scope-OrgID=giantswarm
+            protocol: grpc
+        toolsetPresets:
+          agent-platform:
+            description: The platform's own management surface — agent-manager, model-manager,
+              vm-manager, cluster-manager and muster's core tools.
+            include:
+            - label: agent-platform.giantswarm.io/tool-group=agent-platform
+            - pattern: core_*
+          infrastructure:
+            description: The servers for the infrastructure underneath the platform (Giant
+              Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
+            include:
+            - label: agent-platform.giantswarm.io/tool-group=infrastructure
+      networkPolicy:
+        cilium:
+          allowClusterIngress: true
+        enabled: true
+        flavor: kubernetes
+      podAnnotations:
+        application.giantswarm.io/team: bumblebee
+        karpenter.sh/do-not-disrupt: "true"
+      podDisruptionBudget:
+        enabled: true
+        minAvailable: 1
+      rbac:
+        mcpServerEditor:
+          subjects:
+          - apiGroup: rbac.authorization.k8s.io
+            kind: Group
+            name: giantswarm-ad:giantswarm-admins
+          - apiGroup: rbac.authorization.k8s.io
+            kind: Group
+            name: giantswarm-github:giantswarm:giantswarm-admins
+        workflowEditor:
+          subjects:
+          - apiGroup: rbac.authorization.k8s.io
+            kind: Group
+            name: giantswarm-ad:giantswarm-admins
+          - apiGroup: rbac.authorization.k8s.io
+            kind: Group
+            name: giantswarm-github:giantswarm:giantswarm-admins
+    networkPolicy:
+      additionalEgressCIDRs: []
+      additionalEgressFQDNs: []
+      enabled: true
+      flavor: kubernetes
+      kubernetes:
+        apiServerCIDR: 0.0.0.0/0
+        worldExcludedCIDRs:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+      musterInClusterMcpPorts:
+      - 8080
+      - 8443
+    postgres:
+      affinity: {}
+      applicationDatabase:
+        ensure: present
+        name: kagent
+        owner: kagent
+        schema: kagent
+      backup:
+        crossplane:
+          aws:
+            accountId: ""
+            bucketName: ""
+            lifecycleDays: 45
+            oidcProvider: ""
+            roleName: ""
+          azure:
+            containerName: ""
+            lifecycleDays: 45
+            private: false
+            privateDnsZoneRef: ""
+            replicationType: LRS
+            resourceGroup: ""
+            storageAccountName: ""
+            subnetName: node-subnet
+            subscriptionId: ""
+            vnetName: ""
+          enabled: false
+          observeOnly: false
+          provider: aws
+          providerConfigRef: ""
+          region: ""
+          tags: {}
+        enabled: false
+        immediate: true
+        method: plugin
+        networkPolicy:
+          cidrs: []
+          fqdns: []
+          ports:
+          - "443"
+        objectStore:
+          azure:
+            connectionString:
+              key: ""
+              name: ""
+            inheritFromAzureAD: false
+            storageAccount:
+              key: ""
+              name: ""
+            storageKey:
+              key: ""
+              name: ""
+          data:
+            compression: gzip
+          destinationPath: ""
+          endpointURL: ""
+          existingName: ""
+          retentionPolicy: 30d
+          s3:
+            accessKeyId:
+              key: ACCESS_KEY_ID
+              name: ""
+            inheritFromIAMRole: false
+            secretAccessKey:
+              key: ACCESS_SECRET_KEY
+              name: ""
+          sidecar:
+            resources: {}
+          wal:
+            compression: gzip
+            maxParallel: 1
+        schedule: 0 0 2 * * *
+        serverName: ""
+        serviceAccount:
+          annotations: {}
+        suspend: false
+        volumeSnapshot:
+          className: ""
+          online: true
+          walClassName: ""
+      clusterName: kagent-pg
+      databases:
+        kagent-v2:
+          component: kagent
+          enabled: true
+          extensions:
+          - vector
+          name: kagent_v2
+          reclaimPolicy: retain
+          secretNamespaces: []
+        substrate:
+          component: substrate
+          enabled: true
+          extensions: []
+          name: substrate
+          reclaimPolicy: retain
+          secretNamespaces:
+          - ate-system
+      enabled: false
+      image:
+        name: ""
+      imagePullSecrets: []
+      instances: 3
+      namespace: kagent
+      sessionsDatabase:
+        enabled: false
+        name: sessions
+        owner: sessions
+      storage:
+        size: 20Gi
+        storageClass: ""
+      vector:
+        enabled: false
+        extensionImage:
+          reference: ""
+    substrate:
+      atelet:
+        affinity: {}
+        extraEnv: []
+        imageCache:
+          pinnedImages: []
+        nodeSelector: {}
+        storageBackend: s3
+        tolerations: []
+      createNamespace: false
+      image:
+        registry: gsoci.azurecr.io/giantswarm/substrate
+      images:
+        agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0
+        awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+        postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+        rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+      postgres:
+        connectionString: ""
+        enabled: true
+        schema: public
+      rustfs:
+        enabled: false
+    substrate-crds: {}
+    valkey:
+      ciliumNetworkPolicy:
+        enabled: false
+      podDisruptionBudget:
+        enabled: true
+        maxUnavailable: null
+        minAvailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+      valkey:
+        auth:
+          aclUsers:
+            default:
+              passwordKey: ""
+              permissions: ~* &* +@all
+          enabled: true
+          usersExistingSecret: ""
+        dataStorage:
+          enabled: true
+          requestedSize: 1Gi
+        deploymentStrategy: Recreate
+        fullnameOverride: muster-valkey
+        metrics:
+          exporter:
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
+          podMonitor:
+            enabled: false
+        podAnnotations:
+          karpenter.sh/do-not-disrupt: "true"
+        podSecurityContext:
+          fsGroup: 1000
+          runAsGroup: 1000
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        replicaCount: 1
+        resources:
+          limits:
+            cpu: 200m
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        valkeyConfig: |
+          maxmemory 640mb
+          maxmemory-policy volatile-lru
+      vpa:
+        enabled: false
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: dicebear
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: dicebear
+  targetNamespace: default
+  serviceAccountName: agent-platform-flux
+  chartRef:
+    kind: OCIRepository
+    name: dicebear
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    route:
+      enabled: false
+      hostnames: []
+      parentRefs: []
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: model-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: model-manager
+  targetNamespace: default
+  serviceAccountName: agent-platform-flux
+  chartRef:
+    kind: OCIRepository
+    name: model-manager
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+  values:
+    fullnameOverride: model-manager
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    kagent:
+      apiVersion: v1alpha3
+      disableWiring: true
+      namespace: kagent
+    lemonade:
+      agentHost: ""
+      endpoint: ""
+    lmstudio:
+      agentHost: ""
+      endpoint: ""
+    mcp:
+      enabled: true
+    muster:
+      mcpServer:
+        auth:
+          forwardToken: true
+          requiredAudiences:
+          - dex-k8s-authenticator
+        enabled: true
+    networkPolicy:
+      enabled: false
+    oauth:
+      dex:
+        allowPrivateURLs: true
+      downstream:
+        enabled: true
+      enabled: true
+      provider: dex
+      sso:
+        allowPrivateIPs: true
+    ollama:
+      agentHost: ""
+      endpoint: ""
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: muster
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: muster
+  targetNamespace: default
+  serviceAccountName: agent-platform-flux
+  chartRef:
+    kind: OCIRepository
+    name: muster
+    namespace: default
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  driftDetection:
+    mode: enabled
+  values:
+    crds:
+      install: false
+    enabled: true
+    fullnameOverride: muster
+    gatewayAPI:
+      enabled: false
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    image:
+      registry: gsoci.azurecr.io
+    muster:
+      oauth:
+        server:
+          baseUrl: ""
+          dex:
+            clientId: ""
+            issuerUrl: ""
+          enabled: true
+          existingSecret: ""
+          storage:
+            type: valkey
+            valkey:
+              secretKeyPassword: valkey-password
+              url: muster-valkey:6379
+      observability:
+        grafanaDashboard:
+          enabled: false
+          folder: Agent Platform
+          giantswarm:
+            enabled: true
+            organization: Shared Org
+        metrics:
+          prometheus:
+            prometheusRule:
+              enabled: false
+              labels:
+                observability.giantswarm.io/tenant: giantswarm
+            serviceMonitor:
+              enabled: false
+              interval: 60s
+              labels:
+                observability.giantswarm.io/tenant: giantswarm
+        otel:
+          endpoint: http://otlp-gateway.kube-system.svc:4317
+          headers: X-Scope-OrgID=giantswarm
+          protocol: grpc
+      toolsetPresets:
+        agent-platform:
+          description: The platform's own management surface — agent-manager, model-manager,
+            vm-manager, cluster-manager and muster's core tools.
+          include:
+          - label: agent-platform.giantswarm.io/tool-group=agent-platform
+          - pattern: core_*
+        infrastructure:
+          description: The servers for the infrastructure underneath the platform (Giant
+            Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
+          include:
+          - label: agent-platform.giantswarm.io/tool-group=infrastructure
+    networkPolicy:
+      cilium:
+        allowClusterIngress: true
+      enabled: true
+      flavor: kubernetes
+    podAnnotations:
+      application.giantswarm.io/team: bumblebee
+      karpenter.sh/do-not-disrupt: "true"
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    rbac:
+      mcpServerEditor:
+        subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+      workflowEditor:
+        subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: valkey
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: valkey
+  targetNamespace: default
+  serviceAccountName: agent-platform-flux
+  chartRef:
+    kind: OCIRepository
+    name: valkey
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    ciliumNetworkPolicy:
+      enabled: false
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: ""
+            headers: {}
+            protocol: ""
+      registry: gsoci.azurecr.io
+    valkey:
+      auth:
+        aclUsers:
+          default:
+            passwordKey: ""
+            permissions: ~* &* +@all
+        enabled: true
+        usersExistingSecret: ""
+      dataStorage:
+        enabled: true
+        requestedSize: 1Gi
+      deploymentStrategy: Recreate
+      fullnameOverride: muster-valkey
+      metrics:
+        exporter:
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+        podMonitor:
+          enabled: false
+      podAnnotations:
+        karpenter.sh/do-not-disrupt: "true"
+      podSecurityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      replicaCount: 1
+      resources:
+        limits:
+          cpu: 200m
+          memory: 1Gi
+        requests:
+          cpu: 50m
+          memory: 256Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      valkeyConfig: |
+        maxmemory 640mb
+        maxmemory-policy volatile-lru
+    vpa:
+      enabled: false
+---
+# Source: agent-platform/templates/self/release.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: t
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: self-management
+spec:
+  interval: 10m
+  # created suspended; the resumer Job resumes it once the release is deployed
+  suspend: true
+  releaseName: t
+  targetNamespace: default
+  serviceAccountName: agent-platform-flux
+  chartRef:
+    kind: OCIRepository
+    name: t
+  install:
+    disableWait: true
+    remediation:
+      retries: 5
+  upgrade:
+    disableWait: true
+    remediation:
+      retries: 5
+  valuesFrom:
+    - kind: Secret
+      name: agent-platform-values
+      valuesKey: values.yaml
+      optional: false
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agent-platform-connectivity
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-connectivity
+  ref:
+    semver: "1.1.35"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: dicebear
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/dicebear
+  ref:
+    semver: "0.x"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: model-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/model-manager
+  ref:
+    semver: ">=0.23.0 <2.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: muster
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/muster
+  ref:
+    semver: ">=5.12.0 <6.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: valkey
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/valkey
+  ref:
+    semver: "0.x"
+---
+# Source: agent-platform/templates/self/release.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: t
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: self-management
+spec:
+  interval: 10m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform
+  ref:
+    semver: ">=1.1.35 <2.0.0"
+---
+# Source: agent-platform/templates/self/policy.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: t-self-managed-default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: self-management
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: helm-storage-of-this-release
+      expression: >-
+        object.type == 'helm.sh/release.v1' && has(object.metadata.labels) &&
+        'name' in object.metadata.labels && object.metadata.labels['name'] == "t"
+  variables:
+    - name: handBack
+      expression: >-
+        has(namespaceObject.metadata.annotations) &&
+        "agent-platform.giantswarm.io/helm-cli" in namespaceObject.metadata.annotations &&
+        namespaceObject.metadata.annotations["agent-platform.giantswarm.io/helm-cli"] == 'allow'
+  validations:
+    - expression: >-
+        request.userInfo.username == "system:serviceaccount:default:agent-platform-flux" || variables.handBack
+      reason: Forbidden
+      message: >-
+        release t manages itself through its bundled Flux: change values by rewriting
+        Secret agent-platform-values in namespace default (key values.yaml),
+        or hand the release back to the Helm CLI — annotate the namespace agent-platform.giantswarm.io/helm-cli=allow, then
+        helm upgrade --set gitops.self.enabled=false --force-conflicts
+---
+# Source: agent-platform/templates/self/policy.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: t-self-managed-default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: self-management
+spec:
+  policyName: t-self-managed-default
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: default
+---
+# Source: agent-platform/templates/hooks/netpol.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: t-hooks
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: "t"
+      app.kubernetes.io/component: hooks
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "0.0.0.0/0"
+---
+# Source: agent-platform/templates/hooks/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: t-hooks
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+# Source: agent-platform/templates/hooks/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: t-hooks
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: t-hooks
+    namespace: default
+---
+# Source: agent-platform/templates/hooks/self.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t-self-stop-resumer
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "-6"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    agent-platform.giantswarm.io/about: "stop a resumer Job still running from the last operation"
+spec:
+  # kubectl waits up to 5 minutes for the deletions it requested; the Job gives
+  # up after 10 and Helm's --timeout bounds the whole event. Two retries cover a
+  # transient API error; a hook that still fails aborts the operation before
+  # Helm deletes anything (a failed pre-delete hook leaves the release
+  # `uninstalling` and the platform untouched).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # hook-succeeded removes a finished Job; a failed one is kept for an hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: "agent-platform"
+        app.kubernetes.io/name: "agent-platform"
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "0.1.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "agent-platform-1.1.35"
+        app.kubernetes.io/component: hooks
+    spec:
+      serviceAccountName: t-self
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubectl
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          args:
+            - "delete"
+            - "jobs.batch"
+            - "--namespace"
+            - "default"
+            - "t-self-resume"
+            - "--ignore-not-found"
+          env:
+            # kubectl keeps its discovery cache and helm its cache and config
+            # under $HOME; the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # The requests stay small: a hook is a burst of kubectl runs. The limit
+          # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
+          # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
+          # and nothing a hook does scales with the cluster (the storage-version
+          # backup reads the release Secrets one at a time and parses only a
+          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # 128Mi three seconds into its first kubectl calls on a busy node
+          # (giantswarm/agent-platform#593); 512Mi is four times that pod's
+          # whole budget and is never approached in a normal run.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Source: agent-platform/templates/hooks/self.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t-self-suspend
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    agent-platform.giantswarm.io/about: "suspend the chart's own HelmRelease (deleted without an uninstall, cannot re-create the platform HelmReleases) and drop the hook-written values Secret"
+spec:
+  # kubectl waits up to 5 minutes for the deletions it requested; the Job gives
+  # up after 10 and Helm's --timeout bounds the whole event. Two retries cover a
+  # transient API error; a hook that still fails aborts the operation before
+  # Helm deletes anything (a failed pre-delete hook leaves the release
+  # `uninstalling` and the platform untouched).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # hook-succeeded removes a finished Job; a failed one is kept for an hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: "agent-platform"
+        app.kubernetes.io/name: "agent-platform"
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "0.1.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "agent-platform-1.1.35"
+        app.kubernetes.io/component: hooks
+    spec:
+      serviceAccountName: t-self
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sh
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              ns="default"
+              rel="t"
+              if kubectl get helmreleases.helm.toolkit.fluxcd.io "$rel" -n "$ns" >/dev/null 2>&1; then
+                kubectl patch helmreleases.helm.toolkit.fluxcd.io "$rel" -n "$ns" --type merge -p '{"spec":{"suspend":true}}'
+                echo "self HelmRelease $ns/$rel suspended"
+              else
+                echo "no self HelmRelease $ns/$rel (or no HelmRelease API): nothing to suspend"
+              fi
+              # the hook-written values Secret (by its labels, never by name alone)
+              kubectl delete secrets -n "$ns" -l "app.kubernetes.io/component=self-management,app.kubernetes.io/instance=$rel" --ignore-not-found
+          env:
+            # kubectl keeps its discovery cache and helm its cache and config
+            # under $HOME; the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # The requests stay small: a hook is a burst of kubectl runs. The limit
+          # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
+          # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
+          # and nothing a hook does scales with the cluster (the storage-version
+          # backup reads the release Secrets one at a time and parses only a
+          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # 128Mi three seconds into its first kubectl calls on a busy node
+          # (giantswarm/agent-platform#593); 512Mi is four times that pod's
+          # whole budget and is never approached in a normal run.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Source: agent-platform/templates/hooks/self.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t-self-values
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    agent-platform.giantswarm.io/about: "write the user-supplied values of this release into the values Secret the self HelmRelease reads, and resume the self HelmRelease once the release is deployed"
+spec:
+  # kubectl waits up to 5 minutes for the deletions it requested; the Job gives
+  # up after 10 and Helm's --timeout bounds the whole event. Two retries cover a
+  # transient API error; a hook that still fails aborts the operation before
+  # Helm deletes anything (a failed pre-delete hook leaves the release
+  # `uninstalling` and the platform untouched).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # hook-succeeded removes a finished Job; a failed one is kept for an hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: "agent-platform"
+        app.kubernetes.io/name: "agent-platform"
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "0.1.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "agent-platform-1.1.35"
+        app.kubernetes.io/component: hooks
+    spec:
+      serviceAccountName: t-self
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sh
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              ns="default"
+              rel="t"
+              secret="agent-platform-values"
+              # the USER-SUPPLIED values of the revision in flight — never the merged tree
+              helm get values "$rel" -n "$ns" -o yaml > /tmp/values.yaml
+              if [ "$(tr -d '[:space:]' < /tmp/values.yaml)" = "null" ]; then printf '{}\n' > /tmp/values.yaml; fi
+              rev=$(helm history "$rel" -n "$ns" -o json | jq -r 'map(.revision) | max')
+              echo "release $ns/$rel revision $rev: writing its user-supplied values ($(wc -c < /tmp/values.yaml | tr -d ' ') bytes) into Secret $ns/$secret"
+              kubectl create secret generic "$secret" -n "$ns" --from-file=values.yaml=/tmp/values.yaml --dry-run=client -o json \
+                | jq --arg rel "$rel" '.metadata.labels = {"reconcile.fluxcd.io/watch": "Enabled", "app.kubernetes.io/instance": $rel, "app.kubernetes.io/component": "self-management", "app.kubernetes.io/managed-by": "agent-platform-hooks"}' \
+                | kubectl apply --server-side --field-manager agent-platform-self-values --force-conflicts -f -
+              # the resumer: only while the self HelmRelease is suspended (the install, the
+              # upgrade into self-management); a controller-driven upgrade needs none
+              suspended=$(kubectl get helmreleases.helm.toolkit.fluxcd.io "$rel" -n "$ns" -o jsonpath='{.spec.suspend}' 2>/dev/null || echo "absent")
+              if [ "$suspended" = "true" ]; then
+                kubectl delete jobs.batch "$rel-self-resume" -n "$ns" --ignore-not-found
+                kubectl create -f - <<'EOF'
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: t-self-resume
+                namespace: default
+                labels:
+                  app: "agent-platform"
+                  app.kubernetes.io/name: "agent-platform"
+                  app.kubernetes.io/instance: "t"
+                  app.kubernetes.io/managed-by: "Helm"
+                  app.kubernetes.io/version: "0.1.0"
+                  application.giantswarm.io/team: "bumblebee"
+                  helm.sh/chart: "agent-platform-1.1.35"
+                  app.kubernetes.io/component: self-management
+                annotations:
+                  agent-platform.giantswarm.io/about: "resume the chart's own HelmRelease once the Helm release is deployed (started by the values hook)"
+              spec:
+                backoffLimit: 0
+                activeDeadlineSeconds: 420
+                ttlSecondsAfterFinished: 3600
+                template:
+                  metadata:
+                    labels:
+                      app: "agent-platform"
+                      app.kubernetes.io/name: "agent-platform"
+                      app.kubernetes.io/instance: "t"
+                      app.kubernetes.io/managed-by: "Helm"
+                      app.kubernetes.io/version: "0.1.0"
+                      application.giantswarm.io/team: "bumblebee"
+                      helm.sh/chart: "agent-platform-1.1.35"
+                      app.kubernetes.io/component: self-management
+                  spec:
+                    serviceAccountName: t-self
+                    restartPolicy: Never
+                    securityContext:
+                      runAsNonRoot: true
+                      runAsUser: 65532
+                      runAsGroup: 65532
+                      seccompProfile:
+                        type: RuntimeDefault
+                    containers:
+                      - name: sh
+                        image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+                        command: ["/bin/sh", "-eu", "-c"]
+                        args:
+                          - |
+                            ns="default"
+                            rel="t"
+                            deadline=$(( $(date +%s) + 300 ))
+                            while :; do
+                              status=$(helm status "$rel" -n "$ns" -o json 2>/dev/null | jq -r '.info.status // "unknown"')
+                              echo "$(date -u +%FT%TZ) release $ns/$rel: $status"
+                              case "$status" in
+                                deployed|failed)
+                                  kubectl patch helmreleases.helm.toolkit.fluxcd.io "$rel" -n "$ns" --type merge -p '{"spec":{"suspend":false}}'
+                                  echo "self HelmRelease $ns/$rel resumed (release $status): helm-controller adopts the release"
+                                  exit 0;;
+                              esac
+                              if [ "$(date +%s)" -ge "$deadline" ]; then
+                                echo "release $ns/$rel is still $status after 300 s: NOT resuming the self HelmRelease. Once the release is deployed, resume it by hand: kubectl -n $ns patch helmrelease $rel --type merge -p '{\"spec\":{\"suspend\":false}}'" >&2
+                                exit 1
+                              fi
+                              sleep 2
+                            done
+                        env:
+                          - name: HOME
+                            value: /tmp
+                        securityContext:
+                          allowPrivilegeEscalation: false
+                          readOnlyRootFilesystem: true
+                          capabilities:
+                            drop:
+                              - ALL
+                        # The requests stay small: a hook is a burst of kubectl runs. The limit
+                        # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
+                        # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
+                        # and nothing a hook does scales with the cluster (the storage-version
+                        # backup reads the release Secrets one at a time and parses only a
+                        # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+                        # 128Mi three seconds into its first kubectl calls on a busy node
+                        # (giantswarm/agent-platform#593); 512Mi is four times that pod's
+                        # whole budget and is never approached in a normal run.
+                        resources:
+                          requests:
+                            cpu: 10m
+                            memory: 32Mi
+                          limits:
+                            memory: 512Mi
+                        volumeMounts:
+                          - name: tmp
+                            mountPath: /tmp
+                    volumes:
+                      - name: tmp
+                        emptyDir: {}
+              EOF
+                echo "self HelmRelease $ns/$rel is suspended: resumer Job $ns/$rel-self-resume started"
+              else
+                echo "self HelmRelease $ns/$rel: suspend=$suspended, no resumer needed"
+              fi
+          env:
+            # kubectl keeps its discovery cache and helm its cache and config
+            # under $HOME; the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # The requests stay small: a hook is a burst of kubectl runs. The limit
+          # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
+          # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
+          # and nothing a hook does scales with the cluster (the storage-version
+          # backup reads the release Secrets one at a time and parses only a
+          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # 128Mi three seconds into its first kubectl calls on a busy node
+          # (giantswarm/agent-platform#593); 512Mi is four times that pod's
+          # whole budget and is never approached in a normal run.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Source: agent-platform/templates/hooks/teardown.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t-teardown-releases
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    agent-platform.giantswarm.io/about: "delete the platform HelmReleases in reverse dependency order while helm-controller still runs, waiting for each wave's releases to be uninstalled"
+spec:
+  # kubectl waits up to 5 minutes for the deletions it requested; the Job gives
+  # up after 10 and Helm's --timeout bounds the whole event. Two retries cover a
+  # transient API error; a hook that still fails aborts the operation before
+  # Helm deletes anything (a failed pre-delete hook leaves the release
+  # `uninstalling` and the platform untouched).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # hook-succeeded removes a finished Job; a failed one is kept for an hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: "agent-platform"
+        app.kubernetes.io/name: "agent-platform"
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "0.1.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "agent-platform-1.1.35"
+        app.kubernetes.io/component: hooks
+    spec:
+      serviceAccountName: t-hooks
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sh
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              # The platform HelmReleases in reverse dependency order (a CRD chart's release
+              # only after the releases whose objects are its CRs); kubectl waits for
+              # helm-controller to uninstall a wave before the next one starts.
+              echo "wave 1: agent-platform-connectivity dicebear model-manager valkey"
+              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agent-platform-connectivity dicebear model-manager valkey
+              echo "wave 2: muster"
+              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m muster
+          env:
+            # kubectl keeps its discovery cache and helm its cache and config
+            # under $HOME; the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # The requests stay small: a hook is a burst of kubectl runs. The limit
+          # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
+          # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
+          # and nothing a hook does scales with the cluster (the storage-version
+          # backup reads the release Secrets one at a time and parses only a
+          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # 128Mi three seconds into its first kubectl calls on a busy node
+          # (giantswarm/agent-platform#593); 512Mi is four times that pod's
+          # whole budget and is never approached in a normal run.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Source: agent-platform/templates/hooks/teardown.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t-teardown-engine
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    agent-platform.giantswarm.io/about: "delete the FluxInstance while the operator still runs, and wait for it to uninstall Flux and its CRDs"
+spec:
+  # kubectl waits up to 5 minutes for the deletions it requested; the Job gives
+  # up after 10 and Helm's --timeout bounds the whole event. Two retries cover a
+  # transient API error; a hook that still fails aborts the operation before
+  # Helm deletes anything (a failed pre-delete hook leaves the release
+  # `uninstalling` and the platform untouched).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # hook-succeeded removes a finished Job; a failed one is kept for an hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: "agent-platform"
+        app.kubernetes.io/name: "agent-platform"
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "0.1.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "agent-platform-1.1.35"
+        app.kubernetes.io/component: hooks
+    spec:
+      serviceAccountName: t-hooks
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubectl
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          args:
+            - "delete"
+            - "fluxinstances.fluxcd.controlplane.io"
+            - "--namespace"
+            - "default"
+            - "flux"
+            - "--ignore-not-found"
+            - "--wait"
+            - "--timeout=5m"
+          env:
+            # kubectl keeps its discovery cache and helm its cache and config
+            # under $HOME; the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # The requests stay small: a hook is a burst of kubectl runs. The limit
+          # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
+          # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
+          # and nothing a hook does scales with the cluster (the storage-version
+          # backup reads the release Secrets one at a time and parses only a
+          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # 128Mi three seconds into its first kubectl calls on a busy node
+          # (giantswarm/agent-platform#593); 512Mi is four times that pod's
+          # whole budget and is never approached in a normal run.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
