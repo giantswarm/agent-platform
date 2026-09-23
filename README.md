@@ -30,6 +30,7 @@ The decisive change: each component's version is a **constraint expressed as a v
 - **Per-component values keep their blocks; the on/off switch does not** — the existing `muster:`, `agentgateway:`, `kagent:`, `valkey:`, `klausGateway:`, `agentSandbox:`, `agent-platform-mcps:` blocks still drive each component's configuration, and the connectivity wiring blocks (`ingress:`, `gateway:`, `networkPolicy:`, `postgres:`, `extraObjects:`) still drive the wiring. Whether a component is installed at all is `components.<name>.enabled` — see [Enabling and disabling components](#enabling-and-disabling-components). Each `components.<name>` entry names its source block via `valuesFrom` (connectivity uses `forwardAllValues`).
 - **Dev vs customer track** — keep the `components.*.versionRange` values **wide** for the internal/dogfooding track (continuous auto-update, the default). **Pin** them to exact versions for a customer **bill-of-materials**; see [`helm/agent-platform/examples/customer-bom.yaml`](helm/agent-platform/examples/customer-bom.yaml). A "product release" is that pinned values snapshot.
 - **Dev channel** — `components.<name>.semverFilter` (rendered as `OCIRepository.spec.ref.semverFilter`) is a Go regexp the registry's tags must match *before* `versionRange` is evaluated. With a prerelease-admitting range (`>=3.0.0-0 <4.0.0-0`) and the filter of one branch's dev builds (`.*-dev\.<sanitized-branch>\..*`) a component follows that branch's newest build and never falls back to a stable tag; `gitops.self.semverFilter` does the same for the chart's own source under self-management. Unset by default. See [Dev channel](#dev-channel).
+- **Every `OCIRepository` selects the Helm chart layer** (`layerSelector: {mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip, operation: copy}`, the components' and the self-management one). Without a selector source-controller takes the artifact's first layer, and a signed chart's provenance layer sorts ahead of the chart on about every other release (`helm push` orders layers by digest; the upstream CloudNativePG chart 0.29.1, #649). `make verify-components-charts` asserts the selector and resolves the selected layer in every artifact a range or BOM pin resolves to.
 
 ### Dev channel
 
@@ -190,6 +191,9 @@ metadata:
 spec:
   interval: 1h
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform
+  layerSelector:        # the chart, not a provenance layer that may sort first
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
     semver: ">=1.0.0"   # pin a tag for a customer release
 ---
