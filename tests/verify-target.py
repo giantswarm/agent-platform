@@ -332,32 +332,6 @@ def hold_substrate_range(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
-# giantswarm/agent-platform#629: the data plane's budget gains cpu and memory on
-# both sides, so GOMEMLIMIT and GOMAXPROCS resolve against the pod's limits and
-# not the node's allocatable capacity. The forwarded block is blanked on BOTH
-# sides; drop once GOLDEN_REF carries the budget.
-DATAPLANE_RESOURCES = re.compile(r"^( +)dataPlaneResources:\n(?:\1 +\S.*\n)+", re.M)
-# The same budget as the connectivity chart renders it: the container's own
-# `resources:` on the AgentgatewayParameters. Keyed on the ephemeral-storage
-# limit so no other container's block is blanked.
-CONTAINER_RESOURCES = re.compile(r"^( +)resources:\n(?:\1 +\S.*\n)+", re.M)
-
-
-def hold_dataplane_resources(here: str, there: str) -> tuple:
-    """The two renders with the data plane's resource budget held equal on both sides."""
-    def container(match: "re.Match[str]") -> str:
-        if "ephemeral-storage: 512Mi" not in match.group(0):
-            return match.group(0)
-        return f"{match.group(1)}resources: <held: #629>\n"
-
-    def strip(render: str) -> str:
-        render = DATAPLANE_RESOURCES.sub(r"\1dataPlaneResources: <held: #629>\n", render)
-        return CONTAINER_RESOURCES.sub(container, render)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #629 hold — the agentgateway data plane's resource budget is left out of the golden comparison")
-    return h, strip(there)
-
-
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -513,11 +487,9 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_hook_pods(here, there)
                 here, there = hold_substrate_range(here, there)
                 here, there = hold_otlp_endpoints(here, there)
-                here, there = hold_dataplane_resources(here, there)
             else:
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)
-                here, there = hold_dataplane_resources(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
