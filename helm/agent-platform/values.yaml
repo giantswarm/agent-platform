@@ -337,14 +337,18 @@ components:  # @schema additionalProperties: true
     # rbac.mcpServerEditor/workflowEditor.subjects. Both are bound to the
     # Giant Swarm admin groups below, so the guard is satisfied.
     #
-    # Floor 5.12.0: the muster values below define toolsetPresets that select
-    # by the tool-group label (`label:` rules, muster#1168), and a muster
-    # before 5.12.0 refuses to start on such a preset. With the floor here the
+    # The muster values below define toolsetPresets that select by the
+    # tool-group label (`label:` rules, muster#1168), and a muster before
+    # 5.12.0 refuses to start on such a preset. With the floor here the
     # source re-resolves to a chart that has the rule before the release
     # applies the values that need it, so the two never meet on a cluster.
+    # Floor 5.31.4: a session on a forwarded bearer (an agent's on-behalf-of
+    # token, a forwarded ID token) ends at the bearer's exp, instead of its
+    # pooled connections forwarding the expired token to every backend until
+    # three rejections evict each of them (giantswarm/muster#1323).
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.12.0 <6.0.0"
+    versionRange: ">=5.31.4 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
