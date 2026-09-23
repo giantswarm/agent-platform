@@ -15,6 +15,17 @@
 #     tag push), the consumer-side wiring rendered by the meta-package as a
 #     HelmRelease versioned in lockstep with agent-platform off the same git
 #     commit. This repo has no Dockerfile, so no chart depends on an image build.
+#   - verify-release-floors (tags only): `make verify-release-floors`, the strict
+#     run of tests/verify-components-charts.py — every component range and BOM
+#     pin resolves to a chart that is pullable from its registry, no fallback
+#     (giantswarm/agent-platform#624). A meta chart release naming an unpublished
+#     component chart fails every installation's HelmRelease on the line, so the
+#     release is refused before either chart is pushed: push-connectivity-chart-release
+#     requires it here; the generated push-chart-release requires it through
+#     gen.ci.chartReleaseGateJob in giantswarm/github (a repo-owned job the
+#     generator gates the release push on, the way image.preBuildJob gates the
+#     image). A release refused this way is recovered by rerunning the tag's
+#     workflow from failed once the component chart is out, without a new tag.
 #
 # The agent-platform-crds chart has been RETIRED — every component now ships
 # its own CRDs (app-owned CRDs), so there is no longer a CRD-bundle chart to
@@ -70,9 +81,50 @@ jobs:
         # `helm dependency build`.
         command: make verify-all
 
+  verify-release-floors:
+    # The tag pipeline's gate (giantswarm/agent-platform#624). Same image and the
+    # same bounded, retried installs as test-ingress-modes, without kyverno: the
+    # strict check needs helm (to pull each component chart at the version the
+    # range and the BOM resolve to, the pullability proof) and PyYAML (the roster
+    # and the BOM are read from values.yaml and examples/customer-bom.yaml).
+    docker:
+    - image: cimg/base:current
+    steps:
+    - checkout
+    - run:
+        name: install helm + make + PyYAML
+        command: |
+          set -x
+          for attempt in 1 2 3; do
+            (command -v make >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null) && break
+            (sudo timeout 180 apt-get update -qq && sudo timeout 180 apt-get install -y -qq make python3-yaml) && break
+            echo "apt attempt $attempt failed or stalled; retrying" >&2; sleep 15
+          done
+          command -v make && python3 -c 'import yaml'
+          curl -fsSL --connect-timeout 20 --max-time 180 --retry 5 --retry-delay 10 --retry-all-errors https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz | tar xz -C /tmp
+          sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version
+    - run:
+        name: every component floor and BOM pin is published (make verify-release-floors)
+        # Red here names the component and the version the release waits for.
+        # Recovery: `devctl release wait` on the component, then rerun this
+        # workflow from failed — the tag stands, no new release.
+        command: make verify-release-floors
+
 workflows:
   build:
     jobs:
+    # ---- Release gate (giantswarm/agent-platform#624): tags only. The chart
+    #      pushes of the tag wait on it — the connectivity push below by its
+    #      requires, the generated push-chart-release through the generator's
+    #      chart release gate (gen.ci.chartReleaseGateJob).
+    - verify-release-floors:
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
     # ---- Ingress-mode guard (was the standalone `test` workflow before
     #      generation). Branch-only; the tag-publish flow is the chart jobs.
     - test-ingress-modes:
@@ -135,6 +187,7 @@ workflows:
         explicit_allow_chart_name_mismatch: true
         requires:
         - build-connectivity-chart
+        - verify-release-floors
         filters:
           tags:
             only: /^v.*/
