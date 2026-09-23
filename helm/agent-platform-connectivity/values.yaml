@@ -368,6 +368,30 @@ gateway:
     # set `observability.giantswarm.io/tenant` here for the Giant Swarm
     # otlp-gateway.
     podLabels: {}  # @schema additionalProperties: true
+  # === Buffer size ===
+  # The most the data plane buffers of one HTTP body, from ONE Gateway-scoped
+  # AgentgatewayPolicy, <release>-http (templates/agentgateway/http-policy.yaml,
+  # frontend.http.maxBufferSize). On the MCP path every tool answer of every
+  # server behind muster is read whole here before it is parsed and forwarded,
+  # and an answer above the limit is refused with agentgateway's `body exceeded
+  # buffer limit`, so this number is the cap on what a tool may answer through
+  # the platform. agentgateway's own default is 2 MiB, a value chosen for
+  # nothing here: a whole-registry dry run of the platform manager (fourteen
+  # installations) was above it (giantswarm/agent-platform#630). 8Mi is sized
+  # from what the platform's tools answer: the manager bounds its own answers
+  # at 1 MiB and muster's call_tool wraps the text once more on the way (about
+  # a seventh on top), so the largest bounded answer is ~1.2 MiB, and a server
+  # with no bound of its own (a kubectl get over a namespace, a rendered
+  # fileset) has the same room several times over; a dozen answers at the
+  # limit buffered at once stay inside the data plane's 512Mi memory limit
+  # (gateway.parameters.dataPlaneResources). A Kubernetes quantity (8Mi, 16Mi)
+  # or a byte count; the CRD refuses zero and anything above 4 GiB. Empty
+  # renders no policy and leaves agentgateway's default in force. Field-level
+  # merge on the Gateway: this policy owns frontend.http, -metrics and -tracing
+  # own theirs (verify-dataplane-buffer asserts no other policy carries it).
+  # README "The data plane's buffer".
+  http:
+    maxBufferSize: 8Mi  # @schema type: [string, integer]; pattern: ^([0-9]+(\.[0-9]+)?([KMGTPE]i|[kMGTPE])?)?$
   # === Metric labels ===
   # Custom Prometheus labels on every metric the data plane emits, from ONE
   # Gateway-scoped AgentgatewayPolicy, <release>-metrics
