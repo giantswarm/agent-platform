@@ -235,6 +235,47 @@ compile takes the whole policy down. `make verify-metric-labels` asserts all
 of it, and that no other policy of the chart carries a `frontend.metrics`
 section.
 
+## The data plane's buffer
+
+The data plane reads some bodies whole before it acts on them, and the most
+it holds of one is `frontend.http.maxBufferSize` of the Gateway. On the MCP
+path that is every tool answer of every server behind muster: the `/mcp`
+route to the data plane, the `agent-platform-mcps` backend with the muster
+target, the JSON-RPC answer parsed here and forwarded. An answer above the
+limit is refused — the caller sees agentgateway's `http upstream error: http
+request failed: body exceeded buffer limit`, the server never learns of it —
+so this number is the cap on what a tool may answer through the platform.
+
+agentgateway's own default is 2 MiB, a value chosen for nothing here; a
+whole-registry dry run of the platform manager was above it
+(giantswarm/agent-platform#630). The chart renders the platform's own bound
+from ONE Gateway-scoped `AgentgatewayPolicy`, `<release>-http`
+(`templates/agentgateway/http-policy.yaml`, `frontend.http`), whenever the
+data plane is: `gateway.http.maxBufferSize`, **8Mi** by default. The number is
+sized from what the platform's tools answer: the platform manager bounds its
+own answers at 1 MiB and muster's `call_tool` wraps the text once more on the
+way (about a seventh on top), so the largest bounded answer is about 1.2 MiB,
+and a server with no bound of its own — a `kubectl get` over a namespace, a
+rendered fileset — has the same room several times over; a dozen answers at
+the limit buffered at once stay inside the data plane's 512Mi memory limit
+(`gateway.parameters.dataPlaneResources`).
+
+```yaml
+gateway:
+  http:
+    maxBufferSize: 16Mi   # a Kubernetes quantity, or a byte count (16777216)
+```
+
+**One field, one policy.** Frontend policies of one Gateway merge field by
+field, never deeper: of two policies that both set `http`, one wins whole.
+This policy therefore owns `frontend.http` alone, as `-metrics` owns
+`frontend.metrics` and `-tracing` owns `frontend.tracing`, and no other policy
+of the chart carries an `http` section (`make verify-dataplane-buffer` asserts
+it). Empty renders no policy and leaves agentgateway's default in force. The
+CRD refuses zero and anything above 4 GiB; the schema refuses what is not a
+quantity (`8MB`). The models Gateway of the serving slice is not this
+Gateway and keeps agentgateway's defaults for the LLM path.
+
 ## Data-plane availability
 
 Every MCP call and, with LLM routing on, every model call crosses the
@@ -796,6 +837,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
 | gateway.parameters.podLabels | object | `{}` |  |
+| gateway.http.maxBufferSize | string | `"8Mi"` |  |
 | gateway.metricLabels.agent.enabled | bool | `true` |  |
 | gateway.metricLabels.agent.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent\"] : source.unverifiedWorkload.serviceAccount"` |  |
 | gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |

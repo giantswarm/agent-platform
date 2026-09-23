@@ -1052,6 +1052,38 @@ verify-dataplane-tracing: ## Assert the agentgateway data plane's trace export (
 	@$(PICK) /tmp/vdt-meta.out HelmRelease agent-platform-connectivity | grep -A1 '^        podLabels:$$' | grep -q '^          observability.giantswarm.io/tenant: giantswarm$$' || { echo "FAIL: the meta chart does not forward the data plane's tenant label"; exit 1; }
 	@echo "ok: $@"
 
+# The data plane's buffer (giantswarm/agent-platform#630): the connectivity chart
+# renders ONE Gateway-scoped -http AgentgatewayPolicy carrying
+# frontend.http.maxBufferSize from gateway.http.maxBufferSize — the cap on what a
+# tool may answer through the platform, since the MCP path reads every answer whole.
+DPB_POLICY := agent-platform-connectivity-http
+# The AgentgatewayPolicy names whose spec carries a frontend.http section.
+HTTP_POLICIES := python3 -c 'import re,sys; docs=open(sys.argv[1]).read().split("\n---\n"); [print(re.search(r"^  name: (\S+)", d, re.M).group(1)) for d in docs if "kind: AgentgatewayPolicy\n" in d and re.search(r"^  frontend:\n(?:.*\n)*?    http:", d, re.M)]'
+.PHONY: verify-dataplane-buffer
+verify-dataplane-buffer: ## Assert the data plane's buffer (giantswarm/agent-platform#630): with a data plane the connectivity chart renders the Gateway-scoped -http AgentgatewayPolicy with frontend.http.maxBufferSize 8Mi (the chart's own number, not agentgateway's 2 MiB default), targeting the data-plane Gateway; a quantity or a byte count set by an installation reaches it as written; no other policy of the chart carries a frontend.http section (frontend policies merge field by field); empty renders none, muster-direct renders none, a malformed quantity is refused by the schema; the meta chart forwards the same default to the connectivity release.
+	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) >/tmp/vdb-on.out 2>&1 || { cat /tmp/vdb-on.out; exit 1; }
+	@$(PICK) /tmp/vdb-on.out AgentgatewayPolicy $(DPB_POLICY) >/tmp/vdb-pol.out || { echo "FAIL: no AgentgatewayPolicy $(DPB_POLICY) with the data plane on"; exit 1; }
+	@grep -q '^      kind: Gateway$$' /tmp/vdb-pol.out && grep -q '^      name: agentgateway$$' /tmp/vdb-pol.out || { echo "FAIL: the -http policy does not target the data-plane Gateway (a frontend policy may target nothing else)"; cat /tmp/vdb-pol.out; exit 1; }
+	@grep -q '^      maxBufferSize: 8Mi$$' /tmp/vdb-pol.out || { echo "FAIL: the -http policy does not carry the chart's default maxBufferSize 8Mi"; cat /tmp/vdb-pol.out; exit 1; }
+	@[ "$$($(HTTP_POLICIES) /tmp/vdb-on.out)" = "$(DPB_POLICY)" ] || { echo "FAIL: the policies with a frontend.http section are not $(DPB_POLICY) alone: $$($(HTTP_POLICIES) /tmp/vdb-on.out | tr '\n' ' ')"; exit 1; }
+	@echo "ok: defaults"
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.http.maxBufferSize=16Mi >/tmp/vdb-q.out 2>&1 || { cat /tmp/vdb-q.out; exit 1; }
+	@$(PICK) /tmp/vdb-q.out AgentgatewayPolicy $(DPB_POLICY) | grep -q '^      maxBufferSize: 16Mi$$' || { echo "FAIL: a quantity set by an installation does not reach the policy as written"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.http.maxBufferSize=16777216 >/tmp/vdb-i.out 2>&1 || { cat /tmp/vdb-i.out; exit 1; }
+	@$(PICK) /tmp/vdb-i.out AgentgatewayPolicy $(DPB_POLICY) | grep -q '^      maxBufferSize: 16777216$$' || { echo "FAIL: a byte count set by an installation does not reach the policy as the integer"; exit 1; }
+	@echo "ok: an installation's own size"
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.http.maxBufferSize= >/tmp/vdb-none.out 2>&1 || { cat /tmp/vdb-none.out; exit 1; }
+	@if grep -q 'name: $(DPB_POLICY)$$' /tmp/vdb-none.out; then echo "FAIL: the -http policy renders with the size empty (agentgateway's default is meant to apply)"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(VM) >/tmp/vdb-direct.out 2>&1 || { cat /tmp/vdb-direct.out; exit 1; }
+	@if grep -q 'name: $(DPB_POLICY)$$' /tmp/vdb-direct.out; then echo "FAIL: the -http policy renders in muster-direct, with no data plane to target"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.http.maxBufferSize=8MB >/tmp/vdb-bad.out 2>&1; then echo "FAIL: 8MB (not a Kubernetes quantity) passed the schema"; exit 1; \
+	elif ! grep -q "maxBufferSize" /tmp/vdb-bad.out; then echo "FAIL: 8MB failed for the wrong reason"; cat /tmp/vdb-bad.out; exit 1; fi
+	@echo "ok: guards"
+	@helm template t $(CHART_DIR) $(VM) >/tmp/vdb-meta.out 2>&1 || { cat /tmp/vdb-meta.out; exit 1; }
+	@$(PICK) /tmp/vdb-meta.out HelmRelease agent-platform-connectivity | grep -A1 '^      http:$$' | grep -q '^        maxBufferSize: 8Mi$$' || { echo "FAIL: the meta chart does not forward gateway.http.maxBufferSize 8Mi to the connectivity release"; exit 1; }
+	@echo "ok: $@"
+
 # Anthropic prompt caching (giantswarm/giantswarm#37788; the kagent line's carried patch kagent-dev/kagent#2788).
 .PHONY: verify-prompt-caching
 verify-prompt-caching: ## Assert Anthropic prompt caching: the meta chart forwards kagent.providers.anthropic.config.promptCaching: true + cacheTTL to the kagent release (the default ModelConfig) and to the connectivity release; the connectivity chart's Anthropic catalog entries inherit both in the one provider block next to the listener baseUrl, an entry's own keys win (false included), an OpenAI entry gets nothing, a Bedrock entry takes its own keys under spec.bedrock, the chart alone renders nothing; a cacheTTL outside the CRD's enum and the keys on a provider without them fail the render naming the entry.
