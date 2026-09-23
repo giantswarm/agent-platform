@@ -2204,6 +2204,19 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       minAvailable: 1
       maxUnavailable: ""
       unhealthyPodEvictionPolicy: AlwaysAllow
+    # The kagent chart's defaults with the memory limit raised from 512Mi
+    # (giantswarm/agent-platform#455 follow-up): on gazelle the controller's
+    # working set reached 507-511Mi on seven of eighteen pods in eight days and
+    # the container was OOMKilled, and the VPA below recommended ~1.15Gi
+    # uncapped. RequestsOnly leaves this limit alone, so the VPA cannot lift it;
+    # vpa.maxAllowed.memory stays a step under it.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 2
+        memory: 1536Mi
     # VerticalPodAutoscaler on the controller Deployment, rendered by the
     # connectivity chart in the kagent namespace (the kagent chart has no VPA
     # knob; the #439 pattern of the muster-valkey budget). `auto` (the
@@ -2217,10 +2230,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # falls back to an eviction the budget refuses — the pod keeps its
     # requests until its next roll. RequestsOnly leaves the chart's limits
     # alone; minAllowed is the chart's requests (100m / 128Mi) and maxAllowed
-    # stays a step under its limits (2 / 512Mi): a Burstable pod whose
-    # requests reach its limits on both resources would become Guaranteed,
-    # and Kubernetes refuses a resize that changes the QoS class — so
-    # maxAllowed must never equal the limits. Never forwarded to the kagent
+    # stays a step under its limits (2 / 1536Mi, `resources` above): a
+    # Burstable pod whose requests reach its limits on both resources would
+    # become Guaranteed, and Kubernetes refuses a resize that changes the QoS
+    # class — so maxAllowed must never equal the limits. Never forwarded to the kagent
     # release (components.kagent.omitKeys).
     vpa:
       enabled: auto  # auto | true | false
@@ -2231,7 +2244,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         memory: 128Mi
       maxAllowed:
         cpu: 1900m
-        memory: 480Mi
+        memory: 1280Mi
     # The kagent line serves no Prometheus /metrics: the controller binds its
     # metrics server to "0", and the upstream chart's controller.metrics knob
     # renders a Service and the METRICS_* env to that dead port. Explicitly
