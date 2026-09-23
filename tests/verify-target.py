@@ -498,7 +498,7 @@ def check_golden(meta: str, connectivity: str) -> None:
         hold_608 = ["--set", "components.kagent.versionRange=>=1.0.2 <1.1.0",
                     "--set", "components.kagent-crds.versionRange=>=1.0.2 <1.1.0",
                     "--set", "components.agentgateway.versionRange=>=2.4.0 <3.0.0",
-                    "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.1",
+                    "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.2",
                     *AGENTGATEWAY_IMAGES_HOLD]
         # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH
         # sides: modelServing.imageVerification is on by default now, so a serving
