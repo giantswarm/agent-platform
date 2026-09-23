@@ -32,9 +32,13 @@ range to one release (`agent-platform.substrate.validateRange`). Here:
   - the kagent chart the range resolves to renders the forwarded values into the
     one WorkerPool whose spec.workerImage is the derived image, its own stamp
     overridden — and the Substrate that build was published against
-    (Chart.yaml dependencies[substrate].version) is the pinned release's X.Y.Z:
-    the meta chart's CI names the day the kagent line moves to another Substrate
-    release before the chart's own pin does.
+    (Chart.yaml dependencies[substrate].version) is the pinned release or an
+    older patch of its minor: a patch of the Substrate line changes no runtime
+    contract (the range shape says so), so the chart's pin may lead the kagent
+    stamp by a patch — a data-plane fix ships without a kagent rebuild — while
+    a kagent build stamped against a newer Substrate than the chart pins, or
+    against another minor, fails: the meta chart's CI names the day the kagent
+    line moves to another Substrate release before the chart's own pin does.
 
 Network: gsoci.azurecr.io (the kagent chart). Usage: verify-worker-image.py <meta chart dir>
 """
@@ -65,6 +69,10 @@ FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 
 def tuple_of(version: str) -> str:
     return version.split("-", 1)[0]
+
+
+def ints_of(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in tuple_of(version).split("."))
 
 
 def next_patch(version: str) -> str:
@@ -192,9 +200,13 @@ def main(meta: str) -> int:
         if not built_against:
             cc.fail(f"the kagent chart {resolved} names no substrate dependency in Chart.yaml; the line stamps the Substrate it was published against there")
         print(f"ok: the kagent chart {resolved} (the range {kagent_rng!r}) renders the one WorkerPool with workerImage {derived} — its own stamp {stamp or '(none)'} overridden; published against Substrate {built_against}")
-        if tuple_of(built_against) != tuple_of(floor):
-            cc.fail(f"the kagent build the range {kagent_rng!r} admits ({resolved}) was published against Substrate {built_against}, another release than the chart pins ({floor}): the derived worker keeps the runtime coherent, but the kagent controller and the chart's Substrate are meant to be one line — move components.substrate.versionRange (and its floor) with the kagent line, or hold the kagent range below that build")
-        print(f"ok: the kagent build the range admits was published against Substrate {tuple_of(built_against)}, the release the chart pins ({floor})")
+        built, pinned = ints_of(built_against), ints_of(floor)
+        if built[:2] != pinned[:2] or built > pinned:
+            cc.fail(f"the kagent build the range {kagent_rng!r} admits ({resolved}) was published against Substrate {built_against}, not the release the chart pins ({floor}) or an older patch of its minor: the derived worker keeps the runtime coherent, but the kagent controller and the chart's Substrate are meant to be one line — move components.substrate.versionRange (and its floor) with the kagent line, or hold the kagent range below that build")
+        if built == pinned:
+            print(f"ok: the kagent build the range admits was published against Substrate {tuple_of(built_against)}, the release the chart pins ({floor})")
+        else:
+            print(f"ok: the kagent build the range admits was published against Substrate {tuple_of(built_against)}, an older patch of the minor the chart pins ({floor}): a patch of the line changes no runtime contract, the kagent line follows at its next release")
     return 0
 
 
