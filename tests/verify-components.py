@@ -105,7 +105,7 @@ LINE = {
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
-    "model-manager": (GSOCI, ">=0.23.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
+    "model-manager": (GSOCI, ">=1.0.8 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
     # 0.22.0 carries serviceMonitor.enabled / .labels (giantswarm/vm-manager#73,
     # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
     # from the generated CircleCI pipeline with its guest image artifact

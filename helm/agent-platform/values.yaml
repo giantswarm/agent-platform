@@ -738,15 +738,17 @@ components:  # @schema additionalProperties: true
     # model-manager stays on its 0.x line through the kagent API v2 change: it
     # renders its ModelConfigs at the kagent.dev version the cluster serves,
     # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74). The floor is
-    # 0.23.0 (giantswarm/model-manager#86): the release that reads the GPU node
-    # pool input the discovery ConfigMap publishes (spec.gpuPool, from
-    # modelServing.gpuPool; giantswarm/agent-platform#315) — and, from 0.22.0
-    # (#68), zero-backend start-up and the runtime backend registry. The
-    # ceiling is 2.0.0: model-manager 1.0.0 is the release that composes
+    # 1.0.8 (giantswarm/model-manager#157): the release that writes
+    # spec.ollama.options.num_ctx on every Ollama ModelConfig it wires, so an
+    # agent prompt is not cut to Ollama's VRAM-tiered default of 4096 tokens on
+    # a host with less than 24 GiB of VRAM. It carries 0.23.0's GPU node pool
+    # input (spec.gpuPool, from modelServing.gpuPool;
+    # giantswarm/agent-platform#315) and 0.22.0's zero-backend start-up and
+    # runtime backend registry. The ceiling is 2.0.0: model-manager 1.0.0 is the release that composes
     # LLMInferenceServices only (the classic InferenceService kind and its
     # kserve.servingKind / kserve.runtime values are gone), and nothing this
     # chart forwards names either, so the 0.24 → 1.0 move rolls on its own.
-    versionRange: ">=0.23.0 <2.0.0"
+    versionRange: ">=1.0.8 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
