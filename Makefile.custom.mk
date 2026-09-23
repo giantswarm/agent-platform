@@ -5,6 +5,9 @@
 ##@ Custom
 
 CHART_DIR ?= helm/agent-platform
+# The helm binary the golden renders of tests/golden/ are produced and checked with
+# (the minor CI pins; tests/verify-target.py refuses another one and says why).
+HELM ?= helm
 CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 
 # The API groups a Giant Swarm management cluster serves and the cluster-shape
@@ -1101,6 +1104,12 @@ verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure 
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-engine.py $(CHART_DIR)
 	@echo "flux engine shapes verified."
+
+.PHONY: golden-update
+golden-update: ## Re-render the shapes of tests/golden/ and write them back. Run it when a change moves the rendered output on purpose, and commit the diff: it is what a reviewer reads to see which objects moved. Needs the helm minor CI pins (HELM=<path> to point at it).
+	@echo "====> $@ (tests/golden/)"
+	@HELM="$(HELM)" python3 tests/verify-target.py --update $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "$@: review the tests/golden/ diff before committing — it is the rendered blast radius of this change"
 
 .PHONY: verify-target
 verify-target: ## Assert one release of this chart per target cluster (giantswarm/agent-platform#328): gitops.target.kubeConfig.secretRef stamps spec.kubeConfig.secretRef (name, key when set) onto every component HelmRelease and changes nothing else — unset, the meta and connectivity renders are byte-identical to GOLDEN_REF; components.muster / components.dicebear gain enabled (off = no release, the roster says so, the connectivity chart drops the /mcp route, muster's egress policy, every rule selecting its pods and the avatars host in the portal's CSP); the knob with the bundled engine fails; no hook Job renders with the knob; the serving- and runtime-shaped toggle sets (ci/test-slice-*-values.yaml) render alone, combined (the union, the first slice's documents unchanged — an in-place upgrade) and with the knob (ci/test-target-values.yaml), agentgateway off beside the platform's release and on for a workload cluster; the schema. The lookup guards (a foreign helm-controller, a second owner of a component's CRDs — components.<name>.ownedCrds) need a live cluster: README "One release per target cluster". HELM selects the binary.
