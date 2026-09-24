@@ -176,7 +176,7 @@ READY_TIMEOUT_S = SCENARIO.ready_timeout_s
 # Self-management in the smoke: the chart's own OCIRepository follows the
 # in-cluster registry the candidate was pushed to, at the candidate's exact
 # version. Exact, not the chart's derived range: a branch build carries a
-# prerelease version (3.19.1-dev.<branch>.<date>.h<sha>, abs), and Masterminds
+# prerelease version (3.19.1-r<branch-hash>t<time>h<sha>, abs), and Masterminds
 # semver — Flux's — never matches a prerelease against a release-only bound
 # (`>=X <4.0.0`), so the derived range would find no tag. A released chart
 # has no prerelease; verify-self asserts the derived range offline.
