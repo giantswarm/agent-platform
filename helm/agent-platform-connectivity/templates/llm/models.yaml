@@ -1,0 +1,34 @@
+{{- /* The models the LLM listener serves (llmRouting.models): one
+AgentgatewayModel per entry, attached to the LLM route's rule, whose one
+backend is the model router (AgentgatewayModel `*`). The request's `model`
+picks the candidate: the first by name whose match takes it. No host, port,
+model override or `policies.auth`: a managed provider's defaults resolve to its
+public API with system-trust TLS, the gateway holds no credential, and a
+client's own key passes through untouched, so reach to the listener grants no
+spend. A served model joins the same route under its preset's name, written by
+model-manager (discovery spec.llmEndpoint, giantswarm/model-manager#145). */ -}}
+{{- if (include "agent-platform.llmRouting" .) }}
+{{- range .Values.llmRouting.models }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ include "name" $ }}-llm
+  {{- with .match }}
+  match:
+    model: {{ . | quote }}
+  {{- end }}
+  {{- with .visibility }}
+  visibility: {{ . }}
+  {{- end }}
+  provider: {{ .provider }}
+{{- end }}
+{{- end }}

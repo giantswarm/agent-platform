@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the LLM listener routes by model: `llmRouting.backend` is `llmRouting.models`)
+
+giantswarm/agent-platform#603: with `llmRouting.enabled` the LLM route's backend is the model router (`AgentgatewayModel` `*`) instead of one `AgentgatewayBackend`: the request's `model` picks an `AgentgatewayModel` attached to the route. The chart renders one per `llmRouting.models` entry — by default `anthropic`, provider Anthropic, `match: claude-*` — and, with the serving slice and model-manager on, publishes the route in the discovery ConfigMap (`spec.llmEndpoint`) so model-manager attaches the served models to it. The `AgentgatewayBackend` `anthropic` is removed with the upgrade.
+
+### Operator action
+
+- **None** for an installation that sets `llmRouting.enabled` alone: agents whose ModelConfigs send `claude-*` model names (kagent's default ModelConfig, the chart's `kagent.modelConfigs`, the portal's) route to Anthropic as before, with the client's own key, metered by the same data plane.
+- **An installation that set `llmRouting.backend`**: the schema refuses the key. Name the provider as the first `llmRouting.models` entry instead — `provider` is agentgateway's managed provider name (`Anthropic`, `OpenAI`, …) and `match` the model names it takes; the first entry's provider is the one whose ModelConfigs ride the listener, as `backend.provider`'s was.
+- **A ModelConfig on the listener whose model name the default does not take** (an Anthropic model not named `claude-*`): add an entry whose `match` takes it, or the listener answers `404 model_not_found`.
+- **Recognising it worked**: `kubectl -n <release namespace> get agentgatewaymodel` lists `anthropic` (plus one per served model on an installation with the serving slice), and an agent turn on the default ModelConfig answers.
+
 ## \<current\> → \<next\> (the dev channel's filter reads gitsemver 3's tag shape)
 
 architect-orb 10.10.0 (2026-09-23) tags dev builds `X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>` (gitsemver 3) instead of `X.Y.Z-dev.<branch>.<YYYY-MM-DD>.<HH-MM-SS>.h<sha7>`; this repository, the kagent line and the Substrate line build with it. A `semverFilter` written for the superseded shape matches no build made since and keeps its channel on the last one.

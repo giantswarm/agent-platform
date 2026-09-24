@@ -511,12 +511,26 @@ llmRouting:
   listener:
     name: llm
     port: 8081
-  # The Anthropic AgentgatewayBackend. No host, port or model override: the
-  # provider defaults resolve to api.anthropic.com:443 with system-trust TLS
-  # and the /v1/messages path suffix. No backend auth — see above.
-  backend:
-    name: anthropic
-    provider: anthropic
+  # The models the listener serves, picked by the request's `model` (the
+  # model router: the LLM route's backend is `AgentgatewayModel` `*`, and every
+  # AgentgatewayModel attached to the route is a candidate). One
+  # AgentgatewayModel per entry: `name` (a DNS label, the object's name),
+  # `provider` (an agentgateway managed provider: Anthropic, OpenAI, Gemini,
+  # ...), `match` (the model names it takes: exact, `claude-*`, `*-latest`;
+  # empty matches `name` alone) and `visibility` (Public, or Internal for a
+  # model only a virtual model selects). No host, port or credential: the
+  # provider defaults resolve to the provider's public API with system-trust
+  # TLS, and a client's own key passes through untouched, so reach to the
+  # listener grants no spend. Candidates are tried in name order and the first
+  # whose `match` takes the model wins, so a `*` entry would shadow every model
+  # named after it — a served model (model-manager, discovery
+  # spec.llmEndpoint) joins under its preset's name. The first entry's
+  # provider is the one whose ModelConfigs ride the listener
+  # (kagent.modelConfigs, modelConfigPolicy).
+  models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
+    - name: anthropic
+      provider: Anthropic
+      match: claude-*
   # Client path prefixes the LLM HTTPRoute matches. They must be MORE specific
   # than `/`: agent-platform-mcps renders a catch-all route on the same Gateway
   # that attaches to every listener, and on an equal match the older,
@@ -541,7 +555,7 @@ llmRouting:
   # render through the LLM listener — one created by Backstage, agent-manager or
   # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs
   # below), so the policy never touches them. It writes only when the provider
-  # matches llmRouting.backend.provider and the baseUrl is absent. An object that
+  # is the first llmRouting.models entry's and the baseUrl is absent. An object that
   # names its own baseUrl is never touched.
   #
   # Rendered only where the API server serves
@@ -1662,7 +1676,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # llmRouting.enabled the chart fills in the LLM listener, so the gateway
   #   # meters this model's usage. Set it to reach a different upstream: the
   #   # provider's own URL is how a model stays on the direct, unmetered path.
-  #   # An entry whose provider differs from llmRouting.backend.provider stays
+  #   # An entry whose provider differs from the first llmRouting.models entry's stays
   #   # direct either way: the listener forwards to one provider. Only the
   #   # Anthropic, OpenAI and SAPAICore providers carry a baseUrl in
   #   # ModelConfigSpec, under the CRD's block key (anthropic, openAI,

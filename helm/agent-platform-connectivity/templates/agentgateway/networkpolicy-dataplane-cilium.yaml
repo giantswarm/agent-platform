@@ -83,6 +83,21 @@ spec:
         - ports:
             - port: "9978"
               protocol: TCP
+    {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelServing.enabled" .) }}
+    {{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
+    # The served models on the LLM endpoint: an AgentgatewayModel's baseURL
+    # is the workload Service, reached on the workload port (the serving
+    # namespace's ingress admits the release namespace there).
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ include "agent-platform.modelServing.namespace" . }}
+          matchExpressions:
+            {{- toYaml $shape.matchExpressions | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: {{ $shape.port | quote }}
+              protocol: TCP
+    {{- end }}
     {{- with .Values.gateway.jwksEgress }}
     {{- if .enabled }}
     # Allow the data-plane to fetch JWKS for JWT validation (oauthMode: validate).

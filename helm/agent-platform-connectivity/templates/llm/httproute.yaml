@@ -9,7 +9,7 @@ timestamp and then alphabetically — both of which the older, alphabetically
 earlier MCP route wins. So the provider paths are matched explicitly:
 `llmRouting.pathPrefixes` is longer than `/`, and character count in the path
 match outranks both tiebreaks. A path outside the prefixes reaches the MCP
-backend, not the provider. */ -}}
+backend, not the model router. */ -}}
 {{- if (include "agent-platform.llmRouting" .) }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -38,8 +38,11 @@ spec:
       {{- with (include "agent-platform.routeTimeouts" .) }}
       {{- . | nindent 6 }}
       {{- end }}
+      {{- /* The model router: every AgentgatewayModel attached to this rule
+      (templates/llm/models.yaml, model-manager's served models) is a
+      candidate, and the request's model picks one. */}}
       backendRefs:
         - group: agentgateway.dev
-          kind: AgentgatewayBackend
-          name: {{ .Values.llmRouting.backend.name }}
+          kind: AgentgatewayModel
+          name: "*"
 {{- end }}

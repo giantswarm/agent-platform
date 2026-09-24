@@ -571,8 +571,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.enabled | bool | `false` |  |
 | llmRouting.listener.name | string | `"llm"` |  |
 | llmRouting.listener.port | int | `8081` |  |
-| llmRouting.backend.name | string | `"anthropic"` |  |
-| llmRouting.backend.provider | string | `"anthropic"` |  |
+| llmRouting.models[0].name | string | `"anthropic"` |  |
+| llmRouting.models[0].provider | string | `"Anthropic"` |  |
+| llmRouting.models[0].match | string | `"claude-*"` |  |
 | llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |

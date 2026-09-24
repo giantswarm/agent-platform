@@ -743,6 +743,16 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
+The provider whose ModelConfigs ride the LLM listener: the first
+llmRouting.models entry's, lower-cased (anthropic). kagent.modelConfigs entries
+and the MutatingAdmissionPolicy point a ModelConfig of this provider at the
+listener; a ModelConfig of another provider keeps its own path.
+*/}}
+{{- define "agent-platform.llmRouting.provider" -}}
+{{- with .Values.llmRouting.models -}}{{- lower (first .).provider -}}{{- end -}}
+{{- end -}}
+
+{{/*
 Truthy (emits "true") when a policy of this chart verifies a bearer JWT on a
 route of the data-plane Gateway: the kagent controller route's, agent-manager's
 or model-manager's (each template's own gate, repeated here). Only such a
@@ -845,7 +855,7 @@ entry.
 {{/*
 Key of the ModelConfigSpec provider block that carries baseUrl, for a
 spec.provider value in any case (the CRD's spelling from a catalog entry, the
-lower-cased agentgateway name from llmRouting.backend.provider). The key is not
+lower-cased provider of agent-platform.llmRouting.provider). The key is not
 the lower-cased provider name (openAI, sapAICore), and only three of the ten
 providers have a baseUrl at all — Ollama names its host, AzureOpenAI and Foundry
 an endpoint, the rest a region or a project: a block the CRD does not know is
@@ -916,6 +926,26 @@ the agent-platform-mcps catch-all route on the same Gateway and loses the
 tiebreak, so every inference call would reach the MCP backend instead. */ -}}
 {{- if not .Values.llmRouting.pathPrefixes -}}
 {{- fail "llmRouting.pathPrefixes must list at least one prefix; an empty list renders an LLM route that matches nothing" -}}
+{{- end -}}
+{{- /* The model router tries its candidates in name order and takes the
+first whose match fits, so two entries of one name would be one object and a
+wildcard must be the CRD's shape (`*`, `gpt-*`, `*-latest`). */ -}}
+{{- if not .Values.llmRouting.models -}}
+{{- fail "llmRouting.models must list at least one model; the model router of an empty list answers 404 model_not_found to every agent" -}}
+{{- end -}}
+{{- $names := dict -}}
+{{- range .Values.llmRouting.models -}}
+{{- if not (and .name .provider) -}}
+{{- fail (printf "llmRouting.models: every entry names its AgentgatewayModel (name) and a managed provider (provider); got %v" .) -}}
+{{- end -}}
+{{- if hasKey $names .name -}}
+{{- fail (printf "llmRouting.models names %q twice; every entry is one AgentgatewayModel of that name" .name) -}}
+{{- end -}}
+{{- $_ := set $names .name true -}}
+{{- $m := .match | default "" -}}
+{{- if and (contains "*" $m) (not (or (eq $m "*") (and (hasPrefix "*" $m) (eq (len (splitList "*" $m)) 2)) (and (hasSuffix "*" $m) (eq (len (splitList "*" $m)) 2)))) -}}
+{{- fail (printf "llmRouting.models[%s].match %q: a wildcard is `*`, a suffix like `gpt-*` or a prefix like `*-latest`, one `*` at an end" .name $m) -}}
+{{- end -}}
 {{- end -}}
 {{- range .Values.llmRouting.pathPrefixes -}}
 {{- if eq . "/" -}}

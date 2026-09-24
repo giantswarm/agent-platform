@@ -1,5 +1,5 @@
-# LLM routing on: the `llm` listener, the Anthropic AgentgatewayBackend, the
-# pinned HTTPRoute, the Gateway-scoped AgentgatewayPolicy (the route-type map;
+# LLM routing on: the `llm` listener, the pinned HTTPRoute whose backend is the
+# model router, the Anthropic AgentgatewayModel, the Gateway-scoped AgentgatewayPolicy (the route-type map;
 # the metric labels are the Gateway's own -metrics policy, gateway.metricLabels,
 # rendered with or without this), the model-price ConfigMap and its
 # AgentgatewayParameters reference, and the data-plane PodMonitor.

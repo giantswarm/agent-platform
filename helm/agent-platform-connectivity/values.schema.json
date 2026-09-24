@@ -959,18 +959,6 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "backend": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "name": {
-                            "type": "string"
-                        },
-                        "provider": {
-                            "type": "string"
-                        }
-                    }
-                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -1219,6 +1207,51 @@
                             "type": "boolean"
                         }
                     }
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "match": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string",
+                                "maxLength": 63,
+                                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+                            },
+                            "provider": {
+                                "type": "string",
+                                "enum": [
+                                    "Anthropic",
+                                    "Baseten",
+                                    "Cerebras",
+                                    "Cohere",
+                                    "Deepinfra",
+                                    "Deepseek",
+                                    "Fireworks",
+                                    "Gemini",
+                                    "Groq",
+                                    "Huggingface",
+                                    "Mistral",
+                                    "OpenAI",
+                                    "Openrouter",
+                                    "TogetherAI",
+                                    "XAI"
+                                ]
+                            },
+                            "visibility": {
+                                "type": "string",
+                                "enum": [
+                                    "Public",
+                                    "Internal"
+                                ]
+                            }
+                        }
+                    },
+                    "minItems": 1
                 },
                 "pathPrefixes": {
                     "type": "array",

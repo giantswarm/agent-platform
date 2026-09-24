@@ -48,10 +48,12 @@ Two values turn the path on, and the order matters.
      enabled: true
    ```
 
-   This adds an `llm` listener to the data-plane Gateway, an
-   `AgentgatewayBackend` for the provider, an `HTTPRoute` pinned to that
-   listener, one Gateway-scoped `AgentgatewayPolicy` (the route-type map), and
-   the model-price ConfigMap the cost counter reads. Nothing routes through it
+   This adds an `llm` listener to the data-plane Gateway, an `HTTPRoute` pinned
+   to that listener whose backend is the model router (`AgentgatewayModel` `*`),
+   one `AgentgatewayModel` per `llmRouting.models` entry (by default
+   `anthropic`: provider Anthropic, `match: claude-*`), one Gateway-scoped
+   `AgentgatewayPolicy` (the route-type map), and the model-price ConfigMap the
+   cost counter reads. Nothing routes through it
    yet. The metric labels are not this path's: the Gateway's own `-metrics`
    policy carries them whether or not LLM routing is on (below).
 
@@ -108,6 +110,21 @@ On the installation, after the cutover:
   the MCP backend and answers `mcp: client must accept both application/json
   and text/event-stream`, so `"*": Passthrough` in `llmRouting.routes` covers
   the other provider paths *under* the prefixes, not every path on the port.
+- The request's `model` picks the model: the router tries the models attached to
+  the route in name order and takes the first whose `match` takes the name
+  (exact, `claude-*`, `*-latest`, `*`), so a `*` entry would shadow every model
+  named after it; a name no model takes answers `404 model_not_found`, and
+  `GET /v1/models` lists the public ones. The gateway holds no credential: a
+  managed provider model carries no `policies.auth`, and the client's own key
+  passes through untouched.
+- **Served models on the endpoint.** With the serving slice and model-manager
+  on, the discovery ConfigMap publishes `spec.llmEndpoint` (`parentRefs`, the
+  LLM route; `endpoint`, the listener's in-cluster URL), model-manager holds a
+  Role on the release namespace's `agentgatewaymodels` and nothing else, and the
+  data plane may reach the serving namespace's workload pods on the workload
+  port. model-manager then attaches one `AgentgatewayModel` per served model to
+  the route under the preset's name (giantswarm/model-manager#145), so a client
+  sends `model: <preset>` to the same listener.
 - Agent pods keep their `world:443` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
@@ -115,7 +132,8 @@ On the installation, after the cutover:
   metrics policy per Gateway, and the labels describe every route, so they live
   in the Gateway's own `-metrics` policy — see [Metric labels](#metric-labels).
 - An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
-  own `baseUrl` or names a provider other than `llmRouting.backend.provider`.
+  own `baseUrl` or names a provider other than the first `llmRouting.models`
+  entry's.
   The `baseUrl` lands under the CRD's block for the entry's provider —
   `anthropic`, `openAI`, `sapAICore`, the three `ModelConfigSpec` gives one —
   never the lower-cased provider name, which the API server would prune; the
@@ -894,8 +912,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | llmRouting.enabled | bool | `false` |  |
 | llmRouting.listener.name | string | `"llm"` |  |
 | llmRouting.listener.port | int | `8081` |  |
-| llmRouting.backend.name | string | `"anthropic"` |  |
-| llmRouting.backend.provider | string | `"anthropic"` |  |
+| llmRouting.models[0].name | string | `"anthropic"` |  |
+| llmRouting.models[0].provider | string | `"Anthropic"` |  |
+| llmRouting.models[0].match | string | `"claude-*"` |  |
 | llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |

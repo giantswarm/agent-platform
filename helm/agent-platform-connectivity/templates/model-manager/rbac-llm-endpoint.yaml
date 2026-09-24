@@ -1,0 +1,34 @@
+{{- /* model-manager writes one AgentgatewayModel per served model onto the LLM
+endpoint (discovery spec.llmEndpoint, giantswarm/model-manager#145) as its own
+ServiceAccount: the object follows the serving object's readiness, not a
+caller's request. The Role is that and nothing wider — the AgentgatewayModels
+of the release namespace, where the LLM route is. */ -}}
+{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelManager.enabled" .) (include "agent-platform.modelServing.enabled" .) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "name" . }}-model-manager-llm-endpoint
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelManager.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["agentgateway.dev"]
+    resources: ["agentgatewaymodels"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "name" . }}-model-manager-llm-endpoint
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.modelManager.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "name" . }}-model-manager-llm-endpoint
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "agent-platform.modelManager.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

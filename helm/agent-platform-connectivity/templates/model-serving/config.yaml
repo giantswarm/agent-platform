@@ -75,6 +75,20 @@ data:
         {{- else }}
         enabled: false
         {{- end }}
+      # The LLM endpoint (llmRouting): the route model-manager attaches one
+      # AgentgatewayModel per served model to, in its namespace, and the
+      # listener's in-cluster URL a client (an agent's ModelConfig) reaches
+      # the models at, by name (giantswarm/model-manager#145).
+      {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelManager.enabled" .) }}
+      llmEndpoint:
+        enabled: true
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: {{ include "name" . }}-llm
+            namespace: {{ .Release.Namespace }}
+        endpoint: {{ include "agent-platform.llmBaseUrl" . }}
+      {{- end }}
       # Models as OCI images (modelServing.modelImages): the registry host
       # every oci:// preset's storageUri is published with — empty, as
       # written — so a consumer that builds an image reference of its own
