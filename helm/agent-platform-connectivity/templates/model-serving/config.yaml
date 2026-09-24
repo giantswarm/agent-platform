@@ -75,11 +75,11 @@ data:
         {{- else }}
         enabled: false
         {{- end }}
+      {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelManager.enabled" .) }}
       # The LLM endpoint (llmRouting): the route model-manager attaches one
       # AgentgatewayModel per served model to, in its namespace, and the
       # listener's in-cluster URL a client (an agent's ModelConfig) reaches
       # the models at, by name (giantswarm/model-manager#145).
-      {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelManager.enabled" .) }}
       llmEndpoint:
         enabled: true
         parentRefs:
