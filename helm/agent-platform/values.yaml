@@ -4680,10 +4680,15 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # kagent names the atespace after the AgentTemplate's namespace and the
   # Secrets live next to the AgentTemplate, so every namespace that hosts
   # AgentTemplates needs one entry with itself as the allowed namespace. The
+  # golden actor of every template boots in Substrate's own atespace
+  # ate-golden and fetches the template's git skills with the same
+  # credentials, so ate-golden needs every one of those namespaces too. The
   # default covers the kagent namespace, where the agent charts install.
   credentialProvider:
     namespacePolicies:
       - atespace: kagent
+        allowedNamespaces: [kagent]
+      - atespace: ate-golden
         allowedNamespaces: [kagent]
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows

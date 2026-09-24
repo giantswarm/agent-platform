@@ -1301,6 +1301,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.metrics.podMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | substrate.credentialProvider.namespacePolicies[0].atespace | string | `"kagent"` |  |
 | substrate.credentialProvider.namespacePolicies[0].allowedNamespaces[0] | string | `"kagent"` |  |
+| substrate.credentialProvider.namespacePolicies[1].atespace | string | `"ate-golden"` |  |
+| substrate.credentialProvider.namespacePolicies[1].allowedNamespaces[0] | string | `"kagent"` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
 | substrate.postgres.connectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
