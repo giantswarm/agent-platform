@@ -4077,8 +4077,12 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # kagent.dev/v1alpha3 AgentTemplates for this release's kagent, 0.x the
     # v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases of
     # the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart.
-    semver: 1.x
+    # and moves only with this chart. Capped below 1.5.0: from 1.5.0 the chart
+    # renders no spec.context.compaction on the AgentTemplate (the kagent line
+    # from 1.1.0 refuses it; the platform Harness carries the compaction
+    # there), and the kagent 1.0 line this release delivers has no other
+    # place for it. The cap moves with components.kagent.
+    semver: ">=1.0.0 <1.5.0"
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:
