@@ -469,7 +469,9 @@ platform needs:
   `pre-install,pre-upgrade` hook Job that mints the CA pools
   `service-dns-ca-pool` and `pod-identity-ca-pool` (`podcertificate-controller-system`),
   the JWT authority pool `actor-id-jwt-pool`, the CA pool `actor-id-ca-pool`
-  and the trust anchor `actor-id-ca-certs` derived from it (`ate-system`), and
+  and the trust anchor `actor-id-ca-certs` derived from it, the CA pool
+  `egress-mitm-ca-pool` atenet-egress mints the actors' per-host TLS leaves
+  from (ECDSA P-256; all in `ate-system`), and
   the ConfigMap `ate-api-authentication` with the apiserver's issuer read from
   its OpenID discovery document. Key material comes from `openssl` in an init
   container (`hooks.opensslImage`), the objects from `kubectl`
@@ -1102,12 +1104,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controller.skillsInitImage.repository | string | `"kagent-skills-init"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
-| kagent.controller.env[0].name | string | `"METRICS_BIND_ADDRESS"` |  |
-| kagent.controller.env[0].value | string | `":8080"` |  |
-| kagent.controller.env[1].name | string | `"METRICS_SECURE"` |  |
-| kagent.controller.env[1].value | string | `"false"` |  |
-| kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
+| kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.controller.vpa.enabled | string | `"auto"` |  |
 | kagent.controller.vpa.updateMode | string | `"InPlaceOrRecreate"` |  |
 | kagent.controller.vpa.controlledValues | string | `"RequestsOnly"` |  |
@@ -1133,9 +1131,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.serviceMonitor.enabled | bool | `false` |  |
-| kagent.serviceMonitor.interval | string | `"60s"` |  |
-| kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.otel.tracing.enabled | string | `"auto"` |  |
 | kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |

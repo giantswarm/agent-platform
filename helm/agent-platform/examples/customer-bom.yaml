@@ -35,8 +35,8 @@
 # render refuses such a pin.
 # substrate and substrate-crds pin the SAME release of the Substrate line
 # (stable semver like kagent's; the floor of components.substrate.versionRange
-# — 1.0.3, the line's 1.0 release whose egress gateway runs the agentgateway line's 2.1.2, on the upstream Substrate the
-# kagent line's own pin names). The agentgateway pin is the floor of
+# — 1.1.0, the line on kagent-dev/substrate v0.2.0-beta5, the upstream Substrate the
+# kagent line's own pin names; its egress gateway runs the agentgateway line's 2.1.2). The agentgateway pin is the floor of
 # components.agentgateway.versionRange: 2.4.0 is the first packaging release
 # whose values schema admits the monitoring block the agentgateway component
 # turns on (the tenant label on both monitors, the discovery label and the
@@ -58,10 +58,10 @@ components:
   agentgateway:                  { versionRange: "2.4.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "1.0.3" }
-  kagent-crds:                   { versionRange: "1.0.3" }
-  substrate:                     { versionRange: "1.0.3" }
-  substrate-crds:                { versionRange: "1.0.3" }
+  kagent:                        { versionRange: "1.1.0" }
+  kagent-crds:                   { versionRange: "1.1.0" }
+  substrate:                     { versionRange: "1.1.0" }
+  substrate-crds:                { versionRange: "1.1.0" }
   # 3.3.0 names a failed turn's class (tools, platform, model, policy) in the
   # thread, the turn record and the turn metric, and sends a tool-set or
   # platform failure once more (giantswarm/klaus-gateway#329). Nothing below

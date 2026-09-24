@@ -2,13 +2,12 @@
 {{- $mm := .Values.modelManager }}
 {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson }}
 {{- $port := include "agent-platform.modelManager.servicePort" . }}
-{{- $backends := include "agent-platform.modelManager.backends" . | fromJsonArray }}
 {{- /* A kserve backend exists as a static entry of modelManager.backends, or
 is registered at runtime by cluster-manager (its model-backend-kserve
 ConfigMap, invisible to the chart): either way model-manager calls the Hugging
 Face Hub for it (search, fit checks, revision lookups), so the hub egress
 renders whenever components.cluster-manager is on (#494). */ -}}
-{{- $kserveOn := or (has "kserve" $backends) (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "cluster-manager")) "true") }}
+{{- $kserveOn := include "agent-platform.modelManager.kserveOn" . }}
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.modelManager.oauthEnabled" . }}
@@ -36,12 +35,18 @@ holds byte for byte. */ -}}
 egress to their servers: every endpoint split into host, port and whether it
 is an address — one model-manager may front several. */ -}}
 {{- $servers := include "agent-platform.modelManager.hostTargets" (dict "root" . "key" "endpoint") | fromJsonArray }}
-{{- /* With the serving slice on, model-manager reads a Ready model's runtime —
-GET /version and GET /openapi.json on the workload port — for the API
-interfaces it answers; the serving namespace's own policy admits the release
-namespace on that port (model-serving/netpol.yaml). */ -}}
-{{- $servingOn := include "agent-platform.modelServing.enabled" . }}
-{{- $servingNs := include "agent-platform.modelServing.namespace" . }}
+{{- /* model-manager reads a Ready model's runtime — GET /version and
+GET /openapi.json on the workload port — for the API interfaces it answers,
+wherever it serves: the serving slice of this release, or a slice a GPU node
+pool brought as a second release of the chart (cluster-manager's
+create_node_pool; model-manager's kserve backend then comes from cluster-manager,
+and this release's modelServing stays off). The namespace is
+agent-platform.modelManager.servingNamespace; the serving
+namespace's own policy admits the release namespace on that port
+(model-serving/netpol.yaml; a node pool's slice through
+modelServing.networkPolicy.additionalIngressNamespaces). */ -}}
+{{- $readsServing := include "agent-platform.modelManager.serves" . }}
+{{- $servingNs := include "agent-platform.modelManager.servingNamespace" . }}
 {{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
@@ -144,7 +149,7 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
-    {{- if $servingOn }}
+    {{- if $readsServing }}
     # The served models' runtimes, on the workload port: a Ready model's
     # GET /version and GET /openapi.json, the API interfaces it answers.
     - toEndpoints:
@@ -387,7 +392,7 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    {{- if $servingOn }}
+    {{- if $readsServing }}
     # The served models' runtimes, on the workload port: a Ready model's
     # GET /version and GET /openapi.json, the API interfaces it answers.
     - to:

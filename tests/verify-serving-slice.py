@@ -762,6 +762,81 @@ def check_presets(connectivity: str) -> None:
        f"requests within a g6.xlarge's {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB; the schema knows spec.template")
 
 
+def family_problems(preset: dict, families: list[dict], runtime: dict, templates: str) -> list[str]:
+    """What is wrong with a preset against the model-family table (files/model-serving/model-families.yaml,
+    giantswarm/agent-platform#313): its family, found by spec.model.id, and the parsers and chat template it must carry."""
+    name, spec = preset["metadata"]["name"], preset["spec"]
+    model = spec["model"]["id"]
+    rows = [f for f in families if re.search(f["match"], model)]
+    if len(rows) != 1:
+        which = "no family row" if not rows else f"{len(rows)} family rows ({', '.join(r['name'] for r in rows)})"
+        return [f"preset {name} serves {model}, which {which} of model-families.yaml matches; add the family's row (its tool-call parsers, "
+                "reasoning parser and chat template from its vLLM recipe) or narrow the matches"]
+    row = rows[0]
+    args = [str(a) for a in spec.get("args") or []]
+    caps = set(spec["model"].get("capabilities") or [])
+    tool = [a.split("=", 1)[1] for a in args if a.startswith("--tool-call-parser=")]
+    reasoning = [a.split("=", 1)[1] for a in args if a.startswith("--reasoning-parser=")]
+    problems = []
+    for parser in tool:
+        if parser not in row["toolCallParsers"]:
+            problems.append(f"preset {name} (family {row['name']}) carries --tool-call-parser={parser}; the family's are {row['toolCallParsers']}")
+    for parser in reasoning:
+        if parser != row["reasoningParser"]:
+            problems.append(f"preset {name} (family {row['name']}) carries --reasoning-parser={parser}; the family's is {row['reasoningParser']}")
+    if "tools" in caps and ("--enable-auto-tool-choice" not in args or not tool):
+        problems.append(f"preset {name} (family {row['name']}) is tagged tools without --enable-auto-tool-choice and a tool-call parser of "
+                        f"{row['toolCallParsers']}: kagent sends tools with tool_choice auto on every turn, which vLLM then refuses with 400")
+    if "reasoning" in caps and not reasoning:
+        problems.append(f"preset {name} (family {row['name']}) is tagged reasoning without --reasoning-parser={row['reasoningParser']}: "
+                        "the thinking comes back inside the answer")
+    chat = spec.get("chatTemplate") or {}
+    if row["chatTemplate"] == "required" and not chat:
+        problems.append(f"preset {name} (family {row['name']}) sets no spec.chatTemplate; the family's checkpoints ship none vLLM serves tools with")
+    if chat.get("file") and not os.path.isfile(os.path.join(templates, chat["file"])):
+        problems.append(f"preset {name} mounts the chat template {chat['file']}, which is not under files/model-serving/chat-templates/")
+    return problems
+
+
+def check_model_families(connectivity: str) -> None:
+    """Every shipped preset against the model-family table: its family's parsers and chat template; every row's parsers
+    registered by the runtime's vLLM; a wrong parser, a missing one and an unknown family fail naming what (#313)."""
+    table = yaml.safe_load(open(f"{connectivity}/files/model-serving/model-families.yaml"))
+    families, runtime = table["families"], table["runtime"]
+    templates = f"{connectivity}/files/model-serving/chat-templates"
+    for row in families:
+        if row.get("chatTemplate") not in ("required", "optional"):
+            sys.exit(f"FAIL: model-families.yaml row {row['name']}: chatTemplate is required or optional, not {row.get('chatTemplate')!r}")
+        if row.get("runtimeImage"):
+            continue  # a family on a runtime image of its own names that vLLM's parsers
+        unknown = [p for p in row["toolCallParsers"] if p not in runtime["toolCallParsers"]]
+        if row["reasoningParser"] not in runtime["reasoningParsers"]:
+            unknown.append(row["reasoningParser"])
+        if unknown:
+            sys.exit(f"FAIL: model-families.yaml row {row['name']} names {unknown}, which vLLM {runtime['vllm']} does not register")
+    files = sorted(glob.glob(f"{connectivity}/files/model-serving/presets/*.yaml"))
+    problems = [p for path in files for p in family_problems(yaml.safe_load(open(path)), families, runtime, templates)]
+    if problems:
+        sys.exit("FAIL: " + "\nFAIL: ".join(problems))
+    # Negative controls: the check names what is wrong.
+    base = yaml.safe_load(open(f"{connectivity}/files/model-serving/presets/qwen3-5-4b.yaml"))
+    controls = {
+        "a tool-call parser the family does not list": (["--enable-auto-tool-choice", "--tool-call-parser=hermes", "--reasoning-parser=qwen3"], "Qwen/Qwen3.5-4B", "--tool-call-parser=hermes; the family's are"),
+        "a tools preset without its parser": (["--reasoning-parser=qwen3"], "Qwen/Qwen3.5-4B", "is tagged tools without --enable-auto-tool-choice"),
+        "a reasoning preset without its parser": (["--enable-auto-tool-choice", "--tool-call-parser=qwen3_coder"], "Qwen/Qwen3.5-4B", "is tagged reasoning without --reasoning-parser=qwen3"),
+        "a family the table lacks": (["--enable-auto-tool-choice", "--tool-call-parser=hermes"], "org/Unknown-7B", "which no family row of model-families.yaml matches"),
+    }
+    for what, (args, model, needle) in controls.items():
+        control = yaml.safe_load(yaml.safe_dump(base))
+        control["spec"]["args"], control["spec"]["model"]["id"] = args, model
+        got = family_problems(control, families, runtime, templates)
+        if not any(needle in p for p in got):
+            sys.exit(f"FAIL: the model-family check passes {what} (got {got})")
+    ok(f"{len(files)} shipped presets carry their family's parsers ({len(families)} rows of model-families.yaml, every parser registered by "
+       f"vLLM {runtime['vllm']}): tools with --enable-auto-tool-choice and a family tool-call parser, reasoning with the family's reasoning parser, "
+       f"every mounted chat template present; a foreign parser, a missing one and an unknown family fail naming preset, family and parser")
+
+
 def resource_requests(text: str, name: str) -> tuple:
     """The preset's requests.cpu (vCPU) and requests.memory (GiB), from the
     authoring form's `resources:` block (quantities as Kubernetes writes them)."""
@@ -811,6 +886,7 @@ def main(meta: str, connectivity: str) -> int:
     finally:
         os.unlink(values)
     check_presets(connectivity)
+    check_model_families(connectivity)
     return 0
 
 

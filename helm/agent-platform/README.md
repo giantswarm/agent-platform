@@ -329,7 +329,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.0.3 <1.1.0"` |  |
+| components.kagent.versionRange | string | `">=1.1.0 <1.2.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -343,27 +343,26 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[4] | string | `"modelConfigs"` |  |
 | components.kagent.omitKeys[5] | string | `"oauth2ProxyIngress"` |  |
 | components.kagent.omitKeys[6] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[7] | string | `"serviceMonitor"` |  |
-| components.kagent.omitKeys[8] | string | `"uiRoute"` |  |
-| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[8] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.0.3 <1.1.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.1.0 <1.2.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.0.3 <1.1.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.1.0 <1.2.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.0.3 <1.1.0"` |  |
+| components.substrate.versionRange | string | `">=1.1.0 <1.2.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -761,7 +760,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.vpa.minAllowed.memory | string | `"128Mi"` |  |
 | kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
 | kagent.controller.vpa.maxAllowed.memory | string | `"1280Mi"` |  |
-| kagent.controller.metrics.enabled | bool | `false` |  |
+| kagent.controller.metrics.enabled | bool | `true` |  |
+| kagent.controller.metrics.bindAddress | string | `":8080"` |  |
+| kagent.controller.metrics.secureServing | bool | `false` |  |
+| kagent.controller.metrics.service.port | int | `8080` |  |
+| kagent.controller.metrics.serviceMonitor.enabled | string | `"auto"` |  |
+| kagent.controller.metrics.serviceMonitor.interval | string | `"60s"` |  |
+| kagent.controller.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
 | kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.ui.image.repository | string | `"giantswarm/kagent/ui"` |  |
@@ -797,9 +802,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.apiKey | string | `""` |  |
 | kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
 | kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
-| kagent.serviceMonitor.enabled | bool | `false` |  |
-| kagent.serviceMonitor.interval | string | `"60s"` |  |
-| kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.otel.tracing.enabled | string | `"auto"` |  |
 | kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |
@@ -858,6 +860,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
 | kagent.harness.create | bool | `true` |  |
 | kagent.harness.image | string | `""` |  |
+| kagent.harness.compaction.tokenThreshold | int | `24000` |  |
+| kagent.harness.compaction.eventRetentionSize | int | `4` |  |
 | kagent.harness.snapshotLocation | string | `""` |  |
 | kagent.harness.snapshotStore.prefix | string | `"kagent"` |  |
 | kagent.harness.snapshotStore.crossplane.enabled | bool | `false` |  |
@@ -1163,7 +1167,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
-| agent-manager.agentChart.semver | string | `"1.x"` |  |
+| agent-manager.agentChart.semver | string | `">=1.5.0 <2.0.0"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
@@ -1291,7 +1295,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent-crds.kmcp.enabled | bool | `false` |  |
 | kagent-crds.substrate.enabled | bool | `false` |  |
 | substrate.createNamespace | bool | `false` |  |
-| substrate.image.registry | string | `"gsoci.azurecr.io/giantswarm/substrate"` |  |
+| substrate.image.registry | string | `"gsoci.azurecr.io"` |  |
+| substrate.image.repository | string | `"giantswarm/substrate"` |  |
+| substrate.metrics.podMonitor.enabled | string | `"auto"` |  |
+| substrate.metrics.podMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| substrate.credentialProvider.namespacePolicies[0].atespace | string | `"kagent"` |  |
+| substrate.credentialProvider.namespacePolicies[0].allowedNamespaces[0] | string | `"kagent"` |  |
+| substrate.credentialProvider.namespacePolicies[1].atespace | string | `"ate-golden"` |  |
+| substrate.credentialProvider.namespacePolicies[1].allowedNamespaces[0] | string | `"kagent"` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
 | substrate.postgres.connectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
