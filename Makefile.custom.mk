@@ -596,7 +596,8 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@awk '/^kind: AgentgatewayModel$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out >/tmp/vl-model.out
 	@grep -q '^  name: anthropic$$' /tmp/vl-model.out && grep -q 'provider: Anthropic$$' /tmp/vl-model.out && grep -q 'model: "claude-\*"' /tmp/vl-model.out || { cat /tmp/vl-model.out; echo "FAIL: the default model is not AgentgatewayModel anthropic, provider Anthropic, match claude-*"; exit 1; }
 	@grep -A3 'parentRefs:' /tmp/vl-model.out | grep -q 'name: agent-platform-connectivity-llm$$' || { echo "FAIL: the provider model is not attached to the LLM route; the router would never pick it"; exit 1; }
-	@if grep -qE '^  (baseURL|policies|custom):' /tmp/vl-model.out; then echo "FAIL: the provider model carries a baseURL, a policy or custom settings; the managed provider's defaults serve it and the gateway holds no credential"; exit 1; fi
+	@grep -q 'baseURL: "https://api.anthropic.com/v1"' /tmp/vl-model.out || { echo "FAIL: the provider model has no baseURL with the version path; agentgateway 2.1 would send Anthropic /messages (404)"; exit 1; }
+	@if grep -qE '^  (policies|custom):' /tmp/vl-model.out; then echo "FAIL: the provider model carries a policy or custom settings; the gateway holds no credential"; exit 1; fi
 	@echo "ok: listener + pinned route + model router + credential-free provider model"
 	@grep -q 'name: agent-platform-connectivity-dashboard-llm-usage$$' /tmp/vl-on.out || { echo "FAIL: llmRouting is on and the LLM usage board does not render"; exit 1; }
 	@echo "ok: LLM usage board with the listener"
@@ -643,12 +644,12 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-k8s.out | grep -q 'port: 15020' || { echo "FAIL: the kubernetes data-plane policy does not admit the scrape port"; exit 1; }
 	@echo "ok: network policies"
 	@echo "--> models: an installation's own list, the guards on names and wildcards"
-	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set-json 'llmRouting.models=[{"name":"anthropic","provider":"Anthropic","match":"claude-*"},{"name":"openai","provider":"OpenAI","match":"gpt-*"},{"name":"latest","provider":"OpenAI","match":"*-latest","visibility":"Internal"}]' >/tmp/vl-models.out 2>&1 || { cat /tmp/vl-models.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set-json 'llmRouting.models=[{"name":"anthropic","provider":"Anthropic","baseURL":"https://api.anthropic.com/v1","match":"claude-*"},{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"},{"name":"latest","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"*-latest","visibility":"Internal"}]' >/tmp/vl-models.out 2>&1 || { cat /tmp/vl-models.out; exit 1; }
 	@[ "$$(grep -c '^kind: AgentgatewayModel$$' /tmp/vl-models.out)" = 3 ] || { echo "FAIL: three llmRouting.models entries do not render three AgentgatewayModels"; exit 1; }
 	@awk '/^kind: AgentgatewayModel$$/{f=1} f&&/^  name: latest$$/{g=1} g&&/^---/{exit} g' /tmp/vl-models.out | grep -q 'visibility: Internal' || { echo "FAIL: an entry's visibility does not reach its model"; exit 1; }
-	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set-json 'llmRouting.models=[{"name":"a","provider":"OpenAI"},{"name":"a","provider":"Anthropic"}]' >/tmp/vl-dup.out 2>&1; then echo "FAIL: two models of one name rendered; they are one object"; exit 1; \
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set-json 'llmRouting.models=[{"name":"a","provider":"OpenAI","baseURL":"https://api.openai.com/v1"},{"name":"a","provider":"Anthropic","baseURL":"https://api.anthropic.com/v1"}]' >/tmp/vl-dup.out 2>&1; then echo "FAIL: two models of one name rendered; they are one object"; exit 1; \
 	elif ! grep -q 'names "a" twice' /tmp/vl-dup.out; then cat /tmp/vl-dup.out; echo "FAIL: the duplicate-name guard failed for the wrong reason"; exit 1; else echo "ok: duplicate-name guard"; fi
-	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set-json 'llmRouting.models=[{"name":"a","provider":"OpenAI","match":"g*t-*"}]' >/tmp/vl-wild.out 2>&1; then echo "FAIL: a wildcard in the middle rendered; the CRD refuses it at admission"; exit 1; \
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set-json 'llmRouting.models=[{"name":"a","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"g*t-*"}]' >/tmp/vl-wild.out 2>&1; then echo "FAIL: a wildcard in the middle rendered; the CRD refuses it at admission"; exit 1; \
 	elif ! grep -q 'one `\*` at an end' /tmp/vl-wild.out; then cat /tmp/vl-wild.out; echo "FAIL: the wildcard guard failed for the wrong reason"; exit 1; else echo "ok: wildcard guard"; fi
 	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set llmRouting.models=null >/tmp/vl-nomodel.out 2>&1; then echo "FAIL: an empty model list rendered; the router would answer 404 to every agent"; exit 1; \
 	elif ! grep -q 'llmRouting.models must list at least one model' /tmp/vl-nomodel.out; then cat /tmp/vl-nomodel.out; echo "FAIL: the empty-list guard failed for the wrong reason"; exit 1; else echo "ok: an empty model list is refused"; fi
@@ -727,7 +728,7 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@echo "--> a non-Anthropic entry's baseUrl goes under the CRD's block key (openAI), never the lower-cased provider"
 	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' /tmp/vl-ci.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "https://api.openai.com/v1"' || { echo "FAIL: the OpenAI entry's baseUrl is not under spec.openAI; the API server would prune it and the model would stay direct in silence"; exit 1; }
 	@if grep -qE '^  (openai|sapaicore):$$' /tmp/vl-ci.out; then echo "FAIL: a lower-cased provider block rendered; the CRD knows openAI and sapAICore only"; exit 1; fi
-	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","match":"gpt-*"}]' --set 'kagent.modelConfigs[0].provider=OpenAI' >/tmp/vl-openai-routed.out 2>&1 || { cat /tmp/vl-openai-routed.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' --set 'kagent.modelConfigs[0].provider=OpenAI' >/tmp/vl-openai-routed.out 2>&1 || { cat /tmp/vl-openai-routed.out; exit 1; }
 	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vl-openai-routed.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: the routed default for an OpenAI listener is not under spec.openAI; every routed OpenAI model would be pruned to the direct path"; exit 1; }
 	@echo "ok: openAI block key, explicit and routed"
 	@echo "--> guard: a provider outside the CRD's enum fails the render, naming the entry and the enum"
@@ -737,9 +738,9 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 		cat /tmp/vl-enum.out; echo "FAIL: the enum guard does not name the entry and the CRD's enum"; exit 1; \
 	else echo "ok: enum guard"; fi
 	@echo "--> the MutatingAdmissionPolicy writes the provider's own block name"
-	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","match":"gpt-*"}]' >/tmp/vl-openai.out 2>&1 || { cat /tmp/vl-openai.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' >/tmp/vl-openai.out 2>&1 || { cat /tmp/vl-openai.out; exit 1; }
 	@grep -q 'object.spec.openAI.baseUrl' /tmp/vl-openai.out || { echo "FAIL: the policy reads the lower-cased provider name, not the ModelConfigSpec block; every CEL evaluation would error"; exit 1; }
-	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set-json 'llmRouting.models=[{"name":"gemini","provider":"Gemini","match":"gemini-*"}]' 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
+	@if helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set-json 'llmRouting.models=[{"name":"gemini","provider":"Gemini","baseURL":"https://generativelanguage.googleapis.com/v1beta","match":"gemini-*"}]' 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
 		echo "FAIL: the policy renders for a provider whose block carries no baseUrl; the mutation would be pruned"; exit 1; \
 	else echo "ok: provider block name"; fi
 	@echo "--> the MutatingAdmissionPolicy renders only where the API server serves the GA group"

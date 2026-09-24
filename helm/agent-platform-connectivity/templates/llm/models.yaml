@@ -1,11 +1,12 @@
 {{- /* The models the LLM listener serves (llmRouting.models): one
 AgentgatewayModel per entry, attached to the LLM route's rule, whose one
 backend is the model router (AgentgatewayModel `*`). The request's `model`
-picks the candidate: the first by name whose match takes it. No host, port,
-model override or `policies.auth`: a managed provider's defaults resolve to its
-public API with system-trust TLS, the gateway holds no credential, and a
-client's own key passes through untouched, so reach to the listener grants no
-spend. A served model joins the same route under its preset's name, written by
+picks the candidate: the first by name whose match takes it. The baseURL is the
+provider's API origin with its version path: agentgateway 2.1 appends the
+format's suffix to the baseURL's path, and a managed provider without one gets
+no version path (Anthropic answers `/messages` with 404). No model override or
+`policies.auth`: the gateway holds no credential, and a client's own key passes
+through untouched, so reach to the listener grants no spend. A served model joins the same route under its preset's name, written by
 model-manager (discovery spec.llmEndpoint, giantswarm/model-manager#145). */ -}}
 {{- if (include "agent-platform.llmRouting" .) }}
 {{- range .Values.llmRouting.models }}
@@ -28,5 +29,6 @@ spec:
   visibility: {{ . }}
   {{- end }}
   provider: {{ .provider }}
+  baseURL: {{ .baseURL | quote }}
 {{- end }}
 {{- end }}

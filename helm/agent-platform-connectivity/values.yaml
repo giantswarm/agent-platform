@@ -523,20 +523,23 @@ llmRouting:
   # AgentgatewayModel attached to the route is a candidate). One
   # AgentgatewayModel per entry: `name` (a DNS label, the object's name),
   # `provider` (an agentgateway managed provider: Anthropic, OpenAI, Gemini,
-  # ...), `match` (the model names it takes: exact, `claude-*`, `*-latest`;
-  # empty matches `name` alone) and `visibility` (Public, or Internal for a
-  # model only a virtual model selects). No host, port or credential: the
-  # provider defaults resolve to the provider's public API with system-trust
-  # TLS, and a client's own key passes through untouched, so reach to the
-  # listener grants no spend. Candidates are tried in name order and the first
+  # ...), `baseURL` (the provider's API origin WITH its version path,
+  # https://api.anthropic.com/v1: agentgateway 2.1 builds the upstream path
+  # from the baseURL's path plus the format's suffix, and a model without one
+  # sends Anthropic `/messages`), `match` (the model names it takes: exact,
+  # `claude-*`, `*-latest`; empty matches `name` alone) and `visibility`
+  # (Public, or Internal for a model only a virtual model selects). No
+  # credential: TLS against system trust, and a client's own key passes
+  # through untouched, so reach to the listener grants no spend. Candidates are tried in name order and the first
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, discovery
   # spec.llmEndpoint) joins under its preset's name. The first entry's
   # provider is the one whose ModelConfigs ride the listener
   # (kagent.modelConfigs, modelConfigPolicy).
-  models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
+  models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "baseURL": {"type": "string", "pattern": "^https?://[^/]+/.+"}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
     - name: anthropic
       provider: Anthropic
+      baseURL: https://api.anthropic.com/v1
       match: claude-*
   # The LLM endpoint outside the cluster (llmRouting.external): a public
   # hostname, <hostPrefix>.<global.domain>, on the platform's edge — the data

@@ -1993,6 +1993,10 @@
                         "type": "object",
                         "additionalProperties": false,
                         "properties": {
+                            "baseURL": {
+                                "type": "string",
+                                "pattern": "^https?://[^/]+/.+"
+                            },
                             "match": {
                                 "type": "string"
                             },

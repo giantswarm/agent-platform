@@ -990,8 +990,8 @@ wildcard must be the CRD's shape (`*`, `gpt-*`, `*-latest`). */ -}}
 {{- end -}}
 {{- $names := dict -}}
 {{- range .Values.llmRouting.models -}}
-{{- if not (and .name .provider) -}}
-{{- fail (printf "llmRouting.models: every entry names its AgentgatewayModel (name) and a managed provider (provider); got %v" .) -}}
+{{- if not (and .name .provider .baseURL) -}}
+{{- fail (printf "llmRouting.models: every entry names its AgentgatewayModel (name), a managed provider (provider) and the provider's API origin with its version path (baseURL, e.g. https://api.anthropic.com/v1: the upstream path is the baseURL's path plus the format's suffix); got %v" .) -}}
 {{- end -}}
 {{- if hasKey $names .name -}}
 {{- fail (printf "llmRouting.models names %q twice; every entry is one AgentgatewayModel of that name" .name) -}}
