@@ -405,6 +405,11 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
        (--default-chat-template-kwargs='{"enable_thinking": false}'). */ -}}
 {{- range $args -}}
 {{- $arg := toString . -}}
+{{- /* The API interfaces a served model answers are read from its runtime's
+       route list, GET /openapi.json (model-manager); the flag removes it. */ -}}
+{{- if regexMatch "^--disable-fastapi-docs(=|$)" $arg -}}
+{{- fail (printf "%s: spec.args carries %s, which removes the runtime's /openapi.json — the route list the platform reads a served model's API interfaces from (chat completions, Responses, Messages, embeddings); drop the flag" $where (quote $arg)) -}}
+{{- end -}}
 {{- if regexMatch "[[:space:]\"'$`\\\\;&|<>(){}\\[\\]*?]" (regexReplaceAll "'[^']*'" $arg "") -}}
 {{- fail (printf "%s: spec.args %s carries whitespace, a quote or a shell metacharacter outside single quotes; the runtime template re-parses every argument through a shell (eval \"… $@\"), which splits it there and eats the quotes — write the value single-quoted inside one argument, e.g. --default-chat-template-kwargs='{\"enable_thinking\": false}'" $where (quote $arg)) -}}
 {{- end -}}

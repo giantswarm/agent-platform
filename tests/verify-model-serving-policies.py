@@ -753,6 +753,51 @@ def check_ports(cilium: list[dict], k8s: list[dict], via: str) -> None:
     ok(f"{via}: the workload's ingress (both flavours, the kubelet's rule too) and the agents' egress admit exactly the port its fixture is reached on: {ports}")
 
 
+def check_model_manager_read(connectivity: str, cilium: list[dict], k8s: list[dict], via: str) -> None:
+    """model-manager reads a Ready model's GET /version and GET /openapi.json on the workload port — the API interfaces
+    it answers (giantswarm/agent-platform#602): its egress policy (both flavours) carries one rule selecting each shape's
+    fixture pod in the serving namespace on exactly the port the fixture is reached on, and the shape's ingress admits the
+    release namespace, model-manager's own, on that port. With model-manager off there is no model-manager policy; with
+    the serving slice off its egress carries no rule into a serving namespace."""
+    release_ns = BASE[BASE.index("--namespace") + 1]
+    for shape in SHAPES:
+        want = container_port(shape)
+        labels = {**fixture(shape)["metadata"]["labels"], "io.kubernetes.pod.namespace": NS}
+        egress = one(cilium, "CiliumNetworkPolicy", "-model-manager-egress")["spec"]["egress"]
+        to_shape = [r for r in egress if any(selects(p, labels) for p in r.get("toEndpoints") or [])]
+        if len(to_shape) != 1 or cilium_ports(to_shape) != {want}:
+            fail(f"-model-manager-egress ({via}, cilium): {len(to_shape)} rules reach the {shape} pods on {sorted(cilium_ports(to_shape))}; "
+                 f"expected one on {want}, the port model-manager reads the model's route list on")
+        egress = one(k8s, "NetworkPolicy", "-model-manager-egress")["spec"]["egress"]
+        to_shape = [r for r in egress if any(
+            (p.get("namespaceSelector") or {}).get("matchLabels", {}).get("kubernetes.io/metadata.name") == NS
+            and selects(p.get("podSelector") or {}, fixture(shape)["metadata"]["labels"]) for p in r.get("to") or [])]
+        if len(to_shape) != 1 or {int(p["port"]) for r in to_shape for p in r["ports"]} != {want}:
+            fail(f"-model-manager-egress ({via}, kubernetes): {len(to_shape)} rules reach the {shape} pods in {NS}; expected one on {want}")
+        callers = one(cilium, "CiliumNetworkPolicy", f"-model-serving-{shape}")["spec"]["ingress"]
+        if not any({"io.kubernetes.pod.namespace": release_ns} in [e.get("matchLabels") for e in r.get("fromEndpoints") or []]
+                   and cilium_ports([r]) == {want} for r in callers):
+            fail(f"-model-serving-{shape} ({via}): no ingress rule admits the release namespace {release_ns} (model-manager) on {want}")
+        ingress = one(k8s, "NetworkPolicy", f"-model-serving-{shape}-ingress")["spec"]["ingress"]
+        if not any({"kubernetes.io/metadata.name": release_ns} in [(p.get("namespaceSelector") or {}).get("matchLabels") for p in r["from"]]
+                   for r in ingress):
+            fail(f"-model-serving-{shape}-ingress ({via}): the release namespace {release_ns} (model-manager) is not admitted")
+    ok(f"{via}: model-manager's egress reaches each shape's pod on exactly its port in both flavours, and the shape's ingress admits it")
+
+
+def check_model_manager_read_absent(connectivity: str) -> None:
+    for flags, what in (([*CILIUM, "--set", "components.model-manager.enabled=false"], "model-manager off"),
+                        (["--set", "components.model-manager.enabled=false"], "model-manager off, kubernetes flavour")):
+        if [d for d in render(connectivity, flags) if d["metadata"]["name"].endswith("-model-manager-egress")]:
+            fail(f"{what}: a model-manager egress policy renders")
+    off = [*BASE[:BASE.index("components.modelServing.enabled=true") - 1], *BASE[BASE.index("components.modelServing.enabled=true") + 1:]]
+    for flags in (CILIUM, []):
+        for d in render(connectivity, flags, base=off):
+            if d["metadata"]["name"].endswith("-model-manager-egress") and NS in yaml.safe_dump(d["spec"]):
+                fail(f"the serving slice off: {d['kind']} -model-manager-egress still reaches the serving namespace {NS}")
+    ok("model-manager off renders no model-manager egress policy; the serving slice off leaves no rule into the serving namespace (both flavours)")
+
+
 def cilium_regex(entry: dict) -> re.Pattern:
     """A toFQDNs entry as Cilium's DNS proxy compiles it (pkg/fqdn/matchpattern): lower-cased and anchored; in a
     matchPattern `*` is [-a-zA-Z0-9_]* — DNS label characters, never a dot — so a `*` admits exactly one label."""
@@ -1005,6 +1050,8 @@ def main(connectivity: str, meta: str) -> int:
     check_selectors(cilium, docs)
     check_fqdns(cilium, docs, "the connectivity chart's defaults")
     check_ports(cilium, docs, "the connectivity chart's defaults")
+    check_model_manager_read(connectivity, cilium, docs, "the connectivity chart's defaults")
+    check_model_manager_read_absent(connectivity)
     regressed = render(connectivity, [*CILIUM, "--set", f"modelServing.networkPolicy.llmisvcWorkload.port={CLASSIC_PORT}"])
     try:
         check_ports(regressed, docs, "the negative control")
@@ -1027,6 +1074,7 @@ def main(connectivity: str, meta: str) -> int:
             through_meta.append(render(connectivity, ["-f", forwarded, *apis]))
         check_fqdns(*through_meta, "the meta chart's forwarded values")
         check_ports(*through_meta, "the meta chart's forwarded values")
+        check_model_manager_read(connectivity, *through_meta, "the meta chart's forwarded values")
         check_prepull_forwarded(connectivity, meta, through_meta[1], tmp)
         check_image_verification_forwarded(connectivity, forwarded)
         check_image_verification_egress_forwarded(connectivity, os.path.join(tmp, "forwarded-cilium.yaml"))
