@@ -2067,9 +2067,9 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   # on gsoci. proxy.image is what this chart renders into the
   # AgentgatewayParameters of every data plane it declares (the edge Gateway,
   # the models Gateway), repository and tag in full; controller.image mirrors
-  # the meta chart's block, which the agentgateway release runs. The Substrate
-  # line's egress dataplane (the meta chart's substrate.images.agentgateway)
-  # names the same release; move all of them together.
+  # the meta chart's block, which the agentgateway release runs; move them
+  # together. The Substrate line's router and egress run the build their
+  # Substrate release stamps and follow that release, not these tags.
   controller:
     image:
       repository: giantswarm/agentgateway-upstream/controller

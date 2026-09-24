@@ -93,7 +93,7 @@ KAGENT_RANGE = ">=1.0.2 <1.1.0"
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
 SUBSTRATE_RANGE = ">=1.0.3 <1.1.0"
-SUBSTRATE_PIN = "1.0.3"  # the range's floor, the BOM pin and the worker image's tag: the 1.0 release whose atenet data plane is the agentgateway line's 2.1.2, the build whose Substrate policies watch and re-read their backendTLS certificate files (giantswarm/giantswarm#37915); 1.0.0–1.0.2 name older data planes, so the range cannot admit them while substrate.images.agentgateway names 2.1.2
+SUBSTRATE_PIN = "1.0.3"  # the range's floor, the BOM pin and the worker image's tag: the 1.0 release whose atenet data plane is the agentgateway line's 2.1.2, the build whose Substrate policies watch and re-read their backendTLS certificate files (giantswarm/giantswarm#37915); 1.0.0–1.0.2 name older data planes, which the range must not admit: the atenet data plane follows the release (giantswarm/agent-platform#654)
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
