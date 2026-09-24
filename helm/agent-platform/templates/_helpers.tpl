@@ -1577,15 +1577,19 @@ are created for, in Helm's order: pre-install,pre-upgrade while the kagent
 namespace hook or the storage-version backup hook renders (they run as that
 account — creating a namespace or deleting a CRD is cluster-scoped, the
 namespaced <release>-self identity cannot), post-install,post-upgrade while the
-storage-version restore hook renders, and pre-delete for the ordered teardown
-(the bundled engine). Empty when none of them renders — rbac.yaml renders nothing then.
+storage-version restore hook renders, pre-delete for the ordered teardown
+(the bundled engine), and the serving teardown's event while it renders
+(agent-platform.serving.teardownEvent: pre-delete, or pre-upgrade when the
+slice is switched off in place). Empty when none of them renders — rbac.yaml
+renders nothing then.
 */}}
 {{- define "agent-platform.hooks.serviceAccountEvents" -}}
 {{- $events := list -}}
 {{- if or (include "agent-platform.kagent.hookNamespace" .) (include "agent-platform.kagent.storageVersionHooks" .) }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
 {{- if include "agent-platform.kagent.storageVersionHooks" . }}{{ $events = concat $events (list "post-install" "post-upgrade") }}{{ end -}}
 {{- if eq (include "agent-platform.engineEnabled" .) "true" }}{{ $events = append $events "pre-delete" }}{{ end -}}
-{{- join "," $events -}}
+{{- with include "agent-platform.serving.teardownEvent" . }}{{ $events = append $events . }}{{ end -}}
+{{- join "," (uniq $events) -}}
 {{- end -}}
 
 {{/*
