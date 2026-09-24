@@ -195,11 +195,6 @@ KAGENT_VPA_CAP_HOLD = ["--set", "kagent.controller.vpa.maxAllowed.memory=1280Mi"
 # names a failed turn's class; GOLDEN_REF admits 2.0.0. Written on BOTH sides so
 # the range compares equal; dropped once GOLDEN_REF carries the floor.
 KLAUS_GATEWAY_FLOOR_HOLD = ["--set", "components.klaus-gateway.versionRange=>=3.3.0 <4.0.0"]
-# giantswarm/agent-platform#668: the Generic agent chart is capped below 1.5.0
-# (the release that renders no spec.context.compaction, which the kagent 1.0
-# line's agents need); GOLDEN_REF pins 1.x. Written on BOTH sides so the
-# forwarded range compares equal; dropped once GOLDEN_REF carries the cap.
-AGENT_CHART_CAP_HOLD = ["--set", "agent-manager.agentChart.semver=>=1.0.0 <1.5.0"]
 # giantswarm/giantswarm#36711: this tree turns the substrate chart's PodMonitors
 # on, which GOLDEN_REF's defaults leave off and whose block it does not carry at
 # all. The whole block is written on BOTH sides so the forwarded values compare
@@ -234,6 +229,17 @@ def hold_retired_servicemonitor(here: str, there: str) -> tuple:
     if (h := strip(here)) != here or strip(there) != there:
         print("note: #36711 hold — the forwarded serviceMonitor blocks are left out of the golden comparison")
     return h, strip(there)
+# giantswarm/giantswarm#37705: this tree moves the kagent and Substrate lines to
+# 1.1 and the Generic agent chart to 1.5; GOLDEN_REF stays on the 1.0 lines.
+# Written on BOTH sides so the ranges compare equal; dropped once GOLDEN_REF
+# carries them.
+REPIN_1_1_RANGES_HOLD = [
+    "--set", "components.kagent.versionRange=>=1.1.0 <1.2.0",
+    "--set", "components.kagent-crds.versionRange=>=1.1.0 <1.2.0",
+    "--set", "components.substrate.versionRange=>=1.1.0 <1.2.0",
+    "--set", "components.substrate-crds.versionRange=>=1.1.0 <1.2.0",
+    "--set", "agent-manager.agentChart.semver=>=1.5.0 <2.0.0",
+]
 AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
     "--set", "agentgateway.controller.image.tag=2.0.0",
@@ -673,8 +679,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the klaus-gateway no-op key removal (#636) since 4.62.0.
         golden_only = {meta: [], connectivity: []}
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *AGENT_CHART_CAP_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *AGENT_CHART_CAP_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),

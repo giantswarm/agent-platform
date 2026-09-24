@@ -112,11 +112,19 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {}
+# The 1.1 releases of the kagent line and the Substrate line (giantswarm/giantswarm#37705):
+# the tags follow the agentlab gate; until they exist the ranges render against
+# the dev builds the gate ran on. The four entries go with the release.
+UNRELEASED: dict[str, str] = {"kagent": "1.1.0", "kagent-crds": "1.1.0", "substrate": "1.1.0", "substrate-crds": "1.1.0"}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
-RENDER_AGAINST: dict[str, str] = {}
+RENDER_AGAINST: dict[str, str] = {
+    "kagent": "0.9.11-r588f3d76t20260924141400h1f36e2c",
+    "kagent-crds": "0.9.11-r588f3d76t20260924141400h1f36e2c",
+    "substrate": "0.0.0-r588f3d76t20260924131333h6c6d012",
+    "substrate-crds": "0.0.0-r588f3d76t20260924131333h6c6d012",
+}
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
 HELM_CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
@@ -319,7 +327,7 @@ def fallback(name: str, url: str, constraint: str, tags: list[str], kagent_tag: 
         fail(waits_for(name, url, constraint, tags))
     if name not in UNRELEASED:
         fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED); the release would wait for {name} {floor(constraint)}")
-    chosen = kagent_tag if name in KAGENT else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
+    chosen = RENDER_AGAINST.get(name) or (kagent_tag if name in KAGENT else fluxsemver.resolve(tags, ">=0.0.0"))
     if not chosen or chosen not in tags:
         fail(f"no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
     print(f"NOTE: {name}: {constraint!r} matches no published chart yet (waits for {UNRELEASED[name]}); rendering against {chosen}")
