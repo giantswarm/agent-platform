@@ -277,21 +277,13 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 		if grep -q "$$pattern" /tmp/vg-mon.out; then echo "FAIL: monitor-gated render still contains $$pattern"; exit 1; fi; \
 	done
 	@echo "ok: monitor gate"
-	@echo "--> the default render keeps the CNPG PodMonitor (fleet behavior) and renders NO kagent ServiceMonitor or metrics Service: the kagent line serves no /metrics (kagent.serviceMonitor.enabled: false)"
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true >/tmp/vg-mon-default.out 2>&1 || { cat /tmp/vg-mon-default.out; exit 1; }
-	@if grep -q 'kind: ServiceMonitor' /tmp/vg-mon-default.out; then echo "FAIL: the default render carries a kagent ServiceMonitor; the line's controller serves no /metrics and the monitor would sit at up=0"; exit 1; fi
-	@if grep -q 'kagent-controller-metrics' /tmp/vg-mon-default.out; then echo "FAIL: the default render carries the kagent controller metrics Service; nothing listens behind it on the line"; exit 1; fi
-	@grep -q 'enablePodMonitor: true' /tmp/vg-mon-default.out || { echo "FAIL: default render lost the CNPG PodMonitor"; exit 1; }
-	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-default.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
-	@echo "ok: default: no kagent monitor, CNPG PodMonitor + keep"
-	@echo "--> kagent.serviceMonitor.enabled=true (for when upstream serves metrics) renders the Service and the ServiceMonitor under the global gate"
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true --set kagent.serviceMonitor.enabled=true >/tmp/vg-mon-on.out 2>&1 || { cat /tmp/vg-mon-on.out; exit 1; }
-	@grep -q 'kind: ServiceMonitor' /tmp/vg-mon-on.out || { echo "FAIL: kagent.serviceMonitor.enabled=true renders no ServiceMonitor"; exit 1; }
-	@grep -q 'observability.giantswarm.io/tenant: giantswarm' /tmp/vg-mon-on.out || { echo "FAIL: the kagent ServiceMonitor lost the tenant label"; exit 1; }
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.serviceMonitor.enabled=true --set global.observability.metrics.serviceMonitor.enabled=false 2>/dev/null | grep -q 'kind: ServiceMonitor' && { echo "FAIL: the global monitor gate no longer holds the kagent ServiceMonitor back"; exit 1; } || true
-	@echo "ok: the toggle under the global gate"
-	@echo "--> the kagent controller metrics Service selects kagent's own release instance (the pods' label), the ServiceMonitor this chart's Service"
-	@python3 -c 'import re,sys; docs=open("/tmp/vg-mon-on.out").read().split("\n---\n"); svc=[d for d in docs if "\nkind: Service\n" in d and re.search(r"^  name: t-kagent-controller-metrics$$", d, re.M)]; sys.exit("FAIL: the kagent controller metrics Service did not render") if len(svc)!=1 else None; sel=svc[0][svc[0].index("  selector:"):]; sys.exit("FAIL: the metrics Service does not select app.kubernetes.io/instance: kagent (the kagent release name the meta chart fixes):\n"+sel) if not re.search(r"^    app.kubernetes.io/instance: kagent$$", sel, re.M) else None; sys.exit("FAIL: the metrics Service selects this release (t) — under the meta chart that matches no pod (#305)") if re.search(r"^    app.kubernetes.io/instance: \"?t\"?$$", sel, re.M) else None; sm=[d for d in docs if "kind: ServiceMonitor" in d and "-kagent-controller\n" in d]; sys.exit("FAIL: the kagent ServiceMonitor did not render") if len(sm)!=1 else None; sys.exit("FAIL: the ServiceMonitor must select this chart\x27s Service (instance t)") if "      app.kubernetes.io/instance: \"t\"" not in sm[0] else None; print("ok: metrics Service selects instance kagent; the ServiceMonitor selects this release\x27s Service")'
+	@echo "--> the default render keeps the CNPG PodMonitor (fleet behavior) and renders NO kagent ServiceMonitor or metrics Service: both are the kagent chart's own (controller.metrics)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true >/tmp/vg-mon-on.out 2>&1 || { cat /tmp/vg-mon-on.out; exit 1; }
+	@if grep -q 'kind: ServiceMonitor' /tmp/vg-mon-on.out; then echo "FAIL: this chart renders a ServiceMonitor; every monitor belongs to the component's own chart (the kagent controller's to controller.metrics.serviceMonitor, the agentgateway data plane's to the packaging chart)"; exit 1; fi
+	@if grep -q 'kagent-controller-metrics' /tmp/vg-mon-on.out; then echo "FAIL: this chart renders the kagent controller metrics Service; the kagent chart renders it under controller.metrics.enabled"; exit 1; fi
+	@grep -q 'enablePodMonitor: true' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the CNPG PodMonitor"; exit 1; }
+	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-on.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
+	@echo "ok: no monitor of this chart's own, CNPG PodMonitor + keep"
 	@echo "--> no kagent-targeting selector, Service name or hostname in this chart derives from .Release.Name (the standalone umbrella's one-release assumption)"
 	@if grep -nE 'fullnameOverride \| default \.Release\.Name|fullnameOverride" \| default \(printf "%s-oauth2-proxy" \.Release\.Name' $(CONNECTIVITY_DIR)/templates/kagent/*.yaml; then echo "FAIL: a kagent template falls back to .Release.Name for a kagent-chart object; use agent-platform.kagent.fullname / agent-platform.kagent.releaseName"; exit 1; else echo "ok: kagent templates derive kagent names from the kagent helpers"; fi
 	@echo "--> the CNPG CiliumNetworkPolicy renders only when postgres.enabled"
