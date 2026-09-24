@@ -692,11 +692,16 @@ kyvernoPolicies:
 # (pre-install, pre-upgrade — the CA and JWT pools, the actor-identity trust
 # anchor and ate-api-server's authentication config, minted once and kept) and
 # the derived Postgres connection Secrets of postgres.databases (post-install,
-# post-upgrade). kubectlImage carries kubectl, a shell and jq; opensslImage the
-# openssl the bootstrap mints its key material with — the gsoci copies of
-# alpine/k8s and alpine/openssl (giantswarm/retagger). Both run under the
-# restricted pod security profile as the hook ServiceAccount <release>-hooks
-# (secrets, configmaps and namespaces only, for the hook's lifetime).
+# post-upgrade), the model-serving cache claim (post-install, post-upgrade) and
+# the pre-pull cleanup (pre-delete). kubectlImage carries kubectl, a shell and
+# jq; opensslImage the openssl the bootstrap mints its key material with — the
+# gsoci copies of alpine/k8s and alpine/openssl (giantswarm/retagger). Both run
+# under the restricted pod security profile as the hook ServiceAccount
+# <release>-hooks (RBAC on the objects the rendered hooks write, for the hook's
+# lifetime; templates/substrate/hooks-rbac.yaml). Every hook container requests
+# 10m/32Mi and is limited to 128Mi, except the bootstrap's kubectl container
+# at 256Mi: its script runs two kubectl processes at once next to its
+# in-memory work dir (templates/substrate/bootstrap.yaml).
 hooks:
   kubectlImage:
     registry: gsoci.azurecr.io
