@@ -34,7 +34,7 @@ SUBSTRATE_ON := --set components.substrate.enabled=true --set components.substra
 # Agent CR, per-agent Deployment or config Secret is left to mutate) and no
 # PolicyException either (the v1alpha2 agent Deployments' seccomp exception went
 # with them; its successor is Substrate's substrate-workers). With Agent
-# Substrate on, its four PolicyExceptions join (verify-kyverno holds their rule
+# Substrate on, its five PolicyExceptions join (verify-kyverno holds their rule
 # lists to the workloads).
 KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent-sandbox.enabled=true
 # The golden render deliberately uses the kubernetes networkPolicy flavor: the
@@ -166,7 +166,7 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if grep -q "kyverno.io" /tmp/vm-pe-none.out; then \
 		echo "FAIL: kyverno.io objects still render under kyvernoPolicies.enabled=false"; grep -n "kyverno.io" /tmp/vm-pe-none.out; exit 1; \
 	else echo "ok: no kyverno.io kinds"; fi
-	@echo "--> the default (kyverno) render carries one kyverno.io object — the agent-sandbox ClusterPolicy — no kagent Agent mutation and no app: kagent exception; Substrate on adds its four PolicyExceptions"
+	@echo "--> the default (kyverno) render carries one kyverno.io object — the agent-sandbox ClusterPolicy — no kagent Agent mutation and no app: kagent exception; Substrate on adds its five PolicyExceptions"
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) >/tmp/vm-pe-kyverno.out 2>&1 || { cat /tmp/vm-pe-kyverno.out; exit 1; }
 	@if [ "$$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)" != "1" ]; then \
 		echo "FAIL: expected 1 kyverno.io object, got $$(grep -c '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out)"; grep -n -A3 '^apiVersion: kyverno.io/' /tmp/vm-pe-kyverno.out; exit 1; \
@@ -178,9 +178,9 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		echo "FAIL: the one ClusterPolicy must be the agent-sandbox pod-security policy"; exit 1; \
 	else echo "ok: 1 kyverno.io object, no Agent mutation, no app: kagent exception"; fi
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) $(SUBSTRATE_ON) >/tmp/vm-pe-substrate.out 2>&1 || { cat /tmp/vm-pe-substrate.out; exit 1; }
-	@if [ "$$(grep -c '^kind: PolicyException' /tmp/vm-pe-substrate.out)" != "4" ]; then \
-		echo "FAIL: expected the four Substrate PolicyExceptions, got $$(grep -c '^kind: PolicyException' /tmp/vm-pe-substrate.out)"; exit 1; \
-	else echo "ok: Substrate on renders substrate-atelet, substrate-workers, substrate-control-plane, substrate-podcertificate-controller"; fi
+	@if [ "$$(grep -c '^kind: PolicyException' /tmp/vm-pe-substrate.out)" != "5" ]; then \
+		echo "FAIL: expected the five Substrate PolicyExceptions, got $$(grep -c '^kind: PolicyException' /tmp/vm-pe-substrate.out)"; exit 1; \
+	else echo "ok: Substrate on renders substrate-atelet, substrate-workers, substrate-control-plane, substrate-podcertificate-controller, substrate-credential-provider"; fi
 	@echo "--> the CNPG ImageVolume exception renders only with an extension image"
 	@helm template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true >/tmp/vm-pe-noimg.out 2>&1 || { cat /tmp/vm-pe-noimg.out; exit 1; }
 	@if grep -q "image-volume" /tmp/vm-pe-noimg.out; then \
