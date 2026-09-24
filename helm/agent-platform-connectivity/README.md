@@ -469,7 +469,9 @@ platform needs:
   `pre-install,pre-upgrade` hook Job that mints the CA pools
   `service-dns-ca-pool` and `pod-identity-ca-pool` (`podcertificate-controller-system`),
   the JWT authority pool `actor-id-jwt-pool`, the CA pool `actor-id-ca-pool`
-  and the trust anchor `actor-id-ca-certs` derived from it (`ate-system`), and
+  and the trust anchor `actor-id-ca-certs` derived from it, the CA pool
+  `egress-mitm-ca-pool` atenet-egress mints the actors' per-host TLS leaves
+  from (ECDSA P-256; all in `ate-system`), and
   the ConfigMap `ate-api-authentication` with the apiserver's issuer read from
   its OpenID discovery document. Key material comes from `openssl` in an init
   container (`hooks.opensslImage`), the objects from `kubectl`
