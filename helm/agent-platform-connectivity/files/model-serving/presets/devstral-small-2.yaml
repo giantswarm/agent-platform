@@ -25,6 +25,8 @@ spec:
     - --enforce-eager
     - --no-enable-log-requests
     - --language-model-only
+    - --enable-auto-tool-choice
+    - --tool-call-parser=mistral
   resources:
     gpus: 1
     requests:

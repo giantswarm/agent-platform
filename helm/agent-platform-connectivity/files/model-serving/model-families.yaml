@@ -1,0 +1,74 @@
+# The model families the shipped serving presets serve, and what vLLM needs to
+# serve each family's tool calls, reasoning and chat (giantswarm/agent-platform#313).
+# The tool-call parser, the reasoning parser and the chat template are facts of
+# a model's architecture, not choices: `make verify-serving-slice` reads every
+# shipped preset against this table and fails on a preset of a family the table
+# lacks (add the row), on a parser the family does not list, on a preset tagged
+# `tools` without `--enable-auto-tool-choice` and one of the family's tool-call
+# parsers, on a preset tagged `reasoning` without the family's reasoning
+# parser, and on a family whose chat template must be overridden without
+# `spec.chatTemplate`. Values presets are the installation's and are not
+# checked.
+#
+# `runtime` is the parser registry of the vLLM the platform's llm-d runtime
+# carries (llm-d v0.8.0: vLLM v0.23.0, vllm/tool_parsers/__init__.py and
+# vllm/reasoning/__init__.py): a row may name only a parser vLLM registers
+# without a plugin. Refresh it with the runtime image.
+runtime:
+  vllm: 0.23.0
+  toolCallParsers: [deepseek_v3, deepseek_v31, deepseek_v32, deepseek_v4, cohere_command3, cohere_command4, ernie45, glm45, glm47, granite, granite4, hermes, poolside_v1, hunyuan_a13b, hy_v3, internlm, jamba, lfm2, kimi_k2, llama3_json, llama4_json, llama4_pythonic, longcat, mimo, minimax_m2, minimax, minicpm5, mistral, olmo3, openai, phi4_mini_json, pythonic, qwen3_coder, qwen3_xml, seed_oss, step3, step3p5, xlam, gigachat3, functiongemma, gemma4, apertus]
+  reasoningParsers: [deepseek_r1, deepseek_v3, deepseek_v4, poolside_v1, cohere_command3, cohere_command4, ernie45, gemma4, glm45, openai_gptoss, granite, holo2, hunyuan_a13b, hy_v3, kimi_k2, mimo, minimax_m2, minimax_m2_append_think, mistral, nemotron_v3, olmo3, qwen3, seed_oss, step3, step3p5]
+
+# One row per family: `match`, a regular expression on the preset's
+# spec.model.id (exactly one row may match a preset); `toolCallParsers`, the
+# parsers the family's tool calls are parsed with (the first the recipe's);
+# `reasoningParser`, the family's; `chatTemplate`, `required` when the family's
+# checkpoints ship no template vLLM can serve tools with, else `optional` (a
+# preset may still mount one, e.g. a patched template); `source`, where the
+# parsers come from; `runtimeImage`, only for a family its presets serve on a
+# runtime image of their own (spec.template), whose vLLM's parsers the row
+# names instead of the registry above.
+families:
+  - name: gpt-oss
+    match: ^openai/gpt-oss-
+    toolCallParsers: [openai]
+    reasoningParser: openai_gptoss
+    chatTemplate: optional
+    source: https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html (--tool-call-parser openai; openai_gptoss reads the harmony analysis channel)
+  - name: Gemma 4
+    match: (^|/)gemma-4-
+    toolCallParsers: [gemma4]
+    reasoningParser: gemma4
+    chatTemplate: optional
+    source: https://docs.vllm.ai/projects/recipes/en/latest/Google/Gemma4.html (--tool-call-parser gemma4 --reasoning-parser gemma4)
+  - name: Mistral (Devstral 2, Mistral Small 4)
+    match: ^mistralai/(Devstral-Small-2-|Mistral-Small-4-)
+    toolCallParsers: [mistral]
+    reasoningParser: mistral
+    chatTemplate: optional
+    source: https://huggingface.co/mistralai/Devstral-Small-2-24B-Instruct-2512 (--tool-call-parser mistral --enable-auto-tool-choice), https://huggingface.co/mistralai/Mistral-Small-4-119B-2603-NVFP4 (--tool-call-parser mistral --reasoning-parser mistral)
+  - name: Nemotron 3
+    match: ^nvidia/NVIDIA-Nemotron-3-
+    toolCallParsers: [qwen3_coder]
+    # The model card's super_v3 plugin is vLLM's built-in nemotron_v3, line for
+    # line (DeepSeek R1's parser, with thinking-off output kept as content).
+    reasoningParser: nemotron_v3
+    chatTemplate: optional
+    source: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 (vllm serve … --reasoning-parser super_v3 --enable-auto-tool-choice --tool-call-parser qwen3_coder)
+  - name: Qwen3.5 / Qwen3.6
+    match: (^|/)Qwen3\.[56]-
+    toolCallParsers: [qwen3_coder]
+    reasoningParser: qwen3
+    chatTemplate: optional
+    source: https://huggingface.co/Qwen/Qwen3.5-4B, https://huggingface.co/Qwen/Qwen3.6-35B-A3B-FP8 (--reasoning-parser qwen3 --tool-call-parser qwen3_coder)
+  - name: Qwen3.8
+    match: (^|/)Qwen3\.8-
+    # Both parse the one tool-call format the Qwen3.8 chat template writes
+    # (<tool_call><function=…><parameter=…>…); qwen3_xml is the streaming XML
+    # parser of the two. vLLM's recipes name qwen3_xml for Qwen3.8-27B and
+    # qwen3_coder for Qwen3.8-Flash-Next and the 27B's Ascend recipe, so a
+    # preset may carry either.
+    toolCallParsers: [qwen3_coder, qwen3_xml]
+    reasoningParser: qwen3
+    chatTemplate: optional
+    source: https://recipes.vllm.ai/Qwen/Qwen3.8-27B, https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next

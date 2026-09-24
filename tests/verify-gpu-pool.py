@@ -262,6 +262,7 @@ else:
         fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
         uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
+        parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -425,6 +426,16 @@ else:
                         and k[1].endswith(("-model-serving-llmisvc-workload", "-model-serving-llmisvc-workload-ingress"))]:
                 side.pop(key)
         print(f"note: the llm-d workload's ingress admits the workload's port on this side (#525) and not on {ref}: that policy is left out of the comparison")
+    # devstral-small-2 and nemotron-3-super-nvfp4 carry their family's tool-call
+    # (and reasoning) parsers on this side (giantswarm/agent-platform#313,
+    # files/model-serving/model-families.yaml); a golden from before renders
+    # them without, so both preset ConfigMaps are left out of the comparison on
+    # both sides. Drop this once GOLDEN_REF carries #313.
+    if not parsed:
+        for name in ("devstral-small-2", "nemotron-3-super-nvfp4"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: two presets carry their family's parsers on this side (#313) and not on {ref}: their ConfigMaps are left out of the comparison")
     # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
     # are new documents of the serving render; a golden from before has neither,
     # so both are left out of the comparison on both sides. Drop this once
