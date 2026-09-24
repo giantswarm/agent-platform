@@ -34,7 +34,7 @@ module top to bottom; each one builds on the state the previous left):
      agent chart 1.x into the kagent namespace, the HelmRelease runs as
      kagent-flux and reaches Ready, the AgentTemplate reaches Ready on the
      Harness and the agent's RemoteMCPServer (the toolset carrier) is Accepted;
-     and the drift correction on the two releases that carry it: the platform
+     and the drift correction on kagent's and muster's releases: the platform
      Harness deleted by hand (what the 4.8.0 upgrade does to a consumer whose
      pinned connectivity chart skipped 4.7.19's keep) is back on the kagent
      release's next reconcile — a requested reconcile stands in for the
