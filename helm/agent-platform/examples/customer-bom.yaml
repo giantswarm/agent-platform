@@ -58,8 +58,8 @@ components:
   agentgateway:                  { versionRange: "2.4.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "1.0.2" }
-  kagent-crds:                   { versionRange: "1.0.2" }
+  kagent:                        { versionRange: "1.0.3" }
+  kagent-crds:                   { versionRange: "1.0.3" }
   substrate:                     { versionRange: "1.0.3" }
   substrate-crds:                { versionRange: "1.0.3" }
   # 3.3.0 names a failed turn's class (tools, platform, model, policy) in the
