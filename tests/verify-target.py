@@ -195,6 +195,40 @@ KAGENT_VPA_CAP_HOLD = ["--set", "kagent.controller.vpa.maxAllowed.memory=1280Mi"
 # names a failed turn's class; GOLDEN_REF admits 2.0.0. Written on BOTH sides so
 # the range compares equal; dropped once GOLDEN_REF carries the floor.
 KLAUS_GATEWAY_FLOOR_HOLD = ["--set", "components.klaus-gateway.versionRange=>=3.3.0 <4.0.0"]
+# giantswarm/giantswarm#36711: this tree turns the substrate chart's PodMonitors
+# on, which GOLDEN_REF's defaults leave off and whose block it does not carry at
+# all. The whole block is written on BOTH sides so the forwarded values compare
+# equal; dropped once GOLDEN_REF carries it.
+SUBSTRATE_PODMONITOR_HOLD = [
+    "--set", "substrate.metrics.podMonitor.enabled=false",
+    "--set", "substrate.metrics.podMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
+]
+# giantswarm/giantswarm#36711: this tree turns the kagent controller's metrics
+# and the chart's own ServiceMonitor on, which GOLDEN_REF leaves off (the line
+# served no endpoint before 1.0.2, and this chart rendered the monitor itself).
+# Held equal on BOTH sides; dropped once GOLDEN_REF carries it.
+KAGENT_SERVICEMONITOR_HOLD = [
+    "--set", "kagent.controller.metrics.enabled=false",
+    "--set", "kagent.controller.metrics.bindAddress=:8080",
+    "--set", "kagent.controller.metrics.secureServing=false",
+    "--set", "kagent.controller.metrics.service.port=8080",
+    "--set", "kagent.controller.metrics.serviceMonitor.enabled=false",
+]
+# The same change retires kagent.serviceMonitor, this chart's own key for the
+# monitor it no longer renders. GOLDEN_REF still forwards the block, so it is
+# dropped from BOTH sides by name; the other serviceMonitor blocks (muster's,
+# oauth2-proxy's) go with it, which narrows the comparison until GOLDEN_REF
+# carries the change.
+SERVICEMONITOR_KEY = re.compile(r"^(\s+)serviceMonitor:\s*$")
+
+
+def hold_retired_servicemonitor(here: str, there: str) -> tuple:
+    """The two renders without any forwarded serviceMonitor mapping."""
+    def strip(render: str) -> str:
+        return drop_mapping(render, SERVICEMONITOR_KEY)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #36711 hold — the forwarded serviceMonitor blocks are left out of the golden comparison")
+    return h, strip(there)
 AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
     "--set", "agentgateway.controller.image.tag=2.0.0",
@@ -490,6 +524,24 @@ def hold_substrate_otlp_egress(here: str, there: str) -> tuple:
     return h, t
 
 
+# giantswarm/agent-platform#513: the Substrate bootstrap hook's kubectl container
+# is limited to 256Mi (GOLDEN_REF: the hooks' shared 128Mi). That one limit is
+# blanked on BOTH sides, in that Job only; make verify-hooks-memory asserts every
+# hook container's resources. Drop once GOLDEN_REF carries #513.
+BOOTSTRAP_JOB = "kind: Job\nmetadata:\n  name: t-substrate-bootstrap\n"
+BOOTSTRAP_SH_LIMIT = re.compile(r"(\n        - name: sh\n(?:.*\n)*?            limits:\n              memory: )\S+")
+
+
+def hold_bootstrap_memory(here: str, there: str) -> tuple:
+    """The two connectivity renders with #513's bootstrap memory limit held equal on both sides."""
+    def strip(render: str) -> str:
+        return "\n---\n".join(BOOTSTRAP_SH_LIMIT.sub(r"\g<1><held: #513>", d, count=1) if BOOTSTRAP_JOB in d else d
+                               for d in render.split("\n---\n"))
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #513 hold — the Substrate bootstrap hook's kubectl container memory limit is left out of the golden comparison")
+    return h, strip(there)
+
+
 def hold_dataplane_podmonitor(here: str, there: str) -> tuple:
     """The two connectivity renders with this chart's retired PodMonitor left out."""
     def strip(render: str) -> str:
@@ -583,11 +635,11 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the klaus-gateway no-op key removal (#636) since 4.62.0.
         golden_only = {meta: [], connectivity: []}
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD]),
-            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),
-            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD]),
+            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
+            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
+            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
         ]
         for label, chart, flags in shapes:
             here = helm(chart, flags)
@@ -597,6 +649,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             here, there = hold_dashboards(here, there, chart == meta)
             here, there = hold_opus_5_5_price(here, there)
             here, there = hold_dataplane_buffer(here, there)
+            here, there = hold_retired_servicemonitor(here, there)
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)
@@ -609,6 +662,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)
                 here, there = hold_substrate_otlp_egress(here, there)
+                here, there = hold_bootstrap_memory(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
