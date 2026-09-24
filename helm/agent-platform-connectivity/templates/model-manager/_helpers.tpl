@@ -93,6 +93,36 @@ Usage: include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "k
 {{- end -}}
 
 {{/*
+Truthy when model-manager serves through a kserve backend: a static kserve
+entry of model-manager.backends, or components.cluster-manager on, which
+registers the backend at runtime (its model-backend-kserve ConfigMap, invisible
+to the chart) for every cluster it gives a serving slice.
+*/}}
+{{- define "agent-platform.modelManager.kserveOn" -}}
+{{- if or (include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "kserve")) (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "cluster-manager")) "true") }}true{{ end -}}
+{{- end -}}
+
+{{/*
+Truthy when model-manager is on and serves models it then reads and routes:
+this release's serving slice, or a kserve backend whose slice is elsewhere — a
+GPU node pool brings its slice as a second release of this chart, where
+model-manager is off, while this release's modelServing stays off.
+*/}}
+{{- define "agent-platform.modelManager.serves" -}}
+{{- if and (include "agent-platform.modelManager.enabled" .) (or (include "agent-platform.modelServing.enabled" .) (include "agent-platform.modelManager.kserveOn" .)) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The namespace the models model-manager serves run in: this release's serving
+namespace with the slice on (model-serving-validate.yaml holds the two equal),
+else model-manager's kserve.namespace (model-serving, cluster-manager's
+default too).
+*/}}
+{{- define "agent-platform.modelManager.servingNamespace" -}}
+{{- if include "agent-platform.modelServing.enabled" . }}{{ include "agent-platform.modelServing.namespace" . }}{{ else }}{{ dig "kserve" "namespace" "" (include "agent-platform.modelManager.chartValues" . | fromJson) | default "model-serving" }}{{ end -}}
+{{- end -}}
+
+{{/*
 The Ollama API base URL model-manager dials (model-manager.ollama.endpoint).
 */}}
 {{- define "agent-platform.modelManager.ollamaEndpoint" -}}
