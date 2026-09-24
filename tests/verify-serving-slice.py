@@ -13,7 +13,9 @@ property the slice relies on:
   kserve (release history there too), llmisvcConfigs on and servingruntime off,
   the llm-d-fast/ prefix as imageRegistry — the same prefix the pre-pull's
   llm-d-cuda reference carries (#568) — the block held back from the
-  connectivity release;
+  connectivity release; spec.driftDetection.mode: enabled by default, so a
+  well-known config that went missing is re-created on the release's next
+  reconcile (#508), and no other release of the slice carries drift detection;
 - the derived KServe ingress-gateway value: kserve-llmisvc-resources carries
   kserve.controller.gateway.ingressGateway.kserveGateway = <namespace>/<gateway>,
   a differing copy of the operator's fails the render naming both;
@@ -177,6 +179,10 @@ def check_profile(meta: str) -> str:
     if "storageNamespace" in rc:
         sys.exit("FAIL: the kserve-runtime-configs release targets a namespace of its own; the llm-d controller resolves the well-known configs from the LLMInferenceService's namespace and its own (the release namespace) only")
     need(rc, f"      llmisvcConfigs:\n        enabled: true\n        imageRegistry: {FAST_PREFIX}", "the kserve-runtime-configs release")
+    need(rc, "  driftDetection:\n    mode: enabled\n", "the kserve-runtime-configs release (a missing well-known config is re-created on the next reconcile, #508)")
+    drifting = sorted(name for (kind, name), doc in docs.items() if kind == "HelmRelease" and name != "kserve-runtime-configs" and "\n  driftDetection:" in doc)
+    if drifting:
+        sys.exit(f"FAIL: {drifting} carry spec.driftDetection in the slice; drift detection is decided per release, kserve-runtime-configs only here")
     need(docs[("HelmRelease", "kserve-llmisvc-resources")], "            kserveGateway: agent-platform/models", "the kserve-llmisvc-resources release")
     need(docs[("HelmRelease", "kserve-llmisvc-resources")], "      createSharedResources: true", "the kserve-llmisvc-resources release (the control plane's shared objects are its own)")
     need(docs[("HelmRelease", "kserve-llmisvc-resources")], "        deploymentMode: Standard", "the kserve-llmisvc-resources release")
@@ -190,7 +196,7 @@ def check_profile(meta: str) -> str:
     need(conn, "      kserve-runtime-configs:\n        enabled: true", "the connectivity release's roster")
     if "kubeConfig" in render:
         sys.exit("FAIL: the profile without the target knob renders a kubeConfig")
-    ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into the release namespace, the llm-d controller's (configs on, runtimes off, the llm-d-fast/ prefix as imageRegistry, held back from connectivity); kserveGateway derived; runtimeClassName nvidia")
+    ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into the release namespace, the llm-d controller's (configs on, runtimes off, the llm-d-fast/ prefix as imageRegistry, held back from connectivity, drift detection on and on no other release); kserveGateway derived; runtimeClassName nvidia")
 
     helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway=other/gw"],
          expect_failure="kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway (other/gw) differs")
