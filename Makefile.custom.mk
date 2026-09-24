@@ -2417,7 +2417,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		grep -q -- "$$pattern" /tmp/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' /tmp/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
-	@if grep -qE '^ +modelManager:$$|apiBaseUrl: .*/model-manager$$' /tmp/vw-bs-cm.out; then echo "FAIL: the portal's app-config carries agentPlatform.modelManager with model-manager and its route on; the portal reaches model-manager through muster as the person (giantswarm/backstage#2294) and reads no such key"; exit 1; fi
+	@if grep -qE '^ +modelManager:$$|apiBaseUrl: .*/model-manager$$' /tmp/vw-bs-cm.out; then echo "FAIL: the portal's app-config carries a model-manager entry under agentPlatform with model-manager and its route on; the portal reaches model-manager through muster as the person (giantswarm/backstage#2294) and reads no such key"; exit 1; fi
 	@if grep -q 'musterMcpUrl' /tmp/vw-bs-cm.out; then echo "FAIL: agentPlatform.musterMcpUrl is back in the portal's app-config — the Dev Portal reads no such key (create_agent takes no muster argument); where muster is reaches agent-manager as muster.url (verify-identity)"; exit 1; fi
 	@grep -q 'configMapRef: agent-platform-backstage-app-config' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta chart's backstage: block no longer mounts the ConfigMap this chart renders"; exit 1; }
 	@echo "ok: app-config"
