@@ -9,11 +9,13 @@
 # an install test case.)
 #
 # Snapshot of the internal dogfooding track for the 4.0 line (kagent API v2).
-# The muster pin is the floor of components.muster.versionRange: the toolset
-# presets in values.yaml select by the tool-group label, which a muster before
-# 5.12.0 does not know (it refuses to start), and which agent-platform-mcps,
-# agent-manager and model-manager stamp on their MCPServer CRs from the versions
-# below. The model-manager pin is the floor of its range: 0.23.0 is the first
+# The muster pin is the floor of components.muster.versionRange: 5.31.4 ends a
+# session on a forwarded bearer at the bearer's exp (giantswarm/muster#1323);
+# the toolset presets in values.yaml select by the tool-group label, which a
+# muster before 5.12.0 does not know (it refuses to start), and which
+# agent-platform-mcps, agent-manager and model-manager stamp on their MCPServer
+# CRs from the versions below.
+# The model-manager pin is the floor of its range: 0.23.0 is the first
 # release that reads the GPU node pool input from the discovery ConfigMap
 # (spec.gpuPool, giantswarm/agent-platform#315) — and, from 0.22.0, starts
 # with no backend and registers backends at runtime (#329). kagent and
@@ -50,7 +52,7 @@ gitops:
   interval: 30m
 
 components:
-  muster:                        { versionRange: "5.12.0" }
+  muster:                        { versionRange: "5.31.4" }
   agentgateway:                  { versionRange: "2.4.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }

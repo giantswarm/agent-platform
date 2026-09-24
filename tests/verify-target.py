@@ -339,6 +339,22 @@ def hold_substrate_range(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+# giantswarm/muster#1323: muster's floor moves from 5.12.0 to 5.31.4, the
+# release that ends a forwarded-bearer session at the bearer's exp. GOLDEN_REF's
+# muster OCIRepository is given this tree's range for that one transition, so
+# the hold is inert once GOLDEN_REF carries it and any other range change of
+# muster still fails the comparison; drop once GOLDEN_REF carries it.
+MUSTER_FLOOR = re.compile(r'(url: oci://gsoci\.azurecr\.io/charts/giantswarm/muster\n  ref:\n    semver: )">=5\.12\.0 <6\.0\.0"')
+
+
+def hold_muster_floor(here: str, there: str) -> tuple:
+    """The golden meta render with muster's range at this tree's 5.31.4 floor."""
+    t = MUSTER_FLOOR.sub(r'\1">=5.31.4 <6.0.0"', there)
+    if t != there:
+        print("note: muster#1323 hold — the golden side's muster range is read at the 5.31.4 floor")
+    return here, t
+
+
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -550,6 +566,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_llmd_only(here, there)
                 here, there = hold_hook_pods(here, there)
                 here, there = hold_substrate_range(here, there)
+                here, there = hold_muster_floor(here, there)
                 here, there = hold_otlp_endpoints(here, there)
             else:
                 here, there = hold_dataplane_podmonitor(here, there)

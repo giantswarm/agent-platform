@@ -492,7 +492,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	else echo "ok: engine guard"; fi
 	@echo "--> customer BOM pins every range to an exact version"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml $(ENGINE_OFF) >/tmp/ap-bom.out 2>&1 || { cat /tmp/ap-bom.out; exit 1; }
-	@grep -q 'semver: "5.12.0"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to 5.12.0"; exit 1; }
+	@grep -q 'semver: "$(PRESETS_MUSTER_VERSION)"' /tmp/ap-bom.out || { echo "FAIL: BOM did not pin muster to $(PRESETS_MUSTER_VERSION)"; exit 1; }
 	@if grep -qE 'semver: "[0-9]+\.x"' /tmp/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
@@ -2297,13 +2297,13 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 	@python3 tests/verify-kyverno.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
-# The muster chart version the platform toolset presets need: the first with the
-# `label:` preset rule (muster#1168). It is the floor of
-# components.muster.versionRange; a muster before it refuses to start on the
-# presets. The chart is pulled anonymously from gsoci to render its ConfigMap
+# The floor of components.muster.versionRange, the muster chart version the
+# platform toolset presets are rendered through: the presets need the `label:`
+# rule (muster#1168, from 5.12.0; a muster before it refuses to start on them),
+# the floor is 5.31.4 (giantswarm/muster#1323). The customer BOM pins it. The chart is pulled anonymously from gsoci to render its ConfigMap
 # with the values the meta chart forwards, so the check reads the real schema
 # and template of that version, not a copy.
-PRESETS_MUSTER_VERSION := 5.12.0
+PRESETS_MUSTER_VERSION := 5.31.4
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
 PRESETS_MUSTER_SETS := --set muster.oauth.server.baseUrl=https://muster.ci.example.com --set muster.oauth.server.dex.issuerUrl=https://dex.ci.example.com --set muster.oauth.server.dex.clientId=platform --set muster.oauth.server.existingSecret=muster-oauth
