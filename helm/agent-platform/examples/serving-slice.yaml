@@ -77,9 +77,15 @@ components:
     # The chart's default, shown for the slice: helm-controller re-creates a
     # well-known config that went missing on the release's next reconcile
     # (gitops.interval), instead of reporting the release in-sync with no
-    # config behind it (giantswarm/agent-platform#508).
+    # config behind it (giantswarm/agent-platform#508). The configs' spec is
+    # ignored: KServe defaults fields into it after the apply, and correcting
+    # them kept a fresh install from ever coming back Ready.
     # driftDetection:
     #   mode: enabled
+    #   ignore:
+    #     - paths: ["/spec"]
+    #       target:
+    #         kind: LLMInferenceServiceConfig
   modelServing:
     enabled: true
 
