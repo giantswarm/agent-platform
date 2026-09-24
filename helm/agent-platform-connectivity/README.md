@@ -299,8 +299,9 @@ per request as a CEL expression, so the value is a number between 0 and 1 or
 a boolean. When the data plane starts a trace, it sends a sampled
 `traceparent` upstream, so muster and the server behind it add their spans
 under the data plane's span. On gazelle, about 6,400 requests a day arrive
-with no `traceparent`. At 0.1, about 640 of them get a trace (about 1,100
-spans), so a repeated failure reaches Tempo in minutes.
+untraced, with no `traceparent` or an unsampled one. At 0.1, at most 640 of
+them get a trace (about 1,100 spans), so a repeated failure reaches Tempo in
+minutes.
 
 ```yaml
 gateway:

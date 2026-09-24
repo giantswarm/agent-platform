@@ -1452,9 +1452,9 @@ gateway:
   # klaus-gateway A2A call) is always traced, one with an unsampled traceparent
   # never is. A started trace sends a sampled traceparent upstream, so muster
   # and the server behind it add their spans under the data plane's. 0.1: on
-  # gazelle about 6,400 requests a day arrive without a trace, so ~640 of them
-  # are traced (~1,100 spans), enough for a repeated failure to reach Tempo in
-  # minutes. The span metrics of service="agentgateway" mix every traced
+  # gazelle about 6,400 requests a day arrive untraced, with no traceparent or
+  # an unsampled one, so at most ~640 of them are traced (~1,100 spans),
+  # enough for a repeated failure to reach Tempo in minutes. The span metrics of service="agentgateway" mix every traced
   # request with this share of the rest; rates come from
   # agentgateway_requests_total. Empty or 0 turns random sampling off.
   # README "The data plane's traces".
