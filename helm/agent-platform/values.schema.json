@@ -1189,6 +1189,21 @@
                             }
                         }
                     }
+                },
+                "tracing": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "randomSampling": {
+                            "type": [
+                                "string",
+                                "number"
+                            ],
+                            "maximum": 1,
+                            "minimum": 0,
+                            "pattern": "^((0(\\.[0-9]+)?|1(\\.0+)?)|true|false)?$"
+                        }
+                    }
                 }
             }
         },

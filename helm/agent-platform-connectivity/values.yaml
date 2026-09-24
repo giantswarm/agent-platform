@@ -392,6 +392,25 @@ gateway:
   # README "The data plane's buffer".
   http:
     maxBufferSize: 8Mi  # @schema type: [string, integer]; pattern: ^([0-9]+(\.[0-9]+)?([KMGTPE]i|[kMGTPE])?)?$
+  # === Trace sampling ===
+  # The share of requests that arrive with no trace context which the data
+  # plane starts a trace for: frontend.tracing.randomSampling of the
+  # Gateway-scoped <release>-tracing AgentgatewayPolicy
+  # (templates/agentgateway/tracing.yaml), a CEL expression the proxy evaluates
+  # per request to a float between 0 and 1 or a boolean. It applies only to a
+  # request with no traceparent (an MCP client such as Claude Code through
+  # muster); a request with a sampled traceparent (an agent's turn, a
+  # klaus-gateway A2A call) is always traced, one with an unsampled traceparent
+  # never is. A started trace sends a sampled traceparent upstream, so muster
+  # and the server behind it add their spans under the data plane's. 0.1: on
+  # gazelle about 6,400 requests a day arrive untraced, with no traceparent or
+  # an unsampled one, so at most ~640 of them are traced (~1,100 spans),
+  # enough for a repeated failure to reach Tempo in minutes. The span metrics of service="agentgateway" mix every traced
+  # request with this share of the rest; rates come from
+  # agentgateway_requests_total. Empty or 0 turns random sampling off.
+  # README "The data plane's traces".
+  tracing:
+    randomSampling: "0.1"  # @schema type: [string, number]; pattern: ^((0(\.[0-9]+)?|1(\.0+)?)|true|false)?$; minimum: 0; maximum: 1
   # === Metric labels ===
   # Custom Prometheus labels on every metric the data plane emits, from ONE
   # Gateway-scoped AgentgatewayPolicy, <release>-metrics
