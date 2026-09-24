@@ -181,6 +181,49 @@ spec:
         providerConfigRef:
           name: {{ $xp.providerConfigRef }}
 ---
+# Storage Blob Delegator on the storage account: the one action the role
+# grants, generateUserDelegationKey, is account-level, and the container-scoped
+# Data Contributor above cannot grant it. s3proxy signs the source of a
+# server-side copy with a user delegation SAS, and Substrate's golden tag
+# copies the golden snapshot's objects that way (the Substrate line from
+# 1.1.0); without the key every copy fails with AuthorizationPermissionMismatch
+# and no AgentTemplate reaches Ready.
+apiVersion: kubernetes.crossplane.io/v1alpha2
+kind: Object
+metadata:
+  name: {{ $identity }}-delegator-role-assignment
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: identity
+spec:
+  managementPolicies:
+    - "*"
+  providerConfigRef:
+    name: {{ $pk.providerConfigRef }}
+  references:
+    - patchesFrom:
+        apiVersion: managedidentity.azure.upbound.io/v1beta1
+        kind: UserAssignedIdentity
+        name: {{ $identity }}
+        fieldPath: status.atProvider.principalId
+      toFieldPath: spec.forProvider.principalId
+  forProvider:
+    manifest:
+      apiVersion: authorization.azure.upbound.io/v1beta1
+      kind: RoleAssignment
+      metadata:
+        name: {{ $identity }}-delegator
+        labels:
+          {{- include "labels.common" . | nindent 10 }}
+          app.kubernetes.io/component: identity
+      spec:
+        forProvider:
+          roleDefinitionName: Storage Blob Delegator
+          scope: {{ printf "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Storage/storageAccounts/%s" $capz.subscriptionId $capz.resourceGroup $account | quote }}
+          principalType: ServicePrincipal
+        providerConfigRef:
+          name: {{ $xp.providerConfigRef }}
+---
 # The identity's clientId and tenantId, bridged into the Secret the s3proxy
 # pods read as AZURE_CLIENT_ID / AZURE_TENANT_ID (DefaultAzureCredential's
 # Workload Identity path; the webhook adds the token file).

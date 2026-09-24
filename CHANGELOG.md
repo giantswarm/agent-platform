@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The capz snapshot-store identity also holds Storage Blob Delegator on the storage account** (giantswarm/giantswarm#37705). Substrate 1.1.0's golden tag copies the golden snapshot's objects server-side, and s3proxy signs the copy source with a user delegation SAS; the key is an account-level action the container-scoped Data Contributor cannot grant, so on glean every copy failed with `AuthorizationPermissionMismatch` and no AgentTemplate reached Ready.
 - **The egress gateway reaches the Substrate credential provider (`substrate-atenet-egress` → `k8s-credential-provider` 50051), and the provider has its own policy (ingress from the gateway and the scrape port, egress to the apiserver)** (giantswarm/giantswarm#37705). On the Substrate line from 1.1.0 the gateway asks the provider for every injected credential; without the hop each ask ended in `UpstreamCallTimeout`, the golden boot's git fetch of a private skill got 403 and the AgentTemplate never left `ActorTemplateRetrying`. agentlab renders no network policies, so the gate could not see it.
 
 ### Added
