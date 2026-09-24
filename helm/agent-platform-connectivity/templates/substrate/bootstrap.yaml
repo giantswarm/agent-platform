@@ -48,6 +48,18 @@ substrate release then adopts them — helm-controller takes ownership of a bare
 object). The kagent chart's WorkerPool and the platform Harness come with
 kagent and the kagent wiring; the pools' rotation is an operational procedure
 of Substrate, not this chart's.
+
+The main container's memory limit is 256Mi, twice the hooks' default
+(agent-platform.hooks.job's memory): the script pipes one kubectl into another
+(the actor-id-ca-certs Secret, `kubectl create --dry-run=client | kubectl
+apply --server-side`) and kubectl into jq, so up to two kubectl processes —
+some 30 MiB resident each, the binary's file pages and the discovery cache
+under /tmp — are charged to the pod's memory cgroup at once, next to jq, the
+shell and the candidates on the in-memory /work. At 128Mi the Job's first pod
+was OOM-killed on a busy node and the install completed only on the Job's
+retry (giantswarm/agent-platform#513); a hook that exhausts its backoffLimit
+fails the release. The request stays 32Mi, the openssl init container keeps
+the default.
 */ -}}
 {{- if include "agent-platform.substrate.enabled" . }}
 {{- $ns := include "agent-platform.substrate.namespace" . }}
@@ -55,6 +67,7 @@ of Substrate, not this chart's.
 {{ include "agent-platform.hooks.job" (dict "root" $ "name" "substrate-bootstrap" "hook" "pre-install,pre-upgrade"
       "about" (printf "mint the Agent Substrate CA/JWT pools and ate-api-server's authentication config in %s and %s when they are missing, keep them when they exist; publish the trust anchors derived from the pools (actor-id-ca-certs, the podcert signers' ClusterTrustBundles)" $ns $pcNs)
       "init" (dict "name" "openssl" "image" (include "agent-platform.hooks.imageRef" .Values.hooks.opensslImage) "script" (include "agent-platform.substrate.bootstrap.mint" .))
+      "memory" "256Mi"
       "script" (include "agent-platform.substrate.bootstrap.apply" (dict "root" $ "ns" $ns "pcNs" $pcNs))) }}
 {{- end }}
 

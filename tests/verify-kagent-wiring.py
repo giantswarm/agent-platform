@@ -317,14 +317,14 @@ def check_retired_keys(values: dict[str, list[str]], conn_kagent: str) -> None:
         fail(f"the 0.10 wrapper's bundled example agents are still forwarded: {', '.join(left)}; the line ships none")
     controller = "\n".join(values.get("controller", []))
     if "METRICS_" in controller:
-        fail("METRICS_* env forwarded to the controller; the line serves no Prometheus /metrics")
-    if not re.search(r"^metrics:\nenabled: false$", controller, re.M):
-        fail("kagent.controller.metrics.enabled is not false; the upstream chart's knob renders a Service to a port the line's controller never serves")
+        fail("METRICS_* env forwarded to the controller; the chart renders both variables from controller.metrics, and a second entry of the same name renders the variable twice")
+    if not re.search(r"^metrics:\n(?:.*\n)*?enabled: true$", controller, re.M):
+        fail("kagent.controller.metrics.enabled is not true; the chart's knob is what renders the metrics Service, the METRICS_* env and the ServiceMonitor over them")
     if "skillsInitImage" in controller:
         fail("kagent.controller.skillsInitImage forwarded; the line has no skills-init image")
-    if not re.search(r"^  serviceMonitor:\n    enabled: false$", conn_kagent, re.M):
-        fail("kagent.serviceMonitor.enabled is not false in the values the connectivity chart receives; the monitor would scrape a refused port")
-    print("ok: no example agent, no METRICS_* env, controller metrics and the ServiceMonitor off")
+    if re.search(r"^  serviceMonitor:$", conn_kagent, re.M):
+        fail("kagent.serviceMonitor is still forwarded to the connectivity chart; the controller's monitor is the kagent chart's own (controller.metrics.serviceMonitor)")
+    print("ok: no example agent, no METRICS_* env, the controller's metrics and its own ServiceMonitor on")
 
 
 def check_substrate_pins(docs) -> None:

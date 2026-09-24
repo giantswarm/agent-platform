@@ -116,7 +116,7 @@ MODEL_CONFIG = "default-model-config"
 PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API_KEY"}
 # The Generic agent chart, 1.x = kagent API v2 (0.x rendered the retired Agent).
 AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
-AGENT_CHART_SEMVER = "1.x"
+AGENT_CHART_SEMVER = ">=1.0.0 <1.5.0"  # agent-manager.agentChart.semver: the 1.x line capped below 1.5.0 (#668)
 # The toolset of the smoke's managed agents: a shipped muster preset, so the
 # agent chart renders the agent's own RemoteMCPServer — the toolset carrier,
 # the X-Muster-Toolset header on it; ["preset:none"] alone renders none.

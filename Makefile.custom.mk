@@ -277,21 +277,13 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 		if grep -q "$$pattern" /tmp/vg-mon.out; then echo "FAIL: monitor-gated render still contains $$pattern"; exit 1; fi; \
 	done
 	@echo "ok: monitor gate"
-	@echo "--> the default render keeps the CNPG PodMonitor (fleet behavior) and renders NO kagent ServiceMonitor or metrics Service: the kagent line serves no /metrics (kagent.serviceMonitor.enabled: false)"
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true >/tmp/vg-mon-default.out 2>&1 || { cat /tmp/vg-mon-default.out; exit 1; }
-	@if grep -q 'kind: ServiceMonitor' /tmp/vg-mon-default.out; then echo "FAIL: the default render carries a kagent ServiceMonitor; the line's controller serves no /metrics and the monitor would sit at up=0"; exit 1; fi
-	@if grep -q 'kagent-controller-metrics' /tmp/vg-mon-default.out; then echo "FAIL: the default render carries the kagent controller metrics Service; nothing listens behind it on the line"; exit 1; fi
-	@grep -q 'enablePodMonitor: true' /tmp/vg-mon-default.out || { echo "FAIL: default render lost the CNPG PodMonitor"; exit 1; }
-	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-default.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
-	@echo "ok: default: no kagent monitor, CNPG PodMonitor + keep"
-	@echo "--> kagent.serviceMonitor.enabled=true (for when upstream serves metrics) renders the Service and the ServiceMonitor under the global gate"
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true --set kagent.serviceMonitor.enabled=true >/tmp/vg-mon-on.out 2>&1 || { cat /tmp/vg-mon-on.out; exit 1; }
-	@grep -q 'kind: ServiceMonitor' /tmp/vg-mon-on.out || { echo "FAIL: kagent.serviceMonitor.enabled=true renders no ServiceMonitor"; exit 1; }
-	@grep -q 'observability.giantswarm.io/tenant: giantswarm' /tmp/vg-mon-on.out || { echo "FAIL: the kagent ServiceMonitor lost the tenant label"; exit 1; }
-	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.serviceMonitor.enabled=true --set global.observability.metrics.serviceMonitor.enabled=false 2>/dev/null | grep -q 'kind: ServiceMonitor' && { echo "FAIL: the global monitor gate no longer holds the kagent ServiceMonitor back"; exit 1; } || true
-	@echo "ok: the toggle under the global gate"
-	@echo "--> the kagent controller metrics Service selects kagent's own release instance (the pods' label), the ServiceMonitor this chart's Service"
-	@python3 -c 'import re,sys; docs=open("/tmp/vg-mon-on.out").read().split("\n---\n"); svc=[d for d in docs if "\nkind: Service\n" in d and re.search(r"^  name: t-kagent-controller-metrics$$", d, re.M)]; sys.exit("FAIL: the kagent controller metrics Service did not render") if len(svc)!=1 else None; sel=svc[0][svc[0].index("  selector:"):]; sys.exit("FAIL: the metrics Service does not select app.kubernetes.io/instance: kagent (the kagent release name the meta chart fixes):\n"+sel) if not re.search(r"^    app.kubernetes.io/instance: kagent$$", sel, re.M) else None; sys.exit("FAIL: the metrics Service selects this release (t) — under the meta chart that matches no pod (#305)") if re.search(r"^    app.kubernetes.io/instance: \"?t\"?$$", sel, re.M) else None; sm=[d for d in docs if "kind: ServiceMonitor" in d and "-kagent-controller\n" in d]; sys.exit("FAIL: the kagent ServiceMonitor did not render") if len(sm)!=1 else None; sys.exit("FAIL: the ServiceMonitor must select this chart\x27s Service (instance t)") if "      app.kubernetes.io/instance: \"t\"" not in sm[0] else None; print("ok: metrics Service selects instance kagent; the ServiceMonitor selects this release\x27s Service")'
+	@echo "--> the default render keeps the CNPG PodMonitor (fleet behavior) and renders NO kagent ServiceMonitor or metrics Service: both are the kagent chart's own (controller.metrics)"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true >/tmp/vg-mon-on.out 2>&1 || { cat /tmp/vg-mon-on.out; exit 1; }
+	@if grep -q 'kind: ServiceMonitor' /tmp/vg-mon-on.out; then echo "FAIL: this chart renders a ServiceMonitor; every monitor belongs to the component's own chart (the kagent controller's to controller.metrics.serviceMonitor, the agentgateway data plane's to the packaging chart)"; exit 1; fi
+	@if grep -q 'kagent-controller-metrics' /tmp/vg-mon-on.out; then echo "FAIL: this chart renders the kagent controller metrics Service; the kagent chart renders it under controller.metrics.enabled"; exit 1; fi
+	@grep -q 'enablePodMonitor: true' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the CNPG PodMonitor"; exit 1; }
+	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-on.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
+	@echo "ok: no monitor of this chart's own, CNPG PodMonitor + keep"
 	@echo "--> no kagent-targeting selector, Service name or hostname in this chart derives from .Release.Name (the standalone umbrella's one-release assumption)"
 	@if grep -nE 'fullnameOverride \| default \.Release\.Name|fullnameOverride" \| default \(printf "%s-oauth2-proxy" \.Release\.Name' $(CONNECTIVITY_DIR)/templates/kagent/*.yaml; then echo "FAIL: a kagent template falls back to .Release.Name for a kagent-chart object; use agent-platform.kagent.fullname / agent-platform.kagent.releaseName"; exit 1; else echo "ok: kagent templates derive kagent names from the kagent helpers"; fi
 	@echo "--> the CNPG CiliumNetworkPolicy renders only when postgres.enabled"
@@ -2413,10 +2405,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) >/tmp/vw-bs.out 2>&1 || { cat /tmp/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' /tmp/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >/tmp/vw-bs-cm.out
 	@[ -s /tmp/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'apiBaseUrl: https://agentgateway.ci.example.com/model-manager' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
 		grep -q -- "$$pattern" /tmp/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' /tmp/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
+	@if grep -qE '^ +modelManager:$$|apiBaseUrl: .*/model-manager$$' /tmp/vw-bs-cm.out; then echo "FAIL: the portal's app-config carries a model-manager entry under agentPlatform with model-manager and its route on; the portal reaches model-manager through muster as the person (giantswarm/backstage#2294) and reads no such key"; exit 1; fi
 	@if grep -q 'musterMcpUrl' /tmp/vw-bs-cm.out; then echo "FAIL: agentPlatform.musterMcpUrl is back in the portal's app-config — the Dev Portal reads no such key (create_agent takes no muster argument); where muster is reaches agent-manager as muster.url (verify-identity)"; exit 1; fi
 	@grep -q 'configMapRef: agent-platform-backstage-app-config' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta chart's backstage: block no longer mounts the ConfigMap this chart renders"; exit 1; }
 	@echo "ok: app-config"
@@ -3305,6 +3298,19 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 	@if $(PICK) /tmp/vhn-npoff.out CiliumNetworkPolicy t-hooks >/dev/null 2>&1 || $(PICK) /tmp/vhn-npoff.out NetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the hook policy renders with networkPolicy.enabled=false"; exit 1; fi
 	@helm template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 --set components.flux.enabled=false --set components.kagent.enabled=false >/tmp/vhn-none.out 2>&1 || { cat /tmp/vhn-none.out; exit 1; }
 	@if grep -q 't-hooks' /tmp/vhn-none.out; then echo "FAIL: engine off, kagent off: the hook policy (or identity) renders with no hook to police"; exit 1; fi
+	@echo "ok: $@"
+
+# The connectivity chart's four hook Jobs, each with its switch on: the Substrate
+# bootstrap, the derived Postgres Secrets, the managed cache claim and the
+# pre-pull cleanup (model serving from its OCI ci values).
+HOOKS_ALL := -f $(CONNECTIVITY_DIR)/ci/test-model-serving-oci-values.yaml $(VM) $(SUBSTRATE_ON) --set postgres.enabled=true --set modelServing.cache.enabled=true --set modelServing.prepull.enabled=true
+
+.PHONY: verify-hooks-memory
+verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every hook container requests 10m/32Mi and is limited to agent-platform.hooks.job's default 128Mi, except the Substrate bootstrap's kubectl container at 256Mi (two kubectl processes at once next to its in-memory /work); all four hook Jobs render. Needs PyYAML.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >/tmp/vhm.out 2>&1 || { cat /tmp/vhm.out; exit 1; }
+	@python3 -c 'import sys,yaml; R={"cpu":"10m","memory":"32Mi"}; lim=lambda m: (R, {"memory": m}); want={"t-substrate-bootstrap": {"openssl": lim("128Mi"), "sh": lim("256Mi")}, "t-postgres-databases": {"sh": lim("128Mi")}, "t-model-serving-cache": {"sh": lim("128Mi")}, "t-model-serving-prepull-cleanup": {"sh": lim("128Mi")}}; jobs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; got={j["metadata"]["name"]: {c["name"]: (c["resources"]["requests"], c["resources"]["limits"]) for c in j["spec"]["template"]["spec"].get("initContainers",[])+j["spec"]["template"]["spec"]["containers"]} for j in jobs}; sys.exit("FAIL: hook containers (requests, limits) are %s, want %s" % (got, want)) if got!=want else print("ok: four hook Jobs, 10m/32Mi requests; t-substrate-bootstrap sh limited to 256Mi, every other hook container to 128Mi")' /tmp/vhm.out
 	@echo "ok: $@"
 
 # klaus-gateway on with the two egress policies that select its pod (a2a, OBO) in
