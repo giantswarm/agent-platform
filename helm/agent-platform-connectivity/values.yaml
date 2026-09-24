@@ -3065,6 +3065,30 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Node selector of every model pod, e.g. the GPU node pool; a preset's
     # scheduling.nodeSelector is merged on top.
     nodeSelector: {}
+    # The sizeLimit of every emptyDir KServe composes into a model pod (home,
+    # tmp-dir, dshm and model-cache; kserve-provision-location on an oci://
+    # modelcar pod), set by the chart's Kyverno mutation on the pod and on
+    # its Deployment's pod template (modelServing.policies): the volumes are
+    # bounded, and the fleet's require-emptydir-requests-and-limits audit
+    # has nothing to report. shmSizeLimit bounds dshm, the memory-backed
+    # /dev/shm of vLLM's worker processes: a tensor-parallel preset (four
+    # GPUs on one pod) passes activations through it wherever the cards have
+    # no peer-to-peer path (NCCL's shared-memory transport, as on PCIe L40S),
+    # and KServe's own multi-GPU templates set 8Gi — the single-node
+    # template's 1Gi is replaced. Memory-backed, so what is written counts
+    # against the runtime container's memory limit; the bound reserves
+    # nothing. modelCacheSizeLimit bounds the volume the storage-initializer
+    # downloads an hf:// model into (model-cache or kserve-provision-location,
+    # by KServe release) when modelServing.cache.enabled is false — with the
+    # cache on the claim takes its place —, so it holds the weights; a whole
+    # number of Gi or Ti, and the render fails when a preset in effect with
+    # an hf:// storageUri needs more (requirements.weightsGiB; the largest
+    # shipped one, nemotron-3-super-nvfp4, has 75). Every other emptyDir
+    # without a sizeLimit gets emptyDirSizeLimit; a sizeLimit KServe's
+    # template sets on one of those stays.
+    shmSizeLimit: 8Gi
+    modelCacheSizeLimit: 100Gi
+    emptyDirSizeLimit: 1Gi
   # The GPU node pool the served models run on (giantswarm/agent-platform#315;
   # bumblebee-plans#46, the plan's D3). A pool created through the platform
   # (the gpu-node-pool chart) arrives tainted nvidia.com/gpu NoSchedule — only
