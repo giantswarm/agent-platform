@@ -630,6 +630,31 @@ def hold_substrate_bootstrap(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+CREDENTIAL_PROVIDER_POLICIES = ("  name: substrate-k8s-credential-provider\n", "  name: substrate-k8s-credential-provider-ingress\n")
+CREDENTIAL_PROVIDER_RULE = """    # The credential provider: the Secret values a policy's credential
+    # injection names (the Substrate line from 1.1.0), asked per request.
+    - toEndpoints:
+        - matchLabels:
+            app: k8s-credential-provider
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+"""
+
+
+def hold_credential_provider_netpol(here: str, there: str) -> tuple:
+    """The two connectivity renders without the credential provider's network
+    policies and the egress gateway's rule to it (giantswarm/giantswarm#37705;
+    GOLDEN_REF renders neither). Dropped once GOLDEN_REF carries them."""
+    def strip(render: str) -> str:
+        docs = [d for d in render.split("\n---\n") if not any(n in d for n in CREDENTIAL_PROVIDER_POLICIES)]
+        return "\n---\n".join(docs).replace(CREDENTIAL_PROVIDER_RULE, "")
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #37705 hold — the credential provider's network policies and the egress gateway's rule to it are left out of the golden comparison")
+    return h, strip(there)
+
+
 CREDENTIAL_PROVIDER_EXCEPTION = "  name: substrate-credential-provider\n"
 
 
@@ -756,6 +781,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_bootstrap_memory(here, there)
                 here, there = hold_substrate_bootstrap(here, there)
                 here, there = hold_credential_provider_exception(here, there)
+                here, there = hold_credential_provider_netpol(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
