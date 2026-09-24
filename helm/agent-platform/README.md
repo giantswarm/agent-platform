@@ -1335,6 +1335,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.serving.gpuResourceName | string | `"nvidia.com/gpu"` |  |
 | modelServing.serving.runtimeClassName | string | `""` |  |
 | modelServing.serving.nodeSelector | object | `{}` |  |
+| modelServing.serving.shmSizeLimit | string | `"8Gi"` |  |
+| modelServing.serving.modelCacheSizeLimit | string | `"100Gi"` |  |
+| modelServing.serving.emptyDirSizeLimit | string | `"1Gi"` |  |
 | modelServing.gpuPool.taint.key | string | `"nvidia.com/gpu"` |  |
 | modelServing.gpuPool.taint.value | string | `""` |  |
 | modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |

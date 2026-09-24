@@ -456,8 +456,8 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
     plain = copy.deepcopy(pod)
     plain["spec"]["initContainers"] = [c for c in plain["spec"]["initContainers"] if c["name"] != "storage-initializer"]
     out = apply([pods_policy], plain)
-    if out is not None and out["spec"] != plain["spec"]:
-        fail(f"{shape}: a pod without a storage-initializer was mutated")
+    if out is not None and unbounded(out["spec"]) != unbounded(plain["spec"]):
+        fail(f"{shape}: a pod without a storage-initializer was mutated beyond its emptyDir bounds (check_emptydir_bounds)")
     job = copy.deepcopy(pod)
     job["metadata"]["labels"] = dict(DOWNLOAD_LABELS)
     out = apply([pods_policy], job)
@@ -979,6 +979,113 @@ def check_image_verification_egress_forwarded(connectivity: str, forwarded_ciliu
     ok("the meta chart's forwarded values render the Kyverno egress policy as the connectivity default does")
 
 
+# The fleet's require-emptydir-requests-and-limits (#556) and the bounds modelServing.serving sets by default.
+EMPTYDIR_AUDIT = HERE / "fixtures" / "require-emptydir-requests-and-limits.yaml"
+SHM_LIMIT, MODEL_CACHE_LIMIT, EMPTYDIR_LIMIT = "8Gi", "100Gi", "1Gi"
+# A volume whose own sizeLimit the chart keeps, and the volume KServe's modelcar path (an oci:// storageUri) adds.
+OWN_LIMIT = {"name": "scratch", "emptyDir": {"sizeLimit": "3Gi"}}
+PROVISION = "kserve-provision-location"
+# The volume the storage-initializer downloads into at /mnt/models, by KServe release; bounded by modelCacheSizeLimit with the cache off.
+DOWNLOAD_VOLUMES = ("model-cache", PROVISION)
+
+
+def unbounded(spec: dict) -> dict:
+    """The pod spec without its emptyDirs' sizeLimits: what the other rules of the pods policy may change."""
+    spec = copy.deepcopy(spec)
+    for volume in spec.get("volumes") or []:
+        (volume.get("emptyDir") or {}).pop("sizeLimit", None)
+    return spec
+
+
+def emptydir_audit(resource: dict) -> int:
+    """How many failures the fleet's require-emptydir-requests-and-limits reports on the resource (a Deployment through
+    Kyverno's autogen rule), by `kyverno apply`: a container per emptyDir without sizeLimit it mounts; none when every
+    emptyDir is bounded (the rule's foreach then has no container to check)."""
+    with tempfile.TemporaryDirectory(prefix="ap-model-serving-emptydir-") as tmp:
+        pathlib.Path(tmp, "resource.yaml").write_text(yaml.safe_dump(resource), encoding="utf-8")
+        result = subprocess.run([KYVERNO, "apply", str(EMPTYDIR_AUDIT), "--resource", f"{tmp}/resource.yaml"],
+                                capture_output=True, text=True, check=False)
+    summary = re.search(r"pass: (\d+), fail: (\d+), warn: (\d+), error: (\d+), skip: (\d+)", result.stdout)
+    if summary is None or int(summary.group(4)):
+        fail(f"{EMPTYDIR_AUDIT.name} on {resource['kind']}/{resource['metadata']['name']}: no summary or an error\n{result.stdout}\n{result.stderr}")
+    return int(summary.group(2))
+
+
+def emptydir_limits(spec: dict) -> dict[str, str | None]:
+    """Every emptyDir of the pod spec by name: its sizeLimit, None without one."""
+    return {v["name"]: (v["emptyDir"] or {}).get("sizeLimit") for v in spec.get("volumes") or [] if "emptyDir" in v}
+
+
+def emptydir_pods(shape: str) -> dict[str, dict]:
+    """The shape's fixture pod as KServe composes it for an hf:// model (the storage-initializer downloads) and for an
+    oci:// one (the modelcar path: no storage-initializer, the model image's container shares kserve-provision-location
+    with the runtime), each with a volume that sets its own sizeLimit."""
+    hf = fixture(shape)
+    hf["spec"]["volumes"].append(copy.deepcopy(OWN_LIMIT))
+    oci = copy.deepcopy(hf)
+    spec = oci["spec"]
+    spec["initContainers"] = [c for c in spec["initContainers"] if c["name"] != "storage-initializer"]
+    spec["containers"].append({"name": "modelcar", "image": "gsoci.azurecr.io/giantswarm/models/example:0",
+                               "volumeMounts": [{"name": PROVISION, "mountPath": "/mnt"}]})
+    runtime_of(spec, SHAPES[shape][1])["volumeMounts"].append({"name": PROVISION, "mountPath": "/mnt"})
+    spec["volumes"].append({"name": PROVISION, "emptyDir": {}})
+    return {"hf://": hf, "oci://": oci}
+
+
+def check_emptydir_bounds(connectivity: str, meta: str, pods_policy: dict, deployments_policy: dict) -> None:
+    """Every emptyDir of a model pod, and of its Deployment's pod template, leaves the policies with a sizeLimit — dshm
+    shmSizeLimit, model-cache modelCacheSizeLimit with the cache off, every other one without a sizeLimit
+    emptyDirSizeLimit, a sizeLimit of its own kept — so the fleet's require-emptydir-requests-and-limits, which fails
+    the pod as KServe composes it, passes both (#556). The bounds reach the chart through the meta chart's forwarded
+    values, and a model-cache smaller than an hf:// preset's weights fails the render."""
+    cache_off = one(render(connectivity, ["--set", "modelServing.cache.enabled=false"]), "ClusterPolicy", "-model-serving-pods")
+    for shape in SHAPES:
+        for uri, pod in emptydir_pods(shape).items():
+            deployment = {"apiVersion": "apps/v1", "kind": "Deployment",
+                          "metadata": {"name": pod["metadata"]["name"].rsplit("-", 2)[0], "namespace": NS, "labels": dict(pod["metadata"]["labels"])},
+                          "spec": {"selector": {"matchLabels": dict(pod["metadata"]["labels"])},
+                                   "template": {"metadata": {"labels": dict(pod["metadata"]["labels"])}, "spec": copy.deepcopy(pod["spec"])}}}
+            for kind, resource in (("pod", pod), ("Deployment", deployment)):
+                if not emptydir_audit(resource):
+                    fail(f"{shape} {uri} {kind}: {EMPTYDIR_AUDIT.name} passes it as KServe composes it; the negative control is gone")
+            for cache, policy in (("on", pods_policy), ("off", cache_off)):
+                want = {name: (OWN_LIMIT["emptyDir"]["sizeLimit"] if name == OWN_LIMIT["name"] else SHM_LIMIT if name == "dshm"
+                               else MODEL_CACHE_LIMIT if name in DOWNLOAD_VOLUMES and cache == "off" else EMPTYDIR_LIMIT)
+                        for name in emptydir_limits(pod["spec"])}
+                out = apply([policy], pod)
+                if out is None or emptydir_limits(out["spec"]) != want:
+                    fail(f"{shape} {uri}, cache {cache}: the pod's emptyDir sizeLimits are {out and emptydir_limits(out['spec'])}, expected {want}")
+                kept = [v for v in pod["spec"]["volumes"] if "emptyDir" not in v]
+                others = [v for v in out["spec"]["volumes"] if v["name"] in {k["name"] for k in kept}]
+                if others != kept:
+                    fail(f"{shape} {uri}, cache {cache}: the bounds changed a volume that is no emptyDir: {others}")
+                again = apply([policy], out)
+                if again is not None and emptydir_limits(again["spec"]) != want:
+                    fail(f"{shape} {uri}, cache {cache}: the policy over its own output changed the bounds to {emptydir_limits(again['spec'])}")
+                if emptydir_audit(out):
+                    fail(f"{shape} {uri}, cache {cache}: {EMPTYDIR_AUDIT.name} still fails the mutated pod")
+            want = {name: (OWN_LIMIT["emptyDir"]["sizeLimit"] if name == OWN_LIMIT["name"] else SHM_LIMIT if name == "dshm" else EMPTYDIR_LIMIT)
+                    for name in emptydir_limits(pod["spec"])}
+            out = apply([deployments_policy], deployment)
+            if out is None or emptydir_limits(out["spec"]["template"]["spec"]) != want or emptydir_audit(out):
+                fail(f"{shape} {uri}: the Deployment's template leaves with {out and emptydir_limits(out['spec']['template']['spec'])}, expected {want} "
+                     f"and no failure of {EMPTYDIR_AUDIT.name}")
+    ok(f"every emptyDir of the hf:// and oci:// model pods and of their Deployments' templates gets a sizeLimit (dshm {SHM_LIMIT}, "
+       f"the download's volume {MODEL_CACHE_LIMIT} with the cache off, the rest {EMPTYDIR_LIMIT}, a volume's own kept), idempotently; "
+       f"{EMPTYDIR_AUDIT.name} fails them as KServe composes them and reports nothing on them mutated")
+    serving = forwarded_values(meta, [])["modelServing"]["serving"]
+    bounds = {k: serving.get(k) for k in ("shmSizeLimit", "modelCacheSizeLimit", "emptyDirSizeLimit")}
+    if bounds != {"shmSizeLimit": SHM_LIMIT, "modelCacheSizeLimit": MODEL_CACHE_LIMIT, "emptyDirSizeLimit": EMPTYDIR_LIMIT}:
+        fail(f"the meta chart forwards modelServing.serving {bounds}; expected the connectivity chart's defaults")
+    ok(f"the meta chart forwards the bounds: {bounds}")
+    for value, reason in (("50Gi", "smaller than preset nemotron-3-super-nvfp4's 75 GiB"), ("100G", "a whole number of Gi or Ti")):
+        result = subprocess.run([HELM, "template", "t", connectivity, *BASE, "--set", "modelServing.cache.enabled=false",
+                                 "--set", f"modelServing.serving.modelCacheSizeLimit={value}"], capture_output=True, text=True, check=False)
+        if result.returncode == 0 or reason not in result.stderr:
+            fail(f"modelCacheSizeLimit={value} with the cache off must fail the render with '{reason}'; got rc={result.returncode}:\n{result.stderr}")
+    ok("with the cache off, a modelCacheSizeLimit below an hf:// preset's weights, or not in Gi or Ti, fails the render naming why")
+
+
 def main(connectivity: str, meta: str) -> int:
     if shutil.which(KYVERNO) is None:
         fail(f"the kyverno CLI ({KYVERNO}) is not installed; the mutations are asserted with `kyverno apply`")
@@ -987,17 +1094,18 @@ def main(connectivity: str, meta: str) -> int:
     deployments_policy = one(docs, "ClusterPolicy", "-model-serving-deployments")
     exception = one(docs, "PolicyException", "model-serving-predictors")
     rules = [r["name"] for r in pods_policy["spec"]["rules"]]
-    expected = [f"redirect-model-storage-{s}" for s in SHAPES] + [f"model-pod-env-{s}" for s in SHAPES] + ["storage-initializer-memory"]
+    expected = [f"redirect-model-storage-{s}" for s in SHAPES] + [f"model-pod-env-{s}" for s in SHAPES] + ["storage-initializer-memory"] + [f"emptydir-size-limits-{s}" for s in SHAPES]
     if rules != expected:
-        fail(f"the pods policy's rules are {rules}; expected the redirect rules, the env rules and the limit, no rule adding a container (#518)")
+        fail(f"the pods policy's rules are {rules}; expected the redirect rules, the env rules, the limit and the emptyDir bounds, no rule adding a container (#518)")
     without = one(render(connectivity, ["--set", "modelServing.policies.env=null"]), "ClusterPolicy", "-model-serving-pods")
     if [r["name"] for r in without["spec"]["rules"]] != [r for r in expected if not r.startswith("model-pod-env-")]:
         fail(f"an empty modelServing.policies.env renders {[r['name'] for r in without['spec']['rules']]}; expected no env rule")
-    ok("the pods policy's rules: the redirect rules, the env rules, the limit; an empty modelServing.policies.env renders no env rule")
+    ok("the pods policy's rules: the redirect rules, the env rules, the limit, the emptyDir bounds; an empty modelServing.policies.env renders no env rule")
     for shape in SHAPES:
         check_mutations(pods_policy, shape)
         check_pod_security(pods_policy, exception, shape)
     check_deployments(deployments_policy)
+    check_emptydir_bounds(connectivity, meta, pods_policy, deployments_policy)
     check_image_verification(connectivity, docs)
     cilium = render(connectivity, CILIUM)
     check_image_verification_egress(connectivity, cilium, docs)
