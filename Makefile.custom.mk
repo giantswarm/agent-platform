@@ -311,8 +311,8 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	@echo "--> the kagent JWT policy defaults its issuer from global.identity.issuerUrl"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set kagent.controllerRoute.hostname=agw.example.com --set kagent.controllerRoute.jwtAuthentication.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com 2>/dev/null | grep -q 'issuer: "https://dex.ci.example.com"' || { echo "FAIL: JWT issuer not defaulted from global.identity"; exit 1; }
 	@echo "ok: JWT issuer default"
-	@echo "--> a muster issuer that differs from global.identity fails"
-	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set global.identity.issuerUrl=https://dex.ci.example.com --set muster.muster.oauth.server.enabled=true --set muster.muster.oauth.server.dex.issuerUrl=https://other.example.com >/tmp/vg-idp.out 2>&1; then \
+	@echo "--> a muster issuer that differs from global.identity fails (model-manager off: its absence guard would name the missing client first)"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.model-manager.enabled=false --set global.identity.issuerUrl=https://dex.ci.example.com --set muster.muster.oauth.server.enabled=true --set muster.muster.oauth.server.dex.issuerUrl=https://other.example.com >/tmp/vg-idp.out 2>&1; then \
 		echo "FAIL: muster issuer differing from global.identity accepted"; exit 1; \
 	elif ! grep -q "differs from global.identity.issuerUrl" /tmp/vg-idp.out; then \
 		echo "FAIL: identity consistency check failed for the wrong reason"; cat /tmp/vg-idp.out; exit 1; \
@@ -1802,7 +1802,7 @@ verify-worker-image: ## Assert the Substrate worker image follows the chart's ow
 	@echo "ok: $@"
 
 .PHONY: verify-managers
-verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards.
+verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards, and the four managers' OAuth inputs derived from muster's login (giantswarm/agent-platform#484).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> both components off render nothing of theirs (agent-manager is off by default; model-manager is on since giantswarm/agent-platform#329)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.model-manager.enabled=false >/tmp/vmg-off.out 2>&1 || { cat /tmp/vmg-off.out; exit 1; }
@@ -2031,6 +2031,8 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@if grep -qE '^  name: agent-manager$$' /tmp/vmg-meta-off.out; then echo "FAIL: agent-manager release rendered while disabled"; exit 1; fi
 	@if grep -qE '^    - name: kagent$$' /tmp/vmg-meta-off.out; then echo "FAIL: a dependsOn on the disabled kagent survived"; exit 1; fi
 	@echo "ok: meta render"
+	@echo "--> the managers' OAuth inputs follow muster's login (giantswarm/agent-platform#484): derived, explicit and global.identity win, one login, the absence guard"
+	@python3 tests/verify-manager-identity.py $(CHART_DIR) $(CONNECTIVITY_DIR) $(VM)
 	@echo "All model-manager / agent-manager wiring verified."
 
 # The kagent-flux tenant identity (PRD Q3 / D4) and the upstream fixes that

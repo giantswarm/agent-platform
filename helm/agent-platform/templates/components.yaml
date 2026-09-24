@@ -259,6 +259,11 @@ giantswarm/agent-platform#439) is merged into the four components' own
 nodeSelector / tolerations on the same copy, so the muster, valkey, kagent and
 klaus-gateway releases carry it as their charts' knobs. */ -}}
 {{- include "agent-platform.scheduling.apply" (dict "values" $shaped) -}}
+{{- /* The managers' OAuth blocks take what they and global.identity leave unset
+from muster's OAuth server block, the platform's one login
+(giantswarm/agent-platform#484), on the same copy, so the connectivity release
+guards and wires what the manager releases run with. */ -}}
+{{- include "agent-platform.identity.apply" (dict "values" $shaped) -}}
 {{- range $key, $c := .Values.components }}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
