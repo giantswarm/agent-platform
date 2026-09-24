@@ -36,7 +36,7 @@
             "storageUri": {"type": "string", "pattern": "^(hf|pvc|s3|gs|oci|https?)://.+", "description": "The LLMInferenceService's model URI. hf://<id> downloads through the KServe storage-initializer (into the cache when the Kyverno policies are on); pvc://<claim>/<dir> serves pre-warmed weights without a download; oci://<registry>/<path>[:tag|@digest] is a model image (KServe's modelcar path)."},
             "format": {"type": "string", "default": "vLLM", "description": "The model format, informational on the llm-d path (the well-known template serves vLLM). Published presets always carry it."},
             "contextLength": {"type": "integer", "minimum": 1, "description": "Context window in tokens the recipe serves (informational; --max-model-len in args is authoritative)."},
-            "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Informational tags, e.g. chat, tools, reasoning, vision, coding, embeddings."},
+            "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Informational tags, e.g. chat, tools, reasoning, vision, coding, embeddings. The API interfaces a served model answers (chat completions, Responses, Messages, embeddings) are not declared here or anywhere in a preset: model-manager reads them from the running runtime's route list (GET /openapi.json), which is why spec.args may not carry --disable-fastapi-docs."},
             "license": {"type": "string", "description": "SPDX identifier or the model card's license name."}
           }
         },

@@ -533,9 +533,10 @@ components:  # @schema additionalProperties: true
     # of the platform edits this release's objects in place (no HPA on its
     # Deployments, no webhook-injected field, no hook). An object of the
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
-    # disabled. kagent's and muster's only by default — turning it on for
-    # another release is a decision per release, its objects must tolerate the
-    # re-apply (tests/verify-kagent-wiring.py asserts the set).
+    # disabled. kagent's, muster's and kserve-runtime-configs' only by
+    # default — turning it on for another release is a decision per release,
+    # its objects must tolerate the re-apply (tests/verify-kagent-wiring.py
+    # asserts the set).
     driftDetection:  # @schema additionalProperties: true
       mode: enabled
     # These keys are the connectivity chart's, not kagent's: it reads them for
@@ -1008,6 +1009,21 @@ components:  # @schema additionalProperties: true
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
+    # Drift detection on this release (HelmRelease v2 spec.driftDetection): on
+    # every reconcile — gitops.interval — helm-controller re-applies a config
+    # that differs from the release manifest or is missing, as a server-side
+    # apply, without a Helm revision. Because a slice torn down at once left
+    # the configs terminating under their controller's finalizer, the next
+    # install adopted them, the new controller then finished their deletion,
+    # and the release stayed "in-sync" with no config behind it: every
+    # LLMInferenceService composed from them failed ConfigNotFound until a
+    # forced reconcile (giantswarm/agent-platform#508). With it a missing
+    # config is back within one interval. No ignore rule: the objects are
+    # configuration only; the llm-d controller adds a finalizer, which a
+    # server-side apply of the manifest leaves in place, and no webhook
+    # mutates them (its validating webhook admits the re-create).
+    driftDetection:  # @schema additionalProperties: true
+      mode: enabled
   # Model serving on llm-d: a feature switch, not a component — no chart, so
   # the loop renders no release for it; the flag is forwarded to the
   # connectivity release like every other, and that chart renders the objects
@@ -4973,6 +4989,30 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Node selector of every model pod, e.g. the GPU node pool; a preset's
     # scheduling.nodeSelector is merged on top.
     nodeSelector: {}
+    # The sizeLimit of every emptyDir KServe composes into a model pod (home,
+    # tmp-dir, dshm and model-cache; kserve-provision-location on an oci://
+    # modelcar pod), set by the chart's Kyverno mutation on the pod and on
+    # its Deployment's pod template (modelServing.policies): the volumes are
+    # bounded, and the fleet's require-emptydir-requests-and-limits audit
+    # has nothing to report. shmSizeLimit bounds dshm, the memory-backed
+    # /dev/shm of vLLM's worker processes: a tensor-parallel preset (four
+    # GPUs on one pod) passes activations through it wherever the cards have
+    # no peer-to-peer path (NCCL's shared-memory transport, as on PCIe L40S),
+    # and KServe's own multi-GPU templates set 8Gi — the single-node
+    # template's 1Gi is replaced. Memory-backed, so what is written counts
+    # against the runtime container's memory limit; the bound reserves
+    # nothing. modelCacheSizeLimit bounds the volume the storage-initializer
+    # downloads an hf:// model into (model-cache or kserve-provision-location,
+    # by KServe release) when modelServing.cache.enabled is false — with the
+    # cache on the claim takes its place —, so it holds the weights; a whole
+    # number of Gi or Ti, and the render fails when a preset in effect with
+    # an hf:// storageUri needs more (requirements.weightsGiB; the largest
+    # shipped one, nemotron-3-super-nvfp4, has 75). Every other emptyDir
+    # without a sizeLimit gets emptyDirSizeLimit; a sizeLimit KServe's
+    # template sets on one of those stays.
+    shmSizeLimit: 8Gi
+    modelCacheSizeLimit: 100Gi
+    emptyDirSizeLimit: 1Gi
   # The GPU node pool the served models run on (giantswarm/agent-platform#315;
   # bumblebee-plans#46, the plan's D3). A pool created through the platform
   # (the gpu-node-pool chart) arrives tainted nvidia.com/gpu NoSchedule — only

@@ -464,6 +464,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-runtime-configs.valuesFrom | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.enabled | bool | `false` |  |
 | components.kserve-runtime-configs.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
+| components.kserve-runtime-configs.driftDetection.mode | string | `"enabled"` |  |
 | components.modelServing.enabled | bool | `false` |  |
 | components.gpu-operator.chart | string | `"gpu-operator"` |  |
 | components.gpu-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
@@ -1343,6 +1344,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.serving.gpuResourceName | string | `"nvidia.com/gpu"` |  |
 | modelServing.serving.runtimeClassName | string | `""` |  |
 | modelServing.serving.nodeSelector | object | `{}` |  |
+| modelServing.serving.shmSizeLimit | string | `"8Gi"` |  |
+| modelServing.serving.modelCacheSizeLimit | string | `"100Gi"` |  |
+| modelServing.serving.emptyDirSizeLimit | string | `"1Gi"` |  |
 | modelServing.gpuPool.taint.key | string | `"nvidia.com/gpu"` |  |
 | modelServing.gpuPool.taint.value | string | `""` |  |
 | modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
