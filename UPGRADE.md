@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the portal's app-config carries no `agentPlatform.modelManager`)
+
+giantswarm/agent-platform#318: the connectivity chart no longer renders `agentPlatform.modelManager.installations.<installation>.apiBaseUrl` into the Backstage app-config. Since giantswarm/backstage#2294 (Backstage 2.19.0 and later) the Models pages call model-manager's `x_model-manager_*` tools through muster as the signed-in person, and the portal backend has no model-manager client that would read the key. The `muster.installations` entry and model-manager's `MCPServer` are unchanged; the model-manager route (`modelManager.route`) stays for REST clients.
+
+### Operator action
+
+- **None** for an installation on Backstage 2.19.0 or later (the chart's range admits `>=1.0.0 <3.0.0`; the Models pages already use muster). The app-config changes, so the config-reload hook rolls the portal once.
+- **An installation that added a Backstage peer to `modelManager.networkPolicy.ingress.additionalPeers`** for the portal's REST path can drop it: the portal no longer calls model-manager directly.
+- **Recognising it worked**: `kubectl -n <release namespace> get configmap agent-platform-backstage-app-config -o yaml` shows no `modelManager:` under `agentPlatform`, and the Models pages list the installation's models.
+
 ## \<current\> → \<next\> (the managers' OAuth client, secret, issuer and base URL follow muster's login)
 
 giantswarm/agent-platform#484: the meta chart fills what `model-manager.oauth`, `agent-manager.oauth`, `vm-manager.oauth` and `cluster-manager.oauth` and `global.identity` leave unset from muster's OAuth server block, the platform's one login: `oauth.dex.issuerURL` ← `muster.muster.oauth.server.dex.issuerUrl`, `oauth.dex.clientID` and `oauth.trustedAudiences` ← `dex.clientId`, `oauth.existingSecret` ← `existingSecret` (a Secret with key `dex-client-secret`), for the dex provider while muster's OAuth server is on; `oauth.baseURL` of model-manager and agent-manager ← `https://<modelManager|agentManager.route.hostname, else agentgateway.<global.domain>><route.pathPrefix>` under an agentgateway-* `ingress.mode`. A manager's own value wins; so does `global.identity`, which the charts read themselves. model-manager's render-time guard in the connectivity chart fires again on absence once muster's OAuth server names a Dex issuer.
@@ -53,6 +63,19 @@ giantswarm/giantswarm#36711: `components.kserve-llmisvc-crd`, `components.kserve
 - **None** for an installation on the defaults, or with the kserve components off.
 - **A BOM pin** (`components.kserve-*.versionRange` at a `0.4.x` release): pin `0.5.0` for all three. A `0.4.x` pin makes the `kserve-llmisvc-resources` release fail on the new keys.
 - **Recognising it worked**: `kubectl -n <release namespace> get servicemonitor llmisvc-controller-manager` exists when the cluster serves `monitoring.coreos.com/v1`, and `up{job="llmisvc-controller-manager-service"}` is `1` in Mimir for the `giantswarm` tenant.
+## \<current\> → \<next\> (the kagent line and the Substrate line at `1.1.0`: upstream kagent `main@1069fd2` on Substrate v0.2.0-beta5, the Generic agent chart at `1.5.0`, the data planes at agentgateway `2.1.2`)
+
+giantswarm/giantswarm#37705: the three lines re-pinned on 2026-09-22 and again on 2026-09-24 (kagent `main@1069fd2`, Substrate v0.2.0-beta5, agentgateway `main@3528a428`). Substrate v0.2.0-beta4 brings gateway credential injection: the egress gateway terminates the actors' TLS, injects every credential (model keys, MCP headers, the skills' git credentials) into the request, and the actor holds only placeholders. kagent `main@844ea06b` compiles against it and moves context compaction from the AgentTemplate to the Harness.
+
+### Operator action
+
+- **None** for an installation on the defaults. The connectivity release's bootstrap hook mints the fifth pool, `egress-mitm-ca-pool`, before the `substrate` release upgrades; the chart's `substrate.image` block carries the split registry and repository; the platform Harness carries the compaction the agent chart used to render.
+- **`substrate.image.registry` set in your values** (a mirror): it must be the registry host alone, `mirror.example.com`, with the path in `substrate.image.repository`. The Substrate chart refuses a registry that carries a path, and the derived worker image follows both values.
+- **AgentTemplates outside the `kagent` namespace**: add that namespace to `substrate.credentialProvider.namespacePolicies` twice: one entry with `atespace` and `allowedNamespaces` both the namespace, and the namespace appended to the `allowedNamespaces` of the `ate-golden` entry (the golden actors' atespace, where a template's private git skills are fetched first). Without the first every model call of those agents fails with the runtime's 401; without the second the golden boot of a template with a private skill fails with git's 403 (`atespace "ate-golden" is not permitted to resolve secrets`).
+- **A private skill or plugin source with `credentialRef`**: the Secret key must hold `base64("<username>:<token>")` (GitHub: `x-access-token:<token>`), the value the gateway sends as `Authorization: Basic`. Before, it held the raw token. Change the Secret before the AgentTemplate re-admits on the new kagent.
+- **Agents on the Generic agent chart**: `agent-manager.agentChart.semver` moves to `>=1.5.0 <2.0.0`; every agent namespace's OCIRepository follows and the agents re-render on 1.5.0, whose AgentTemplate carries no `spec.context` (the 1.4.x render is refused by this kagent). An installation that pinned the chart itself moves the pin.
+- **`context.compaction` in an agent chart's values**: the AgentTemplate no longer has the field; the Generic agent chart stops rendering it (its own release) and the platform Harness compacts every admitted agent with `kagent.harness.compaction`. Per-agent opt-out is gone until upstream offers it.
+- **Recognising it worked**: `kubectl -n ate-system get secret egress-mitm-ca-pool` exists; `kubectl -n ate-system get deploy` shows the credential provider next to the control plane; `kubectl -n kagent get harness kagent -o jsonpath='{.spec.kagent.compaction}'` prints the block; one agent turn through a model answers.
 
 ## \<current\> → \<next\> (the three upstream lines at their decoupled releases: kagent `1.0.0`, Substrate `1.0.0`, agentgateway `2.0.0`)
 

@@ -130,8 +130,8 @@ overwrite would hide a values file that still spells the old key.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation);
     substrateWorkerPool.workerImage from the Substrate release THIS chart pins
-    (agent-platform.substrate.workerImage: the substrate block's image.registry,
-    ateom-gvisor, the floor of components.substrate.versionRange) — never the
+    (agent-platform.substrate.workerImage: the substrate block's image.registry
+    and image.repository, ateom-gvisor, the floor of components.substrate.versionRange) — never the
     worker the kagent build was published against, so the worker and the
     atelet are one Substrate release whatever kagent build the range admits
     (giantswarm/agent-platform#466). An installation's own workerImage stands
@@ -690,15 +690,18 @@ Usage: include "agent-platform.substrate.pinnedVersion" $root
 
 {{/*
 The gVisor worker image of the Substrate release this chart pins:
-<substrate.image.registry>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
-— the registry the substrate block names for the control plane's images (a
-mirror sets it there, once, for both), the tag the atelet's. Every release of
-the line publishes atelet and ateom-gvisor under the same tag.
+<substrate.image.registry>/<substrate.image.repository>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
+— the registry and repository the substrate block names for the control
+plane's images (a mirror sets them there, once, for both), the tag the
+atelet's. Every release of the line publishes atelet and ateom-gvisor under
+the same tag.
 Usage: include "agent-platform.substrate.workerImage" $root
 */}}
 {{- define "agent-platform.substrate.workerImage" -}}
-{{- $registry := dig "image" "registry" "gsoci.azurecr.io/giantswarm/substrate" (.Values.substrate | default dict) -}}
-{{- printf "%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (include "agent-platform.substrate.pinnedVersion" .) -}}
+{{- $image := dig "image" (dict) (.Values.substrate | default dict) -}}
+{{- $registry := dig "registry" "gsoci.azurecr.io" $image -}}
+{{- $repository := dig "repository" "giantswarm/substrate" $image -}}
+{{- printf "%s/%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (trimAll "/" $repository) (include "agent-platform.substrate.pinnedVersion" .) -}}
 {{- end -}}
 
 {{/*
@@ -1348,7 +1351,11 @@ answers, but only where the leaf is left at `auto`:
                                own monitor; the chart takes a boolean),
                                vm-manager.serviceMonitor.enabled,
                                kserve-llmisvc-resources.kserve.llmisvc
-                               .controller.serviceMonitor.enabled
+                               .controller.serviceMonitor.enabled,
+                               substrate.metrics.podMonitor.enabled (the six
+                               workloads of the Substrate control plane),
+                               kagent.controller.metrics.serviceMonitor.enabled
+                               (the controller's own, from the line's 1.0.2)
 Two leaves have no `auto` form and are derived directly, off only:
   valkey.valkey.metrics.podMonitor.enabled — the valkey chart's own default is
       on; written false when monitors are off, left absent otherwise so the
@@ -1409,6 +1416,8 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "agentgateway" "monitoring" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "mcpKubernetes" "instrumentation" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "grafanaDashboards" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "substrate" "metrics" "podMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "controller" "metrics" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "tracing" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "logging" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "vm-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
