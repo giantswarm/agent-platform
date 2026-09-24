@@ -580,13 +580,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.models[0].match | string | `"claude-*"` |  |
 | llmRouting.external.enabled | bool | `false` |  |
 | llmRouting.external.hostPrefix | string | `"llm"` |  |
+| llmRouting.external.listener.name | string | `"llm-external"` |  |
+| llmRouting.external.listener.port | int | `8082` |  |
 | llmRouting.external.apiKeys.secretRef.name | string | `""` |  |
 | llmRouting.external.apiKeys.secretSelector.matchLabels | object | `{}` |  |
 | llmRouting.external.apiKeys.configMapSelector.matchLabels | object | `{}` |  |
-| llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
-| llmRouting.routes./v1/messages | string | `"Messages"` |  |
-| llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
-| llmRouting.routes.* | string | `"Passthrough"` |  |
 | llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |

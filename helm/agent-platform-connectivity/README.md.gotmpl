@@ -39,13 +39,11 @@ Two values turn the path on, and the order matters.
      enabled: true
    ```
 
-   This adds an `llm` listener to the data-plane Gateway, an `HTTPRoute` pinned
-   to that listener whose backend is the model router (`AgentgatewayModel` `*`),
-   one `AgentgatewayModel` per `llmRouting.models` entry (by default
-   `anthropic`: provider Anthropic, `match: claude-*`), one Gateway-scoped
-   `AgentgatewayPolicy` (the route-type map), and the model-price ConfigMap the
-   cost counter reads. Nothing routes through it
-   yet. The metric labels are not this path's: the Gateway's own `-metrics`
+   This adds an `llm` listener to the data-plane Gateway, one
+   `AgentgatewayModel` per `llmRouting.models` entry attached directly to that
+   listener (by default `anthropic`: provider Anthropic, `match: claude-*`),
+   and the model-price ConfigMap the cost counter reads. Nothing routes
+   through it yet. The metric labels are not this path's: the Gateway's own `-metrics`
    policy carries them whether or not LLM routing is on (below).
 
    Verify the listener answers before you continue. From a pod in the release
@@ -89,33 +87,64 @@ On the installation, after the cutover:
 ### Notes
 
 - The `llm` listener is cluster-internal. The data-plane network policy admits
-  world traffic on 443 only, and the LLM route pins itself to its own listener
-  by `sectionName`, so it never attaches to the public HTTPS listener in edge
-  mode.
-- Pinning is not enough on its own: `agent-platform-mcps` renders a catch-all
-  `HTTPRoute` (`PathPrefix: /`, no `sectionName`, no hostname) that attaches to
-  every listener of the same Gateway. An equal match is broken by creation
-  timestamp and then alphabetically, both of which that route wins, so the LLM
-  route matches `llmRouting.pathPrefixes` (`/v1`) instead — character count in
-  the path match outranks both tiebreaks. A path outside those prefixes reaches
-  the MCP backend and answers `mcp: client must accept both application/json
-  and text/event-stream`, so `"*": Passthrough` in `llmRouting.routes` covers
-  the other provider paths *under* the prefixes, not every path on the port.
+  world traffic on 443 only, and every model attaches to the listener itself
+  (`parentRefs`: the Gateway with `sectionName: llm`), never to the public
+  HTTPS listener in edge mode.
+- **No route in front of the models.** agentgateway strips the matched
+  `PathPrefix` of an `HTTPRoute` rule whose backend is the model router: the
+  prefix is a serving prefix in front of `/v1/...`, so a route matching `/v1`
+  hands the router `/messages`, which it cannot classify. Such a request is
+  proxied as Passthrough and records no `agentgateway_gen_ai_*` token or cost
+  metric. A model attached to the listener directly matches the serving
+  endpoints themselves (`/v1/messages`, `/v1/chat/completions`, ...), which
+  outrank the `agent-platform-mcps` catch-all `HTTPRoute` (`PathPrefix: /`,
+  no `sectionName`, no hostname) attached to every listener of the Gateway; any
+  other path on the port reaches the MCP backend. No `AgentgatewayBackend`
+  remains on the path, so there is no route-type map either: the router
+  classifies each request itself. The ModelConfig base URL is the listener's
+  origin with no path (`http://agentgateway.<release namespace>.svc:8081`); the
+  client appends `/v1/messages`.
 - The request's `model` picks the model: the router tries the models attached to
-  the route in name order and takes the first whose `match` takes the name
+  the listener in name order and takes the first whose `match` takes the name
   (exact, `claude-*`, `*-latest`, `*`), so a `*` entry would shadow every model
   named after it; a name no model takes answers `404 model_not_found`, and
   `GET /v1/models` lists the public ones. The gateway holds no credential: a
   managed provider model carries no `policies.auth`, and the client's own key
   passes through untouched.
-- **Served models on the endpoint.** With the serving slice and model-manager
-  on, the discovery ConfigMap publishes `spec.llmEndpoint` (`parentRefs`, the
-  LLM route; `endpoint`, the listener's in-cluster URL), model-manager holds a
-  Role on the release namespace's `agentgatewaymodels` and nothing else, and the
-  data plane may reach the serving namespace's workload pods on the workload
-  port. model-manager then attaches one `AgentgatewayModel` per served model to
-  the route under the preset's name (giantswarm/model-manager#145), so a client
-  sends `model: <preset>` to the same listener.
+- **Served models on the endpoint: the LLMEndpoint document.** With LLM routing
+  and a serving model-manager — this release's serving slice, or a GPU node
+  pool's, which cluster-manager brings as a second release of this chart with
+  model-manager off while this release keeps `modelServing` off — the chart
+  renders the ConfigMap `<name>-llm-endpoint` in the release namespace,
+  labelled `agent-platform.giantswarm.io/llm-endpoint: "true"`, whose
+  `llm-endpoint.yaml` is the contract model-manager reads:
+
+  ```yaml
+  apiVersion: agent-platform.giantswarm.io/v1alpha1
+  kind: LLMEndpoint
+  spec:
+    parentRefs:          # exactly the provider models' own
+      - group: gateway.networking.k8s.io
+        kind: Gateway
+        name: agentgateway
+        namespace: <release namespace>
+        sectionName: llm
+      - group: gateway.networking.k8s.io   # with llmRouting.external
+        kind: HTTPRoute
+        name: <name>-llm-external
+        namespace: <release namespace>
+    endpoint: http://agentgateway.<release namespace>.svc:8081
+    externalEndpoint: https://llm.<global.domain>   # with llmRouting.external
+  ```
+
+  With it, model-manager holds a Role on the release namespace's
+  `agentgatewaymodels` and nothing else, and the data plane may reach the
+  serving namespace's workload pods on the workload port (both network policy
+  flavours; the namespace is where model-manager serves). model-manager then
+  attaches one `AgentgatewayModel` per served model to those parents under the
+  preset's name (giantswarm/model-manager#145), so a client sends
+  `model: <preset>` to the same listener. None of it renders without LLM
+  routing or without a serving model-manager.
 - **The endpoint outside the cluster** (`llmRouting.external`): `enabled: true`
   puts the listener's models on `https://<hostPrefix>.<global.domain>`
   (`llm` by default) behind the installation's API keys — a route of its own
@@ -125,15 +154,22 @@ On the installation, after the cutover:
   release namespace: `apiKeys.secretRef.name` (a Secret: an entry per key, the
   key or `{"key"|"keyHash": …, "metadata": {…}}`), `apiKeys.secretSelector` or
   `apiKeys.configMapSelector` (`matchLabels`; a ConfigMap's entries carry
-  `keyHash: sha256:<hex>` only). With the chart's own edge
-  (`gatewayApi.gateway.create`) the route is on the data plane's HTTPS
-  listener; behind a public Gateway (`global.gatewayApi.parentRefs`) that
-  Gateway forwards the hostname to the LLM listener, where the route takes it
-  by hostname — the in-cluster route matches none, so a call by the Service's
-  name stays credential-free. Give every key entry `"metadata": {"name":
+  `keyHash: sha256:<hex>` only). The route matches `PathPrefix: /`, which the
+  agentgateway controller treats as a root model route: nothing version-like is
+  stripped, and its hostname outranks the hostname-less MCP catch-all. The
+  controller refuses a root model route on a listener that also has directly
+  attached models (`ModelRoutingConflict`), so the route never shares the LLM
+  listener: with the chart's own edge (`gatewayApi.gateway.create`) it is on the
+  data plane's HTTPS listener; behind a public Gateway
+  (`global.gatewayApi.parentRefs`) it is on a data-plane listener of its own,
+  `llmRouting.external.listener` (`llm-external`, `8082`, HTTP, routes of the
+  release namespace), to which that Gateway forwards the hostname
+  (`<name>-llm-public`); the data-plane network policies admit that port from
+  the cluster as they do the LLM listener's. A call by the Service's name to the
+  LLM listener stays credential-free. Give every key entry `"metadata": {"name":
   "<who>"}`: the data plane's metrics carry it as `api_key`
   (`gateway.metricLabels.api_key`, held until this route renders). The
-  discovery ConfigMap names the route and `externalEndpoint`, so model-manager
+  LLMEndpoint document names the route and `externalEndpoint`, so model-manager
   puts served models on it too. **Every key reaches every model**: agentgateway
   does not enforce a key's `allowedModels` on the Kubernetes API-key contract
   yet (giantswarm/giantswarm#37742), so putting a paid provider model next to
@@ -141,9 +177,11 @@ On the installation, after the cutover:
 - Agent pods keep their `world:443` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
-- The LLM policy carries no `frontend.metrics`: the data plane honours one
+- The LLM path adds no `frontend.metrics` policy: the data plane honours one
   metrics policy per Gateway, and the labels describe every route, so they live
   in the Gateway's own `-metrics` policy — see [Metric labels](#metric-labels).
+- `ingress.httpRoute.timeouts` reaches the external routes only: the in-cluster
+  path has no `HTTPRoute` to carry route timeouts.
 - An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
   own `baseUrl` or names a provider other than the first `llmRouting.models`
   entry's.

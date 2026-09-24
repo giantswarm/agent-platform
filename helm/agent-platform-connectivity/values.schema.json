@@ -1022,6 +1022,18 @@
                         },
                         "hostPrefix": {
                             "type": "string"
+                        },
+                        "listener": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "integer"
+                                }
+                            }
                         }
                     }
                 },
@@ -1319,27 +1331,6 @@
                         }
                     },
                     "minItems": 1
-                },
-                "pathPrefixes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "routes": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "*": {
-                            "type": "string"
-                        },
-                        "/v1/messages": {
-                            "type": "string"
-                        },
-                        "/v1/messages/count_tokens": {
-                            "type": "string"
-                        }
-                    }
                 }
             }
         },

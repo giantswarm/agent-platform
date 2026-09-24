@@ -12,11 +12,23 @@ spec:
     {{- toYaml .Values.gateway.listeners | nindent 4 }}
     {{- if (include "agent-platform.llmRouting" .) }}
     # LLM listener: agent inference traffic to the provider. Cluster-internal —
-    # the data-plane NetworkPolicy admits world traffic on 443 only, and the LLM
-    # HTTPRoute pins itself here by sectionName so it never attaches to the
-    # public HTTPS listener below.
+    # the data-plane NetworkPolicy admits world traffic on 443 only, and the
+    # models (templates/llm/models.yaml) attach here by sectionName, never to
+    # the public HTTPS listener below.
     - name: {{ .Values.llmRouting.listener.name }}
       port: {{ .Values.llmRouting.listener.port }}
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+    {{- end }}
+    {{- if (include "agent-platform.llmRouting.externalListener" .) }}
+    # The external LLM route's listener, behind a public Gateway that forwards
+    # <llmRouting.external.hostPrefix>.<global.domain> here: that route matches
+    # `/`, which the agentgateway controller refuses on the LLM listener above,
+    # where models attach directly (templates/llm/external.yaml).
+    - name: {{ .Values.llmRouting.external.listener.name }}
+      port: {{ .Values.llmRouting.external.listener.port }}
       protocol: HTTP
       allowedRoutes:
         namespaces:

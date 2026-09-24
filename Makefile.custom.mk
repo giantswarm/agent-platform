@@ -560,13 +560,36 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 LLM_VM := $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set llmRouting.enabled=true
 # The serving slice on (the llm-d control plane and the models namespace), for the served models' LLM endpoint.
 SERVING_ON := --set components.modelServing.enabled=true --set components.kserve-llmisvc-crd.enabled=true --set components.kserve-llmisvc-resources.enabled=true --set modelServing.namespace.name=model-serving
+# cluster-manager on and the serving slice off: a GPU node pool's topology, where the slice comes as a second release of the chart and model-manager's kserve backend from cluster-manager. cluster-manager's resource server needs the platform identity.
+LLM_POOL_ON := --set components.cluster-manager.enabled=true --set global.domain=ex.test --set global.identity.issuerUrl=https://dex.ex.test --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth
+# The parents every model of the LLM endpoint attaches to, as sorted JSON: the data plane's LLM listener, and the external route with llmRouting.external.
+LLM_PARENT_LISTENER := {"group": "gateway.networking.k8s.io", "kind": "Gateway", "name": "agentgateway", "namespace": "default", "sectionName": "llm"}
+LLM_PARENT_EXTERNAL := {"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "name": "agent-platform-connectivity-llm-external", "namespace": "default"}
+# A root model route's matches and its one backend, the model router, as sorted JSON.
+LLM_ROOT_MATCH := [[{"path": {"type": "PathPrefix", "value": "/"}}]]
+LLM_ROUTER := [{"group": "agentgateway.dev", "kind": "AgentgatewayModel", "name": "*"}]
+# Each AgentgatewayModel of a render: its name and parentRefs (sorted JSON), one per line.
+LLM_MODEL_PARENTS := python3 -c 'import sys,json,yaml; [print(d["metadata"]["name"], json.dumps(d["spec"]["parentRefs"], sort_keys=True)) for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="AgentgatewayModel"]'
+# The LLMEndpoint document of a render: the <name>-llm-endpoint ConfigMap's discovery label and its llm-endpoint.yaml parsed (sorted JSON); nothing when it does not render.
+LLM_ENDPOINT_DOC := python3 -c 'import sys,json,yaml; [print(d["metadata"]["labels"].get("agent-platform.giantswarm.io/llm-endpoint"), json.dumps(yaml.safe_load(d["data"]["llm-endpoint.yaml"]), sort_keys=True)) for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="ConfigMap" and d["metadata"]["name"]=="agent-platform-connectivity-llm-endpoint"]'
+# An HTTPRoute of a render, by name: its parentRefs' sectionNames (- for none), its rules' matches and its backendRefs (sorted JSON).
+LLM_ROUTE := python3 -c 'import sys,json,yaml; [print(",".join(p.get("sectionName", "-") for p in d["spec"]["parentRefs"]), json.dumps([r.get("matches") for r in d["spec"]["rules"]], sort_keys=True), json.dumps([b for r in d["spec"]["rules"] for b in r["backendRefs"]], sort_keys=True)) for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="HTTPRoute" and d["metadata"]["name"]==sys.argv[2]]'
+# The data-plane Gateway's listeners of a render, name:port:protocol:allowedRoutes.namespaces.from, space-separated.
+LLM_LISTENERS := python3 -c 'import sys,yaml; [print(" ".join("%s:%s:%s:%s" % (l["name"], l["port"], l["protocol"], l.get("allowedRoutes", {}).get("namespaces", {}).get("from", "")) for l in d["spec"]["listeners"])) for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Gateway" and d["metadata"]["name"]=="agentgateway"]'
+# The AgentgatewayPolicies of a render with a backend.ai section (the retired routes map), one name per line.
+LLM_AI_POLICIES := python3 -c 'import sys,yaml; [print(d["metadata"]["name"]) for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="AgentgatewayPolicy" and "ai" in (d["spec"].get("backend") or {})]'
+# The data-plane network policy of a render (either flavour).
+DATAPLANE_DOC := awk '/^  name: agent-platform-connectivity-dataplane$$/{f=1} f&&/^---/{exit} f'
+# The LLMEndpoint document without and with llmRouting.external, as LLM_ENDPOINT_DOC prints it.
+LLM_ENDPOINT_IN := true {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "LLMEndpoint", "spec": {"endpoint": "http://agentgateway.default.svc:8081", "parentRefs": [$(LLM_PARENT_LISTENER)]}}
+LLM_ENDPOINT_EXT := true {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "LLMEndpoint", "spec": {"endpoint": "http://agentgateway.default.svc:8081", "externalEndpoint": "https://llm.ex.test", "parentRefs": [$(LLM_PARENT_LISTENER), $(LLM_PARENT_EXTERNAL)]}}
 
 .PHONY: verify-llm-routing
-verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the LLM path (the Gateway's metrics policy is not its — verify-metric-labels), on renders the listener + routing — the route's backend the model router (AgentgatewayModel *), one credential-free AgentgatewayModel per llmRouting.models entry (anthropic, claude-* by default), with the serving slice and model-manager on the discovery block spec.llmEndpoint, model-manager's Role on agentgatewaymodels and the data plane's egress to the served models' workload port (giantswarm/agent-platform#603) —, and the guards fire.
+verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the LLM path (the Gateway's metrics policy is not its — verify-metric-labels); on renders the listener and every provider model attached to it directly (llmRouting.models; no in-cluster HTTPRoute, no routes map, the retired pathPrefixes and routes keys refused), with llmRouting.external a root route (PathPrefix /) on the HTTPS listener with the chart's edge and on a listener of its own behind a public Gateway, and with a serving model-manager (this release's slice or a node pool's) the LLMEndpoint document, model-manager's Role on agentgatewaymodels and the data plane's egress to the served models (giantswarm/agent-platform#603); and the guards fire.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> off (default): no LLM listener, route, model, LLM policy, price ConfigMap, discovery block or model-manager Role"
+	@echo "--> off (default): no LLM listener, model, price ConfigMap, LLMEndpoint document, external route or model-manager Role"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.kagent.enabled=true >/tmp/vl-off.out 2>&1 || { cat /tmp/vl-off.out; exit 1; }
-	@for pattern in 'AgentgatewayBackend' 'AgentgatewayModel' 'name: agent-platform-connectivity-llm$$' '^  backend:$$' 'sectionName: llm' 'model-catalog' 'modelCatalog' 'llmEndpoint' 'model-manager-llm-endpoint'; do \
+	@for pattern in 'AgentgatewayBackend' 'AgentgatewayModel' 'name: agent-platform-connectivity-llm$$' '^  backend:$$' 'sectionName: llm' 'model-catalog' 'modelCatalog' 'llm-endpoint' 'llm-external'; do \
 		if grep -qE -- "$$pattern" /tmp/vl-off.out; then echo "FAIL: llmRouting is off but the render still contains $$pattern"; exit 1; fi; \
 	done
 	@if grep -qE '^      port: 8081$$' /tmp/vl-off.out; then echo "FAIL: the LLM listener renders with llmRouting off"; exit 1; fi
@@ -586,50 +609,31 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@grep -q 'observability.giantswarm.io/folder: Agent Platform' /tmp/vl-mon.out || { echo "FAIL: the dashboard ConfigMap lost its folder annotation; the board lands in the organization's General folder"; exit 1; }
 	@grep -q 'observability.giantswarm.io/organization: Shared Org' /tmp/vl-mon.out || { echo "FAIL: the dashboard ConfigMap lost its organization annotation; customers would not see the board"; exit 1; }
 	@echo "ok: monitoring on, board in Shared Org / Agent Platform"
-	@echo "--> on: the llm listener, the pinned route whose backend is the model router, the provider model, the Gateway policy and the price catalog"
+	@echo "--> on: the llm listener, every provider model attached to it directly (no in-cluster HTTPRoute, no routes map), credential-free"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) >/tmp/vl-on.out 2>&1 || { cat /tmp/vl-on.out; exit 1; }
-	@grep -q 'name: llm' /tmp/vl-on.out || { echo "FAIL: no llm listener on the Gateway"; exit 1; }
-	@grep -q 'sectionName: llm' /tmp/vl-on.out || { echo "FAIL: the LLM route is not pinned to its listener; in edge mode it would attach to the public HTTPS listener"; exit 1; }
-	@if grep -q 'kind: AgentgatewayBackend' /tmp/vl-on.out; then echo "FAIL: an AgentgatewayBackend renders; the LLM route's backend is the model router (AgentgatewayModel *)"; exit 1; fi
-	@awk '/^kind: HTTPRoute$$/{r=1} r&&/^  name: agent-platform-connectivity-llm$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out | grep -A3 'backendRefs:' | grep -q 'kind: AgentgatewayModel' || { echo "FAIL: the LLM route's backend is not the model router; a request's model would pick nothing"; exit 1; }
-	@awk '/^kind: HTTPRoute$$/{r=1} r&&/^  name: agent-platform-connectivity-llm$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out | grep -A4 'backendRefs:' | grep -q 'name: "\*"' || { echo "FAIL: the model router backendRef is not AgentgatewayModel \"*\"; the controller attaches no model to the rule"; exit 1; }
+	@$(LLM_LISTENERS) /tmp/vl-on.out | grep -q ' llm:8081:HTTP:Same' || { $(LLM_LISTENERS) /tmp/vl-on.out; echo "FAIL: no llm listener (8081, HTTP, routes of the release namespace) on the Gateway"; exit 1; }
+	@if grep -q 'kind: AgentgatewayBackend' /tmp/vl-on.out; then echo "FAIL: an AgentgatewayBackend renders; the LLM path is the model router's AgentgatewayModels"; exit 1; fi
+	@[ "$$($(LLM_MODEL_PARENTS) /tmp/vl-on.out)" = 'anthropic [$(LLM_PARENT_LISTENER)]' ] || { $(LLM_MODEL_PARENTS) /tmp/vl-on.out; echo "FAIL: the provider model is not attached to the data plane's LLM listener alone (Gateway agentgateway, sectionName llm); behind a route's path prefix the model router sees the path stripped and records no token or cost metrics"; exit 1; }
+	@if grep -q '^  name: agent-platform-connectivity-llm$$' /tmp/vl-on.out; then echo "FAIL: the in-cluster LLM HTTPRoute or the routes-map policy (agent-platform-connectivity-llm) renders; agentgateway strips a route's PathPrefix before the model router, which then classifies nothing"; exit 1; fi
+	@[ -z "$$($(LLM_AI_POLICIES) /tmp/vl-on.out)" ] || { echo "FAIL: an AgentgatewayPolicy carries backend.ai ($$($(LLM_AI_POLICIES) /tmp/vl-on.out)), the routes map; it overrides the model router's classification for every path it does not list"; exit 1; }
 	@awk '/^kind: AgentgatewayModel$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out >/tmp/vl-model.out
 	@grep -q '^  name: anthropic$$' /tmp/vl-model.out && grep -q 'provider: Anthropic$$' /tmp/vl-model.out && grep -q 'model: "claude-\*"' /tmp/vl-model.out || { cat /tmp/vl-model.out; echo "FAIL: the default model is not AgentgatewayModel anthropic, provider Anthropic, match claude-*"; exit 1; }
-	@grep -A3 'parentRefs:' /tmp/vl-model.out | grep -q 'name: agent-platform-connectivity-llm$$' || { echo "FAIL: the provider model is not attached to the LLM route; the router would never pick it"; exit 1; }
 	@grep -q 'baseURL: "https://api.anthropic.com/v1"' /tmp/vl-model.out || { echo "FAIL: the provider model has no baseURL with the version path; agentgateway 2.1 would send Anthropic /messages (404)"; exit 1; }
 	@if grep -qE '^  (policies|custom):' /tmp/vl-model.out; then echo "FAIL: the provider model carries a policy or custom settings; the gateway holds no credential"; exit 1; fi
-	@echo "ok: listener + pinned route + model router + credential-free provider model"
+	@echo "ok: listener + listener-attached, credential-free provider model; no in-cluster route or routes map"
 	@grep -q 'name: agent-platform-connectivity-dashboard-llm-usage$$' /tmp/vl-on.out || { echo "FAIL: llmRouting is on and the LLM usage board does not render"; exit 1; }
 	@echo "ok: LLM usage board with the listener"
-	@echo "--> the LLM route matches the provider path prefixes, never a bare / (the MCP catch-all wins that tie)"
-	@grep -A6 'sectionName: llm' /tmp/vl-on.out | grep -q 'value: "/v1"' || { echo "FAIL: the LLM route does not match the provider path prefix"; exit 1; }
-	@if grep -A6 'sectionName: llm' /tmp/vl-on.out | grep -qE 'value: "?/"?$$'; then \
-		echo "FAIL: the LLM route matches a bare /; agent-platform-mcps renders a catch-all route on the same Gateway that wins an equal match, so every inference call would reach the MCP backend"; exit 1; \
-	fi
-	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set 'llmRouting.pathPrefixes[0]=/openai/v1' >/tmp/vl-prefix.out 2>&1 || { cat /tmp/vl-prefix.out; exit 1; }
-	@grep -A6 'sectionName: llm' /tmp/vl-prefix.out | grep -q 'value: "/openai/v1"' || { echo "FAIL: llmRouting.pathPrefixes does not reach the route matches"; exit 1; }
-	@echo "ok: path prefixes"
-	@echo "--> guard: a bare / prefix, and an empty prefix list, must fail"
-	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set 'llmRouting.pathPrefixes[0]=/' >/tmp/vl-slash.out 2>&1; then \
-		echo "FAIL: the bare-/ guard did not fire; the MCP catch-all would swallow every inference call"; exit 1; \
-	elif ! grep -q "must be more specific" /tmp/vl-slash.out; then \
-		echo "FAIL: the bare-/ guard failed for the wrong reason"; cat /tmp/vl-slash.out; exit 1; \
-	else echo "ok: bare-/ guard"; fi
-	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set llmRouting.pathPrefixes=null >/tmp/vl-empty.out 2>&1; then \
-		echo "FAIL: the empty-prefix-list guard did not fire; the route would match nothing"; exit 1; \
-	elif ! grep -q "must list at least one prefix" /tmp/vl-empty.out; then \
-		echo "FAIL: the empty-prefix-list guard failed for the wrong reason"; cat /tmp/vl-empty.out; exit 1; \
-	else echo "ok: empty-prefix-list guard"; fi
-	@echo "--> the LLM policy carries the route-type map INCLUDING the wildcard, and no metrics section (the Gateway's -metrics policy is the one)"
-	@grep -q '"/v1/messages": Messages' /tmp/vl-on.out || { echo "FAIL: no Messages route type; the gateway would parse Anthropic bodies as OpenAI Completions"; exit 1; }
-	@grep -q '"/v1/messages/count_tokens": AnthropicTokenCount' /tmp/vl-on.out || { echo "FAIL: no AnthropicTokenCount route type"; exit 1; }
-	@grep -q '"\*": Passthrough' /tmp/vl-on.out || { echo "FAIL: no wildcard route type; any other path would fall back to Completions parsing"; exit 1; }
+	@echo "--> the retired path keys are refused by the schema: llmRouting.pathPrefixes and llmRouting.routes"
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set 'llmRouting.pathPrefixes[0]=/v1' >/tmp/vl-prefix.out 2>&1; then echo "FAIL: the retired llmRouting.pathPrefixes rendered"; exit 1; \
+	elif ! grep -qiE "additional propert(y|ies) '?pathPrefixes'? (is )?not allowed" /tmp/vl-prefix.out; then cat /tmp/vl-prefix.out; echo "FAIL: llmRouting.pathPrefixes is not refused by the schema"; exit 1; else echo "ok: llmRouting.pathPrefixes is refused (the models attach to the listener)"; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set 'llmRouting.routes.x=Passthrough' >/tmp/vl-routes.out 2>&1; then echo "FAIL: the retired llmRouting.routes rendered"; exit 1; \
+	elif ! grep -qiE "additional propert(y|ies) '?routes'? (is )?not allowed" /tmp/vl-routes.out; then cat /tmp/vl-routes.out; echo "FAIL: llmRouting.routes is not refused by the schema"; exit 1; else echo "ok: llmRouting.routes is refused (no AI backend remains on the LLM path)"; fi
+	@echo "--> the Gateway's -metrics policy is the one metrics policy with LLM routing on, with the agent attribution labels"
 	@$(METRICS_POLICIES) /tmp/vl-on.out >/tmp/vl-on-metrics.out
 	@[ "$$(cat /tmp/vl-on-metrics.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: the policies with a frontend.metrics section are [$$(tr '\n' ' ' </tmp/vl-on-metrics.out)], not agent-platform-connectivity-metrics alone; the data plane keeps one per Gateway and drops the rest in silence"; exit 1; }
-	@awk '/^  name: agent-platform-connectivity-llm$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out | grep -q 'frontend:' && { echo "FAIL: the LLM policy carries a frontend section; the labels moved to the -metrics policy"; exit 1; } || true
 	@$(METRICS_EXPRS) /tmp/vl-on.out | grep -q '^agent=.* : source.unverifiedWorkload.serviceAccount$$' || { echo "FAIL: no agent attribution label (the source ServiceAccount behind the Substrate egress predicate; verify-metric-labels holds the expression)"; exit 1; }
 	@$(METRICS_EXPRS) /tmp/vl-on.out | grep -q '^agent_namespace=.* : source.unverifiedWorkload.namespace$$' || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
-	@echo "ok: route-type map on the LLM policy, the labels on the metrics policy"
+	@echo "ok: the labels on the metrics policy"
 	@echo "--> the price ConfigMap renders and the AgentgatewayParameters references it"
 	@grep -q 'name: t-model-catalog' /tmp/vl-on.out || { echo "FAIL: no model-price ConfigMap; every cost lookup would report NoCatalog"; exit 1; }
 	@grep -A4 '^  modelCatalog:' /tmp/vl-on.out | grep -q 'key: catalog.json' || { echo "FAIL: AgentgatewayParameters does not reference the price ConfigMap"; exit 1; }
@@ -655,46 +659,63 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	elif ! grep -q 'llmRouting.models must list at least one model' /tmp/vl-nomodel.out; then cat /tmp/vl-nomodel.out; echo "FAIL: the empty-list guard failed for the wrong reason"; exit 1; else echo "ok: an empty model list is refused"; fi
 	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set llmRouting.backend.provider=anthropic >/tmp/vl-backend.out 2>&1; then echo "FAIL: the retired llmRouting.backend rendered"; exit 1; \
 	elif ! grep -qiE "additional propert(y|ies) '?backend'? (is )?not allowed" /tmp/vl-backend.out; then cat /tmp/vl-backend.out; echo "FAIL: llmRouting.backend is not refused by the schema"; exit 1; else echo "ok: llmRouting.backend is refused (llmRouting.models)"; fi
-	@echo "--> the LLM endpoint for served models: the discovery block, model-manager's Role, the data plane's egress to the workloads (both flavours), and none of it without the serving slice or model-manager"
+	@echo "--> the LLM endpoint for served models: the LLMEndpoint document, model-manager's Role and the data plane's egress to the workloads (both flavours) render with llmRouting and a serving model-manager — this release's slice, or a node pool's (cluster-manager on, the slice off) — and none of it without either"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) $(SERVING_ON) >/tmp/vl-serving.out 2>&1 || { cat /tmp/vl-serving.out; exit 1; }
-	@grep -A10 '^      llmEndpoint:$$' /tmp/vl-serving.out >/tmp/vl-endpoint.out || { echo "FAIL: the discovery ConfigMap publishes no spec.llmEndpoint with llmRouting and model-manager on; model-manager would put no served model on the endpoint"; exit 1; }
-	@grep -q 'enabled: true' /tmp/vl-endpoint.out && grep -q 'kind: HTTPRoute' /tmp/vl-endpoint.out && grep -q 'name: agent-platform-connectivity-llm$$' /tmp/vl-endpoint.out && grep -q 'namespace: default$$' /tmp/vl-endpoint.out && grep -q 'endpoint: http://agentgateway.default.svc:8081$$' /tmp/vl-endpoint.out || { cat /tmp/vl-endpoint.out; echo "FAIL: spec.llmEndpoint does not name the LLM route and the listener URL"; exit 1; }
-	@awk '/^kind: Role$$/{r=1} r&&/^  name: agent-platform-connectivity-model-manager-llm-endpoint$$/{f=1} f&&/^---/{exit} f' /tmp/vl-serving.out >/tmp/vl-role.out
-	@grep -q 'agentgatewaymodels' /tmp/vl-role.out && grep -q 'namespace: default$$' /tmp/vl-role.out || { cat /tmp/vl-role.out; echo "FAIL: no Role on agentgatewaymodels in the release namespace for model-manager"; exit 1; }
-	@if grep -E -- '- (secrets|configmaps|pods|"\*")' /tmp/vl-role.out >/dev/null || [ "$$(grep -c -- '- apiGroups:' /tmp/vl-role.out)" != 1 ]; then cat /tmp/vl-role.out; echo "FAIL: model-manager's LLM endpoint Role reaches more than the AgentgatewayModels"; exit 1; fi
-	@awk '/^kind: RoleBinding$$/{r=1} r&&/^  name: agent-platform-connectivity-model-manager-llm-endpoint$$/{f=1} f&&/^---/{exit} f' /tmp/vl-serving.out | grep -A3 'subjects:' | grep -q 'name: model-manager$$' || { echo "FAIL: the Role is not bound to model-manager's ServiceAccount"; exit 1; }
-	@awk '/^  name: agent-platform-connectivity-dataplane$$/{f=1} f&&/^---/{exit} f' /tmp/vl-serving.out | grep -B2 -A12 'io.kubernetes.pod.namespace: model-serving' | grep -q 'port: "8000"' || { echo "FAIL: the cilium data-plane policy does not reach the served models' workload port; every request to a served model would time out"; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) $(SERVING_ON) --set networkPolicy.flavor=kubernetes >/tmp/vl-serving-k8s.out 2>&1 || { cat /tmp/vl-serving-k8s.out; exit 1; }
-	@awk '/^  name: agent-platform-connectivity-dataplane$$/{f=1} f&&/^---/{exit} f' /tmp/vl-serving-k8s.out | grep -A14 'kubernetes.io/metadata.name: model-serving' | grep -q 'port: 8000$$' || { echo "FAIL: the kubernetes data-plane policy does not reach the served models' workload port"; exit 1; }
-	@if grep -q 'io.kubernetes.pod.namespace: model-serving' /tmp/vl-on.out || grep -qE 'llmEndpoint|model-manager-llm-endpoint' /tmp/vl-on.out; then echo "FAIL: without the serving slice the render still carries the served models' egress, the discovery block or the Role"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) $(LLM_POOL_ON) >/tmp/vl-pool.out 2>&1 || { cat /tmp/vl-pool.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) $(LLM_POOL_ON) --set networkPolicy.flavor=kubernetes >/tmp/vl-pool-k8s.out 2>&1 || { cat /tmp/vl-pool-k8s.out; exit 1; }
+	@for out in vl-serving vl-pool; do \
+		[ "$$($(LLM_ENDPOINT_DOC) /tmp/$$out.out)" = '$(LLM_ENDPOINT_IN)' ] || { $(LLM_ENDPOINT_DOC) /tmp/$$out.out; echo "FAIL: $$out: the LLMEndpoint document (ConfigMap agent-platform-connectivity-llm-endpoint, labelled agent-platform.giantswarm.io/llm-endpoint=true) does not name exactly the LLM listener and its in-cluster URL; model-manager would put no served model on the endpoint"; exit 1; }; \
+		awk '/^kind: Role$$/{r=1} r&&/^  name: agent-platform-connectivity-model-manager-llm-endpoint$$/{f=1} f&&/^---/{exit} f' /tmp/$$out.out >/tmp/vl-role.out; \
+		grep -q 'agentgatewaymodels' /tmp/vl-role.out && grep -q 'namespace: default$$' /tmp/vl-role.out || { cat /tmp/vl-role.out; echo "FAIL: $$out: no Role on agentgatewaymodels in the release namespace for model-manager"; exit 1; }; \
+		if grep -E -- '- (secrets|configmaps|pods|"\*")' /tmp/vl-role.out >/dev/null || [ "$$(grep -c -- '- apiGroups:' /tmp/vl-role.out)" != 1 ]; then cat /tmp/vl-role.out; echo "FAIL: $$out: model-manager's LLM endpoint Role reaches more than the AgentgatewayModels"; exit 1; fi; \
+		awk '/^kind: RoleBinding$$/{r=1} r&&/^  name: agent-platform-connectivity-model-manager-llm-endpoint$$/{f=1} f&&/^---/{exit} f' /tmp/$$out.out | grep -A3 'subjects:' | grep -q 'name: model-manager$$' || { echo "FAIL: $$out: the Role is not bound to model-manager's ServiceAccount"; exit 1; }; \
+		$(DATAPLANE_DOC) /tmp/$$out.out | grep -B2 -A12 'io.kubernetes.pod.namespace: model-serving' | grep -q 'port: "8000"' || { echo "FAIL: $$out: the cilium data-plane policy does not reach the served models' workload port; every request to a served model would time out"; exit 1; }; \
+		$(DATAPLANE_DOC) /tmp/$$out-k8s.out | grep -A14 'kubernetes.io/metadata.name: model-serving' | grep -q 'port: 8000$$' || { echo "FAIL: $$out: the kubernetes data-plane policy does not reach the served models' workload port"; exit 1; }; \
+	done
+	@if grep -q 'llmEndpoint' /tmp/vl-serving.out; then echo "FAIL: the serving slice's discovery ConfigMap still carries spec.llmEndpoint; a node pool's slice has no model-manager and the platform release no slice, so the block never reaches model-manager"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(AGW_VM) $(SERVING_ON) $(LLM_POOL_ON) >/tmp/vl-serving-nollm.out 2>&1 || { cat /tmp/vl-serving-nollm.out; exit 1; }
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) $(SERVING_ON) --set components.model-manager.enabled=false >/tmp/vl-serving-nomm.out 2>&1 || { cat /tmp/vl-serving-nomm.out; exit 1; }
-	@if grep -qE 'llmEndpoint:|model-manager-llm-endpoint' /tmp/vl-serving-nomm.out; then echo "FAIL: without model-manager the discovery block or its Role renders"; exit 1; fi
-	@echo "ok: the served models' LLM endpoint: discovery, Role, egress; nothing without the slice or model-manager"
-	@echo "--> llmRouting.external: the public hostname behind API keys, on the data plane's HTTPS listener with the chart's edge and on the LLM listener behind a public Gateway; every model attaches to it; the api_key label renders with it"
+	@for out in vl-serving-nollm vl-serving-nomm vl-on; do \
+		if grep -qE -- '-llm-endpoint$$|giantswarm.io/llm-endpoint' /tmp/$$out.out; then echo "FAIL: $$out: the LLMEndpoint document or model-manager's Role renders without llmRouting or a serving model-manager"; exit 1; fi; \
+		if $(DATAPLANE_DOC) /tmp/$$out.out | grep -q 'io.kubernetes.pod.namespace: model-serving'; then echo "FAIL: $$out: the data plane's egress to the served models renders without llmRouting or a serving model-manager"; exit 1; fi; \
+	done
+	@echo "ok: the served models' LLM endpoint: document, Role, egress with this release's slice and a node pool's; nothing without llmRouting or a serving model-manager"
+	@echo "--> llmRouting.external: the public hostname behind API keys on a root route (PathPrefix /): on the data plane's HTTPS listener with the chart's edge, on a listener of its own behind a public Gateway (never the LLM listener, beside whose directly attached models the controller refuses a root route); every model attaches to it, the LLMEndpoint document names it, the api_key label renders with it"
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) $(SERVING_ON) --set global.domain=ex.test --set llmRouting.external.enabled=true --set llmRouting.external.apiKeys.secretRef.name=llm-keys --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wild >/tmp/vl-ext-edge.out 2>&1 || { cat /tmp/vl-ext-edge.out; exit 1; }
-	@awk '/^kind: HTTPRoute$$/{r=1} r&&/^  name: agent-platform-connectivity-llm-external$$/{f=1} f&&/^---/{exit} f' /tmp/vl-ext-edge.out >/tmp/vl-ext-route.out
-	@grep -q 'sectionName: https$$' /tmp/vl-ext-route.out && grep -q '"llm.ex.test"' /tmp/vl-ext-route.out && grep -q 'kind: AgentgatewayModel' /tmp/vl-ext-route.out || { cat /tmp/vl-ext-route.out; echo "FAIL: with the chart's edge the external route is not the model router on the HTTPS listener for llm.<domain>"; exit 1; }
+	@[ "$$($(LLM_ROUTE) /tmp/vl-ext-edge.out agent-platform-connectivity-llm-external)" = 'https $(LLM_ROOT_MATCH) $(LLM_ROUTER)' ] || { $(LLM_ROUTE) /tmp/vl-ext-edge.out agent-platform-connectivity-llm-external; echo "FAIL: with the chart's edge the external route is not the model router at PathPrefix / on the HTTPS listener"; exit 1; }
+	@awk '/^kind: HTTPRoute$$/{r=1} r&&/^  name: agent-platform-connectivity-llm-external$$/{f=1} f&&/^---/{exit} f' /tmp/vl-ext-edge.out | grep -q '"llm.ex.test"' || { echo "FAIL: the external route does not take llm.<domain>"; exit 1; }
 	@awk '/^kind: AgentgatewayPolicy$$/{r=1} r&&/^  name: agent-platform-connectivity-llm-external-keys$$/{f=1} f&&/^---/{exit} f' /tmp/vl-ext-edge.out >/tmp/vl-ext-keys.out
 	@grep -q 'name: agent-platform-connectivity-llm-external$$' /tmp/vl-ext-keys.out && grep -q 'mode: Strict' /tmp/vl-ext-keys.out && grep -A1 'secretRef:' /tmp/vl-ext-keys.out | grep -q 'name: llm-keys' || { cat /tmp/vl-ext-keys.out; echo "FAIL: the external route is not behind the installation's API keys in Strict mode"; exit 1; }
 	@if grep -q 'selector' /tmp/vl-ext-keys.out; then echo "FAIL: the key policy renders an unset source beside the set one; the CRD admits exactly one"; exit 1; fi
-	@awk '/^kind: AgentgatewayModel$$/{f=1} f&&/^---/{exit} f' /tmp/vl-ext-edge.out | grep -q 'name: agent-platform-connectivity-llm-external$$' || { echo "FAIL: the provider model is not attached to the external route"; exit 1; }
-	@grep -A14 '^      llmEndpoint:$$' /tmp/vl-ext-edge.out | grep -q 'externalEndpoint: https://llm.ex.test$$' && grep -A14 '^      llmEndpoint:$$' /tmp/vl-ext-edge.out | grep -q 'name: agent-platform-connectivity-llm-external$$' || { echo "FAIL: spec.llmEndpoint does not name the external route and URL; model-manager's served models would be off the public endpoint"; exit 1; }
+	@[ "$$($(LLM_MODEL_PARENTS) /tmp/vl-ext-edge.out)" = 'anthropic [$(LLM_PARENT_LISTENER), $(LLM_PARENT_EXTERNAL)]' ] || { $(LLM_MODEL_PARENTS) /tmp/vl-ext-edge.out; echo "FAIL: the provider model is not attached to the LLM listener and the external route"; exit 1; }
+	@[ "$$($(LLM_ENDPOINT_DOC) /tmp/vl-ext-edge.out)" = '$(LLM_ENDPOINT_EXT)' ] || { $(LLM_ENDPOINT_DOC) /tmp/vl-ext-edge.out; echo "FAIL: the LLMEndpoint document does not name the LLM listener, the external route and the public URL; model-manager's served models would be off the public endpoint"; exit 1; }
+	@if $(LLM_LISTENERS) /tmp/vl-ext-edge.out | grep -q 'llm-external:' || grep -q 'llm-public' /tmp/vl-ext-edge.out || $(DATAPLANE_DOC) /tmp/vl-ext-edge.out | grep -q '"8082"'; then echo "FAIL: with the chart's edge the external listener, its port or a public-Gateway forwarder renders"; exit 1; fi
+	@if grep -q '^  name: agent-platform-connectivity-llm$$' /tmp/vl-ext-edge.out || [ -n "$$($(LLM_AI_POLICIES) /tmp/vl-ext-edge.out)" ]; then echo "FAIL: with the external endpoint the in-cluster LLM route or the routes map renders"; exit 1; fi
 	@$(METRICS_EXPRS) /tmp/vl-ext-edge.out | grep -q '^api_key=apiKey.name$$' || { echo "FAIL: no api_key metric label with the external endpoint on; per-key token usage would be invisible"; exit 1; }
 	@if $(METRICS_EXPRS) /tmp/vl-on.out | grep -q '^api_key='; then echo "FAIL: the api_key label renders without a route that verifies API keys"; exit 1; fi
-	@if grep -qE 'llm-external|llm-public|externalEndpoint' /tmp/vl-serving.out; then echo "FAIL: without llmRouting.external the render carries an external route, policy or URL"; exit 1; fi
+	@if grep -qE 'llm-external|llm-public|externalEndpoint' /tmp/vl-serving.out; then echo "FAIL: without llmRouting.external the render carries an external route, listener, policy or URL"; exit 1; fi
 	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set global.domain=ex.test --set llmRouting.external.enabled=true --set-string 'llmRouting.external.apiKeys.configMapSelector.matchLabels.llm-keys=true' --set 'global.gatewayApi.parentRefs[0].name=edge' --set 'global.gatewayApi.parentRefs[0].namespace=envoy' >/tmp/vl-ext-front.out 2>&1 || { cat /tmp/vl-ext-front.out; exit 1; }
-	@awk '/^kind: HTTPRoute$$/{r=1} r&&/^  name: agent-platform-connectivity-llm-external$$/{f=1} f&&/^---/{exit} f' /tmp/vl-ext-front.out | grep -q 'sectionName: llm$$' || { echo "FAIL: behind a public Gateway the external route is not on the LLM listener"; exit 1; }
+	@[ "$$($(LLM_ROUTE) /tmp/vl-ext-front.out agent-platform-connectivity-llm-external)" = 'llm-external $(LLM_ROOT_MATCH) $(LLM_ROUTER)' ] || { $(LLM_ROUTE) /tmp/vl-ext-front.out agent-platform-connectivity-llm-external; echo "FAIL: behind a public Gateway the external route is not the model router at PathPrefix / on its own listener (llm-external)"; exit 1; }
+	@$(LLM_LISTENERS) /tmp/vl-ext-front.out | grep -q ' llm:8081:HTTP:Same llm-external:8082:HTTP:Same' || { $(LLM_LISTENERS) /tmp/vl-ext-front.out; echo "FAIL: behind a public Gateway the data plane has no listener llm-external (8082, HTTP, routes of the release namespace) beside the LLM listener"; exit 1; }
+	@[ "$$($(LLM_ROUTE) /tmp/vl-ext-front.out agent-platform-connectivity-llm-public)" = '- $(LLM_ROOT_MATCH) [{"name": "agentgateway", "port": 8082}]' ] || { $(LLM_ROUTE) /tmp/vl-ext-front.out agent-platform-connectivity-llm-public; echo "FAIL: the public Gateway does not forward the hostname at / to the external listener's port (8082)"; exit 1; }
 	@awk '/^kind: HTTPRoute$$/{r=1} r&&/^  name: agent-platform-connectivity-llm-public$$/{f=1} f&&/^---/{exit} f' /tmp/vl-ext-front.out >/tmp/vl-ext-public.out
-	@grep -q 'name: edge$$' /tmp/vl-ext-public.out && grep -q '"llm.ex.test"' /tmp/vl-ext-public.out && grep -q 'port: 8081$$' /tmp/vl-ext-public.out || { cat /tmp/vl-ext-public.out; echo "FAIL: the public Gateway does not forward llm.<domain> to the LLM listener"; exit 1; }
+	@grep -q 'name: edge$$' /tmp/vl-ext-public.out && grep -q '"llm.ex.test"' /tmp/vl-ext-public.out || { cat /tmp/vl-ext-public.out; echo "FAIL: the forwarder is not on the public Gateway for llm.<domain>"; exit 1; }
+	@$(DATAPLANE_DOC) /tmp/vl-ext-front.out | grep -q '"8082"' || { echo "FAIL: the cilium data-plane policy does not admit the external listener's port; the public Gateway's forwarder would time out"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set global.domain=ex.test --set llmRouting.external.enabled=true --set llmRouting.external.apiKeys.secretRef.name=llm-keys --set 'global.gatewayApi.parentRefs[0].name=edge' --set 'global.gatewayApi.parentRefs[0].namespace=envoy' --set networkPolicy.flavor=kubernetes >/tmp/vl-ext-front-k8s.out 2>&1 || { cat /tmp/vl-ext-front-k8s.out; exit 1; }
+	@$(DATAPLANE_DOC) /tmp/vl-ext-front-k8s.out | grep -q 'port: 8082$$' || { echo "FAIL: the kubernetes data-plane policy does not admit the external listener's port"; exit 1; }
 	@awk '/^kind: AgentgatewayPolicy$$/{r=1} r&&/^  name: agent-platform-connectivity-llm-external-keys$$/{f=1} f&&/^---/{exit} f' /tmp/vl-ext-front.out | grep -A2 'configMapSelector:' | grep -q 'llm-keys: "true"' || { echo "FAIL: a ConfigMap key source does not reach the policy"; exit 1; }
-	@if grep -q 'llm-public' /tmp/vl-ext-edge.out; then echo "FAIL: with the chart's edge a public-Gateway route renders"; exit 1; fi
+	@for port in '8080:is already taken by the http listener' "8081:is the LLM listener's"; do \
+		if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set global.domain=ex.test --set llmRouting.external.enabled=true --set llmRouting.external.apiKeys.secretRef.name=a --set 'global.gatewayApi.parentRefs[0].name=edge' --set llmRouting.external.listener.port=$${port%%:*} >/tmp/vl-ext-port.out 2>&1; then echo "FAIL: the external listener rendered on port $${port%%:*}, taken by another listener"; exit 1; fi; \
+		grep -qF "llmRouting.external.listener.port $${port%%:*} $${port#*:}" /tmp/vl-ext-port.out || { cat /tmp/vl-ext-port.out; echo "FAIL: the external listener's port guard failed for the wrong reason"; exit 1; }; \
+	done
 	@for set in '' '--set llmRouting.external.apiKeys.secretRef.name=a --set llmRouting.external.apiKeys.secretSelector.matchLabels.b=c'; do \
 		if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set global.domain=ex.test --set llmRouting.external.enabled=true --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wild $$set >/tmp/vl-ext-guard.out 2>&1; then echo "FAIL: the external endpoint rendered with key sources [$$set]; exactly one is required"; exit 1; fi; \
 		grep -q 'set exactly one of secretRef.name, secretSelector.matchLabels or configMapSelector.matchLabels' /tmp/vl-ext-guard.out || { cat /tmp/vl-ext-guard.out; echo "FAIL: the key-source guard failed for the wrong reason"; exit 1; }; \
 	done
 	@if helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set global.domain=ex.test --set llmRouting.external.enabled=true --set llmRouting.external.apiKeys.secretRef.name=a --set llmRouting.external.hostPrefix=LLM_ --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wild >/tmp/vl-ext-host.out 2>&1; then echo "FAIL: a hostPrefix that is no DNS label rendered"; exit 1; \
 	elif ! grep -q 'must be a DNS label' /tmp/vl-ext-host.out; then cat /tmp/vl-ext-host.out; echo "FAIL: the hostPrefix guard failed for the wrong reason"; exit 1; fi
-	@echo "ok: the external LLM endpoint in both edge shapes, its API keys, the models and discovery on it, the api_key label with it, and its guards"
+	@echo "ok: the external LLM endpoint at / in both edge shapes, its listener, forwarder and port, its API keys, the models and the LLMEndpoint document on it, the api_key label with it, and its guards"
 	@echo "--> guard: llmRouting on with no agentgateway data plane must fail"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set llmRouting.enabled=true >/tmp/vl-guard.out 2>&1; then \
 		echo "FAIL: llmRouting rendered with no data plane; the cutover would take every agent offline"; exit 1; \

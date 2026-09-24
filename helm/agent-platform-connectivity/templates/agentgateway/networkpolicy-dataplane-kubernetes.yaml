@@ -23,6 +23,12 @@ spec:
         - port: {{ .Values.llmRouting.listener.port }}
           protocol: TCP
         {{- end }}
+        {{- if (include "agent-platform.llmRouting.externalListener" .) }}
+        # The external LLM route's listener, reached through the public
+        # Gateway's forwarder (templates/llm/external.yaml) from the cluster.
+        - port: {{ .Values.llmRouting.external.listener.port }}
+          protocol: TCP
+        {{- end }}
     {{- /* Prometheus scrape of the data plane's stats endpoint: pod port 15020,
     path /metrics, the target of the PodMonitor this chart renders. The port is
     fixed by the agentgateway controller, which names it `metrics` on the
@@ -98,14 +104,16 @@ spec:
       ports:
         - port: 9978
           protocol: TCP
-    {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelServing.enabled" .) }}
+    {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelManager.serves" .) }}
     {{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
-    # The served models on the LLM endpoint: an AgentgatewayModel's baseURL
-    # is the workload Service, reached on the workload port.
+    # The served models on the LLM endpoint: an AgentgatewayModel model-manager
+    # writes has the workload Service as its baseURL, reached on the workload
+    # port wherever model-manager serves — this release's slice or a node
+    # pool's.
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ include "agent-platform.modelServing.namespace" . }}
+              kubernetes.io/metadata.name: {{ include "agent-platform.modelManager.servingNamespace" . }}
           podSelector:
             matchExpressions:
               {{- toYaml $shape.matchExpressions | nindent 14 }}

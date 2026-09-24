@@ -1,13 +1,19 @@
 {{- /* The models the LLM listener serves (llmRouting.models): one
-AgentgatewayModel per entry, attached to the LLM route's rule, whose one
-backend is the model router (AgentgatewayModel `*`). The request's `model`
-picks the candidate: the first by name whose match takes it. The baseURL is the
-provider's API origin with its version path: agentgateway 2.1 appends the
-format's suffix to the baseURL's path, and a managed provider without one gets
-no version path (Anthropic answers `/messages` with 404). No model override or
-`policies.auth`: the gateway holds no credential, and a client's own key passes
-through untouched, so reach to the listener grants no spend. A served model joins the same route under its preset's name, written by
-model-manager (discovery spec.llmEndpoint, giantswarm/model-manager#145). */ -}}
+AgentgatewayModel per entry, attached directly to the data-plane Gateway's LLM
+listener by sectionName (agent-platform.llmRouting.modelParents) — no HTTPRoute
+and no path prefix in front of it. A listener-attached model matches the
+serving endpoints themselves (/v1/messages, /v1/chat/completions, ...), which
+outrank the agent-platform-mcps catch-all, and the path reaches the model
+router whole, so it classifies the request and records the GenAI token and
+cost metrics. The request's `model` picks the candidate: the first by name
+whose match takes it. The baseURL is the provider's API origin with its
+version path: agentgateway 2.1 appends the format's suffix to the baseURL's
+path, and a managed provider without one gets no version path (Anthropic
+answers `/messages` with 404). No model override or `policies.auth`: the
+gateway holds no credential, and a client's own key passes through untouched,
+so reach to the listener grants no spend. A served model joins under its
+preset's name, written by model-manager to the same parents
+(templates/llm/llm-endpoint.yaml). */ -}}
 {{- if (include "agent-platform.llmRouting" .) }}
 {{- range .Values.llmRouting.models }}
 ---

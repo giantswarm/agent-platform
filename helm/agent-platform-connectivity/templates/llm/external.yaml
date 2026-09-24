@@ -1,16 +1,21 @@
 {{- /* The LLM endpoint outside the cluster (llmRouting.external): the
-public hostname <hostPrefix>.<global.domain>, and on the data plane a route
-of its own that every model of the endpoint attaches to
+public hostname <hostPrefix>.<global.domain>, and on the data plane a route of
+its own that every model of the endpoint attaches to
 (agent-platform.llmRouting.modelParents), whose one backend is the model
-router, behind the installation's API keys. Where the chart owns the edge
-(gatewayApi.gateway.create) that route is on the data plane's HTTPS listener
-itself; else the public Gateway (global.gatewayApi.parentRefs) forwards the
-hostname to the LLM listener, where the route takes it by hostname — the
-in-cluster route there matches no hostname, so a call by the Service's name
-stays credential-free. */ -}}
+router, behind the installation's API keys. The route matches PathPrefix `/`:
+the agentgateway controller treats that as a root model route, so nothing
+version-like is stripped and the router sees /v1/messages whole, and the
+hostname outranks the hostname-less agent-platform-mcps catch-all. The
+controller refuses a root model route on a listener with directly attached
+models (ModelRoutingConflict), so the route never shares the LLM listener:
+where the chart owns the edge (gatewayApi.gateway.create) it is on the data
+plane's HTTPS listener; else on a listener of its own
+(llmRouting.external.listener), to which the public Gateway
+(global.gatewayApi.parentRefs) forwards the hostname. A call by the
+Service's name to the LLM listener stays credential-free. */ -}}
 {{- if (include "agent-platform.llmRouting.external" .) }}
 {{- $host := include "agent-platform.llmRouting.externalHost" . }}
-{{- $edge := include "agent-platform.edgeIsDataPlane" . }}
+{{- $ownListener := include "agent-platform.llmRouting.externalListener" . }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -24,16 +29,14 @@ spec:
       namespace: {{ .Release.Namespace }}
       group: gateway.networking.k8s.io
       kind: Gateway
-      sectionName: {{ ternary "https" .Values.llmRouting.listener.name (eq $edge "true") }}
+      sectionName: {{ ternary .Values.llmRouting.external.listener.name "https" (eq $ownListener "true") }}
   hostnames:
     - {{ $host | quote }}
   rules:
     - matches:
-        {{- range .Values.llmRouting.pathPrefixes }}
         - path:
             type: PathPrefix
-            value: {{ . | quote }}
-        {{- end }}
+            value: /
       {{- with (include "agent-platform.routeTimeouts" .) }}
       {{- . | nindent 6 }}
       {{- end }}
@@ -60,10 +63,11 @@ spec:
     apiKeyAuthentication:
       mode: Strict
       {{- include "agent-platform.llmRouting.apiKeySource" . | nindent 6 }}
-{{- if not (eq $edge "true") }}
+{{- if $ownListener }}
 ---
-# The public hostname on the edge Gateway, forwarded to the data plane's LLM
-# listener with its Host: there the route above takes it and checks the key.
+# The public hostname on the edge Gateway, forwarded with its Host to the data
+# plane's external LLM listener: there the route above takes it and checks the
+# key.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -78,16 +82,14 @@ spec:
     - {{ $host | quote }}
   rules:
     - matches:
-        {{- range .Values.llmRouting.pathPrefixes }}
         - path:
             type: PathPrefix
-            value: {{ . | quote }}
-        {{- end }}
+            value: /
       {{- with (include "agent-platform.routeTimeouts" .) }}
       {{- . | nindent 6 }}
       {{- end }}
       backendRefs:
         - name: {{ .Values.gateway.name }}
-          port: {{ .Values.llmRouting.listener.port }}
+          port: {{ .Values.llmRouting.external.listener.port }}
 {{- end }}
 {{- end }}

@@ -743,13 +743,23 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
-The provider whose ModelConfigs ride the LLM listener: the first
-llmRouting.models entry's, lower-cased (anthropic). kagent.modelConfigs entries
-and the MutatingAdmissionPolicy point a ModelConfig of this provider at the
-listener; a ModelConfig of another provider keeps its own path.
+Truthy when the LLM endpoint is also published outside the cluster
+(llmRouting.external).
 */}}
 {{- define "agent-platform.llmRouting.external" -}}
 {{- if and (include "agent-platform.llmRouting" .) .Values.llmRouting.external.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the external LLM route needs a data-plane listener of its own
+(llmRouting.external.listener): behind a public Gateway, which forwards the
+hostname there. The external route matches `/` (a root model route), and the
+agentgateway controller refuses one on a listener with directly attached
+models (ModelRoutingConflict), which the LLM listener has. With the chart's
+own edge the route is on the HTTPS listener instead, and this is empty.
+*/}}
+{{- define "agent-platform.llmRouting.externalListener" -}}
+{{- if and (include "agent-platform.llmRouting.external" .) (not (include "agent-platform.edgeIsDataPlane" .)) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -760,16 +770,20 @@ The public hostname of the external LLM endpoint: <llmRouting.external.hostPrefi
 {{- end -}}
 
 {{/*
-The routes a model of the LLM endpoint attaches to, as a YAML list of parent
-references: the in-cluster LLM route, and the external one with
-llmRouting.external — the same list the discovery ConfigMap hands
-model-manager for the served models (spec.llmEndpoint.parentRefs).
+What a model of the LLM endpoint attaches to, as a YAML list of parent
+references: the data-plane Gateway's LLM listener directly (no path prefix: a
+listener-attached model matches the serving endpoints, /v1/messages,
+/v1/chat/completions, ..., and those outrank the agent-platform-mcps
+catch-all), and the external route with llmRouting.external — the same list
+the LLMEndpoint document hands model-manager for the served models
+(templates/llm/llm-endpoint.yaml, spec.parentRefs).
 */}}
 {{- define "agent-platform.llmRouting.modelParents" -}}
 - group: gateway.networking.k8s.io
-  kind: HTTPRoute
-  name: {{ include "name" . }}-llm
+  kind: Gateway
+  name: {{ .Values.gateway.name }}
   namespace: {{ .Release.Namespace }}
+  sectionName: {{ .Values.llmRouting.listener.name }}
 {{- if (include "agent-platform.llmRouting.external" .) }}
 - group: gateway.networking.k8s.io
   kind: HTTPRoute
@@ -792,6 +806,12 @@ validateLlmRouting holds it to exactly one.
 {{- toYaml $out -}}
 {{- end -}}
 
+{{/*
+The provider whose ModelConfigs ride the LLM listener: the first
+llmRouting.models entry's, lower-cased (anthropic). kagent.modelConfigs entries
+and the MutatingAdmissionPolicy point a ModelConfig of this provider at the
+listener; a ModelConfig of another provider keeps its own path.
+*/}}
 {{- define "agent-platform.llmRouting.provider" -}}
 {{- with .Values.llmRouting.models -}}{{- lower (first .).provider -}}{{- end -}}
 {{- end -}}
@@ -948,7 +968,7 @@ lookup — the same state as no ConfigMap at all, but with an object to explain.
 Validate the LLM routing block. Rendered exactly once via templates/validate.yaml.
 
 The feature has no data plane of its own: it adds a listener to the
-agentgateway Gateway and a policy the agentgateway controller reconciles. With
+agentgateway Gateway and models the agentgateway controller reconciles. With
 the component off (which includes the default ingress.mode: muster-direct) the
 listener would exist in values only, kagent's base URL would point at nothing,
 and every agent would lose inference at the cutover. Fail the render instead.
@@ -961,21 +981,23 @@ and every agent would lose inference at the cutover. Fail the render instead.
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) -}}
 {{- fail "llmRouting.enabled requires components.agentgateway.enabled: true; the LLM listener is reconciled by the agentgateway controller" -}}
 {{- end -}}
-{{- $port := .Values.llmRouting.listener.port | int -}}
-{{- range .Values.gateway.listeners -}}
-{{- if eq (.port | int) $port -}}
-{{- fail (printf "llmRouting.listener.port %d is already taken by the %s listener in gateway.listeners" $port .name) -}}
+{{- /* Every listener the LLM path adds takes a port of its own: the LLM
+listener, and behind a public Gateway the external route's. */ -}}
+{{- $own := list (dict "key" "llmRouting.listener.port" "port" (.Values.llmRouting.listener.port | int)) -}}
+{{- if (include "agent-platform.llmRouting.externalListener" .) -}}
+{{- $own = append $own (dict "key" "llmRouting.external.listener.port" "port" (.Values.llmRouting.external.listener.port | int)) -}}
+{{- end -}}
+{{- range $own -}}
+{{- $o := . -}}
+{{- range $.Values.gateway.listeners -}}
+{{- if eq (.port | int) $o.port -}}
+{{- fail (printf "%s %d is already taken by the %s listener in gateway.listeners" $o.key $o.port .name) -}}
 {{- end -}}
 {{- end -}}
-{{- /* An empty list renders a route that matches nothing; a bare "/" ties with
-the agent-platform-mcps catch-all route on the same Gateway and loses the
-tiebreak, so every inference call would reach the MCP backend instead. */ -}}
-{{- if not .Values.llmRouting.pathPrefixes -}}
-{{- fail "llmRouting.pathPrefixes must list at least one prefix; an empty list renders an LLM route that matches nothing" -}}
 {{- end -}}
-{{- /* The model router tries its candidates in name order and takes the
-first whose match fits, so two entries of one name would be one object and a
-wildcard must be the CRD's shape (`*`, `gpt-*`, `*-latest`). */ -}}
+{{- if and (eq (len $own) 2) (eq (index $own 0).port (index $own 1).port) -}}
+{{- fail (printf "llmRouting.external.listener.port %d is the LLM listener's (llmRouting.listener.port); the external route matches / and the agentgateway controller refuses such a route on a listener with directly attached models" (index $own 1).port) -}}
+{{- end -}}
 {{- if (include "agent-platform.llmRouting.external" .) -}}
 {{- $set := keys (include "agent-platform.llmRouting.apiKeySource" . | fromYaml) -}}
 {{- if ne (len $set) 1 -}}
@@ -985,6 +1007,9 @@ wildcard must be the CRD's shape (`*`, `gpt-*`, `*-latest`). */ -}}
 {{- fail (printf "llmRouting.external.hostPrefix %q must be a DNS label; the endpoint's hostname is <hostPrefix>.<global.domain>" (toString .Values.llmRouting.external.hostPrefix)) -}}
 {{- end -}}
 {{- end -}}
+{{- /* The model router tries its candidates in name order and takes the
+first whose match fits, so two entries of one name would be one object and a
+wildcard must be the CRD's shape (`*`, `gpt-*`, `*-latest`). */ -}}
 {{- if not .Values.llmRouting.models -}}
 {{- fail "llmRouting.models must list at least one model; the model router of an empty list answers 404 model_not_found to every agent" -}}
 {{- end -}}
@@ -1000,14 +1025,6 @@ wildcard must be the CRD's shape (`*`, `gpt-*`, `*-latest`). */ -}}
 {{- $m := .match | default "" -}}
 {{- if and (contains "*" $m) (not (or (eq $m "*") (and (hasPrefix "*" $m) (eq (len (splitList "*" $m)) 2)) (and (hasSuffix "*" $m) (eq (len (splitList "*" $m)) 2)))) -}}
 {{- fail (printf "llmRouting.models[%s].match %q: a wildcard is `*`, a suffix like `gpt-*` or a prefix like `*-latest`, one `*` at an end" .name $m) -}}
-{{- end -}}
-{{- end -}}
-{{- range .Values.llmRouting.pathPrefixes -}}
-{{- if eq . "/" -}}
-{{- fail "llmRouting.pathPrefixes must be more specific than \"/\": the agent-platform-mcps catch-all route attaches to the same Gateway and wins an equal match, so every inference call would reach the MCP backend" -}}
-{{- end -}}
-{{- if not (hasPrefix "/" .) -}}
-{{- fail (printf "llmRouting.pathPrefixes entry %q must start with /" .) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -454,13 +454,15 @@ RANDOM_SAMPLING_VALUE = re.compile(r'^(\s+)tracing:\n\1  randomSampling: "0\.1"\
 
 
 # giantswarm/agent-platform#603: the LLM listener routes by model —
-# llmRouting.backend is llmRouting.models, llmRouting.external is new, and
-# gateway.metricLabels gains the held api_key entry — and the meta chart
-# forwards all three in the connectivity release's values. Those keys are left
-# out of the meta renders' comparison, inside the forwarded llmRouting block and
-# the one metric label; dropped once GOLDEN_REF carries #603.
+# llmRouting.backend is llmRouting.models, the models attach to the listener
+# directly so llmRouting.pathPrefixes and llmRouting.routes are gone,
+# llmRouting.external is new, and gateway.metricLabels gains the held api_key
+# entry — and the meta chart forwards them in the connectivity release's
+# values. Those keys are left out of the meta renders' comparison, inside the
+# forwarded llmRouting block and the one metric label; dropped once GOLDEN_REF
+# carries #603.
 LLM_BACKEND = re.compile(r"^( +)backend:\n\1  name: anthropic\n\1  provider: anthropic\n", re.M)
-LLM_NEW_KEYS = re.compile(r"^( +)(?:external|models):\n(?:\1[ -].*\n)+", re.M)
+LLM_CHANGED_KEYS = re.compile(r"^( +)(?:external|models|pathPrefixes|routes):\n(?:\1[ -].*\n)+", re.M)
 API_KEY_LABEL = re.compile(r"^( +)api_key:\n\1  enabled: true\n\1  expression: apiKey\.name\n", re.M)
 
 
@@ -474,10 +476,10 @@ def hold_llm_endpoint(here: str, there: str) -> tuple:
         end = start + len("\n    llmRouting:\n")
         while end < len(render) and render[end:].startswith("      "):
             end = render.index("\n", end) + 1
-        block = LLM_NEW_KEYS.sub("", LLM_BACKEND.sub("", render[start:end]))
+        block = LLM_CHANGED_KEYS.sub("", LLM_BACKEND.sub("", render[start:end]))
         return render[:start] + block + render[end:]
     if (h := strip(here)) != here or strip(there) != there:
-        print("note: #603 hold — the forwarded llmRouting.backend/models/external and gateway.metricLabels.api_key are left out of the golden comparison")
+        print("note: #603 hold — the forwarded llmRouting.backend/models/external/pathPrefixes/routes and gateway.metricLabels.api_key are left out of the golden comparison")
     return h, strip(there)
 
 

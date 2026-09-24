@@ -1,9 +1,12 @@
 {{- /* model-manager writes one AgentgatewayModel per served model onto the LLM
-endpoint (discovery spec.llmEndpoint, giantswarm/model-manager#145) as its own
-ServiceAccount: the object follows the serving object's readiness, not a
+endpoint (the LLMEndpoint document, templates/llm/llm-endpoint.yaml) as its
+own ServiceAccount: the object follows the serving object's readiness, not a
 caller's request. The Role is that and nothing wider — the AgentgatewayModels
-of the release namespace, where the LLM route is. */ -}}
-{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelManager.enabled" .) (include "agent-platform.modelServing.enabled" .) }}
+of the release namespace, where the LLM listener's Gateway is. Rendered with
+llmRouting and a serving model-manager (agent-platform.modelManager.serves):
+this release's slice, or a GPU node pool's, which comes as a second release of
+this chart while this one keeps modelServing off. */ -}}
+{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelManager.serves" .) }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
