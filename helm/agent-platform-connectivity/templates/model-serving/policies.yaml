@@ -91,6 +91,17 @@
 #                              stays; the egress allow-list is not widened.
 #   storage-initializer-memory a memory limit that survives multi-GB downloads
 #                              (KServe's default 1Gi is OOM-killed).
+#   emptydir-size-limits-llmisvc-workload
+#                              a sizeLimit on every emptyDir of the pod
+#                              (modelServing.serving: shmSizeLimit for dshm,
+#                              modelCacheSizeLimit for model-cache with the
+#                              cache off, emptyDirSizeLimit for the rest), on
+#                              every model pod, hf:// and oci:// alike: the
+#                              volumes are bounded and the fleet's
+#                              require-emptydir-requests-and-limits audit has
+#                              nothing to report (#556). The Deployments
+#                              policy below sets the same on the Deployment's
+#                              pod template, which that audit reports too.
 # The rules mutate at CREATE only: a pod's init containers are immutable, and
 # the operation filter keeps later pod updates untouched. Every rule is a
 # strategic merge keyed by name (containers, volumes) or mountPath (mounts):
@@ -114,7 +125,8 @@ metadata:
       pod carrying the claim's fsGroup; vLLM's cache a directory of the claim's
       own on the runtime container), sets the Hugging Face client's
       environment on the storage-initializer and the runtime container, and
-      raises the storage-initializer memory limit.
+      raises the storage-initializer memory limit and bounds every emptyDir of the
+      pod with a sizeLimit.
 spec:
   background: false
   rules:
@@ -219,12 +231,30 @@ spec:
                   limits:
                     memory: {{ . | quote }}
     {{- end }}
-{{- if gt (int $ms.policies.progressDeadlineSeconds) 0 }}
+    - name: emptydir-size-limits-{{ $shape.name }}
+      match:
+        any:
+          {{- $podMatch | nindent 10 }}
+      mutate:
+        foreach:
+          {{- include "agent-platform.modelServing.emptyDirBounds" (dict "root" . "spec" "request.object.spec" "nest" (list "spec")) | trim | nindent 10 }}
 ---
-# KServe exposes no progressDeadlineSeconds on the LLMInferenceService; the
-# Kubernetes default (600s) is shorter than a first model download and fires
-# rollout-stuck alerts while the pod is healthy and busy. The Deployments carry
-# the labels of the pods they run.
+# The LLMInferenceService Deployments (they carry the labels of the pods they
+# run). Per rule:
+#   progress-deadline          KServe exposes no progressDeadlineSeconds on the
+#                              LLMInferenceService; the Kubernetes default
+#                              (600s) is shorter than a first model download
+#                              and fires rollout-stuck alerts while the pod is
+#                              healthy and busy (only with
+#                              modelServing.policies.progressDeadlineSeconds
+#                              above 0).
+#   emptydir-size-limits       the pods policy's emptyDir bounds on the pod
+#                              template: the fleet's
+#                              require-emptydir-requests-and-limits audits the
+#                              Deployment (and its ReplicaSets) as well as the
+#                              pod. The llm-d controller's next update of the
+#                              Deployment is mutated the same way, so its
+#                              template does not flip between the two.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -235,10 +265,12 @@ metadata:
     policies.kyverno.io/title: Model serving Deployments
     policies.kyverno.io/description: >-
       Sets progressDeadlineSeconds on every LLMInferenceService Deployment in
-      the {{ $ns }} namespace, long enough for a first model download.
+      the {{ $ns }} namespace, long enough for a first model download, and a
+      sizeLimit on every emptyDir of its pod template.
 spec:
   background: false
   rules:
+    {{- if gt (int $ms.policies.progressDeadlineSeconds) 0 }}
     - name: progress-deadline
       match:
         any:
@@ -247,5 +279,12 @@ spec:
         patchStrategicMerge:
           spec:
             progressDeadlineSeconds: {{ int $ms.policies.progressDeadlineSeconds }}
-{{- end }}
+    {{- end }}
+    - name: emptydir-size-limits
+      match:
+        any:
+          {{- include "agent-platform.modelServing.kyvernoMatch" (dict "root" . "kinds" (list "Deployment") "operations" (list "CREATE" "UPDATE")) | trim | nindent 10 }}
+      mutate:
+        foreach:
+          {{- include "agent-platform.modelServing.emptyDirBounds" (dict "root" . "spec" "request.object.spec.template.spec" "nest" (list "spec" "template" "spec")) | trim | nindent 10 }}
 {{- end }}
