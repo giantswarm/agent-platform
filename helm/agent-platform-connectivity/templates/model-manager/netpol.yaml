@@ -36,12 +36,22 @@ holds byte for byte. */ -}}
 egress to their servers: every endpoint split into host, port and whether it
 is an address — one model-manager may front several. */ -}}
 {{- $servers := include "agent-platform.modelManager.hostTargets" (dict "root" . "key" "endpoint") | fromJsonArray }}
-{{- /* With the serving slice on, model-manager reads a Ready model's runtime —
-GET /version and GET /openapi.json on the workload port — for the API
-interfaces it answers; the serving namespace's own policy admits the release
-namespace on that port (model-serving/netpol.yaml). */ -}}
+{{- /* model-manager reads a Ready model's runtime — GET /version and
+GET /openapi.json on the workload port — for the API interfaces it answers,
+wherever it serves: the serving slice of this release, or a slice a GPU node
+pool brought as a second release of the chart (cluster-manager's
+create_node_pool; model-manager's kserve backend then comes from cluster-manager,
+and this release's modelServing stays off). The namespace is this release's
+serving namespace, else model-manager's kserve namespace; the serving
+namespace's own policy admits the release namespace on that port
+(model-serving/netpol.yaml; a node pool's slice through
+modelServing.networkPolicy.additionalIngressNamespaces). */ -}}
 {{- $servingOn := include "agent-platform.modelServing.enabled" . }}
+{{- $readsServing := or $servingOn $kserveOn }}
 {{- $servingNs := include "agent-platform.modelServing.namespace" . }}
+{{- if not $servingOn }}
+{{- $servingNs = dig "kserve" "namespace" "" $chart | default "model-serving" }}
+{{- end }}
 {{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
@@ -144,7 +154,7 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
-    {{- if $servingOn }}
+    {{- if $readsServing }}
     # The served models' runtimes, on the workload port: a Ready model's
     # GET /version and GET /openapi.json, the API interfaces it answers.
     - toEndpoints:
@@ -387,7 +397,7 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    {{- if $servingOn }}
+    {{- if $readsServing }}
     # The served models' runtimes, on the workload port: a Ready model's
     # GET /version and GET /openapi.json, the API interfaces it answers.
     - to:
