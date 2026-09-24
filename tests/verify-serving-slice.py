@@ -636,6 +636,9 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
         if gpus != tp:
             sys.exit(f"FAIL: shipped preset {preset_name} requests {gpus} GPU(s) (resources.gpus) but its arguments set tensor parallel {tp}; "
                      "a preset on N GPUs carries --tensor-parallel-size=N, a one-GPU preset no such flag")
+        if docs_off := [a for a in preset_args if re.match(r"--disable-fastapi-docs(=|$)", a)]:
+            sys.exit(f"FAIL: shipped preset {preset_name} carries {docs_off}: it removes the runtime's /openapi.json, the route list "
+                     "model-manager reads the model's API interfaces from (giantswarm/agent-platform#602)")
         expected = [shlex.split(a)[0] for a in preset_args]
         checked += json_values(preset_name, "the llm-d template", eval_argv(preset_args), expected)
     if checked == 0:
@@ -646,6 +649,12 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
                "spec": {"displayName": "Old", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, field: {} if field == "predictor" else "kserve-vllm"}}
         err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure=f"spec.{field} is no longer a preset field")
         need(err, 'serving preset "old" (values)', f"the guard's message for spec.{field}")
+    # A values preset that turns the runtime's route list off fails the render naming the flag.
+    for flag in ("--disable-fastapi-docs", "--disable-fastapi-docs=true"):
+        doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "nodocs"},
+               "spec": {"displayName": "No docs", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "args": ["--enforce-eager", flag]}}
+        err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="removes the runtime's /openapi.json")
+        need(err, f'serving preset "nodocs" (values): spec.args carries "{flag}"', f"the guard's message for {flag}")
     bad = {"bare JSON in two arguments": ["--default-chat-template-kwargs", '{"enable_thinking": false}'],
            "a space": ["--x=a b"], "a stray single quote": ["--x=it's"], "a double quote": ['--x="a"'],
            "a brace expansion": ["--x={a,b}"], "a variable": ["--x=$HOME"], "a glob": ["--x=*"]}
@@ -657,6 +666,7 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
     ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval ({checked} JSON values parse), none carries a classic field, "
        f"each one's resources.gpus equals its tensor-parallel size, "
        f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
+       f"none carries --disable-fastapi-docs and a values preset with it fails the render naming the flag (the route list model-manager reads the interfaces from); "
        f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
 
 

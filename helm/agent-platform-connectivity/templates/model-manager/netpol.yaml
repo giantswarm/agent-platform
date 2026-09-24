@@ -36,6 +36,13 @@ holds byte for byte. */ -}}
 egress to their servers: every endpoint split into host, port and whether it
 is an address — one model-manager may front several. */ -}}
 {{- $servers := include "agent-platform.modelManager.hostTargets" (dict "root" . "key" "endpoint") | fromJsonArray }}
+{{- /* With the serving slice on, model-manager reads a Ready model's runtime —
+GET /version and GET /openapi.json on the workload port — for the API
+interfaces it answers; the serving namespace's own policy admits the release
+namespace on that port (model-serving/netpol.yaml). */ -}}
+{{- $servingOn := include "agent-platform.modelServing.enabled" . }}
+{{- $servingNs := include "agent-platform.modelServing.namespace" . }}
+{{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
@@ -136,6 +143,19 @@ spec:
             - port: "443"
               protocol: TCP
     {{- end }}
+    {{- end }}
+    {{- if $servingOn }}
+    # The served models' runtimes, on the workload port: a Ready model's
+    # GET /version and GET /openapi.json, the API interfaces it answers.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ $servingNs }}
+          matchExpressions:
+            {{- toYaml $shape.matchExpressions | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: {{ $shape.port | quote }}
+              protocol: TCP
     {{- end }}
     {{- with $egress.fqdns }}
     # Further destinations of the service by name, whatever the backend
@@ -367,6 +387,20 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
+    {{- if $servingOn }}
+    # The served models' runtimes, on the workload port: a Ready model's
+    # GET /version and GET /openapi.json, the API interfaces it answers.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $servingNs }}
+          podSelector:
+            matchExpressions:
+              {{- toYaml $shape.matchExpressions | nindent 14 }}
+      ports:
+        - port: {{ $shape.port }}
+          protocol: TCP
+    {{- end }}
     {{- if and $kserveOn $hf.cidrs }}
     # Hugging Face by address (huggingFace.cidrs): these blocks only.
     - to:
