@@ -533,9 +533,10 @@ components:  # @schema additionalProperties: true
     # of the platform edits this release's objects in place (no HPA on its
     # Deployments, no webhook-injected field, no hook). An object of the
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
-    # disabled. kagent's and muster's only by default — turning it on for
-    # another release is a decision per release, its objects must tolerate the
-    # re-apply (tests/verify-kagent-wiring.py asserts the set).
+    # disabled. kagent's, muster's and kserve-runtime-configs' only by
+    # default — turning it on for another release is a decision per release,
+    # its objects must tolerate the re-apply (tests/verify-kagent-wiring.py
+    # asserts the set).
     driftDetection:  # @schema additionalProperties: true
       mode: enabled
     # These keys are the connectivity chart's, not kagent's: it reads them for
@@ -1008,6 +1009,21 @@ components:  # @schema additionalProperties: true
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
+    # Drift detection on this release (HelmRelease v2 spec.driftDetection): on
+    # every reconcile — gitops.interval — helm-controller re-applies a config
+    # that differs from the release manifest or is missing, as a server-side
+    # apply, without a Helm revision. Because a slice torn down at once left
+    # the configs terminating under their controller's finalizer, the next
+    # install adopted them, the new controller then finished their deletion,
+    # and the release stayed "in-sync" with no config behind it: every
+    # LLMInferenceService composed from them failed ConfigNotFound until a
+    # forced reconcile (giantswarm/agent-platform#508). With it a missing
+    # config is back within one interval. No ignore rule: the objects are
+    # configuration only; the llm-d controller adds a finalizer, which a
+    # server-side apply of the manifest leaves in place, and no webhook
+    # mutates them (its validating webhook admits the re-create).
+    driftDetection:  # @schema additionalProperties: true
+      mode: enabled
   # Model serving on llm-d: a feature switch, not a component — no chart, so
   # the loop renders no release for it; the flag is forwarded to the
   # connectivity release like every other, and that chart renders the objects
