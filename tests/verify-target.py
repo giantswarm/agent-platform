@@ -453,6 +453,34 @@ def hold_dataplane_buffer(here: str, there: str) -> tuple:
 RANDOM_SAMPLING_VALUE = re.compile(r'^(\s+)tracing:\n\1  randomSampling: "0\.1"\n', re.M)
 
 
+# giantswarm/agent-platform#603: the LLM listener routes by model —
+# llmRouting.backend is llmRouting.models, llmRouting.external is new, and
+# gateway.metricLabels gains the held api_key entry — and the meta chart
+# forwards all three in the connectivity release's values. Those keys are left
+# out of the meta renders' comparison, inside the forwarded llmRouting block and
+# the one metric label; dropped once GOLDEN_REF carries #603.
+LLM_BACKEND = re.compile(r"^( +)backend:\n\1  name: anthropic\n\1  provider: anthropic\n", re.M)
+LLM_NEW_KEYS = re.compile(r"^( +)(?:external|models):\n(?:\1[ -].*\n)+", re.M)
+API_KEY_LABEL = re.compile(r"^( +)api_key:\n\1  enabled: true\n\1  expression: apiKey\.name\n", re.M)
+
+
+def hold_llm_endpoint(here: str, there: str) -> tuple:
+    """The two meta renders with #603's forwarded llmRouting and metric-label keys left out."""
+    def strip(render: str) -> str:
+        render = API_KEY_LABEL.sub("", render)
+        start = render.find("\n    llmRouting:\n")
+        if start < 0:
+            return render
+        end = start + len("\n    llmRouting:\n")
+        while end < len(render) and render[end:].startswith("      "):
+            end = render.index("\n", end) + 1
+        block = LLM_NEW_KEYS.sub("", LLM_BACKEND.sub("", render[start:end]))
+        return render[:start] + block + render[end:]
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #603 hold — the forwarded llmRouting.backend/models/external and gateway.metricLabels.api_key are left out of the golden comparison")
+    return h, strip(there)
+
+
 def hold_dataplane_sampling(here: str, there: str) -> tuple:
     """The two meta renders with the forwarded random sampling left out."""
     if (h := RANDOM_SAMPLING_VALUE.sub("", here)) != here or RANDOM_SAMPLING_VALUE.search(there):
@@ -605,6 +633,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_muster_floor(here, there)
                 here, there = hold_otlp_endpoints(here, there)
                 here, there = hold_dataplane_sampling(here, there)
+                here, there = hold_llm_endpoint(here, there)
             else:
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)
