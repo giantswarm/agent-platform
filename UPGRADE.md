@@ -15,6 +15,16 @@ giantswarm/agent-platform#603: with `llmRouting.enabled` the LLM listener's back
 - **A ModelConfig on the listener whose model name the default does not take** (an Anthropic model not named `claude-*`): add an entry whose `match` takes it, or the listener answers `404 model_not_found`.
 - **Recognising it worked**: `kubectl -n <release namespace> get agentgatewaymodel` lists `anthropic` (plus one per served model on an installation with a serving model-manager), `kubectl -n <release namespace> get httproute` lists no `<name>-llm`, an agent turn on the default ModelConfig answers, and `agentgateway_gen_ai_client_token_usage` grows for it.
 
+## \<current\> → \<next\> (the portal's app-config carries no `agentPlatform.modelManager`)
+
+giantswarm/agent-platform#318: the connectivity chart no longer renders `agentPlatform.modelManager.installations.<installation>.apiBaseUrl` into the Backstage app-config. Since giantswarm/backstage#2294 (Backstage 2.19.0 and later) the Models pages call model-manager's `x_model-manager_*` tools through muster as the signed-in person, and the portal backend has no model-manager client that would read the key. The `muster.installations` entry and model-manager's `MCPServer` are unchanged; the model-manager route (`modelManager.route`) stays for REST clients.
+
+### Operator action
+
+- **None** for an installation on Backstage 2.19.0 or later (the chart's range admits `>=1.0.0 <3.0.0`; the Models pages already use muster). The app-config changes, so the config-reload hook rolls the portal once.
+- **An installation that added a Backstage peer to `modelManager.networkPolicy.ingress.additionalPeers`** for the portal's REST path can drop it: the portal no longer calls model-manager directly.
+- **Recognising it worked**: `kubectl -n <release namespace> get configmap agent-platform-backstage-app-config -o yaml` shows no `modelManager:` under `agentPlatform`, and the Models pages list the installation's models.
+
 ## \<current\> → \<next\> (the dev channel's filter reads gitsemver 3's tag shape)
 
 architect-orb 10.10.0 (2026-09-23) tags dev builds `X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>` (gitsemver 3) instead of `X.Y.Z-dev.<branch>.<YYYY-MM-DD>.<HH-MM-SS>.h<sha7>`; this repository, the kagent line and the Substrate line build with it. A `semverFilter` written for the superseded shape matches no build made since and keeps its channel on the last one.
