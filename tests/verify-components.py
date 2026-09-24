@@ -507,9 +507,11 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"examples/customer-bom.yaml does not pin components.{name}.versionRange")
         pin = m.group(1)
         # Exact: X.Y.Z — the kagent and Substrate lines release stable semver of
-        # their own; a dogfooding BOM may pin a line's dev build
-        # (X.Y.Z-dev.<branch>.<date>.<time>.h<sha7>) instead.
-        if not re.fullmatch(r"\d+\.\d+\.\d+(-dev\.[a-z0-9-]+\.\d{4}-\d{2}-\d{2}\.\d{2}-\d{2}-\d{2}\.h[0-9a-f]{7})?", pin):
+        # their own; a dogfooding BOM may pin a line's dev build instead:
+        # gitsemver 3's X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>, or the
+        # superseded X.Y.Z-dev.<branch>.<date>.<time>.h<sha7> of a build made
+        # before architect-orb 10.10.0, which the registry still holds.
+        if not re.fullmatch(r"\d+\.\d+\.\d+(-r[0-9a-f]{8}t\d{14}h[0-9a-f]{7}|-dev\.[a-z0-9-]+\.\d{4}-\d{2}-\d{2}\.\d{2}-\d{2}-\d{2}\.h[0-9a-f]{7})?", pin):
             fail(f"the BOM pin for {name} is not an exact version: {pin!r}")
         if f'semver: "{pin}"' not in bom[("OCIRepository", name)]:
             fail(f"the BOM pin {pin} for {name} did not reach its OCIRepository")

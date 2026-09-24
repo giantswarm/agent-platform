@@ -14,9 +14,11 @@ The helm.sh/chart label: <name>-<version> as a valid label value. A label is at
 most 63 characters and must end on an alphanumeric: Helm's `+` build metadata
 (helm-controller appends the OCI digest to every chart version it installs,
 `3.20.0+8c89e1be4cbf`) becomes `_`, and after the cut every trailing `-`, `.`
-and `_` goes — a branch build's long prerelease version (abs:
-`3.19.1-dev.<branch>.<date>.h<sha>`) made the cut land on the `_` once, and the
-apiserver rejected every object of the release. tests/verify-labels.py.
+and `_` goes — a branch build's long prerelease version (the superseded abs
+shape `3.19.1-dev.<branch>.<date>.h<sha>`; gitsemver 3's
+`X.Y.Z-r<branch-hash>t<time>h<sha>` holds neither `.` nor `-`, so only the `_`
+is left to land on) made the cut land on the `_` once, and the apiserver
+rejected every object of the release. tests/verify-labels.py.
 */ -}}
 {{- define "chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-._" -}}
@@ -1959,7 +1961,7 @@ the controller applies. Build metadata (helm-controller renders the chart as
 
 {{/*
 This chart's own version as its releases are published: <major>.<minor>.<patch>
-with a pre-release kept (a dev build is X.Y.Z-dev.<branch>.<date>.h<sha>, one
+with a pre-release kept (a dev build is X.Y.Z-r<branch-hash>t<time>h<sha>, one
 version for the two charts of a commit) and build metadata dropped
 (helm-controller renders the chart as <version>+<oci digest>). The floor of
 the self range above, and the exact version of every component released off

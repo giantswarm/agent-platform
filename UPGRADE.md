@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the dev channel's filter reads gitsemver 3's tag shape)
+
+architect-orb 10.10.0 (2026-09-23) tags dev builds `X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>` (gitsemver 3) instead of `X.Y.Z-dev.<branch>.<YYYY-MM-DD>.<HH-MM-SS>.h<sha7>`; this repository, the kagent line and the Substrate line build with it. A `semverFilter` written for the superseded shape matches no build made since and keeps its channel on the last one.
+
+### Operator action
+
+- **None** for an installation on the defaults: no default carries a filter, and the stable ranges carry no `-0`, so they refuse a dev build of either shape (at one `X.Y.Z` a current tag sorts above the `-gs.N` and `-dev.` tags and, for a hash starting `0`–`b`, below `-rc.N`).
+- **An installation on a dev channel** (`components.<name>.semverFilter` or `gitops.self.semverFilter` set): replace the filter with `^.*-r<branch-hash>t[0-9]{14}h[0-9a-f]{7}$`, where `gitsemver branch-hash <branch>` prints the hash (`588f3d76` for the kagent and Substrate lines' branch `giantswarm`), and keep the range's floor below the branch's base (`>=0.0.0-0` for a line whose re-pin restarted its count). The channel moves to the branch's newest current build on the next reconcile, even where a superseded build carries a higher base.
+- **Recognising it worked**: `kubectl -n <release namespace> get ocirepository <name> -o jsonpath='{.status.artifact.revision}'` names a `-r…t…h…` tag.
+
 ## \<current\> → \<next\> (the `klausGateway` keys the Slack-only gateway ignores are no longer forwarded)
 
 giantswarm/klaus-gateway#319: klaus-gateway 2.0.0 serves Slack only, `components.klaus-gateway.versionRange` is `>=2.0.0 <3.0.0`, and this chart stops forwarding the six keys that served the removed paths — `klausGateway.cli`, `klausGateway.lifecycle`, `klausGateway.upstream`, `klausGateway.agentgateway`, `klausGateway.routing.defaultTTL` and `klausGateway.a2a.saToken`. The klaus-gateway `HTTPRoute` the connectivity chart renders (`klausGateway.agentgatewayRoute.enabled`) drops `/v1`, `/web` and `/cli/v1`, which answer 404 on 2.x, and carries `/channels/slack` alone; with `klausGateway.slack.enabled` off it now renders nothing at all, the route having nothing left to publish. The OBO route (`/auth/slack/`, `/connectors/complete`) is untouched.

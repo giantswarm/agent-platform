@@ -48,7 +48,7 @@ asserted offline by `make verify-self`. The smoke sidesteps the trap the issue
 names by pointing the self OCIRepository at the in-cluster registry that holds
 the candidate. The version range is set to the candidate's exact version rather
 than the chart's derived `>=<version> <next major>.0.0`: a branch build has a
-prerelease version (`3.19.1-dev.<branch>.<date>.h<sha>`, stamped by abs), and
+prerelease version (`3.19.1-r<branch-hash>t<time>h<sha>`, stamped by abs), and
 Masterminds semver — Flux's — never matches a prerelease against a release-only
 bound. A released chart has no prerelease.
 

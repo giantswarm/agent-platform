@@ -33,7 +33,8 @@ knowledge:
       in-cluster registry, a lab registry).
   semverFilter  — optional Go regexp the OCI tags must match BEFORE versionRange
       is evaluated (OCIRepository.spec.ref.semverFilter). Selects a dev channel:
-      the branch builds of one branch (`.*-dev\.<sanitized-branch>\..*` today)
+      the branch builds of one branch (`^.*-r<branch-hash>t[0-9]{14}h[0-9a-f]{7}$`,
+      gitsemver 3's dev shape; `gitsemver branch-hash <branch>` prints the hash)
       together with a prerelease-admitting range; the stable tags never act as
       fallback while a filter is set. Unset = every tag of the range.
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to

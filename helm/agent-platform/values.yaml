@@ -258,11 +258,15 @@ gitops:
 #   semverFilter — Go regexp the OCI tags must match BEFORE versionRange is
 #       evaluated (OCIRepository.spec.ref.semverFilter); unset = every tag.
 #       Selects a dev channel: the dev builds of one branch (see "Dev channel"
-#       in the README), e.g. ".*-dev\\.<sanitized-branch>\\..*" together with
-#       a prerelease-admitting range such as ">=3.0.0-0 <4.0.0-0" — a range
-#       without the `-0` bounds never matches a prerelease, and Masterminds
-#       semver (Flux's) rejects the RFC's "*-*". The stable tags never act as
-#       fallback while a filter is set.
+#       in the README), "^.*-r<branch-hash>t[0-9]{14}h[0-9a-f]{7}$" — gitsemver
+#       3's dev shape X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>, the hash
+#       printed by `gitsemver branch-hash <branch>` — together with a
+#       prerelease-admitting range such as ">=4.0.0-0 <5.0.0-0" whose floor
+#       lies below the branch's base (a re-pinned line's builds count from the
+#       upstream tag or 0.0.0 again: ">=0.0.0-0") — a range without a `-0`
+#       bound never matches a prerelease, and Masterminds semver (Flux's)
+#       rejects the RFC's "*-*". The stable tags never act as fallback while a
+#       filter is set.
 #   crds         — Helm CRD lifecycle (CreateReplace) for a component that ships its
 #       own CRDs in its chart's crds/ dir (app-owned CRDs). Such a component owns its
 #       CRD version; its CR consumers dependsOn it instead.
@@ -468,7 +472,8 @@ components:  # @schema additionalProperties: true
     # releases as the line's own stable semver (X.Y.Z, decoupled from the
     # upstream version, which FORK.md and the images' annotation
     # io.giantswarm.upstream.version record) and, on every push to the
-    # consumed branch, dev builds X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7>.
+    # consumed branch, dev builds X.Y.Z-r588f3d76t<YYYYMMDDHHMMSS>h<sha7>
+    # (gitsemver 3's dev shape; r588f3d76 is `gitsemver branch-hash giantswarm`).
     # Upstream's chart shape: keys at the chart root, the CRDs as their own
     # chart (kagent-crds below), no values schema.
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
@@ -480,7 +485,7 @@ components:  # @schema additionalProperties: true
     # range with Masterminds semver, which skips every prerelease while no bound
     # of the range carries one — and evaluates them all as soon as one bound
     # does — so the range carries no `-0`: `<1.1.0-0` would admit the line's
-    # 1.0.x-dev.giantswarm.… builds (the dev channel is a consumer's `-0` range
+    # 1.0.x-r588f3d76t… builds (the dev channel is a consumer's `-0` range
     # plus a semverFilter, README "Dev channel"). The build's image tag and Go
     # ADK digest travel inside
     # the chart (stamped at publish), not here. Re-pinning the line is one
@@ -604,7 +609,8 @@ components:  # @schema additionalProperties: true
     # gsoci.azurecr.io/giantswarm/substrate, signed with the Giant Swarm
     # CircleCI identity, as releases of the line's own stable semver (X.Y.Z,
     # decoupled from the upstream version FORK.md records) and as dev builds
-    # X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7> on every push. Two roster
+    # X.Y.Z-r588f3d76t<YYYYMMDDHHMMSS>h<sha7> on every push (gitsemver 3's
+    # dev shape, the hash of the branch name giantswarm). Two roster
     # entries, the kagent-crds shape: this one renders the three ate.dev CRDs
     # (WorkerPool, SandboxConfig, CSIDriverConfig) as templates; substrate
     # below renders the control plane. Both FOLLOW components.kagent when they

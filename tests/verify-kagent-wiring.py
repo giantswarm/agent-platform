@@ -82,13 +82,17 @@ LINE_IMAGES = "giantswarm/kagent"
 HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 # What the release range must admit and refuse, by shape: the line's releases
 # of the pinned minor — the floor and its patches, which never change a runtime
-# contract — and nothing else: not the line's dev builds (Masterminds skips
+# contract — and nothing else: not the line's dev builds in gitsemver 3's
+# shape (X.Y.Z-r588f3d76t<time>h<sha>, which sorts above the `-gs.N` and
+# `-dev.` prereleases of its X.Y.Z) nor in the superseded one (Masterminds skips
 # every prerelease while no bound of the range carries one — and evaluates them
 # all once one does, so a `-0` anywhere in the range is refused), not the last release
 # of the former coupled `-gs.N` scheme, not the next minor (a re-pin onto
 # another upstream release) or its release candidates, not the next major.
 ADMITTED = ["{floor}", "{floor_patch}", "{floor_patch_tenfold}"]
-REFUSED = ["{last_coupled}", "{floor}-dev.giantswarm.2026-09-19.00-00-00.h0000000", "{floor_patch}-dev.giantswarm.2026-09-19.00-00-00.h0000000",
+REFUSED = ["{last_coupled}",
+           "{floor}-r588f3d76t20260924050320h8e763ab", "{floor_patch}-r588f3d76t20260924050320h8e763ab",
+           "{floor}-dev.giantswarm.2026-09-19.00-00-00.h0000000", "{floor_patch}-dev.giantswarm.2026-09-19.00-00-00.h0000000",
            "{next_minor}-rc.1", "{next_minor}", "{next_major}"]
 STABLE_FLOOR = "1.0.0"  # the line's first release of its own stable semver
 LAST_COUPLED = "0.11.0-gs.22"  # the line's last release under the coupled scheme, below every stable range
