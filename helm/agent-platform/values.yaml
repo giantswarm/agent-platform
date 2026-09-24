@@ -4620,16 +4620,24 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # (the chart's `substrate.otel.env` helper reads this single endpoint as
   # the fallback for the per-signal traces / metrics / logs endpoints below,
   # all `enabled: true` in the chart's own defaults). Same collector as
-  # kagent, agentgateway and klaus-gateway. giantswarm/giantswarm#36711:
-  # until now this stayed empty and all three signals went nowhere.
+  # kagent, agentgateway and klaus-gateway. The connectivity chart's Substrate
+  # policies open this endpoint's namespace and port for the four exporters
+  # (agent-platform.substrate.otlpEgress).
   #
-  # The chart has no OTLP-headers key for any of the four components (only
-  # atelet.extraEnv / ateApiServer.extraEnv exist, and ate-controller /
-  # atenet-router have neither), so X-Scope-OrgID cannot be set here the way
-  # it is for kagent below — every Substrate span, metric and log point
-  # reaches the collector untenanted until the chart grows one.
+  # Traces keep the chart's parentbased_traceidratio at 0.01: a span under a
+  # kagent turn follows the turn's own decision (kagent's ate-api client
+  # propagates it), so the ratio applies only to Substrate's parentless
+  # background work — reconciles, workflows, the atelet loops.
   otel:
     endpoint: http://otlp-gateway.kube-system.svc:4317
+  # The chart has no OTLP-headers key, so X-Scope-OrgID cannot be set the way
+  # it is for kagent below: otlp-gateway takes the tenant of a headerless
+  # export from this pod label instead. The chart's podLabels key is
+  # kagent-dev/substrate#48, carried from Substrate 1.1.0
+  # (giantswarm/substrate#55); an older release ignores it and every Substrate
+  # signal reaches the collector without a tenant (giantswarm/giantswarm#36711).
+  podLabels:
+    observability.giantswarm.io/tenant: giantswarm
   # The chart's third-party images (giantswarm/agent-platform#575, #580, #654).
   # The Substrate line stamps each default at publish — the gsoci copies of
   # postgres, rustfs and busybox, and the agentgateway line's build its release
