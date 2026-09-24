@@ -319,7 +319,7 @@ def fallback(name: str, url: str, constraint: str, tags: list[str], kagent_tag: 
         fail(waits_for(name, url, constraint, tags))
     if name not in UNRELEASED:
         fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED); the release would wait for {name} {floor(constraint)}")
-    chosen = RENDER_AGAINST.get(name) or (kagent_tag if name in KAGENT else fluxsemver.resolve(tags, ">=0.0.0"))
+    chosen = kagent_tag if name in KAGENT else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
     if not chosen or chosen not in tags:
         fail(f"no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
     print(f"NOTE: {name}: {constraint!r} matches no published chart yet (waits for {UNRELEASED[name]}); rendering against {chosen}")

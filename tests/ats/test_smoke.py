@@ -764,7 +764,7 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     assert (podcert_ns["metadata"].get("annotations") or {}).get("helm.sh/resource-policy") == "keep", podcert_ns["metadata"].get("annotations")
     for pool in PODCERT_SIGNERS.values():
         assert kube.get("secret", pool, namespace=PODCERT_NAMESPACE), f"CA pool {PODCERT_NAMESPACE}/{pool} went with the uninstall"
-    for pool in ("actor-id-ca-pool", "actor-id-jwt-pool", "actor-id-ca-certs", "egress-mitm-ca-pool"):
+    for pool in ("actor-id-ca-pool", "actor-id-jwt-pool", "actor-id-ca-certs"):
         assert kube.get("secret", pool, namespace=ATE_NAMESPACE), f"{ATE_NAMESPACE}/{pool} went with the uninstall"
     bundles = substrate_trust_bundles(kube)
     assert bundles == sorted(s.replace("/", ":") + ":primary-bundle" for s in PODCERT_SIGNERS), f"the podcert signers' ClusterTrustBundles after the uninstall: {bundles}"

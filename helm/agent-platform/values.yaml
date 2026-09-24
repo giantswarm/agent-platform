@@ -496,7 +496,7 @@ components:  # @schema additionalProperties: true
     # spec.ollama.think, which model-manager writes on the Ollama models it
     # wires that have the thinking capability, so their agents answer instead of
     # thinking before every answer or replying with nothing.
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.0.3 <1.1.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -595,7 +595,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.0.3 <1.1.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -646,7 +646,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.0.3 <1.1.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -668,7 +668,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.0.3 <1.1.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -2844,18 +2844,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # Set by a dev loop that runs the platform on a locally built image; it
     # travels only when set (components.kagent.omitEmptyKeys).
     image: ""
-    # Context compaction for every agent the Harness admits
-    # (Harness.spec.kagent.compaction, where kagent-dev/kagent#2790 put it; the
-    # AgentTemplate has no such field). Tail retention: once a prompt passes
-    # tokenThreshold tokens, everything but the newest eventRetentionSize
-    # events is summarised before the next model call. 24 000 leaves room for
-    # a system prompt with skills and the muster meta-tools plus a few tool
-    # results; 4 keeps the last two tool exchanges raw. An empty block leaves
-    # every history uncompacted. Needs the kagent line at 1.1.0 or later; an
-    # earlier chart ignores the key.
-    compaction:
-      tokenThreshold: 24000
-      eventRetentionSize: 4
     # Where Substrate keeps the actors' snapshots for this Harness — the
     # Harness's snapshotPolicy.location: an object-store URL, s3://<bucket>/<prefix>
     # (the prefix keeps one bucket's Harnesses apart). REQUIRED whenever
@@ -4163,11 +4151,12 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # kagent.dev/v1alpha3 AgentTemplates for this release's kagent, 0.x the
     # v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases of
     # the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart. From 1.5.0 the chart renders no
-    # spec.context.compaction on the AgentTemplate: the kagent line from 1.1.0
-    # refuses the field and the platform Harness carries the compaction
-    # (kagent.harness.compaction). The floor moves with components.kagent.
-    semver: ">=1.5.0 <2.0.0"
+    # and moves only with this chart. Capped below 1.5.0: from 1.5.0 the chart
+    # renders no spec.context.compaction on the AgentTemplate (the kagent line
+    # from 1.1.0 refuses it; the platform Harness carries the compaction
+    # there), and the kagent 1.0 line this release delivers has no other
+    # place for it. The cap moves with components.kagent.
+    semver: ">=1.0.0 <1.5.0"
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:
@@ -4679,9 +4668,9 @@ kagent-crds:  # @schema skipProperties: true; additionalProperties: true
 # Values forwarded verbatim to the substrate component release — the chart of
 # the Giant Swarm Substrate line (giantswarm/substrate, branch giantswarm; keys
 # at the chart root, no schema). The chart's image references are stamped at
-# publish (image.registry gsoci.azurecr.io, image.repository giantswarm/substrate,
-# image.tag the build); an installation that mirrors them sets image.registry
-# here and components.substrate.repository. What Substrate needs and the chart does not
+# publish (image.registry gsoci.azurecr.io/giantswarm/substrate, image.tag the build);
+# an installation that mirrors them sets image.registry here and
+# components.substrate.repository. What Substrate needs and the chart does not
 # render — the CA and JWT pools, the actor-identity trust anchor, ate-api-
 # server's authentication config — the connectivity release's bootstrap hook
 # mints (README "Agent Substrate"); what the cluster must bring — Kubernetes
@@ -4694,16 +4683,13 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   createNamespace: false
   # The line's images: published as gsoci.azurecr.io/giantswarm/substrate/<component>
   # (the chart's stamp; multi-arch, signed with the Giant Swarm CircleCI
-  # identity), releases and dev builds alike. The registry is the host only
-  # and the repository the path under it (the Substrate chart refuses a
-  # registry with a path); a mirror moves the registry, and the control
-  # plane's images (<registry>/<repository>/<component>:<tag>, the tag the
-  # chart's stamp) and the derived worker image
+  # identity), releases and dev builds alike. The registry is the one value a
+  # mirror moves: the control plane's images (<registry>/<component>:<tag>,
+  # the tag the chart's stamp) and the derived worker image
   # (agent-platform.substrate.workerImage, kagent.substrateWorkerPool above)
   # follow it. The dev channel needs no registry override.
   image:
-    registry: gsoci.azurecr.io
-    repository: giantswarm/substrate
+    registry: gsoci.azurecr.io/giantswarm/substrate
   # One PodMonitor per workload that serves metrics: ate-api-server, atelet,
   # atenet-router, atenet-egress, k8s-credential-provider and ate-controller,
   # each pinned to the port name its own pod declares. The fleet's metrics
@@ -4718,23 +4704,6 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
         # Mimir routes a scrape by this label; a monitor without it writes to
         # no tenant of the GS observability platform.
         observability.giantswarm.io/tenant: giantswarm
-  # The credential provider (the Substrate line from 1.1.0): the egress
-  # gateway injects an agent's credentials — model keys, MCP headers, the
-  # skills' git credentials — into the request from Secrets it reads on the
-  # agent's behalf, and it reads a namespace only where a policy allows it.
-  # kagent names the atespace after the AgentTemplate's namespace and the
-  # Secrets live next to the AgentTemplate, so every namespace that hosts
-  # AgentTemplates needs one entry with itself as the allowed namespace. The
-  # golden actor of every template boots in Substrate's own atespace
-  # ate-golden and fetches the template's git skills with the same
-  # credentials, so ate-golden needs every one of those namespaces too. The
-  # default covers the kagent namespace, where the agent charts install.
-  credentialProvider:
-    namespacePolicies:
-      - atespace: kagent
-        allowedNamespaces: [kagent]
-      - atespace: ate-golden
-        allowedNamespaces: [kagent]
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows
     # the platform: with the platform's CNPG Cluster on (postgres.enabled) the

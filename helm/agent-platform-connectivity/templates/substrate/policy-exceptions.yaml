@@ -30,9 +30,6 @@ renders for a WorkerPool) and holds the lists to them:
   * the podcertificate-controller (Deployment, podcertificate-controller-system):
     drops ALL, adds NET_BIND_SERVICE, allowPrivilegeEscalation false, read-only
     root — but no runAsNonRoot and no seccompProfile.
-  * the credential provider (Deployment k8s-credential-provider, ate-system,
-    the Substrate line from 1.1.0): non-root user, drops ALL,
-    allowPrivilegeEscalation false, read-only root — but no seccompProfile.
 
 Kinds: the Pod and the controller kind of each workload (Kyverno evaluates the
 controller through its autogen rules, then the pod). A selector is matched
@@ -153,28 +150,4 @@ spec:
         selector:
           matchLabels:
             app: podcertificate-controller
----
-apiVersion: kyverno.io/v2
-kind: PolicyException
-metadata:
-  name: substrate-credential-provider
-  namespace: {{ $polexNs }}
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-    agent-platform.giantswarm.io/substrate-workload: credential-provider
-spec:
-  exceptions:
-  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "check-seccomp-strict")) | nindent 2 }}
-  match:
-    any:
-    - resources:
-        kinds:
-        - Pod
-        - Deployment
-        - ReplicaSet
-        namespaces:
-        - {{ $ns }}
-        selector:
-          matchLabels:
-            app: k8s-credential-provider
 {{- end }}

@@ -188,7 +188,7 @@ def main(meta: str, connectivity: str) -> int:
     url, constraint = cc.source(source)
     tags = cc.registry_tags(url)
     floor = constraint.split()[0].lstrip(">=")
-    version = cc.fluxsemver.resolve(tags, constraint) or cc.fallback("kagent", url, constraint, tags, floor)
+    version = cc.fluxsemver.resolve(tags, constraint) or cc.fallback("kagent", constraint, tags, floor)
     with tempfile.TemporaryDirectory() as d:
         resolved = cc.pull(url, version, d)
         print(f"kagent chart {resolved} ({url}, the range {constraint!r})")
