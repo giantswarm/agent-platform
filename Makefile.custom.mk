@@ -1599,13 +1599,21 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@grep -q 'port: "8443"' /tmp/vkn-sub-router-workers.out || { echo "FAIL: the atenet router has no egress to the worker pods' mTLS CONNECT listener (8443) — every turn fails with 'Connect: deadline has elapsed' (#383)"; exit 1; }
 	@for n in substrate-ate-api-server substrate-ate-controller substrate-atelet substrate-atenet-router substrate-dns substrate-podcertificate-controller; do grep -q "^  name: $$n$$" /tmp/vkn-sub.out || { echo "FAIL: no policy $$n"; exit 1; }; done
 	@awk "/^  name: substrate-ate-api-server$$/,/^---/" /tmp/vkn-sub.out | grep -q 'port: "8085"' || { echo "FAIL: ate-api-server has no egress to atelet's hostPort 8085 (the bootstrap API → node agent rule upstream lacks)"; exit 1; }
+	@grep -A4 'app: k8s-credential-provider' /tmp/vkn-sub-egress.out | grep -q 'port: "50051"' || { echo "FAIL: the egress gateway has no egress to the credential provider's FetchSecret (50051): every credential injection times out and no golden snapshot completes"; exit 1; }
+	@awk "/^  name: substrate-k8s-credential-provider$$/,/^---/" /tmp/vkn-sub.out >/tmp/vkn-sub-credprov.out
+	@grep -q 'app: k8s-credential-provider' /tmp/vkn-sub-credprov.out || { echo "FAIL: no policy selects the credential provider (app: k8s-credential-provider); with policy enforcement always it is default-denied, its readiness probe fails"; exit 1; }
+	@awk '/^  ingress:/,/^  egress:/' /tmp/vkn-sub-credprov.out | grep -A5 'app: atenet-egress' | grep -q 'port: "50051"' || { echo "FAIL: the credential provider does not admit atenet-egress on 50051"; cat /tmp/vkn-sub-credprov.out; exit 1; }
+	@awk '/^  ingress:/,/^  egress:/' /tmp/vkn-sub-credprov.out | grep -A5 -- '- cluster' | grep -q 'port: "9090"' || { echo "FAIL: the credential provider does not admit its probe and metrics port 9090 from the cluster"; exit 1; }
+	@awk '/^  egress:/,0' /tmp/vkn-sub-credprov.out | grep -q -- '- kube-apiserver' || { echo "FAIL: the credential provider cannot reach the apiserver (it reads the Secrets it serves)"; exit 1; }
+	@echo "ok: the credential provider: atenet-egress reaches it on 50051, it admits atenet-egress on 50051 and the cluster on 9090, reaches the apiserver"
 	@if grep -q 'kagent-agent-muster-egress' /tmp/vkn-sub.out; then echo "FAIL: the v1alpha2 agent pods' egress policy is back; the actors' egress is the egress gateway's"; exit 1; fi
 	@echo "ok: Substrate hops (cilium)"
 	@echo "--> Agent Substrate on, kubernetes flavour: the ingress policies of the hops, no egress policy, no cilium.io object"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes >/tmp/vkn-sub-k8s.out 2>&1 || { cat /tmp/vkn-sub-k8s.out; exit 1; }
-	@for n in substrate-ate-api-server-ingress substrate-atenet-router-ingress substrate-atenet-egress-ingress substrate-dns-ingress substrate-workers-ingress substrate-actors-to-kagent-controller; do grep -q "^  name: $$n$$" /tmp/vkn-sub-k8s.out || { echo "FAIL: kubernetes flavour: no policy $$n"; exit 1; }; done
+	@for n in substrate-ate-api-server-ingress substrate-atenet-router-ingress substrate-atenet-egress-ingress substrate-k8s-credential-provider-ingress substrate-dns-ingress substrate-workers-ingress substrate-actors-to-kagent-controller; do grep -q "^  name: $$n$$" /tmp/vkn-sub-k8s.out || { echo "FAIL: kubernetes flavour: no policy $$n"; exit 1; }; done
 	@if grep -q 'cilium.io' /tmp/vkn-sub-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavour"; exit 1; fi
 	@if awk '/^---/{p=0} /^  name: substrate-/{p=1} p' /tmp/vkn-sub-k8s.out | grep -q 'policyTypes: \[Egress\]'; then echo "FAIL: the kubernetes flavour renders an egress policy for Substrate; it renders ingress only, as for kagent (model-manager, on by default, has its own egress policy in this flavour)"; exit 1; fi
+	@awk "/^  name: substrate-k8s-credential-provider-ingress$$/,/^---/" /tmp/vkn-sub-k8s.out | grep -A6 'app: atenet-egress' | grep -q 'port: 50051' || { echo "FAIL: kubernetes flavour: the credential provider does not admit atenet-egress on 50051"; exit 1; }
 	@echo "ok: Substrate hops (kubernetes)"
 	@echo "--> Substrate off: none of its policies renders"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set muster.enabled=true --set networkPolicy.flavor=cilium >/tmp/vkn-nosub.out 2>&1 || { cat /tmp/vkn-nosub.out; exit 1; }

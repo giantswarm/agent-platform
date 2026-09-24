@@ -32,6 +32,11 @@ what (the substrate chart's arguments and Service definitions):
         store :9000.
   ate-controller, dns, podcertificate-controller ──▶ the apiserver (and
         ate-controller ──▶ ate-api :443); dns answers the actors' lookups.
+  atenet-egress ──▶ k8s-credential-provider :50051 (FetchSecret, gRPC over
+        mTLS as atenet-egress's SPIFFE identity: the Secret an actor's upstream
+        request carries, e.g. a git skill's token); k8s-credential-provider ──▶
+        the apiserver (the Secrets) and the OTLP gateway, its /readyz and
+        /metrics on 9090.
   ate-api-server, ate-controller, atelet, atenet-router ──▶ the OTLP gateway
         substrate.otel names (agent-platform.substrate.otlpEgress); atenet-egress
         exports nothing.
@@ -439,6 +444,17 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # The credential provider: every credential atenet-egress injects into an
+    # actor's upstream request (a git skill's token, an MCP server's key) is
+    # fetched here first. Without the rule FetchSecret times out after 10 s,
+    # the request is refused 403 and no golden snapshot completes.
+    - toEndpoints:
+        - matchLabels:
+            app: k8s-credential-provider
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
     {{- if and $kagentOn .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
     - toEndpoints:
         - matchLabels:
@@ -592,6 +608,43 @@ spec:
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
     - toEntities:
         - kube-apiserver
+---
+# k8s-credential-provider: answers atenet-egress's FetchSecret on 50051 (it
+# admits only atenet-egress's SPIFFE identity) with the Secret an actor's
+# upstream request carries, read from the apiserver; /readyz (the kubelet's
+# probe) and /metrics on 9090.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-k8s-credential-provider
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: k8s-credential-provider
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: atenet-egress
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    {{- with include "agent-platform.substrate.otlpEgress" . }}
+    {{- . | nindent 4 }}
+    {{- end }}
 ---
 # The worker pods of every WorkerPool in the kagent namespace: a turn comes in
 # from atenet-router on the tunnel (443) and the mTLS CONNECT listener (8443);
@@ -776,6 +829,30 @@ spec:
           protocol: TCP
     - ports:
         - port: 15020
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-k8s-credential-provider-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: k8s-credential-provider
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: atenet-egress
+      ports:
+        - port: 50051
+          protocol: TCP
+    - ports:
+        - port: 9090
           protocol: TCP
 ---
 apiVersion: networking.k8s.io/v1

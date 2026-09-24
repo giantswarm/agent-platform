@@ -645,6 +645,25 @@ def hold_credential_provider_exception(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+CREDENTIAL_PROVIDER_EGRESS = re.compile(
+    r"    # The credential provider: every credential atenet-egress injects into an\n"
+    r"(?:    #.*\n)*"
+    r"    - toEndpoints:\n        - matchLabels:\n            app: k8s-credential-provider\n"
+    r"      toPorts:\n        - ports:\n            - port: \"50051\"\n              protocol: TCP\n")
+
+
+def hold_credential_provider_netpol(here: str, there: str) -> tuple:
+    """The two connectivity renders without the credential provider's network
+    policies and atenet-egress's rule to it (Substrate 1.1.0's k8s-credential-provider
+    on 50051, no policy on GOLDEN_REF). Dropped once GOLDEN_REF carries them."""
+    def strip(render: str) -> str:
+        docs = [d for d in render.split("\n---\n") if "name: substrate-k8s-credential-provider" not in d]
+        return CREDENTIAL_PROVIDER_EGRESS.sub("", "\n---\n".join(docs))
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: credential-provider hold — the k8s-credential-provider policies and atenet-egress's rule to it are left out of the golden comparison")
+    return h, strip(there)
+
+
 DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
 DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
 
@@ -756,6 +775,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_bootstrap_memory(here, there)
                 here, there = hold_substrate_bootstrap(here, there)
                 here, there = hold_credential_provider_exception(here, there)
+                here, there = hold_credential_provider_netpol(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
