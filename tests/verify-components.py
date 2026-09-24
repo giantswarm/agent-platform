@@ -120,9 +120,10 @@ LINE = {
     # belongs to the 3.x meta chart. The floor is 2.0.0, the Slack-only line
     # (giantswarm/klaus-gateway#319): the klausGateway block forwards no
     # lifecycle.driver, and a 1.x gateway without one falls back to operator
-    # with no operatorMCPURL and does not start. The ceiling stops before the
-    # major that deletes the six no-op keys from that chart's schema.
-    "klaus-gateway": (GSOCI, ">=2.0.0 <4.0.0", []),
+    # with no operatorMCPURL and does not start. 3.3.0 names a turn's failure
+    # class in the thread, the turn record and the turn metric
+    # (giantswarm/klaus-gateway#329).
+    "klaus-gateway": (GSOCI, ">=3.3.0 <4.0.0", []),
 }
 
 # The kagent.dev API version the 4.x line serves, pinned into both managers'
