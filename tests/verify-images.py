@@ -90,10 +90,6 @@ INPUTS = ["--set", "global.domain=ci.example.com", "--set", "global.identity.iss
 # publishes it and removes the entry: a regular expression over `<path>=<value>`
 # (the rendered object's kind/name, the field path and the value).
 PENDING = {
-    # The upstream CloudNativePG chart, behind a Giant Swarm wrapper release on
-    # the same operator line (giantswarm/agent-platform#580).
-    r"OCIRepository/cloudnative-pg\.spec\.url=oci://ghcr\.io/cloudnative-pg/charts/cloudnative-pg":
-        "the CloudNativePG operator chart from gsoci (giantswarm/agent-platform#580)",
     # The substrate chart's rustfs-bucket-init Job runs Docker Hub's aws-cli by
     # its short name, and the meta chart forwards that value unchanged on
     # purpose (values.yaml substrate.images.awsCli): the Job is a release

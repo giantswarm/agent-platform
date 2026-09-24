@@ -364,7 +364,7 @@ The components the [agent-platform-standalone](https://github.com/giantswarm/age
 |---|---|---|---|---|
 | `backstage` | [giantswarm/backstage](https://github.com/giantswarm/backstage) | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.x` | `cloudnative-pg` |
 | `mcp-kubernetes` | [giantswarm/mcp-kubernetes](https://github.com/giantswarm/mcp-kubernetes) | `oci://gsoci.azurecr.io/charts/giantswarm` | `>=1.1.1 <2.0.0` (the `global.identity` fallbacks the block relies on) | — |
-| `cloudnative-pg` | [cloudnative-pg/charts](https://github.com/cloudnative-pg/charts) (upstream) | `oci://ghcr.io/cloudnative-pg/charts` | `0.29.x` (one chart minor is one operator line; moving it is a deliberate edit, an operator upgrade rolls every instance pod) | — |
+| `cloudnative-pg` | [cloudnative-pg/charts](https://github.com/cloudnative-pg/charts) (upstream, its gsoci copy; the operator image from gsoci too) | `oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts` | `0.29.x` (one chart minor is one operator line; moving it is a deliberate edit, an operator upgrade rolls every instance pod) | — |
 | `kserve-llmisvc-crd` | [giantswarm/kserve](https://github.com/giantswarm/kserve) | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` (the kserve charts move together) | — |
 | `kserve-llmisvc-resources` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.2.x` | `kserve-llmisvc-crd` |
 | `kserve-runtime-configs` | giantswarm/kserve | `oci://gsoci.azurecr.io/charts/giantswarm` | `0.3.x` (into `kserve`; [The serving slice](#the-serving-slice-and-the-models-gateway)) | `kserve-llmisvc-crd` |
