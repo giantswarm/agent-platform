@@ -486,8 +486,12 @@ components:  # @schema additionalProperties: true
     # the chart (stamped at publish), not here. Re-pinning the line is one
     # values change: this range and kagent-crds' range move together, and the
     # Substrate range follows when the line's own Substrate pin moves (README
-    # "Re-pinning the kagent line").
-    versionRange: ">=1.0.2 <1.1.0"
+    # "Re-pinning the kagent line"). The floor is 1.0.3
+    # (giantswarm/kagent-upstream#81): the release whose ModelConfig carries
+    # spec.ollama.think, which model-manager writes on the Ollama models it
+    # wires that have the thinking capability, so their agents answer instead of
+    # thinking before every answer or replying with nothing.
+    versionRange: ">=1.0.3 <1.1.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -586,7 +590,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.0.2 <1.1.0"
+    versionRange: ">=1.0.3 <1.1.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
