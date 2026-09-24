@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The portal's app-config carries no `agentPlatform.modelManager` block** (giantswarm/agent-platform#318). The Models pages call model-manager's `x_model-manager_*` tools through muster as the signed-in person (giantswarm/backstage#2294, Backstage 2.19.0 on), so the REST `apiBaseUrl` the chart rendered with model-manager's route on was read by nothing. `verify-wiring` asserts it stays out; the `muster.installations` entry and the model-manager route are unchanged.
+
 - **The Qwen3 small presets `qwen3-4b-instruct`, `qwen3-8b-fp8` and `qwen3-14b`** (giantswarm/agent-platform#591). They pinned 2025 checkpoints whose successors are smaller or stronger under the same licence and are replaced by the 24 GB line-up above (`qwen3-5-4b` for the 4B, `qwen3-5-9b-fp8` or `gemma-4-12b` for the 8B, `gpt-oss-20b` or `gemma-4-12b` for the 14B — which, at 28 GiB of BF16 weights, never fit a 24 GB card and was tuned for a 128 GB node). The upgrade removes their ConfigMaps; a model already served from one keeps serving (the `LLMInferenceService` is model-manager's object), and an installation that wants one back carries its file under `modelServing.presets` (UPGRADE.md).
 - **The presets no single card holds: `qwen3-5-27b`, `qwen3-coder-next` and `qwen3-5-35b-a3b`** (giantswarm/agent-platform#591): 54 GiB BF16, 80 GiB FP8 and 70 GiB BF16 of weights exceed the 48 GB GPU they would target; the presets above are their model-image successors of the same shape. The shipped set goes from twelve to eleven presets; `tests/verify-gpu-pool.py` leaves each side's own presets out of the golden comparison until the golden carries this change.
 
