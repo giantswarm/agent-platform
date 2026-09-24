@@ -1020,7 +1020,7 @@ DPT_POLICY := agent-platform-connectivity-tracing
 DPT_EGRESS := agent-platform-connectivity-dataplane-otlp-egress
 
 .PHONY: verify-dataplane-tracing
-verify-dataplane-tracing: ## Assert the agentgateway data plane's trace export (giantswarm/giantswarm#36711): the connectivity chart renders the Gateway-scoped -tracing AgentgatewayPolicy (frontend.tracing, url and protocol from gateway.parameters.dataPlaneEnv, global.observability.traces.otlp winning when its endpoint is set) and -dataplane-otlp-egress (DNS + the endpoint's namespace on its port in the cilium flavour, the cluster entity for a host that is not an in-cluster Service, a namespaceSelector in the kubernetes one) exactly while an endpoint is set; none in muster-direct or with no endpoint, no egress policy with networkPolicy off; gateway.parameters.podLabels reaches the pod template; the meta chart forwards the tenant label.
+verify-dataplane-tracing: ## Assert the agentgateway data plane's trace export (giantswarm/giantswarm#36711): the connectivity chart renders the Gateway-scoped -tracing AgentgatewayPolicy (frontend.tracing, url and protocol from gateway.parameters.dataPlaneEnv, global.observability.traces.otlp winning when its endpoint is set) and -dataplane-otlp-egress (DNS + the endpoint's namespace on its port in the cilium flavour, the cluster entity for a host that is not an in-cluster Service, a namespaceSelector in the kubernetes one) exactly while an endpoint is set; none in muster-direct or with no endpoint, no egress policy with networkPolicy off; gateway.parameters.podLabels reaches the pod template; gateway.tracing.randomSampling reaches the policy as a quoted CEL literal (the chart's 0.1 by default, a number or a boolean an installation sets as written; empty, null and 0 render none; the schema refuses what is not a literal between 0 and 1); the meta chart forwards the tenant label and the same sampling default.
 	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
 	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set 'gateway.parameters.podLabels.observability\.giantswarm\.io/tenant=giantswarm' >/tmp/vdt.out 2>&1 || { cat /tmp/vdt.out; exit 1; }
 	@$(PICK) /tmp/vdt.out AgentgatewayPolicy $(DPT_POLICY) >/tmp/vdt-pol.out || { echo "FAIL: no AgentgatewayPolicy $(DPT_POLICY) with the default data-plane endpoint"; exit 1; }
@@ -1030,7 +1030,22 @@ verify-dataplane-tracing: ## Assert the agentgateway data plane's trace export (
 	@grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' /tmp/vdt-cnp.out && grep -q 'io.kubernetes.pod.namespace: kube-system$$' /tmp/vdt-cnp.out && grep -q 'port: "4317"' /tmp/vdt-cnp.out && grep -q 'k8s-app: kube-dns' /tmp/vdt-cnp.out || { echo "FAIL: the egress policy does not admit DNS and kube-system:4317 for the data-plane pods"; cat /tmp/vdt-cnp.out; exit 1; }
 	@if grep -q 'world\|kube-apiserver\|toCIDR' /tmp/vdt-cnp.out; then echo "FAIL: the egress policy admits more than DNS and the collector"; exit 1; fi
 	@grep -A3 '^      template:$$' /tmp/vdt.out | grep -q '^            observability.giantswarm.io/tenant: giantswarm$$' || { echo "FAIL: gateway.parameters.podLabels does not reach the data-plane pod template"; exit 1; }
+	@grep -q '^      randomSampling: "0.1"$$' /tmp/vdt-pol.out || { echo "FAIL: the tracing policy does not start traces for 0.1 of the requests with no traceparent (gateway.tracing.randomSampling)"; cat /tmp/vdt-pol.out; exit 1; }
 	@echo "ok: defaults"
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.tracing.randomSampling=1 >/tmp/vdt-rs1.out 2>&1 || { cat /tmp/vdt-rs1.out; exit 1; }
+	@$(PICK) /tmp/vdt-rs1.out AgentgatewayPolicy $(DPT_POLICY) | grep -q '^      randomSampling: "1"$$' || { echo "FAIL: a number set by an installation does not reach randomSampling as its literal"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set-string gateway.tracing.randomSampling=false >/tmp/vdt-rsb.out 2>&1 || { cat /tmp/vdt-rsb.out; exit 1; }
+	@$(PICK) /tmp/vdt-rsb.out AgentgatewayPolicy $(DPT_POLICY) | grep -q '^      randomSampling: "false"$$' || { echo "FAIL: a boolean set by an installation does not reach randomSampling as written"; exit 1; }
+	@for v in 'gateway.tracing.randomSampling=' 'gateway.tracing.randomSampling=null' 'gateway.tracing.randomSampling=0'; do \
+	  helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set "$$v" >/tmp/vdt-rs0.out 2>&1 || { cat /tmp/vdt-rs0.out; exit 1; }; \
+	  $(PICK) /tmp/vdt-rs0.out AgentgatewayPolicy $(DPT_POLICY) >/tmp/vdt-rs0-pol.out || { echo "FAIL: no tracing policy with $$v (sampling off must keep the export of traced requests)"; exit 1; }; \
+	  if grep -q 'randomSampling' /tmp/vdt-rs0-pol.out; then echo "FAIL: $$v still renders randomSampling"; exit 1; fi; \
+	done
+	@for v in 10% 1.5 always; do \
+	  if helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set-string "gateway.tracing.randomSampling=$$v" >/tmp/vdt-rsbad.out 2>&1; then echo "FAIL: randomSampling $$v passed the schema"; exit 1; \
+	  elif ! grep -q 'randomSampling' /tmp/vdt-rsbad.out; then echo "FAIL: randomSampling $$v failed for the wrong reason"; cat /tmp/vdt-rsbad.out; exit 1; fi; \
+	done
+	@echo "ok: random sampling"
 	@helm template t $(CONNECTIVITY_DIR) $(DPT_VM) --set global.observability.traces.otlp.endpoint=https://collector.example.com --set global.observability.traces.otlp.protocol=http/protobuf >/tmp/vdt-global.out 2>&1 || { cat /tmp/vdt-global.out; exit 1; }
 	@$(PICK) /tmp/vdt-global.out AgentgatewayPolicy $(DPT_POLICY) | grep -q '^      url: "https://collector.example.com"$$' || { echo "FAIL: global.observability.traces.otlp.endpoint does not win"; exit 1; }
 	@$(PICK) /tmp/vdt-global.out AgentgatewayPolicy $(DPT_POLICY) | grep -q '^      protocol: HTTP$$' || { echo "FAIL: http/protobuf does not map to HTTP"; exit 1; }
@@ -1050,6 +1065,7 @@ verify-dataplane-tracing: ## Assert the agentgateway data plane's trace export (
 	@echo "ok: guards"
 	@helm template t $(CHART_DIR) $(VM) >/tmp/vdt-meta.out 2>&1 || { cat /tmp/vdt-meta.out; exit 1; }
 	@$(PICK) /tmp/vdt-meta.out HelmRelease agent-platform-connectivity | grep -A1 '^        podLabels:$$' | grep -q '^          observability.giantswarm.io/tenant: giantswarm$$' || { echo "FAIL: the meta chart does not forward the data plane's tenant label"; exit 1; }
+	@$(PICK) /tmp/vdt-meta.out HelmRelease agent-platform-connectivity | grep -A1 '^      tracing:$$' | grep -q '^        randomSampling: "0.1"$$' || { echo "FAIL: the meta chart does not forward gateway.tracing.randomSampling 0.1 to the connectivity release"; exit 1; }
 	@echo "ok: $@"
 
 # The data plane's buffer (giantswarm/agent-platform#630): the connectivity chart

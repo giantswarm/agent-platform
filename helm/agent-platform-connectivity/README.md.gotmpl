@@ -267,6 +267,48 @@ CRD refuses zero and anything above 4 GiB; the schema refuses what is not a
 quantity (`8MB`). The models Gateway of the serving slice is not this
 Gateway and keeps agentgateway's defaults for the LLM path.
 
+## The data plane's traces
+
+The chart turns on the data plane's trace export with ONE Gateway-scoped
+`AgentgatewayPolicy`, `<release>-tracing`
+(`templates/agentgateway/tracing.yaml`, `frontend.tracing`). The policy sends
+spans to the endpoint in `gateway.parameters.dataPlaneEnv`, or to
+`global.observability.traces.otlp` when its endpoint is set. The exporter
+sends no headers, so the tenant comes from the pod label in
+`gateway.parameters.podLabels`.
+
+The incoming `traceparent` decides if the data plane traces a request:
+
+| Incoming request | Traced |
+|---|---|
+| A sampled `traceparent` (`-01`): an agent's turn, a klaus-gateway A2A call | Always |
+| No `traceparent`: an MCP client such as Claude Code through muster | At `gateway.tracing.randomSampling` |
+| An unsampled `traceparent` (`-00`) | Never |
+
+`gateway.tracing.randomSampling` is **0.1** by default. The proxy evaluates it
+per request as a CEL expression, so the value is a number between 0 and 1 or
+a boolean. When the data plane starts a trace, it sends a sampled
+`traceparent` upstream, so muster and the server behind it add their spans
+under the data plane's span. On gazelle, about 6,400 requests a day arrive
+with no `traceparent`. At 0.1, about 640 of them get a trace (about 1,100
+spans), so a repeated failure reaches Tempo in minutes.
+
+```yaml
+gateway:
+  tracing:
+    randomSampling: "0.01"   # a number between 0 and 1, true or false
+```
+
+An empty value or 0 turns random sampling off, and the policy still exports
+the requests that arrive with a sampled `traceparent`. The schema refuses a
+value that is not a number between 0 and 1 or a boolean (`10%`, `1.5`).
+
+**Span metrics are not request rates.** `traces_spanmetrics_calls_total` for
+`service="agentgateway"` counts every request with a sampled `traceparent`
+plus the random share of the others. Use `agentgateway_requests_total` for
+rates. `make verify-dataplane-tracing` asserts the policy, the sampling value
+and the schema.
+
 ## Data-plane availability
 
 Every MCP call and, with LLM routing on, every model call crosses the

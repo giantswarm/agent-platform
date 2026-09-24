@@ -445,6 +445,21 @@ def hold_dataplane_buffer(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+# giantswarm/giantswarm#36711: the data plane's random trace sampling —
+# gateway.tracing.randomSampling, a key GOLDEN_REF's closed gateway block refuses,
+# forwarded by the meta chart to the connectivity release (the connectivity
+# chart renders it inside the -tracing policy, already held above). Cut from the
+# meta render; dropped once GOLDEN_REF carries it.
+RANDOM_SAMPLING_VALUE = re.compile(r'^(\s+)tracing:\n\1  randomSampling: "0\.1"\n', re.M)
+
+
+def hold_dataplane_sampling(here: str, there: str) -> tuple:
+    """The two meta renders with the forwarded random sampling left out."""
+    if (h := RANDOM_SAMPLING_VALUE.sub("", here)) != here or RANDOM_SAMPLING_VALUE.search(there):
+        print("note: #36711 hold — the data plane's random trace sampling (gateway.tracing.randomSampling) is left out of the golden comparison")
+    return h, RANDOM_SAMPLING_VALUE.sub("", there)
+
+
 def hold_dataplane_tracing(here: str, there: str) -> tuple:
     """The two connectivity renders with the data plane's tracing objects left out."""
     def strip(render: str) -> str:
@@ -589,6 +604,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_substrate_range(here, there)
                 here, there = hold_muster_floor(here, there)
                 here, there = hold_otlp_endpoints(here, there)
+                here, there = hold_dataplane_sampling(here, there)
             else:
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)
