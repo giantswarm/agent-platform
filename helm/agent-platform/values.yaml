@@ -616,8 +616,9 @@ components:  # @schema additionalProperties: true
     # 1.0 releases, whose WorkerPool CRD carries spec.template
     # .topologySpreadConstraints and podAntiAffinity (agent-platform.substrate
     # .workerPoolSpreadFloor, the render guard on kagent.substrateWorkerPool
-    # .template) and whose egress gateway runs the agentgateway line's release
-    # named in substrate.images.agentgateway below. The worker image the kagent
+    # .template) and whose router and egress gateway run the agentgateway
+    # line's build each release stamps (substrate.images below forwards no
+    # data plane: it follows the release). The worker image the kagent
     # WorkerPool runs is DERIVED from this range's floor
     # (agent-platform.substrate.workerImage: substrate.image.registry,
     # ateom-gvisor, the floor), never taken from the kagent chart's stamp: the
@@ -3546,8 +3547,11 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   # name (a value wins over a chart default; a default that moves alone
   # renders a tag that exists under another name). The connectivity chart's
   # agentgateway.proxy.image (the AgentgatewayParameters of its data planes)
-  # and the Substrate line's egress dataplane (substrate.images.agentgateway)
-  # name the same release; move all of them together.
+  # names the same release; move them together. The Substrate line's router
+  # and egress run the build their Substrate release stamps, a release of
+  # this line under proxy.image's repository (`make verify-substrate-images`),
+  # from a static config the release renders rather than this controller's
+  # xDS: they follow components.substrate.versionRange, not this tag.
   controller:
     image:
       repository: giantswarm/agentgateway-upstream/controller
@@ -4616,22 +4620,21 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # reaches the collector untenanted until the chart grows one.
   otel:
     endpoint: http://otlp-gateway.kube-system.svc:4317
-  # The chart's own third-party image defaults, pinned to their gsoci copies
-  # (giantswarm/agent-platform#575, #580). The chart names Docker Hub —
-  # `postgres:18-alpine@…`, `rustfs/rustfs:…`, `amazon/aws-cli:…`, short names
-  # whose registry is the node runtime's call (containerd defaults to
-  # docker.io; CRI-O in short-name enforcing mode refuses them) — and the
-  # agentgateway line's ghcr build, and this block travels verbatim into the
-  # substrate release, where `make verify-images` could not see them. Each
-  # value here is the SAME DIGEST under gsoci.azurecr.io/giantswarm — retagger's
-  # mirrors of library/postgres, rustfs/rustfs and the agentgateway line's
-  # release tags — so the pods roll once onto identical bits. These pins hold
-  # for the Substrate release components.substrate.versionRange confines: a
-  # re-pin moves them with it (`make verify-substrate-images` renders the
-  # pinned release with this block and refuses a digest or tag that drifted
-  # from the release's own defaults, or an image left off gsoci). The line's
-  # own defaults are the durable fix; until its release carries them this
-  # block is the fleet's.
+  # The chart's third-party images (giantswarm/agent-platform#575, #580, #654).
+  # The Substrate line stamps each default at publish — the gsoci copies of
+  # postgres, rustfs and busybox, and the agentgateway line's build its release
+  # was written for — so the release pulls them from the one registry `make
+  # verify-images` holds every default to. A key here wins over that default
+  # (this block travels verbatim into the substrate release), which makes it a
+  # hold, not a copy: `make verify-substrate-images` requires every release the
+  # range admits to name its defaults on gsoci and published, and a key here to
+  # carry the floor's digest (or tag) — a newer admitted patch naming another
+  # default is no failure, the pin holds the floor's bits until the floor moves.
+  # The atenet data plane (images.agentgateway) is never pinned here: the
+  # release's router and egress run the static config it renders, written for
+  # the build it stamps, so an installation that floats onto a Substrate patch
+  # runs that patch's data plane — the check refuses the key. An installation
+  # that mirrors the registry sets images.* itself.
   images:
     # The bundled control-plane database (postgres.enabled true, or auto
     # without the platform Cluster). The chart pins Docker Hub's floating
@@ -4651,13 +4654,6 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # name until then. Set here so the rendered release carries it and the
     # check sees it, as it sees the other three.
     awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
-    # The agentgateway build atenet-router and atenet-egress run: the release
-    # of the agentgateway line the Substrate release was published with (its
-    # egress config is written for that build's config schema), the line's own
-    # stable semver under its nested name on gsoci — the same release the
-    # agentgateway block above names for the controller and the data plane.
-    # The three move together; this one moves with the Substrate pin.
-    agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.2
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3
