@@ -13,11 +13,11 @@ not openai), and three providers have one. */}}
 {{- if and .baseUrl (not $urlKey) }}
 {{- fail (printf "kagent.modelConfigs[].baseUrl is set on %q, whose provider %s has no baseUrl in ModelConfigSpec (Anthropic, OpenAI and SAPAICore have one; every other provider names its upstream through its own fields)" .name $provider) }}
 {{- end }}
-{{- /* The listener forwards to one provider (llmRouting.backend.provider). An
-entry for any other provider would reach the wrong upstream, so it keeps the
-direct path even with routing on. */}}
+{{- /* The listener's ModelConfig provider is the first llmRouting.models
+entry's (agent-platform.llmRouting.provider). An entry for any other provider
+keeps the direct path even with routing on. */}}
 {{- $onListener := false }}
-{{- if and $routed $urlKey (eq (lower $provider) (lower $.Values.llmRouting.backend.provider)) }}
+{{- if and $routed $urlKey (eq (lower $provider) (include "agent-platform.llmRouting.provider" $)) }}
 {{- $onListener = true }}
 {{- end }}
 {{- $baseUrl := .baseUrl | default (ternary $listener "" $onListener) }}
