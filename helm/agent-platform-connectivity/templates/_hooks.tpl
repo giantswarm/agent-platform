@@ -18,8 +18,9 @@ behind; #563). All run under the
 restricted pod security profile (this chart's Jobs have to be admitted where
 restricted PSS is enforced — the hook pods themselves violate nothing) as the
 ServiceAccount <release>-hooks (templates/substrate/hooks-rbac.yaml): a
-ClusterRole on secrets, configmaps and namespaces (on persistentvolumeclaims
-while the cache claim is this chart's, on the pre-pull DaemonSet by name while
+ClusterRole on secrets, configmaps and namespaces (on persistentvolumeclaims,
+and get on storageclasses, while the cache claim is this chart's, on the
+pre-pull DaemonSet by name while
 it renders) — the bootstrap writes into two
 namespaces the substrate release has not created yet and the databases hook
 into the namespaces of postgres.databases.*.secretNamespaces, none of which
