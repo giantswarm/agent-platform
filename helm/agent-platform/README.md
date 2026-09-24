@@ -300,7 +300,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.12.0 <6.0.0"` |  |
+| components.muster.versionRange | string | `">=5.31.4 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.driftDetection.mode | string | `"enabled"` |  |
@@ -376,7 +376,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.klaus-gateway.versionRange | string | `">=2.0.0 <4.0.0"` |  |
+| components.klaus-gateway.versionRange | string | `">=3.3.0 <4.0.0"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
 | components.klaus-gateway.omitKeys[0] | string | `"observability.enabled"` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |

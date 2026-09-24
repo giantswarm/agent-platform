@@ -9,12 +9,14 @@
 # an install test case.)
 #
 # Snapshot of the internal dogfooding track for the 4.0 line (kagent API v2).
-# The muster pin is the floor of components.muster.versionRange: the toolset
-# presets in values.yaml select by the tool-group label, which a muster before
-# 5.12.0 does not know (it refuses to start), and which agent-platform-mcps,
-# agent-manager and model-manager stamp on their MCPServer CRs from the versions
-# below. The model-manager pin is the floor of its range: 1.0.8 is the first
-# release that writes num_ctx on the Ollama ModelConfigs it wires
+# The muster pin is the floor of components.muster.versionRange: 5.31.4 ends a
+# session on a forwarded bearer at the bearer's exp (giantswarm/muster#1323);
+# the toolset presets in values.yaml select by the tool-group label, which a
+# muster before 5.12.0 does not know (it refuses to start), and which
+# agent-platform-mcps, agent-manager and model-manager stamp on their MCPServer
+# CRs from the versions below.
+# The model-manager pin is the floor of its range: 1.0.8 is the first release
+# that writes num_ctx on the Ollama ModelConfigs it wires
 # (giantswarm/model-manager#157); it reads the GPU node pool input from the
 # discovery ConfigMap (spec.gpuPool, giantswarm/agent-platform#315, from 0.23.0)
 # and starts with no backend and registers backends at runtime (#329, from
@@ -52,7 +54,7 @@ gitops:
   interval: 30m
 
 components:
-  muster:                        { versionRange: "5.12.0" }
+  muster:                        { versionRange: "5.31.4" }
   agentgateway:                  { versionRange: "2.4.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
@@ -60,11 +62,12 @@ components:
   kagent-crds:                   { versionRange: "1.0.2" }
   substrate:                     { versionRange: "1.0.3" }
   substrate-crds:                { versionRange: "1.0.3" }
-  # 2.0.0 is the Slack-only gateway (giantswarm/klaus-gateway#319): the meta
-  # chart forwards no lifecycle.driver any more, and a 1.x gateway without it
-  # falls back to its own default (operator, with no operatorMCPURL) and never
-  # starts. Running on graveler, glean and gazelle.
-  klaus-gateway:                 { versionRange: "2.0.0" }
+  # 3.3.0 names a failed turn's class (tools, platform, model, policy) in the
+  # thread, the turn record and the turn metric, and sends a tool-set or
+  # platform failure once more (giantswarm/klaus-gateway#329). Nothing below
+  # 2.0.0 starts: the meta chart forwards no lifecycle.driver
+  # (giantswarm/klaus-gateway#319).
+  klaus-gateway:                 { versionRange: "3.3.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.0.8" }
