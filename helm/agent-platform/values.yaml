@@ -4933,9 +4933,10 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # and KServe's own multi-GPU templates set 8Gi — the single-node
     # template's 1Gi is replaced. Memory-backed, so what is written counts
     # against the runtime container's memory limit; the bound reserves
-    # nothing. modelCacheSizeLimit bounds model-cache when
-    # modelServing.cache.enabled is false: the storage-initializer then
-    # downloads an hf:// model into it, so it holds the weights; a whole
+    # nothing. modelCacheSizeLimit bounds the volume the storage-initializer
+    # downloads an hf:// model into (model-cache or kserve-provision-location,
+    # by KServe release) when modelServing.cache.enabled is false — with the
+    # cache on the claim takes its place —, so it holds the weights; a whole
     # number of Gi or Ti, and the render fails when a preset in effect with
     # an hf:// storageUri needs more (requirements.weightsGiB; the largest
     # shipped one, nemotron-3-super-nvfp4, has 75). Every other emptyDir

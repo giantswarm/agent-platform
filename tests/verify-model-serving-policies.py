@@ -985,6 +985,8 @@ SHM_LIMIT, MODEL_CACHE_LIMIT, EMPTYDIR_LIMIT = "8Gi", "100Gi", "1Gi"
 # A volume whose own sizeLimit the chart keeps, and the volume KServe's modelcar path (an oci:// storageUri) adds.
 OWN_LIMIT = {"name": "scratch", "emptyDir": {"sizeLimit": "3Gi"}}
 PROVISION = "kserve-provision-location"
+# The volume the storage-initializer downloads into at /mnt/models, by KServe release; bounded by modelCacheSizeLimit with the cache off.
+DOWNLOAD_VOLUMES = ("model-cache", PROVISION)
 
 
 def unbounded(spec: dict) -> dict:
@@ -1048,7 +1050,7 @@ def check_emptydir_bounds(connectivity: str, meta: str, pods_policy: dict, deplo
                     fail(f"{shape} {uri} {kind}: {EMPTYDIR_AUDIT.name} passes it as KServe composes it; the negative control is gone")
             for cache, policy in (("on", pods_policy), ("off", cache_off)):
                 want = {name: (OWN_LIMIT["emptyDir"]["sizeLimit"] if name == OWN_LIMIT["name"] else SHM_LIMIT if name == "dshm"
-                               else MODEL_CACHE_LIMIT if name == "model-cache" and cache == "off" else EMPTYDIR_LIMIT)
+                               else MODEL_CACHE_LIMIT if name in DOWNLOAD_VOLUMES and cache == "off" else EMPTYDIR_LIMIT)
                         for name in emptydir_limits(pod["spec"])}
                 out = apply([policy], pod)
                 if out is None or emptydir_limits(out["spec"]) != want:
@@ -1069,7 +1071,7 @@ def check_emptydir_bounds(connectivity: str, meta: str, pods_policy: dict, deplo
                 fail(f"{shape} {uri}: the Deployment's template leaves with {out and emptydir_limits(out['spec']['template']['spec'])}, expected {want} "
                      f"and no failure of {EMPTYDIR_AUDIT.name}")
     ok(f"every emptyDir of the hf:// and oci:// model pods and of their Deployments' templates gets a sizeLimit (dshm {SHM_LIMIT}, "
-       f"model-cache {MODEL_CACHE_LIMIT} with the cache off, the rest {EMPTYDIR_LIMIT}, a volume's own kept), idempotently; "
+       f"the download's volume {MODEL_CACHE_LIMIT} with the cache off, the rest {EMPTYDIR_LIMIT}, a volume's own kept), idempotently; "
        f"{EMPTYDIR_AUDIT.name} fails them as KServe composes them and reports nothing on them mutated")
     serving = forwarded_values(meta, [])["modelServing"]["serving"]
     bounds = {k: serving.get(k) for k in ("shmSizeLimit", "modelCacheSizeLimit", "emptyDirSizeLimit")}

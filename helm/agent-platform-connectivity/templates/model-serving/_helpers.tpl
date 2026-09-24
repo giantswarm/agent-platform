@@ -631,9 +631,11 @@ Usage: $shape := include "agent-platform.modelServing.podShape" . | fromJson
 {{/*
 The Kyverno foreach entries that bound every emptyDir of a model pod
 (modelServing.serving: shmSizeLimit, modelCacheSizeLimit, emptyDirSizeLimit):
-dshm gets shmSizeLimit whatever KServe's template set, model-cache gets
-modelCacheSizeLimit when modelServing.cache.enabled is false (it then holds the
-storage-initializer's download), and every other emptyDir without a sizeLimit
+dshm gets shmSizeLimit whatever KServe's template set, the volume the
+storage-initializer downloads into (model-cache or kserve-provision-location,
+by KServe release) modelCacheSizeLimit when modelServing.cache.enabled is false
+(with the cache on, the redirect rule mounts the claim at /mnt/models instead
+and the emptyDir holds nothing), and every other emptyDir without a sizeLimit
 gets emptyDirSizeLimit; a sizeLimit the template set on one of those stays.
 The volumes are found by the pod spec's own list, so a pod shape's own
 emptyDirs (an hf:// pod's model-cache, an oci:// modelcar pod's
@@ -659,7 +661,10 @@ Usage: include "agent-platform.modelServing.emptyDirBounds" (dict "root" $ "spec
 {{- fail (printf "modelServing.serving.modelCacheSizeLimit (%s) is smaller than preset %s's %d GiB of weights: with modelServing.cache.enabled false its pod downloads them into model-cache" $limit $name $weights) -}}
 {{- end -}}
 {{- end -}}
+{{- /* The download's volume: model-cache on KServe releases that mount it at
+       /mnt/models, kserve-provision-location on the current ones. */ -}}
 {{- $_ := set $named "model-cache" $limit -}}
+{{- $_ := set $named "kserve-provision-location" $limit -}}
 {{- end -}}
 {{- $default := required "modelServing.serving.emptyDirSizeLimit is required: every emptyDir of a model pod is bounded" $s.emptyDirSizeLimit -}}
 {{- /* One JSON patch per volume, at its index: an add on an existing member
