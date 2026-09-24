@@ -490,6 +490,24 @@ def hold_substrate_otlp_egress(here: str, there: str) -> tuple:
     return h, t
 
 
+# giantswarm/agent-platform#513: the Substrate bootstrap hook's kubectl container
+# is limited to 256Mi (GOLDEN_REF: the hooks' shared 128Mi). That one limit is
+# blanked on BOTH sides, in that Job only; make verify-hooks-memory asserts every
+# hook container's resources. Drop once GOLDEN_REF carries #513.
+BOOTSTRAP_JOB = "kind: Job\nmetadata:\n  name: t-substrate-bootstrap\n"
+BOOTSTRAP_SH_LIMIT = re.compile(r"(\n        - name: sh\n(?:.*\n)*?            limits:\n              memory: )\S+")
+
+
+def hold_bootstrap_memory(here: str, there: str) -> tuple:
+    """The two connectivity renders with #513's bootstrap memory limit held equal on both sides."""
+    def strip(render: str) -> str:
+        return "\n---\n".join(BOOTSTRAP_SH_LIMIT.sub(r"\g<1><held: #513>", d, count=1) if BOOTSTRAP_JOB in d else d
+                               for d in render.split("\n---\n"))
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #513 hold — the Substrate bootstrap hook's kubectl container memory limit is left out of the golden comparison")
+    return h, strip(there)
+
+
 def hold_dataplane_podmonitor(here: str, there: str) -> tuple:
     """The two connectivity renders with this chart's retired PodMonitor left out."""
     def strip(render: str) -> str:
@@ -609,6 +627,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)
                 here, there = hold_substrate_otlp_egress(here, there)
+                here, there = hold_bootstrap_memory(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

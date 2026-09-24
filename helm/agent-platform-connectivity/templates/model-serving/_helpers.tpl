@@ -405,6 +405,11 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
        (--default-chat-template-kwargs='{"enable_thinking": false}'). */ -}}
 {{- range $args -}}
 {{- $arg := toString . -}}
+{{- /* The API interfaces a served model answers are read from its runtime's
+       route list, GET /openapi.json (model-manager); the flag removes it. */ -}}
+{{- if regexMatch "^--disable-fastapi-docs(=|$)" $arg -}}
+{{- fail (printf "%s: spec.args carries %s, which removes the runtime's /openapi.json — the route list the platform reads a served model's API interfaces from (chat completions, Responses, Messages, embeddings); drop the flag" $where (quote $arg)) -}}
+{{- end -}}
 {{- if regexMatch "[[:space:]\"'$`\\\\;&|<>(){}\\[\\]*?]" (regexReplaceAll "'[^']*'" $arg "") -}}
 {{- fail (printf "%s: spec.args %s carries whitespace, a quote or a shell metacharacter outside single quotes; the runtime template re-parses every argument through a shell (eval \"… $@\"), which splits it there and eats the quotes — write the value single-quoted inside one argument, e.g. --default-chat-template-kwargs='{\"enable_thinking\": false}'" $where (quote $arg)) -}}
 {{- end -}}
@@ -626,6 +631,66 @@ Usage: $shape := include "agent-platform.modelServing.podShape" . | fromJson
 {{- $llmisvc := dict "name" "llmisvc-workload" "kind" "LLMInferenceService" "nameLabel" "app.kubernetes.io/name" "runtimeContainer" "main" "port" (int $np.llmisvcWorkload.port) -}}
 {{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "kserve.io/component" "operator" "In" "values" (list "workload")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
 {{- $llmisvc | toJson -}}
+{{- end -}}
+
+{{/*
+The Kyverno foreach entries that bound every emptyDir of a model pod
+(modelServing.serving: shmSizeLimit, modelCacheSizeLimit, emptyDirSizeLimit):
+dshm gets shmSizeLimit whatever KServe's template set, the volume the
+storage-initializer downloads into (model-cache or kserve-provision-location,
+by KServe release) modelCacheSizeLimit when modelServing.cache.enabled is false
+(with the cache on, the redirect rule mounts the claim at /mnt/models instead
+and the emptyDir holds nothing), and every other emptyDir without a sizeLimit
+gets emptyDirSizeLimit; a sizeLimit the template set on one of those stays.
+The volumes are found by the pod spec's own list, so a pod shape's own
+emptyDirs (an hf:// pod's model-cache, an oci:// modelcar pod's
+kserve-provision-location) are bounded without being named and none is added.
+"spec" is the JMESPath of the pod spec (request.object.spec for a Pod,
+request.object.spec.template.spec for a Deployment), "nest" the keys the patch
+nests the spec under (list "spec" or list "spec" "template" "spec").
+Usage: include "agent-platform.modelServing.emptyDirBounds" (dict "root" $ "spec" "request.object.spec" "nest" (list "spec"))
+*/}}
+{{- define "agent-platform.modelServing.emptyDirBounds" -}}
+{{- $ms := .root.Values.modelServing -}}
+{{- $s := $ms.serving -}}
+{{- $named := dict "dshm" (required "modelServing.serving.shmSizeLimit is required: the model pod's /dev/shm is bounded" $s.shmSizeLimit) -}}
+{{- if not $ms.cache.enabled -}}
+{{- $limit := toString (required "modelServing.serving.modelCacheSizeLimit is required with modelServing.cache.enabled false: model-cache holds the download" $s.modelCacheSizeLimit) -}}
+{{- if not (regexMatch "^[1-9][0-9]*(Gi|Ti)$" $limit) -}}
+{{- fail (printf "modelServing.serving.modelCacheSizeLimit (%s) is a whole number of Gi or Ti, compared with the presets' requirements.weightsGiB" $limit) -}}
+{{- end -}}
+{{- $limitGiB := mul (trimSuffix "Gi" (trimSuffix "Ti" $limit) | int) (ternary 1024 1 (hasSuffix "Ti" $limit)) -}}
+{{- range $name, $entry := include "agent-platform.modelServing.presets" .root | fromJson -}}
+{{- $weights := dig "spec" "requirements" "weightsGiB" 0 $entry.preset | int -}}
+{{- if and (hasPrefix "hf://" (dig "spec" "model" "storageUri" "" $entry.preset)) (gt $weights $limitGiB) -}}
+{{- fail (printf "modelServing.serving.modelCacheSizeLimit (%s) is smaller than preset %s's %d GiB of weights: with modelServing.cache.enabled false its pod downloads them into model-cache" $limit $name $weights) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The download's volume: model-cache on KServe releases that mount it at
+       /mnt/models, kserve-provision-location on the current ones. */ -}}
+{{- $_ := set $named "model-cache" $limit -}}
+{{- $_ := set $named "kserve-provision-location" $limit -}}
+{{- end -}}
+{{- $default := required "modelServing.serving.emptyDirSizeLimit is required: every emptyDir of a model pod is bounded" $s.emptyDirSizeLimit -}}
+{{- /* One JSON patch per volume, at its index: an add on an existing member
+       replaces it, so a reinvoked webhook sets the same value again and the
+       volumes keep KServe's order (a strategic merge moves the patched
+       entries to the front of the list). */ -}}
+{{- $value := list -}}
+{{- range $name := keys $named | sortAlpha -}}
+{{- $value = append $value (printf "(element.name == '%s' && '%s')" $name (toString (get $named $name))) -}}
+{{- end -}}
+{{- $value = append $value (printf "element.emptyDir.sizeLimit || '%s'" (toString $default)) }}
+- list: {{ printf "%s.volumes" .spec | quote }}
+  preconditions:
+    all:
+      - key: {{ "{{ contains(keys(element), 'emptyDir') }}" | quote }}
+        operator: Equals
+        value: true
+  patchesJson6902: |-
+    - op: add
+      path: {{ printf "/%s/volumes/{{ elementIndex }}/emptyDir/sizeLimit" (join "/" .nest) }}
+      value: {{ printf "{{ %s }}" (join " || " $value) | quote }}
 {{- end -}}
 
 {{/*

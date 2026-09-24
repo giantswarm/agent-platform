@@ -179,7 +179,9 @@ knowledge:
       the platform Harness, the runtime of every agent (#409); muster for its
       own CiliumNetworkPolicy, whose egress selectors named the pre-rename
       namespace on a live cluster while the release manifest named the new one
-      (#287).
+      (#287); kserve-runtime-configs for the well-known
+      LLMInferenceServiceConfigs, which a torn-down slice's controller deleted
+      from under a release that stayed "in-sync" (#508).
   ownedCrds     — CRDs the component installs; a second owner on the cluster fails
       the render naming the release to remove first
       (agent-platform.validateCrdOwners in _helpers.tpl; skipped with the target
