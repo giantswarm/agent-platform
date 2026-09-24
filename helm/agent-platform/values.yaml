@@ -533,9 +533,10 @@ components:  # @schema additionalProperties: true
     # of the platform edits this release's objects in place (no HPA on its
     # Deployments, no webhook-injected field, no hook). An object of the
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
-    # disabled. kagent's and muster's only by default — turning it on for
-    # another release is a decision per release, its objects must tolerate the
-    # re-apply (tests/verify-kagent-wiring.py asserts the set).
+    # disabled. kagent's, muster's and kserve-runtime-configs' only by
+    # default — turning it on for another release is a decision per release,
+    # its objects must tolerate the re-apply (tests/verify-kagent-wiring.py
+    # asserts the set).
     driftDetection:  # @schema additionalProperties: true
       mode: enabled
     # These keys are the connectivity chart's, not kagent's: it reads them for
@@ -558,7 +559,6 @@ components:  # @schema additionalProperties: true
       - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
-      - serviceMonitor
       - uiRoute
       # The worker PodDisruptionBudget is the connectivity chart's (the kagent
       # chart has no budget template for the WorkerPool; #472).
@@ -1008,6 +1008,31 @@ components:  # @schema additionalProperties: true
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
+    # Drift detection on this release (HelmRelease v2 spec.driftDetection): on
+    # every reconcile — gitops.interval — helm-controller re-applies a config
+    # that differs from the release manifest or is missing, as a server-side
+    # apply, without a Helm revision. Because a slice torn down at once left
+    # the configs terminating under their controller's finalizer, the next
+    # install adopted them, the new controller then finished their deletion,
+    # and the release stayed "in-sync" with no config behind it: every
+    # LLMInferenceService composed from them failed ConfigNotFound until a
+    # forced reconcile (giantswarm/agent-platform#508). With it a missing
+    # config is back within one interval. The configs' spec is ignored: once
+    # Helm has applied them, KServe writes the fields its API types default
+    # (spec.model.uri, a port's protocol and appProtocol, an empty resources,
+    # a backendRef's group) into kserve-config-llm-scheduler and
+    # -latency-predictor, and helm-controller, comparing against the chart's
+    # manifest, corrected them on every reconcile and never came back Ready —
+    # a fresh install hung there (giantswarm/agent-platform#508). A missing
+    # config is still re-created: an object that is gone is drift whatever
+    # the ignore rules say. The llm-d controller's finalizer is metadata and
+    # was never drift.
+    driftDetection:  # @schema additionalProperties: true
+      mode: enabled
+      ignore:
+        - paths: ["/spec"]
+          target:  # @schema additionalProperties: true
+            kind: LLMInferenceServiceConfig
   # Model serving on llm-d: a feature switch, not a component — no chart, so
   # the loop renders no release for it; the flag is forwarded to the
   # connectivity release like every other, and that chart renders the objects
@@ -2357,7 +2382,27 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # the same reason. Both go back on together when upstream serves metrics
     # (an upstream item under giantswarm/giantswarm#37742).
     metrics:
-      enabled: false
+      enabled: true
+      bindAddress: ":8080"
+      secureServing: false
+      service:
+        port: 8080
+      # The chart's own ServiceMonitor over that Service, from 1.0.2 on.
+      # `auto` follows the resolved
+      # global.observability.metrics.serviceMonitor.enabled. The endpoint
+      # follows secureServing: port name, scheme, bearer token and TLS all
+      # derive from it. With secureServing on, the scrape is authorized only
+      # once <fullname>-metrics-reader is bound to the collector's
+      # ServiceAccount (controller.metrics.serviceMonitor
+      # .prometheusServiceAccount), which is why this platform scrapes plain
+      # HTTP on a port closed to everything but its own namespaces.
+      serviceMonitor:
+        enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+        interval: 60s
+        labels:
+          # Mimir routes a scrape by this label; a monitor without it writes
+          # to no tenant of the GS observability platform.
+          observability.giantswarm.io/tenant: giantswarm
     # X-Scope-OrgID routes OTLP traces and logs to the correct Loki/Tempo
     # tenant. The configmap template has no headers field so we inject via env.
     # The meta chart drops the OTEL_EXPORTER_OTLP_HEADERS entry when both OTel
@@ -2589,23 +2634,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       config:
         promptCaching: true
         cacheTTL: "5m"
-
-  # The controller metrics Service and ServiceMonitor the connectivity chart
-  # renders under the global.observability.metrics.serviceMonitor gate (which
-  # detects monitoring.coreos.com/v1); this is the object's own toggle
-  # underneath that gate. Off: the kagent line serves no Prometheus /metrics
-  # (controller.metrics above), so the monitor would scrape a refused port
-  # and the target would sit at up=0 — and nothing reads those metrics: the
-  # fleet's KagentControllerDown rule reads the Deployment's
-  # kube-state-metrics series. Back to true together with controller.metrics
-  # when upstream serves them.
-  serviceMonitor:
-    enabled: false
-    interval: 60s
-    # Extra labels on the ServiceMonitor metadata. The tenant label routes
-    # metrics to the correct Mimir instance in the GS Observability Platform.
-    labels:
-      observability.giantswarm.io/tenant: giantswarm
 
   # OTel — traces and logs to the GS Observability Platform OTLP gateway.
   # X-Scope-OrgID header routes to the correct Loki/Tempo tenant. `auto` (the
@@ -4077,8 +4105,12 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # kagent.dev/v1alpha3 AgentTemplates for this release's kagent, 0.x the
     # v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases of
     # the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart.
-    semver: 1.x
+    # and moves only with this chart. Capped below 1.5.0: from 1.5.0 the chart
+    # renders no spec.context.compaction on the AgentTemplate (the kagent line
+    # from 1.1.0 refuses it; the platform Harness carries the compaction
+    # there), and the kagent 1.0 line this release delivers has no other
+    # place for it. The cap moves with components.kagent.
+    semver: ">=1.0.0 <1.5.0"
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:
@@ -4612,6 +4644,20 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # follow it. The dev channel needs no registry override.
   image:
     registry: gsoci.azurecr.io/giantswarm/substrate
+  # One PodMonitor per workload that serves metrics: ate-api-server, atelet,
+  # atenet-router, atenet-egress, k8s-credential-provider and ate-controller,
+  # each pinned to the port name its own pod declares. The fleet's metrics
+  # collector discovers monitors and nothing else, so without these the whole
+  # ate registry is served and thrown away. `auto` follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled; the chart's own
+  # default is off.
+  metrics:
+    podMonitor:
+      enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+      labels:
+        # Mimir routes a scrape by this label; a monitor without it writes to
+        # no tenant of the GS observability platform.
+        observability.giantswarm.io/tenant: giantswarm
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows
     # the platform: with the platform's CNPG Cluster on (postgres.enabled) the
@@ -4921,6 +4967,30 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Node selector of every model pod, e.g. the GPU node pool; a preset's
     # scheduling.nodeSelector is merged on top.
     nodeSelector: {}
+    # The sizeLimit of every emptyDir KServe composes into a model pod (home,
+    # tmp-dir, dshm and model-cache; kserve-provision-location on an oci://
+    # modelcar pod), set by the chart's Kyverno mutation on the pod and on
+    # its Deployment's pod template (modelServing.policies): the volumes are
+    # bounded, and the fleet's require-emptydir-requests-and-limits audit
+    # has nothing to report. shmSizeLimit bounds dshm, the memory-backed
+    # /dev/shm of vLLM's worker processes: a tensor-parallel preset (four
+    # GPUs on one pod) passes activations through it wherever the cards have
+    # no peer-to-peer path (NCCL's shared-memory transport, as on PCIe L40S),
+    # and KServe's own multi-GPU templates set 8Gi — the single-node
+    # template's 1Gi is replaced. Memory-backed, so what is written counts
+    # against the runtime container's memory limit; the bound reserves
+    # nothing. modelCacheSizeLimit bounds the volume the storage-initializer
+    # downloads an hf:// model into (model-cache or kserve-provision-location,
+    # by KServe release) when modelServing.cache.enabled is false — with the
+    # cache on the claim takes its place —, so it holds the weights; a whole
+    # number of Gi or Ti, and the render fails when a preset in effect with
+    # an hf:// storageUri needs more (requirements.weightsGiB; the largest
+    # shipped one, nemotron-3-super-nvfp4, has 75). Every other emptyDir
+    # without a sizeLimit gets emptyDirSizeLimit; a sizeLimit KServe's
+    # template sets on one of those stays.
+    shmSizeLimit: 8Gi
+    modelCacheSizeLimit: 100Gi
+    emptyDirSizeLimit: 1Gi
   # The GPU node pool the served models run on (giantswarm/agent-platform#315;
   # bumblebee-plans#46, the plan's D3). A pool created through the platform
   # (the gpu-node-pool chart) arrives tainted nvidia.com/gpu NoSchedule — only

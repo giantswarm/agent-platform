@@ -1344,7 +1344,11 @@ answers, but only where the leaf is left at `auto`:
                                own monitor; the chart takes a boolean),
                                vm-manager.serviceMonitor.enabled,
                                kserve-llmisvc-resources.kserve.llmisvc
-                               .controller.serviceMonitor.enabled
+                               .controller.serviceMonitor.enabled,
+                               substrate.metrics.podMonitor.enabled (the six
+                               workloads of the Substrate control plane),
+                               kagent.controller.metrics.serviceMonitor.enabled
+                               (the controller's own, from the line's 1.0.2)
 Two leaves have no `auto` form and are derived directly, off only:
   valkey.valkey.metrics.podMonitor.enabled — the valkey chart's own default is
       on; written false when monitors are off, left absent otherwise so the
@@ -1405,6 +1409,8 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "agentgateway" "monitoring" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "mcpKubernetes" "instrumentation" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "grafanaDashboards" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "substrate" "metrics" "podMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "controller" "metrics" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "tracing" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "logging" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "vm-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
