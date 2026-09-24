@@ -125,6 +125,28 @@ On the installation, after the cutover:
   port. model-manager then attaches one `AgentgatewayModel` per served model to
   the route under the preset's name (giantswarm/model-manager#145), so a client
   sends `model: <preset>` to the same listener.
+- **The endpoint outside the cluster** (`llmRouting.external`): `enabled: true`
+  puts the listener's models on `https://<hostPrefix>.<global.domain>`
+  (`llm` by default) behind the installation's API keys — a route of its own
+  whose backend is the model router, attached to by every model of the
+  endpoint (provider models and served ones), with an `AgentgatewayPolicy`
+  whose `apiKeyAuthentication` is `Strict` over exactly one source in the
+  release namespace: `apiKeys.secretRef.name` (a Secret: an entry per key, the
+  key or `{"key"|"keyHash": …, "metadata": {…}}`), `apiKeys.secretSelector` or
+  `apiKeys.configMapSelector` (`matchLabels`; a ConfigMap's entries carry
+  `keyHash: sha256:<hex>` only). With the chart's own edge
+  (`gatewayApi.gateway.create`) the route is on the data plane's HTTPS
+  listener; behind a public Gateway (`global.gatewayApi.parentRefs`) that
+  Gateway forwards the hostname to the LLM listener, where the route takes it
+  by hostname — the in-cluster route matches none, so a call by the Service's
+  name stays credential-free. Give every key entry `"metadata": {"name":
+  "<who>"}`: the data plane's metrics carry it as `api_key`
+  (`gateway.metricLabels.api_key`, held until this route renders). The
+  discovery ConfigMap names the route and `externalEndpoint`, so model-manager
+  puts served models on it too. **Every key reaches every model**: agentgateway
+  does not enforce a key's `allowedModels` on the Kubernetes API-key contract
+  yet (giantswarm/giantswarm#37742), so putting a paid provider model next to
+  consumer keys is the installation's decision.
 - Agent pods keep their `world:443` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
@@ -906,6 +928,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.metricLabels.agent_namespace.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-namespace\"] : source.unverifiedWorkload.namespace"` |  |
 | gateway.metricLabels.user.enabled | bool | `true` |  |
 | gateway.metricLabels.user.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-user\"] : jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
+| gateway.metricLabels.api_key.enabled | bool | `true` |  |
+| gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -915,6 +939,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | llmRouting.models[0].name | string | `"anthropic"` |  |
 | llmRouting.models[0].provider | string | `"Anthropic"` |  |
 | llmRouting.models[0].match | string | `"claude-*"` |  |
+| llmRouting.external.enabled | bool | `false` |  |
+| llmRouting.external.hostPrefix | string | `"llm"` |  |
+| llmRouting.external.apiKeys.secretRef.name | string | `""` |  |
+| llmRouting.external.apiKeys.secretSelector.matchLabels | object | `{}` |  |
+| llmRouting.external.apiKeys.configMapSelector.matchLabels | object | `{}` |  |
 | llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |

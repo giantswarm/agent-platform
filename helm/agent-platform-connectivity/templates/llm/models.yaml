@@ -19,9 +19,7 @@ metadata:
     {{- include "labels.common" $ | nindent 4 }}
 spec:
   parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: {{ include "name" $ }}-llm
+    {{- include "agent-platform.llmRouting.modelParents" $ | nindent 4 }}
   {{- with .match }}
   match:
     model: {{ . | quote }}

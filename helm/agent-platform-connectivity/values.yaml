@@ -458,6 +458,13 @@ gateway:
     user:
       enabled: true
       expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-user"] : jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
+    # The API key behind a call on the external LLM endpoint
+    # (llmRouting.external): the key entry's metadata.name. Held — rendered
+    # only — while that endpoint's route verifies API keys, like a jwt label
+    # while a route verifies a bearer.
+    api_key:
+      enabled: true
+      expression: apiKey.name
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -531,6 +538,34 @@ llmRouting:
     - name: anthropic
       provider: Anthropic
       match: claude-*
+  # The LLM endpoint outside the cluster (llmRouting.external): a public
+  # hostname, <hostPrefix>.<global.domain>, on the platform's edge — the data
+  # plane's own HTTPS listener where the chart owns the edge
+  # (gatewayApi.gateway.create), else a route on global.gatewayApi.parentRefs
+  # to the listener — and there a route of its own that every model of the
+  # endpoint also attaches to, behind API keys (mode Strict: a request
+  # without a valid key answers 401). The in-cluster listener stays
+  # credential-free as it is. `apiKeys` sets exactly one source in the
+  # release namespace, the installation's own: `secretRef.name` (a Secret
+  # whose entries are keys or {"key"|"keyHash", "metadata"}),
+  # `secretSelector.matchLabels` or `configMapSelector.matchLabels` (a ConfigMap's
+  # entries must be {"keyHash": "sha256:<hex>", "metadata": {...}}). Give
+  # every entry `"metadata": {"name": "<who>"}`: the data plane's metrics
+  # carry it as the `api_key` label (gateway.metricLabels.api_key). A key
+  # reaches every model on the endpoint — agentgateway does not enforce a
+  # key's allowedModels on the Kubernetes API-key contract yet
+  # (giantswarm/giantswarm#37742) — so a paid provider model next to consumer
+  # keys is the installation's decision.
+  external:
+    enabled: false
+    hostPrefix: llm
+    apiKeys:
+      secretRef:
+        name: ""
+      secretSelector:
+        matchLabels: {}  # @schema additionalProperties: {"type": "string"}
+      configMapSelector:
+        matchLabels: {}  # @schema additionalProperties: {"type": "string"}
   # Client path prefixes the LLM HTTPRoute matches. They must be MORE specific
   # than `/`: agent-platform-mcps renders a catch-all route on the same Gateway
   # that attaches to every listener, and on an equal match the older,

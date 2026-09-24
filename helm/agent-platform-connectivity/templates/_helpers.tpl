@@ -748,6 +748,50 @@ llmRouting.models entry's, lower-cased (anthropic). kagent.modelConfigs entries
 and the MutatingAdmissionPolicy point a ModelConfig of this provider at the
 listener; a ModelConfig of another provider keeps its own path.
 */}}
+{{- define "agent-platform.llmRouting.external" -}}
+{{- if and (include "agent-platform.llmRouting" .) .Values.llmRouting.external.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The public hostname of the external LLM endpoint: <llmRouting.external.hostPrefix>.<global.domain>.
+*/}}
+{{- define "agent-platform.llmRouting.externalHost" -}}
+{{- include "agent-platform.hostname" (dict "ctx" . "prefix" .Values.llmRouting.external.hostPrefix "override" "" "key" "llmRouting.external.hostPrefix") -}}
+{{- end -}}
+
+{{/*
+The routes a model of the LLM endpoint attaches to, as a YAML list of parent
+references: the in-cluster LLM route, and the external one with
+llmRouting.external — the same list the discovery ConfigMap hands
+model-manager for the served models (spec.llmEndpoint.parentRefs).
+*/}}
+{{- define "agent-platform.llmRouting.modelParents" -}}
+- group: gateway.networking.k8s.io
+  kind: HTTPRoute
+  name: {{ include "name" . }}-llm
+  namespace: {{ .Release.Namespace }}
+{{- if (include "agent-platform.llmRouting.external" .) }}
+- group: gateway.networking.k8s.io
+  kind: HTTPRoute
+  name: {{ include "name" . }}-llm-external
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The API-key source of the external LLM endpoint's policy, as YAML: the set ones
+of llmRouting.external.apiKeys (secretRef with a name, a selector with labels);
+validateLlmRouting holds it to exactly one.
+*/}}
+{{- define "agent-platform.llmRouting.apiKeySource" -}}
+{{- $k := .Values.llmRouting.external.apiKeys | default dict -}}
+{{- $out := dict -}}
+{{- with (dig "secretRef" "name" "" $k) }}{{- $_ := set $out "secretRef" (dict "name" .) -}}{{- end -}}
+{{- with (dig "secretSelector" "matchLabels" dict $k) }}{{- $_ := set $out "secretSelector" (dict "matchLabels" .) -}}{{- end -}}
+{{- with (dig "configMapSelector" "matchLabels" dict $k) }}{{- $_ := set $out "configMapSelector" (dict "matchLabels" .) -}}{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
 {{- define "agent-platform.llmRouting.provider" -}}
 {{- with .Values.llmRouting.models -}}{{- lower (first .).provider -}}{{- end -}}
 {{- end -}}
@@ -784,6 +828,7 @@ Usage: include "agent-platform.metricLabels" . | fromYamlArray
 {{- define "agent-platform.metricLabels" -}}
 {{- $root := . -}}
 {{- $jwtRoute := include "agent-platform.jwtRouteRendered" . -}}
+{{- $apiKeyRoute := include "agent-platform.llmRouting.external" . -}}
 {{- /* The data plane's own labels (agentgateway telemetry/metrics.rs) and the scrape's. */ -}}
 {{- $reserved := list "bind" "gateway" "listener" "route" "route_rule" "backend" "protocol" "method" "status" "reason" "gen_ai_operation_name" "gen_ai_system" "gen_ai_request_model" "gen_ai_response_model" "gen_ai_token_type" "resource_type" "server" "resource" -}}
 {{- $scrape := list "namespace" "pod" "instance" "job" "container" "service" "endpoint" -}}
@@ -816,7 +861,8 @@ Usage: include "agent-platform.metricLabels" . | fromYamlArray
 {{- if contains "\n" $expr -}}
 {{- fail (printf "gateway.metricLabels.%s spans more than one line; write the CEL expression on one line" $name) -}}
 {{- end -}}
-{{- if or (not (regexMatch "(^|[^A-Za-z0-9_.])jwt\\s*[.\\[]" $expr)) $jwtRoute -}}
+{{- $held := or (and (regexMatch "(^|[^A-Za-z0-9_.])jwt\\s*[.\\[]" $expr) (not $jwtRoute)) (and (regexMatch "(^|[^A-Za-z0-9_.])apiKey\\s*[.\\[]" $expr) (not $apiKeyRoute)) -}}
+{{- if not $held -}}
 {{- $labels = append $labels (dict "name" $name "expression" $expr) -}}
 {{- end -}}
 {{- end -}}
@@ -930,6 +976,15 @@ tiebreak, so every inference call would reach the MCP backend instead. */ -}}
 {{- /* The model router tries its candidates in name order and takes the
 first whose match fits, so two entries of one name would be one object and a
 wildcard must be the CRD's shape (`*`, `gpt-*`, `*-latest`). */ -}}
+{{- if (include "agent-platform.llmRouting.external" .) -}}
+{{- $set := keys (include "agent-platform.llmRouting.apiKeySource" . | fromYaml) -}}
+{{- if ne (len $set) 1 -}}
+{{- fail (printf "llmRouting.external.apiKeys sets %d key sources (%s); set exactly one of secretRef.name, secretSelector.matchLabels or configMapSelector.matchLabels — the external LLM endpoint admits a request only with one of the installation's API keys" (len $set) (join ", " ($set | sortAlpha))) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString .Values.llmRouting.external.hostPrefix)) -}}
+{{- fail (printf "llmRouting.external.hostPrefix %q must be a DNS label; the endpoint's hostname is <hostPrefix>.<global.domain>" (toString .Values.llmRouting.external.hostPrefix)) -}}
+{{- end -}}
+{{- end -}}
 {{- if not .Values.llmRouting.models -}}
 {{- fail "llmRouting.models must list at least one model; the model router of an empty list answers 404 model_not_found to every agent" -}}
 {{- end -}}

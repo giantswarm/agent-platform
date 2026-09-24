@@ -976,6 +976,18 @@
                                 }
                             }
                         },
+                        "api_key": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "user": {
                             "type": "object",
                             "additionalProperties": false,
@@ -1677,6 +1689,57 @@
             "properties": {
                 "enabled": {
                     "type": "boolean"
+                },
+                "external": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "apiKeys": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "configMapSelector": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "matchLabels": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "secretRef": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "name": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "secretSelector": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "matchLabels": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "hostPrefix": {
+                            "type": "string"
+                        }
+                    }
                 },
                 "listener": {
                     "type": "object",

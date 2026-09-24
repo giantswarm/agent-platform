@@ -83,11 +83,11 @@ data:
       llmEndpoint:
         enabled: true
         parentRefs:
-          - group: gateway.networking.k8s.io
-            kind: HTTPRoute
-            name: {{ include "name" . }}-llm
-            namespace: {{ .Release.Namespace }}
+          {{- include "agent-platform.llmRouting.modelParents" . | nindent 10 }}
         endpoint: {{ include "agent-platform.llmBaseUrl" . }}
+        {{- if (include "agent-platform.llmRouting.external" .) }}
+        externalEndpoint: https://{{ include "agent-platform.llmRouting.externalHost" . }}
+        {{- end }}
       {{- end }}
       # Models as OCI images (modelServing.modelImages): the registry host
       # every oci:// preset's storageUri is published with — empty, as

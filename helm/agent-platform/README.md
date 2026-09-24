@@ -565,6 +565,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.metricLabels.agent_namespace.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-namespace\"] : source.unverifiedWorkload.namespace"` |  |
 | gateway.metricLabels.user.enabled | bool | `true` |  |
 | gateway.metricLabels.user.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-user\"] : jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
+| gateway.metricLabels.api_key.enabled | bool | `true` |  |
+| gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -574,6 +576,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.models[0].name | string | `"anthropic"` |  |
 | llmRouting.models[0].provider | string | `"Anthropic"` |  |
 | llmRouting.models[0].match | string | `"claude-*"` |  |
+| llmRouting.external.enabled | bool | `false` |  |
+| llmRouting.external.hostPrefix | string | `"llm"` |  |
+| llmRouting.external.apiKeys.secretRef.name | string | `""` |  |
+| llmRouting.external.apiKeys.secretSelector.matchLabels | object | `{}` |  |
+| llmRouting.external.apiKeys.configMapSelector.matchLabels | object | `{}` |  |
 | llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
 | llmRouting.routes./v1/messages | string | `"Messages"` |  |
 | llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
