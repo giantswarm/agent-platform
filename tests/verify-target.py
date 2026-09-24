@@ -600,6 +600,21 @@ def hold_substrate_bootstrap(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+CREDENTIAL_PROVIDER_EXCEPTION = "  name: substrate-credential-provider\n"
+
+
+def hold_credential_provider_exception(here: str, there: str) -> tuple:
+    """The two connectivity renders without the credential provider's PolicyException
+    (giantswarm/giantswarm#37705: Substrate 1.1.0's k8s-credential-provider declares no
+    seccompProfile; GOLDEN_REF renders four Substrate exceptions). Dropped once
+    GOLDEN_REF carries it."""
+    def strip(render: str) -> str:
+        return "\n---\n".join(d for d in render.split("\n---\n") if CREDENTIAL_PROVIDER_EXCEPTION not in d)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #37705 hold — the substrate-credential-provider PolicyException is left out of the golden comparison")
+    return h, strip(there)
+
+
 DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
 DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
 
@@ -709,6 +724,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_substrate_otlp_egress(here, there)
                 here, there = hold_bootstrap_memory(here, there)
                 here, there = hold_substrate_bootstrap(here, there)
+                here, there = hold_credential_provider_exception(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
