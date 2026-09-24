@@ -465,6 +465,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-runtime-configs.enabled | bool | `false` |  |
 | components.kserve-runtime-configs.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
 | components.kserve-runtime-configs.driftDetection.mode | string | `"enabled"` |  |
+| components.kserve-runtime-configs.driftDetection.ignore[0].paths[0] | string | `"/spec"` |  |
+| components.kserve-runtime-configs.driftDetection.ignore[0].target.kind | string | `"LLMInferenceServiceConfig"` |  |
 | components.modelServing.enabled | bool | `false` |  |
 | components.gpu-operator.chart | string | `"gpu-operator"` |  |
 | components.gpu-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |

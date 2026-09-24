@@ -1018,12 +1018,22 @@ components:  # @schema additionalProperties: true
     # and the release stayed "in-sync" with no config behind it: every
     # LLMInferenceService composed from them failed ConfigNotFound until a
     # forced reconcile (giantswarm/agent-platform#508). With it a missing
-    # config is back within one interval. No ignore rule: the objects are
-    # configuration only; the llm-d controller adds a finalizer, which a
-    # server-side apply of the manifest leaves in place, and no webhook
-    # mutates them (its validating webhook admits the re-create).
+    # config is back within one interval. The configs' spec is ignored: once
+    # Helm has applied them, KServe writes the fields its API types default
+    # (spec.model.uri, a port's protocol and appProtocol, an empty resources,
+    # a backendRef's group) into kserve-config-llm-scheduler and
+    # -latency-predictor, and helm-controller, comparing against the chart's
+    # manifest, corrected them on every reconcile and never came back Ready —
+    # a fresh install hung there (giantswarm/agent-platform#508). A missing
+    # config is still re-created: an object that is gone is drift whatever
+    # the ignore rules say. The llm-d controller's finalizer is metadata and
+    # was never drift.
     driftDetection:  # @schema additionalProperties: true
       mode: enabled
+      ignore:
+        - paths: ["/spec"]
+          target:  # @schema additionalProperties: true
+            kind: LLMInferenceServiceConfig
   # Model serving on llm-d: a feature switch, not a component — no chart, so
   # the loop renders no release for it; the flag is forwarded to the
   # connectivity release like every other, and that chart renders the objects

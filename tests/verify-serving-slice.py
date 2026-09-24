@@ -15,7 +15,9 @@ property the slice relies on:
   llm-d-cuda reference carries (#568) — the block held back from the
   connectivity release; spec.driftDetection.mode: enabled by default, so a
   well-known config that went missing is re-created on the release's next
-  reconcile (#508), and no other release of the slice carries drift detection;
+  reconcile (#508), with the configs' /spec ignored (KServe defaults fields
+  into it after the apply; correcting them kept a fresh install from coming
+  back Ready), and no other release of the slice carries drift detection;
 - the derived KServe ingress-gateway value: kserve-llmisvc-resources carries
   kserve.controller.gateway.ingressGateway.kserveGateway = <namespace>/<gateway>,
   a differing copy of the operator's fails the render naming both;
@@ -179,7 +181,7 @@ def check_profile(meta: str) -> str:
     if "storageNamespace" in rc:
         sys.exit("FAIL: the kserve-runtime-configs release targets a namespace of its own; the llm-d controller resolves the well-known configs from the LLMInferenceService's namespace and its own (the release namespace) only")
     need(rc, f"      llmisvcConfigs:\n        enabled: true\n        imageRegistry: {FAST_PREFIX}", "the kserve-runtime-configs release")
-    need(rc, "  driftDetection:\n    mode: enabled\n", "the kserve-runtime-configs release (a missing well-known config is re-created on the next reconcile, #508)")
+    need(rc, "  driftDetection:\n    ignore:\n    - paths:\n      - /spec\n      target:\n        kind: LLMInferenceServiceConfig\n    mode: enabled\n", "the kserve-runtime-configs release (a missing well-known config is re-created on the next reconcile; the spec KServe defaults after the apply is not drift, or a fresh install never comes back Ready, #508)")
     drifting = sorted(name for (kind, name), doc in docs.items() if kind == "HelmRelease" and name != "kserve-runtime-configs" and "\n  driftDetection:" in doc)
     if drifting:
         sys.exit(f"FAIL: {drifting} carry spec.driftDetection in the slice; drift detection is decided per release, kserve-runtime-configs only here")
