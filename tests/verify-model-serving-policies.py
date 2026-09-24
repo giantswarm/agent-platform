@@ -254,6 +254,11 @@ BASE = [
     "--api-versions", "gateway.networking.k8s.io/v1",
 ]
 CILIUM = ["--api-versions", "cilium.io/v2"]
+# cluster-manager on (it registers model-manager's kserve backend at runtime), with the identity its resource server
+# needs to render.
+CLUSTER_MANAGER_ON = ["--set", "components.cluster-manager.enabled=true", "--set", "global.domain=example.test",
+                      "--set", "global.identity.issuerUrl=https://dex.example.test", "--set", "global.identity.clientId=platform",
+                      "--set", "global.identity.existingSecret=platform-oauth"]
 
 
 def fail(msg: str) -> None:
@@ -758,7 +763,7 @@ def check_model_manager_read(connectivity: str, cilium: list[dict], k8s: list[di
     it answers (giantswarm/agent-platform#602): its egress policy (both flavours) carries one rule selecting each shape's
     fixture pod in the serving namespace on exactly the port the fixture is reached on, and the shape's ingress admits the
     release namespace, model-manager's own, on that port. With model-manager off there is no model-manager policy; with
-    the serving slice off its egress carries no rule into a serving namespace."""
+    the serving slice off the rule follows model-manager's kserve backend (check_model_manager_read_absent)."""
     release_ns = BASE[BASE.index("--namespace") + 1]
     for shape in SHAPES:
         want = container_port(shape)
@@ -791,11 +796,34 @@ def check_model_manager_read_absent(connectivity: str) -> None:
         if [d for d in render(connectivity, flags) if d["metadata"]["name"].endswith("-model-manager-egress")]:
             fail(f"{what}: a model-manager egress policy renders")
     off = [*BASE[:BASE.index("components.modelServing.enabled=true") - 1], *BASE[BASE.index("components.modelServing.enabled=true") + 1:]]
+    no_kserve = ["--set", "components.cluster-manager.enabled=false"]
     for flags in (CILIUM, []):
-        for d in render(connectivity, flags, base=off):
+        for d in render(connectivity, [*flags, *no_kserve], base=off):
             if d["metadata"]["name"].endswith("-model-manager-egress") and NS in yaml.safe_dump(d["spec"]):
-                fail(f"the serving slice off: {d['kind']} -model-manager-egress still reaches the serving namespace {NS}")
-    ok("model-manager off renders no model-manager egress policy; the serving slice off leaves no rule into the serving namespace (both flavours)")
+                fail(f"the serving slice off, no kserve backend: {d['kind']} -model-manager-egress still reaches the serving namespace {NS}")
+    ok("model-manager off renders no model-manager egress policy; the serving slice off and no kserve backend leave no rule into the serving namespace (both flavours)")
+    # A GPU node pool brings the serving slice as a second release of the chart (cluster-manager's create_node_pool):
+    # this release's modelServing stays off, model-manager's kserve backend is cluster-manager's (or a static entry),
+    # and model-manager still reads the models it serves — into its kserve namespace.
+    for extra, ns, what in ((CLUSTER_MANAGER_ON, "model-serving", "cluster-manager on"),
+                            (["--set", "components.cluster-manager.enabled=false", "--set", "model-manager.backends[0]=kserve",
+                              "--set", "model-manager.kserve.namespace=gpu-serving"], "gpu-serving", "a static kserve backend in gpu-serving")):
+        for flags, kind in ((CILIUM, "CiliumNetworkPolicy"), ([], "NetworkPolicy")):
+            egress = one(render(connectivity, [*flags, *extra], base=off), kind, "-model-manager-egress")["spec"]["egress"]
+            for shape in SHAPES:
+                want = container_port(shape)
+                if kind == "CiliumNetworkPolicy":
+                    labels = {**fixture(shape)["metadata"]["labels"], "io.kubernetes.pod.namespace": ns}
+                    hits = [r for r in egress if any(selects(p, labels) for p in r.get("toEndpoints") or [])]
+                    got = cilium_ports(hits)
+                else:
+                    hits = [r for r in egress if any(
+                        (p.get("namespaceSelector") or {}).get("matchLabels", {}).get("kubernetes.io/metadata.name") == ns
+                        and selects(p.get("podSelector") or {}, fixture(shape)["metadata"]["labels"]) for p in r.get("to") or [])]
+                    got = {int(p["port"]) for r in hits for p in r["ports"]}
+                if len(hits) != 1 or got != {want}:
+                    fail(f"the serving slice off, {what} ({kind}): {len(hits)} rules reach the {shape} pods in {ns} on {sorted(got)}; expected one on {want}")
+    ok("the serving slice off, model-manager with a kserve backend (cluster-manager's or a static one): its egress reaches each shape's pod in its kserve namespace on exactly its port (both flavours)")
 
 
 def cilium_regex(entry: dict) -> re.Pattern:

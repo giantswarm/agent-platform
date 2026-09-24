@@ -11,14 +11,16 @@ line to the next Substrate was admitted, so the newer worker ran under the
 older atelet — the pause bundle had been renamed, every golden boot failed on
 `bundles/_pause/config.json`, and nothing on any hop named the skew. The chart
 now DERIVES the worker from `components.substrate.versionRange`'s floor
-(`agent-platform.substrate.workerImage`: `<substrate.image.registry>/ateom-gvisor:
-<floor>`), merged over the forwarded kagent block, and confines the Substrate
+(`agent-platform.substrate.workerImage`: `<substrate.image.registry>/
+<substrate.image.repository>/ateom-gvisor:<floor>`), merged over the forwarded
+kagent block, and confines the Substrate
 range to one release (`agent-platform.substrate.validateRange`). Here:
   - the default render forwards workerImage = gsoci.azurecr.io/giantswarm/
     substrate/ateom-gvisor:<floor of values.yaml's components.substrate.versionRange>
     (the line's release copied under its upstream path, giantswarm/retagger#1229)
     to the kagent release, and the substrate OCIRepository carries that range;
-  - substrate.image.registry (a mirror) moves the worker's registry with it;
+  - substrate.image.registry (a mirror) moves the worker's registry with it, the
+    repository path unchanged;
   - an installation's own workerImage stands verbatim while its tag is the pinned
     release; another tag, or a digest without a tag, fails the render naming the
     key, the release and the derived image;
@@ -58,7 +60,8 @@ cc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cc)
 
 KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
-REGISTRY = "gsoci.azurecr.io/giantswarm/substrate"
+REGISTRY = "gsoci.azurecr.io"
+REPOSITORY = "giantswarm/substrate"
 WORKER = "ateom-gvisor"
 # The 4.15.2 shape of the skew: the Substrate range a minor behind the kagent
 # line's stamp (a synthetic older minor in the stable shape; the render alone is
@@ -123,7 +126,7 @@ def main(meta: str) -> int:
     values_yaml = yaml.safe_load(open(os.path.join(meta, "values.yaml"), encoding="utf-8"))
     rng = values_yaml["components"]["substrate"]["versionRange"]
     floor = floor_of(rng)
-    derived = f"{REGISTRY}/{WORKER}:{floor}"
+    derived = f"{REGISTRY}/{REPOSITORY}/{WORKER}:{floor}"
     if rng != f">={floor} <{next_minor(floor)}":
         cc.fail(f"values.yaml's components.substrate.versionRange {rng!r} is not `>={floor} <{next_minor(floor)}`: the range confines the pinned minor of the Substrate line — one runtime contract, the worker image's — and carries no -0 (a prerelease bound anywhere makes Flux evaluate the line's dev builds against the range)")
     if values_yaml["components"]["substrate-crds"]["versionRange"] != rng:
@@ -138,18 +141,18 @@ def main(meta: str) -> int:
         cc.fail(f"the substrate OCIRepository carries {substrate_rng!r}, not components.substrate.versionRange {rng!r}")
     print(f"ok: the default render forwards workerImage {derived} to the kagent release — the floor of the Substrate range {rng!r} the substrate OCIRepository carries")
 
-    mirror = "mirror.example.com/substrate"
+    mirror = "mirror.example.com"
     values, _, _ = kagent_release(meta, ["--set", f"substrate.image.registry={mirror}"])
-    if worker_image(values) != f"{mirror}/{WORKER}:{floor}":
+    if worker_image(values) != f"{mirror}/{REPOSITORY}/{WORKER}:{floor}":
         cc.fail(f"substrate.image.registry={mirror} does not move the worker's registry: {worker_image(values)!r}")
-    print(f"ok: substrate.image.registry moves the worker image with the control plane's ({mirror}/{WORKER}:{floor})")
+    print(f"ok: substrate.image.registry moves the worker image with the control plane's ({mirror}/{REPOSITORY}/{WORKER}:{floor})")
 
     own = f"quay.io/example/{WORKER}:{floor}"
     values, _, _ = kagent_release(meta, ["--set", f"kagent.substrateWorkerPool.workerImage={own}"])
     if worker_image(values) != own:
         cc.fail(f"an installation's own workerImage tagged with the pinned release does not reach the kagent release verbatim: {worker_image(values)!r}")
     print(f"ok: an own workerImage tagged {floor} reaches the kagent release verbatim ({own})")
-    for wrong, what in ((f"{REGISTRY}/{WORKER}:{next_patch(floor)}", "another tag"), (f"{REGISTRY}/{WORKER}@sha256:{'0' * 64}", "a digest without a tag")):
+    for wrong, what in ((f"{REGISTRY}/{REPOSITORY}/{WORKER}:{next_patch(floor)}", "another tag"), (f"{REGISTRY}/{REPOSITORY}/{WORKER}@sha256:{'0' * 64}", "a digest without a tag")):
         render_fails(meta, ["--set", f"kagent.substrateWorkerPool.workerImage={wrong}"],
                      f"kagent.substrateWorkerPool.workerImage ({wrong}) does not carry the Substrate release this chart pins ({floor}, the floor of components.substrate.versionRange)",
                      f"an own workerImage with {what}")
@@ -157,7 +160,7 @@ def main(meta: str) -> int:
 
     values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={OLDER_RANGE}"])
     old_floor = floor_of(OLDER_RANGE)
-    if worker_image(values) != f"{REGISTRY}/{WORKER}:{old_floor}":
+    if worker_image(values) != f"{REGISTRY}/{REPOSITORY}/{WORKER}:{old_floor}":
         cc.fail(f"with the Substrate range at {OLDER_RANGE!r} the kagent release carries workerImage {worker_image(values)!r}; expected the {old_floor} worker — the worker follows the chart's Substrate, not the kagent build the range admits (the 4.15.2 skew, #466)")
     print(f"ok: the 4.15.2 shape (Substrate {OLDER_RANGE!r}, the kagent range untouched) forwards the {old_floor} worker — the worker follows the chart's Substrate pin")
 
