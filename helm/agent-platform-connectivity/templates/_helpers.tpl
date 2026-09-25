@@ -610,53 +610,52 @@ Truthy when the kagent controller's VerticalPodAutoscaler renders
 {{- end -}}
 
 {{/*
-OTEL exporter env for the agentgateway data-plane container, from
-global.observability.traces.otlp. Emits nothing when the endpoint is empty.
-Rendered as YAML list items.
+The data-plane container's env as a JSON list: gateway.parameters.dataPlaneEnv,
+in order, with the `auto` value of OTEL_EXPORTER_OTLP_ENDPOINT and
+OTEL_EXPORTER_OTLP_PROTOCOL taken from global.observability.traces.otlp (the
+endpoint entry dropped when that endpoint is empty; an empty protocol is grpc),
+and OTEL_EXPORTER_OTLP_HEADERS from its headers appended when they are set and
+the list names no such entry. An entry set to anything else wins. The tenant is
+not a header here: the data plane's tenant is its pod label
+(gateway.parameters.podLabels). The meta chart resolves the same `auto` values
+before it forwards the list (agent-platform.shape.otlp there).
+Usage: include "agent-platform.dataPlaneEnv" . | fromJsonArray
 */}}
-{{- define "agent-platform.otlpEnv" -}}
-{{- with .Values.global.observability.traces.otlp }}
-{{- if .endpoint }}
-- name: OTEL_EXPORTER_OTLP_ENDPOINT
-  value: {{ .endpoint | quote }}
-{{- with .protocol }}
-- name: OTEL_EXPORTER_OTLP_PROTOCOL
-  value: {{ . | quote }}
-{{- end }}
-{{- if .headers }}
-{{- $pairs := list }}
-{{- range $key, $value := .headers }}
-{{- $pairs = append $pairs (printf "%s=%s" $key $value) }}
-{{- end }}
-- name: OTEL_EXPORTER_OTLP_HEADERS
-  value: {{ join "," $pairs | quote }}
-{{- end }}
-{{- end }}
-{{- end }}
+{{- define "agent-platform.dataPlaneEnv" -}}
+{{- $otlp := dig "observability" "traces" "otlp" dict (.Values.global | default dict) | default dict -}}
+{{- $derived := dict "OTEL_EXPORTER_OTLP_ENDPOINT" (dig "endpoint" "" $otlp | default "" | toString | trim) "OTEL_EXPORTER_OTLP_PROTOCOL" (dig "protocol" "" $otlp | default "grpc" | toString) -}}
+{{- $env := list -}}
+{{- $names := dict -}}
+{{- range (.Values.gateway.parameters.dataPlaneEnv | default list) -}}
+{{- $name := toString .name -}}
+{{- $_ := set $names $name true -}}
+{{- if and (hasKey $derived $name) (eq (toString .value) "auto") -}}
+{{- with (index $derived $name) -}}{{- $env = append $env (dict "name" $name "value" .) -}}{{- end -}}
+{{- else -}}
+{{- $env = append $env . -}}
+{{- end -}}
+{{- end -}}
+{{- $headers := dig "headers" dict $otlp | default dict -}}
+{{- if and $headers (not (hasKey $names "OTEL_EXPORTER_OTLP_HEADERS")) -}}
+{{- $pairs := list -}}
+{{- range $key, $value := $headers -}}{{- $pairs = append $pairs (printf "%s=%s" $key $value) -}}{{- end -}}
+{{- $env = append $env (dict "name" "OTEL_EXPORTER_OTLP_HEADERS" "value" (join "," $pairs)) -}}
+{{- end -}}
+{{- $env | toJson -}}
 {{- end -}}
 
 {{/*
 The OTLP endpoint and protocol the data plane exports to, as JSON
-{endpoint, protocol}: global.observability.traces.otlp when its endpoint is set,
-else the OTEL_EXPORTER_OTLP_ENDPOINT / _PROTOCOL entries of
-gateway.parameters.dataPlaneEnv — the same precedence the parameters apply to
-the env. An empty endpoint means no export.
+{endpoint, protocol}: the OTEL_EXPORTER_OTLP_ENDPOINT / _PROTOCOL entries of the
+data-plane env (agent-platform.dataPlaneEnv). An empty endpoint means no export.
 Usage: include "agent-platform.dataPlaneOtlp" . | fromJson
 */}}
 {{- define "agent-platform.dataPlaneOtlp" -}}
 {{- $endpoint := "" -}}
 {{- $protocol := "" -}}
-{{- with .Values.global.observability.traces.otlp -}}
-{{- if .endpoint -}}
-{{- $endpoint = .endpoint -}}
-{{- $protocol = .protocol | default "" -}}
-{{- end -}}
-{{- end -}}
-{{- if not $endpoint -}}
-{{- range (.Values.gateway.parameters.dataPlaneEnv | default list) -}}
+{{- range (include "agent-platform.dataPlaneEnv" . | fromJsonArray) -}}
 {{- if eq .name "OTEL_EXPORTER_OTLP_ENDPOINT" -}}{{- $endpoint = .value | default "" -}}{{- end -}}
 {{- if eq .name "OTEL_EXPORTER_OTLP_PROTOCOL" -}}{{- $protocol = .value | default "" -}}{{- end -}}
-{{- end -}}
 {{- end -}}
 {{- dict "endpoint" ($endpoint | toString | trim) "protocol" ($protocol | default "grpc" | toString | lower) | toJson -}}
 {{- end -}}

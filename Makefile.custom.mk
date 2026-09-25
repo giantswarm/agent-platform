@@ -3675,6 +3675,12 @@ verify-substrate-otlp: ## Assert Substrate's OTLP export reaches a tenant (giant
 	done
 	@echo "ok: $@"
 
+.PHONY: verify-otlp-global
+verify-otlp-global: ## Assert one OTLP collector for the platform (giantswarm/giantswarm#36711): global.observability.traces.otlp (endpoint, protocol, tenant, headers) derives every exporter's `auto` key in the meta chart (kagent's two exporters and the X-Scope-OrgID env of its controller and Harness, muster's otel block, klaus-gateway's endpoint and headers, Substrate's endpoint and tenant pod label, the data plane's env and tenant pod label), and the connectivity chart, rendered with the values its release carries, opens every OTLP egress rule on the resolved endpoint's namespace and port in both flavours: defaults on the kube-system otlp-gateway, a customer collector in another namespace on another port with another tenant, an explicit per-component key winning over the global one, an empty endpoint exporting nothing, an empty tenant sending neither header nor label, a disagreeing X-Scope-OrgID header failing, http/protobuf refused while a gRPC-only exporter would take it. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-otlp-global.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-storage-version
 verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over (#396): with kagent on, the backup Job (pre-install,pre-upgrade, -7: records the objects of modelconfigs/modelproviderconfigs/remotemcpservers.kagent.dev still stored at v1alpha2 into the migration ConfigMap, sets the crds policy of the HelmRelease the CRDs' Flux labels name to Skip (#416), deletes those CRDs and watches them stay absent for 60 s — a re-created one is deleted again and fails the hook naming the owner) and the restore Job (post-install,post-upgrade, 0: waits for modelconfigs.kagent.dev to serve v1alpha3, re-creates the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3, tolerates AlreadyExists, marks restored-at) as the hook identity in the helm image, the identity at their events; with the engine off (the fleet) the same pair and nothing else; with kagent off none of it; the kagent namespace follows kagent.namespaceOverride; helm lint.
 	@echo "====> $@ ($(CHART_DIR))"

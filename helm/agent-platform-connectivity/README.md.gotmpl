@@ -350,10 +350,12 @@ Gateway and keeps agentgateway's defaults for the LLM path.
 The chart turns on the data plane's trace export with ONE Gateway-scoped
 `AgentgatewayPolicy`, `<release>-tracing`
 (`templates/agentgateway/tracing.yaml`, `frontend.tracing`). The policy sends
-spans to the endpoint in `gateway.parameters.dataPlaneEnv`, or to
-`global.observability.traces.otlp` when its endpoint is set. The exporter
+spans to the endpoint in `gateway.parameters.dataPlaneEnv`, whose `auto`
+values take `global.observability.traces.otlp`'s endpoint and protocol (the
+platform's one collector; an entry set to anything else wins). The exporter
 sends no headers, so the tenant comes from the pod label in
-`gateway.parameters.podLabels`.
+`gateway.parameters.podLabels`, which the meta chart derives from
+`global.observability.traces.otlp.tenant`.
 
 The incoming `traceparent` decides if the data plane traces a request:
 
