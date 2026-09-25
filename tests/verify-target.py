@@ -713,6 +713,35 @@ def hold_credential_provider_exception(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+SCRAPE_PORTS_COMMENT = """# The metrics port serves no API and is admitted from the cluster entity, as
+# the platform's other metrics ports are.
+"""
+ATENET_EGRESS_POLICIES = ("  name: substrate-atenet-egress\n", "  name: substrate-atenet-egress-ingress\n")
+ATENET_EGRESS_METRICS = re.compile(r'\n(\s+)- port: "?9090"?\n\s+protocol: TCP(\n\1- port: "?15020"?)')
+KAGENT_CONTROLLER_POLICIES = ("-kagent-from-agentgateway\n", "-kagent-controller-ingress\n")
+KAGENT_METRICS_RULE = re.compile(
+    r"\n    - fromEntities:\n        - cluster\n      toPorts:\n        - ports:\n            - port: \"\d+\"\n              protocol: TCP(?=\n---|\n*$)"
+    r"|\n    - ports:\n        - port: \d+\n          protocol: TCP(?=\n---|\n*$)")
+
+
+def hold_scrape_ports(here: str, there: str) -> tuple:
+    """The two connectivity renders without the metrics ports opened on the kagent
+    controller and atenet-egress's ext-proc (giantswarm/giantswarm#36711;
+    GOLDEN_REF admits neither). Dropped once GOLDEN_REF carries them."""
+    def strip(render: str) -> str:
+        docs = []
+        for d in render.replace(SCRAPE_PORTS_COMMENT, "").split("\n---\n"):
+            if any(n in d for n in ATENET_EGRESS_POLICIES):
+                d = ATENET_EGRESS_METRICS.sub(r"\2", d)
+            elif any(n in d for n in KAGENT_CONTROLLER_POLICIES):
+                d = KAGENT_METRICS_RULE.sub("", d)
+            docs.append(d)
+        return "\n---\n".join(docs)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #36711 hold — the kagent controller's and atenet-egress's metrics ports are left out of the golden comparison")
+    return h, strip(there)
+
+
 DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
 DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
 
@@ -827,6 +856,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_substrate_bootstrap(here, there)
                 here, there = hold_credential_provider_exception(here, there)
                 here, there = hold_credential_provider_netpol(here, there)
+                here, there = hold_scrape_ports(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
