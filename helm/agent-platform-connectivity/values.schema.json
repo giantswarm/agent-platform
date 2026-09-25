@@ -744,14 +744,26 @@
                                     "additionalProperties": false,
                                     "properties": {
                                         "endpoint": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "The collector's URL. Empty: the data plane exports nothing."
                                         },
                                         "headers": {
                                             "type": "object",
+                                            "description": "More OTLP headers, appended to the data-plane env.",
                                             "additionalProperties": true
                                         },
                                         "protocol": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "`grpc` or `http/protobuf`; empty is grpc.",
+                                            "enum": [
+                                                "",
+                                                "grpc",
+                                                "http/protobuf"
+                                            ]
+                                        },
+                                        "tenant": {
+                                            "type": "string",
+                                            "description": "The collector's tenant. Read by the meta chart (the X-Scope-OrgID header, the observability.giantswarm.io/tenant pod label); the data plane's label arrives resolved in gateway.parameters.podLabels."
                                         }
                                     }
                                 }

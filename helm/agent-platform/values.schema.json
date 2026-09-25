@@ -1485,14 +1485,26 @@
                                     "additionalProperties": false,
                                     "properties": {
                                         "endpoint": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "The collector's URL. Empty exports nothing: every `auto` endpoint is emptied and kagent's exporters (`auto`) resolve off."
                                         },
                                         "headers": {
                                             "type": "object",
+                                            "description": "More headers for the exporters that take headers. An X-Scope-OrgID here that differs from `tenant` fails the render. Values in this block are plain values: keep credentials out of it.",
                                             "additionalProperties": true
                                         },
                                         "protocol": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "`grpc` or `http/protobuf`. klaus-gateway, Substrate and kagent's log exporter speak gRPC only: with `http/protobuf` the render fails while one of them would take this endpoint: set its own key.",
+                                            "enum": [
+                                                "",
+                                                "grpc",
+                                                "http/protobuf"
+                                            ]
+                                        },
+                                        "tenant": {
+                                            "type": "string",
+                                            "description": "The collector's tenant. Sent as the X-Scope-OrgID header by the exporters that take headers (kagent, muster, klaus-gateway), and as the pod label observability.giantswarm.io/tenant on the ones that do not (Substrate, the agentgateway data plane). Empty sends neither."
                                         }
                                     }
                                 }

@@ -58,13 +58,22 @@ global:
         # empty keeps the per-component labels.
         labels: {}  # @schema type: object; additionalProperties: true
     traces:
-      # OTLP exporter env (OTEL_EXPORTER_OTLP_*) for the agentgateway data
-      # plane. An empty endpoint renders nothing and
-      # gateway.parameters.dataPlaneEnv applies unchanged; a set endpoint wins
-      # over same-named entries in that list.
+      # The one OTLP collector of the platform. This chart reads it for the
+      # agentgateway data plane: the `auto` values of
+      # gateway.parameters.dataPlaneEnv take its endpoint and protocol, and its
+      # headers are appended as OTEL_EXPORTER_OTLP_HEADERS. The meta chart
+      # derives every other exporter's key from it before forwarding, and this
+      # chart's egress rules follow each exporter's resolved endpoint.
       otlp:
-        endpoint: ""
-        protocol: ""
+        # -- The collector's URL. Empty: the data plane exports nothing.
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        # -- `grpc` or `http/protobuf`; empty is grpc.
+        protocol: grpc  # @schema enum: ["", grpc, http/protobuf]
+        # -- The collector's tenant. Read by the meta chart (the X-Scope-OrgID
+        # header, the observability.giantswarm.io/tenant pod label); the data
+        # plane's label arrives resolved in gateway.parameters.podLabels.
+        tenant: giantswarm
+        # -- More OTLP headers, appended to the data-plane env.
         headers: {}  # @schema type: object; additionalProperties: true
 
 # === Components ===
@@ -252,14 +261,14 @@ gateway:
         drop: [ALL]
       seccompProfile:
         type: RuntimeDefault
-    # Strategic-merge env appended to the data-plane container.
-    # Defaults push OTel traces to the cluster-wide otlp-gateway in kube-system.
-    # Override or extend for per-cluster backends.
+    # Strategic-merge env appended to the data-plane container. The two
+    # `auto` values take global.observability.traces.otlp's endpoint and
+    # protocol (an empty endpoint drops its entry); a value set here wins.
     dataPlaneEnv:
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://otlp-gateway.kube-system.svc:4317
+        value: auto
       - name: OTEL_EXPORTER_OTLP_PROTOCOL
-        value: grpc
+        value: auto
     dataPlaneVolumes: []
     dataPlaneVolumeMounts: []
     # Resources for the agentgateway data-plane container. ephemeral-storage
