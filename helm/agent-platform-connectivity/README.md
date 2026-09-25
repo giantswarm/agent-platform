@@ -1709,6 +1709,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.modelsGateway.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
 | modelServing.modelsGateway.tls.issuerRef.group | string | `"cert-manager.io"` |  |
 | modelServing.modelsGateway.replicas | int | `1` |  |
+| modelServing.modelsGateway.service.annotations."service.beta.kubernetes.io/aws-load-balancer-scheme" | string | `"internet-facing"` |  |
 | modelServing.modelsGateway.externalDns.enabled | bool | `true` |  |
 | modelServing.modelsGateway.externalDns.annotations."giantswarm.io/external-dns" | string | `"managed"` |  |
 | modelServing.modelsGateway.jwtAuthentication.mode | string | `"Strict"` |  |

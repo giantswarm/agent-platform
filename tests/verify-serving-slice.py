@@ -115,6 +115,7 @@ G6_XLARGE_VCPU, G6_XLARGE_GIB = 4, 16
 USABLE_VCPU = G6_XLARGE_VCPU - 1.0
 USABLE_GIB = G6_XLARGE_GIB * 0.95 - 3.3
 AUDIENCE = "dex-k8s-authenticator"
+SCHEME = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 
 
 def helm(chart: str, flags: list[str], expect_failure: str = "") -> str:
@@ -315,6 +316,7 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
         sys.exit("FAIL: no Gateway models in the connectivity render")
     for needle in ("  gatewayClassName: agentgateway", "      protocol: HTTPS", '      hostname: "models.wc01.example.com"', "            name: wildcard-tls", "          from: All",
                    "      external-dns.alpha.kubernetes.io/hostname: models.wc01.example.com", "      giantswarm.io/external-dns: managed",
+                   f"      {SCHEME}: internet-facing",
                    "      kind: AgentgatewayParameters\n      name: models"):
         need(gw, needle, "the models Gateway")
     params = docs.get(("AgentgatewayParameters", "models"))
@@ -351,6 +353,20 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
     for needle in ("      gateway:\n        enabled: true", "        endpoint: https://models.wc01.example.com", "        pathConvention: /<namespace>/<model>/v1"):
         need(cm, needle, "the discovery ConfigMap")
     ok("connectivity: the models Gateway on models.<domain> with the wildcard, its data plane's parameters (the platform's security contexts, one replica, LoadBalancer), the external-dns hostname and filter, one Strict policy (audience, Override, issuer), the JWKS backend at the issuer on 443/TLS, the discovery entry")
+
+    # The data plane's Service inherits the Gateway's infrastructure annotations: an internet-facing NLB by default
+    # (#690: the AWS Load Balancer Controller's own default is internal), an explicit scheme replaces it, and it does
+    # not hang on external-dns.
+    scheme_key = "modelServing.modelsGateway.service.annotations." + SCHEME.replace(".", "\\.")
+    private = documents(helm(connectivity, [*base, "--set", f"{scheme_key}=internal"]))[("Gateway", "models")]
+    need(private, f"      {SCHEME}: internal", "the models Gateway with an explicit scheme")
+    if f"{SCHEME}: internet-facing" in private:
+        sys.exit(f"FAIL: an explicit scheme did not replace the default:\n{private}")
+    no_dns = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.externalDns.enabled=false"]))[("Gateway", "models")]
+    need(no_dns, f"    annotations:\n      {SCHEME}: internet-facing", "the models Gateway without external-dns")
+    if "external-dns.alpha.kubernetes.io/hostname:" in no_dns or "giantswarm.io/external-dns:" in no_dns:
+        sys.exit(f"FAIL: externalDns.enabled false still rendered an external-dns annotation:\n{no_dns}")
+    ok("the models data plane's Service is internet-facing by default, an explicit scheme replaces it, with and without external-dns")
 
     cert = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.tls.issuerRef.name=platform-ca"]))
     c = cert.get(("Certificate", "models-tls"))
