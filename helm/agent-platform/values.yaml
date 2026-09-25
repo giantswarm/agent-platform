@@ -934,13 +934,14 @@ components:  # @schema additionalProperties: true
     enabled: false
   cloudnative-pg:  # @schema additionalProperties: true
     chart: cloudnative-pg
-    # The upstream CloudNativePG operator (cloudnative-pg/charts). The CNPG
-    # Cluster the connectivity chart renders under postgres.enabled and the
-    # Backstage database need its postgresql.cnpg.io API on the cluster; a
-    # management cluster runs the operator as its own app and keeps this off.
-    # The chart renders its CRDs as templates (crds.create), so they upgrade
-    # with the release.
-    repository: oci://ghcr.io/cloudnative-pg/charts
+    # The upstream CloudNativePG operator (cloudnative-pg/charts), from its
+    # gsoci copy under the upstream path (giantswarm/retagger, digests
+    # preserved). The CNPG Cluster the connectivity chart renders under
+    # postgres.enabled and the Backstage database need its postgresql.cnpg.io
+    # API on the cluster; a management cluster runs the operator as its own
+    # app and keeps this off. The chart renders its CRDs as templates
+    # (crds.create), so they upgrade with the release.
+    repository: oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts
     # One chart minor is one operator line (0.29.x ships CNPG 1.30), and an
     # operator upgrade rolls every instance pod it manages, so the range holds
     # the minor: moving to the next CNPG line is a deliberate edit here, not a
@@ -4658,10 +4659,16 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
 
 # === CloudNativePG operator (cloudnative-pg) ===
 # Values forwarded verbatim to the cloudnative-pg component release (the
-# upstream chart, cloudnative-pg/charts). Empty: the chart's defaults install
-# the operator cluster-wide with its CRDs (crds.create) and without a
-# PodMonitor (monitoring.podMonitorEnabled), the shape the standalone shipped.
-cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
+# upstream chart, cloudnative-pg/charts). Besides the image, the chart's
+# defaults: the operator cluster-wide with its CRDs (crds.create) and without
+# a PodMonitor (monitoring.podMonitorEnabled), the shape the standalone
+# shipped.
+cloudnative-pg:  # @schema skipProperties: true; additionalProperties: true
+  # The operator image from its gsoci copy: the upstream image at the same
+  # digest, signed with the Giant Swarm identity. The tag stays the chart's
+  # appVersion, so the image follows the chart.
+  image:
+    repository: gsoci.azurecr.io/giantswarm/cloudnative-pg
 # === kagent-crds (the kagent line's CRD chart) ===
 # Values forwarded verbatim to the kagent-crds component release (the CRDs of
 # the kagent line as their own chart, which the kagent release dependsOn). The

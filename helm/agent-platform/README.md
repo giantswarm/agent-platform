@@ -441,7 +441,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
 | components.cloudnative-pg.chart | string | `"cloudnative-pg"` |  |
-| components.cloudnative-pg.repository | string | `"oci://ghcr.io/cloudnative-pg/charts"` |  |
+| components.cloudnative-pg.repository | string | `"oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts"` |  |
 | components.cloudnative-pg.versionRange | string | `"0.29.x"` |  |
 | components.cloudnative-pg.valuesFrom | string | `"cloudnative-pg"` |  |
 | components.cloudnative-pg.enabled | bool | `false` |  |
@@ -1298,7 +1298,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | mcp-kubernetes.grafanaDashboards.giantswarm.enabled | bool | `true` |  |
 | mcp-kubernetes.grafanaDashboards.giantswarm.organization | string | `"Shared Org"` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
-| cloudnative-pg | object | `{}` |  |
+| cloudnative-pg.image.repository | string | `"gsoci.azurecr.io/giantswarm/cloudnative-pg"` |  |
 | kagent-crds.kmcp.enabled | bool | `false` |  |
 | kagent-crds.substrate.enabled | bool | `false` |  |
 | substrate.createNamespace | bool | `false` |  |

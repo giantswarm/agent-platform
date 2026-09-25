@@ -62,7 +62,7 @@ GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 NEW = {
     "backstage": (GSOCI, ">=1.0.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
     "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
-    "cloudnative-pg": ("oci://ghcr.io/cloudnative-pg/charts", "0.29.x", [], None),
+    "cloudnative-pg": ("oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts", "0.29.x", [], "repository: gsoci.azurecr.io/giantswarm/cloudnative-pg"),
     "kserve-llmisvc-crd": (GSOCI, "0.5.x", [], None),
     # The one KServe controller: it renders the control plane's shared objects
     # itself, since the classic controller (kserve-resources) is gone.
