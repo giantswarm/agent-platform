@@ -1488,9 +1488,18 @@ klaus-gateway gates read the endpoints. Emits nothing.
               kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint
               (the model pods' tracing preset; dropped when empty), then
               modelServing.networkPolicy.otlpEndpoint from that preset's
-              resolved endpoint (the model pods' egress)
+              resolved endpoint (the model pods' egress);
+              <manager>.observability.otel.endpoint (model-manager,
+              agent-manager, vm-manager, cluster-manager, backstage);
+              mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint as
+              host:port (the scheme and path dropped, the port the scheme's or
+              protocol's default when it names none), with .otlpInsecure false for an
+              https:// endpoint, true otherwise, and .tracingExporter otlp,
+              none when the endpoint is empty
   protocol -> kagent.otel.tracing.exporter.otlp.protocol,
               muster.muster.observability.otel.protocol,
+              <manager>.observability.otel.protocol,
+              mcp-kubernetes.mcpKubernetes.instrumentation.otlpProtocol,
               gateway.parameters.dataPlaneEnv[OTEL_EXPORTER_OTLP_PROTOCOL];
               empty is grpc
   tenant   -> the X-Scope-OrgID header of the exporters that send headers,
@@ -1498,7 +1507,9 @@ klaus-gateway gates read the endpoints. Emits nothing.
               that send none: substrate.podLabels, gateway.parameters.podLabels,
               kserve-runtime-configs.kserve.llmisvcConfigs.tracing.podLabels
               (the label dropped when the tenant is empty)
-  headers  -> with the tenant: muster.muster.observability.otel.headers and
+  headers  -> with the tenant: muster.muster.observability.otel.headers,
+              <manager>.observability.otel.headers,
+              mcp-kubernetes.mcpKubernetes.instrumentation.otlpHeaders and
               kagent.{controller,harness}.env[OTEL_EXPORTER_OTLP_HEADERS]
               ("k=v,k=v"; the entry dropped when empty),
               klausGateway.observability.otlpHeaders (a map)
@@ -1575,6 +1586,24 @@ after the endpoint, so true would send plaintext to an https collector. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" $path "value" $protocol) -}}
 {{- end -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "otel" "headers") "value" $joined) -}}
+{{- range $name := list "model-manager" "agent-manager" "vm-manager" "cluster-manager" "backstage" -}}
+{{- $base := list $name "observability" "otel" -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "endpoint") "value" $endpoint) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "protocol") "value" $protocol) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "headers") "value" $joined) -}}
+{{- end -}}
+{{- /* mcp-kubernetes takes host:port and a separate insecure flag, and exports
+nothing unless tracingExporter names otlp. */ -}}
+{{- $instr := list "mcp-kubernetes" "mcpKubernetes" "instrumentation" -}}
+{{- $hostport := regexReplaceAll "^[a-zA-Z][a-zA-Z0-9+.-]*://" $endpoint "" | splitList "/" | first -}}
+{{- if and $hostport (not (regexMatch ":[0-9]+$" $hostport)) -}}
+{{- $hostport = printf "%s:%s" $hostport (ternary "443" (ternary "4318" "4317" (eq $protocol "http/protobuf")) (hasPrefix "https://" (lower $endpoint))) -}}
+{{- end -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "tracingExporter") "value" (ternary "otlp" "none" (ne $endpoint ""))) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "otlpEndpoint") "value" $hostport) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "otlpInsecure") "value" (not (hasPrefix "https://" (lower $endpoint)))) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "otlpProtocol") "value" $protocol) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "otlpHeaders") "value" $joined) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "klausGateway" "observability" "otlpHeaders") "value" (deepCopy $headers)) -}}
 {{- $kagent := index $v "kagent" | default dict -}}
 {{- if kindIs "map" $kagent -}}

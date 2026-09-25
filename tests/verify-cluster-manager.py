@@ -12,7 +12,7 @@ one property of that:
   `cluster-manager: enabled: false`, the two blocks (`cluster-manager:`, `clusterManager:`)
   are held back from the connectivity release (gatedValues), and the connectivity chart
   renders nothing named cluster-manager;
-- on: ONE OCIRepository (the catalog's cluster-manager chart on >=0.4.2 <1.0.0) and ONE
+- on: ONE OCIRepository (the catalog's cluster-manager chart on >=0.19.0 <1.0.0) and ONE
   HelmRelease that dependsOn muster, with the block forwarded — the pinned Service name,
   oauth on with downstream, the muster registration with forwardToken and the audience
   the kube-apiserver trusts, global injected, modelManager.namespace derived from the
@@ -52,7 +52,7 @@ HELM = os.environ.get("HELM", "helm")
 NAME = "cluster-manager"
 WIRING = "clusterManager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
-RANGE = ">=0.4.2 <1.0.0"
+RANGE = ">=0.19.0 <1.0.0"
 CI = ["--set", "components.flux.enabled=false"]
 ON = ["--set", f"components.{NAME}.enabled=true"]
 IDENTITY = [

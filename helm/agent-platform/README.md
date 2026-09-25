@@ -389,7 +389,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=1.0.8 <2.0.0"` |  |
+| components.model-manager.versionRange | string | `">=1.3.0 <2.0.0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
@@ -397,14 +397,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `"1.x"` |  |
+| components.agent-manager.versionRange | string | `">=1.2.0 <2.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.vm-manager.versionRange | string | `">=0.22.0 <1.0.0"` |  |
+| components.vm-manager.versionRange | string | `">=0.24.0 <1.0.0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
@@ -412,7 +412,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.cluster-manager.chart | string | `"cluster-manager"` |  |
 | components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.cluster-manager.versionRange | string | `">=0.4.2 <1.0.0"` |  |
+| components.cluster-manager.versionRange | string | `">=0.19.0 <1.0.0"` |  |
 | components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
@@ -420,7 +420,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.backstage.versionRange | string | `">=1.0.0 <3.0.0"` |  |
+| components.backstage.versionRange | string | `">=2.68.0 <3.0.0"` |  |
 | components.backstage.valuesFrom | string | `"backstage"` |  |
 | components.backstage.omitKeys[0] | string | `"hostname"` |  |
 | components.backstage.omitKeys[1] | string | `"parentRefs"` |  |
@@ -437,7 +437,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.mcp-kubernetes.chart | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.mcp-kubernetes.versionRange | string | `">=1.1.1 <2.0.0"` |  |
+| components.mcp-kubernetes.versionRange | string | `">=1.3.0 <2.0.0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
@@ -1107,6 +1107,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentSandbox.podSecurity.containerSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentSandbox.podSecurity.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | model-manager.fullnameOverride | string | `"model-manager"` |  |
+| model-manager.observability.otel.endpoint | string | `"auto"` |  |
+| model-manager.observability.otel.protocol | string | `"auto"` |  |
+| model-manager.observability.otel.headers | string | `"auto"` |  |
 | model-manager.ollama.endpoint | string | `""` |  |
 | model-manager.ollama.agentHost | string | `""` |  |
 | model-manager.lemonade.endpoint | string | `""` |  |
@@ -1152,6 +1155,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.registeredBackends | list | `[]` |  |
 | vm-manager.fullnameOverride | string | `"vm-manager"` |  |
+| vm-manager.observability.otel.endpoint | string | `"auto"` |  |
+| vm-manager.observability.otel.protocol | string | `"auto"` |  |
+| vm-manager.observability.otel.headers | string | `"auto"` |  |
 | vm-manager.persistence.existingClaim | string | `""` |  |
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |
@@ -1173,6 +1179,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | vmManager.networkPolicy.guestEgress.cidrs[0] | string | `"0.0.0.0/0"` |  |
 | vmManager.networkPolicy.guestEgress.except | list | `[]` |  |
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
+| agent-manager.observability.otel.endpoint | string | `"auto"` |  |
+| agent-manager.observability.otel.protocol | string | `"auto"` |  |
+| agent-manager.observability.otel.headers | string | `"auto"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
@@ -1219,6 +1228,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.githubToken.key | string | `"token"` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
+| cluster-manager.observability.otel.endpoint | string | `"auto"` |  |
+| cluster-manager.observability.otel.protocol | string | `"auto"` |  |
+| cluster-manager.observability.otel.headers | string | `"auto"` |  |
 | cluster-manager.installation.name | string | `""` |  |
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
@@ -1240,6 +1252,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| backstage.observability.otel.endpoint | string | `"auto"` |  |
+| backstage.observability.otel.protocol | string | `"auto"` |  |
+| backstage.observability.otel.headers | string | `"auto"` |  |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |
@@ -1288,6 +1303,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.backstage.extraVolumeMounts[0].mountPath | string | `"/etc/agent-platform/idp-ca"` |  |
 | backstage.backstage.extraVolumeMounts[0].readOnly | bool | `true` |  |
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.tracingExporter | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.otlpInsecure | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.otlpProtocol | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.otlpHeaders | string | `"auto"` |  |
 | mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.enabled | string | `"auto"` |  |
 | mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |

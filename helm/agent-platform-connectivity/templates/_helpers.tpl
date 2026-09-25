@@ -2187,6 +2187,39 @@ list item; include with nindent under `egress:`.
 {{- end -}}
 
 {{/*
+The egress rule to the OTLP gateway of a component whose chart block carries
+observability.otel (the managers, backstage): .chart is that block, .who names
+the sender in the rule's comment, .flavor is cilium or kubernetes. The pods of
+the endpoint's namespace on its port (agent-platform.otlpTarget), else the
+cluster entity (cilium) or any address (kubernetes) on that port. Nothing when
+the endpoint is empty. Rendered as a YAML list item; include with nindent under
+`egress:`.
+*/}}
+{{- define "agent-platform.componentOtlpEgress" -}}
+{{- $endpoint := dig "observability" "otel" "endpoint" "" .chart | toString | trim -}}
+{{- if and $endpoint (ne $endpoint "auto") -}}
+{{- $otlp := include "agent-platform.otlpTarget" (dict "endpoint" $endpoint "protocol" (dig "observability" "otel" "protocol" "grpc" .chart)) | fromJson -}}
+{{- if eq .flavor "cilium" -}}
+{{- include "agent-platform.otlpEgressRule" (dict "target" $otlp "who" .who) -}}
+{{- else }}
+# The OTLP gateway {{ .who }} ({{ $otlp.endpoint }}).
+- to:
+    {{- if $otlp.namespace }}
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ $otlp.namespace }}
+    {{- else }}
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    {{- end }}
+  ports:
+    - port: {{ $otlp.port | int }}
+      protocol: TCP
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The OTLP gateways kagent's exporters send to, for a network policy: a JSON
 list of {endpoint, namespace, port} (agent-platform.otlpTarget), one per
 distinct destination of the signals that are on (kagent.otel.tracing /
