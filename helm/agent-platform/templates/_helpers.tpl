@@ -130,8 +130,8 @@ overwrite would hide a values file that still spells the old key.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation);
     substrateWorkerPool.workerImage from the Substrate release THIS chart pins
-    (agent-platform.substrate.workerImage: the substrate block's image.registry,
-    ateom-gvisor, the floor of components.substrate.versionRange) — never the
+    (agent-platform.substrate.workerImage: the substrate block's image.registry
+    and image.repository, ateom-gvisor, the floor of components.substrate.versionRange) — never the
     worker the kagent build was published against, so the worker and the
     atelet are one Substrate release whatever kagent build the range admits
     (giantswarm/agent-platform#466). An installation's own workerImage stands
@@ -146,7 +146,11 @@ overwrite would hide a values file that still spells the old key.
     muster's OAuth server is off (muster.muster.oauth.server.enabled, the
     platform's one login): a platform without a login has no issuer for a
     resource server to trust — the lab shape of examples/kind-lab-dex.yaml —
-    the way the muster discovery label derives from the same toggle.
+    the way the muster discovery label derives from the same toggle. The
+    managers' login itself (oauth.dex.issuerURL, clientID, existingSecret,
+    trustedAudiences, baseURL) is not derived here but on the shaped values
+    (agent-platform.identity.apply), so the connectivity release guards and
+    wires the same block.
   substrate: atelet.serviceAccount.annotations and
     ateApiServer.serviceAccount.annotations gain eks.amazonaws.com/role-arn,
     the IRSA role the store block renders, while it does (a differing explicit
@@ -686,15 +690,18 @@ Usage: include "agent-platform.substrate.pinnedVersion" $root
 
 {{/*
 The gVisor worker image of the Substrate release this chart pins:
-<substrate.image.registry>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
-— the registry the substrate block names for the control plane's images (a
-mirror sets it there, once, for both), the tag the atelet's. Every release of
-the line publishes atelet and ateom-gvisor under the same tag.
+<substrate.image.registry>/<substrate.image.repository>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
+— the registry and repository the substrate block names for the control
+plane's images (a mirror sets them there, once, for both), the tag the
+atelet's. Every release of the line publishes atelet and ateom-gvisor under
+the same tag.
 Usage: include "agent-platform.substrate.workerImage" $root
 */}}
 {{- define "agent-platform.substrate.workerImage" -}}
-{{- $registry := dig "image" "registry" "gsoci.azurecr.io/giantswarm/substrate" (.Values.substrate | default dict) -}}
-{{- printf "%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (include "agent-platform.substrate.pinnedVersion" .) -}}
+{{- $image := dig "image" (dict) (.Values.substrate | default dict) -}}
+{{- $registry := dig "registry" "gsoci.azurecr.io" $image -}}
+{{- $repository := dig "repository" "giantswarm/substrate" $image -}}
+{{- printf "%s/%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (trimAll "/" $repository) (include "agent-platform.substrate.pinnedVersion" .) -}}
 {{- end -}}
 
 {{/*
@@ -1344,7 +1351,11 @@ answers, but only where the leaf is left at `auto`:
                                own monitor; the chart takes a boolean),
                                vm-manager.serviceMonitor.enabled,
                                kserve-llmisvc-resources.kserve.llmisvc
-                               .controller.serviceMonitor.enabled
+                               .controller.serviceMonitor.enabled,
+                               substrate.metrics.podMonitor.enabled (the six
+                               workloads of the Substrate control plane),
+                               kagent.controller.metrics.serviceMonitor.enabled
+                               (the controller's own, from the line's 1.0.2)
 Two leaves have no `auto` form and are derived directly, off only:
   valkey.valkey.metrics.podMonitor.enabled — the valkey chart's own default is
       on; written false when monitors are off, left absent otherwise so the
@@ -1405,6 +1416,8 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "agentgateway" "monitoring" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "mcpKubernetes" "instrumentation" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "grafanaDashboards" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "substrate" "metrics" "podMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "controller" "metrics" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "tracing" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "logging" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "vm-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
@@ -1503,6 +1516,68 @@ Usage: include "agent-platform.scheduling.apply" (dict "values" $shaped)
 {{- end -}}
 
 {{/*
+The platform's one login in the managers' OAuth blocks
+(giantswarm/agent-platform#484). model-manager, agent-manager, vm-manager and
+cluster-manager are OAuth resource servers of the login muster's OAuth server
+names. Each chart resolves its issuer, client, Secret and trusted audiences
+from its own oauth block, else global.identity; what both leave unset is filled
+here from muster.muster.oauth.server — oauth.dex.issuerURL from dex.issuerUrl,
+oauth.dex.clientID from dex.clientId (and oauth.trustedAudiences [that client],
+the charts' own default from global.identity.clientId), oauth.existingSecret
+from existingSecret (key dex-client-secret, the key every manager chart and
+muster read) — so an installation that names muster's login names the
+managers' too, a customer's own Dex client included, which a fleet-wide
+global.identity.clientId cannot carry. Defaults, not the single-source rule: a
+manager's own value wins, and so does global.identity (the connectivity chart
+fails the render when either disagrees with muster's). Only for the dex
+provider, while muster's OAuth server is on (with it off, model-manager's oauth
+is off: componentDerivedValues).
+oauth.baseURL of the two routed managers is https://<host><route.pathPrefix>
+under an agentgateway-* ingress.mode, host being the hostname the connectivity
+chart gives the route (modelManager.route.hostname / agentManager.route.hostname,
+else agentgateway.<global.domain>); without one it stays unset and the
+connectivity chart's guard names the key.
+Runs on the $shaped copy in components.yaml after scheduling.apply, so each
+manager release and the connectivity release — its guards, the managers'
+identity-provider egress — read the same filled block. Emits nothing.
+Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
+*/}}
+{{- define "agent-platform.identity.apply" -}}
+{{- $v := .values -}}
+{{- $global := index $v "global" | default dict -}}
+{{- $identity := dig "identity" dict $global -}}
+{{- $domain := dig "domain" "" $global -}}
+{{- $mode := dig "ingress" "mode" "" $v -}}
+{{- $server := dig "muster" "oauth" "server" dict (index $v "muster" | default dict) -}}
+{{- $login := dict -}}
+{{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
+{{- $login = dict "issuerURL" (dig "dex" "issuerUrl" "" $server) "clientID" (dig "dex" "clientId" "" $server) "existingSecret" (dig "existingSecret" "" $server) -}}
+{{- end -}}
+{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" -}}
+{{- $block := index $v $name -}}
+{{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
+{{- $oauth := index $block "oauth" -}}
+{{- if and $login (eq (toString (dig "provider" "dex" $oauth)) "dex") -}}
+{{- if not (kindIs "map" (index $oauth "dex")) }}{{ $_ := set $oauth "dex" dict }}{{ end -}}
+{{- $dex := index $oauth "dex" -}}
+{{- if and $login.issuerURL (not $dex.issuerURL) (not $identity.issuerUrl) }}{{ $_ := set $dex "issuerURL" $login.issuerURL }}{{ end -}}
+{{- if and $login.clientID (not $dex.clientID) (not $identity.clientId) -}}
+{{- $_ := set $dex "clientID" $login.clientID -}}
+{{- if not $oauth.trustedAudiences }}{{ $_ := set $oauth "trustedAudiences" (list $login.clientID) }}{{ end -}}
+{{- end -}}
+{{- if and $login.existingSecret (not $oauth.existingSecret) (not $dex.clientSecret) (not $identity.existingSecret) }}{{ $_ := set $oauth "existingSecret" $login.existingSecret }}{{ end -}}
+{{- end -}}
+{{- if and $wiring (not $oauth.baseURL) (or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
+{{- $route := dig $wiring "route" dict $v -}}
+{{- $host := $route.hostname -}}
+{{- if and (not $host) $domain }}{{ $host = printf "agentgateway.%s" $domain }}{{ end -}}
+{{- if and $host $route.pathPrefix }}{{ $_ := set $oauth "baseURL" (printf "https://%s%s" $host $route.pathPrefix) }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Whether the bundled Flux engine is on — components.flux.enabled, read through
 the same helper as every other roster entry (a missing entry counts as on, as
 Helm treats a dependency whose condition path is absent). Emits "true" or "".
@@ -1577,15 +1652,19 @@ are created for, in Helm's order: pre-install,pre-upgrade while the kagent
 namespace hook or the storage-version backup hook renders (they run as that
 account — creating a namespace or deleting a CRD is cluster-scoped, the
 namespaced <release>-self identity cannot), post-install,post-upgrade while the
-storage-version restore hook renders, and pre-delete for the ordered teardown
-(the bundled engine). Empty when none of them renders — rbac.yaml renders nothing then.
+storage-version restore hook renders, pre-delete for the ordered teardown
+(the bundled engine), and the serving teardown's event while it renders
+(agent-platform.serving.teardownEvent: pre-delete, or pre-upgrade when the
+slice is switched off in place). Empty when none of them renders — rbac.yaml
+renders nothing then.
 */}}
 {{- define "agent-platform.hooks.serviceAccountEvents" -}}
 {{- $events := list -}}
 {{- if or (include "agent-platform.kagent.hookNamespace" .) (include "agent-platform.kagent.storageVersionHooks" .) }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
 {{- if include "agent-platform.kagent.storageVersionHooks" . }}{{ $events = concat $events (list "post-install" "post-upgrade") }}{{ end -}}
 {{- if eq (include "agent-platform.engineEnabled" .) "true" }}{{ $events = append $events "pre-delete" }}{{ end -}}
-{{- join "," $events -}}
+{{- with include "agent-platform.serving.teardownEvent" . }}{{ $events = append $events . }}{{ end -}}
+{{- join "," (uniq $events) -}}
 {{- end -}}
 
 {{/*

@@ -15,7 +15,9 @@ property the slice relies on:
   llm-d-cuda reference carries (#568) — the block held back from the
   connectivity release; spec.driftDetection.mode: enabled by default, so a
   well-known config that went missing is re-created on the release's next
-  reconcile (#508), and no other release of the slice carries drift detection;
+  reconcile (#508), with the configs' /spec ignored (KServe defaults fields
+  into it after the apply; correcting them kept a fresh install from coming
+  back Ready), and no other release of the slice carries drift detection;
 - the derived KServe ingress-gateway value: kserve-llmisvc-resources carries
   kserve.controller.gateway.ingressGateway.kserveGateway = <namespace>/<gateway>,
   a differing copy of the operator's fails the render naming both;
@@ -179,7 +181,7 @@ def check_profile(meta: str) -> str:
     if "storageNamespace" in rc:
         sys.exit("FAIL: the kserve-runtime-configs release targets a namespace of its own; the llm-d controller resolves the well-known configs from the LLMInferenceService's namespace and its own (the release namespace) only")
     need(rc, f"      llmisvcConfigs:\n        enabled: true\n        imageRegistry: {FAST_PREFIX}", "the kserve-runtime-configs release")
-    need(rc, "  driftDetection:\n    mode: enabled\n", "the kserve-runtime-configs release (a missing well-known config is re-created on the next reconcile, #508)")
+    need(rc, "  driftDetection:\n    ignore:\n    - paths:\n      - /spec\n      target:\n        kind: LLMInferenceServiceConfig\n    mode: enabled\n", "the kserve-runtime-configs release (a missing well-known config is re-created on the next reconcile; the spec KServe defaults after the apply is not drift, or a fresh install never comes back Ready, #508)")
     drifting = sorted(name for (kind, name), doc in docs.items() if kind == "HelmRelease" and name != "kserve-runtime-configs" and "\n  driftDetection:" in doc)
     if drifting:
         sys.exit(f"FAIL: {drifting} carry spec.driftDetection in the slice; drift detection is decided per release, kserve-runtime-configs only here")
@@ -393,11 +395,16 @@ CACHE_CLASS = ("StorageClass", f"agent-platform-connectivity-hf-cache-{class_dig
 NO_CLASS = ["--set", "modelServing.cache.storageClass.create=false"]
 # The keep annotation as rendered (the templates' comments name the policy too).
 KEEP = "    helm.sh/resource-policy: keep"
+# The prefix of the tier annotations the hook stamps on the claim (#605): -type, -iops, -throughput, the class parameters
+# cluster-manager prices the claim from once its class is gone.
+TIER = "agent-platform.giantswarm.io/volume"
 
 
-# A stub kubectl for the hook's script (#570): STUB_SIZE describes an existing claim (empty: no claim), STUB_PHASE its phase,
-# STUB_CLASS its storageClassName (the variable unset: the claim carries no such key; empty: the empty class), STUB_SC_EXISTS
-# whether `get storageclass` finds the class, STUB_APPLIED where the applied manifest lands.
+# A stub kubectl for the hook's script (#570, #605): STUB_SIZE describes an existing claim (empty: no claim), STUB_PHASE its phase,
+# STUB_CLASS its storageClassName (the variable unset: the claim carries no such key; empty: the empty class), STUB_TIER the
+# claim's tier annotations as the script reads them (empty: none), STUB_SC_EXISTS whether `get storageclass` finds the class,
+# STUB_SC_PARAMS its parameters ("key=value ..."), STUB_APPLIED where the applied manifest lands, STUB_ANNOTATED where the
+# arguments of `annotate` land. Read back after the apply, the claim's class is the one the applied manifest names.
 STUB_KUBECTL = """#!/bin/sh
 case "$*" in
   *"get pvc"*"{.spec.resources.requests.storage}"*) printf '%s' "$STUB_SIZE" ;;
@@ -405,25 +412,34 @@ case "$*" in
   *"get pvc"*"{.spec.storageClassName}"*"--allow-missing-template-keys=false"*)
     [ -n "${STUB_CLASS+x}" ] || { echo 'error: error executing jsonpath "{.spec.storageClassName}": storageClassName is not found' >&2; exit 1; }
     printf '%s' "$STUB_CLASS" ;;
+  *"get pvc"*"{.spec.storageClassName}") sed -n 's/.*"storageClassName":"\\([^"]*\\)".*/\\1/p' "$STUB_APPLIED" ;;
+  *"get pvc"*"volume-type"*) printf '%s' "$STUB_TIER" ;;
   *"get pvc"*) [ -n "$STUB_SIZE" ] || exit 1 ;;
+  *"get storageclass"*"{.parameters."*)
+    key=$(printf '%s' "$*" | sed 's/.*{[.]parameters[.]\\([a-z]*\\)}.*/\\1/')
+    printf ' %s ' "$STUB_SC_PARAMS" | sed -n "s/.* $key=\\([^ ]*\\) .*/\\1/p" ;;
   *"get storageclass"*) [ "$STUB_SC_EXISTS" = 1 ] || exit 1 ;;
+  *"annotate pvc"*) printf '%s\\n' "$@" > "$STUB_ANNOTATED" ;;
   *"apply"*) cat > "$STUB_APPLIED" ;;
   *) echo "stub kubectl: unexpected $*" >&2; exit 9 ;;
 esac
 """
 
 
-def run_hook(job: str, phase: str = "", size: str = "", storage_class: str | None = None, class_exists: bool = True) -> tuple[int, dict | None, str, str]:
-    """Run the hook Job's script against the stub kubectl: (rc, the applied manifest or None, stdout, stderr). size "" is no existing claim."""
+def run_hook(job: str, phase: str = "", size: str = "", storage_class: str | None = None, class_exists: bool = True,
+             tier: str = "", class_parameters: str = "") -> tuple[int, dict | None, str, str]:
+    """Run the hook Job's script against the stub kubectl: (rc, the claim as the hook leaves it or None, stdout, stderr) -- the
+    applied manifest, with the annotations `kubectl annotate` added merged in. size "" is no existing claim."""
     script = yaml.safe_load(job)["spec"]["template"]["spec"]["containers"][0]["args"][0]
     with tempfile.TemporaryDirectory() as d:
         stub = os.path.join(d, "kubectl")
         with open(stub, "w", encoding="utf-8") as f:
             f.write(STUB_KUBECTL)
         os.chmod(stub, 0o755)
-        applied = os.path.join(d, "applied.json")
+        applied, annotated = os.path.join(d, "applied.json"), os.path.join(d, "annotated")
         env = {k: v for k, v in os.environ.items() if not k.startswith("STUB_")}
-        env.update(PATH=f"{d}:{env['PATH']}", STUB_APPLIED=applied, STUB_PHASE=phase, STUB_SIZE=size, STUB_SC_EXISTS="1" if class_exists else "0")
+        env.update(PATH=f"{d}:{env['PATH']}", STUB_APPLIED=applied, STUB_ANNOTATED=annotated, STUB_PHASE=phase, STUB_SIZE=size,
+                   STUB_TIER=tier, STUB_SC_EXISTS="1" if class_exists else "0", STUB_SC_PARAMS=class_parameters)
         if storage_class is not None:
             env["STUB_CLASS"] = storage_class
         result = subprocess.run(["sh", "-eu", "-c", script], env=env, capture_output=True, text=True, check=False)
@@ -431,7 +447,15 @@ def run_hook(job: str, phase: str = "", size: str = "", storage_class: str | Non
         if os.path.exists(applied):
             with open(applied, encoding="utf-8") as f:
                 manifest = json.load(f)
+        if manifest and os.path.exists(annotated):
+            with open(annotated, encoding="utf-8") as f:
+                manifest["metadata"].setdefault("annotations", {}).update(a.split("=", 1) for a in f.read().splitlines() if a.startswith(f"{TIER}-"))
     return result.returncode, manifest, result.stdout, result.stderr
+
+
+def tier_of(claim: dict) -> dict:
+    """The tier annotations a claim carries, by parameter: {"type": ..., "iops": ..., "throughput": ...} as present."""
+    return {k.removeprefix(f"{TIER}-"): v for k, v in claim["metadata"].get("annotations", {}).items() if k.startswith(f"{TIER}-")}
 
 
 def applied_claim(job: str) -> dict:
@@ -466,7 +490,8 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     if not role or ("ServiceAccount", HOOK_IDENTITY) not in docs or ("ClusterRoleBinding", HOOK_IDENTITY) not in docs:
         sys.exit(f"FAIL: the hook identity {HOOK_IDENTITY} (ServiceAccount, ClusterRole, ClusterRoleBinding) is incomplete")
     need(role, '    resources: ["persistentvolumeclaims"]\n    verbs: ["get", "create", "patch"]', "the hook identity's ClusterRole")
-    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 100Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete on them")
+    need(role, '  - apiGroups: ["storage.k8s.io"]\n    resources: ["storageclasses"]\n    verbs: ["get"]', "the hook identity's ClusterRole (the claim's class and its tier, #605)")
+    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 100Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and get on StorageClasses, never delete on them")
 
     ns = docs.get(SERVING_NS)
     if not ns:
@@ -510,12 +535,36 @@ def check_cache(connectivity: str, base: list[str]) -> None:
        "is grown to 100Gi; an equal size in another spelling passes silently; a Pending claim on a class the cluster lacks fails naming the claim, the way out and the rendered class; "
        "a Pending claim on a class the cluster has, a claim without a class and one on the empty class keep theirs")
 
+    # The claim carries its tier (#605): stamped once by `kubectl annotate` -- never by the apply, which would take it away again on
+    # a later run under its field manager -- from the chart's parameters on the chart's class, else from the claim's class.
+    chart_tier = {"type": "gp3", "iops": "3000", "throughput": "500"}
+    rc, created, out, err = run_hook(job)
+    if rc != 0 or tier_of(created) != chart_tier or f"tier stamped from StorageClass {CACHE_CLASS[1]}" not in out:
+        sys.exit(f"FAIL: the created claim should carry the chart's class parameters as its tier (rc={rc}):\n{json.dumps(created['metadata'] if created else None, indent=1)}\n{out}\n{err}")
+    rc, again, out, err = run_hook(job, "Bound", "100Gi", CACHE_CLASS[1], tier="gp33000500", class_parameters="type=io2 iops=9 throughput=9")
+    if rc != 0 or tier_of(again) or "tier" in out:
+        sys.exit(f"FAIL: a claim that carries its tier should be left alone: neither re-stamped nor carried by the apply, which would own it (rc={rc}):\n{json.dumps(again['metadata'] if again else None, indent=1)}\n{out}\n{err}")
+    rc, former, out, err = run_hook(job, "Bound", "500Gi", old, class_parameters="type=gp3 iops=4000 throughput=1000")
+    if rc != 0 or tier_of(former) != {"type": "gp3", "iops": "4000", "throughput": "1000"} or f"tier stamped from StorageClass {old}" not in out:
+        sys.exit(f"FAIL: an existing claim without its tier should be stamped from its own class's parameters, not the chart's (rc={rc}):\n{json.dumps(former['metadata'] if former else None, indent=1)}\n{out}\n{err}")
+    rc, gone, out, err = run_hook(job, "Bound", "500Gi", old, class_exists=False)
+    if rc != 0 or tier_of(gone) or f"no tier stamped (StorageClass {old} is gone)" not in out:
+        sys.exit(f"FAIL: an existing claim whose class is gone should be applied without a tier, the log saying why (rc={rc}):\n{out}\n{err}")
+    rc, bare, out, err = run_hook(job, "Bound", "500Gi", old, class_parameters="encrypted=true")
+    if rc != 0 or tier_of(bare) or "carries no type, iops, throughput" not in out:
+        sys.exit(f"FAIL: a class without type, iops or throughput should stamp nothing, the log saying so (rc={rc}):\n{out}\n{err}")
+    ok(f"the claim carries its tier: created on the chart's class it is stamped {TIER}-type=gp3, -iops=3000, -throughput=500 from the chart's parameters by kubectl annotate "
+       "(the applied manifest carries none, so no later apply removes them); a claim carrying its tier is left alone; an existing one without it is stamped from its own class; "
+       "a class that is gone or carries none of the three stamps nothing, the log saying why")
+
     # A parameter change renders a new class -- the API forbids changing a class's parameters -- and the claim references it (#570).
     retiered = documents(helm(connectivity, [*base, "--set", "modelServing.cache.storageClass.parameters.throughput=1000"]))
     retiered_name = f"agent-platform-connectivity-hf-cache-{class_digest(CACHE_PROVISIONER, {**CACHE_PARAMETERS, 'throughput': '1000'})}"
     if ("StorageClass", retiered_name) not in retiered or CACHE_CLASS in retiered or applied_claim(retiered[CACHE_JOB])["spec"]["storageClassName"] != retiered_name:
         sys.exit(f"FAIL: a parameter change should render the class under a new name ({retiered_name}) and the claim reference it: {sorted(k for k in retiered if k[0] == 'StorageClass')}, {applied_claim(retiered[CACHE_JOB])['spec']}")
     need(retiered[("StorageClass", retiered_name)], '  throughput: "1000"', "the re-tiered StorageClass")
+    if tier_of(applied_claim(retiered[CACHE_JOB])) != {"type": "gp3", "iops": "3000", "throughput": "1000"}:
+        sys.exit(f"FAIL: the claim created on the re-tiered class should carry its parameters as its tier: {tier_of(applied_claim(retiered[CACHE_JOB]))}")
     ok(f"a parameter change renders the class under a new digest name ({retiered_name}), the former ({CACHE_CLASS[1]}) gone, and the applied claim references the new one")
 
     knobs = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.pvc.storageClassName=gp3", "--set", "modelServing.cache.pvc.size=1Ti",
@@ -532,9 +581,15 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     named = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.storageClass.name=io2-fast"]))
     if any(kind == "StorageClass" for kind, _ in named) or applied_claim(named[CACHE_JOB])["spec"].get("storageClassName") != "io2-fast":
         sys.exit(f"FAIL: storageClass.create: false with a name should render no class and reference io2-fast: {sorted(k for k in named if k[0] == 'StorageClass')}, {applied_claim(named[CACHE_JOB])['spec']}")
+    rc, io2, out, err = run_hook(named[CACHE_JOB], class_parameters="type=io2 iops=16000")
+    if rc != 0 or tier_of(io2) != {"type": "io2", "iops": "16000"} or "tier stamped from StorageClass io2-fast" not in out:
+        sys.exit(f"FAIL: a claim created on a named class should carry what that class carries at apply time (rc={rc}):\n{json.dumps(io2['metadata'] if io2 else None, indent=1)}\n{out}\n{err}")
     default_class = documents(helm(connectivity, [*base, *NO_CLASS]))
     if any(kind == "StorageClass" for kind, _ in default_class) or "storageClassName" in applied_claim(default_class[CACHE_JOB])["spec"]:
         sys.exit(f"FAIL: storageClass.create: false without a name should render no class and leave the claim on the cluster's default: {applied_claim(default_class[CACHE_JOB])['spec']}")
+    rc, unclassed, out, err = run_hook(default_class[CACHE_JOB])
+    if rc != 0 or tier_of(unclassed) or "no tier stamped (the claim names no StorageClass)" not in out:
+        sys.exit(f"FAIL: a claim that names no class should be applied without a tier, the log saying why (rc={rc}):\n{out}\n{err}")
     own = documents(helm(connectivity, [*base, "--set", "modelServing.cache.storageClass.name=fast", "--set", "modelServing.cache.storageClass.parameters.iops=16000",
                                         "--set", "modelServing.cache.storageClass.provisioner=disk.csi.azure.com"]))
     fast = own.get(("StorageClass", "fast"))
@@ -707,6 +762,81 @@ def check_presets(connectivity: str) -> None:
        f"requests within a g6.xlarge's {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB; the schema knows spec.template")
 
 
+def family_problems(preset: dict, families: list[dict], runtime: dict, templates: str) -> list[str]:
+    """What is wrong with a preset against the model-family table (files/model-serving/model-families.yaml,
+    giantswarm/agent-platform#313): its family, found by spec.model.id, and the parsers and chat template it must carry."""
+    name, spec = preset["metadata"]["name"], preset["spec"]
+    model = spec["model"]["id"]
+    rows = [f for f in families if re.search(f["match"], model)]
+    if len(rows) != 1:
+        which = "no family row" if not rows else f"{len(rows)} family rows ({', '.join(r['name'] for r in rows)})"
+        return [f"preset {name} serves {model}, which {which} of model-families.yaml matches; add the family's row (its tool-call parsers, "
+                "reasoning parser and chat template from its vLLM recipe) or narrow the matches"]
+    row = rows[0]
+    args = [str(a) for a in spec.get("args") or []]
+    caps = set(spec["model"].get("capabilities") or [])
+    tool = [a.split("=", 1)[1] for a in args if a.startswith("--tool-call-parser=")]
+    reasoning = [a.split("=", 1)[1] for a in args if a.startswith("--reasoning-parser=")]
+    problems = []
+    for parser in tool:
+        if parser not in row["toolCallParsers"]:
+            problems.append(f"preset {name} (family {row['name']}) carries --tool-call-parser={parser}; the family's are {row['toolCallParsers']}")
+    for parser in reasoning:
+        if parser != row["reasoningParser"]:
+            problems.append(f"preset {name} (family {row['name']}) carries --reasoning-parser={parser}; the family's is {row['reasoningParser']}")
+    if "tools" in caps and ("--enable-auto-tool-choice" not in args or not tool):
+        problems.append(f"preset {name} (family {row['name']}) is tagged tools without --enable-auto-tool-choice and a tool-call parser of "
+                        f"{row['toolCallParsers']}: kagent sends tools with tool_choice auto on every turn, which vLLM then refuses with 400")
+    if "reasoning" in caps and not reasoning:
+        problems.append(f"preset {name} (family {row['name']}) is tagged reasoning without --reasoning-parser={row['reasoningParser']}: "
+                        "the thinking comes back inside the answer")
+    chat = spec.get("chatTemplate") or {}
+    if row["chatTemplate"] == "required" and not chat:
+        problems.append(f"preset {name} (family {row['name']}) sets no spec.chatTemplate; the family's checkpoints ship none vLLM serves tools with")
+    if chat.get("file") and not os.path.isfile(os.path.join(templates, chat["file"])):
+        problems.append(f"preset {name} mounts the chat template {chat['file']}, which is not under files/model-serving/chat-templates/")
+    return problems
+
+
+def check_model_families(connectivity: str) -> None:
+    """Every shipped preset against the model-family table: its family's parsers and chat template; every row's parsers
+    registered by the runtime's vLLM; a wrong parser, a missing one and an unknown family fail naming what (#313)."""
+    table = yaml.safe_load(open(f"{connectivity}/files/model-serving/model-families.yaml"))
+    families, runtime = table["families"], table["runtime"]
+    templates = f"{connectivity}/files/model-serving/chat-templates"
+    for row in families:
+        if row.get("chatTemplate") not in ("required", "optional"):
+            sys.exit(f"FAIL: model-families.yaml row {row['name']}: chatTemplate is required or optional, not {row.get('chatTemplate')!r}")
+        if row.get("runtimeImage"):
+            continue  # a family on a runtime image of its own names that vLLM's parsers
+        unknown = [p for p in row["toolCallParsers"] if p not in runtime["toolCallParsers"]]
+        if row["reasoningParser"] not in runtime["reasoningParsers"]:
+            unknown.append(row["reasoningParser"])
+        if unknown:
+            sys.exit(f"FAIL: model-families.yaml row {row['name']} names {unknown}, which vLLM {runtime['vllm']} does not register")
+    files = sorted(glob.glob(f"{connectivity}/files/model-serving/presets/*.yaml"))
+    problems = [p for path in files for p in family_problems(yaml.safe_load(open(path)), families, runtime, templates)]
+    if problems:
+        sys.exit("FAIL: " + "\nFAIL: ".join(problems))
+    # Negative controls: the check names what is wrong.
+    base = yaml.safe_load(open(f"{connectivity}/files/model-serving/presets/qwen3-5-4b.yaml"))
+    controls = {
+        "a tool-call parser the family does not list": (["--enable-auto-tool-choice", "--tool-call-parser=hermes", "--reasoning-parser=qwen3"], "Qwen/Qwen3.5-4B", "--tool-call-parser=hermes; the family's are"),
+        "a tools preset without its parser": (["--reasoning-parser=qwen3"], "Qwen/Qwen3.5-4B", "is tagged tools without --enable-auto-tool-choice"),
+        "a reasoning preset without its parser": (["--enable-auto-tool-choice", "--tool-call-parser=qwen3_coder"], "Qwen/Qwen3.5-4B", "is tagged reasoning without --reasoning-parser=qwen3"),
+        "a family the table lacks": (["--enable-auto-tool-choice", "--tool-call-parser=hermes"], "org/Unknown-7B", "which no family row of model-families.yaml matches"),
+    }
+    for what, (args, model, needle) in controls.items():
+        control = yaml.safe_load(yaml.safe_dump(base))
+        control["spec"]["args"], control["spec"]["model"]["id"] = args, model
+        got = family_problems(control, families, runtime, templates)
+        if not any(needle in p for p in got):
+            sys.exit(f"FAIL: the model-family check passes {what} (got {got})")
+    ok(f"{len(files)} shipped presets carry their family's parsers ({len(families)} rows of model-families.yaml, every parser registered by "
+       f"vLLM {runtime['vllm']}): tools with --enable-auto-tool-choice and a family tool-call parser, reasoning with the family's reasoning parser, "
+       f"every mounted chat template present; a foreign parser, a missing one and an unknown family fail naming preset, family and parser")
+
+
 def resource_requests(text: str, name: str) -> tuple:
     """The preset's requests.cpu (vCPU) and requests.memory (GiB), from the
     authoring form's `resources:` block (quantities as Kubernetes writes them)."""
@@ -756,6 +886,7 @@ def main(meta: str, connectivity: str) -> int:
     finally:
         os.unlink(values)
     check_presets(connectivity)
+    check_model_families(connectivity)
     return 0
 
 
