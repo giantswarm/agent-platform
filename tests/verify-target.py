@@ -122,28 +122,6 @@ def hold_otlp_endpoints(here: str, there: str) -> tuple:
     if (h := strip(here)) != here or strip(there) != there:
         print("note: #36711 hold — muster's and Substrate's OTLP endpoint blocks and the data plane's tenant pod label are left out of the golden comparison")
     return h, strip(there)
-# giantswarm/giantswarm#36711: global.observability.traces.otlp is the one
-# collector of every exporter: its default names the kube-system otlp-gateway
-# and the giantswarm tenant, where GOLDEN_REF's is empty and has no tenant key.
-# `global` is injected into every component release, so the block differs in
-# every HelmRelease's values while each component's own keys resolve to what
-# GOLDEN_REF forwards. GOLDEN_REF's schema refuses the tenant key, so the block
-# cannot be held by --set: each side's default block is cut from the meta
-# renders, exactly as written (any other value still fails the comparison).
-# Dropped once GOLDEN_REF carries it.
-GLOBAL_OTLP_HERE = re.compile(
-    r"^(\s+)traces:\n\1  otlp:\n\1    endpoint: http://otlp-gateway\.kube-system\.svc:4317\n"
-    r"\1    headers: \{\}\n\1    protocol: grpc\n\1    tenant: giantswarm\n", re.M)
-GLOBAL_OTLP_THERE = re.compile(
-    r'^(\s+)traces:\n\1  otlp:\n\1    endpoint: ""\n\1    headers: \{\}\n\1    protocol: ""\n', re.M)
-
-
-def hold_global_otlp(here: str, there: str) -> tuple:
-    """The two meta renders with the injected global.observability.traces.otlp default cut out."""
-    h, t = GLOBAL_OTLP_HERE.sub("", here), GLOBAL_OTLP_THERE.sub("", there)
-    if h != here or t != there:
-        print("note: #36711 hold — the injected global.observability.traces.otlp default is left out of the golden comparison")
-    return h, t
 
 
 # giantswarm/agentgateway#60: this tree turns the packaging chart's own
@@ -859,7 +837,6 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_muster_floor(here, there)
                 here, there = hold_repin_1_1(here, there)
                 here, there = hold_otlp_endpoints(here, there)
-                here, there = hold_global_otlp(here, there)
                 here, there = hold_dataplane_sampling(here, there)
                 here, there = hold_llm_endpoint(here, there)
                 here, there = hold_mm_workload_clusters(here, there)
