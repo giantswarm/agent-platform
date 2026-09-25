@@ -761,11 +761,11 @@ SUBSTRATE_OTLP_METRICS = re.compile(
 
 
 def hold_substrate_otlp_metrics(here: str, there: str) -> tuple:
-    """The meta renders without substrate.otel.metrics.enabled. Dropped once GOLDEN_REF carries it."""
-    h = SUBSTRATE_OTLP_METRICS.sub(r"\1otel:\n\2", here)
-    if h != here:
+    """Both meta renders without substrate.otel.metrics.enabled: GOLDEN_REF carries it from #694 on."""
+    h, t = (SUBSTRATE_OTLP_METRICS.sub(r"\1otel:\n\2", r) for r in (here, there))
+    if h != here or t != there:
         print("note: #36711 hold — substrate.otel.metrics.enabled is left out of the golden comparison")
-    return h, there
+    return h, t
 
 
 DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
