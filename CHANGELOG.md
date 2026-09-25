@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Substrate's metrics stay on the scrape path: `substrate.otel.metrics.enabled` is `false`** (giantswarm/giantswarm#36711). With the PodMonitors on and the OTLP endpoint set, every `ateapi`, `atelet`, `atenet-router` and `atecontroller` series reached Mimir twice, scraped (`ate_actor_crashes_total`, job `ate-system/ate-api-server`) and pushed (`ate_actor_crashes`, job `ateapi`), about 6,300 series on gazelle. The value renders `OTEL_METRICS_EXPORTER=none`, which the Go components honor from giantswarm/substrate#82 on and ignore before it; traces and logs keep exporting. The worker pods' `ateom` exports through the WorkerPool's environment and keeps pushing. `make verify-substrate-otlp` asserts the forwarded value.
+
 ### Fixed
 
 - **The kagent controller's metrics port and atenet-egress's ext-proc `9090` are admitted from the cluster entity, so their monitors scrape** (giantswarm/giantswarm#36711). The controller's ingress policy opened the API port `8083` only, so the scrape of `kagent.controller.metrics.bindAddress` (`:8080`) was dropped and `kagent-controller-metrics` reported `up=0` on every installation; the rule renders while `kagent.controller.metrics.enabled` is true, in both flavours, and never opens the API port. `substrate-atenet-egress` opened `15020` only, so the ext-proc's `9090` target was down the same way. `make verify-kagent-netpol` asserts both.
