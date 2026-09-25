@@ -10,11 +10,13 @@ rendered with the values the meta chart hands its release (the Flux path):
 
 - defaults: every exporter names the kube-system otlp-gateway on 4317, the tenant
   giantswarm travels as X-Scope-OrgID (kagent controller + Harness env, muster,
-  klaus-gateway) or as the observability.giantswarm.io/tenant pod label
+  klaus-gateway, the four managers, the portal, mcp-kubernetes) or as the observability.giantswarm.io/tenant pod label
   (Substrate, the data plane); every OTLP egress rule selects kube-system on 4317;
 - a customer collector in another namespace, on another port, with another tenant
   and one more header: every key follows, every egress rule selects that
   namespace on that port in both flavours, no kube-system OTLP rule is left;
+  mcp-kubernetes takes the endpoint as host:port, with the scheme's or the
+  protocol's default port when it names none, and otlpInsecure from the scheme;
 - an https collector outside the cluster: kagent's `insecure` resolves false (the
   SDKs read it after the endpoint), every egress rule is the cluster entity on 443;
 - an explicit per-component key wins over the global one, and its egress rule
@@ -55,6 +57,18 @@ ON = [
     "--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true",
     "--set", "components.klaus-gateway.enabled=true",
     "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster",
+    # OAuth off for the managers and mcp-kubernetes: their OTLP keys and
+    # egress do not depend on it, and on it needs each one's issuer and client.
+    *[f for c in ("agent-manager", "vm-manager", "cluster-manager", "backstage", "mcp-kubernetes")
+      for f in ("--set", f"components.{c}.enabled=true")],
+    *[f for c in ("model-manager", "agent-manager", "vm-manager", "cluster-manager")
+      for f in ("--set", f"{c}.oauth.enabled=false")],
+    "--set", "mcp-kubernetes.mcpKubernetes.oauth.enabled=false",
+    # The portal's egress policy names the login issuer, its route a Gateway,
+    # its public URL the domain.
+    "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+    "--set", "global.gatewayApi.parentRefs[0].name=gw", "--set", "global.gatewayApi.parentRefs[0].namespace=gw-system",
+    "--set", "global.domain=example.com",
 ]
 OTLP = "global.observability.traces.otlp"
 DEFAULT_EP = "http://otlp-gateway.kube-system.svc:4317"
@@ -67,6 +81,12 @@ MUSTER_POLICY = "muster-otlp-egress"
 KLAUS_POLICY = "agent-platform-connectivity-klausgateway-otlp-egress"
 DATAPLANE_POLICY = "agent-platform-connectivity-dataplane-otlp-egress"
 TRACING_POLICY = "agent-platform-connectivity-tracing"
+# The components whose chart block carries observability.otel (model-manager on
+# by default, the rest turned on above), and their egress policy in each flavour.
+COMPONENTS = ["model-manager", "agent-manager", "vm-manager", "cluster-manager", "backstage"]
+COMPONENT_POLICIES = {c: f"agent-platform-connectivity-{c}-egress" for c in COMPONENTS if c != "backstage"}
+COMPONENT_POLICIES_CILIUM = {**COMPONENT_POLICIES, "backstage": "agent-platform-connectivity-backstage"}
+COMPONENT_POLICIES_K8S = {**COMPONENT_POLICIES, "backstage": "agent-platform-connectivity-backstage-egress"}
 
 
 def fail(msg: str) -> None:
@@ -169,7 +189,14 @@ def exporters(values: dict) -> dict:
         "klaus-gateway": get(kg, ["observability", "otlpEndpoint"]),
         "substrate": get(sub, ["otel", "endpoint"]),
         "data plane": env(conn, ["gateway", "parameters", "dataPlaneEnv"], "OTEL_EXPORTER_OTLP_ENDPOINT"),
+        **{c: get(values[c], ["observability", "otel", "endpoint"]) for c in COMPONENTS},
     }
+
+
+def mcp_kubernetes(values: dict) -> dict:
+    """mcp-kubernetes' instrumentation keys as its release carries them."""
+    return {k: get(values["mcp-kubernetes"], ["mcpKubernetes", "instrumentation", k])
+            for k in ("tracingExporter", "otlpEndpoint", "otlpInsecure", "otlpProtocol", "otlpHeaders")}
 
 
 def otlp_rules(policy: str) -> list:
@@ -199,6 +226,32 @@ def k8s_rule(policy: str) -> tuple:
     ns = re.search(r"kubernetes\.io/metadata\.name: (\S+)", policy)
     port = re.search(r"port: (\d+)\n\s+protocol: TCP\n\s+- ports:", policy)
     return (ns.group(1) if ns else None, port.group(1) if port else None)
+
+
+def k8s_otlp_rules(policy: str) -> list:
+    """The (namespace or 'any', port) of every OTLP rule in a kubernetes-flavour
+    NetworkPolicy: the rule item that follows each `# The OTLP gateway ...` comment."""
+    rules = []
+    lines = policy.splitlines()
+    for i, line in enumerate(lines):
+        if not line.lstrip().startswith("# The OTLP gateway "):
+            continue
+        rule = "\n".join(lines[i + 1:i + 12])
+        ns = re.search(r"kubernetes\.io/metadata\.name: (\S+)", rule)
+        port = re.search(r"port: (\d+)", rule)
+        rules.append((ns.group(1) if ns and "ipBlock" not in rule.split("ports:")[0] else "any", port.group(1) if port else "?"))
+    return rules
+
+
+def check_components(conn: dict, k8s: dict, dest, what: str, k8s_dest="same") -> None:
+    """Every component policy opens exactly dest (None: no OTLP rule), cilium and,
+    when k8s is given, kubernetes flavour (k8s_dest, default the same)."""
+    for c, name in COMPONENT_POLICIES_CILIUM.items():
+        expect(f"{what}: {name} OTLP rules", sorted(set(otlp_rules(doc(conn, "CiliumNetworkPolicy", name)))), [dest] if dest else [])
+    if k8s:
+        want = dest if k8s_dest == "same" else k8s_dest
+        for c, name in COMPONENT_POLICIES_K8S.items():
+            expect(f"{what}: {name} OTLP rules (kubernetes flavour)", sorted(set(k8s_otlp_rules(doc(k8s, "NetworkPolicy", name)))), [want] if want else [])
 
 
 def check_egress(conn: dict, k8s: dict, want: dict, what: str) -> None:
@@ -235,10 +288,17 @@ def case_defaults(meta: str, conn_chart: str, tmp: str) -> None:
     expect("defaults: substrate tenant label", get(sub, ["podLabels", "observability.giantswarm.io/tenant"]), "giantswarm")
     expect("defaults: data-plane protocol", env(cv, ["gateway", "parameters", "dataPlaneEnv"], "OTEL_EXPORTER_OTLP_PROTOCOL"), "grpc")
     expect("defaults: data-plane tenant label", get(cv, ["gateway", "parameters", "podLabels", "observability.giantswarm.io/tenant"]), "giantswarm")
-    left = re.compile(r"^\s*(?:endpoint|protocol|headers|otlpEndpoint|otlpHeaders|value|observability\.giantswarm\.io/tenant): auto$", re.M)
+    for c in COMPONENTS:
+        expect(f"defaults: {c} protocol", get(values[c], ["observability", "otel", "protocol"]), "grpc")
+        expect(f"defaults: {c} headers", get(values[c], ["observability", "otel", "headers"]), "X-Scope-OrgID=giantswarm")
+    expect("defaults: mcp-kubernetes", mcp_kubernetes(values), {
+        "tracingExporter": "otlp", "otlpEndpoint": "otlp-gateway.kube-system.svc:4317", "otlpInsecure": "true",
+        "otlpProtocol": "grpc", "otlpHeaders": "X-Scope-OrgID=giantswarm"})
+    left = re.compile(r"^\s*(?:endpoint|protocol|headers|otlpEndpoint|otlpHeaders|otlpInsecure|otlpProtocol|tracingExporter|value|observability\.giantswarm\.io/tenant): auto$", re.M)
     if any(left.search(v) for v in values.values()):
         fail("defaults: an OTLP value reaches a release as `auto`: " + ", ".join(n for n, v in values.items() if left.search(v)))
     check_egress(conn, k8s, everywhere(("kube-system", "4317")), "defaults")
+    check_components(conn, k8s, ("kube-system", "4317"), "defaults")
     print("ok: defaults: every exporter on the kube-system otlp-gateway, tenant as header or label, egress on kube-system:4317")
 
 
@@ -258,7 +318,12 @@ def case_customer(meta: str, conn_chart: str, tmp: str) -> None:
     if not re.search(r"- name: OTEL_EXPORTER_OTLP_HEADERS\n\s+value: X-Team=platform$", params, re.M):
         fail("customer: the data plane's env does not carry the extra header (and only it: the tenant is the pod label)")
     expect("customer: tracing policy url", re.search(r'url: "([^"]+)"', doc(conn, "AgentgatewayPolicy", TRACING_POLICY)).group(1), CUSTOMER_EP)
+    for c in COMPONENTS:
+        expect(f"customer: {c} headers", get(values[c], ["observability", "otel", "headers"]), "X-Scope-OrgID=acme,X-Team=platform")
+    expect("customer: mcp-kubernetes endpoint", mcp_kubernetes(values)["otlpEndpoint"], "otel-collector.customer-otel.svc:14317")
+    expect("customer: mcp-kubernetes headers", mcp_kubernetes(values)["otlpHeaders"], "X-Scope-OrgID=acme,X-Team=platform")
     check_egress(conn, k8s, everywhere(("customer-otel", "14317")), "customer")
+    check_components(conn, k8s, ("customer-otel", "14317"), "customer")
     print("ok: customer collector: every exporter, header and label follows; every egress rule selects customer-otel:14317 in both flavours")
 
 
@@ -269,6 +334,10 @@ def case_tls(meta: str, conn_chart: str, tmp: str) -> None:
         expect(f"tls: kagent {signal} insecure", get(kagent, ["otel", signal, "exporter", "otlp", "insecure"]), "false")
     expect("tls: substrate signals left on", get(values["substrate"], ["otel", "traces", "enabled"]), None)
     check_egress(conn, {}, {p: ("cluster", "443") for p in [*KAGENT_POLICIES, *SUBSTRATE_POLICIES, MUSTER_POLICY, KLAUS_POLICY, DATAPLANE_POLICY]}, "tls")
+    mk = mcp_kubernetes(values)
+    expect("tls: mcp-kubernetes endpoint (the scheme's port)", mk["otlpEndpoint"], "otlp.example.com:443")
+    expect("tls: mcp-kubernetes insecure", mk["otlpInsecure"], "false")
+    check_components(conn, {}, ("cluster", "443"), "tls")
     print("ok: an https collector outside the cluster: kagent exports over TLS, every egress rule is the cluster entity on 443")
 
 
@@ -278,6 +347,7 @@ def case_explicit(meta: str, conn_chart: str, tmp: str) -> None:
         "muster.muster.observability.otel.endpoint": "http://collector.own-muster.svc:4317",
         "klausGateway.observability.otlpEndpoint": "http://collector.own-klaus.svc:4317",
         "substrate.otel.endpoint": "http://collector.own-substrate.svc:4317",
+        "agent-manager.observability.otel.endpoint": "http://collector.own-agent-manager.svc:4317",
     }
     flags = ["--set", f"{OTLP}.endpoint={CUSTOMER_EP}",
              "--set", "gateway.parameters.dataPlaneEnv[0].name=OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -294,7 +364,13 @@ def case_explicit(meta: str, conn_chart: str, tmp: str) -> None:
         "klaus-gateway": own["klausGateway.observability.otlpEndpoint"],
         "substrate": own["substrate.otel.endpoint"],
         "data plane": "http://collector.own-dataplane.svc:4317",
+        **{c: CUSTOMER_EP for c in COMPONENTS},
+        "agent-manager": own["agent-manager.observability.otel.endpoint"],
     })
+    expect("explicit: agent-manager OTLP rules", otlp_rules(doc(conn, "CiliumNetworkPolicy", COMPONENT_POLICIES["agent-manager"])),
+           [("own-agent-manager", "4317")])
+    expect("explicit: model-manager OTLP rules", otlp_rules(doc(conn, "CiliumNetworkPolicy", COMPONENT_POLICIES["model-manager"])),
+           [("customer-otel", "14317")])
     expect("explicit: substrate tenant label", get(values["substrate"], ["podLabels", "observability.giantswarm.io/tenant"]), "own")
     expect("explicit: muster headers", get(values["muster"], ["muster", "observability", "otel", "headers"]), "X-Scope-OrgID=own")
     expect("explicit: kagent controller OTLP rules", sorted(otlp_rules(doc(conn, "CiliumNetworkPolicy", KAGENT_POLICIES[0]))),
@@ -310,7 +386,10 @@ def case_empty_endpoint(meta: str, conn_chart: str, tmp: str) -> None:
     values, conn, k8s = meta_and_conn(meta, conn_chart, ["--set", f"{OTLP}.endpoint="], tmp, "empty")
     got = exporters(values)
     expect("empty: exporters", {k: v for k, v in got.items() if k != "data plane"},
-           {"kagent.otel.tracing": '""', "kagent.otel.logging": '""', "muster": '""', "klaus-gateway": '""', "substrate": '""'})
+           {"kagent.otel.tracing": '""', "kagent.otel.logging": '""', "muster": '""', "klaus-gateway": '""', "substrate": '""',
+            **{c: '""' for c in COMPONENTS}})
+    expect("empty: mcp-kubernetes exporter", mcp_kubernetes(values)["tracingExporter"], "none")
+    check_components(conn, k8s, None, "empty")
     expect("empty: data-plane endpoint entry", got["data plane"], None)
     kagent = values["kagent"]
     expect("empty: kagent tracing enabled", get(kagent, ["otel", "tracing", "enabled"]), "false")
@@ -336,6 +415,9 @@ def case_empty_tenant(meta: str, conn_chart: str, tmp: str) -> None:
     expect("no tenant: kagent Harness header", env(kagent, ["harness", "env"], "OTEL_EXPORTER_OTLP_HEADERS"), None)
     expect("no tenant: muster headers", get(values["muster"], ["muster", "observability", "otel", "headers"]), '""')
     expect("no tenant: klaus-gateway headers", get(values["klaus-gateway"], ["observability", "otlpHeaders"]), "{}")
+    for c in COMPONENTS:
+        expect(f"no tenant: {c} headers", get(values[c], ["observability", "otel", "headers"]), '""')
+    expect("no tenant: mcp-kubernetes headers", mcp_kubernetes(values)["otlpHeaders"], '""')
     expect("no tenant: substrate tenant label", get(values["substrate"], ["podLabels", "observability.giantswarm.io/tenant"]), None)
     expect("no tenant: data-plane tenant label",
            get(values["agent-platform-connectivity"], ["gateway", "parameters", "podLabels", "observability.giantswarm.io/tenant"]), None)
@@ -367,6 +449,11 @@ def case_http(meta: str, conn_chart: str, tmp: str) -> None:
     expect("http: tracing policy protocol", re.search(r"protocol: (\S+)", doc(conn, "AgentgatewayPolicy", TRACING_POLICY)).group(1), "HTTP")
     check_egress(conn, k8s, {MUSTER_POLICY: ("customer-otel", "4318"), DATAPLANE_POLICY: ("customer-otel", "4318"),
                              KLAUS_POLICY: ("customer-otel", "4317")}, "http")
+    for c in COMPONENTS:
+        expect(f"http: {c} protocol", get(values[c], ["observability", "otel", "protocol"]), "http/protobuf")
+    expect("http: mcp-kubernetes endpoint (the protocol's port)", mcp_kubernetes(values)["otlpEndpoint"], "otel-collector.customer-otel.svc:4318")
+    expect("http: mcp-kubernetes protocol", mcp_kubernetes(values)["otlpProtocol"], "http/protobuf")
+    check_components(conn, k8s, ("customer-otel", "4318"), "http")
     expect("http: kagent controller OTLP rules", sorted(otlp_rules(doc(conn, "CiliumNetworkPolicy", KAGENT_POLICIES[0]))),
            [("customer-otel", "4317"), ("customer-otel", "4318")])
     print("ok: http/protobuf: refused for the gRPC-only exporters at auto; with their own endpoints the rest speak http/protobuf on 4318")

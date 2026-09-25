@@ -112,11 +112,16 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {}
+UNRELEASED: dict[str, str] = {
+    "agent-manager": "1.2.0",
+    "backstage": "2.67.0",
+}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
-RENDER_AGAINST: dict[str, str] = {}
+RENDER_AGAINST: dict[str, str] = {
+    "backstage": "2.66.4-r33bae384t20260925102117hd771c93",
+}
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
 HELM_CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"

@@ -88,6 +88,9 @@ spec:
       {{- include "agent-platform.clusterManager.podSelector" . | nindent 6 }}
   egress:
     {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "cluster-manager's traces go to" "flavor" "cilium") }}
+    {{- . | nindent 4 }}
+    {{- end }}
     - toEntities:
         - kube-apiserver
     {{- if $oauthOn }}
@@ -225,6 +228,9 @@ spec:
       {{- include "agent-platform.clusterManager.podSelector" . | nindent 6 }}
   policyTypes: [Egress]
   egress:
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "cluster-manager's traces go to" "flavor" "kubernetes") }}
+    {{- . | nindent 4 }}
+    {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:

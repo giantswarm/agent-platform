@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the managers, the portal and mcp-kubernetes export traces)
+
+giantswarm/giantswarm#36711: model-manager, agent-manager, vm-manager, cluster-manager, backstage and mcp-kubernetes export their traces over OTLP to `global.observability.traces.otlp`, and their ranges start at the releases that do (model-manager `1.3.0`, agent-manager `1.2.0`, vm-manager `0.24.0`, cluster-manager `0.19.0`, backstage `2.67.0`, mcp-kubernetes `1.3.0`).
+
+### Operator action
+
+- **None** for an installation on the defaults: each component resolves the new release in its range and starts exporting to the platform's collector under its tenant.
+- **A BOM that pins one of the six** below its new floor: pin the floor (`examples/customer-bom.yaml`).
+- **An installation that sets a component's OTLP keys itself** (`<component>.observability.otel.*`, `mcp-kubernetes.mcpKubernetes.instrumentation.otlp*` / `.tracingExporter`): the explicit value wins, and its egress rule follows it. To follow the platform's collector, delete it.
+- **Recognising it worked**: `sum by (service) (increase(traces_spanmetrics_calls_total{service=~"model-manager|agent-manager|vm-manager|cluster-manager|backstage|mcp-kubernetes"}[1h]))` is non-zero once each component served a request.
+
 ## \<current\> → \<next\> (`kagent.harness.compaction.tokenThreshold` is `600000`)
 
 giantswarm/giantswarm#37792: the platform Harness compacts an agent's history only once a prompt passes 600 000 tokens (was 24 000), keeping the last four events and summarising on the agent's own model. Below that every follow-up re-reads its history from the prompt cache.
