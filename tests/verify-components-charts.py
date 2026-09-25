@@ -112,11 +112,7 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-# kserve-runtime-configs waits for the release that opens
-# kserve.llmisvcConfigs.tracing (giantswarm/kserve#99; through 0.5.7 the schema
-# closes the block). giantswarm/kserve pushes charts on tags only, so no branch
-# build carries that schema and this check stays red until 0.6.0 exists.
-UNRELEASED: dict[str, str] = {"kserve-runtime-configs": "0.6.0"}
+UNRELEASED: dict[str, str] = {}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
