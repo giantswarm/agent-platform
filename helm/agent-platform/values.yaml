@@ -5665,6 +5665,16 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
         name: ""
         kind: ClusterIssuer
         group: cert-manager.io
+    # The data plane's LoadBalancer Service: annotations on the Gateway's
+    # infrastructure, which the Service inherits. The models host is public by
+    # design (the JWT is checked at the gateway), so the default asks the AWS
+    # Load Balancer Controller for an internet-facing NLB — its own default is
+    # internal, which publishes the host with private addresses. An
+    # installation that wants a private models host sets the scheme to
+    # internal; other providers ignore the annotation.
+    service:
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
     # external-dns: the hostname annotation on the Gateway's infrastructure,
     # which the data plane's LoadBalancer Service inherits.
     externalDns:
