@@ -3985,6 +3985,17 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
       cidrs: []
+    # The workload clusters' API servers the kserve backend calls as the caller:
+    # a backend cluster-manager registers targets a workload cluster's apiserver
+    # (list_backends, loads and fits all go there). Same shape as
+    # clusterManager.networkPolicy.workloadClusters (fqdns: Cilium FQDN
+    # selectors; cidrs: IP blocks, in the kubernetes flavor these blocks or else
+    # every public destination; ports: default 443 and 6443). Empty, the
+    # default, it follows clusterManager.networkPolicy.workloadClusters, since
+    # model-manager serves on the clusters cluster-manager composes onto; set,
+    # it replaces that value as a whole. Rendered with a kserve backend
+    # (static, or cluster-manager on).
+    workloadClusters: {}
     # Further destinations of the service on 443, whatever the backend — the
     # same knob as agentManager.networkPolicy.egress: a private identity
     # provider, a model mirror.

@@ -536,6 +536,18 @@ LLM_CHANGED_KEYS = re.compile(r"^( +)(?:external|models|pathPrefixes|routes):\n(
 API_KEY_LABEL = re.compile(r"^( +)api_key:\n\1  enabled: true\n\1  expression: apiKey\.name\n", re.M)
 
 
+MM_WORKLOAD_CLUSTERS = re.compile(r"^ +workloadClusters: \{\}\n", re.M)
+
+
+def hold_mm_workload_clusters(here: str, there: str) -> tuple:
+    """The two meta renders without model-manager's forwarded, empty workloadClusters
+    (giantswarm/agent-platform#687: it follows cluster-manager's when empty). Dropped
+    once GOLDEN_REF carries it."""
+    if (h := MM_WORKLOAD_CLUSTERS.sub("", here)) != here or MM_WORKLOAD_CLUSTERS.search(there):
+        print("note: #687 hold — model-manager's forwarded, empty networkPolicy.workloadClusters is left out of the golden comparison")
+    return h, MM_WORKLOAD_CLUSTERS.sub("", there)
+
+
 def hold_llm_endpoint(here: str, there: str) -> tuple:
     """The two meta renders with #603's forwarded llmRouting and metric-label keys left out."""
     def strip(render: str) -> str:
@@ -781,6 +793,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_otlp_endpoints(here, there)
                 here, there = hold_dataplane_sampling(here, there)
                 here, there = hold_llm_endpoint(here, there)
+                here, there = hold_mm_workload_clusters(here, there)
             else:
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)

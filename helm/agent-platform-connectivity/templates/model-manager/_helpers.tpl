@@ -113,6 +113,22 @@ model-manager is off, while this release's modelServing stays off.
 {{- end -}}
 
 {{/*
+The workload clusters' API servers model-manager's kserve backend calls as the
+caller — a backend cluster-manager registers targets a workload cluster's
+apiserver (modelManager.networkPolicy.workloadClusters: fqdns, cidrs, ports).
+Set, it wins as a whole; empty, the default, it follows
+clusterManager.networkPolicy.workloadClusters: model-manager serves on the
+clusters cluster-manager composes onto. Ports default to 443 and 6443. JSON.
+*/}}
+{{- define "agent-platform.modelManager.workloadClusters" -}}
+{{- $wc := dig "networkPolicy" "workloadClusters" dict .Values.modelManager -}}
+{{- if not $wc -}}
+{{- $wc = dig "networkPolicy" "workloadClusters" dict .Values.clusterManager -}}
+{{- end -}}
+{{- dict "fqdns" (dig "fqdns" list $wc) "cidrs" (dig "cidrs" list $wc) "ports" (dig "ports" (list 443 6443) $wc) | toJson -}}
+{{- end -}}
+
+{{/*
 The namespace the models model-manager serves run in: this release's serving
 namespace with the slice on (model-serving-validate.yaml holds the two equal),
 else model-manager's kserve.namespace (model-serving, cluster-manager's

@@ -8,6 +8,7 @@ ConfigMap, invisible to the chart): either way model-manager calls the Hugging
 Face Hub for it (search, fit checks, revision lookups), so the hub egress
 renders whenever components.cluster-manager is on (#494). */ -}}
 {{- $kserveOn := include "agent-platform.modelManager.kserveOn" . }}
+{{- $wc := include "agent-platform.modelManager.workloadClusters" . | fromJson }}
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.modelManager.oauthEnabled" . }}
@@ -147,6 +148,29 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    {{- end }}
+    {{- with $wc.fqdns }}
+    # The workload clusters' API servers a kserve backend targets, by name
+    # (modelManager.networkPolicy.workloadClusters, by default cluster-manager's).
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $wc.ports }}
+            - port: {{ . | toString | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    {{- with $wc.cidrs }}
+    # The workload clusters' API servers by address.
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $wc.ports }}
+            - port: {{ . | toString | quote }}
+              protocol: TCP
+            {{- end }}
     {{- end }}
     {{- end }}
     {{- if $readsServing }}
@@ -416,6 +440,25 @@ spec:
       ports:
         - port: 443
           protocol: TCP
+    {{- end }}
+    {{- if $kserveOn }}
+    # The workload clusters' API servers a kserve backend targets
+    # (modelManager.networkPolicy.workloadClusters, by default cluster-manager's):
+    # vanilla NetworkPolicy has no FQDN selector, so their blocks when set,
+    # else every public destination on their ports.
+    - to:
+        {{- range ($wc.cidrs | default (list "0.0.0.0/0")) }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+            {{- if eq . "0.0.0.0/0" }}
+            except: {{ toYaml $.Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+            {{- end }}
+        {{- end }}
+      ports:
+        {{- range $wc.ports }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
     {{- end }}
     {{- if or $oauthOn (and $kserveOn (not $hf.cidrs)) }}
     - to:
