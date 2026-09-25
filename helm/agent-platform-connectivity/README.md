@@ -359,10 +359,12 @@ Gateway and keeps agentgateway's defaults for the LLM path.
 The chart turns on the data plane's trace export with ONE Gateway-scoped
 `AgentgatewayPolicy`, `<release>-tracing`
 (`templates/agentgateway/tracing.yaml`, `frontend.tracing`). The policy sends
-spans to the endpoint in `gateway.parameters.dataPlaneEnv`, or to
-`global.observability.traces.otlp` when its endpoint is set. The exporter
+spans to the endpoint in `gateway.parameters.dataPlaneEnv`, whose `auto`
+values take `global.observability.traces.otlp`'s endpoint and protocol (the
+platform's one collector; an entry set to anything else wins). The exporter
 sends no headers, so the tenant comes from the pod label in
-`gateway.parameters.podLabels`.
+`gateway.parameters.podLabels`, which the meta chart derives from
+`global.observability.traces.otlp.tenant`.
 
 The incoming `traceparent` decides if the data plane traces a request:
 
@@ -906,9 +908,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
 | global.observability.metrics.serviceMonitor.labels | object | `{}` |  |
-| global.observability.traces.otlp.endpoint | string | `""` |  |
-| global.observability.traces.otlp.protocol | string | `""` |  |
-| global.observability.traces.otlp.headers | object | `{}` |  |
+| global.observability.traces.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` | The collector's URL. Empty: the data plane exports nothing. |
+| global.observability.traces.otlp.protocol | string | `"grpc"` | `grpc` or `http/protobuf`; empty is grpc. |
+| global.observability.traces.otlp.tenant | string | `"giantswarm"` | The collector's tenant. Read by the meta chart (the X-Scope-OrgID header, the observability.giantswarm.io/tenant pod label); the data plane's label arrives resolved in gateway.parameters.podLabels. |
+| global.observability.traces.otlp.headers | object | `{}` | More OTLP headers, appended to the data-plane env. |
 | components.muster.enabled | bool | `true` |  |
 | components.dicebear.enabled | bool | `true` |  |
 | components.agentgateway.enabled | bool | `false` |  |
@@ -964,9 +967,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.parameters.containerSecurityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | gateway.parameters.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | gateway.parameters.dataPlaneEnv[0].name | string | `"OTEL_EXPORTER_OTLP_ENDPOINT"` |  |
-| gateway.parameters.dataPlaneEnv[0].value | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| gateway.parameters.dataPlaneEnv[0].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneEnv[1].name | string | `"OTEL_EXPORTER_OTLP_PROTOCOL"` |  |
-| gateway.parameters.dataPlaneEnv[1].value | string | `"grpc"` |  |
+| gateway.parameters.dataPlaneEnv[1].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneVolumes | list | `[]` |  |
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.cpu | string | `"100m"` |  |

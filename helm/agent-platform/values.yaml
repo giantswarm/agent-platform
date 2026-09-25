@@ -63,13 +63,32 @@ global:
         # empty keeps the per-component labels.
         labels: {}  # @schema type: object; additionalProperties: true
     traces:
-      # OTLP exporter env (OTEL_EXPORTER_OTLP_*) for the agentgateway data
-      # plane. An empty endpoint renders nothing and
-      # gateway.parameters.dataPlaneEnv applies unchanged; a set endpoint wins
-      # over same-named entries in that list.
+      # The one OTLP collector every exporter of the platform sends to. The
+      # meta chart writes it into each component's own key where that key is
+      # `auto` (the default), before it forwards the component's values:
+      # kagent.otel.{tracing,logging}.exporter.otlp, the Harness's and the
+      # controller's OTEL_EXPORTER_OTLP_HEADERS, muster.muster.observability
+      # .otel, klausGateway.observability.otlpEndpoint / otlpHeaders,
+      # substrate.otel.endpoint and substrate.podLabels, and the data plane's
+      # gateway.parameters.dataPlaneEnv and podLabels. A component key set to
+      # anything else wins. The connectivity chart's egress rules follow each
+      # component's resolved endpoint: its namespace and its port.
       otlp:
-        endpoint: ""
-        protocol: ""
+        # -- The collector's URL. Empty exports nothing: every `auto` endpoint
+        # is emptied and kagent's exporters (`auto`) resolve off.
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        # -- `grpc` or `http/protobuf`. klaus-gateway, Substrate and kagent's
+        # log exporter speak gRPC only: with `http/protobuf` the render fails
+        # while one of them would take this endpoint: set its own key.
+        protocol: grpc  # @schema enum: ["", grpc, http/protobuf]
+        # -- The collector's tenant. Sent as the X-Scope-OrgID header by the
+        # exporters that take headers (kagent, muster, klaus-gateway), and as
+        # the pod label observability.giantswarm.io/tenant on the ones that
+        # do not (Substrate, the agentgateway data plane). Empty sends neither.
+        tenant: giantswarm
+        # -- More headers for the exporters that take headers. An
+        # X-Scope-OrgID here that differs from `tenant` fails the render.
+        # Values in this block are plain values: keep credentials out of it.
         headers: {}  # @schema type: object; additionalProperties: true
 
 # === Meta-package release flow ===
@@ -1322,14 +1341,14 @@ gateway:
         drop: [ALL]
       seccompProfile:
         type: RuntimeDefault
-    # Strategic-merge env appended to the data-plane container.
-    # Defaults push OTel traces to the cluster-wide otlp-gateway in kube-system.
-    # Override or extend for per-cluster backends.
+    # Strategic-merge env appended to the data-plane container. The two
+    # `auto` values take global.observability.traces.otlp's endpoint and
+    # protocol (an empty endpoint drops its entry); a value set here wins.
     dataPlaneEnv:
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://otlp-gateway.kube-system.svc:4317
+        value: auto
       - name: OTEL_EXPORTER_OTLP_PROTOCOL
-        value: grpc
+        value: auto
     dataPlaneVolumes: []
     dataPlaneVolumeMounts: []
     # Resources for the agentgateway data-plane container. ephemeral-storage
@@ -1439,10 +1458,11 @@ gateway:
     # gateway.parameters.podDisruptionBudget above.
     podAnnotations: {}  # @schema additionalProperties: true
     # Labels on the data-plane pods. The data plane's OTLP exporter sends no
-    # headers, so the tenant label is how otlp-gateway routes its spans to the
-    # giantswarm Tempo tenant. The connectivity chart reads this.
+    # headers, so the tenant label is how the collector routes its spans to a
+    # tenant: `auto` takes global.observability.traces.otlp.tenant (empty drops
+    # the label). The connectivity chart reads this.
     podLabels:  # @schema additionalProperties: true
-      observability.giantswarm.io/tenant: giantswarm
+      observability.giantswarm.io/tenant: auto
   # === Buffer size ===
   # The most the data plane buffers of one HTTP body, from ONE Gateway-scoped
   # AgentgatewayPolicy, <release>-http (templates/agentgateway/http-policy.yaml,
@@ -2006,18 +2026,16 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     # meta chart replaces them before it forwards the block); an explicit
     # true / false wins.
     observability:
-      # OTLP traces and logs to the same collector kagent, agentgateway and
-      # klaus-gateway use; X-Scope-OrgID routes to the giantswarm Loki/Tempo
-      # tenant. giantswarm/giantswarm#36711: until now this stayed empty, so
-      # the two spans per MCP tool call muster's docs describe reached
-      # nothing. Metrics stay on the ServiceMonitor scrape below —
-      # muster.observability.metrics.exporter empty defers to serviceMonitor
-      # when it is enabled, so setting this endpoint does not also push
-      # metrics over OTLP.
+      # OTLP traces and logs to the collector global.observability.traces
+      # .otlp names: each `auto` takes its endpoint, protocol and headers (the
+      # tenant as X-Scope-OrgID); a value set here wins. Metrics stay on the
+      # ServiceMonitor scrape below — muster.observability.metrics.exporter
+      # empty defers to serviceMonitor when it is enabled, so this endpoint
+      # does not also push metrics over OTLP.
       otel:
-        endpoint: http://otlp-gateway.kube-system.svc:4317
-        protocol: grpc
-        headers: "X-Scope-OrgID=giantswarm"
+        endpoint: auto
+        protocol: auto
+        headers: auto
       metrics:
         prometheus:
           serviceMonitor:
@@ -2451,13 +2469,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           # Mimir routes a scrape by this label; a monitor without it writes
           # to no tenant of the GS observability platform.
           observability.giantswarm.io/tenant: giantswarm
-    # X-Scope-OrgID routes OTLP traces and logs to the correct Loki/Tempo
-    # tenant. The configmap template has no headers field so we inject via env.
-    # The meta chart drops the OTEL_EXPORTER_OTLP_HEADERS entry when both OTel
-    # exporters below resolve off (no OTLP gateway to send the tenant to).
+    # The OTLP headers of kagent's exporters (the configmap template has no
+    # headers field, so they go in as env). `auto` takes
+    # global.observability.traces.otlp's headers, the tenant as X-Scope-OrgID;
+    # the meta chart drops the entry when they are empty or when both OTel
+    # exporters below resolve off (no collector to send them to).
     env:
       - name: OTEL_EXPORTER_OTLP_HEADERS
-        value: "X-Scope-OrgID=giantswarm"
+        value: auto
 
   ui:
     image:
@@ -2683,26 +2702,31 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         promptCaching: true
         cacheTTL: "5m"
 
-  # OTel — traces and logs to the GS Observability Platform OTLP gateway.
-  # X-Scope-OrgID header routes to the correct Loki/Tempo tenant. `auto` (the
-  # default) follows the resolved global.observability.metrics.serviceMonitor
-  # .enabled — the gateway is part of the same observability platform whose
-  # monitoring.coreos.com/v1 CRDs that knob detects; the meta chart replaces
-  # it before forwarding. An explicit true / false wins.
+  # OTel — traces and logs to the collector global.observability.traces.otlp
+  # names: an `auto` endpoint or protocol takes its value there, the tenant
+  # travels as the X-Scope-OrgID header (controller.env, harness.env). An
+  # `enabled: auto` follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled (the collector is part
+  # of the same observability platform whose monitoring.coreos.com/v1 CRDs
+  # that knob detects) and resolves off with no endpoint. An `insecure: auto`
+  # is false for an https:// endpoint and true otherwise: the SDKs read the
+  # INSECURE variable after the endpoint, so a true would send plaintext to a
+  # TLS collector. The meta chart replaces every `auto` before forwarding; an
+  # explicit value wins.
   otel:
     tracing:
       enabled: auto  # auto | true | false
       exporter:
         otlp:
-          endpoint: http://otlp-gateway.kube-system.svc:4317
-          protocol: grpc
-          insecure: true
+          endpoint: auto
+          protocol: auto
+          insecure: auto
     logging:
       enabled: auto  # auto | true | false
       exporter:
         otlp:
-          endpoint: http://otlp-gateway.kube-system.svc:4317
-          insecure: true
+          endpoint: auto
+          insecure: auto
 
   # --- UI auth: oauth2-proxy in front of the kagent UI ---
   # Disabled by default. Enable and supply Dex OIDC credentials to secure the UI.
@@ -3027,7 +3051,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       - name: OTEL_LOGGING_ENABLED
         value: "true"
       - name: OTEL_EXPORTER_OTLP_HEADERS
-        value: "X-Scope-OrgID=giantswarm"
+        value: auto
       - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
         value: "500"
     # The admission contract: a template is admitted by the ONE label the
@@ -3517,10 +3541,10 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     #   existingSecret: ""  # default: valkey.valkey.auth.usersExistingSecret
     #   passwordKey: ""     # default: valkey.valkey.auth.aclUsers.default.passwordKey
 
-  # OTel traces to the GS Observability Platform's OTLP gateway, the tenant
-  # header selecting the Loki/Tempo tenant — the target kagent's exporters send
-  # to (kagent.otel). Every channel turn is one trace: the gateway's
-  # `slack.turn` span is the parent of the kagent controller's
+  # OTel traces to the collector global.observability.traces.otlp names (each
+  # `auto` below takes its endpoint, and its headers with the tenant as
+  # X-Scope-OrgID; a value set here wins). Every channel turn is one trace: the
+  # gateway's `slack.turn` span is the parent of the kagent controller's
   # SendStreamingMessage and of the actor's spans under it, the Slack API calls
   # and a token refresh hang off it too (giantswarm/klaus-gateway#263;
   # klaus-gateway 1.10.0 or later for the headers knob and the URL endpoint).
@@ -3534,9 +3558,8 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # endpoint (-klausgateway-otlp-egress).
   observability:
     enabled: auto  # auto | true | false
-    otlpEndpoint: http://otlp-gateway.kube-system.svc:4317
-    otlpHeaders:
-      X-Scope-OrgID: giantswarm
+    otlpEndpoint: auto
+    otlpHeaders: auto  # @schema type: [object, string]; additionalProperties: true
 
   # The chart's own ServiceMonitor over the gateway's admin port
   # (klaus_gateway_* requests, turns and their phases, Slack streaming). `auto`
@@ -4787,22 +4810,26 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # all `enabled: true` in the chart's own defaults). Same collector as
   # kagent, agentgateway and klaus-gateway. The connectivity chart's Substrate
   # policies open this endpoint's namespace and port for the four exporters
-  # (agent-platform.substrate.otlpEgress).
+  # (agent-platform.substrate.otlpEgress). `auto` takes
+  # global.observability.traces.otlp.endpoint; the chart speaks gRPC only. With
+  # no endpoint the meta chart also turns off every signal that names none of
+  # its own (the chart's exporters would otherwise fall back to localhost:4317).
   #
   # Traces keep the chart's parentbased_traceidratio at 0.01: a span under a
   # kagent turn follows the turn's own decision (kagent's ate-api client
   # propagates it), so the ratio applies only to Substrate's parentless
   # background work — reconciles, workflows, the atelet loops.
   otel:
-    endpoint: http://otlp-gateway.kube-system.svc:4317
+    endpoint: auto
   # The chart has no OTLP-headers key, so X-Scope-OrgID cannot be set the way
-  # it is for kagent below: otlp-gateway takes the tenant of a headerless
-  # export from this pod label instead. The chart's podLabels key is
-  # kagent-dev/substrate#48, carried from Substrate 1.1.0
-  # (giantswarm/substrate#55); an older release ignores it and every Substrate
-  # signal reaches the collector without a tenant (giantswarm/giantswarm#36711).
+  # it is for kagent below: the collector takes the tenant of a headerless
+  # export from this pod label instead, `auto` taking
+  # global.observability.traces.otlp.tenant (empty drops the label). The
+  # chart's podLabels key is kagent-dev/substrate#48, carried from Substrate
+  # 1.1.0 (giantswarm/substrate#55); an older release ignores it and every
+  # Substrate signal reaches the collector without a tenant.
   podLabels:
-    observability.giantswarm.io/tenant: giantswarm
+    observability.giantswarm.io/tenant: auto
   # The chart's third-party images (giantswarm/agent-platform#575, #580, #654).
   # The Substrate line stamps each default at publish — the gsoci copies of
   # postgres, rustfs and busybox, and the agentgateway line's build its release

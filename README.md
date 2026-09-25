@@ -750,28 +750,30 @@ ingress:
 
 ## Observability
 
-All bundled components push OTel traces to the cluster-wide `otlp-gateway.kube-system.svc:4317` (gRPC) by default:
+Every exporter of the platform sends to ONE collector, `global.observability.traces.otlp`, the kube-system `otlp-gateway` on 4317 (gRPC) with the `giantswarm` tenant by default. The meta chart writes it into each component's own key that is `auto` (the default) before it forwards the component's values, and the connectivity chart's egress rules follow each exporter's resolved endpoint: the pods of its namespace on its port (the cluster entity on that port for a host that is not an in-cluster Service). A component key set to anything but `auto` wins, and nothing fails over the difference. The collector takes the tenant from the `X-Scope-OrgID` header or, for a headerless export, from the pod label `observability.giantswarm.io/tenant`:
 
-| Component | Mechanism | Default endpoint |
+| Exporter | Endpoint key (`auto` → `endpoint`) | Tenant |
 |---|---|---|
-| agentgateway data plane | `OTEL_EXPORTER_OTLP_ENDPOINT` + `OTEL_EXPORTER_OTLP_PROTOCOL` env vars via `gateway.parameters.dataPlaneEnv` | `http://otlp-gateway.kube-system.svc:4317` |
+| kagent controller and actors (traces, logs) | `kagent.otel.{tracing,logging}.exporter.otlp.endpoint`, `.tracing.exporter.otlp.protocol` | `X-Scope-OrgID`: `OTEL_EXPORTER_OTLP_HEADERS` in `kagent.controller.env` and `kagent.harness.env` |
+| muster (traces, logs) | `muster.muster.observability.otel.{endpoint,protocol}` | `X-Scope-OrgID`: `muster.muster.observability.otel.headers` |
+| klaus-gateway (traces) | `klausGateway.observability.otlpEndpoint` | `X-Scope-OrgID`: `klausGateway.observability.otlpHeaders` |
+| Substrate control plane (traces, metrics, logs) | `substrate.otel.endpoint` | pod label: `substrate.podLabels` |
+| agentgateway data plane (traces) | `gateway.parameters.dataPlaneEnv` (`OTEL_EXPORTER_OTLP_ENDPOINT`, `_PROTOCOL`) | pod label: `gateway.parameters.podLabels` |
 
-Muster does not yet support OTLP push. Its `/metrics` endpoint is scraped via `ServiceMonitor` (`muster.muster.observability.metrics.prometheus.serviceMonitor.enabled`, `auto`: follows the resolved `global.observability.metrics.serviceMonitor.enabled`).
+`headers` adds headers for the exporters that send headers (and the data plane's env); an `X-Scope-OrgID` there that differs from `tenant` fails the render. An empty `endpoint` exports nothing (kagent's `auto` exporters and Substrate's signals resolve off), an empty `tenant` sends neither header nor label. kagent's `exporter.otlp.insecure` (`auto`) is `false` for an `https://` endpoint and `true` otherwise. klaus-gateway, Substrate and kagent's log exporter speak gRPC only: `protocol: http/protobuf` fails the render while one of them would take the endpoint, naming the key to set instead. `make verify-otlp-global` asserts the derivation and the egress rules.
 
-The kagent line serves **no Prometheus `/metrics`**: its controller binds the metrics server to `0`, so `kagent.serviceMonitor.enabled` (the connectivity chart's controller metrics `Service` + `ServiceMonitor`) and the forwarded `kagent.controller.metrics.enabled` (upstream's knob, which renders a Service and `METRICS_*` env to that dead port) default to `false` in both charts — a monitor would scrape a refused port and sit at `up=0`. Nothing reads those metrics: the fleet's `KagentControllerDown` rule reads the Deployment's kube-state-metrics series, the HelmRelease and CNPG alerts read Flux and CNPG state. Both knobs go back on together when upstream serves metrics. kagent's OTel exporters (traces, logs) are unaffected and keep following the resolved `global.observability.metrics.serviceMonitor.enabled`. `make verify-global` asserts the default renders no kagent monitor and that `kagent.serviceMonitor.enabled: true` still renders one under the global gate.
-
-Override any endpoint per component:
+Moving the platform to a customer's collector is one value:
 
 ```yaml
-gateway:
-  parameters:
-    dataPlaneEnv:
-      - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://tempo-distributor.tempo.svc:4317
-      - name: OTEL_EXPORTER_OTLP_PROTOCOL
-        value: grpc
-
+global:
+  observability:
+    traces:
+      otlp:
+        endpoint: http://otel-collector.observability.svc:4317
+        tenant: acme
 ```
+
+The kagent line serves **no Prometheus `/metrics`**: its controller binds the metrics server to `0`, so `kagent.serviceMonitor.enabled` (the connectivity chart's controller metrics `Service` + `ServiceMonitor`) and the forwarded `kagent.controller.metrics.enabled` (upstream's knob, which renders a Service and `METRICS_*` env to that dead port) default to `false` in both charts — a monitor would scrape a refused port and sit at `up=0`. Nothing reads those metrics: the fleet's `KagentControllerDown` rule reads the Deployment's kube-state-metrics series, the HelmRelease and CNPG alerts read Flux and CNPG state. Both knobs go back on together when upstream serves metrics. kagent's OTel exporters (traces, logs) are unaffected and keep following the resolved `global.observability.metrics.serviceMonitor.enabled`. `make verify-global` asserts the default renders no kagent monitor and that `kagent.serviceMonitor.enabled: true` still renders one under the global gate.
 
 ## Reference workloads (not bundled)
 

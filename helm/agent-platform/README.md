@@ -272,9 +272,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster, detected once by the meta chart (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
 | global.observability.metrics.serviceMonitor.labels | object | `{}` |  |
-| global.observability.traces.otlp.endpoint | string | `""` |  |
-| global.observability.traces.otlp.protocol | string | `""` |  |
-| global.observability.traces.otlp.headers | object | `{}` |  |
+| global.observability.traces.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` | The collector's URL. Empty exports nothing: every `auto` endpoint is emptied and kagent's exporters (`auto`) resolve off. |
+| global.observability.traces.otlp.protocol | string | `"grpc"` | `grpc` or `http/protobuf`. klaus-gateway, Substrate and kagent's log exporter speak gRPC only: with `http/protobuf` the render fails while one of them would take this endpoint: set its own key. |
+| global.observability.traces.otlp.tenant | string | `"giantswarm"` | The collector's tenant. Sent as the X-Scope-OrgID header by the exporters that take headers (kagent, muster, klaus-gateway), and as the pod label observability.giantswarm.io/tenant on the ones that do not (Substrate, the agentgateway data plane). Empty sends neither. |
+| global.observability.traces.otlp.headers | object | `{}` | More headers for the exporters that take headers. An X-Scope-OrgID here that differs from `tenant` fails the render. Values in this block are plain values: keep credentials out of it. |
 | gitops.engine | string | `"flux"` |  |
 | gitops.interval | string | `"10m"` |  |
 | gitops.namespace | string | `""` |  |
@@ -540,9 +541,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.containerSecurityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | gateway.parameters.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | gateway.parameters.dataPlaneEnv[0].name | string | `"OTEL_EXPORTER_OTLP_ENDPOINT"` |  |
-| gateway.parameters.dataPlaneEnv[0].value | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| gateway.parameters.dataPlaneEnv[0].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneEnv[1].name | string | `"OTEL_EXPORTER_OTLP_PROTOCOL"` |  |
-| gateway.parameters.dataPlaneEnv[1].value | string | `"grpc"` |  |
+| gateway.parameters.dataPlaneEnv[1].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneVolumes | list | `[]` |  |
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.cpu | string | `"100m"` |  |
@@ -558,7 +559,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
-| gateway.parameters.podLabels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| gateway.parameters.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | gateway.http.maxBufferSize | string | `"8Mi"` |  |
 | gateway.tracing.randomSampling | string | `"0.1"` |  |
 | gateway.metricLabels.agent.enabled | bool | `true` |  |
@@ -689,9 +690,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, vm-manager, cluster-manager and muster's core tools."` |  |
 | muster.muster.toolsetPresets.agent-platform.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=agent-platform"` |  |
 | muster.muster.toolsetPresets.agent-platform.include[1].pattern | string | `"core_*"` |  |
-| muster.muster.observability.otel.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| muster.muster.observability.otel.protocol | string | `"grpc"` |  |
-| muster.muster.observability.otel.headers | string | `"X-Scope-OrgID=giantswarm"` |  |
+| muster.muster.observability.otel.endpoint | string | `"auto"` |  |
+| muster.muster.observability.otel.protocol | string | `"auto"` |  |
+| muster.muster.observability.otel.headers | string | `"auto"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | string | `"auto"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.interval | string | `"60s"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
@@ -774,7 +775,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.metrics.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.controller.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
+| kagent.controller.env[0].value | string | `"auto"` |  |
 | kagent.ui.image.repository | string | `"giantswarm/kagent/ui"` |  |
 | kagent.substrateWorkerPool.create | bool | `true` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
@@ -809,12 +810,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
 | kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
 | kagent.otel.tracing.enabled | string | `"auto"` |  |
-| kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |
-| kagent.otel.tracing.exporter.otlp.insecure | bool | `true` |  |
+| kagent.otel.tracing.exporter.otlp.endpoint | string | `"auto"` |  |
+| kagent.otel.tracing.exporter.otlp.protocol | string | `"auto"` |  |
+| kagent.otel.tracing.exporter.otlp.insecure | string | `"auto"` |  |
 | kagent.otel.logging.enabled | string | `"auto"` |  |
-| kagent.otel.logging.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.logging.exporter.otlp.insecure | bool | `true` |  |
+| kagent.otel.logging.exporter.otlp.endpoint | string | `"auto"` |  |
+| kagent.otel.logging.exporter.otlp.insecure | string | `"auto"` |  |
 | kagent.oauth2-proxy.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
@@ -912,7 +913,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.harness.env[1].name | string | `"OTEL_LOGGING_ENABLED"` |  |
 | kagent.harness.env[1].value | string | `"true"` |  |
 | kagent.harness.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.harness.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
+| kagent.harness.env[2].value | string | `"auto"` |  |
 | kagent.harness.env[3].name | string | `"KAGENT_TRACE_FLUSH_TIMEOUT_MS"` |  |
 | kagent.harness.env[3].value | string | `"500"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |
@@ -1040,8 +1041,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
 | klausGateway.observability.enabled | string | `"auto"` |  |
-| klausGateway.observability.otlpEndpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| klausGateway.observability.otlpHeaders.X-Scope-OrgID | string | `"giantswarm"` |  |
+| klausGateway.observability.otlpEndpoint | string | `"auto"` |  |
+| klausGateway.observability.otlpHeaders | string | `"auto"` |  |
 | klausGateway.serviceMonitor.enabled | string | `"auto"` |  |
 | klausGateway.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | klausGateway.slack.enabled | bool | `false` |  |
@@ -1315,8 +1316,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.postgres.connectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
 | substrate.rustfs.enabled | bool | `false` |  |
-| substrate.otel.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| substrate.podLabels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| substrate.otel.endpoint | string | `"auto"` |  |
+| substrate.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | substrate.images.postgres | string | `"gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"` |  |
 | substrate.images.rustfs | string | `"gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358"` |  |
 | substrate.images.awsCli | string | `"amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73"` |  |
