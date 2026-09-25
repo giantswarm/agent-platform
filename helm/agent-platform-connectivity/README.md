@@ -1176,8 +1176,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.podDisruptionBudget.enabled | bool | `true` |  |
-| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
-| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.minAvailable | string | `nil` |  |
+| valkey.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
@@ -1614,8 +1614,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | agentManager.podDisruptionBudget.enabled | bool | `true` |  |
-| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
-| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.minAvailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |

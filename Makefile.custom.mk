@@ -103,7 +103,10 @@ DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview agent-p
 define drop_dashboards
 	@python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' $(1) "$(DASHBOARDS_GOLDEN_DROP)"
 endef
-WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false
+# muster-valkey's budget is maxUnavailable: 1 here (giantswarm/agent-platform#697)
+# and minAvailable: 1 on a golden from before; both sides render it the same.
+# Drop the valkey pair once GOLDEN_REF carries #697.
+WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
 # PolicyException is gone with them, the kagent controller's ingress policy
@@ -1428,21 +1431,21 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@echo "ok: the knob reaches deployment.spec.template.metadata"
 	@awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-on.out | awk '/^  name: agent-manager$$/{f=1} /^---/{f=0} f' >/tmp/vd-pdb.out
 	@grep -q '^  name: agent-manager$$' /tmp/vd-pdb.out || { echo "FAIL: no PodDisruptionBudget agent-manager in the render"; exit 1; }
-	@grep -q '^  minAvailable: 1$$' /tmp/vd-pdb.out || { echo "FAIL: the agent-manager budget is not minAvailable: 1"; cat /tmp/vd-pdb.out; exit 1; }
-	@if grep -q 'maxUnavailable' /tmp/vd-pdb.out; then echo "FAIL: the agent-manager budget carries maxUnavailable next to minAvailable"; exit 1; fi
+	@grep -q '^  maxUnavailable: 1$$' /tmp/vd-pdb.out || { echo "FAIL: the agent-manager budget is not maxUnavailable: 1 (a single replica must stay drainable)"; cat /tmp/vd-pdb.out; exit 1; }
+	@if grep -q 'minAvailable' /tmp/vd-pdb.out; then echo "FAIL: the agent-manager budget carries minAvailable next to maxUnavailable"; exit 1; fi
 	@grep -q '^  unhealthyPodEvictionPolicy: AlwaysAllow$$' /tmp/vd-pdb.out || { echo "FAIL: the agent-manager budget does not keep unhealthy pods evictable (AlwaysAllow)"; exit 1; }
 	@grep -A2 '^    matchLabels:$$' /tmp/vd-pdb.out | grep -q 'app.kubernetes.io/name: agent-manager' || { echo "FAIL: the agent-manager budget does not select the agent-manager pods by name"; exit 1; }
 	@[ "$$(grep -c '^kind: PodDisruptionBudget' /tmp/vd-on.out)" = "3" ] || { echo "FAIL: expected exactly three PodDisruptionBudgets from the connectivity chart (agent-manager, muster-valkey, the Substrate worker pool — #472, verify-workerpool asserts that one), got $$(grep -c '^kind: PodDisruptionBudget' /tmp/vd-on.out)"; exit 1; }
-	@echo "ok: agent-manager budget minAvailable: 1, AlwaysAllow, selects the pods by name"
+	@echo "ok: agent-manager budget maxUnavailable: 1, AlwaysAllow, selects the pods by name"
 	@echo "--> connectivity: the muster-valkey budget (#439) renders from valkey.podDisruptionBudget, named after the Deployment, selecting the pod as the valkey subchart labels it"
 	@awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-on.out | awk '/^  name: muster-valkey$$/{f=1} /^---/{f=0} f' >/tmp/vd-valkey-pdb.out
 	@grep -q '^  name: muster-valkey$$' /tmp/vd-valkey-pdb.out || { echo "FAIL: no PodDisruptionBudget muster-valkey in the render"; exit 1; }
-	@grep -q '^  minAvailable: 1$$' /tmp/vd-valkey-pdb.out || { echo "FAIL: the muster-valkey budget is not minAvailable: 1"; cat /tmp/vd-valkey-pdb.out; exit 1; }
-	@if grep -q 'maxUnavailable' /tmp/vd-valkey-pdb.out; then echo "FAIL: the muster-valkey budget carries maxUnavailable next to minAvailable"; exit 1; fi
+	@grep -q '^  maxUnavailable: 1$$' /tmp/vd-valkey-pdb.out || { echo "FAIL: the muster-valkey budget is not maxUnavailable: 1 (a single replica must stay drainable)"; cat /tmp/vd-valkey-pdb.out; exit 1; }
+	@if grep -q 'minAvailable' /tmp/vd-valkey-pdb.out; then echo "FAIL: the muster-valkey budget carries minAvailable next to maxUnavailable"; exit 1; fi
 	@grep -q '^  unhealthyPodEvictionPolicy: AlwaysAllow$$' /tmp/vd-valkey-pdb.out || { echo "FAIL: the muster-valkey budget does not keep unhealthy pods evictable (AlwaysAllow)"; exit 1; }
 	@grep -A3 '^    matchLabels:$$' /tmp/vd-valkey-pdb.out | grep -q 'app.kubernetes.io/name: valkey' || { echo "FAIL: the muster-valkey budget does not select the valkey pods by name"; cat /tmp/vd-valkey-pdb.out; exit 1; }
 	@grep -A3 '^    matchLabels:$$' /tmp/vd-valkey-pdb.out | grep -q 'app.kubernetes.io/instance: valkey' || { echo "FAIL: the muster-valkey budget does not select the valkey release's pods (app.kubernetes.io/instance: valkey)"; cat /tmp/vd-valkey-pdb.out; exit 1; }
-	@echo "ok: muster-valkey budget minAvailable: 1, AlwaysAllow, selects the valkey release's pods by name and instance"
+	@echo "ok: muster-valkey budget maxUnavailable: 1, AlwaysAllow, selects the valkey release's pods by name and instance"
 	@echo "--> knobs off: no annotation, no budget"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set gateway.parameters.podAnnotations=null --set agentManager.podDisruptionBudget.enabled=false --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false >/tmp/vd-off.out 2>&1 || { cat /tmp/vd-off.out; exit 1; }
 	@if grep -q 'do-not-disrupt' /tmp/vd-off.out; then echo "FAIL: karpenter.sh/do-not-disrupt renders with gateway.parameters.podAnnotations cleared"; exit 1; fi
@@ -1462,9 +1465,9 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@if grep -q '^kind: PodDisruptionBudget' /tmp/vd-kagent-off.out; then echo "FAIL: a PodDisruptionBudget renders while kagent, valkey and agent-manager are off"; exit 1; fi
 	@echo "ok: inert while valkey is off"
 	@echo "--> the muster-valkey budget's guards"
-	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.podDisruptionBudget.maxUnavailable=1 >/tmp/vd-valkey-both.out 2>&1; then echo "FAIL: both minAvailable and maxUnavailable accepted on valkey.podDisruptionBudget"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.podDisruptionBudget.minAvailable=1 >/tmp/vd-valkey-both.out 2>&1; then echo "FAIL: both minAvailable and maxUnavailable accepted on valkey.podDisruptionBudget"; exit 1; fi
 	@grep -q 'valkey.podDisruptionBudget sets both minAvailable and maxUnavailable' /tmp/vd-valkey-both.out || { echo "FAIL: wrong error for both fields set on valkey.podDisruptionBudget"; tail -3 /tmp/vd-valkey-both.out; exit 1; }
-	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.podDisruptionBudget.minAvailable=null >/tmp/vd-valkey-none.out 2>&1; then echo "FAIL: a valkey budget with neither field accepted"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.podDisruptionBudget.maxUnavailable=null >/tmp/vd-valkey-none.out 2>&1; then echo "FAIL: a valkey budget with neither field accepted"; exit 1; fi
 	@grep -q 'neither minAvailable nor maxUnavailable' /tmp/vd-valkey-none.out || { echo "FAIL: wrong error for neither field set on valkey.podDisruptionBudget"; tail -3 /tmp/vd-valkey-none.out; exit 1; }
 	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set valkey.podDisruptionBudget.unhealthyPodEvictionPolicy=Sometimes >/tmp/vd-valkey-enum.out 2>&1; then echo "FAIL: an unknown unhealthyPodEvictionPolicy accepted on valkey.podDisruptionBudget"; exit 1; fi
 	@grep -q 'is not a PodDisruptionBudget eviction policy' /tmp/vd-valkey-enum.out || { echo "FAIL: wrong error for the valkey eviction policy enum"; tail -3 /tmp/vd-valkey-enum.out; exit 1; }
@@ -1472,15 +1475,22 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@grep -q 'valkey.valkey.fullnameOverride must be set' /tmp/vd-valkey-name.out || { echo "FAIL: wrong error for the missing valkey fullnameOverride"; tail -3 /tmp/vd-valkey-name.out; exit 1; }
 	@echo "ok: the muster-valkey budget's guards fire"
 	@echo "--> the agent-manager budget's guards"
-	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.maxUnavailable=1 >/tmp/vd-both.out 2>&1; then echo "FAIL: both minAvailable and maxUnavailable accepted"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.minAvailable=1 >/tmp/vd-both.out 2>&1; then echo "FAIL: both minAvailable and maxUnavailable accepted"; exit 1; fi
 	@grep -q 'sets both minAvailable and maxUnavailable' /tmp/vd-both.out || { echo "FAIL: wrong error for both fields set"; tail -3 /tmp/vd-both.out; exit 1; }
-	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.minAvailable=null >/tmp/vd-none.out 2>&1; then echo "FAIL: a budget with neither field accepted"; exit 1; fi
+	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.maxUnavailable=null >/tmp/vd-none.out 2>&1; then echo "FAIL: a budget with neither field accepted"; exit 1; fi
 	@grep -q 'neither minAvailable nor maxUnavailable' /tmp/vd-none.out || { echo "FAIL: wrong error for neither field set"; tail -3 /tmp/vd-none.out; exit 1; }
 	@if helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy=Sometimes >/tmp/vd-enum.out 2>&1; then echo "FAIL: an unknown unhealthyPodEvictionPolicy accepted"; exit 1; fi
 	@grep -q 'is not a PodDisruptionBudget eviction policy' /tmp/vd-enum.out || { echo "FAIL: wrong error for the eviction policy enum"; tail -3 /tmp/vd-enum.out; exit 1; }
-	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.minAvailable=null --set agentManager.podDisruptionBudget.maxUnavailable=50% >/tmp/vd-max.out 2>&1 || { cat /tmp/vd-max.out; exit 1; }
-	@awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-max.out | grep -q '^  maxUnavailable: 50%$$' || { echo "FAIL: maxUnavailable alone does not pass through"; exit 1; }
-	@echo "ok: guards fire, maxUnavailable alone passes through"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set agentManager.podDisruptionBudget.maxUnavailable=null --set agentManager.podDisruptionBudget.minAvailable=50% >/tmp/vd-min.out 2>&1 || { cat /tmp/vd-min.out; exit 1; }
+	@awk '/^kind: PodDisruptionBudget/,/^---/' /tmp/vd-min.out | grep -q '^  minAvailable: 50%$$' || { echo "FAIL: minAvailable alone does not pass through"; exit 1; }
+	@echo "ok: guards fire, minAvailable alone passes through"
+	@echo "--> the platform Postgres: one instance renders enablePDB: false (no replica to switch over to), more instances keep the operator's budgets"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set postgres.enabled=true --set postgres.instances=1 >/tmp/vd-pg1.out 2>&1 || { cat /tmp/vd-pg1.out; exit 1; }
+	@awk '/^kind: Cluster$$/,/^---/' /tmp/vd-pg1.out | grep -q '^  enablePDB: false$$' || { echo "FAIL: a one-instance Cluster does not render enablePDB: false"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set postgres.enabled=true >/tmp/vd-pg3.out 2>&1 || { cat /tmp/vd-pg3.out; exit 1; }
+	@awk '/^kind: Cluster$$/,/^---/' /tmp/vd-pg3.out | grep -q '^  instances: 3$$' || { echo "FAIL: the default Cluster does not run three instances"; exit 1; }
+	@if awk '/^kind: Cluster$$/,/^---/' /tmp/vd-pg3.out | grep -q 'enablePDB'; then echo "FAIL: the three-instance Cluster turns the operator's budgets off"; exit 1; fi
+	@echo "ok: enablePDB off at one instance only"
 	@echo "--> meta chart: the component charts' own knobs travel on their HelmReleases"
 	@helm template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true >/tmp/vd-meta.out 2>&1 || { cat /tmp/vd-meta.out; exit 1; }
 	@python3 tests/verify-disruption.py /tmp/vd-meta.out
