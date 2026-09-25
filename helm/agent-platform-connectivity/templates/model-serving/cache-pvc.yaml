@@ -39,6 +39,20 @@ resource keeps it (the keep policy) and the hook takes its fields over
 The claim's class (agent-platform.modelServing.cacheClaim.storageClassName):
 pvc.storageClassName when set, else the class the chart renders
 (storageClass.create) or storageClass.name names, else the cluster's default.
+
+The claim's tier (giantswarm/agent-platform#605): the claim outlives its class —
+the chart's is Helm-owned and digest-named, so an uninstall or a parameter
+change removes it while the claim stays — and the class was the only place the
+volume's type, IOPS and throughput could be read from; cluster-manager prices a
+claim from them. So the hook stamps them on the claim as annotations
+(agent-platform.giantswarm.io/volume-type, -iops, -throughput in MiB/s: the EBS
+CSI class parameters type, iops, throughput, as the class carries them): the
+chart's own parameters when the claim is on the class the chart renders, else
+what the claim's class carries at apply time. Once: at create, or on the first
+run that finds a claim without any of them while its class exists; a claim
+carrying one is left alone whatever a later release renders. kubectl annotate
+writes them, not the apply: under a field manager of their own, no later apply
+of this hook removes them.
 */ -}}
 {{- if (include "agent-platform.modelServing.cacheClaimManaged" .) }}
 {{- $pvc := .Values.modelServing.cache.pvc }}
@@ -85,11 +99,14 @@ class as placeholders, decided against the existing claim (#570): the size is
 the larger of the claim's and the rendered one (a quantity compared in bytes;
 a claim never shrinks), the class is the claim's own (immutable), a claim
 Pending on a class the cluster lacks fails the hook naming the way out. Then
-server-side applied under this chart's field manager; the log says created or
-present, what was kept, and the claim's phase.
+server-side applied under this chart's field manager; then the tier stamped
+where the claim carries none (#605). The log says created or present, what was
+kept, the tier stamped or why none was, and the claim's phase.
 */ -}}
 {{- define "agent-platform.modelServing.cacheClaim.script" -}}
 {{- $pvc := .Values.modelServing.cache.pvc -}}
+{{- $tier := "agent-platform.giantswarm.io/volume" -}}
+{{- $tierKeys := list "type" "iops" "throughput" -}}
 {{- $claim := include "agent-platform.modelServing.cacheClaim" . | fromYaml | toJson -}}
 {{- $claim = $claim | replace (printf "\"storage\":%s" ($pvc.size | toString | toJson)) "\"storage\":\"@@SIZE@@\"" -}}
 {{- $class := "" -}}
@@ -156,5 +173,38 @@ else
 fi
 claim=$(printf '%s' "$claim" | sed "s|@@SIZE@@|$size|{{ if $hasClass }}; s|@@CLASS@@|$class|{{ end }}")
 printf '%s' "$claim" | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
-echo "cache claim $ns/$name $state$kept, $(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.status.phase}') (it Binds with its first consumer; nothing waits for it)"
+# The tier, once (#605): a claim carrying any of the annotations is left alone. The class is read back from the claim — the one it
+# was kept on, or the cluster's default an admission gave it.
+tier=""
+if [ -z "$(kubectl -n "$ns" get pvc "$name" -o jsonpath='{{ range $tierKeys }}{.metadata.annotations.{{ $tier | replace "." "\\." }}-{{ . }}}{{ end }}')" ]; then
+  on=$(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.spec.storageClassName}')
+  set --
+  if [ -z "$on" ]; then
+    tier=", no tier stamped (the claim names no StorageClass)"
+{{- if (include "agent-platform.modelServing.cacheStorageClassManaged" .) }}
+{{- $parameters := .Values.modelServing.cache.storageClass.parameters | default dict }}
+  elif [ "$on" = {{ include "agent-platform.modelServing.cacheStorageClass.name" . | quote }} ]; then
+    # The class this chart renders: its parameters as rendered.
+{{- range $key := $tierKeys }}
+{{- with index $parameters $key }}
+    set -- "$@" '{{ printf "%s-%s=%s" $tier $key (toString .) | replace "'" "'\\''" }}'
+{{- end }}
+{{- end }}
+{{- end }}
+  elif kubectl get storageclass "$on" >/dev/null 2>&1; then
+    for key in {{ join " " $tierKeys }}; do
+      value=$(kubectl get storageclass "$on" -o jsonpath="{.parameters.$key}")
+      [ -z "$value" ] || set -- "$@" "{{ $tier }}-$key=$value"
+    done
+  else
+    tier=", no tier stamped (StorageClass $on is gone)"
+  fi
+  if [ $# -gt 0 ]; then
+    kubectl -n "$ns" annotate pvc "$name" "$@" >/dev/null
+    tier=", tier stamped from StorageClass $on ($*)"
+  elif [ -z "$tier" ]; then
+    tier=", no tier stamped (StorageClass $on carries no {{ join ", " $tierKeys }})"
+  fi
+fi
+echo "cache claim $ns/$name $state$kept$tier, $(kubectl -n "$ns" get pvc "$name" -o jsonpath='{.status.phase}') (it Binds with its first consumer; nothing waits for it)"
 {{- end -}}

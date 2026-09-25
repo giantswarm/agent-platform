@@ -556,6 +556,39 @@
                                 "type": "string"
                             }
                         },
+                        "driftDetection": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "ignore": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "paths": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "target": {
+                                                "type": "object",
+                                                "additionalProperties": true,
+                                                "properties": {
+                                                    "kind": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "mode": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "enabled": {
                             "type": "boolean"
                         },
@@ -965,6 +998,18 @@
                             }
                         },
                         "agent_namespace": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "api_key": {
                             "type": "object",
                             "additionalProperties": false,
                             "properties": {
@@ -1440,14 +1485,26 @@
                                     "additionalProperties": false,
                                     "properties": {
                                         "endpoint": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "The collector's URL. Empty exports nothing: every `auto` endpoint is emptied and kagent's exporters (`auto`) resolve off."
                                         },
                                         "headers": {
                                             "type": "object",
+                                            "description": "More headers for the exporters that take headers. An X-Scope-OrgID here that differs from `tenant` fails the render. Values in this block are plain values: keep credentials out of it.",
                                             "additionalProperties": true
                                         },
                                         "protocol": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "`grpc` or `http/protobuf`. klaus-gateway, Substrate and kagent's log exporter speak gRPC only: with `http/protobuf` the render fails while one of them would take this endpoint: set its own key.",
+                                            "enum": [
+                                                "",
+                                                "grpc",
+                                                "http/protobuf"
+                                            ]
+                                        },
+                                        "tenant": {
+                                            "type": "string",
+                                            "description": "The collector's tenant. Sent as the X-Scope-OrgID header by the exporters that take headers (kagent, muster, klaus-gateway), and as the pod label observability.giantswarm.io/tenant on the ones that do not (Substrate, the agentgateway data plane). Empty sends neither."
                                         }
                                     }
                                 }
@@ -1675,20 +1732,71 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "backend": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "external": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                        "name": {
+                        "apiKeys": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "configMapSelector": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "matchLabels": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "secretRef": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "name": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "secretSelector": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "matchLabels": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "hostPrefix": {
                             "type": "string"
                         },
-                        "provider": {
-                            "type": "string"
+                        "listener": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "integer"
+                                }
+                            }
                         }
                     }
-                },
-                "enabled": {
-                    "type": "boolean"
                 },
                 "listener": {
                     "type": "object",
@@ -1936,26 +2044,54 @@
                         }
                     }
                 },
-                "pathPrefixes": {
+                "models": {
                     "type": "array",
                     "items": {
-                        "type": "string"
-                    }
-                },
-                "routes": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "*": {
-                            "type": "string"
-                        },
-                        "/v1/messages": {
-                            "type": "string"
-                        },
-                        "/v1/messages/count_tokens": {
-                            "type": "string"
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "baseURL": {
+                                "type": "string",
+                                "pattern": "^https?://[^/]+/.+"
+                            },
+                            "match": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string",
+                                "maxLength": 63,
+                                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+                            },
+                            "provider": {
+                                "type": "string",
+                                "enum": [
+                                    "Anthropic",
+                                    "Baseten",
+                                    "Cerebras",
+                                    "Cohere",
+                                    "Deepinfra",
+                                    "Deepseek",
+                                    "Fireworks",
+                                    "Gemini",
+                                    "Groq",
+                                    "Huggingface",
+                                    "Mistral",
+                                    "OpenAI",
+                                    "Openrouter",
+                                    "TogetherAI",
+                                    "XAI"
+                                ]
+                            },
+                            "visibility": {
+                                "type": "string",
+                                "enum": [
+                                    "Public",
+                                    "Internal"
+                                ]
+                            }
                         }
-                    }
+                    },
+                    "minItems": 1
                 }
             }
         },

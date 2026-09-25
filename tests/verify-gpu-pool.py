@@ -263,6 +263,9 @@ else:
         uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
         muse = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/muse-glimmer-30b.yaml")
+        parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
+        mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
+        drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -437,6 +440,27 @@ else:
                         and k[1].endswith(("-model-serving-llmisvc-workload", "-model-serving-llmisvc-workload-ingress"))]:
                 side.pop(key)
         print(f"note: the llm-d workload's ingress admits the workload's port on this side (#525) and not on {ref}: that policy is left out of the comparison")
+    # devstral-small-2 and nemotron-3-super-nvfp4 carry their family's tool-call
+    # (and reasoning) parsers on this side (giantswarm/agent-platform#313,
+    # files/model-serving/model-families.yaml); a golden from before renders
+    # them without, so both preset ConfigMaps are left out of the comparison on
+    # both sides. Drop this once GOLDEN_REF carries #313.
+    if not parsed:
+        for name in ("devstral-small-2", "nemotron-3-super-nvfp4"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: two presets carry their family's parsers on this side (#313) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # model-manager's egress reaches the serving namespace's workload pods on the
+    # workload port with the slice on (giantswarm/agent-platform#602: the route
+    # list it reads a served model's API interfaces from); a golden from before
+    # renders that policy without the rule, so model-manager's egress policy is
+    # left out of the comparison on both sides. Drop this once GOLDEN_REF
+    # carries #602.
+    if not mmread:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-egress")]:
+                side.pop(key)
+        print(f"note: model-manager's egress reaches the served models' runtimes on this side (#602) and not on {ref}: its policy is left out of the comparison")
     # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
     # are new documents of the serving render; a golden from before has neither,
     # so both are left out of the comparison on both sides. Drop this once
@@ -477,6 +501,16 @@ else:
         for key in [k for k in head if k[1] in ("t-model-serving-prepull-cleanup", "t-hooks")]:
             head.pop(key)
         print(f"note: the pre-pull DaemonSet is a hook object with a pre-delete cleanup Job on this side (#563) and not on {ref}: its document, the Job and the hook identity are left out of the comparison")
+    # The single-replica budgets are maxUnavailable: 1 and a lone Postgres
+    # instance renders enablePDB: false on this side (giantswarm/agent-platform#697);
+    # a golden from before renders minAvailable: 1 and the operator's budgets,
+    # so the budgets and the Postgres Cluster are left out of the comparison on
+    # both sides. Drop this once GOLDEN_REF carries #697.
+    if not drainable:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] in ("PodDisruptionBudget", "Cluster")]:
+                side.pop(key)
+        print(f"note: the single-replica budgets are drainable on this side (#697) and not on {ref}: the budgets and the Postgres Cluster are left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):

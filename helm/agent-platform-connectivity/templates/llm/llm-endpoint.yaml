@@ -1,0 +1,33 @@
+{{- /* The LLM endpoint document, owned by the platform release: what
+model-manager attaches one AgentgatewayModel per served model to (parentRefs,
+exactly the provider models' own, agent-platform.llmRouting.modelParents), the
+listener's in-cluster URL a client (an agent's ModelConfig) reaches the models
+at by name (endpoint, no path: the client appends /v1/...), and with
+llmRouting.external the public URL (externalEndpoint). Rendered with llmRouting
+and a serving model-manager (agent-platform.modelManager.serves): this
+release's serving slice, or a GPU node pool's, which comes as a second release
+of this chart with model-manager off while this release keeps modelServing
+off — so the document cannot live in the serving slice's discovery ConfigMap.
+Fixed label, in the release namespace (model-manager's):
+  kubectl -n <release namespace> get configmap -l agent-platform.giantswarm.io/llm-endpoint=true */ -}}
+{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.modelManager.serves" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "name" . }}-llm-endpoint
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/llm-endpoint: "true"
+data:
+  llm-endpoint.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: LLMEndpoint
+    spec:
+      parentRefs:
+        {{- include "agent-platform.llmRouting.modelParents" . | nindent 8 }}
+      endpoint: {{ include "agent-platform.llmBaseUrl" . }}
+      {{- if (include "agent-platform.llmRouting.external" .) }}
+      externalEndpoint: https://{{ include "agent-platform.llmRouting.externalHost" . }}
+      {{- end }}
+{{- end }}

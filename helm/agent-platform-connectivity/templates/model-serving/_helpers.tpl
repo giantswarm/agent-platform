@@ -405,6 +405,11 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
        (--default-chat-template-kwargs='{"enable_thinking": false}'). */ -}}
 {{- range $args -}}
 {{- $arg := toString . -}}
+{{- /* The API interfaces a served model answers are read from its runtime's
+       route list, GET /openapi.json (model-manager); the flag removes it. */ -}}
+{{- if regexMatch "^--disable-fastapi-docs(=|$)" $arg -}}
+{{- fail (printf "%s: spec.args carries %s, which removes the runtime's /openapi.json — the route list the platform reads a served model's API interfaces from (chat completions, Responses, Messages, embeddings); drop the flag" $where (quote $arg)) -}}
+{{- end -}}
 {{- if regexMatch "[[:space:]\"'$`\\\\;&|<>(){}\\[\\]*?]" (regexReplaceAll "'[^']*'" $arg "") -}}
 {{- fail (printf "%s: spec.args %s carries whitespace, a quote or a shell metacharacter outside single quotes; the runtime template re-parses every argument through a shell (eval \"… $@\"), which splits it there and eats the quotes — write the value single-quoted inside one argument, e.g. --default-chat-template-kwargs='{\"enable_thinking\": false}'" $where (quote $arg)) -}}
 {{- end -}}
@@ -629,6 +634,66 @@ Usage: $shape := include "agent-platform.modelServing.podShape" . | fromJson
 {{- end -}}
 
 {{/*
+The Kyverno foreach entries that bound every emptyDir of a model pod
+(modelServing.serving: shmSizeLimit, modelCacheSizeLimit, emptyDirSizeLimit):
+dshm gets shmSizeLimit whatever KServe's template set, the volume the
+storage-initializer downloads into (model-cache or kserve-provision-location,
+by KServe release) modelCacheSizeLimit when modelServing.cache.enabled is false
+(with the cache on, the redirect rule mounts the claim at /mnt/models instead
+and the emptyDir holds nothing), and every other emptyDir without a sizeLimit
+gets emptyDirSizeLimit; a sizeLimit the template set on one of those stays.
+The volumes are found by the pod spec's own list, so a pod shape's own
+emptyDirs (an hf:// pod's model-cache, an oci:// modelcar pod's
+kserve-provision-location) are bounded without being named and none is added.
+"spec" is the JMESPath of the pod spec (request.object.spec for a Pod,
+request.object.spec.template.spec for a Deployment), "nest" the keys the patch
+nests the spec under (list "spec" or list "spec" "template" "spec").
+Usage: include "agent-platform.modelServing.emptyDirBounds" (dict "root" $ "spec" "request.object.spec" "nest" (list "spec"))
+*/}}
+{{- define "agent-platform.modelServing.emptyDirBounds" -}}
+{{- $ms := .root.Values.modelServing -}}
+{{- $s := $ms.serving -}}
+{{- $named := dict "dshm" (required "modelServing.serving.shmSizeLimit is required: the model pod's /dev/shm is bounded" $s.shmSizeLimit) -}}
+{{- if not $ms.cache.enabled -}}
+{{- $limit := toString (required "modelServing.serving.modelCacheSizeLimit is required with modelServing.cache.enabled false: model-cache holds the download" $s.modelCacheSizeLimit) -}}
+{{- if not (regexMatch "^[1-9][0-9]*(Gi|Ti)$" $limit) -}}
+{{- fail (printf "modelServing.serving.modelCacheSizeLimit (%s) is a whole number of Gi or Ti, compared with the presets' requirements.weightsGiB" $limit) -}}
+{{- end -}}
+{{- $limitGiB := mul (trimSuffix "Gi" (trimSuffix "Ti" $limit) | int) (ternary 1024 1 (hasSuffix "Ti" $limit)) -}}
+{{- range $name, $entry := include "agent-platform.modelServing.presets" .root | fromJson -}}
+{{- $weights := dig "spec" "requirements" "weightsGiB" 0 $entry.preset | int -}}
+{{- if and (hasPrefix "hf://" (dig "spec" "model" "storageUri" "" $entry.preset)) (gt $weights $limitGiB) -}}
+{{- fail (printf "modelServing.serving.modelCacheSizeLimit (%s) is smaller than preset %s's %d GiB of weights: with modelServing.cache.enabled false its pod downloads them into model-cache" $limit $name $weights) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The download's volume: model-cache on KServe releases that mount it at
+       /mnt/models, kserve-provision-location on the current ones. */ -}}
+{{- $_ := set $named "model-cache" $limit -}}
+{{- $_ := set $named "kserve-provision-location" $limit -}}
+{{- end -}}
+{{- $default := required "modelServing.serving.emptyDirSizeLimit is required: every emptyDir of a model pod is bounded" $s.emptyDirSizeLimit -}}
+{{- /* One JSON patch per volume, at its index: an add on an existing member
+       replaces it, so a reinvoked webhook sets the same value again and the
+       volumes keep KServe's order (a strategic merge moves the patched
+       entries to the front of the list). */ -}}
+{{- $value := list -}}
+{{- range $name := keys $named | sortAlpha -}}
+{{- $value = append $value (printf "(element.name == '%s' && '%s')" $name (toString (get $named $name))) -}}
+{{- end -}}
+{{- $value = append $value (printf "element.emptyDir.sizeLimit || '%s'" (toString $default)) }}
+- list: {{ printf "%s.volumes" .spec | quote }}
+  preconditions:
+    all:
+      - key: {{ "{{ contains(keys(element), 'emptyDir') }}" | quote }}
+        operator: Equals
+        value: true
+  patchesJson6902: |-
+    - op: add
+      path: {{ printf "/%s/volumes/{{ elementIndex }}/emptyDir/sizeLimit" (join "/" .nest) }}
+      value: {{ printf "{{ %s }}" (join " || " $value) | quote }}
+{{- end -}}
+
+{{/*
 The Kyverno `match` entry selecting the model pods of the serving namespace at
 CREATE (agent-platform.modelServing.podShape); the caller nests it under
 `match.any`. Kinds default to Pod; the operations to CREATE (a pod's init
@@ -660,4 +725,28 @@ one at all).
 */}}
 {{- define "agent-platform.modelServing.modelNamePath" -}}
 {{- printf "request.object.metadata.labels.%q" (include "agent-platform.modelServing.podShape" . | fromJson).nameLabel -}}
+{{- end -}}
+
+{{/*
+The OTLP endpoint the model pods export traces to, which
+<release>-model-serving-otlp-egress opens: modelServing.networkPolicy.otlpEndpoint,
+where the meta chart writes the tracing preset's resolved endpoint; `auto`
+(this chart rendered on its own) follows global.observability.traces.otlp.endpoint.
+vLLM and the llm-d endpoint picker export over gRPC only, so `auto` with an
+http/protobuf global protocol fails the render. Empty: no export, no rule.
+Usage: include "agent-platform.modelServing.otlpEndpoint" .
+*/}}
+{{- define "agent-platform.modelServing.otlpEndpoint" -}}
+{{- $own := dig "networkPolicy" "otlpEndpoint" "auto" (.Values.modelServing | default dict) | default "" | toString | trim -}}
+{{- if eq $own "auto" -}}
+{{- $otlp := dig "observability" "traces" "otlp" dict (.Values.global | default dict) | default dict -}}
+{{- $endpoint := dig "endpoint" "" $otlp | default "" | toString | trim -}}
+{{- $protocol := dig "protocol" "" $otlp | default "grpc" | toString | lower -}}
+{{- if and $endpoint (ne $protocol "grpc") -}}
+{{- fail (printf "global.observability.traces.otlp.protocol is %s, but the model pods export OTLP over gRPC only (the LLMInferenceService tracing spec has no protocol): set modelServing.networkPolicy.otlpEndpoint to the collector's gRPC endpoint" $protocol) -}}
+{{- end -}}
+{{- $endpoint -}}
+{{- else -}}
+{{- $own -}}
+{{- end -}}
 {{- end -}}

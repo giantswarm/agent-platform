@@ -130,8 +130,8 @@ overwrite would hide a values file that still spells the old key.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation);
     substrateWorkerPool.workerImage from the Substrate release THIS chart pins
-    (agent-platform.substrate.workerImage: the substrate block's image.registry,
-    ateom-gvisor, the floor of components.substrate.versionRange) — never the
+    (agent-platform.substrate.workerImage: the substrate block's image.registry
+    and image.repository, ateom-gvisor, the floor of components.substrate.versionRange) — never the
     worker the kagent build was published against, so the worker and the
     atelet are one Substrate release whatever kagent build the range admits
     (giantswarm/agent-platform#466). An installation's own workerImage stands
@@ -146,7 +146,11 @@ overwrite would hide a values file that still spells the old key.
     muster's OAuth server is off (muster.muster.oauth.server.enabled, the
     platform's one login): a platform without a login has no issuer for a
     resource server to trust — the lab shape of examples/kind-lab-dex.yaml —
-    the way the muster discovery label derives from the same toggle.
+    the way the muster discovery label derives from the same toggle. The
+    managers' login itself (oauth.dex.issuerURL, clientID, existingSecret,
+    trustedAudiences, baseURL) is not derived here but on the shaped values
+    (agent-platform.identity.apply), so the connectivity release guards and
+    wires the same block.
   substrate: atelet.serviceAccount.annotations and
     ateApiServer.serviceAccount.annotations gain eks.amazonaws.com/role-arn,
     the IRSA role the store block renders, while it does (a differing explicit
@@ -686,15 +690,18 @@ Usage: include "agent-platform.substrate.pinnedVersion" $root
 
 {{/*
 The gVisor worker image of the Substrate release this chart pins:
-<substrate.image.registry>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
-— the registry the substrate block names for the control plane's images (a
-mirror sets it there, once, for both), the tag the atelet's. Every release of
-the line publishes atelet and ateom-gvisor under the same tag.
+<substrate.image.registry>/<substrate.image.repository>/ateom-gvisor:<agent-platform.substrate.pinnedVersion>
+— the registry and repository the substrate block names for the control
+plane's images (a mirror sets them there, once, for both), the tag the
+atelet's. Every release of the line publishes atelet and ateom-gvisor under
+the same tag.
 Usage: include "agent-platform.substrate.workerImage" $root
 */}}
 {{- define "agent-platform.substrate.workerImage" -}}
-{{- $registry := dig "image" "registry" "gsoci.azurecr.io/giantswarm/substrate" (.Values.substrate | default dict) -}}
-{{- printf "%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (include "agent-platform.substrate.pinnedVersion" .) -}}
+{{- $image := dig "image" (dict) (.Values.substrate | default dict) -}}
+{{- $registry := dig "registry" "gsoci.azurecr.io" $image -}}
+{{- $repository := dig "repository" "giantswarm/substrate" $image -}}
+{{- printf "%s/%s/ateom-gvisor:%s" (trimSuffix "/" $registry) (trimAll "/" $repository) (include "agent-platform.substrate.pinnedVersion" .) -}}
 {{- end -}}
 
 {{/*
@@ -1332,7 +1339,8 @@ answers, but only where the leaf is left at `auto`:
                                same observability platform),
                                kagent.oauth2-proxy.metrics.serviceMonitor.enabled,
                                kagent.otel.tracing.enabled / .logging.enabled (the
-                               OTLP gateway they export to is part of that platform),
+                               OTLP gateway they export to is part of that platform;
+                               off while the signal has no endpoint),
                                agentgateway.monitoring.enabled (the packaging
                                chart's own gate over its controller ServiceMonitor,
                                proxy PodMonitor and dashboard ConfigMap),
@@ -1344,7 +1352,13 @@ answers, but only where the leaf is left at `auto`:
                                own monitor; the chart takes a boolean),
                                vm-manager.serviceMonitor.enabled,
                                kserve-llmisvc-resources.kserve.llmisvc
-                               .controller.serviceMonitor.enabled
+                               .controller.serviceMonitor.enabled,
+                               substrate.metrics.podMonitor.enabled (the six
+                               workloads of the Substrate control plane),
+                               kagent.controller.metrics.serviceMonitor.enabled
+                               (the controller's own, from the line's 1.0.2)
+The OTLP destination of every exporter comes from global.observability.traces.otlp
+the same way, before the gates below read it (agent-platform.shape.otlp).
 Two leaves have no `auto` form and are derived directly, off only:
   valkey.valkey.metrics.podMonitor.enabled — the valkey chart's own default is
       on; written false when monitors are off, left absent otherwise so the
@@ -1395,6 +1409,7 @@ connectivity release both read the resolved value. */ -}}
 {{- if kindIs "map" (dig "postgres" nil (index $v "substrate" | default dict)) -}}
 {{- $_ := set (index $v "substrate" "postgres") "enabled" (eq (include "agent-platform.substrate.postgresMode" $root) "bundled") -}}
 {{- end -}}
+{{- include "agent-platform.shape.otlp" (dict "root" $root "values" $v "monitors" $monitors) -}}
 {{- /* Derived component copies: only a leaf left at auto is written. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "networkPolicy" "flavor") "value" $flavor) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "valkey" "ciliumNetworkPolicy" "enabled") "value" (eq $flavor "cilium")) -}}
@@ -1405,8 +1420,12 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "agentgateway" "monitoring" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "mcpKubernetes" "instrumentation" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "grafanaDashboards" "enabled") "value" $monitors) -}}
-{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "tracing" "enabled") "value" $monitors) -}}
-{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" "logging" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "substrate" "metrics" "podMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "controller" "metrics" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- range $signal := list "tracing" "logging" -}}
+{{- $endpoint := dig "otel" $signal "exporter" "otlp" "endpoint" "" (index $v "kagent" | default dict) | toString | trim -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" $signal "enabled") "value" (and $monitors (ne $endpoint ""))) -}}
+{{- end -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "vm-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kserve-llmisvc-resources" "kserve" "llmisvc" "controller" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- /* valkey PodMonitor: the chart's own default is on, so only "off" is written. */ -}}
@@ -1447,6 +1466,217 @@ when it is off (giantswarm/klaus-gateway#263). */ -}}
 {{- if and (kindIs "map" $kgObs) (hasKey $kgObs "enabled") (ne (toString (index $kgObs "enabled")) "true") -}}
 {{- $_ := set $kgObs "otlpEndpoint" "" -}}
 {{- $_ := set $kgObs "otlpHeaders" dict -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Every OTLP exporter's destination from ONE block, global.observability.traces.otlp
+(endpoint, protocol, tenant, headers), written into the component copies on the
+shaped values tree where they are `auto` (agent-platform.shape.derive: a copy set
+to anything else wins, and nothing fails over the difference: the same rule as
+the monitor gates). Runs inside agent-platform.shape.apply before the kagent and
+klaus-gateway gates read the endpoints. Emits nothing.
+  endpoint -> kagent.otel.{tracing,logging}.exporter.otlp.endpoint,
+              muster.muster.observability.otel.endpoint,
+              klausGateway.observability.otlpEndpoint, substrate.otel.endpoint,
+              gateway.parameters.dataPlaneEnv[OTEL_EXPORTER_OTLP_ENDPOINT]
+              (the entry dropped when the endpoint is empty);
+              kagent.otel.{tracing,logging}.exporter.otlp.insecure: false for
+              an https:// endpoint, true otherwise; with no endpoint, every
+              Substrate signal that names no endpoint of its own is turned off
+              (substrate.otel.<signal>.enabled: false);
+              kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint
+              (the model pods' tracing preset; dropped when empty), then
+              modelServing.networkPolicy.otlpEndpoint from that preset's
+              resolved endpoint (the model pods' egress);
+              <manager>.observability.otel.endpoint (model-manager,
+              agent-manager, vm-manager, cluster-manager, backstage);
+              mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint as
+              host:port (the scheme and path dropped, the port the scheme's or
+              protocol's default when it names none), with .otlpInsecure false for an
+              https:// endpoint, true otherwise, and .tracingExporter otlp,
+              none when the endpoint is empty
+  protocol -> kagent.otel.tracing.exporter.otlp.protocol,
+              muster.muster.observability.otel.protocol,
+              <manager>.observability.otel.protocol,
+              mcp-kubernetes.mcpKubernetes.instrumentation.otlpProtocol,
+              gateway.parameters.dataPlaneEnv[OTEL_EXPORTER_OTLP_PROTOCOL];
+              empty is grpc
+  tenant   -> the X-Scope-OrgID header of the exporters that send headers,
+              and the pod label observability.giantswarm.io/tenant of the two
+              that send none: substrate.podLabels, gateway.parameters.podLabels,
+              kserve-runtime-configs.kserve.llmisvcConfigs.tracing.podLabels
+              (the label dropped when the tenant is empty)
+  headers  -> with the tenant: muster.muster.observability.otel.headers,
+              <manager>.observability.otel.headers,
+              mcp-kubernetes.mcpKubernetes.instrumentation.otlpHeaders and
+              kagent.{controller,harness}.env[OTEL_EXPORTER_OTLP_HEADERS]
+              ("k=v,k=v"; the entry dropped when empty),
+              klausGateway.observability.otlpHeaders (a map)
+klaus-gateway, Substrate, kagent's log exporter (the actors' Go ADK) and the
+model pods' tracing preset (vLLM, the llm-d endpoint picker) speak gRPC only: an http/protobuf protocol fails the render while one of them is on
+and would take the endpoint, naming the key to set instead. .monitors is the
+resolved global.observability.metrics.serviceMonitor.enabled, which kagent's
+`auto` log exporter follows.
+Usage: include "agent-platform.shape.otlp" (dict "root" $ "values" $shaped "monitors" $monitors)
+*/}}
+{{- define "agent-platform.shape.otlp" -}}
+{{- $root := .root -}}
+{{- $v := .values -}}
+{{- $monitors := .monitors -}}
+{{- $otlp := dig "observability" "traces" "otlp" dict (index $v "global" | default dict) | default dict -}}
+{{- $endpoint := dig "endpoint" "" $otlp | default "" | toString | trim -}}
+{{- $protocol := dig "protocol" "" $otlp | default "grpc" | toString | lower -}}
+{{- $tenant := dig "tenant" "" $otlp | default "" | toString | trim -}}
+{{- $headers := dict -}}
+{{- range $k, $val := (dig "headers" dict $otlp | default dict) -}}
+{{- if eq (lower $k) "x-scope-orgid" -}}
+{{- if and $tenant (ne (toString $val) $tenant) -}}
+{{- fail (printf "global.observability.traces.otlp.headers.%s (%s) differs from global.observability.traces.otlp.tenant (%s): the tenant is one value, so set it in tenant and drop the header" $k $val $tenant) -}}
+{{- end -}}
+{{- if not $tenant -}}{{- $_ := set $headers $k (toString $val) -}}{{- end -}}
+{{- else -}}
+{{- $_ := set $headers $k (toString $val) -}}
+{{- end -}}
+{{- end -}}
+{{- with $tenant -}}{{- $_ := set $headers "X-Scope-OrgID" . -}}{{- end -}}
+{{- $pairs := list -}}
+{{- range $k, $val := $headers -}}{{- $pairs = append $pairs (printf "%s=%s" $k $val) -}}{{- end -}}
+{{- $joined := join "," $pairs -}}
+{{- /* The gRPC-only exporters that would take an http/protobuf endpoint. */ -}}
+{{- if eq $protocol "http/protobuf" -}}
+{{- $grpcOnly := list -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "klaus-gateway")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "klausGateway" "observability" "otlpEndpoint"))) -}}
+{{- $grpcOnly = append $grpcOnly "klausGateway.observability.otlpEndpoint" -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "substrate")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "substrate" "otel" "endpoint"))) -}}
+{{- $grpcOnly = append $grpcOnly "substrate.otel.endpoint" -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "kagent" "otel" "logging" "exporter" "otlp" "endpoint"))) (has (toString (dig "otel" "logging" "enabled" "auto" (index $v "kagent" | default dict))) (ternary (list "true" "auto") (list "true") $monitors)) -}}
+{{- $grpcOnly = append $grpcOnly "kagent.otel.logging.exporter.otlp.endpoint (or kagent.otel.logging.enabled: false)" -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "kserve-runtime-configs")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "exporterEndpoint"))) -}}
+{{- $grpcOnly = append $grpcOnly "kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint" -}}
+{{- end -}}
+{{- with $grpcOnly -}}
+{{- fail (printf "global.observability.traces.otlp.protocol is http/protobuf, but these exporters speak OTLP over gRPC only and would take its endpoint: %s. Set each to the collector's gRPC endpoint" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+{{- /* Substrate with no endpoint: each signal that names no endpoint of its own
+is turned off, where the chart would export to the SDK's localhost default. */ -}}
+{{- if and (not $endpoint) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "substrate" "otel" "endpoint"))) -}}
+{{- $otel := index $v "substrate" "otel" -}}
+{{- range $signal := list "traces" "metrics" "logs" -}}
+{{- $cfg := index $otel $signal | default dict -}}
+{{- if and (kindIs "map" $cfg) (not (dig "endpoint" "" $cfg)) (not (hasKey $cfg "enabled")) -}}
+{{- $_ := set $otel $signal (merge (dict "enabled" false) $cfg) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $path := list (list "kagent" "otel" "tracing" "exporter" "otlp" "endpoint") (list "kagent" "otel" "logging" "exporter" "otlp" "endpoint") (list "muster" "muster" "observability" "otel" "endpoint") (list "klausGateway" "observability" "otlpEndpoint") (list "substrate" "otel" "endpoint") -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" $path "value" $endpoint) -}}
+{{- end -}}
+{{- /* kagent's INSECURE follows each signal's resolved endpoint: the SDKs read it
+after the endpoint, so true would send plaintext to an https collector. */ -}}
+{{- range $signal := list "tracing" "logging" -}}
+{{- $resolved := dig "otel" $signal "exporter" "otlp" "endpoint" "" (index $v "kagent" | default dict) | toString | trim | lower -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" $signal "exporter" "otlp" "insecure") "value" (not (hasPrefix "https://" $resolved))) -}}
+{{- end -}}
+{{- range $path := list (list "kagent" "otel" "tracing" "exporter" "otlp" "protocol") (list "muster" "muster" "observability" "otel" "protocol") -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" $path "value" $protocol) -}}
+{{- end -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "otel" "headers") "value" $joined) -}}
+{{- range $name := list "model-manager" "agent-manager" "vm-manager" "cluster-manager" "backstage" -}}
+{{- $base := list $name "observability" "otel" -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "endpoint") "value" $endpoint) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "protocol") "value" $protocol) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "headers") "value" $joined) -}}
+{{- end -}}
+{{- /* mcp-kubernetes takes host:port and a separate insecure flag, and exports
+nothing unless tracingExporter names otlp. */ -}}
+{{- $instr := list "mcp-kubernetes" "mcpKubernetes" "instrumentation" -}}
+{{- $hostport := regexReplaceAll "^[a-zA-Z][a-zA-Z0-9+.-]*://" $endpoint "" | splitList "/" | first -}}
+{{- if and $hostport (not (regexMatch ":[0-9]+$" $hostport)) -}}
+{{- $hostport = printf "%s:%s" $hostport (ternary "443" (ternary "4318" "4317" (eq $protocol "http/protobuf")) (hasPrefix "https://" (lower $endpoint))) -}}
+{{- end -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "tracingExporter") "value" (ternary "otlp" "none" (ne $endpoint ""))) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "otlpEndpoint") "value" $hostport) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "otlpInsecure") "value" (not (hasPrefix "https://" (lower $endpoint)))) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "otlpProtocol") "value" $protocol) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $instr "otlpHeaders") "value" $joined) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "klausGateway" "observability" "otlpHeaders") "value" (deepCopy $headers)) -}}
+{{- $kagent := index $v "kagent" | default dict -}}
+{{- if kindIs "map" $kagent -}}
+{{- range $owner := list "controller" "harness" -}}
+{{- include "agent-platform.shape.deriveEnv" (dict "owner" (index $kagent $owner) "name" "OTEL_EXPORTER_OTLP_HEADERS" "value" $joined) -}}
+{{- end -}}
+{{- end -}}
+{{- $params := dig "gateway" "parameters" nil $v -}}
+{{- if kindIs "map" $params -}}
+{{- include "agent-platform.shape.deriveEnv" (dict "owner" $params "key" "dataPlaneEnv" "name" "OTEL_EXPORTER_OTLP_ENDPOINT" "value" $endpoint) -}}
+{{- include "agent-platform.shape.deriveEnv" (dict "owner" $params "key" "dataPlaneEnv" "name" "OTEL_EXPORTER_OTLP_PROTOCOL" "value" $protocol) -}}
+{{- end -}}
+{{- range $path := list (list "substrate" "podLabels") (list "gateway" "parameters" "podLabels") (list "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "podLabels") -}}
+{{- include "agent-platform.shape.deriveOrDrop" (dict "values" $v "path" (append $path "observability.giantswarm.io/tenant") "value" $tenant) -}}
+{{- end -}}
+{{- /* The model pods: the tracing preset's endpoint, then its resolved value
+mirrored for the connectivity release's egress (the kserve-runtime-configs
+block does not reach that release). */ -}}
+{{- include "agent-platform.shape.deriveOrDrop" (dict "values" $v "path" (list "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "exporterEndpoint") "value" $endpoint) -}}
+{{- $presetEndpoint := dig "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "exporterEndpoint" "" $v | toString | trim -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "modelServing" "networkPolicy" "otlpEndpoint") "value" $presetEndpoint) -}}
+{{- end -}}
+
+{{/*
+"true" when the leaf at .path (a list of keys) in .values is `auto`, else empty.
+*/}}
+{{- define "agent-platform.shape.isAuto" -}}
+{{- $cur := .values -}}
+{{- $ok := true -}}
+{{- range .path -}}
+{{- if and $ok (kindIs "map" $cur) (hasKey $cur .) -}}
+{{- $cur = index $cur . -}}
+{{- else -}}
+{{- $ok = false -}}
+{{- end -}}
+{{- end -}}
+{{- if and $ok (eq (toString $cur) "auto") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+agent-platform.shape.derive, except that an empty .value deletes the leaf
+instead of writing it (a label whose value would be empty). Emits nothing.
+*/}}
+{{- define "agent-platform.shape.deriveOrDrop" -}}
+{{- if include "agent-platform.shape.isAuto" . -}}
+{{- if .value -}}
+{{- include "agent-platform.shape.derive" . -}}
+{{- else -}}
+{{- $cur := .values -}}
+{{- range (initial .path) -}}{{- $cur = index $cur . -}}{{- end -}}
+{{- $_ := unset $cur (last .path) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+In the env list .owner.<key> (key: env by default), a list of name/value maps,
+write .value into the entry named .name whose value is `auto`, or drop that
+entry when .value is empty. An entry set to anything else wins. Emits nothing.
+*/}}
+{{- define "agent-platform.shape.deriveEnv" -}}
+{{- $owner := .owner -}}
+{{- $key := .key | default "env" -}}
+{{- if and (kindIs "map" $owner) (kindIs "slice" (index $owner $key)) -}}
+{{- $env := list -}}
+{{- range (index $owner $key) -}}
+{{- if and (kindIs "map" .) (eq (toString (index . "name")) $.name) (eq (toString (index . "value")) "auto") -}}
+{{- if $.value -}}{{- $env = append $env (merge (dict "value" $.value) (omit . "value")) -}}{{- end -}}
+{{- else -}}
+{{- $env = append $env . -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $owner $key $env -}}
 {{- end -}}
 {{- end -}}
 
@@ -1498,6 +1728,68 @@ Usage: include "agent-platform.scheduling.apply" (dict "values" $shaped)
 {{- end -}}
 {{- with $selector }}{{ $_ := set $node "nodeSelector" (merge (deepCopy (index $node "nodeSelector" | default dict)) .) }}{{ end -}}
 {{- with $tolerations }}{{ $_ := set $node "tolerations" (concat (index $node "tolerations" | default list) .) }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The platform's one login in the managers' OAuth blocks
+(giantswarm/agent-platform#484). model-manager, agent-manager, vm-manager and
+cluster-manager are OAuth resource servers of the login muster's OAuth server
+names. Each chart resolves its issuer, client, Secret and trusted audiences
+from its own oauth block, else global.identity; what both leave unset is filled
+here from muster.muster.oauth.server — oauth.dex.issuerURL from dex.issuerUrl,
+oauth.dex.clientID from dex.clientId (and oauth.trustedAudiences [that client],
+the charts' own default from global.identity.clientId), oauth.existingSecret
+from existingSecret (key dex-client-secret, the key every manager chart and
+muster read) — so an installation that names muster's login names the
+managers' too, a customer's own Dex client included, which a fleet-wide
+global.identity.clientId cannot carry. Defaults, not the single-source rule: a
+manager's own value wins, and so does global.identity (the connectivity chart
+fails the render when either disagrees with muster's). Only for the dex
+provider, while muster's OAuth server is on (with it off, model-manager's oauth
+is off: componentDerivedValues).
+oauth.baseURL of the two routed managers is https://<host><route.pathPrefix>
+under an agentgateway-* ingress.mode, host being the hostname the connectivity
+chart gives the route (modelManager.route.hostname / agentManager.route.hostname,
+else agentgateway.<global.domain>); without one it stays unset and the
+connectivity chart's guard names the key.
+Runs on the $shaped copy in components.yaml after scheduling.apply, so each
+manager release and the connectivity release — its guards, the managers'
+identity-provider egress — read the same filled block. Emits nothing.
+Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
+*/}}
+{{- define "agent-platform.identity.apply" -}}
+{{- $v := .values -}}
+{{- $global := index $v "global" | default dict -}}
+{{- $identity := dig "identity" dict $global -}}
+{{- $domain := dig "domain" "" $global -}}
+{{- $mode := dig "ingress" "mode" "" $v -}}
+{{- $server := dig "muster" "oauth" "server" dict (index $v "muster" | default dict) -}}
+{{- $login := dict -}}
+{{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
+{{- $login = dict "issuerURL" (dig "dex" "issuerUrl" "" $server) "clientID" (dig "dex" "clientId" "" $server) "existingSecret" (dig "existingSecret" "" $server) -}}
+{{- end -}}
+{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" -}}
+{{- $block := index $v $name -}}
+{{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
+{{- $oauth := index $block "oauth" -}}
+{{- if and $login (eq (toString (dig "provider" "dex" $oauth)) "dex") -}}
+{{- if not (kindIs "map" (index $oauth "dex")) }}{{ $_ := set $oauth "dex" dict }}{{ end -}}
+{{- $dex := index $oauth "dex" -}}
+{{- if and $login.issuerURL (not $dex.issuerURL) (not $identity.issuerUrl) }}{{ $_ := set $dex "issuerURL" $login.issuerURL }}{{ end -}}
+{{- if and $login.clientID (not $dex.clientID) (not $identity.clientId) -}}
+{{- $_ := set $dex "clientID" $login.clientID -}}
+{{- if not $oauth.trustedAudiences }}{{ $_ := set $oauth "trustedAudiences" (list $login.clientID) }}{{ end -}}
+{{- end -}}
+{{- if and $login.existingSecret (not $oauth.existingSecret) (not $dex.clientSecret) (not $identity.existingSecret) }}{{ $_ := set $oauth "existingSecret" $login.existingSecret }}{{ end -}}
+{{- end -}}
+{{- if and $wiring (not $oauth.baseURL) (or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
+{{- $route := dig $wiring "route" dict $v -}}
+{{- $host := $route.hostname -}}
+{{- if and (not $host) $domain }}{{ $host = printf "agentgateway.%s" $domain }}{{ end -}}
+{{- if and $host $route.pathPrefix }}{{ $_ := set $oauth "baseURL" (printf "https://%s%s" $host $route.pathPrefix) }}{{ end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1577,15 +1869,19 @@ are created for, in Helm's order: pre-install,pre-upgrade while the kagent
 namespace hook or the storage-version backup hook renders (they run as that
 account — creating a namespace or deleting a CRD is cluster-scoped, the
 namespaced <release>-self identity cannot), post-install,post-upgrade while the
-storage-version restore hook renders, and pre-delete for the ordered teardown
-(the bundled engine). Empty when none of them renders — rbac.yaml renders nothing then.
+storage-version restore hook renders, pre-delete for the ordered teardown
+(the bundled engine), and the serving teardown's event while it renders
+(agent-platform.serving.teardownEvent: pre-delete, or pre-upgrade when the
+slice is switched off in place). Empty when none of them renders — rbac.yaml
+renders nothing then.
 */}}
 {{- define "agent-platform.hooks.serviceAccountEvents" -}}
 {{- $events := list -}}
 {{- if or (include "agent-platform.kagent.hookNamespace" .) (include "agent-platform.kagent.storageVersionHooks" .) }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
 {{- if include "agent-platform.kagent.storageVersionHooks" . }}{{ $events = concat $events (list "post-install" "post-upgrade") }}{{ end -}}
 {{- if eq (include "agent-platform.engineEnabled" .) "true" }}{{ $events = append $events "pre-delete" }}{{ end -}}
-{{- join "," $events -}}
+{{- with include "agent-platform.serving.teardownEvent" . }}{{ $events = append $events . }}{{ end -}}
+{{- join "," (uniq $events) -}}
 {{- end -}}
 
 {{/*

@@ -12,7 +12,7 @@ one property of that:
   `cluster-manager: enabled: false`, the two blocks (`cluster-manager:`, `clusterManager:`)
   are held back from the connectivity release (gatedValues), and the connectivity chart
   renders nothing named cluster-manager;
-- on: ONE OCIRepository (the catalog's cluster-manager chart on >=0.4.2 <1.0.0) and ONE
+- on: ONE OCIRepository (the catalog's cluster-manager chart on >=0.19.0 <1.0.0) and ONE
   HelmRelease that dependsOn muster, with the block forwarded — the pinned Service name,
   oauth on with downstream, the muster registration with forwardToken and the audience
   the kube-apiserver trusts, global injected, modelManager.namespace derived from the
@@ -52,7 +52,7 @@ HELM = os.environ.get("HELM", "helm")
 NAME = "cluster-manager"
 WIRING = "clusterManager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
-RANGE = ">=0.4.2 <1.0.0"
+RANGE = ">=0.19.0 <1.0.0"
 CI = ["--set", "components.flux.enabled=false"]
 ON = ["--set", f"components.{NAME}.enabled=true"]
 IDENTITY = [
@@ -262,6 +262,24 @@ def main(meta: str, connectivity: str) -> int:
         fail("model-manager's egress opens the Hugging Face Hub with neither a static kserve backend nor cluster-manager")
     ok("model-manager's egress: the Hugging Face Hub by name with cluster-manager on, not without a kserve backend")
 
+    # --- model-manager reaches the workload clusters' API servers its kserve backends target (#687) ---
+    # Nothing set on model-manager: its egress follows clusterManager.networkPolicy.workloadClusters (the
+    # cilium render above sets fqdns api.*.example.com and cidrs 198.51.100.0/24), on the same ports.
+    must_have(mm_egress, ("matchPattern: api.*.example.com\n", "- 198.51.100.0/24\n", '- port: "6443"\n'),
+              "model-manager's egress: the workload clusters derived from cluster-manager's")
+    if "api.*.example.com" in mm_off or "198.51.100.0/24" in mm_off:
+        fail("model-manager's egress opens the workload clusters with neither a static kserve backend nor cluster-manager")
+    own = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=cilium",
+                                        "--set", f"{WIRING}.networkPolicy.workloadClusters.fqdns[0].matchPattern=api.*.example.com",
+                                        "--set", "modelManager.networkPolicy.workloadClusters.fqdns[0].matchName=api.override.example",
+                                        "--set", "modelManager.networkPolicy.workloadClusters.ports[0]=8443"], ci_values=False))
+    mm_own = own[("CiliumNetworkPolicy", "agent-platform-connectivity-model-manager-egress")]
+    must_have(mm_own, ("matchName: api.override.example\n", '- port: "8443"\n'), "model-manager's egress with its own workloadClusters")
+    if "api.*.example.com" in mm_own:
+        fail("an explicit modelManager.networkPolicy.workloadClusters does not replace cluster-manager's value")
+    must_have(own[("CiliumNetworkPolicy", f"{prefix}-egress")], ("matchPattern: api.*.example.com\n",), "cluster-manager's egress, untouched by model-manager's value")
+    ok("model-manager's egress: the workload clusters' API servers by name and address on 443/6443, derived from cluster-manager's; an explicit value replaces it; none without a kserve backend")
+
     # --- connectivity, kubernetes -----------------------------------------------------
     k8s = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=kubernetes"], ci_values=False))
     for pol in POLICIES:
@@ -278,7 +296,10 @@ def main(meta: str, connectivity: str) -> int:
     must_have(narrowed, ('cidr: "198.51.100.0/24"\n',), "the narrowed kubernetes egress policy")
     if narrowed.count("cidr: 0.0.0.0/0") != 1:
         fail("kubernetes egress with workload cidrs: the workload rule still opens every public destination")
-    ok("kubernetes: the three policies; the apiserver CIDR; every public destination on the workload ports, narrowed by cidrs; the IdP on 443")
+    mm_narrowed = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=kubernetes",
+                                                "--set", f"{WIRING}.networkPolicy.workloadClusters.cidrs[0]=198.51.100.0/24"], ci_values=False))[("NetworkPolicy", "agent-platform-connectivity-model-manager-egress")]
+    must_have(mm_narrowed, ('cidr: "198.51.100.0/24"\n', "- port: 6443\n"), "model-manager's kubernetes egress with cluster-manager's workload cidrs")
+    ok("kubernetes: the three policies; the apiserver CIDR; every public destination on the workload ports, narrowed by cidrs; the IdP on 443; model-manager follows the workload cidrs")
 
     # --- the guards -------------------------------------------------------------------------
     for what, flags, fragment in (

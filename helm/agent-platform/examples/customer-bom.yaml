@@ -15,8 +15,10 @@
 # muster before 5.12.0 does not know (it refuses to start), and which
 # agent-platform-mcps, agent-manager and model-manager stamp on their MCPServer
 # CRs from the versions below.
-# The model-manager pin is the floor of its range: 1.0.8 is the first release
-# that writes num_ctx on the Ollama ModelConfigs it wires
+# The model-manager, agent-manager, vm-manager, cluster-manager, backstage and
+# mcp-kubernetes pins are the floors of their ranges, the first releases that
+# export traces over OTLP (giantswarm/giantswarm#36711). model-manager carries
+# 1.0.8's num_ctx on the Ollama ModelConfigs it wires
 # (giantswarm/model-manager#157); it reads the GPU node pool input from the
 # discovery ConfigMap (spec.gpuPool, giantswarm/agent-platform#315, from 0.23.0)
 # and starts with no backend and registers backends at runtime (#329, from
@@ -25,8 +27,7 @@
 # carries its own image tag and Go ADK digest, nothing in values.yaml names
 # them; the line's releases are stable semver of its own, decoupled from the
 # upstream version).
-# agent-manager and backstage pin the first releases of their kagent API v2
-# lines. agent-platform-connectivity is NOT pinned here and must not be: it is
+# agent-platform-connectivity is NOT pinned here and must not be: it is
 # released off the same tag as the meta chart and follows the meta chart's own
 # version (components.agent-platform-connectivity.releasedWithChart) — a pin
 # here lags the moment the meta chart moves, and a lagging connectivity
@@ -35,8 +36,8 @@
 # render refuses such a pin.
 # substrate and substrate-crds pin the SAME release of the Substrate line
 # (stable semver like kagent's; the floor of components.substrate.versionRange
-# — 1.0.3, the line's 1.0 release whose egress gateway runs the agentgateway line's 2.1.2, on the upstream Substrate the
-# kagent line's own pin names). The agentgateway pin is the floor of
+# — 1.1.0, the line on kagent-dev/substrate v0.2.0-beta5, the upstream Substrate the
+# kagent line's own pin names; its egress gateway runs the agentgateway line's 2.1.2). The agentgateway pin is the floor of
 # components.agentgateway.versionRange: 2.4.0 is the first packaging release
 # whose values schema admits the monitoring block the agentgateway component
 # turns on (the tenant label on both monitors, the discovery label and the
@@ -58,10 +59,10 @@ components:
   agentgateway:                  { versionRange: "2.4.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "1.0.3" }
-  kagent-crds:                   { versionRange: "1.0.3" }
-  substrate:                     { versionRange: "1.0.3" }
-  substrate-crds:                { versionRange: "1.0.3" }
+  kagent:                        { versionRange: "1.1.0" }
+  kagent-crds:                   { versionRange: "1.1.0" }
+  substrate:                     { versionRange: "1.1.0" }
+  substrate-crds:                { versionRange: "1.1.0" }
   # 3.3.0 names a failed turn's class (tools, platform, model, policy) in the
   # thread, the turn record and the turn metric, and sends a tool-set or
   # platform failure once more (giantswarm/klaus-gateway#329). Nothing below
@@ -70,23 +71,21 @@ components:
   klaus-gateway:                 { versionRange: "3.3.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
-  model-manager:                 { versionRange: "1.0.8" }
-  agent-manager:                 { versionRange: "1.0.0" }
-  vm-manager:                    { versionRange: "0.22.0" }
-  # The cluster write surface (components.cluster-manager, off by default): 0.4.2
-  # is the first release with the muster registration and the identity contract
-  # that also tolerates a cluster without the Cluster API group.
-  cluster-manager:               { versionRange: "0.4.2" }
+  model-manager:                 { versionRange: "1.3.0" }
+  agent-manager:                 { versionRange: "1.2.0" }
+  vm-manager:                    { versionRange: "0.24.0" }
+  # The cluster write surface (components.cluster-manager, off by default).
+  cluster-manager:               { versionRange: "0.19.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
-  # chart's tested pins on 2026-09-08; the kserve charts move together (one
-  # upstream repository).
-  backstage:                     { versionRange: "1.0.0" }
-  mcp-kubernetes:                { versionRange: "1.1.8" }
+  # chart's tested pins on 2026-09-08, backstage and mcp-kubernetes at their
+  # floors; the kserve charts move together (one upstream repository).
+  backstage:                     { versionRange: "2.68.0" }
+  mcp-kubernetes:                { versionRange: "1.3.0" }
   cloudnative-pg:                { versionRange: "0.29.0" }
   kserve-llmisvc-crd:            { versionRange: "0.5.0" }
   kserve-llmisvc-resources:      { versionRange: "0.5.0" }
-  kserve-runtime-configs:        { versionRange: "0.5.0" }
+  kserve-runtime-configs:        { versionRange: "0.6.0" }
   # The GPU operator (components.gpu-operator, off by default): the catalog's
   # gpu-operator wrapper chart, 1.3.0 = operator 26.3.1.
   gpu-operator:                  { versionRange: "1.3.0" }
