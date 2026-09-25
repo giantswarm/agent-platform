@@ -17,8 +17,8 @@ rendered with the values the meta chart hands its release (the Flux path):
   namespace on that port in both flavours, no kube-system OTLP rule is left;
   mcp-kubernetes takes the endpoint as host:port, with the scheme's or the
   protocol's default port when it names none, and otlpInsecure from the scheme;
-- an https collector outside the cluster: kagent's `insecure` resolves false (the
-  SDKs read it after the endpoint), every egress rule is the cluster entity on 443;
+- an https collector outside the cluster: kagent takes the https:// endpoint (its
+  scheme decides TLS), every egress rule is the cluster entity on 443;
 - an explicit per-component key wins over the global one, and its egress rule
   follows it, while the other exporters keep the global endpoint;
 - an empty endpoint exports nothing: kagent's exporters resolve off, Substrate's
@@ -27,10 +27,10 @@ rendered with the values the meta chart hands its release (the Flux path):
   policy, no OTLP egress rule renders;
 - an empty tenant sends no X-Scope-OrgID and sets no tenant label;
 - an X-Scope-OrgID header that differs from the tenant fails the render;
-- http/protobuf fails while a gRPC-only exporter (klaus-gateway, Substrate,
-  kagent's log exporter) would take the endpoint, and passes once each names
-  its own; the other exporters and the data plane then speak http/protobuf and
-  their egress rules open 4318 for an endpoint without a port.
+- http/protobuf fails while a gRPC-only exporter (klaus-gateway, Substrate)
+  would take the endpoint, and passes once each names its own; the other
+  exporters (kagent's traces and logs included) and the data plane then speak
+  http/protobuf and their egress rules open 4318 for an endpoint without a port.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
@@ -183,8 +183,7 @@ def exporters(values: dict) -> dict:
     """Every exporter's endpoint as its release (or the connectivity release, for the data plane) carries it."""
     kagent, muster, kg, sub, conn = (values[n] for n in ("kagent", "muster", "klaus-gateway", "substrate", "agent-platform-connectivity"))
     return {
-        "kagent.otel.tracing": get(kagent, ["otel", "tracing", "exporter", "otlp", "endpoint"]),
-        "kagent.otel.logging": get(kagent, ["otel", "logging", "exporter", "otlp", "endpoint"]),
+        "kagent": get(kagent, ["otel", "exporter", "otlp", "endpoint"]),
         "muster": get(muster, ["muster", "observability", "otel", "endpoint"]),
         "klaus-gateway": get(kg, ["observability", "otlpEndpoint"]),
         "substrate": get(sub, ["otel", "endpoint"]),
@@ -275,11 +274,9 @@ def case_defaults(meta: str, conn_chart: str, tmp: str) -> None:
     values, conn, k8s = meta_and_conn(meta, conn_chart, [], tmp, "defaults")
     expect("defaults: exporters", set(exporters(values).values()), {DEFAULT_EP})
     kagent, muster, kg, sub, cv = (values[n] for n in ("kagent", "muster", "klaus-gateway", "substrate", "agent-platform-connectivity"))
-    expect("defaults: kagent tracing protocol", get(kagent, ["otel", "tracing", "exporter", "otlp", "protocol"]), "grpc")
-    expect("defaults: kagent tracing insecure (http:// endpoint)", get(kagent, ["otel", "tracing", "exporter", "otlp", "insecure"]), "true")
-    expect("defaults: kagent logging insecure (http:// endpoint)", get(kagent, ["otel", "logging", "exporter", "otlp", "insecure"]), "true")
-    expect("defaults: kagent tracing enabled", get(kagent, ["otel", "tracing", "enabled"]), "true")
-    expect("defaults: kagent logging enabled", get(kagent, ["otel", "logging", "enabled"]), "true")
+    expect("defaults: kagent protocol", get(kagent, ["otel", "exporter", "otlp", "protocol"]), "grpc")
+    expect("defaults: kagent traces enabled", get(kagent, ["otel", "traces", "enabled"]), "true")
+    expect("defaults: kagent logs enabled", get(kagent, ["otel", "logs", "enabled"]), "true")
     expect("defaults: kagent controller header", env(kagent, ["controller", "env"], "OTEL_EXPORTER_OTLP_HEADERS"), "X-Scope-OrgID=giantswarm")
     expect("defaults: kagent Harness header", env(kagent, ["harness", "env"], "OTEL_EXPORTER_OTLP_HEADERS"), "X-Scope-OrgID=giantswarm")
     expect("defaults: muster protocol", get(muster, ["muster", "observability", "otel", "protocol"]), "grpc")
@@ -329,9 +326,7 @@ def case_customer(meta: str, conn_chart: str, tmp: str) -> None:
 
 def case_tls(meta: str, conn_chart: str, tmp: str) -> None:
     values, conn, _ = meta_and_conn(meta, conn_chart, ["--set", f"{OTLP}.endpoint=https://otlp.example.com"], tmp, "tls")
-    kagent = values["kagent"]
-    for signal in ("tracing", "logging"):
-        expect(f"tls: kagent {signal} insecure", get(kagent, ["otel", signal, "exporter", "otlp", "insecure"]), "false")
+    expect("tls: kagent endpoint", get(values["kagent"], ["otel", "exporter", "otlp", "endpoint"]), "https://otlp.example.com")
     expect("tls: substrate signals left on", get(values["substrate"], ["otel", "traces", "enabled"]), None)
     check_egress(conn, {}, {p: ("cluster", "443") for p in [*KAGENT_POLICIES, *SUBSTRATE_POLICIES, MUSTER_POLICY, KLAUS_POLICY, DATAPLANE_POLICY]}, "tls")
     mk = mcp_kubernetes(values)
@@ -343,7 +338,7 @@ def case_tls(meta: str, conn_chart: str, tmp: str) -> None:
 
 def case_explicit(meta: str, conn_chart: str, tmp: str) -> None:
     own = {
-        "kagent.otel.tracing.exporter.otlp.endpoint": "http://traces.own-kagent.svc:4317",
+        "kagent.otel.traces.endpoint": "http://traces.own-kagent.svc:4317",
         "muster.muster.observability.otel.endpoint": "http://collector.own-muster.svc:4317",
         "klausGateway.observability.otlpEndpoint": "http://collector.own-klaus.svc:4317",
         "substrate.otel.endpoint": "http://collector.own-substrate.svc:4317",
@@ -358,8 +353,7 @@ def case_explicit(meta: str, conn_chart: str, tmp: str) -> None:
         flags += ["--set", f"{k}={v}"]
     values, conn, k8s = meta_and_conn(meta, conn_chart, flags, tmp, "explicit")
     expect("explicit: exporters", exporters(values), {
-        "kagent.otel.tracing": own["kagent.otel.tracing.exporter.otlp.endpoint"],
-        "kagent.otel.logging": CUSTOMER_EP,
+        "kagent": CUSTOMER_EP,
         "muster": own["muster.muster.observability.otel.endpoint"],
         "klaus-gateway": own["klausGateway.observability.otlpEndpoint"],
         "substrate": own["substrate.otel.endpoint"],
@@ -371,6 +365,7 @@ def case_explicit(meta: str, conn_chart: str, tmp: str) -> None:
            [("own-agent-manager", "4317")])
     expect("explicit: model-manager OTLP rules", otlp_rules(doc(conn, "CiliumNetworkPolicy", COMPONENT_POLICIES["model-manager"])),
            [("customer-otel", "14317")])
+    expect("explicit: kagent traces endpoint", get(values["kagent"], ["otel", "traces", "endpoint"]), own["kagent.otel.traces.endpoint"])
     expect("explicit: substrate tenant label", get(values["substrate"], ["podLabels", "observability.giantswarm.io/tenant"]), "own")
     expect("explicit: muster headers", get(values["muster"], ["muster", "observability", "otel", "headers"]), "X-Scope-OrgID=own")
     expect("explicit: kagent controller OTLP rules", sorted(otlp_rules(doc(conn, "CiliumNetworkPolicy", KAGENT_POLICIES[0]))),
@@ -386,14 +381,14 @@ def case_empty_endpoint(meta: str, conn_chart: str, tmp: str) -> None:
     values, conn, k8s = meta_and_conn(meta, conn_chart, ["--set", f"{OTLP}.endpoint="], tmp, "empty")
     got = exporters(values)
     expect("empty: exporters", {k: v for k, v in got.items() if k != "data plane"},
-           {"kagent.otel.tracing": '""', "kagent.otel.logging": '""', "muster": '""', "klaus-gateway": '""', "substrate": '""',
+           {"kagent": '""', "muster": '""', "klaus-gateway": '""', "substrate": '""',
             **{c: '""' for c in COMPONENTS}})
     expect("empty: mcp-kubernetes exporter", mcp_kubernetes(values)["tracingExporter"], "none")
     check_components(conn, k8s, None, "empty")
     expect("empty: data-plane endpoint entry", got["data plane"], None)
     kagent = values["kagent"]
-    expect("empty: kagent tracing enabled", get(kagent, ["otel", "tracing", "enabled"]), "false")
-    expect("empty: kagent logging enabled", get(kagent, ["otel", "logging", "enabled"]), "false")
+    expect("empty: kagent traces enabled", get(kagent, ["otel", "traces", "enabled"]), "false")
+    expect("empty: kagent logs enabled", get(kagent, ["otel", "logs", "enabled"]), "false")
     expect("empty: kagent controller header", env(kagent, ["controller", "env"], "OTEL_EXPORTER_OTLP_HEADERS"), None)
     for signal in ("traces", "metrics", "logs"):
         expect(f"empty: substrate {signal} enabled (else localhost:4317)", get(values["substrate"], ["otel", signal, "enabled"]), "false")
@@ -435,14 +430,13 @@ def case_header_conflict(meta: str) -> None:
 def case_http(meta: str, conn_chart: str, tmp: str) -> None:
     http = ["--set", f"{OTLP}.protocol=http/protobuf", "--set", f"{OTLP}.endpoint=http://otel-collector.customer-otel.svc"]
     r = helm(meta, VM + ON + http)
-    for key in ("klausGateway.observability.otlpEndpoint", "substrate.otel.endpoint", "kagent.otel.logging.exporter.otlp.endpoint"):
+    for key in ("klausGateway.observability.otlpEndpoint", "substrate.otel.endpoint"):
         if r.returncode == 0 or key not in r.stderr:
             fail(f"http/protobuf with {key} at auto did not fail the render naming it\n{r.stderr}")
     grpc = "http://otel-collector.customer-otel.svc:4317"
-    flags = http + ["--set", f"klausGateway.observability.otlpEndpoint={grpc}", "--set", f"substrate.otel.endpoint={grpc}",
-                    "--set", f"kagent.otel.logging.exporter.otlp.endpoint={grpc}"]
+    flags = http + ["--set", f"klausGateway.observability.otlpEndpoint={grpc}", "--set", f"substrate.otel.endpoint={grpc}"]
     values, conn, k8s = meta_and_conn(meta, conn_chart, flags, tmp, "http")
-    expect("http: kagent tracing protocol", get(values["kagent"], ["otel", "tracing", "exporter", "otlp", "protocol"]), "http/protobuf")
+    expect("http: kagent protocol", get(values["kagent"], ["otel", "exporter", "otlp", "protocol"]), "http/protobuf")
     expect("http: muster protocol", get(values["muster"], ["muster", "observability", "otel", "protocol"]), "http/protobuf")
     expect("http: data-plane protocol",
            env(values["agent-platform-connectivity"], ["gateway", "parameters", "dataPlaneEnv"], "OTEL_EXPORTER_OTLP_PROTOCOL"), "http/protobuf")
@@ -455,7 +449,7 @@ def case_http(meta: str, conn_chart: str, tmp: str) -> None:
     expect("http: mcp-kubernetes protocol", mcp_kubernetes(values)["otlpProtocol"], "http/protobuf")
     check_components(conn, k8s, ("customer-otel", "4318"), "http")
     expect("http: kagent controller OTLP rules", sorted(otlp_rules(doc(conn, "CiliumNetworkPolicy", KAGENT_POLICIES[0]))),
-           [("customer-otel", "4317"), ("customer-otel", "4318")])
+           [("customer-otel", "4318")])
     print("ok: http/protobuf: refused for the gRPC-only exporters at auto; with their own endpoints the rest speak http/protobuf on 4318")
 
 

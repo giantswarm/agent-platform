@@ -754,13 +754,13 @@ Every exporter of the platform sends to ONE collector, `global.observability.tra
 
 | Exporter | Endpoint key (`auto` → `endpoint`) | Tenant |
 |---|---|---|
-| kagent controller and actors (traces, logs) | `kagent.otel.{tracing,logging}.exporter.otlp.endpoint`, `.tracing.exporter.otlp.protocol` | `X-Scope-OrgID`: `OTEL_EXPORTER_OTLP_HEADERS` in `kagent.controller.env` and `kagent.harness.env` |
+| kagent controller and actors (traces, logs) | `kagent.otel.exporter.otlp.{endpoint,protocol}` | `X-Scope-OrgID`: `OTEL_EXPORTER_OTLP_HEADERS` in `kagent.controller.env` and `kagent.harness.env` |
 | muster (traces, logs) | `muster.muster.observability.otel.{endpoint,protocol}` | `X-Scope-OrgID`: `muster.muster.observability.otel.headers` |
 | klaus-gateway (traces) | `klausGateway.observability.otlpEndpoint` | `X-Scope-OrgID`: `klausGateway.observability.otlpHeaders` |
 | Substrate control plane (traces, metrics, logs) | `substrate.otel.endpoint` | pod label: `substrate.podLabels` |
 | agentgateway data plane (traces) | `gateway.parameters.dataPlaneEnv` (`OTEL_EXPORTER_OTLP_ENDPOINT`, `_PROTOCOL`) | pod label: `gateway.parameters.podLabels` |
 
-`headers` adds headers for the exporters that send headers (and the data plane's env); an `X-Scope-OrgID` there that differs from `tenant` fails the render. An empty `endpoint` exports nothing (kagent's `auto` exporters and Substrate's signals resolve off), an empty `tenant` sends neither header nor label. kagent's `exporter.otlp.insecure` (`auto`) is `false` for an `https://` endpoint and `true` otherwise. klaus-gateway, Substrate and kagent's log exporter speak gRPC only: `protocol: http/protobuf` fails the render while one of them would take the endpoint, naming the key to set instead. `make verify-otlp-global` asserts the derivation and the egress rules.
+`headers` adds headers for the exporters that send headers (and the data plane's env); an `X-Scope-OrgID` there that differs from `tenant` fails the render. An empty `endpoint` exports nothing (kagent's `auto` exporters and Substrate's signals resolve off), an empty `tenant` sends neither header nor label. kagent takes the endpoint in `kagent.otel.exporter.otlp` (a signal's own `kagent.otel.traces.endpoint` / `logs.endpoint` wins), its scheme deciding TLS. klaus-gateway and Substrate speak gRPC only: `protocol: http/protobuf` fails the render while one of them would take the endpoint, naming the key to set instead. `make verify-otlp-global` asserts the derivation and the egress rules.
 
 Moving the platform to a customer's collector is one value:
 
