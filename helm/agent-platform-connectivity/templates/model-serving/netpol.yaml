@@ -7,6 +7,9 @@
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
 {{- $port := int $shape.port }}
+{{- $otlpEndpoint := include "agent-platform.modelServing.otlpEndpoint" . }}
+{{- $otlp := dict }}
+{{- if $otlpEndpoint }}{{- $otlp = include "agent-platform.otlpTarget" (dict "endpoint" $otlpEndpoint "protocol" "grpc") | fromJson }}{{- end }}
 {{- /* Network policies of the serving namespace, in the flavor networkPolicy
        selects (auto: cilium where cilium.io/v2 is served). The model pods are
        the LLMInferenceService workload pods the llm-d controller runs
@@ -67,6 +70,25 @@ spec:
   egress:
     {{- include "agent-platform.dnsEgressWithProxy" $ | nindent 4 }}
     {{- include "agent-platform.modelServing.huggingFaceEgress.cilium" $ | trim | nindent 4 }}
+{{- if $otlp }}
+---
+# {{ $shape.kind }} pods: their traces, from vLLM and the endpoint picker of a
+# service whose spec carries `tracing` (the kserve-config-llm-tracing preset
+# names the endpoint). DNS is the pods' own policy's.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-otlp-egress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" $ | nindent 4 }}
+spec:
+  endpointSelector:
+    matchExpressions:
+      {{- toYaml $shape.matchExpressions | nindent 6 }}
+  egress:
+    {{- include "agent-platform.otlpEgressRule" (dict "target" $otlp "who" "the model pods' traces go to") | nindent 4 }}
+{{- end }}
 ---
 # model-manager's pre-warm download Jobs (kserve backend): DNS and the model
 # download endpoints; they serve nothing and mount no ServiceAccount token.
@@ -177,6 +199,36 @@ spec:
   egress:
     {{- include "agent-platform.dnsEgress.kubernetes" $ | nindent 4 }}
     {{- include "agent-platform.modelServing.huggingFaceEgress.kubernetes" $ | trim | nindent 4 }}
+{{- if $otlp }}
+---
+# {{ $shape.kind }} pods: their traces (the kserve-config-llm-tracing preset
+# names the endpoint). DNS is the pods' own egress policy's.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-otlp-egress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      {{- toYaml $shape.matchExpressions | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- if $otlp.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $otlp.namespace }}
+        {{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        {{- end }}
+      ports:
+        - port: {{ $otlp.port | int }}
+          protocol: TCP
+{{- end }}
 ---
 # model-manager's pre-warm download Jobs (kserve backend): DNS and the model
 # download endpoints.
