@@ -3659,12 +3659,13 @@ SUBSTRATE_OTLP_EXPORTERS := substrate-ate-api-server substrate-ate-controller su
 SUBSTRATE_OTLP_VM := $(VM) --set components.substrate.enabled=true --set substrate.otel.endpoint=$(MUSTER_OTLP_EP)
 
 .PHONY: verify-substrate-otlp
-verify-substrate-otlp: ## Assert Substrate's OTLP export reaches a tenant (giantswarm/giantswarm#36711): the meta chart forwards substrate.otel.endpoint to the connectivity release and substrate.podLabels (the observability.giantswarm.io/tenant label otlp-gateway routes a headerless export by) to the substrate release; the connectivity chart's policies of the four exporters (ate-api-server, ate-controller, atelet, atenet-router) each open the endpoint's namespace on its port, no cluster-wide 4317 rule remains, a signal's own endpoint adds its destination and a disabled signal's does not, an endpoint that is not an in-cluster Service is the cluster entity on its port, and no endpoint opens nothing.
+verify-substrate-otlp: ## Assert Substrate's OTLP export reaches a tenant (giantswarm/giantswarm#36711): the meta chart forwards substrate.otel.endpoint to the connectivity release, substrate.otel.metrics.enabled false (metrics are scraped, not pushed) and substrate.podLabels (the observability.giantswarm.io/tenant label otlp-gateway routes a headerless export by) to the substrate release; the connectivity chart's policies of the four exporters (ate-api-server, ate-controller, atelet, atenet-router) each open the endpoint's namespace on its port, no cluster-wide 4317 rule remains, a signal's own endpoint adds its destination and a disabled signal's does not, an endpoint that is not an in-cluster Service is the cluster entity on its port, and no endpoint opens nothing.
 	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
 	@helm template t $(CHART_DIR) $(VM) $(SUBSTRATE_ON) >/tmp/vso-meta.out 2>&1 || { cat /tmp/vso-meta.out; exit 1; }
 	@$(PICK) /tmp/vso-meta.out HelmRelease substrate | grep -A1 '^    podLabels:$$' | grep -q '^      observability.giantswarm.io/tenant: giantswarm$$' || { echo "FAIL: the substrate release does not receive the tenant pod label"; exit 1; }
 	@$(PICK) /tmp/vso-meta.out HelmRelease agent-platform-connectivity | grep -A1 '^      otel:$$' | grep -q '^        endpoint: $(MUSTER_OTLP_EP)$$' || { echo "FAIL: the connectivity release does not receive substrate.otel.endpoint"; exit 1; }
-	@echo "ok: meta chart forwards the endpoint and the tenant label"
+	@$(PICK) /tmp/vso-meta.out HelmRelease substrate | grep -A3 '^    otel:$$' | grep -A1 '^      metrics:$$' | grep -q '^        enabled: false$$' || { echo "FAIL: the substrate release pushes its metrics over OTLP as well; the PodMonitors scrape them, so every series would reach Mimir twice"; exit 1; }
+	@echo "ok: meta chart forwards the endpoint and the tenant label, metrics stay on the scrape path"
 	@helm template t $(CONNECTIVITY_DIR) $(SUBSTRATE_OTLP_VM) >/tmp/vso.out 2>&1 || { cat /tmp/vso.out; exit 1; }
 	@for p in $(SUBSTRATE_OTLP_EXPORTERS); do \
 		$(PICK) /tmp/vso.out CiliumNetworkPolicy $$p >/tmp/vso-pol.out || { echo "FAIL: no CiliumNetworkPolicy $$p"; exit 1; }; \
