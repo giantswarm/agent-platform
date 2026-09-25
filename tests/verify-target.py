@@ -861,6 +861,11 @@ def check_slices(meta: str) -> None:
     for kind_name, doc in documents(serving).items():
         if kind_name[1] == "agent-platform-connectivity":
             continue
+        # A hook object is no installed object: Helm creates it for its events and removes it again, so the hook
+        # identity's event list growing with the second slice's hooks (the serving teardown's pre-delete joined by the
+        # kagent storage-version pair's) changes nothing an in-place upgrade keeps.
+        if "\n    helm.sh/hook: " in doc:
+            continue
         if documents(both).get(kind_name) != doc:
             sys.exit(f"FAIL: {kind_name} of the serving slice changed when the runtime slice was switched on (not an in-place upgrade)")
     ok(f"serving ({len(s)}) + runtime ({len(r)}) = one release of {len(b)} HelmReleases; the first slice's documents unchanged when the second is switched on")

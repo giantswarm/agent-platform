@@ -1235,6 +1235,12 @@ verify-serving-slice: ## Assert the serving slice (giantswarm/agent-platform#326
 	@python3 tests/verify-serving-slice.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "serving slice verified."
 
+.PHONY: verify-serving-teardown
+verify-serving-teardown: ## Assert the serving slice's ordered teardown (giantswarm/agent-platform#527): the <release>-serving-teardown hook Job renders at pre-delete (weight -2, the helm image, as <release>-hooks with that identity and its apiserver egress policy rendered for it, the engine off too; before the engine's teardown waves with it on) while kserve-llmisvc-resources and kserve-runtime-configs are on, and not with either off offline (the pre-upgrade case needs the live HelmRelease a lookup finds) or with gitops.target.kubeConfig. Its script, against a stub kubectl: the controller's release deleted and waited for, its Deployment and the llmisvc webhook configuration waited for, then the configs of kserve-runtime-configs (no other release's) deleted and freed of serving.kserve.io/llmisvcconfig-finalizer through the CRD's storage version (other finalizers kept), then the configs' release; a re-run with everything gone touches no config. The live half (the slice switched off in place and uninstalled with no release UninstallFailed and no config terminating) runs in agentlab. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-serving-teardown.py $(CHART_DIR)
+	@echo "serving teardown verified."
+
 .PHONY: verify-preset-weights
 verify-preset-weights: ## Assert every shipped serving preset's requirements.weightsGiB matches the Hub (giantswarm/agent-platform#535): each preset's spec.model.id is sized the way model-manager sizes a fit — model.safetensors.index.json's metadata.total_size when it agrees with the shards it maps (a stale index is overruled by their sum), else the sum of the *.safetensors files — and passes at >= the Hub's size and <= 15 % above it; a preset the Hub cannot size fails. The two fixtures (tests/fixtures/serving-preset-weights-*.yaml) are the negative controls and must verify as understated and overstated. Network: the Hub API.
 	@echo "====> $@ ($(CONNECTIVITY_DIR)/files/model-serving/presets)"
