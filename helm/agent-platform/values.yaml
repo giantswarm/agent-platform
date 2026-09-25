@@ -1921,15 +1921,18 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     # and person runs through it. Karpenter's consolidation works around the
     # node instead of evicting the pod mid-session; set "false" to opt out.
     karpenter.sh/do-not-disrupt: "true"
-  # The muster chart's PodDisruptionBudget: with one replica, minAvailable: 1
-  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
-  # node drain waits for its drain timeout — 30 min terminationGracePeriod on
-  # the fleet's Karpenter NodePools, the MachineDeployment's nodeDrainTimeout
-  # elsewhere) — the interim guard until the component runs two replicas.
-  # `enabled: false` removes the budget.
+  # The muster chart's PodDisruptionBudget: maxUnavailable: 1 lets a node drain (a cluster upgrade rolling its
+  # machines) evict the single replica and go on, where minAvailable: 1 would
+  # refuse every eviction and hold the drain until its timeout. Karpenter's
+  # consolidation is kept away by the pod's do-not-disrupt annotation, not by
+  # the budget. The empty minAvailable clears the
+  # chart's default of 1 (a null is consumed by Helm before the value reaches
+  # the chart). Two replicas with minAvailable: 1 is the HA shape once muster
+  # runs them. `enabled: false` removes the budget.
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
+    minAvailable: ""
+    maxUnavailable: 1
   # Disabled: the umbrella owns muster's public route now (see ingress.*). Gates
   # only muster's HTTPRoute + its BackendTrafficPolicy; Service/Deployment untouched.
   gatewayAPI:
@@ -2085,18 +2088,20 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
   # chart in the release namespace (neither the wrapper nor the upstream valkey
   # subchart has a knob of its own; giantswarm/agent-platform#439, the #431
   # pattern). muster's OAuth token store lives here: while the pod is gone
-  # every token refresh blocks inside muster. With one replica, minAvailable: 1
-  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
-  # node drain waits for its drain timeout); AlwaysAllow keeps a pod that is
-  # not Ready evictable. Exactly one of minAvailable / maxUnavailable (int or
-  # percentage); the render refuses both, neither, and a policy outside the
-  # API's enum. `enabled: false` removes the budget. Inert while
+  # every token refresh blocks inside muster. maxUnavailable: 1 lets a node drain (a cluster upgrade rolling its
+  # machines) evict the single replica and go on, where minAvailable: 1 would
+  # refuse every eviction and hold the drain until its timeout. Karpenter's
+  # consolidation is kept away by the pod's do-not-disrupt annotation, not by
+  # the budget. AlwaysAllow keeps a pod
+  # that is not Ready evictable. Exactly one of minAvailable / maxUnavailable
+  # (int or percentage); the render refuses both, neither, and a policy outside
+  # the API's enum. `enabled: false` removes the budget. Inert while
   # components.valkey.enabled is false. Never forwarded to the valkey release
   # (components.valkey.omitKeys).
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
-    maxUnavailable: null
+    minAvailable: null
+    maxUnavailable: 1
     unhealthyPodEvictionPolicy: AlwaysAllow
   valkey:
     fullnameOverride: muster-valkey
@@ -2365,21 +2370,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # holds every streaming turn (A2A SendStreamingMessage, the portal's SSE)
     # and the actor sessions behind them; an eviction mid-turn leaves the task
     # `working` with no end of stream reaching the person. The annotation keeps
-    # Karpenter's consolidation away from the node (set "false" to opt out);
-    # the chart's budget refuses voluntary evictions of the single replica
-    # (Karpenter: DisruptionBlocked; a node drain waits for its drain timeout)
-    # and AlwaysAllow keeps a pod that is not Ready evictable, so a
-    # crash-looping controller never wedges a drain. The chart defaults to
-    # maxUnavailable: 1 and refuses both fields; a null set here is consumed by
-    # Helm before the value reaches the chart (the default would come back
-    # next to minAvailable), the empty string travels and the chart reads it
-    # as unset. `pdb.enabled: false` removes the budget.
+    # Karpenter's consolidation away from the node (set "false" to opt out).
+    # The chart's budget keeps its default, maxUnavailable: 1, so a node drain
+    # (a cluster upgrade rolling its machines) evicts the single replica and
+    # goes on; minAvailable: 1 would hold the drain until its timeout. The
+    # chart refuses both fields: a minAvailable set here needs
+    # `maxUnavailable: ""` next to it (a null is consumed by Helm before the
+    # value reaches the chart). AlwaysAllow keeps a pod that is not Ready
+    # evictable. `pdb.enabled: false` removes the budget.
     podAnnotations:
       karpenter.sh/do-not-disrupt: "true"
     pdb:
       enabled: true
-      minAvailable: 1
-      maxUnavailable: ""
       unhealthyPodEvictionPolicy: AlwaysAllow
     # The kagent chart's defaults with the memory limit raised from 512Mi
     # (giantswarm/agent-platform#455 follow-up): on gazelle the controller's
@@ -3482,17 +3484,20 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # Voluntary disruption (giantswarm/agent-platform#431): the gateway pod
   # carries the Slack turns in flight and the OBO link store. The annotation
   # keeps Karpenter's consolidation away from its node (set "false" to opt
-  # out); the chart's budget refuses voluntary evictions of the single replica
-  # (Karpenter: DisruptionBlocked; a node drain waits for its drain timeout),
-  # AlwaysAllow keeps a pod that is not Ready evictable. Both knobs
-  # need klaus-gateway chart 1.1.0 or later (giantswarm/klaus-gateway#241);
-  # the 1.x range above resolves it. `podDisruptionBudget.enabled: false`
-  # removes the budget.
+  # out). The chart's budget is maxUnavailable: 1, so a node drain (a cluster
+  # upgrade rolling its machines) evicts the single replica and goes on;
+  # minAvailable: 1 would hold the drain until its timeout. The empty
+  # minAvailable clears the chart's default of 1 (a null is consumed by Helm
+  # before the value reaches the chart). AlwaysAllow keeps a pod that is not
+  # Ready evictable. Both knobs need klaus-gateway chart 1.1.0 or later
+  # (giantswarm/klaus-gateway#241); the 1.x range above resolves it.
+  # `podDisruptionBudget.enabled: false` removes the budget.
   podAnnotations:
     karpenter.sh/do-not-disrupt: "true"
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
+    minAvailable: ""
+    maxUnavailable: 1
     unhealthyPodEvictionPolicy: AlwaysAllow
 
   # Routing store: the binding of every thread to its agent instance and the
@@ -4246,17 +4251,18 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
           caSecretName: ""
   # PodDisruptionBudget on the agent-manager pods, rendered by the connectivity
   # chart in the release namespace (the component chart has no knob of its
-  # own; giantswarm/agent-platform#431). With one replica, minAvailable: 1
-  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
-  # node drain waits for its drain timeout); AlwaysAllow keeps a pod that is
-  # not Ready evictable. Exactly one of minAvailable / maxUnavailable (int or
-  # percentage); the render refuses both, neither, and a policy outside the
-  # API's enum. `enabled: false` removes the budget. Inert while
-  # components.agent-manager.enabled is false.
+  # own; giantswarm/agent-platform#431). maxUnavailable: 1 lets a node drain (a
+  # cluster upgrade rolling its machines) evict the single replica and go on,
+  # where minAvailable: 1 would refuse every eviction and hold the drain until
+  # its timeout; its calls are short MCP requests, so a restart costs a retry.
+  # AlwaysAllow keeps a pod that is not Ready evictable. Exactly one of
+  # minAvailable / maxUnavailable (int or percentage); the render refuses both,
+  # neither, and a policy outside the API's enum. `enabled: false` removes the
+  # budget. Inert while components.agent-manager.enabled is false.
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
-    maxUnavailable: null
+    minAvailable: null
+    maxUnavailable: 1
     unhealthyPodEvictionPolicy: AlwaysAllow
   flux:
     # Fail the render when the Flux APIs agent-manager writes

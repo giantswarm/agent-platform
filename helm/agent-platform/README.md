@@ -673,7 +673,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | muster.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | muster.podDisruptionBudget.enabled | bool | `true` |  |
-| muster.podDisruptionBudget.minAvailable | int | `1` |  |
+| muster.podDisruptionBudget.minAvailable | string | `""` |  |
+| muster.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | muster.gatewayAPI.enabled | bool | `false` |  |
 | muster.muster.oauth.server.enabled | bool | `true` |  |
 | muster.muster.oauth.server.baseUrl | string | `""` |  |
@@ -703,8 +704,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.podDisruptionBudget.enabled | bool | `true` |  |
-| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
-| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.minAvailable | string | `nil` |  |
+| valkey.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
@@ -753,8 +754,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
 | kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | kagent.controller.pdb.enabled | bool | `true` |  |
-| kagent.controller.pdb.minAvailable | int | `1` |  |
-| kagent.controller.pdb.maxUnavailable | string | `""` |  |
 | kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.controller.resources.requests.cpu | string | `"100m"` |  |
 | kagent.controller.resources.requests.memory | string | `"128Mi"` |  |
@@ -1036,7 +1035,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | klausGateway.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | klausGateway.podDisruptionBudget.enabled | bool | `true` |  |
-| klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
+| klausGateway.podDisruptionBudget.minAvailable | string | `""` |  |
+| klausGateway.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
 | klausGateway.observability.enabled | string | `"auto"` |  |
@@ -1201,8 +1201,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | agentManager.podDisruptionBudget.enabled | bool | `true` |  |
-| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
-| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.minAvailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
