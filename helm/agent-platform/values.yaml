@@ -4820,6 +4820,11 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # OTEL_METRICS_EXPORTER=none, which the Go components honor from
   # giantswarm/substrate#82 on and ignore before it. The worker pods' ateom
   # exports through the WorkerPool's environment and is not affected.
+  # The scrape is kept because OTLP metrics reach Mimir with only job and
+  # instance as labels (no namespace, pod, cluster_id or installation, and no
+  # `up`). Substrate is OTLP-first upstream: once giantswarm/giantswarm#37935
+  # gives OTLP metrics those labels, push instead — this key back on, the
+  # PodMonitors of the pushing components off.
   otel:
     endpoint: auto
     metrics:
