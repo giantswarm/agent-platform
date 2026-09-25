@@ -41,8 +41,8 @@ what (the substrate chart's arguments and Service definitions):
         substrate.otel names (agent-platform.substrate.otlpEgress); atenet-egress
         exports nothing.
   Prometheus scrapes the annotated pods (atelet 9090, ate-api-server 9090,
-  ate-controller 8080, atenet-router 9090, k8s-credential-provider 9090, the
-  agentgateway sidecars 15020) —
+  ate-controller 8080, atenet-router 9090, atenet-egress's ext-proc 9090,
+  k8s-credential-provider 9090, the agentgateway sidecars 15020) —
   admitted from the cluster entity, as the platform's other metrics ports are.
 
 The kubernetes flavour renders the ingress policies only — the chart's
@@ -428,6 +428,8 @@ spec:
         - cluster
       toPorts:
         - ports:
+            - port: "9090"
+              protocol: TCP
             - port: "15020"
               protocol: TCP
   egress:
@@ -823,6 +825,8 @@ spec:
         - port: 8443
           protocol: TCP
     - ports:
+        - port: 9090
+          protocol: TCP
         - port: 15020
           protocol: TCP
 ---

@@ -2424,12 +2424,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       maxAllowed:
         cpu: 1900m
         memory: 1280Mi
-    # The kagent line serves no Prometheus /metrics: the controller binds its
-    # metrics server to "0", and the upstream chart's controller.metrics knob
-    # renders a Service and the METRICS_* env to that dead port. Explicitly
-    # off; the connectivity chart's kagent.serviceMonitor below stays off for
-    # the same reason. Both go back on together when upstream serves metrics
-    # (an upstream item under giantswarm/giantswarm#37742).
+    # The controller's Prometheus /metrics (controller-runtime and the gRPC
+    # server's kagent_grpc_server_* families) on bindAddress. The connectivity
+    # chart's controller ingress policy admits that port from the cluster
+    # entity whenever enabled is true; the API port stays closed to everything
+    # but the gateway and the UI.
     metrics:
       enabled: true
       bindAddress: ":8080"
@@ -2444,7 +2443,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # once <fullname>-metrics-reader is bound to the collector's
       # ServiceAccount (controller.metrics.serviceMonitor
       # .prometheusServiceAccount), which is why this platform scrapes plain
-      # HTTP on a port closed to everything but its own namespaces.
+      # HTTP on a port that serves nothing but metrics.
       serviceMonitor:
         enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
         interval: 60s
