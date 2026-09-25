@@ -867,7 +867,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
 | kagent.harness.create | bool | `true` |  |
 | kagent.harness.image | string | `""` |  |
-| kagent.harness.compaction.tokenThreshold | int | `24000` |  |
+| kagent.harness.compaction.tokenThreshold | int | `600000` |  |
 | kagent.harness.compaction.eventRetentionSize | int | `4` |  |
 | kagent.harness.snapshotLocation | string | `""` |  |
 | kagent.harness.snapshotStore.prefix | string | `"kagent"` |  |
