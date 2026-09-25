@@ -726,3 +726,27 @@ one at all).
 {{- define "agent-platform.modelServing.modelNamePath" -}}
 {{- printf "request.object.metadata.labels.%q" (include "agent-platform.modelServing.podShape" . | fromJson).nameLabel -}}
 {{- end -}}
+
+{{/*
+The OTLP endpoint the model pods export traces to, which
+<release>-model-serving-otlp-egress opens: modelServing.networkPolicy.otlpEndpoint,
+where the meta chart writes the tracing preset's resolved endpoint; `auto`
+(this chart rendered on its own) follows global.observability.traces.otlp.endpoint.
+vLLM and the llm-d endpoint picker export over gRPC only, so `auto` with an
+http/protobuf global protocol fails the render. Empty: no export, no rule.
+Usage: include "agent-platform.modelServing.otlpEndpoint" .
+*/}}
+{{- define "agent-platform.modelServing.otlpEndpoint" -}}
+{{- $own := dig "networkPolicy" "otlpEndpoint" "auto" (.Values.modelServing | default dict) | default "" | toString | trim -}}
+{{- if eq $own "auto" -}}
+{{- $otlp := dig "observability" "traces" "otlp" dict (.Values.global | default dict) | default dict -}}
+{{- $endpoint := dig "endpoint" "" $otlp | default "" | toString | trim -}}
+{{- $protocol := dig "protocol" "" $otlp | default "grpc" | toString | lower -}}
+{{- if and $endpoint (ne $protocol "grpc") -}}
+{{- fail (printf "global.observability.traces.otlp.protocol is %s, but the model pods export OTLP over gRPC only (the LLMInferenceService tracing spec has no protocol): set modelServing.networkPolicy.otlpEndpoint to the collector's gRPC endpoint" $protocol) -}}
+{{- end -}}
+{{- $endpoint -}}
+{{- else -}}
+{{- $own -}}
+{{- end -}}
+{{- end -}}

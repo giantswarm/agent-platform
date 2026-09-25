@@ -3644,6 +3644,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # kagent agent pods and the release namespace: e.g. the namespace of a
     # Gateway of the operator's own or of Prometheus.
     additionalIngressNamespaces: []
+    # The OTLP endpoint the model pods export their traces to, which
+    # <release>-model-serving-otlp-egress opens (README "The model pods'
+    # traces"). `auto` follows global.observability.traces.otlp.endpoint; the
+    # meta chart writes the tracing preset's resolved endpoint here
+    # (kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint),
+    # so an explicit preset endpoint moves the egress with it. Empty: no rule.
+    otlpEndpoint: auto
     # Where the weights come from, TCP 443: the KServe storage-initializer
     # (hf:// presets), the runtime's own Hub lookups, model-manager's
     # pre-warm download Jobs and — on the kserve backend — model-manager
