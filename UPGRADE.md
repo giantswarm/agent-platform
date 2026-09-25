@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (`kagent.harness.compaction.tokenThreshold` is `600000`)
+
+giantswarm/giantswarm#37792: the platform Harness compacts an agent's history only once a prompt passes 600 000 tokens (was 24 000), keeping the last four events and summarising on the agent's own model. Below that every follow-up re-reads its history from the prompt cache.
+
+### Operator action
+
+- **None** for an installation on the defaults. The kagent release upgrades once and the Harness's `spec.kagent.compaction` changes; every admitted AgentTemplate recompiles once (about 20 s per template).
+- **An installation whose agents run on a model with a context window below 600 000 tokens** (a self-served model): set `kagent.harness.compaction.tokenThreshold` below that window, or those agents fill it before compacting.
+- **An installation that set `kagent.harness.compaction` itself**: nothing changes, the explicit value wins.
+- **Recognising it worked**: `kubectl -n kagent get harness kagent -o jsonpath='{.spec.kagent.compaction}'` prints `{"eventRetentionSize":4,"tokenThreshold":600000}`, and one agent turn answers.
+
 ## \<current\> → \<next\> (`global.observability.traces.otlp` is the collector of every exporter, not only the data plane's)
 
 giantswarm/giantswarm#36711: `global.observability.traces.otlp` used to reach the agentgateway data plane only, empty by default, and a set endpoint won over `gateway.parameters.dataPlaneEnv`. It now names the collector of every exporter of the platform: its default is `endpoint: http://otlp-gateway.kube-system.svc:4317`, `protocol: grpc` and the new `tenant: giantswarm`, and the meta chart writes it into every component key that is `auto`, the new default of kagent's, muster's, klaus-gateway's and Substrate's OTLP keys, of the tenant pod labels and of the data plane's two OTLP env entries. A component key set to anything else wins over it, the data plane's `dataPlaneEnv` entries included.

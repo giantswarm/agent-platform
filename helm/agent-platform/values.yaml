@@ -2876,13 +2876,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # (Harness.spec.kagent.compaction, where kagent-dev/kagent#2790 put it; the
     # AgentTemplate has no such field). Tail retention: once a prompt passes
     # tokenThreshold tokens, everything but the newest eventRetentionSize
-    # events is summarised before the next model call. 24 000 leaves room for
-    # a system prompt with skills and the muster meta-tools plus a few tool
-    # results; 4 keeps the last two tool exchanges raw. An empty block leaves
-    # every history uncompacted. Needs the kagent line at 1.1.0 or later; an
-    # earlier chart ignores the key.
+    # events is summarised before the next model call, on the agent's own
+    # model (no summariser model is set). 600 000 compacts only a session
+    # heading for the edge of the 1M context window: below it every follow-up
+    # re-reads its history from the prompt cache (0.1x), which is cheaper and
+    # faster than a summary and keeps what a summary drops; a compaction costs
+    # the turn tens of seconds before its first token and loses facts across
+    # turns. A model with a smaller window needs a lower value. 4 keeps the
+    # last two tool exchanges raw. An empty block leaves every history
+    # uncompacted. Needs the kagent line at 1.1.0 or later; an earlier chart
+    # ignores the key.
     compaction:
-      tokenThreshold: 24000
+      tokenThreshold: 600000
       eventRetentionSize: 4
     # Where Substrate keeps the actors' snapshots for this Harness — the
     # Harness's snapshotPolicy.location: an object-store URL, s3://<bucket>/<prefix>
