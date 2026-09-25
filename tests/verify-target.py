@@ -548,6 +548,40 @@ def hold_mm_workload_clusters(here: str, there: str) -> tuple:
     return h, MM_WORKLOAD_CLUSTERS.sub("", there)
 
 
+# giantswarm/agent-platform#697: the single-replica budgets are maxUnavailable: 1
+# (muster and klaus-gateway with minAvailable: "" to clear their charts'
+# default, the kagent controller on its chart's default) and a lone Postgres
+# instance renders enablePDB: false. The budgets' minAvailable/maxUnavailable
+# lines, in the meta renders' forwarded podDisruptionBudget/pdb blocks and in
+# the connectivity renders' PodDisruptionBudgets, and the enablePDB line with
+# its comment are left out on both sides; dropped once GOLDEN_REF carries #697.
+BUDGET_BLOCK = re.compile(r"^( *)(?:podDisruptionBudget|pdb):\n")
+BUDGET_KEY = re.compile(r"^ *(?:minAvailable|maxUnavailable): .*$")
+LONE_PRIMARY_PDB = re.compile(r"^( +)# One instance: the operator's budget.*\n(?:\1#.*\n)*\1enablePDB: false\n", re.M)
+
+
+def hold_disruption(here: str, there: str) -> tuple:
+    """The two renders with #697's budget bounds and enablePDB left out."""
+    def strip(render: str) -> str:
+        docs = []
+        for doc in render.split("\n---\n"):
+            pdb_doc = "\nkind: PodDisruptionBudget\n" in f"\n{doc}"
+            out, indent = [], None
+            for line in doc.split("\n"):
+                if indent is not None and line.strip() and len(line) - len(line.lstrip()) <= indent:
+                    indent = None
+                if m := BUDGET_BLOCK.match(line + "\n"):
+                    indent = len(m.group(1))
+                if (indent is not None or pdb_doc) and BUDGET_KEY.match(line):
+                    continue
+                out.append(line)
+            docs.append("\n".join(out))
+        return LONE_PRIMARY_PDB.sub("", "\n---\n".join(docs))
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #697 hold — the budgets' minAvailable/maxUnavailable and a lone Postgres primary's enablePDB are left out of the golden comparison")
+    return h, strip(there)
+
+
 def hold_llm_endpoint(here: str, there: str) -> tuple:
     """The two meta renders with #603's forwarded llmRouting and metric-label keys left out."""
     def strip(render: str) -> str:
@@ -812,6 +846,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             here, there = hold_opus_5_5_price(here, there)
             here, there = hold_dataplane_buffer(here, there)
             here, there = hold_retired_servicemonitor(here, there)
+            here, there = hold_disruption(here, there)
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)

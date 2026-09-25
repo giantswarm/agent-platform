@@ -614,16 +614,16 @@ def test_edited_muster_object_is_reverted_on_the_next_reconcile(kube: Kube, must
     revision = hr["status"]["history"][0]["version"]
     before = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
     assert before, f"no PodDisruptionBudget muster in {NAMESPACE} to edit"
-    assert before["spec"].get("minAvailable") == 1, f"the muster PDB does not budget one pod; pick another drift target: {before['spec']}"
+    assert before["spec"].get("maxUnavailable") == 1, f"the muster PDB does not allow one eviction; pick another drift target: {before['spec']}"
     started = time.monotonic()
-    kube.cmd(["-n", NAMESPACE, "patch", "poddisruptionbudgets", "muster", "--type=merge", "-p", '{"spec":{"minAvailable":2}}'])
-    assert kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)["spec"]["minAvailable"] == 2, "the hand edit did not take"
+    kube.cmd(["-n", NAMESPACE, "patch", "poddisruptionbudgets", "muster", "--type=merge", "-p", '{"spec":{"maxUnavailable":2}}'])
+    assert kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)["spec"]["maxUnavailable"] == 2, "the hand edit did not take"
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     kube.cmd(["-n", NAMESPACE, "annotate", "helmreleases.helm.toolkit.fluxcd.io", "muster", f"reconcile.fluxcd.io/requestedAt={stamp}", "--overwrite"])
 
     def reverted() -> Any:
         pdb = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
-        return pdb if pdb and pdb["spec"].get("minAvailable") == 1 else False
+        return pdb if pdb and pdb["spec"].get("maxUnavailable") == 1 else False
 
     try:
         wait_for("muster PDB reverted by the muster release's reconcile", reverted, 180)

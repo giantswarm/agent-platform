@@ -264,6 +264,7 @@ else:
         ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
+        drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -488,6 +489,16 @@ else:
         for key in [k for k in head if k[1] in ("t-model-serving-prepull-cleanup", "t-hooks")]:
             head.pop(key)
         print(f"note: the pre-pull DaemonSet is a hook object with a pre-delete cleanup Job on this side (#563) and not on {ref}: its document, the Job and the hook identity are left out of the comparison")
+    # The single-replica budgets are maxUnavailable: 1 and a lone Postgres
+    # instance renders enablePDB: false on this side (giantswarm/agent-platform#697);
+    # a golden from before renders minAvailable: 1 and the operator's budgets,
+    # so the budgets and the Postgres Cluster are left out of the comparison on
+    # both sides. Drop this once GOLDEN_REF carries #697.
+    if not drainable:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] in ("PodDisruptionBudget", "Cluster")]:
+                side.pop(key)
+        print(f"note: the single-replica budgets are drainable on this side (#697) and not on {ref}: the budgets and the Postgres Cluster are left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):

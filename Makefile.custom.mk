@@ -103,7 +103,10 @@ DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview agent-p
 define drop_dashboards
 	@python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' $(1) "$(DASHBOARDS_GOLDEN_DROP)"
 endef
-WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false
+# muster-valkey's budget is maxUnavailable: 1 here (giantswarm/agent-platform#697)
+# and minAvailable: 1 on a golden from before; both sides render it the same.
+# Drop the valkey pair once GOLDEN_REF carries #697.
+WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
 # PolicyException is gone with them, the kagent controller's ingress policy
