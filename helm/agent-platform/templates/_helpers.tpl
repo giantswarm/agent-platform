@@ -146,7 +146,11 @@ overwrite would hide a values file that still spells the old key.
     muster's OAuth server is off (muster.muster.oauth.server.enabled, the
     platform's one login): a platform without a login has no issuer for a
     resource server to trust — the lab shape of examples/kind-lab-dex.yaml —
-    the way the muster discovery label derives from the same toggle.
+    the way the muster discovery label derives from the same toggle. The
+    managers' login itself (oauth.dex.issuerURL, clientID, existingSecret,
+    trustedAudiences, baseURL) is not derived here but on the shaped values
+    (agent-platform.identity.apply), so the connectivity release guards and
+    wires the same block.
   substrate: atelet.serviceAccount.annotations and
     ateApiServer.serviceAccount.annotations gain eks.amazonaws.com/role-arn,
     the IRSA role the store block renders, while it does (a differing explicit
@@ -1507,6 +1511,68 @@ Usage: include "agent-platform.scheduling.apply" (dict "values" $shaped)
 {{- end -}}
 {{- with $selector }}{{ $_ := set $node "nodeSelector" (merge (deepCopy (index $node "nodeSelector" | default dict)) .) }}{{ end -}}
 {{- with $tolerations }}{{ $_ := set $node "tolerations" (concat (index $node "tolerations" | default list) .) }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The platform's one login in the managers' OAuth blocks
+(giantswarm/agent-platform#484). model-manager, agent-manager, vm-manager and
+cluster-manager are OAuth resource servers of the login muster's OAuth server
+names. Each chart resolves its issuer, client, Secret and trusted audiences
+from its own oauth block, else global.identity; what both leave unset is filled
+here from muster.muster.oauth.server — oauth.dex.issuerURL from dex.issuerUrl,
+oauth.dex.clientID from dex.clientId (and oauth.trustedAudiences [that client],
+the charts' own default from global.identity.clientId), oauth.existingSecret
+from existingSecret (key dex-client-secret, the key every manager chart and
+muster read) — so an installation that names muster's login names the
+managers' too, a customer's own Dex client included, which a fleet-wide
+global.identity.clientId cannot carry. Defaults, not the single-source rule: a
+manager's own value wins, and so does global.identity (the connectivity chart
+fails the render when either disagrees with muster's). Only for the dex
+provider, while muster's OAuth server is on (with it off, model-manager's oauth
+is off: componentDerivedValues).
+oauth.baseURL of the two routed managers is https://<host><route.pathPrefix>
+under an agentgateway-* ingress.mode, host being the hostname the connectivity
+chart gives the route (modelManager.route.hostname / agentManager.route.hostname,
+else agentgateway.<global.domain>); without one it stays unset and the
+connectivity chart's guard names the key.
+Runs on the $shaped copy in components.yaml after scheduling.apply, so each
+manager release and the connectivity release — its guards, the managers'
+identity-provider egress — read the same filled block. Emits nothing.
+Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
+*/}}
+{{- define "agent-platform.identity.apply" -}}
+{{- $v := .values -}}
+{{- $global := index $v "global" | default dict -}}
+{{- $identity := dig "identity" dict $global -}}
+{{- $domain := dig "domain" "" $global -}}
+{{- $mode := dig "ingress" "mode" "" $v -}}
+{{- $server := dig "muster" "oauth" "server" dict (index $v "muster" | default dict) -}}
+{{- $login := dict -}}
+{{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
+{{- $login = dict "issuerURL" (dig "dex" "issuerUrl" "" $server) "clientID" (dig "dex" "clientId" "" $server) "existingSecret" (dig "existingSecret" "" $server) -}}
+{{- end -}}
+{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" -}}
+{{- $block := index $v $name -}}
+{{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
+{{- $oauth := index $block "oauth" -}}
+{{- if and $login (eq (toString (dig "provider" "dex" $oauth)) "dex") -}}
+{{- if not (kindIs "map" (index $oauth "dex")) }}{{ $_ := set $oauth "dex" dict }}{{ end -}}
+{{- $dex := index $oauth "dex" -}}
+{{- if and $login.issuerURL (not $dex.issuerURL) (not $identity.issuerUrl) }}{{ $_ := set $dex "issuerURL" $login.issuerURL }}{{ end -}}
+{{- if and $login.clientID (not $dex.clientID) (not $identity.clientId) -}}
+{{- $_ := set $dex "clientID" $login.clientID -}}
+{{- if not $oauth.trustedAudiences }}{{ $_ := set $oauth "trustedAudiences" (list $login.clientID) }}{{ end -}}
+{{- end -}}
+{{- if and $login.existingSecret (not $oauth.existingSecret) (not $dex.clientSecret) (not $identity.existingSecret) }}{{ $_ := set $oauth "existingSecret" $login.existingSecret }}{{ end -}}
+{{- end -}}
+{{- if and $wiring (not $oauth.baseURL) (or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
+{{- $route := dig $wiring "route" dict $v -}}
+{{- $host := $route.hostname -}}
+{{- if and (not $host) $domain }}{{ $host = printf "agentgateway.%s" $domain }}{{ end -}}
+{{- if and $host $route.pathPrefix }}{{ $_ := set $oauth "baseURL" (printf "https://%s%s" $host $route.pathPrefix) }}{{ end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
