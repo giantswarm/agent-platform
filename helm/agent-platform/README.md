@@ -1146,6 +1146,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelManager.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.workloadClusters | object | `{}` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.registeredBackends | list | `[]` |  |

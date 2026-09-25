@@ -1494,6 +1494,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelManager.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.workloadClusters | object | `{}` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.registeredBackends | list | `[]` |  |
