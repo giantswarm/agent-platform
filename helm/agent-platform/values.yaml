@@ -4819,8 +4819,22 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # kagent turn follows the turn's own decision (kagent's ate-api client
   # propagates it), so the ratio applies only to Substrate's parentless
   # background work — reconciles, workflows, the atelet loops.
+  #
+  # Metrics are scraped (the substrate PodMonitors, tenant label on), not
+  # pushed: with both paths every ateapi, atelet, atenet-router and
+  # atecontroller series reached Mimir twice under two names. `false` renders
+  # OTEL_METRICS_EXPORTER=none, which the Go components honor from
+  # giantswarm/substrate#82 on and ignore before it. The worker pods' ateom
+  # exports through the WorkerPool's environment and is not affected.
+  # The scrape is kept because OTLP metrics reach Mimir with only job and
+  # instance as labels (no namespace, pod, cluster_id or installation, and no
+  # `up`). Substrate is OTLP-first upstream: once giantswarm/giantswarm#37935
+  # gives OTLP metrics those labels, push instead: this key back on, the
+  # PodMonitors of the pushing components off.
   otel:
     endpoint: auto
+    metrics:
+      enabled: false
   # The chart has no OTLP-headers key, so X-Scope-OrgID cannot be set the way
   # it is for kagent below: the collector takes the tenant of a headerless
   # export from this pod label instead, `auto` taking

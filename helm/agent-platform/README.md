@@ -1317,6 +1317,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.postgres.schema | string | `"public"` |  |
 | substrate.rustfs.enabled | bool | `false` |  |
 | substrate.otel.endpoint | string | `"auto"` |  |
+| substrate.otel.metrics.enabled | bool | `false` |  |
 | substrate.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | substrate.images.postgres | string | `"gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"` |  |
 | substrate.images.rustfs | string | `"gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358"` |  |

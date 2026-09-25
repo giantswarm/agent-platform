@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Substrate's metrics stay on the scrape path: `substrate.otel.metrics.enabled` is `false`** (giantswarm/giantswarm#36711). With the PodMonitors on and the OTLP endpoint set, every `ateapi`, `atelet`, `atenet-router` and `atecontroller` series reached Mimir twice, scraped (`ate_actor_crashes_total`, job `ate-system/ate-api-server`) and pushed (`ate_actor_crashes`, job `ateapi`), about 6,300 series on gazelle. The value renders `OTEL_METRICS_EXPORTER=none`, which the Go components honor from giantswarm/substrate#82 on and ignore before it; traces and logs keep exporting. The worker pods' `ateom` exports through the WorkerPool's environment and keeps pushing. `make verify-substrate-otlp` asserts the forwarded value.
+
 ### Fixed
 
 - **A node drain no longer waits on the single-replica components' budgets.** The PodDisruptionBudgets of muster, klaus-gateway, agent-manager, muster-valkey and the kagent controller were `minAvailable: 1` on one replica, which refuses every eviction: a cluster upgrade rolling its machines waited for each drain's timeout. They are `maxUnavailable: 1`, so a drain evicts the pod and goes on. Karpenter's consolidation stays away from those pods through their `karpenter.sh/do-not-disrupt` annotation (giantswarm/agent-platform#431), not through the budget. muster and klaus-gateway get `minAvailable: ""` next to it to clear their charts' default of 1, and the kagent controller keeps its chart's own default. A platform Postgres with `postgres.instances: 1` renders `enablePDB: false`, because the operator's budget on a lone primary has no replica to switch over to; two or more instances keep the operator's budgets and its switchover on drain.
