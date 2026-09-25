@@ -720,20 +720,6 @@ def hold_scrape_ports(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
-# giantswarm/giantswarm#36711: Substrate's metrics stay on the scrape path
-# (substrate.otel.metrics.enabled false). GOLDEN_REF forwards no such key.
-SUBSTRATE_OTLP_METRICS = re.compile(
-    r"^(\s+)otel:\n(\1  endpoint: [^\n]+\n)\1  metrics:\n\1    enabled: false\n", re.M)
-
-
-def hold_substrate_otlp_metrics(here: str, there: str) -> tuple:
-    """The meta renders without substrate.otel.metrics.enabled. Dropped once GOLDEN_REF carries it."""
-    h = SUBSTRATE_OTLP_METRICS.sub(r"\1otel:\n\2", here)
-    if h != here:
-        print("note: #36711 hold — substrate.otel.metrics.enabled is left out of the golden comparison")
-    return h, there
-
-
 DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
 DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
 
@@ -829,7 +815,6 @@ def check_golden(meta: str, connectivity: str) -> None:
             here, there = hold_dataplane_buffer(here, there)
             here, there = hold_retired_servicemonitor(here, there)
             if chart == meta:
-                here, there = hold_substrate_otlp_metrics(here, there)
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)
                 here, there = hold_hook_pods(here, there)

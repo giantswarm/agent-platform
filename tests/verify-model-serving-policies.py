@@ -83,7 +83,8 @@ agent-platform.modelServing.podShape); this check holds what that buys:
     the container's shape).
   * The network policies (both flavours), the kagent agents' egress and the
     PolicyException select each fixture by exactly its own shape's policy and
-    never the download Job's pod.
+    the traces' egress (<release>-model-serving-otlp-egress), and never the
+    download Job's pod.
   * Image verification (modelServing.imageVerification, #552, #575) is off by
     default and renders nothing without kyverno.io/v1. Enabled alone, the
     chart's defaults reach the rule: every image under the platform's
@@ -541,10 +542,10 @@ def check_selectors(cilium: list[dict], k8s: list[dict]) -> None:
     for shape in SHAPES:
         labels = fixture(shape)["metadata"]["labels"]
         hit_k8s = suffixes([d for d in serving_k8s if selects(d["spec"]["podSelector"], labels)], "-model-serving-")
-        if hit_k8s != [f"{shape}-egress", f"{shape}-ingress"]:
+        if hit_k8s != [f"{shape}-egress", f"{shape}-ingress", "otlp-egress"]:
             fail(f"{shape}: the kubernetes-flavour policies selecting it are {hit_k8s}")
         hit_cilium = suffixes([d for d in serving_cilium if selects(d["spec"]["endpointSelector"], labels)], "-model-serving-")
-        if hit_cilium != [shape]:
+        if hit_cilium != [shape, "otlp-egress"]:
             fail(f"{shape}: the cilium-flavour policies selecting it are {hit_cilium}")
         if not any(selects(p, {**labels, "io.kubernetes.pod.namespace": NS}) for p in peers):
             fail(f"{shape}: the kagent agents' egress selects no {shape} pod in {NS}")
@@ -559,7 +560,7 @@ def check_selectors(cilium: list[dict], k8s: list[dict]) -> None:
     for who, labels in (("model-manager's download-Job pod", DOWNLOAD_LABELS), ("the pre-pull DaemonSet's pod", prepull_labels(k8s))):
         if any(selects(s, labels) for s in exception_selectors) or any(selects(p, {**labels, "io.kubernetes.pod.namespace": NS}) for p in peers):
             fail(f"the PolicyException or the agents' egress selects {who}")
-    ok("each shape's pod is selected by exactly its own network policies (both flavours), the agents' egress and the PolicyException; "
+    ok("each shape's pod is selected by exactly its own network policies and the traces' egress (both flavours), the agents' egress and the PolicyException; "
        "the download Job's pod and the pre-pull pod by none of them")
 
 

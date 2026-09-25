@@ -1024,7 +1024,9 @@ components:  # @schema additionalProperties: true
     # LLMInferenceService CRDs only (the configs are CRs of theirs), not the
     # controller.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.5.x"
+    # 0.6.0 opens kserve.llmisvcConfigs.tracing (giantswarm/kserve#99), which
+    # the kserve-runtime-configs: block below and the derived endpoint set.
+    versionRange: "0.6.x"
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
@@ -4988,12 +4990,22 @@ kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties:
 # prefix; modelServing.prepull.images below names the same llm-d-cuda
 # reference — keep the two in step. servingruntime off: the chart's
 # ServingRuntimes are the classic InferenceService path, which the platform
-# does not serve.
+# does not serve. tracing: the kserve-config-llm-tracing preset, which the llm-d
+# controller merges into every LLMInferenceService whose spec carries
+# `tracing` (README "The model pods' traces"). `auto` follows
+# global.observability.traces.otlp (agent-platform.shape.otlp): the endpoint,
+# and the tenant as the pod label otlp-gateway routes a headerless export by
+# (dropped with an empty tenant). The sampler stays upstream's
+# (parentbased_traceidratio, 0.05).
 kserve-runtime-configs:  # @schema skipProperties: true; additionalProperties: true
   kserve:
     llmisvcConfigs:
       enabled: true
       imageRegistry: gsoci.azurecr.io/giantswarm/llm-d-fast/
+      tracing:
+        exporterEndpoint: auto
+        podLabels:
+          observability.giantswarm.io/tenant: auto
     servingruntime:
       enabled: false
 
@@ -5627,6 +5639,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # kagent agent pods and the release namespace: e.g. the namespace of a
     # Gateway of the operator's own or of Prometheus.
     additionalIngressNamespaces: []
+    # The OTLP endpoint the model pods export their traces to, which
+    # <release>-model-serving-otlp-egress opens (README "The model pods'
+    # traces"). `auto` follows global.observability.traces.otlp.endpoint; the
+    # meta chart writes the tracing preset's resolved endpoint here
+    # (kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint),
+    # so an explicit preset endpoint moves the egress with it. Empty: no rule.
+    otlpEndpoint: auto
     # Where the weights come from, TCP 443: the KServe storage-initializer
     # (hf:// presets), the runtime's own Hub lookups, model-manager's
     # pre-warm download Jobs and — on the kserve backend — model-manager

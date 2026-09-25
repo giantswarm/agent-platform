@@ -460,7 +460,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-llmisvc-resources.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
 | components.kserve-runtime-configs.chart | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.kserve-runtime-configs.versionRange | string | `"0.5.x"` |  |
+| components.kserve-runtime-configs.versionRange | string | `"0.6.x"` |  |
 | components.kserve-runtime-configs.valuesFrom | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.enabled | bool | `false` |  |
 | components.kserve-runtime-configs.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
@@ -1346,6 +1346,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.enabled | bool | `true` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint | string | `"auto"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.tracing.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | kserve-runtime-configs.kserve.servingruntime.enabled | bool | `false` |  |
 | gpu-operator.driver.enabled | bool | `false` |  |
 | gpu-operator.toolkit.enabled | bool | `false` |  |
@@ -1417,6 +1419,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.imageVerification.kyvernoEgress.hosts[3].matchName | string | `"rekor.sigstore.dev"` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
 | modelServing.networkPolicy.additionalIngressNamespaces | list | `[]` |  |
+| modelServing.networkPolicy.otlpEndpoint | string | `"auto"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |

@@ -1484,21 +1484,26 @@ klaus-gateway gates read the endpoints. Emits nothing.
               kagent.otel.{tracing,logging}.exporter.otlp.insecure: false for
               an https:// endpoint, true otherwise; with no endpoint, every
               Substrate signal that names no endpoint of its own is turned off
-              (substrate.otel.<signal>.enabled: false)
+              (substrate.otel.<signal>.enabled: false);
+              kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint
+              (the model pods' tracing preset; dropped when empty), then
+              modelServing.networkPolicy.otlpEndpoint from that preset's
+              resolved endpoint (the model pods' egress)
   protocol -> kagent.otel.tracing.exporter.otlp.protocol,
               muster.muster.observability.otel.protocol,
               gateway.parameters.dataPlaneEnv[OTEL_EXPORTER_OTLP_PROTOCOL];
               empty is grpc
   tenant   -> the X-Scope-OrgID header of the exporters that send headers,
               and the pod label observability.giantswarm.io/tenant of the two
-              that send none: substrate.podLabels, gateway.parameters.podLabels
+              that send none: substrate.podLabels, gateway.parameters.podLabels,
+              kserve-runtime-configs.kserve.llmisvcConfigs.tracing.podLabels
               (the label dropped when the tenant is empty)
   headers  -> with the tenant: muster.muster.observability.otel.headers and
               kagent.{controller,harness}.env[OTEL_EXPORTER_OTLP_HEADERS]
               ("k=v,k=v"; the entry dropped when empty),
               klausGateway.observability.otlpHeaders (a map)
-klaus-gateway, Substrate and kagent's log exporter (the actors' Go ADK) speak
-gRPC only: an http/protobuf protocol fails the render while one of them is on
+klaus-gateway, Substrate, kagent's log exporter (the actors' Go ADK) and the
+model pods' tracing preset (vLLM, the llm-d endpoint picker) speak gRPC only: an http/protobuf protocol fails the render while one of them is on
 and would take the endpoint, naming the key to set instead. .monitors is the
 resolved global.observability.metrics.serviceMonitor.enabled, which kagent's
 `auto` log exporter follows.
@@ -1538,6 +1543,9 @@ Usage: include "agent-platform.shape.otlp" (dict "root" $ "values" $shaped "moni
 {{- end -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "kagent" "otel" "logging" "exporter" "otlp" "endpoint"))) (has (toString (dig "otel" "logging" "enabled" "auto" (index $v "kagent" | default dict))) (ternary (list "true" "auto") (list "true") $monitors)) -}}
 {{- $grpcOnly = append $grpcOnly "kagent.otel.logging.exporter.otlp.endpoint (or kagent.otel.logging.enabled: false)" -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "kserve-runtime-configs")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "exporterEndpoint"))) -}}
+{{- $grpcOnly = append $grpcOnly "kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint" -}}
 {{- end -}}
 {{- with $grpcOnly -}}
 {{- fail (printf "global.observability.traces.otlp.protocol is http/protobuf, but these exporters speak OTLP over gRPC only and would take its endpoint: %s. Set each to the collector's gRPC endpoint" (join ", " .)) -}}
@@ -1579,9 +1587,15 @@ after the endpoint, so true would send plaintext to an https collector. */ -}}
 {{- include "agent-platform.shape.deriveEnv" (dict "owner" $params "key" "dataPlaneEnv" "name" "OTEL_EXPORTER_OTLP_ENDPOINT" "value" $endpoint) -}}
 {{- include "agent-platform.shape.deriveEnv" (dict "owner" $params "key" "dataPlaneEnv" "name" "OTEL_EXPORTER_OTLP_PROTOCOL" "value" $protocol) -}}
 {{- end -}}
-{{- range $path := list (list "substrate" "podLabels") (list "gateway" "parameters" "podLabels") -}}
+{{- range $path := list (list "substrate" "podLabels") (list "gateway" "parameters" "podLabels") (list "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "podLabels") -}}
 {{- include "agent-platform.shape.deriveOrDrop" (dict "values" $v "path" (append $path "observability.giantswarm.io/tenant") "value" $tenant) -}}
 {{- end -}}
+{{- /* The model pods: the tracing preset's endpoint, then its resolved value
+mirrored for the connectivity release's egress (the kserve-runtime-configs
+block does not reach that release). */ -}}
+{{- include "agent-platform.shape.deriveOrDrop" (dict "values" $v "path" (list "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "exporterEndpoint") "value" $endpoint) -}}
+{{- $presetEndpoint := dig "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "exporterEndpoint" "" $v | toString | trim -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "modelServing" "networkPolicy" "otlpEndpoint") "value" $presetEndpoint) -}}
 {{- end -}}
 
 {{/*
