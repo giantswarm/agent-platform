@@ -330,7 +330,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.1.0 <1.2.0"` |  |
+| components.kagent.versionRange | string | `">=1.2.0 <1.3.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -351,7 +351,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.1.0 <1.2.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.2.0 <1.3.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
@@ -809,13 +809,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.apiKey | string | `""` |  |
 | kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
 | kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
-| kagent.otel.tracing.enabled | string | `"auto"` |  |
-| kagent.otel.tracing.exporter.otlp.endpoint | string | `"auto"` |  |
-| kagent.otel.tracing.exporter.otlp.protocol | string | `"auto"` |  |
-| kagent.otel.tracing.exporter.otlp.insecure | string | `"auto"` |  |
-| kagent.otel.logging.enabled | string | `"auto"` |  |
-| kagent.otel.logging.exporter.otlp.endpoint | string | `"auto"` |  |
-| kagent.otel.logging.exporter.otlp.insecure | string | `"auto"` |  |
+| kagent.otel.exporter.otlp.endpoint | string | `"auto"` |  |
+| kagent.otel.exporter.otlp.protocol | string | `"auto"` |  |
+| kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
+| kagent.otel.traces.enabled | string | `"auto"` |  |
+| kagent.otel.logs.enabled | string | `"auto"` |  |
 | kagent.oauth2-proxy.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
@@ -910,12 +908,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
 | kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
 | kagent.harness.env[0].value | string | `"true"` |  |
-| kagent.harness.env[1].name | string | `"OTEL_LOGGING_ENABLED"` |  |
-| kagent.harness.env[1].value | string | `"true"` |  |
-| kagent.harness.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.harness.env[2].value | string | `"auto"` |  |
-| kagent.harness.env[3].name | string | `"KAGENT_TRACE_FLUSH_TIMEOUT_MS"` |  |
-| kagent.harness.env[3].value | string | `"500"` |  |
+| kagent.harness.env[1].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.harness.env[1].value | string | `"auto"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."kagent.dev/harness" | string | `""` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
