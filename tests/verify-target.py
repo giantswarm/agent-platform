@@ -139,8 +139,11 @@ GLOBAL_OTLP_THERE = re.compile(
 
 
 def hold_global_otlp(here: str, there: str) -> tuple:
-    """The two meta renders with the injected global.observability.traces.otlp default cut out."""
-    h, t = GLOBAL_OTLP_HERE.sub("", here), GLOBAL_OTLP_THERE.sub("", there)
+    """The two meta renders with the injected global.observability.traces.otlp default cut out,
+    either shape from either side: once GOLDEN_REF carries the default, both sides render it."""
+    def strip(render: str) -> str:
+        return GLOBAL_OTLP_THERE.sub("", GLOBAL_OTLP_HERE.sub("", render))
+    h, t = strip(here), strip(there)
     if h != here or t != there:
         print("note: #36711 hold — the injected global.observability.traces.otlp default is left out of the golden comparison")
     return h, t
