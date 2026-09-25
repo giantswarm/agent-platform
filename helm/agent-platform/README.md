@@ -809,8 +809,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.apiKey | string | `""` |  |
 | kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
 | kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
-| kagent.otel.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.exporter.otlp.protocol | string | `"grpc"` |  |
+| kagent.otel.exporter.otlp.endpoint | string | `"auto"` |  |
+| kagent.otel.exporter.otlp.protocol | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
 | kagent.otel.traces.enabled | string | `"auto"` |  |
 | kagent.otel.logs.enabled | string | `"auto"` |  |
