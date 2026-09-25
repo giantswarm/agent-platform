@@ -255,7 +255,7 @@ def case_customer(meta: str, conn_chart: str, tmp: str) -> None:
     expect("customer: substrate tenant label", get(sub, ["podLabels", "observability.giantswarm.io/tenant"]), "acme")
     expect("customer: data-plane tenant label", get(cv, ["gateway", "parameters", "podLabels", "observability.giantswarm.io/tenant"]), "acme")
     params = doc(conn, "AgentgatewayParameters", "t")
-    if not re.search(r"- name: OTEL_EXPORTER_OTLP_HEADERS\n\s+value: X-Team=platform\n", params):
+    if not re.search(r"- name: OTEL_EXPORTER_OTLP_HEADERS\n\s+value: X-Team=platform$", params, re.M):
         fail("customer: the data plane's env does not carry the extra header (and only it: the tenant is the pod label)")
     expect("customer: tracing policy url", re.search(r'url: "([^"]+)"', doc(conn, "AgentgatewayPolicy", TRACING_POLICY)).group(1), CUSTOMER_EP)
     check_egress(conn, k8s, everywhere(("customer-otel", "14317")), "customer")
