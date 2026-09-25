@@ -9,6 +9,17 @@
 {{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
 {{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $clusterName := .Values.postgres.clusterName }}
+{{- /* The controller's metrics port, opened only when the kagent chart renders
+     its metrics server (kagent.controller.metrics): the port of bindAddress,
+     which the chart also uses as the containerPort. */}}
+{{- $metrics := dig "controller" "metrics" dict (.Values.kagent | default dict) }}
+{{- $metricsPort := "" }}
+{{- if dig "enabled" false $metrics }}
+{{- $metricsPort = dig "bindAddress" ":8080" $metrics | splitList ":" | last }}
+{{- if not (regexMatch "^[0-9]+$" $metricsPort) }}
+{{- fail (printf "kagent.controller.metrics.bindAddress: expected [host]:port, got %q" (dig "bindAddress" "" $metrics)) }}
+{{- end }}
+{{- end }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
@@ -42,6 +53,8 @@ spec:
 # controller itself decodes the bearer without verifying it, so every other pod
 # is kept off the API port. Agent pods do not call the controller from inside
 # the namespace any more (the Substrate actors' egress is a separate policy).
+# The metrics port serves no API and is admitted from the cluster entity, as
+# the platform's other metrics ports are.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -67,6 +80,14 @@ spec:
         - ports:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
+    {{- if $metricsPort }}
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ $metricsPort | quote }}
+              protocol: TCP
+    {{- end }}
 ---
 # Egress from the kagent controller: DNS, Postgres, Kubernetes API, the OTLP
 # gateway kagent.otel names (the pods of the endpoint's
@@ -414,6 +435,11 @@ spec:
       ports:
         - port: {{ $controllerPort | int }}
           protocol: TCP
+    {{- if $metricsPort }}
+    - ports:
+        - port: {{ $metricsPort | int }}
+          protocol: TCP
+    {{- end }}
 {{- end }}
 
 {{- end }}
