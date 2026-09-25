@@ -4513,13 +4513,22 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       additionalPeers: []
     # The workload clusters' API servers cluster-manager reads and writes as
     # the caller: a cluster's operator and serving layer are detected through
-    # its own apiserver, and a pool is targeted there. On Giant Swarm
-    # installations that is api.<cluster>.<base domain> on 443.
+    # its own apiserver, and a pool is targeted there. cluster-manager dials
+    # the `server:` of the cluster's Cluster API kubeconfig Secret
+    # (`<cluster>-kubeconfig`), never `api.<cluster>.<base domain>`: on a CAPA
+    # installation that is the API server's load balancer,
+    # `<cluster>-apiserver-<id>.<region>.elb.amazonaws.com`.
     workloadClusters:
-      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
-      # resolved through the DNS proxy rule the policy renders — for a Giant
-      # Swarm installation `- matchPattern: "api.*.<base domain>"`. Ignored by
-      # the kubernetes flavor (see cidrs).
+      # The installation's provider, a preset of the names below: `aws` adds
+      # `matchPattern: "*.*.elb.amazonaws.com"`, the API server load balancers
+      # of CAPA clusters. Empty, the default, adds none. cilium flavor only.
+      provider: ""
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) of the
+      # kubeconfig Secrets' `server:` hosts, resolved through the DNS proxy
+      # rule the policy renders, next to the provider's preset. Cilium's `*`
+      # matches one DNS label, never a dot: `*.elb.amazonaws.com` selects no
+      # load balancer name, `*.*.elb.amazonaws.com` does. Ignored by the
+      # kubernetes flavor (see cidrs).
       fqdns: []
       # IP blocks of the workload clusters' API servers. kubernetes flavor:
       # vanilla NetworkPolicy selects addresses, never names, so an empty list

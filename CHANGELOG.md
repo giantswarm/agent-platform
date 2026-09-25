@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`clusterManager.networkPolicy.workloadClusters.provider: aws` opens the CAPA API server load balancers, `*.*.elb.amazonaws.com`** (giantswarm/agent-platform#487). cluster-manager dials the `server:` of a cluster's Cluster API kubeconfig Secret, which on CAPA is the API server's load balancer, never the `api.*.<base domain>` pattern the values used to document. The preset renders next to `fqdns` in cluster-manager's egress and in model-manager's, which follows cluster-manager's block. An unknown provider is refused and the presets are named. The values now say which host to select and that Cilium's `*` matches one DNS label.
 - **The Klaus Gateway board shows the whole turn as a person sees it: "Turn done (final flush), p50 and p95"** (giantswarm/giantswarm#37787). The panel sits beside "Time to first text" and shows the time from the message's arrival to the last edit of the answer in the channel, from `klaus_gateway_turn_phase_seconds{phase="final_flush"}`. Before, the board showed only this phase's p95, inside "Turn phases, p95".
 
 ### Changed
