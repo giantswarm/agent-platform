@@ -1332,22 +1332,21 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       apiKeySecretKey: ANTHROPIC_API_KEY
       apiKey: ""  # Set per-cluster in secret-values; chart creates the Secret
 
-  # OTel — traces and logs to the GS Observability Platform OTLP gateway.
-  # X-Scope-OrgID header routes to the correct Loki/Tempo tenant.
+  # OTel — traces and logs to the GS Observability Platform OTLP gateway, the
+  # kagent chart's SDK-spec shape (the meta chart's kagent.otel). This chart
+  # reads it for the OTLP egress rules of the kagent controller and the
+  # Substrate egress gateway: a signal's own endpoint and protocol, else
+  # exporter.otlp's.
   otel:
-    tracing:
+    exporter:
+      otlp:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        protocol: grpc
+        timeout: "500"
+    traces:
       enabled: auto  # auto | true | false (resolved by the meta chart)
-      exporter:
-        otlp:
-          endpoint: http://otlp-gateway.kube-system.svc:4317
-          protocol: grpc
-          insecure: true
-    logging:
+    logs:
       enabled: auto  # auto | true | false (resolved by the meta chart)
-      exporter:
-        otlp:
-          endpoint: http://otlp-gateway.kube-system.svc:4317
-          insecure: true
 
   # --- UI auth: oauth2-proxy in front of the kagent UI ---
   # Disabled by default. Enable and supply Dex OIDC credentials to secure the UI.
