@@ -1429,6 +1429,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.modelsGateway.tls.issuerRef.name | string | `""` |  |
 | modelServing.modelsGateway.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
 | modelServing.modelsGateway.tls.issuerRef.group | string | `"cert-manager.io"` |  |
+| modelServing.modelsGateway.service.annotations."service.beta.kubernetes.io/aws-load-balancer-scheme" | string | `"internet-facing"` |  |
 | modelServing.modelsGateway.externalDns.enabled | bool | `true` |  |
 | modelServing.modelsGateway.jwtAuthentication.mode | string | `"Strict"` |  |
 | modelServing.modelsGateway.jwtAuthentication.issuer | string | `""` |  |
