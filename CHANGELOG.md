@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Klaus Gateway board shows the whole turn as a person sees it: "Turn done (final flush), p50 and p95"** (giantswarm/giantswarm#37787). The panel sits beside "Time to first text" and shows the time from the message's arrival to the last edit of the answer in the channel, from `klaus_gateway_turn_phase_seconds{phase="final_flush"}`. Before, the board showed only this phase's p95, inside "Turn phases, p95".
+
 ### Changed
 
 - **`kagent.harness.compaction.tokenThreshold` is `600000` (was `24000`); `eventRetentionSize` stays `4` and the summaries stay on the agent's own model** (giantswarm/giantswarm#37792). Every Anthropic agent on the platform has the full 1M context window and nothing on the path limits the input, so 24 000 was the only bound below it, and it did not bound a turn: a large tool result stays in the retained tail and the prompt grows past the threshold anyway. Measured on a six-turn session with 100–290k-token tool results, every compacting threshold (24k, 64k, 200k) put a 13–50 s summary in front of each follow-up's first token (median 27–38 s against 4 s uncompacted), lost three of five facts across turns, and saved nothing in a warm session, where the history is a 0.1× cache read. At 600 000 the session never compacted, its follow-ups started in 4.5 s median, recall held and it was the cheapest of the Sonnet-summarised variants. Compaction now fires only for a session heading for the edge of the window. Untested at its own size: a summary over several hundred thousand tokens may exceed the Go ADK's 60 s bound, in which case the call goes ahead uncompacted (the harness log says so). An agent on a model with a smaller window (a self-served model) is not compacted before its window fills.
