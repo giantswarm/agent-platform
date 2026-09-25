@@ -10,7 +10,11 @@ what (the substrate chart's arguments and Service definitions):
         send to (the actors' traces and logs, kagent.otel — the pods of the
         endpoint's namespace on its port, agent-platform.kagent.otlpEgress);
         atenet-egress asks ate-api :443 which
-        actor a connection belongs to (the substrateEgress policy) — nothing
+        actor a connection belongs to (the substrateEgress policy) and the
+        credential provider k8s-credential-provider :50051 for the Secret
+        values a policy's credential injection names (the Substrate line from
+        1.1.0; without this hop every injection ends in UpstreamCallTimeout
+        and the golden boot's git fetch gets 403) — nothing
         leaves a worker pod for those destinations directly; the sandbox's
         outbound traffic is tunnelled to atenet-egress, so the actors' egress
         allow-list lives on atenet-egress and the worker pods reach only the
@@ -30,13 +34,15 @@ what (the substrate chart's arguments and Service definitions):
         the gVisor asset from storage.googleapis.com, the S3 snapshot store; a
         registry mirror behind a private address is cluster:443), the bundled
         store :9000.
-  ate-controller, dns, podcertificate-controller ──▶ the apiserver (and
-        ate-controller ──▶ ate-api :443); dns answers the actors' lookups.
+  ate-controller, dns, podcertificate-controller, k8s-credential-provider ──▶
+        the apiserver (and ate-controller ──▶ ate-api :443); dns answers the
+        actors' lookups; the credential provider reads the agents' Secrets.
   ate-api-server, ate-controller, atelet, atenet-router ──▶ the OTLP gateway
         substrate.otel names (agent-platform.substrate.otlpEgress); atenet-egress
         exports nothing.
   Prometheus scrapes the annotated pods (atelet 9090, ate-api-server 9090,
-  ate-controller 8080, atenet-router 9090, the agentgateway sidecars 15020) —
+  ate-controller 8080, atenet-router 9090, atenet-egress's ext-proc 9090,
+  k8s-credential-provider 9090, the agentgateway sidecars 15020) —
   admitted from the cluster entity, as the platform's other metrics ports are.
 
 The kubernetes flavour renders the ingress policies only — the chart's
@@ -422,6 +428,8 @@ spec:
         - cluster
       toPorts:
         - ports:
+            - port: "9090"
+              protocol: TCP
             - port: "15020"
               protocol: TCP
   egress:
@@ -438,6 +446,15 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+    # The credential provider: the Secret values a policy's credential
+    # injection names (the Substrate line from 1.1.0), asked per request.
+    - toEndpoints:
+        - matchLabels:
+            app: k8s-credential-provider
+      toPorts:
+        - ports:
+            - port: "50051"
               protocol: TCP
     {{- if and $kagentOn .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
     - toEndpoints:
@@ -569,6 +586,39 @@ spec:
             - port: "53"
               protocol: UDP
             - port: "53"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+---
+# k8s-credential-provider: the egress gateway asks it (50051, mTLS) for the
+# Secret values a policy's credential injection names; it reads those Secrets
+# from the apiserver and nothing else. Prometheus scrapes 9090.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-k8s-credential-provider
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: k8s-credential-provider
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: atenet-egress
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "9090"
               protocol: TCP
   egress:
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
@@ -775,7 +825,33 @@ spec:
         - port: 8443
           protocol: TCP
     - ports:
+        - port: 9090
+          protocol: TCP
         - port: 15020
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-k8s-credential-provider-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: k8s-credential-provider
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: atenet-egress
+      ports:
+        - port: 50051
+          protocol: TCP
+    - ports:
+        - port: 9090
           protocol: TCP
 ---
 apiVersion: networking.k8s.io/v1

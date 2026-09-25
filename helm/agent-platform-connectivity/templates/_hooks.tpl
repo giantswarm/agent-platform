@@ -18,8 +18,9 @@ behind; #563). All run under the
 restricted pod security profile (this chart's Jobs have to be admitted where
 restricted PSS is enforced — the hook pods themselves violate nothing) as the
 ServiceAccount <release>-hooks (templates/substrate/hooks-rbac.yaml): a
-ClusterRole on secrets, configmaps and namespaces (on persistentvolumeclaims
-while the cache claim is this chart's, on the pre-pull DaemonSet by name while
+ClusterRole on secrets, configmaps and namespaces (on persistentvolumeclaims,
+and get on storageclasses, while the cache claim is this chart's, on the
+pre-pull DaemonSet by name while
 it renders) — the bootstrap writes into two
 namespaces the substrate release has not created yet and the databases hook
 into the namespaces of postgres.databases.*.secretNamespaces, none of which
@@ -42,6 +43,11 @@ Usage of the Job include (a dict):
   script    the shell script (run as `sh -eu -c` in hooks.kubectlImage)
   init      optional: a dict {name, image, script} — an init container that
             prepares /work for the main container (the bootstrap's openssl)
+  memory    optional: the main container's memory limit (default 128Mi, which
+            holds one kubectl run and its shell). A hook whose script keeps
+            more resident at once raises it for itself and says why in its
+            template (the bootstrap: 256Mi). Every request stays 10m/32Mi, and
+            the init container keeps 128Mi.
   timeout   optional activeDeadlineSeconds (default 600)
 */}}
 
@@ -82,6 +88,7 @@ Whether this release renders any hook Job — and with it the hook identity.
 {{- define "agent-platform.hooks.job" -}}
 {{- $root := .root -}}
 {{- $timeout := .timeout | default 600 -}}
+{{- $memory := .memory | default "128Mi" -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -173,7 +180,7 @@ spec:
               cpu: 10m
               memory: 32Mi
             limits:
-              memory: 128Mi
+              memory: {{ $memory }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp

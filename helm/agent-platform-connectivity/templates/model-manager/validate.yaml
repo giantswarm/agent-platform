@@ -122,18 +122,21 @@ login provider beside global.identity, or a route the API server rejects.
          default and an installation may run without muster — and the muster
          peer policy (netpol.yaml) reads the same toggle. Nothing to guard. */ -}}
 
-  {{- /* The component release resolves its OAuth inputs through the chart's
-         global.identity / global.domain fallbacks. model-manager is on by
-         default (giantswarm/agent-platform#329), so this guard follows the
-         muster guard's convention exactly: a value in the component block
-         that disagrees with global.identity would give two components two
-         different logins — checked only where both sides are set, so a render
-         that sets no global.identity (a bare `helm template`, global.domain or
-         global.identity.issuerUrl alone for hostnames or a JWT issuer, an
-         install that configures the component block itself) is untouched and
-         a missing input is reported by the child release, as for muster. The
-         opt-in managers (agent-manager, vm-manager) keep their absence guards,
-         the way kagent's fire only with its route on. */ -}}
+  {{- /* The component release resolves its OAuth inputs from its block, else
+         the chart's global.identity / global.domain fallbacks; the meta chart
+         fills what both leave unset from muster's OAuth server block, the
+         platform's one login, and hands this release the same filled block
+         (agent-platform.identity.apply, giantswarm/agent-platform#484). A value
+         in the block that disagrees with global.identity would give two
+         components two different logins — checked where both sides are set.
+         model-manager is on by default, so its absence guard fires once the
+         installation names its login — muster's OAuth server on with a Dex
+         issuer: a missing issuer, client, secret or base URL then fails here,
+         naming what to set, instead of failing the model-manager release. A
+         render that names no login (a bare `helm template`,
+         global.identity.issuerUrl alone for a JWT issuer) is untouched. The
+         opt-in managers (agent-manager, vm-manager) guard absence whenever
+         their OAuth is on. */ -}}
   {{- if and (include "agent-platform.modelManager.oauthEnabled" .) (eq (include "agent-platform.modelManager.oauthProvider" .) "dex") }}
     {{- $oauth := dig "oauth" dict $chart }}
     {{- $dex := dig "dex" dict $oauth }}
@@ -142,6 +145,21 @@ login provider beside global.identity, or a route the API server rejects.
       {{- $own := index $pair 1 }}{{- $global := index $pair 3 }}
       {{- if and $own $global (ne (toString $own) (toString $global)) }}
         {{- fail (printf "model-manager.oauth.%s (%s) differs from global.identity.%s (%s); the platform has one login provider" (index $pair 0) $own (index $pair 2) $global) }}
+      {{- end }}
+    {{- end }}
+    {{- $server := dig "muster" "oauth" "server" dict (.Values.muster | default dict) }}
+    {{- if and (dig "enabled" true $server) (dig "dex" "issuerUrl" "" $server) }}
+      {{- if not (include "agent-platform.modelManager.issuerUrl" .) }}
+        {{- fail "model-manager.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set: model-manager validates tokens of the platform's login — the meta chart fills it from muster.muster.oauth.server.dex.issuerUrl; set global.identity.issuerUrl or model-manager.oauth.dex.issuerURL when rendering this chart alone" }}
+      {{- end }}
+      {{- if and (not (dig "clientID" "" $dex)) (not $identity.clientId) }}
+        {{- fail "model-manager.oauth.dex.clientID is empty and global.identity.clientId is not set: model-manager validates tokens for the platform's login client — set muster.muster.oauth.server.dex.clientId, which the meta chart fills model-manager.oauth.dex.clientID from (or set global.identity.clientId)" }}
+      {{- end }}
+      {{- if and (not (dig "existingSecret" "" $oauth)) (not (dig "clientSecret" "" $dex)) (not $identity.existingSecret) }}
+        {{- fail "none of model-manager.oauth.existingSecret, model-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: model-manager needs the login client's secret — set muster.muster.oauth.server.existingSecret (a Secret with key dex-client-secret), which the meta chart fills model-manager.oauth.existingSecret from (or set global.identity.existingSecret)" }}
+      {{- end }}
+      {{- if and (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
+        {{- fail "model-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL — under an agentgateway-* ingress.mode the meta chart derives https://<hostname><modelManager.route.pathPrefix> from modelManager.route.hostname, else agentgateway.<global.domain>; set one of them, or model-manager.oauth.baseURL" }}
       {{- end }}
     {{- end }}
   {{- end }}

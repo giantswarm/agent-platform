@@ -38,6 +38,19 @@ instead of a silent 503.
 {{- end -}}
 
 {{/*
+The ServiceAccount model-manager runs as, the model-manager chart's rule:
+serviceAccount.name, else the fullname while the chart creates it, else default.
+*/}}
+{{- define "agent-platform.modelManager.serviceAccountName" -}}
+{{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
+{{- if dig "serviceAccount" "create" true $chart -}}
+{{- dig "serviceAccount" "name" "" $chart | default (include "agent-platform.modelManager.fullname" .) -}}
+{{- else -}}
+{{- dig "serviceAccount" "name" "" $chart | default "default" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The port the model-manager Service listens on (model-manager.service.port, default 8080).
 */}}
 {{- define "agent-platform.modelManager.servicePort" -}}
@@ -77,6 +90,52 @@ Usage: include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "k
 */}}
 {{- define "agent-platform.modelManager.hasBackend" -}}
 {{- if has .name (include "agent-platform.modelManager.backends" .root | fromJsonArray) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+Truthy when model-manager serves through a kserve backend: a static kserve
+entry of model-manager.backends, or components.cluster-manager on, which
+registers the backend at runtime (its model-backend-kserve ConfigMap, invisible
+to the chart) for every cluster it gives a serving slice.
+*/}}
+{{- define "agent-platform.modelManager.kserveOn" -}}
+{{- if or (include "agent-platform.modelManager.hasBackend" (dict "root" . "name" "kserve")) (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "cluster-manager")) "true") }}true{{ end -}}
+{{- end -}}
+
+{{/*
+Truthy when model-manager is on and serves models it then reads and routes:
+this release's serving slice, or a kserve backend whose slice is elsewhere — a
+GPU node pool brings its slice as a second release of this chart, where
+model-manager is off, while this release's modelServing stays off.
+*/}}
+{{- define "agent-platform.modelManager.serves" -}}
+{{- if and (include "agent-platform.modelManager.enabled" .) (or (include "agent-platform.modelServing.enabled" .) (include "agent-platform.modelManager.kserveOn" .)) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The workload clusters' API servers model-manager's kserve backend calls as the
+caller — a backend cluster-manager registers targets a workload cluster's
+apiserver (modelManager.networkPolicy.workloadClusters: fqdns, cidrs, ports).
+Set, it wins as a whole; empty, the default, it follows
+clusterManager.networkPolicy.workloadClusters: model-manager serves on the
+clusters cluster-manager composes onto. Ports default to 443 and 6443. JSON.
+*/}}
+{{- define "agent-platform.modelManager.workloadClusters" -}}
+{{- $wc := dig "networkPolicy" "workloadClusters" dict .Values.modelManager -}}
+{{- if not $wc -}}
+{{- $wc = dig "networkPolicy" "workloadClusters" dict .Values.clusterManager -}}
+{{- end -}}
+{{- dict "fqdns" (dig "fqdns" list $wc) "cidrs" (dig "cidrs" list $wc) "ports" (dig "ports" (list 443 6443) $wc) | toJson -}}
+{{- end -}}
+
+{{/*
+The namespace the models model-manager serves run in: this release's serving
+namespace with the slice on (model-serving-validate.yaml holds the two equal),
+else model-manager's kserve.namespace (model-serving, cluster-manager's
+default too).
+*/}}
+{{- define "agent-platform.modelManager.servingNamespace" -}}
+{{- if include "agent-platform.modelServing.enabled" . }}{{ include "agent-platform.modelServing.namespace" . }}{{ else }}{{ dig "kserve" "namespace" "" (include "agent-platform.modelManager.chartValues" . | fromJson) | default "model-serving" }}{{ end -}}
 {{- end -}}
 
 {{/*

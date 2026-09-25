@@ -8,7 +8,8 @@ namespace the FluxInstance labels warns on anything less), as the hook
 ServiceAccount (rbac.yaml, cluster-admin, itself a hook at the events its Jobs
 need) or — the self-management hooks — as the regular ServiceAccount
 <release>-self (self/rbac.yaml, a namespaced Role). Every hook but the
-storage-version pair renders only with the bundled engine. Hook weights in use:
+storage-version pair and the serving teardown renders only with the bundled
+engine. Hook weights in use:
   -10  the hook ServiceAccount + ClusterRoleBinding (rbac.yaml, pre-delete; and
        pre-install + pre-upgrade while the kagent namespace hook or the
        storage-version backup hook renders, post-install + post-upgrade while
@@ -25,6 +26,10 @@ storage-version pair renders only with the bundled engine. Hook weights in use:
        pre-delete — and pre-upgrade when self-management is off, the hand-back)
    -5  suspend the chart's own HelmRelease and drop the values Secret
        (hooks/self.yaml; same events as -6)
+   -2  the serving teardown: the llm-d controller's release, the well-known
+       LLMInferenceServiceConfigs with their finalizer, the configs' release
+       (hooks/serving-teardown.yaml; pre-delete, or pre-upgrade when the
+       serving slice is switched off in place; a script in the helm image)
     0  delete the platform HelmReleases in reverse dependency order and wait
        per wave (teardown.yaml, pre-delete; a script in the helm image);
        re-create the recorded ModelConfigs no Helm release owned at v1alpha3

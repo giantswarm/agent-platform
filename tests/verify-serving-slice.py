@@ -13,11 +13,21 @@ property the slice relies on:
   kserve (release history there too), llmisvcConfigs on and servingruntime off,
   the llm-d-fast/ prefix as imageRegistry — the same prefix the pre-pull's
   llm-d-cuda reference carries (#568) — the block held back from the
-  connectivity release;
+  connectivity release; spec.driftDetection.mode: enabled by default, so a
+  well-known config that went missing is re-created on the release's next
+  reconcile (#508), with the configs' /spec ignored (KServe defaults fields
+  into it after the apply; correcting them kept a fresh install from coming
+  back Ready), and no other release of the slice carries drift detection;
 - the derived KServe ingress-gateway value: kserve-llmisvc-resources carries
   kserve.controller.gateway.ingressGateway.kserveGateway = <namespace>/<gateway>,
   a differing copy of the operator's fails the render naming both;
 - modelServing.serving.runtimeClassName: nvidia reaches the connectivity release;
+- the model pods' traces (giantswarm/giantswarm#36711): kserve-runtime-configs on
+  the 0.6.x line carries the tracing preset's endpoint and tenant pod label from
+  global.observability.traces.otlp (agent-platform.shape.otlp); an explicit preset
+  endpoint wins; <release>-model-serving-otlp-egress opens the preset's endpoint
+  (modelServing.networkPolicy.otlpEndpoint) to the workload pods in both flavours;
+  an http/protobuf global fails naming the key; no endpoint, no policy;
 - with the target knob (ci/test-target-values.yaml) agentgateway is on and every
   HelmRelease carries the kubeConfig;
 - the controller policy of the slice on a workload cluster (components.agentgateway
@@ -111,6 +121,7 @@ G6_XLARGE_VCPU, G6_XLARGE_GIB = 4, 16
 USABLE_VCPU = G6_XLARGE_VCPU - 1.0
 USABLE_GIB = G6_XLARGE_GIB * 0.95 - 3.3
 AUDIENCE = "dex-k8s-authenticator"
+SCHEME = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 
 
 def helm(chart: str, flags: list[str], expect_failure: str = "") -> str:
@@ -177,6 +188,10 @@ def check_profile(meta: str) -> str:
     if "storageNamespace" in rc:
         sys.exit("FAIL: the kserve-runtime-configs release targets a namespace of its own; the llm-d controller resolves the well-known configs from the LLMInferenceService's namespace and its own (the release namespace) only")
     need(rc, f"      llmisvcConfigs:\n        enabled: true\n        imageRegistry: {FAST_PREFIX}", "the kserve-runtime-configs release")
+    need(rc, "  driftDetection:\n    ignore:\n    - paths:\n      - /spec\n      target:\n        kind: LLMInferenceServiceConfig\n    mode: enabled\n", "the kserve-runtime-configs release (a missing well-known config is re-created on the next reconcile; the spec KServe defaults after the apply is not drift, or a fresh install never comes back Ready, #508)")
+    drifting = sorted(name for (kind, name), doc in docs.items() if kind == "HelmRelease" and name != "kserve-runtime-configs" and "\n  driftDetection:" in doc)
+    if drifting:
+        sys.exit(f"FAIL: {drifting} carry spec.driftDetection in the slice; drift detection is decided per release, kserve-runtime-configs only here")
     need(docs[("HelmRelease", "kserve-llmisvc-resources")], "            kserveGateway: agent-platform/models", "the kserve-llmisvc-resources release")
     need(docs[("HelmRelease", "kserve-llmisvc-resources")], "      createSharedResources: true", "the kserve-llmisvc-resources release (the control plane's shared objects are its own)")
     need(docs[("HelmRelease", "kserve-llmisvc-resources")], "        deploymentMode: Standard", "the kserve-llmisvc-resources release")
@@ -190,7 +205,7 @@ def check_profile(meta: str) -> str:
     need(conn, "      kserve-runtime-configs:\n        enabled: true", "the connectivity release's roster")
     if "kubeConfig" in render:
         sys.exit("FAIL: the profile without the target knob renders a kubeConfig")
-    ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into the release namespace, the llm-d controller's (configs on, runtimes off, the llm-d-fast/ prefix as imageRegistry, held back from connectivity); kserveGateway derived; runtimeClassName nvidia")
+    ok(f"examples/serving-slice.yaml: exactly {len(SERVING)} releases; kserve-runtime-configs after kserve-llmisvc-crd into the release namespace, the llm-d controller's (configs on, runtimes off, the llm-d-fast/ prefix as imageRegistry, held back from connectivity, drift detection on and on no other release); kserveGateway derived; runtimeClassName nvidia")
 
     helm(meta, ["-f", profile, *VM, *INSTALLATION, "--set", "kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway=other/gw"],
          expect_failure="kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway (other/gw) differs")
@@ -307,6 +322,7 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
         sys.exit("FAIL: no Gateway models in the connectivity render")
     for needle in ("  gatewayClassName: agentgateway", "      protocol: HTTPS", '      hostname: "models.wc01.example.com"', "            name: wildcard-tls", "          from: All",
                    "      external-dns.alpha.kubernetes.io/hostname: models.wc01.example.com", "      giantswarm.io/external-dns: managed",
+                   f"      {SCHEME}: internet-facing",
                    "      kind: AgentgatewayParameters\n      name: models"):
         need(gw, needle, "the models Gateway")
     params = docs.get(("AgentgatewayParameters", "models"))
@@ -343,6 +359,20 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
     for needle in ("      gateway:\n        enabled: true", "        endpoint: https://models.wc01.example.com", "        pathConvention: /<namespace>/<model>/v1"):
         need(cm, needle, "the discovery ConfigMap")
     ok("connectivity: the models Gateway on models.<domain> with the wildcard, its data plane's parameters (the platform's security contexts, one replica, LoadBalancer), the external-dns hostname and filter, one Strict policy (audience, Override, issuer), the JWKS backend at the issuer on 443/TLS, the discovery entry")
+
+    # The data plane's Service inherits the Gateway's infrastructure annotations: an internet-facing NLB by default
+    # (#690: the AWS Load Balancer Controller's own default is internal), an explicit scheme replaces it, and it does
+    # not hang on external-dns.
+    scheme_key = "modelServing.modelsGateway.service.annotations." + SCHEME.replace(".", "\\.")
+    private = documents(helm(connectivity, [*base, "--set", f"{scheme_key}=internal"]))[("Gateway", "models")]
+    need(private, f"      {SCHEME}: internal", "the models Gateway with an explicit scheme")
+    if f"{SCHEME}: internet-facing" in private:
+        sys.exit(f"FAIL: an explicit scheme did not replace the default:\n{private}")
+    no_dns = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.externalDns.enabled=false"]))[("Gateway", "models")]
+    need(no_dns, f"    annotations:\n      {SCHEME}: internet-facing", "the models Gateway without external-dns")
+    if "external-dns.alpha.kubernetes.io/hostname:" in no_dns or "giantswarm.io/external-dns:" in no_dns:
+        sys.exit(f"FAIL: externalDns.enabled false still rendered an external-dns annotation:\n{no_dns}")
+    ok("the models data plane's Service is internet-facing by default, an explicit scheme replaces it, with and without external-dns")
 
     cert = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.tls.issuerRef.name=platform-ca"]))
     c = cert.get(("Certificate", "models-tls"))
@@ -387,11 +417,16 @@ CACHE_CLASS = ("StorageClass", f"agent-platform-connectivity-hf-cache-{class_dig
 NO_CLASS = ["--set", "modelServing.cache.storageClass.create=false"]
 # The keep annotation as rendered (the templates' comments name the policy too).
 KEEP = "    helm.sh/resource-policy: keep"
+# The prefix of the tier annotations the hook stamps on the claim (#605): -type, -iops, -throughput, the class parameters
+# cluster-manager prices the claim from once its class is gone.
+TIER = "agent-platform.giantswarm.io/volume"
 
 
-# A stub kubectl for the hook's script (#570): STUB_SIZE describes an existing claim (empty: no claim), STUB_PHASE its phase,
-# STUB_CLASS its storageClassName (the variable unset: the claim carries no such key; empty: the empty class), STUB_SC_EXISTS
-# whether `get storageclass` finds the class, STUB_APPLIED where the applied manifest lands.
+# A stub kubectl for the hook's script (#570, #605): STUB_SIZE describes an existing claim (empty: no claim), STUB_PHASE its phase,
+# STUB_CLASS its storageClassName (the variable unset: the claim carries no such key; empty: the empty class), STUB_TIER the
+# claim's tier annotations as the script reads them (empty: none), STUB_SC_EXISTS whether `get storageclass` finds the class,
+# STUB_SC_PARAMS its parameters ("key=value ..."), STUB_APPLIED where the applied manifest lands, STUB_ANNOTATED where the
+# arguments of `annotate` land. Read back after the apply, the claim's class is the one the applied manifest names.
 STUB_KUBECTL = """#!/bin/sh
 case "$*" in
   *"get pvc"*"{.spec.resources.requests.storage}"*) printf '%s' "$STUB_SIZE" ;;
@@ -399,25 +434,34 @@ case "$*" in
   *"get pvc"*"{.spec.storageClassName}"*"--allow-missing-template-keys=false"*)
     [ -n "${STUB_CLASS+x}" ] || { echo 'error: error executing jsonpath "{.spec.storageClassName}": storageClassName is not found' >&2; exit 1; }
     printf '%s' "$STUB_CLASS" ;;
+  *"get pvc"*"{.spec.storageClassName}") sed -n 's/.*"storageClassName":"\\([^"]*\\)".*/\\1/p' "$STUB_APPLIED" ;;
+  *"get pvc"*"volume-type"*) printf '%s' "$STUB_TIER" ;;
   *"get pvc"*) [ -n "$STUB_SIZE" ] || exit 1 ;;
+  *"get storageclass"*"{.parameters."*)
+    key=$(printf '%s' "$*" | sed 's/.*{[.]parameters[.]\\([a-z]*\\)}.*/\\1/')
+    printf ' %s ' "$STUB_SC_PARAMS" | sed -n "s/.* $key=\\([^ ]*\\) .*/\\1/p" ;;
   *"get storageclass"*) [ "$STUB_SC_EXISTS" = 1 ] || exit 1 ;;
+  *"annotate pvc"*) printf '%s\\n' "$@" > "$STUB_ANNOTATED" ;;
   *"apply"*) cat > "$STUB_APPLIED" ;;
   *) echo "stub kubectl: unexpected $*" >&2; exit 9 ;;
 esac
 """
 
 
-def run_hook(job: str, phase: str = "", size: str = "", storage_class: str | None = None, class_exists: bool = True) -> tuple[int, dict | None, str, str]:
-    """Run the hook Job's script against the stub kubectl: (rc, the applied manifest or None, stdout, stderr). size "" is no existing claim."""
+def run_hook(job: str, phase: str = "", size: str = "", storage_class: str | None = None, class_exists: bool = True,
+             tier: str = "", class_parameters: str = "") -> tuple[int, dict | None, str, str]:
+    """Run the hook Job's script against the stub kubectl: (rc, the claim as the hook leaves it or None, stdout, stderr) -- the
+    applied manifest, with the annotations `kubectl annotate` added merged in. size "" is no existing claim."""
     script = yaml.safe_load(job)["spec"]["template"]["spec"]["containers"][0]["args"][0]
     with tempfile.TemporaryDirectory() as d:
         stub = os.path.join(d, "kubectl")
         with open(stub, "w", encoding="utf-8") as f:
             f.write(STUB_KUBECTL)
         os.chmod(stub, 0o755)
-        applied = os.path.join(d, "applied.json")
+        applied, annotated = os.path.join(d, "applied.json"), os.path.join(d, "annotated")
         env = {k: v for k, v in os.environ.items() if not k.startswith("STUB_")}
-        env.update(PATH=f"{d}:{env['PATH']}", STUB_APPLIED=applied, STUB_PHASE=phase, STUB_SIZE=size, STUB_SC_EXISTS="1" if class_exists else "0")
+        env.update(PATH=f"{d}:{env['PATH']}", STUB_APPLIED=applied, STUB_ANNOTATED=annotated, STUB_PHASE=phase, STUB_SIZE=size,
+                   STUB_TIER=tier, STUB_SC_EXISTS="1" if class_exists else "0", STUB_SC_PARAMS=class_parameters)
         if storage_class is not None:
             env["STUB_CLASS"] = storage_class
         result = subprocess.run(["sh", "-eu", "-c", script], env=env, capture_output=True, text=True, check=False)
@@ -425,7 +469,15 @@ def run_hook(job: str, phase: str = "", size: str = "", storage_class: str | Non
         if os.path.exists(applied):
             with open(applied, encoding="utf-8") as f:
                 manifest = json.load(f)
+        if manifest and os.path.exists(annotated):
+            with open(annotated, encoding="utf-8") as f:
+                manifest["metadata"].setdefault("annotations", {}).update(a.split("=", 1) for a in f.read().splitlines() if a.startswith(f"{TIER}-"))
     return result.returncode, manifest, result.stdout, result.stderr
+
+
+def tier_of(claim: dict) -> dict:
+    """The tier annotations a claim carries, by parameter: {"type": ..., "iops": ..., "throughput": ...} as present."""
+    return {k.removeprefix(f"{TIER}-"): v for k, v in claim["metadata"].get("annotations", {}).items() if k.startswith(f"{TIER}-")}
 
 
 def applied_claim(job: str) -> dict:
@@ -460,7 +512,8 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     if not role or ("ServiceAccount", HOOK_IDENTITY) not in docs or ("ClusterRoleBinding", HOOK_IDENTITY) not in docs:
         sys.exit(f"FAIL: the hook identity {HOOK_IDENTITY} (ServiceAccount, ClusterRole, ClusterRoleBinding) is incomplete")
     need(role, '    resources: ["persistentvolumeclaims"]\n    verbs: ["get", "create", "patch"]', "the hook identity's ClusterRole")
-    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 100Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and never delete on them")
+    need(role, '  - apiGroups: ["storage.k8s.io"]\n    resources: ["storageclasses"]\n    verbs: ["get"]', "the hook identity's ClusterRole (the claim's class and its tier, #605)")
+    ok(f"the cache claim: no PersistentVolumeClaim object; a post-install,post-upgrade hook Job server-side applies hf-cache into model-serving (keep, RWO, 100Gi, the chart's class {CACHE_CLASS[1]}) as t-hooks, whose ClusterRole carries get/create/patch on claims and get on StorageClasses, never delete on them")
 
     ns = docs.get(SERVING_NS)
     if not ns:
@@ -504,12 +557,36 @@ def check_cache(connectivity: str, base: list[str]) -> None:
        "is grown to 100Gi; an equal size in another spelling passes silently; a Pending claim on a class the cluster lacks fails naming the claim, the way out and the rendered class; "
        "a Pending claim on a class the cluster has, a claim without a class and one on the empty class keep theirs")
 
+    # The claim carries its tier (#605): stamped once by `kubectl annotate` -- never by the apply, which would take it away again on
+    # a later run under its field manager -- from the chart's parameters on the chart's class, else from the claim's class.
+    chart_tier = {"type": "gp3", "iops": "3000", "throughput": "500"}
+    rc, created, out, err = run_hook(job)
+    if rc != 0 or tier_of(created) != chart_tier or f"tier stamped from StorageClass {CACHE_CLASS[1]}" not in out:
+        sys.exit(f"FAIL: the created claim should carry the chart's class parameters as its tier (rc={rc}):\n{json.dumps(created['metadata'] if created else None, indent=1)}\n{out}\n{err}")
+    rc, again, out, err = run_hook(job, "Bound", "100Gi", CACHE_CLASS[1], tier="gp33000500", class_parameters="type=io2 iops=9 throughput=9")
+    if rc != 0 or tier_of(again) or "tier" in out:
+        sys.exit(f"FAIL: a claim that carries its tier should be left alone: neither re-stamped nor carried by the apply, which would own it (rc={rc}):\n{json.dumps(again['metadata'] if again else None, indent=1)}\n{out}\n{err}")
+    rc, former, out, err = run_hook(job, "Bound", "500Gi", old, class_parameters="type=gp3 iops=4000 throughput=1000")
+    if rc != 0 or tier_of(former) != {"type": "gp3", "iops": "4000", "throughput": "1000"} or f"tier stamped from StorageClass {old}" not in out:
+        sys.exit(f"FAIL: an existing claim without its tier should be stamped from its own class's parameters, not the chart's (rc={rc}):\n{json.dumps(former['metadata'] if former else None, indent=1)}\n{out}\n{err}")
+    rc, gone, out, err = run_hook(job, "Bound", "500Gi", old, class_exists=False)
+    if rc != 0 or tier_of(gone) or f"no tier stamped (StorageClass {old} is gone)" not in out:
+        sys.exit(f"FAIL: an existing claim whose class is gone should be applied without a tier, the log saying why (rc={rc}):\n{out}\n{err}")
+    rc, bare, out, err = run_hook(job, "Bound", "500Gi", old, class_parameters="encrypted=true")
+    if rc != 0 or tier_of(bare) or "carries no type, iops, throughput" not in out:
+        sys.exit(f"FAIL: a class without type, iops or throughput should stamp nothing, the log saying so (rc={rc}):\n{out}\n{err}")
+    ok(f"the claim carries its tier: created on the chart's class it is stamped {TIER}-type=gp3, -iops=3000, -throughput=500 from the chart's parameters by kubectl annotate "
+       "(the applied manifest carries none, so no later apply removes them); a claim carrying its tier is left alone; an existing one without it is stamped from its own class; "
+       "a class that is gone or carries none of the three stamps nothing, the log saying why")
+
     # A parameter change renders a new class -- the API forbids changing a class's parameters -- and the claim references it (#570).
     retiered = documents(helm(connectivity, [*base, "--set", "modelServing.cache.storageClass.parameters.throughput=1000"]))
     retiered_name = f"agent-platform-connectivity-hf-cache-{class_digest(CACHE_PROVISIONER, {**CACHE_PARAMETERS, 'throughput': '1000'})}"
     if ("StorageClass", retiered_name) not in retiered or CACHE_CLASS in retiered or applied_claim(retiered[CACHE_JOB])["spec"]["storageClassName"] != retiered_name:
         sys.exit(f"FAIL: a parameter change should render the class under a new name ({retiered_name}) and the claim reference it: {sorted(k for k in retiered if k[0] == 'StorageClass')}, {applied_claim(retiered[CACHE_JOB])['spec']}")
     need(retiered[("StorageClass", retiered_name)], '  throughput: "1000"', "the re-tiered StorageClass")
+    if tier_of(applied_claim(retiered[CACHE_JOB])) != {"type": "gp3", "iops": "3000", "throughput": "1000"}:
+        sys.exit(f"FAIL: the claim created on the re-tiered class should carry its parameters as its tier: {tier_of(applied_claim(retiered[CACHE_JOB]))}")
     ok(f"a parameter change renders the class under a new digest name ({retiered_name}), the former ({CACHE_CLASS[1]}) gone, and the applied claim references the new one")
 
     knobs = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.pvc.storageClassName=gp3", "--set", "modelServing.cache.pvc.size=1Ti",
@@ -526,9 +603,15 @@ def check_cache(connectivity: str, base: list[str]) -> None:
     named = documents(helm(connectivity, [*base, *NO_CLASS, "--set", "modelServing.cache.storageClass.name=io2-fast"]))
     if any(kind == "StorageClass" for kind, _ in named) or applied_claim(named[CACHE_JOB])["spec"].get("storageClassName") != "io2-fast":
         sys.exit(f"FAIL: storageClass.create: false with a name should render no class and reference io2-fast: {sorted(k for k in named if k[0] == 'StorageClass')}, {applied_claim(named[CACHE_JOB])['spec']}")
+    rc, io2, out, err = run_hook(named[CACHE_JOB], class_parameters="type=io2 iops=16000")
+    if rc != 0 or tier_of(io2) != {"type": "io2", "iops": "16000"} or "tier stamped from StorageClass io2-fast" not in out:
+        sys.exit(f"FAIL: a claim created on a named class should carry what that class carries at apply time (rc={rc}):\n{json.dumps(io2['metadata'] if io2 else None, indent=1)}\n{out}\n{err}")
     default_class = documents(helm(connectivity, [*base, *NO_CLASS]))
     if any(kind == "StorageClass" for kind, _ in default_class) or "storageClassName" in applied_claim(default_class[CACHE_JOB])["spec"]:
         sys.exit(f"FAIL: storageClass.create: false without a name should render no class and leave the claim on the cluster's default: {applied_claim(default_class[CACHE_JOB])['spec']}")
+    rc, unclassed, out, err = run_hook(default_class[CACHE_JOB])
+    if rc != 0 or tier_of(unclassed) or "no tier stamped (the claim names no StorageClass)" not in out:
+        sys.exit(f"FAIL: a claim that names no class should be applied without a tier, the log saying why (rc={rc}):\n{out}\n{err}")
     own = documents(helm(connectivity, [*base, "--set", "modelServing.cache.storageClass.name=fast", "--set", "modelServing.cache.storageClass.parameters.iops=16000",
                                         "--set", "modelServing.cache.storageClass.provisioner=disk.csi.azure.com"]))
     fast = own.get(("StorageClass", "fast"))
@@ -630,6 +713,9 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
         if gpus != tp:
             sys.exit(f"FAIL: shipped preset {preset_name} requests {gpus} GPU(s) (resources.gpus) but its arguments set tensor parallel {tp}; "
                      "a preset on N GPUs carries --tensor-parallel-size=N, a one-GPU preset no such flag")
+        if docs_off := [a for a in preset_args if re.match(r"--disable-fastapi-docs(=|$)", a)]:
+            sys.exit(f"FAIL: shipped preset {preset_name} carries {docs_off}: it removes the runtime's /openapi.json, the route list "
+                     "model-manager reads the model's API interfaces from (giantswarm/agent-platform#602)")
         expected = [shlex.split(a)[0] for a in preset_args]
         checked += json_values(preset_name, "the llm-d template", eval_argv(preset_args), expected)
     if checked == 0:
@@ -640,6 +726,12 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
                "spec": {"displayName": "Old", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, field: {} if field == "predictor" else "kserve-vllm"}}
         err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure=f"spec.{field} is no longer a preset field")
         need(err, 'serving preset "old" (values)', f"the guard's message for spec.{field}")
+    # A values preset that turns the runtime's route list off fails the render naming the flag.
+    for flag in ("--disable-fastapi-docs", "--disable-fastapi-docs=true"):
+        doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "nodocs"},
+               "spec": {"displayName": "No docs", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "args": ["--enforce-eager", flag]}}
+        err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="removes the runtime's /openapi.json")
+        need(err, f'serving preset "nodocs" (values): spec.args carries "{flag}"', f"the guard's message for {flag}")
     bad = {"bare JSON in two arguments": ["--default-chat-template-kwargs", '{"enable_thinking": false}'],
            "a space": ["--x=a b"], "a stray single quote": ["--x=it's"], "a double quote": ['--x="a"'],
            "a brace expansion": ["--x={a,b}"], "a variable": ["--x=$HOME"], "a glob": ["--x=*"]}
@@ -651,6 +743,7 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
     ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval ({checked} JSON values parse), none carries a classic field, "
        f"each one's resources.gpus equals its tensor-parallel size, "
        f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
+       f"none carries --disable-fastapi-docs and a values preset with it fails the render naming the flag (the route list model-manager reads the interfaces from); "
        f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
 
 
@@ -691,6 +784,81 @@ def check_presets(connectivity: str) -> None:
        f"requests within a g6.xlarge's {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB; the schema knows spec.template")
 
 
+def family_problems(preset: dict, families: list[dict], runtime: dict, templates: str) -> list[str]:
+    """What is wrong with a preset against the model-family table (files/model-serving/model-families.yaml,
+    giantswarm/agent-platform#313): its family, found by spec.model.id, and the parsers and chat template it must carry."""
+    name, spec = preset["metadata"]["name"], preset["spec"]
+    model = spec["model"]["id"]
+    rows = [f for f in families if re.search(f["match"], model)]
+    if len(rows) != 1:
+        which = "no family row" if not rows else f"{len(rows)} family rows ({', '.join(r['name'] for r in rows)})"
+        return [f"preset {name} serves {model}, which {which} of model-families.yaml matches; add the family's row (its tool-call parsers, "
+                "reasoning parser and chat template from its vLLM recipe) or narrow the matches"]
+    row = rows[0]
+    args = [str(a) for a in spec.get("args") or []]
+    caps = set(spec["model"].get("capabilities") or [])
+    tool = [a.split("=", 1)[1] for a in args if a.startswith("--tool-call-parser=")]
+    reasoning = [a.split("=", 1)[1] for a in args if a.startswith("--reasoning-parser=")]
+    problems = []
+    for parser in tool:
+        if parser not in row["toolCallParsers"]:
+            problems.append(f"preset {name} (family {row['name']}) carries --tool-call-parser={parser}; the family's are {row['toolCallParsers']}")
+    for parser in reasoning:
+        if parser != row["reasoningParser"]:
+            problems.append(f"preset {name} (family {row['name']}) carries --reasoning-parser={parser}; the family's is {row['reasoningParser']}")
+    if "tools" in caps and ("--enable-auto-tool-choice" not in args or not tool):
+        problems.append(f"preset {name} (family {row['name']}) is tagged tools without --enable-auto-tool-choice and a tool-call parser of "
+                        f"{row['toolCallParsers']}: kagent sends tools with tool_choice auto on every turn, which vLLM then refuses with 400")
+    if "reasoning" in caps and not reasoning:
+        problems.append(f"preset {name} (family {row['name']}) is tagged reasoning without --reasoning-parser={row['reasoningParser']}: "
+                        "the thinking comes back inside the answer")
+    chat = spec.get("chatTemplate") or {}
+    if row["chatTemplate"] == "required" and not chat:
+        problems.append(f"preset {name} (family {row['name']}) sets no spec.chatTemplate; the family's checkpoints ship none vLLM serves tools with")
+    if chat.get("file") and not os.path.isfile(os.path.join(templates, chat["file"])):
+        problems.append(f"preset {name} mounts the chat template {chat['file']}, which is not under files/model-serving/chat-templates/")
+    return problems
+
+
+def check_model_families(connectivity: str) -> None:
+    """Every shipped preset against the model-family table: its family's parsers and chat template; every row's parsers
+    registered by the runtime's vLLM; a wrong parser, a missing one and an unknown family fail naming what (#313)."""
+    table = yaml.safe_load(open(f"{connectivity}/files/model-serving/model-families.yaml"))
+    families, runtime = table["families"], table["runtime"]
+    templates = f"{connectivity}/files/model-serving/chat-templates"
+    for row in families:
+        if row.get("chatTemplate") not in ("required", "optional"):
+            sys.exit(f"FAIL: model-families.yaml row {row['name']}: chatTemplate is required or optional, not {row.get('chatTemplate')!r}")
+        if row.get("runtimeImage"):
+            continue  # a family on a runtime image of its own names that vLLM's parsers
+        unknown = [p for p in row["toolCallParsers"] if p not in runtime["toolCallParsers"]]
+        if row["reasoningParser"] not in runtime["reasoningParsers"]:
+            unknown.append(row["reasoningParser"])
+        if unknown:
+            sys.exit(f"FAIL: model-families.yaml row {row['name']} names {unknown}, which vLLM {runtime['vllm']} does not register")
+    files = sorted(glob.glob(f"{connectivity}/files/model-serving/presets/*.yaml"))
+    problems = [p for path in files for p in family_problems(yaml.safe_load(open(path)), families, runtime, templates)]
+    if problems:
+        sys.exit("FAIL: " + "\nFAIL: ".join(problems))
+    # Negative controls: the check names what is wrong.
+    base = yaml.safe_load(open(f"{connectivity}/files/model-serving/presets/qwen3-5-4b.yaml"))
+    controls = {
+        "a tool-call parser the family does not list": (["--enable-auto-tool-choice", "--tool-call-parser=hermes", "--reasoning-parser=qwen3"], "Qwen/Qwen3.5-4B", "--tool-call-parser=hermes; the family's are"),
+        "a tools preset without its parser": (["--reasoning-parser=qwen3"], "Qwen/Qwen3.5-4B", "is tagged tools without --enable-auto-tool-choice"),
+        "a reasoning preset without its parser": (["--enable-auto-tool-choice", "--tool-call-parser=qwen3_coder"], "Qwen/Qwen3.5-4B", "is tagged reasoning without --reasoning-parser=qwen3"),
+        "a family the table lacks": (["--enable-auto-tool-choice", "--tool-call-parser=hermes"], "org/Unknown-7B", "which no family row of model-families.yaml matches"),
+    }
+    for what, (args, model, needle) in controls.items():
+        control = yaml.safe_load(yaml.safe_dump(base))
+        control["spec"]["args"], control["spec"]["model"]["id"] = args, model
+        got = family_problems(control, families, runtime, templates)
+        if not any(needle in p for p in got):
+            sys.exit(f"FAIL: the model-family check passes {what} (got {got})")
+    ok(f"{len(files)} shipped presets carry their family's parsers ({len(families)} rows of model-families.yaml, every parser registered by "
+       f"vLLM {runtime['vllm']}): tools with --enable-auto-tool-choice and a family tool-call parser, reasoning with the family's reasoning parser, "
+       f"every mounted chat template present; a foreign parser, a missing one and an unknown family fail naming preset, family and parser")
+
+
 def resource_requests(text: str, name: str) -> tuple:
     """The preset's requests.cpu (vCPU) and requests.memory (GiB), from the
     authoring form's `resources:` block (quantities as Kubernetes writes them)."""
@@ -709,6 +877,117 @@ def resource_requests(text: str, name: str) -> tuple:
     return vcpu, gib
 
 
+# global.observability.traces.otlp's defaults (endpoint, tenant), which the
+# tracing preset of kserve-runtime-configs follows through agent-platform.shape.otlp.
+GLOBAL_OTLP = "http://otlp-gateway.kube-system.svc:4317"
+TENANT_LABEL = {"observability.giantswarm.io/tenant": "giantswarm"}
+OTLP_POLICY = "agent-platform-connectivity-model-serving-otlp-egress"
+PRESET_ENDPOINT = "kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint"
+
+
+def release_values(render: str, name: str) -> dict:
+    return yaml.safe_load(values_block(documents(render)[("HelmRelease", name)]))
+
+
+def check_tracing(meta: str, connectivity: str) -> None:
+    """The model pods' traces (giantswarm/giantswarm#36711): the tracing preset follows global.observability.traces.otlp, and the egress follows the preset."""
+    profile = ["-f", f"{meta}/examples/serving-slice.yaml", *VM, *INSTALLATION]
+    with open(f"{meta}/values.yaml", encoding="utf-8") as f:
+        rng = yaml.safe_load(f)["components"]["kserve-runtime-configs"]["versionRange"]
+    if rng != "0.6.x":
+        sys.exit(f"FAIL: components.kserve-runtime-configs.versionRange is {rng!r}; 0.6.x is the line that opens kserve.llmisvcConfigs.tracing (giantswarm/kserve#99)")
+
+    def tracing(render: str) -> dict:
+        return release_values(render, "kserve-runtime-configs")["kserve"]["llmisvcConfigs"].get("tracing", {})
+
+    def egress(conn_values: dict, flavor: str) -> tuple:
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            yaml.safe_dump(conn_values, f)
+            path = f.name
+        try:
+            out = helm(connectivity, ["-f", path, "--namespace", "agent-platform", *FLEET_APIS, "--set", f"networkPolicy.flavor={flavor}"])
+        finally:
+            os.unlink(path)
+        kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
+        docs = {k: yaml.safe_load(v) for k, v in documents(out).items()}
+        return docs.get((kind, OTLP_POLICY)), docs
+
+    def cilium_peer(render: str) -> list:
+        policy, _ = egress(release_values(render, "agent-platform-connectivity"), "cilium")
+        return policy["spec"]["egress"][0]["toEndpoints"]
+
+    render = helm(meta, profile)
+    got = tracing(render)
+    want = {"exporterEndpoint": GLOBAL_OTLP, "podLabels": TENANT_LABEL}
+    if got != want:
+        sys.exit(f"FAIL: the kserve-runtime-configs release carries tracing {got}, expected {want} (global.observability.traces.otlp's endpoint and tenant, upstream's sampler)")
+    conn = release_values(render, "agent-platform-connectivity")
+    if conn["modelServing"]["networkPolicy"]["otlpEndpoint"] != GLOBAL_OTLP:
+        sys.exit(f"FAIL: the connectivity release gets modelServing.networkPolicy.otlpEndpoint {conn['modelServing']['networkPolicy']['otlpEndpoint']!r}, expected the preset's {GLOBAL_OTLP}")
+    for flavor in ("cilium", "kubernetes"):
+        policy, docs = egress(conn, flavor)
+        if policy is None:
+            sys.exit(f"FAIL: no {OTLP_POLICY} in the {flavor} flavour: the model pods' exports are dropped")
+        workload = docs[("CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy",
+                         "agent-platform-connectivity-model-serving-llmisvc-workload" + ("" if flavor == "cilium" else "-egress"))]
+        spec, own = policy["spec"], workload["spec"]
+        if flavor == "cilium":
+            if spec["endpointSelector"] != own["endpointSelector"] or policy["metadata"]["namespace"] != "model-serving":
+                sys.exit(f"FAIL: {OTLP_POLICY} selects {spec['endpointSelector']} in {policy['metadata']['namespace']}, not the model pods")
+            expected = [{"toEndpoints": [{"matchLabels": {"io.kubernetes.pod.namespace": "kube-system"}}], "toPorts": [{"ports": [{"port": "4317", "protocol": "TCP"}]}]}]
+        else:
+            if spec["podSelector"] != own["podSelector"] or spec["policyTypes"] != ["Egress"]:
+                sys.exit(f"FAIL: {OTLP_POLICY} selects {spec['podSelector']}, not the model pods, or is not an egress policy")
+            expected = [{"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}}], "ports": [{"port": 4317, "protocol": "TCP"}]}]
+        if spec["egress"] != expected:
+            sys.exit(f"FAIL: {OTLP_POLICY} ({flavor}) egress is {spec['egress']}, expected {expected}")
+    ok(f"tracing preset: exporterEndpoint {GLOBAL_OTLP} and the tenant pod label from global.observability.traces.otlp, upstream's sampler; {OTLP_POLICY} opens kube-system:4317 to the model pods, both flavours")
+
+    moved = helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint=http://collector.tracing.svc:4317", "--set", "global.observability.traces.otlp.tenant=acme"])
+    if tracing(moved) != {"exporterEndpoint": "http://collector.tracing.svc:4317", "podLabels": {"observability.giantswarm.io/tenant": "acme"}}:
+        sys.exit(f"FAIL: the tracing preset does not follow global.observability.traces.otlp: {tracing(moved)}")
+    if cilium_peer(moved) != [{"matchLabels": {"io.kubernetes.pod.namespace": "tracing"}}]:
+        sys.exit(f"FAIL: the model pods' egress does not follow global.observability.traces.otlp.endpoint: {cilium_peer(moved)}")
+    untenanted = tracing(helm(meta, [*profile, "--set", "global.observability.traces.otlp.tenant="]))
+    if "observability.giantswarm.io/tenant" in (untenanted.get("podLabels") or {}):
+        sys.exit(f"FAIL: an empty tenant still labels the model pods: {untenanted}")
+    ip = release_values(helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint=http://10.0.0.5:4317"]), "agent-platform-connectivity")
+    if egress(ip, "cilium")[0]["spec"]["egress"][0].get("toEntities") != ["cluster"]:
+        sys.exit("FAIL: an endpoint outside a Service address should open the cluster entity")
+    if egress(ip, "kubernetes")[0]["spec"]["egress"][0]["to"] != [{"ipBlock": {"cidr": "0.0.0.0/0"}}]:
+        sys.exit("FAIL: an endpoint outside a Service address should open an ipBlock in the kubernetes flavour")
+    ok("the preset follows global.observability.traces.otlp's endpoint and tenant (an empty tenant drops the label), the egress follows the endpoint; an address outside a Service opens the cluster entity / an ipBlock")
+
+    own = helm(meta, [*profile, "--set", f"{PRESET_ENDPOINT}=http://other.tracing2.svc:4317"])
+    if tracing(own)["exporterEndpoint"] != "http://other.tracing2.svc:4317" or cilium_peer(own) != [{"matchLabels": {"io.kubernetes.pod.namespace": "tracing2"}}]:
+        sys.exit(f"FAIL: an explicit preset endpoint must win and move the egress with it: {tracing(own)}, {cilium_peer(own)}")
+    pinned = helm(meta, [*profile, "--set", "modelServing.networkPolicy.otlpEndpoint=http://sidecar.tracing3.svc:4317"])
+    if tracing(pinned)["exporterEndpoint"] != GLOBAL_OTLP or cilium_peer(pinned) != [{"matchLabels": {"io.kubernetes.pod.namespace": "tracing3"}}]:
+        sys.exit("FAIL: an explicit modelServing.networkPolicy.otlpEndpoint must change the egress alone")
+    ok(f"an explicit {PRESET_ENDPOINT} wins and the egress follows it; an explicit modelServing.networkPolicy.otlpEndpoint changes the egress alone")
+
+    helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint=http://collector.tracing.svc:4318", "--set", "global.observability.traces.otlp.protocol=http/protobuf"],
+         expect_failure=PRESET_ENDPOINT)
+    helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint=http://collector.tracing.svc:4318", "--set", "global.observability.traces.otlp.protocol=http/protobuf",
+                "--set", f"{PRESET_ENDPOINT}=http://collector.tracing.svc:4317"])
+    standalone = dict(conn, modelServing={**conn["modelServing"], "networkPolicy": {**conn["modelServing"]["networkPolicy"], "otlpEndpoint": "auto"}},
+                      **{"global": {**conn["global"], "observability": {**conn["global"]["observability"], "traces": {"otlp": {"endpoint": "http://collector.tracing.svc:4318", "protocol": "http/protobuf"}}}}})
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(standalone, f)
+        path = f.name
+    try:
+        helm(connectivity, ["-f", path, "--namespace", "agent-platform", *FLEET_APIS], expect_failure="modelServing.networkPolicy.otlpEndpoint")
+    finally:
+        os.unlink(path)
+    empty = helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint="])
+    if "exporterEndpoint" in tracing(empty):
+        sys.exit(f"FAIL: an empty global endpoint still set the preset's: {tracing(empty)}")
+    none = release_values(empty, "agent-platform-connectivity")
+    for flavor in ("cilium", "kubernetes"):
+        if egress(none, flavor)[0] is not None:
+            sys.exit(f"FAIL: {OTLP_POLICY} renders ({flavor}) with no OTLP endpoint")
+    ok(f"an http/protobuf global fails naming {PRESET_ENDPOINT} (an explicit gRPC preset endpoint passes) and, in the connectivity chart alone, modelServing.networkPolicy.otlpEndpoint; no endpoint, no preset endpoint (upstream's) and no egress policy")
+
 def check_prepull_prefix(meta: str, connectivity: str) -> None:
     """The pre-pull's runtime image is the well-known config's llm-d-cuda at the prefix the slice passes (#568)."""
     with open(f"{meta}/values.yaml", encoding="utf-8") as f:
@@ -725,6 +1004,7 @@ def check_prepull_prefix(meta: str, connectivity: str) -> None:
 def main(meta: str, connectivity: str) -> int:
     check_prepull_prefix(meta, connectivity)
     forwarded = check_profile(meta)
+    check_tracing(meta, connectivity)
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
         f.write(forwarded)
         values = f.name
@@ -740,6 +1020,7 @@ def main(meta: str, connectivity: str) -> int:
     finally:
         os.unlink(values)
     check_presets(connectivity)
+    check_model_families(connectivity)
     return 0
 
 

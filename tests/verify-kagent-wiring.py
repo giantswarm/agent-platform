@@ -40,13 +40,15 @@ time, in the child HelmRelease or in the running controller:
     HelmRelease CRD does not know: the 4.8.0 upgrade adopts the platform Harness
     the connectivity chart (through 4.7.19) left in place through helm.sh/resource-policy: keep
     (giantswarm/agent-platform#406 step 2);
-  * a kagent or muster release without drift detection (spec.driftDetection.mode:
-    enabled): a plain reconcile of an unchanged release reports "in-sync", so the
+  * a kagent, muster or kserve-runtime-configs release without drift detection
+    (spec.driftDetection.mode: enabled): a plain reconcile of an unchanged release reports "in-sync", so the
     platform Harness a consumer skipping 4.7.19 loses on the 4.8.0 upgrade would
     stay deleted until a values change or a forced reconcile
     (giantswarm/agent-platform#409), and a muster CiliumNetworkPolicy left
     drifted by the agentic-platform -> agent-platform rename would stay drifted
-    across every upgrade (giantswarm/agent-platform#287); or drift detection on
+    across every upgrade (giantswarm/agent-platform#287), and a well-known
+    LLMInferenceServiceConfig gone missing would stay missing
+    (giantswarm/agent-platform#508); or drift detection on
     another release by default — a decision per release, its objects must
     tolerate the re-apply.
 
@@ -315,14 +317,14 @@ def check_retired_keys(values: dict[str, list[str]], conn_kagent: str) -> None:
         fail(f"the 0.10 wrapper's bundled example agents are still forwarded: {', '.join(left)}; the line ships none")
     controller = "\n".join(values.get("controller", []))
     if "METRICS_" in controller:
-        fail("METRICS_* env forwarded to the controller; the line serves no Prometheus /metrics")
-    if not re.search(r"^metrics:\nenabled: false$", controller, re.M):
-        fail("kagent.controller.metrics.enabled is not false; the upstream chart's knob renders a Service to a port the line's controller never serves")
+        fail("METRICS_* env forwarded to the controller; the chart renders both variables from controller.metrics, and a second entry of the same name renders the variable twice")
+    if not re.search(r"^metrics:\n(?:.*\n)*?enabled: true$", controller, re.M):
+        fail("kagent.controller.metrics.enabled is not true; the chart's knob is what renders the metrics Service, the METRICS_* env and the ServiceMonitor over them")
     if "skillsInitImage" in controller:
         fail("kagent.controller.skillsInitImage forwarded; the line has no skills-init image")
-    if not re.search(r"^  serviceMonitor:\n    enabled: false$", conn_kagent, re.M):
-        fail("kagent.serviceMonitor.enabled is not false in the values the connectivity chart receives; the monitor would scrape a refused port")
-    print("ok: no example agent, no METRICS_* env, controller metrics and the ServiceMonitor off")
+    if re.search(r"^  serviceMonitor:$", conn_kagent, re.M):
+        fail("kagent.serviceMonitor is still forwarded to the connectivity chart; the controller's monitor is the kagent chart's own (controller.metrics.serviceMonitor)")
+    print("ok: no example agent, no METRICS_* env, the controller's metrics and its own ServiceMonitor on")
 
 
 def check_substrate_pins(docs) -> None:
@@ -363,21 +365,26 @@ DRIFT_DETECTION = {
     "muster": "a CiliumNetworkPolicy the agentic-platform -> agent-platform rename left pointing at the old namespace "
               "would stay drifted across every upgrade, with muster's egress to Valkey denied "
               "(giantswarm/agent-platform#287)",
+    "kserve-runtime-configs": "a well-known LLMInferenceServiceConfig that went missing (a torn-down slice's controller "
+                              "finished deleting it under a release it had adopted) would stay missing, the release "
+                              "in-sync, every LLMInferenceService composed from it ConfigNotFound "
+                              "(giantswarm/agent-platform#508)",
 }
 
 
 def check_drift_detection(docs) -> None:
-    """The kagent and muster releases detect and correct drift
-    (giantswarm/agent-platform#409, #287): with spec.driftDetection.mode: enabled
+    """The kagent, muster and kserve-runtime-configs releases detect and correct drift
+    (giantswarm/agent-platform#409, #287, #508): with spec.driftDetection.mode: enabled
     helm-controller re-applies, on every reconcile, what differs from the release manifest or
     is missing — the platform Harness a skipped 4.7.19 loses on the 4.8.0 upgrade, and a
-    muster object an operator or a rename edited away from its manifest — as a server-side
+    muster object an operator or a rename edited away from its manifest, a well-known
+    LLMInferenceServiceConfig deleted from under its release — as a server-side
     apply, with no forced reconcile and no Helm revision. Off (helm-controller's default) a
     plain reconcile of the unchanged release reports in-sync and corrects nothing; Helm's
     three-way merge does not correct it either, because it only patches what changed between
     two release manifests. Per release, not fleet-wide: every other component keeps the
     default until its objects are known to tolerate the re-apply, so a driftDetection block
-    on another release is a deliberate values change, never a side effect of these two."""
+    on another release is a deliberate values change, never a side effect of these three."""
     for (kind, name), lines in docs.items():
         if kind != "HelmRelease":
             continue
