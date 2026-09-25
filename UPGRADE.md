@@ -4,7 +4,7 @@ Operator action required between releases. CHANGELOG.md captures the diff; UPGRA
 
 ## \<current\> → \<next\> (the managers, the portal and mcp-kubernetes export traces)
 
-giantswarm/giantswarm#36711: model-manager, agent-manager, vm-manager, cluster-manager, backstage and mcp-kubernetes export their traces over OTLP to `global.observability.traces.otlp`, and their ranges start at the releases that do (model-manager `1.3.0`, agent-manager `1.2.0`, vm-manager `0.24.0`, cluster-manager `0.19.0`, backstage `2.67.0`, mcp-kubernetes `1.3.0`).
+giantswarm/giantswarm#36711: model-manager, agent-manager, vm-manager, cluster-manager, backstage and mcp-kubernetes export their traces over OTLP to `global.observability.traces.otlp`, and their ranges start at the releases that do (model-manager `1.3.0`, agent-manager `1.2.0`, vm-manager `0.24.0`, cluster-manager `0.19.0`, backstage `2.68.0`, mcp-kubernetes `1.3.0`).
 
 ### Operator action
 

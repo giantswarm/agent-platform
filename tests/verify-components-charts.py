@@ -114,12 +114,13 @@ KAGENT = ["kagent-crds", "kagent"]
 # line has (see fallback()); the entry goes when the release exists.
 UNRELEASED: dict[str, str] = {
     "agent-manager": "1.2.0",
-    "backstage": "2.67.0",
+    "backstage": "2.68.0",
 }
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
 RENDER_AGAINST: dict[str, str] = {
+    "agent-manager": "1.1.22-r33bae384t20260925101317hed8f308",
     "backstage": "2.66.4-r33bae384t20260925102117hd771c93",
 }
 # The layer every OCIRepository of the meta chart selects, and the manifest

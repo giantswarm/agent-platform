@@ -175,7 +175,7 @@ COMPONENT_TRACES_HOLD = [
     "--set", "components.model-manager.versionRange=>=1.3.0 <2.0.0",
     "--set", "components.agent-manager.versionRange=>=1.2.0 <2.0.0",
     "--set", "components.cluster-manager.versionRange=>=0.19.0 <1.0.0",
-    "--set", "components.backstage.versionRange=>=2.67.0 <3.0.0",
+    "--set", "components.backstage.versionRange=>=2.68.0 <3.0.0",
     "--set", "components.mcp-kubernetes.versionRange=>=1.3.0 <2.0.0",
     "--set", "model-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
     "--set", "model-manager.observability.otel.protocol=grpc",

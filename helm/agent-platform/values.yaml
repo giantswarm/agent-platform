@@ -915,10 +915,10 @@ components:  # @schema additionalProperties: true
     # range spans both majors so the component resolves the complete portal,
     # not the 1.2.0 without the backend. Bounded below 3.0.0: the next major
     # is the next cut-over.
-    # The floor is 2.67.0: the image preloads the OpenTelemetry SDK and the
+    # The floor is 2.68.0: the image preloads the OpenTelemetry SDK and the
     # chart takes observability.otel, the OTLP trace export
     # global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=2.67.0 <3.0.0"
+    versionRange: ">=2.68.0 <3.0.0"
     valuesFrom: backstage
     # The backstage chart validates its values with additionalProperties: false,
     # and these keys are not its own: the connectivity chart reads them for the

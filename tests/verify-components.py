@@ -60,7 +60,7 @@ GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 # component -> (repository, versionRange, dependsOn, a line only the standalone's
 # defaults put into the forwarded values, or None when the block is empty)
 NEW = {
-    "backstage": (GSOCI, ">=2.67.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
+    "backstage": (GSOCI, ">=2.68.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
     "mcp-kubernetes": (GSOCI, ">=1.3.0 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts", "0.29.x", [], "repository: gsoci.azurecr.io/giantswarm/cloudnative-pg"),
     "kserve-llmisvc-crd": (GSOCI, "0.5.x", [], None),

@@ -420,7 +420,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.backstage.versionRange | string | `">=2.67.0 <3.0.0"` |  |
+| components.backstage.versionRange | string | `">=2.68.0 <3.0.0"` |  |
 | components.backstage.valuesFrom | string | `"backstage"` |  |
 | components.backstage.omitKeys[0] | string | `"hostname"` |  |
 | components.backstage.omitKeys[1] | string | `"parentRefs"` |  |
