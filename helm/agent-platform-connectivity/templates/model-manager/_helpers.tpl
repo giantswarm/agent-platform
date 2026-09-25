@@ -38,6 +38,19 @@ instead of a silent 503.
 {{- end -}}
 
 {{/*
+The ServiceAccount model-manager runs as, the model-manager chart's rule:
+serviceAccount.name, else the fullname while the chart creates it, else default.
+*/}}
+{{- define "agent-platform.modelManager.serviceAccountName" -}}
+{{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
+{{- if dig "serviceAccount" "create" true $chart -}}
+{{- dig "serviceAccount" "name" "" $chart | default (include "agent-platform.modelManager.fullname" .) -}}
+{{- else -}}
+{{- dig "serviceAccount" "name" "" $chart | default "default" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The port the model-manager Service listens on (model-manager.service.port, default 8080).
 */}}
 {{- define "agent-platform.modelManager.servicePort" -}}

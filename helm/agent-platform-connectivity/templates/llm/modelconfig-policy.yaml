@@ -10,10 +10,10 @@ its feature gate, so the policy would exist and mutate nothing. An absent object
 is honest; a silent one is not. Confirm with:
 
   kubernetes_feature_enabled{name="MutatingAdmissionPolicy", job="apiserver"} */ -}}
-{{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" .Values.llmRouting.backend.provider }}
+{{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" (include "agent-platform.llmRouting.provider" .) }}
 {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled $urlKey (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
-{{- $provider := lower .Values.llmRouting.backend.provider }}
+{{- $provider := include "agent-platform.llmRouting.provider" . }}
 {{- $name := printf "%s-modelconfig-llm-routing" (include "name" .) }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicy

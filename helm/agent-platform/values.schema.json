@@ -1009,6 +1009,18 @@
                                 }
                             }
                         },
+                        "api_key": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "expression": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "user": {
                             "type": "object",
                             "additionalProperties": false,
@@ -1708,20 +1720,71 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "backend": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "external": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                        "name": {
+                        "apiKeys": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "configMapSelector": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "matchLabels": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "secretRef": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "name": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "secretSelector": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "matchLabels": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "hostPrefix": {
                             "type": "string"
                         },
-                        "provider": {
-                            "type": "string"
+                        "listener": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "integer"
+                                }
+                            }
                         }
                     }
-                },
-                "enabled": {
-                    "type": "boolean"
                 },
                 "listener": {
                     "type": "object",
@@ -1969,26 +2032,54 @@
                         }
                     }
                 },
-                "pathPrefixes": {
+                "models": {
                     "type": "array",
                     "items": {
-                        "type": "string"
-                    }
-                },
-                "routes": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "*": {
-                            "type": "string"
-                        },
-                        "/v1/messages": {
-                            "type": "string"
-                        },
-                        "/v1/messages/count_tokens": {
-                            "type": "string"
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "baseURL": {
+                                "type": "string",
+                                "pattern": "^https?://[^/]+/.+"
+                            },
+                            "match": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string",
+                                "maxLength": 63,
+                                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+                            },
+                            "provider": {
+                                "type": "string",
+                                "enum": [
+                                    "Anthropic",
+                                    "Baseten",
+                                    "Cerebras",
+                                    "Cohere",
+                                    "Deepinfra",
+                                    "Deepseek",
+                                    "Fireworks",
+                                    "Gemini",
+                                    "Groq",
+                                    "Huggingface",
+                                    "Mistral",
+                                    "OpenAI",
+                                    "Openrouter",
+                                    "TogetherAI",
+                                    "XAI"
+                                ]
+                            },
+                            "visibility": {
+                                "type": "string",
+                                "enum": [
+                                    "Public",
+                                    "Internal"
+                                ]
+                            }
                         }
-                    }
+                    },
+                    "minItems": 1
                 }
             }
         },

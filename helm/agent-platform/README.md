@@ -567,18 +567,25 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.metricLabels.agent_namespace.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-namespace\"] : source.unverifiedWorkload.namespace"` |  |
 | gateway.metricLabels.user.enabled | bool | `true` |  |
 | gateway.metricLabels.user.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-user\"] : jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
+| gateway.metricLabels.api_key.enabled | bool | `true` |  |
+| gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
 | llmRouting.enabled | bool | `false` |  |
 | llmRouting.listener.name | string | `"llm"` |  |
 | llmRouting.listener.port | int | `8081` |  |
-| llmRouting.backend.name | string | `"anthropic"` |  |
-| llmRouting.backend.provider | string | `"anthropic"` |  |
-| llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
-| llmRouting.routes./v1/messages | string | `"Messages"` |  |
-| llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
-| llmRouting.routes.* | string | `"Passthrough"` |  |
+| llmRouting.models[0].name | string | `"anthropic"` |  |
+| llmRouting.models[0].provider | string | `"Anthropic"` |  |
+| llmRouting.models[0].baseURL | string | `"https://api.anthropic.com/v1"` |  |
+| llmRouting.models[0].match | string | `"claude-*"` |  |
+| llmRouting.external.enabled | bool | `false` |  |
+| llmRouting.external.hostPrefix | string | `"llm"` |  |
+| llmRouting.external.listener.name | string | `"llm-external"` |  |
+| llmRouting.external.listener.port | int | `8082` |  |
+| llmRouting.external.apiKeys.secretRef.name | string | `""` |  |
+| llmRouting.external.apiKeys.secretSelector.matchLabels | object | `{}` |  |
+| llmRouting.external.apiKeys.configMapSelector.matchLabels | object | `{}` |  |
 | llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |

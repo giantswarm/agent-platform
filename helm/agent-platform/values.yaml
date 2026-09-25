@@ -1532,6 +1532,13 @@ gateway:
     user:
       enabled: true
       expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-user"] : jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
+    # The API key behind a call on the external LLM endpoint
+    # (llmRouting.external): the key entry's metadata.name. Held — rendered
+    # only — while that endpoint's route verifies API keys, like a jwt label
+    # while a route verifies a bearer.
+    api_key:
+      enabled: true
+      expression: apiKey.name
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -1561,7 +1568,7 @@ gatewayApi:
 #
 # Two values turn it on, and the order matters:
 #   1. llmRouting.enabled: true  — renders the `llm` listener on the data-plane
-#      Gateway plus the AgentgatewayBackend / HTTPRoute / AgentgatewayPolicy
+#      Gateway plus the AgentgatewayModels attached to it (llmRouting.models)
 #      that carry the traffic, and the model-price ConfigMap. Nothing routes
 #      through it yet.
 #   2. kagent.providers.anthropic.config.baseUrl:
@@ -1576,37 +1583,76 @@ llmRouting:
   enabled: false
   # One more entry in the data-plane Gateway's listener list. HTTP and
   # cluster-internal: the data-plane NetworkPolicy admits world traffic on 443
-  # only, and the LLM HTTPRoute pins itself to this listener by sectionName so
-  # it never attaches to the public HTTPS listener in edge mode.
+  # only, and every model attaches to this listener directly by sectionName —
+  # no HTTPRoute and no path prefix: a listener-attached model matches the
+  # serving endpoints (/v1/messages, /v1/chat/completions, ...), which
+  # outrank the agent-platform-mcps catch-all, and never the public HTTPS
+  # listener in edge mode.
   listener:
     name: llm
     port: 8081
-  # The Anthropic AgentgatewayBackend. No host, port or model override: the
-  # provider defaults resolve to api.anthropic.com:443 with system-trust TLS
-  # and the /v1/messages path suffix. No backend auth — see above.
-  backend:
-    name: anthropic
-    provider: anthropic
-  # Client path prefixes the LLM HTTPRoute matches. They must be MORE specific
-  # than `/`: agent-platform-mcps renders a catch-all route on the same Gateway
-  # that attaches to every listener, and on an equal match the older,
-  # alphabetically earlier MCP route wins — every inference call would answer
-  # `mcp: client must accept both application/json and text/event-stream`.
-  # Character count in the path match outranks those tiebreaks, so one prefix
-  # covering the provider's API is enough (`/v1` for Anthropic and every
-  # OpenAI-compatible provider). A path outside these prefixes reaches the MCP
-  # backend, not the provider.
-  pathPrefixes:
-    - /v1
-  # Client path -> body format the gateway parses, on the Gateway-scoped
-  # AgentgatewayPolicy. Mandatory: without it an `ai` backend parses every body
-  # as OpenAI Completions and mis-parses Anthropic bodies. Keys match the client
-  # path by suffix, so the "*" entry forwards every other path unchanged
-  # instead of falling back to Completions.
-  routes:  # @schema type: object; additionalProperties: true
-    "/v1/messages": Messages
-    "/v1/messages/count_tokens": AnthropicTokenCount
-    "*": Passthrough
+  # The models the listener serves, picked by the request's `model` (the
+  # model router: every AgentgatewayModel attached to the listener is a
+  # candidate). One
+  # AgentgatewayModel per entry: `name` (a DNS label, the object's name),
+  # `provider` (an agentgateway managed provider: Anthropic, OpenAI, Gemini,
+  # ...), `baseURL` (the provider's API origin WITH its version path,
+  # https://api.anthropic.com/v1: agentgateway 2.1 builds the upstream path
+  # from the baseURL's path plus the format's suffix, and a model without one
+  # sends Anthropic `/messages`), `match` (the model names it takes: exact,
+  # `claude-*`, `*-latest`; empty matches `name` alone) and `visibility`
+  # (Public, or Internal for a model only a virtual model selects). No
+  # credential: TLS against system trust, and a client's own key passes
+  # through untouched, so reach to the listener grants no spend. Candidates are tried in name order and the first
+  # whose `match` takes the model wins, so a `*` entry would shadow every model
+  # named after it — a served model (model-manager, the LLMEndpoint
+  # document) joins under its preset's name. The first entry's
+  # provider is the one whose ModelConfigs ride the listener
+  # (kagent.modelConfigs, modelConfigPolicy).
+  models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "baseURL": {"type": "string", "pattern": "^https?://[^/]+/.+"}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
+    - name: anthropic
+      provider: Anthropic
+      baseURL: https://api.anthropic.com/v1
+      match: claude-*
+  # The LLM endpoint outside the cluster (llmRouting.external): a public
+  # hostname, <hostPrefix>.<global.domain>, with a route of its own on the
+  # data plane that every model of the endpoint also attaches to, behind API
+  # keys (mode Strict: a request without a valid key answers 401). The route
+  # matches `/` (a root model route: the hostname outranks the hostname-less
+  # MCP catch-all, and nothing version-like is stripped), and the
+  # agentgateway controller refuses one on a listener with directly attached
+  # models, so it never shares the LLM listener: where the chart owns the
+  # edge (gatewayApi.gateway.create) it is on the data plane's HTTPS
+  # listener; else on `listener`, a data-plane listener of its own (HTTP,
+  # routes of the release namespace), to which a route on
+  # global.gatewayApi.parentRefs forwards the hostname. The in-cluster
+  # listener stays credential-free as it is. `apiKeys` sets exactly one
+  # source in the release namespace, the installation's own: `secretRef.name`
+  # (a Secret whose entries are keys or {"key"|"keyHash", "metadata"}),
+  # `secretSelector.matchLabels` or `configMapSelector.matchLabels` (a
+  # ConfigMap's entries must be {"keyHash": "sha256:<hex>", "metadata":
+  # {...}}). Give every entry `"metadata": {"name": "<who>"}`: the data
+  # plane's metrics carry it as the `api_key` label
+  # (gateway.metricLabels.api_key). A key reaches every model on the
+  # endpoint — agentgateway does not enforce a key's allowedModels on the
+  # Kubernetes API-key contract yet (giantswarm/giantswarm#37742) — so a paid
+  # provider model next to consumer keys is the installation's decision.
+  external:
+    enabled: false
+    hostPrefix: llm
+    # The external route's data-plane listener behind a public Gateway; not
+    # rendered with the chart's own edge. Its port is the public forwarder's
+    # target and must differ from every other listener's.
+    listener:
+      name: llm-external
+      port: 8082
+    apiKeys:
+      secretRef:
+        name: ""
+      secretSelector:
+        matchLabels: {}  # @schema additionalProperties: {"type": "string"}
+      configMapSelector:
+        matchLabels: {}  # @schema additionalProperties: {"type": "string"}
   # A MutatingAdmissionPolicy that sends a ModelConfig the connectivity chart
   # does NOT render through the LLM listener — one created by Backstage,
   # agent-manager or kubectl. Rendered only on Kubernetes 1.36 and later, where
