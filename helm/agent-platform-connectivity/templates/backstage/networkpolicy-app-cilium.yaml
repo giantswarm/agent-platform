@@ -60,6 +60,9 @@ spec:
               protocol: TCP
   egress:
     {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $backstage "who" "the portal's traces go to" "flavor" "cilium") }}
+    {{- . | nindent 4 }}
+    {{- end }}
     # The Kubernetes API: the portal's Clusters and Kubernetes pages, and the
     # Agent Platform pages' Flux writes, act as the caller.
     - toEntities:

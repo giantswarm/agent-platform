@@ -776,8 +776,8 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # model-manager stays on its 0.x line through the kagent API v2 change: it
     # renders its ModelConfigs at the kagent.dev version the cluster serves,
-    # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74). The floor is
-    # 1.0.8 (giantswarm/model-manager#157): the release that writes
+    # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74). 1.0.8
+    # (giantswarm/model-manager#157) is the release that writes
     # spec.ollama.options.num_ctx on every Ollama ModelConfig it wires, so an
     # agent prompt is not cut to Ollama's VRAM-tiered default of 4096 tokens on
     # a host with less than 24 GiB of VRAM. It carries 0.23.0's GPU node pool
@@ -787,7 +787,9 @@ components:  # @schema additionalProperties: true
     # LLMInferenceServices only (the classic InferenceService kind and its
     # kserve.servingKind / kserve.runtime values are gone), and nothing this
     # chart forwards names either, so the 0.24 → 1.0 move rolls on its own.
-    versionRange: ">=1.0.8 <2.0.0"
+    # The floor is 1.3.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=1.3.0 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -811,7 +813,9 @@ components:  # @schema additionalProperties: true
     # composes agents for kagent 0.10 (v1alpha2) and never meets this chart.
     # Until 1.0.0 is published the range resolves nothing (the component is
     # off by default; a lab follows a branch build through semverFilter).
-    versionRange: "1.x"
+    # The floor is 1.2.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=1.2.0 <2.0.0"
     valuesFrom: agent-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -837,7 +841,9 @@ components:  # @schema additionalProperties: true
     # guest-image job failed; 0.19.x were on ghcr.io, with the guest image as
     # a node path). The ceiling stays the next major, so minor releases roll
     # on their own.
-    versionRange: ">=0.22.0 <1.0.0"
+    # The floor is 0.24.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=0.24.0 <1.0.0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -865,7 +871,9 @@ components:  # @schema additionalProperties: true
     # that does not exist is refused naming it, get_info reports clusterApi and
     # the real version); the ceiling stays the next major, so minor releases
     # roll on their own.
-    versionRange: ">=0.4.2 <1.0.0"
+    # The floor is 0.19.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=0.19.0 <1.0.0"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -907,7 +915,10 @@ components:  # @schema additionalProperties: true
     # range spans both majors so the component resolves the complete portal,
     # not the 1.2.0 without the backend. Bounded below 3.0.0: the next major
     # is the next cut-over.
-    versionRange: ">=1.0.0 <3.0.0"
+    # The floor is 2.67.0: the image preloads the OpenTelemetry SDK and the
+    # chart takes observability.otel, the OTLP trace export
+    # global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=2.67.0 <3.0.0"
     valuesFrom: backstage
     # The backstage chart validates its values with additionalProperties: false,
     # and these keys are not its own: the connectivity chart reads them for the
@@ -940,10 +951,12 @@ components:  # @schema additionalProperties: true
     # presenting the forwarded token to the kube-apiserver. Registered with
     # muster through an MCPServer CR the connectivity chart renders.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # Floor 1.1.1: the mcp-kubernetes block below leaves the issuer, client,
-    # Secret and CA to the chart's global.identity fallbacks, which a chart
-    # before 1.1.1 does not have. The next major is the ceiling.
-    versionRange: ">=1.1.1 <2.0.0"
+    # The mcp-kubernetes block below leaves the issuer, client, Secret and CA
+    # to the chart's global.identity fallbacks (from 1.1.1). The floor is
+    # 1.3.0: the chart takes mcpKubernetes.instrumentation.otlpProtocol and
+    # .otlpHeaders, so its traces reach the collector's gRPC endpoint with the
+    # tenant header (giantswarm/giantswarm#36711). The next major is the ceiling.
+    versionRange: ">=1.3.0 <2.0.0"
     valuesFrom: mcp-kubernetes
     # The connectivity chart's key, not the chart's (which validates strictly):
     # the audience muster requests for the forwarded token, read for the
@@ -3860,6 +3873,13 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # off; the connectivity chart renders the policies (modelManager below).
 model-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: model-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   # No backend is configured here: model-manager (>= 0.22.0) starts with none
   # and the backends — Ollama, LM Studio, Lemonade, KServe — are registered at
   # runtime as labelled ConfigMaps in its namespace (the add_backend tool, the
@@ -4097,6 +4117,13 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
 # the connectivity chart renders the policies (vmManager below).
 vm-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: vm-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   persistence:
     existingClaim: ""
     create: false
@@ -4187,6 +4214,13 @@ vmManager:  # @schema skipProperties: true; additionalProperties: true
 # (agentManager below).
 agent-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: agent-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   kagent:
     namespace: kagent
     # Pinned as model-manager's: the one version the 4.x line serves, and the
@@ -4386,6 +4420,13 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
 # it or the render fails).
 cluster-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: cluster-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   installation:
     name: ""
   mcp:
@@ -4534,6 +4575,13 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # configReload. Their meaning is documented in the connectivity chart's
 # values.yaml; the defaults are the standalone's.
 backstage:  # @schema skipProperties: true; additionalProperties: true
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   # --- Wiring (read by the connectivity chart, not passed to the backstage chart) ---
   # Public hostname; empty derives backstage.<global.domain>.
   hostname: ""
@@ -4652,6 +4700,14 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: mcp-kubernetes
   mcpKubernetes:
     instrumentation:
+      # OTLP trace export: `auto` takes global.observability.traces.otlp
+      # (otlpEndpoint as host:port, otlpInsecure from its scheme, otlp as the
+      # exporter while it is set, the tenant as X-Scope-OrgID next to headers).
+      tracingExporter: auto
+      otlpEndpoint: auto
+      otlpInsecure: auto
+      otlpProtocol: auto
+      otlpHeaders: auto
       # The chart serves /metrics on its own port whatever this holds
       # (mcpKubernetes.metrics, on by default); this renders the monitor that
       # collects it. `auto` follows the resolved

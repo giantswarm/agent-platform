@@ -160,10 +160,43 @@ MCP_KUBERNETES_MONITORING_HOLD = [
 # forwarded values and the range compare equal; dropped once GOLDEN_REF
 # carries them.
 VM_MANAGER_MONITOR_HOLD = [
-    "--set", "components.vm-manager.versionRange=>=0.22.0 <1.0.0",
+    "--set", "components.vm-manager.versionRange=>=0.24.0 <1.0.0",
     "--set", "vm-manager.serviceMonitor.enabled=false",
     "--set", "vm-manager.serviceMonitor.interval=60s",
     "--set", "vm-manager.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
+]
+# giantswarm/giantswarm#36711: the managers', the portal's and mcp-kubernetes'
+# OTLP trace keys, which this tree derives from global.observability.traces.otlp
+# and GOLDEN_REF's blocks do not carry (open blocks, so they forward as
+# written), and the floors of the releases that take them. Written on BOTH
+# sides with the values this tree derives by default; dropped once GOLDEN_REF
+# carries them.
+COMPONENT_TRACES_HOLD = [
+    "--set", "components.model-manager.versionRange=>=1.3.0 <2.0.0",
+    "--set", "components.agent-manager.versionRange=>=1.2.0 <2.0.0",
+    "--set", "components.cluster-manager.versionRange=>=0.19.0 <1.0.0",
+    "--set", "components.backstage.versionRange=>=2.67.0 <3.0.0",
+    "--set", "components.mcp-kubernetes.versionRange=>=1.3.0 <2.0.0",
+    "--set", "model-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "model-manager.observability.otel.protocol=grpc",
+    "--set", "model-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "agent-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "agent-manager.observability.otel.protocol=grpc",
+    "--set", "agent-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "vm-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "vm-manager.observability.otel.protocol=grpc",
+    "--set", "vm-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "cluster-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "cluster-manager.observability.otel.protocol=grpc",
+    "--set", "cluster-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "backstage.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "backstage.observability.otel.protocol=grpc",
+    "--set", "backstage.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.tracingExporter=otlp",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint=otlp-gateway.kube-system.svc:4317",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpInsecure=true",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpProtocol=grpc",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpHeaders=X-Scope-OrgID=giantswarm",
 ]
 # giantswarm/kserve#88, giantswarm/giantswarm#36711: the llmisvc controller's
 # ServiceMonitor and plain-HTTP metrics, keys GOLDEN_REF's
@@ -799,8 +832,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the klaus-gateway no-op key removal (#636) since 4.62.0.
         golden_only = {meta: [], connectivity: []}
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),

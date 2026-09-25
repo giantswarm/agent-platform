@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the managers, the portal and mcp-kubernetes export traces)
+
+giantswarm/giantswarm#36711: model-manager, agent-manager, vm-manager, cluster-manager, backstage and mcp-kubernetes export their traces over OTLP to `global.observability.traces.otlp`, and their ranges start at the releases that do (model-manager `1.3.0`, agent-manager `1.2.0`, vm-manager `0.24.0`, cluster-manager `0.19.0`, backstage `2.67.0`, mcp-kubernetes `1.3.0`).
+
+### Operator action
+
+- **None** for an installation on the defaults: each component resolves the new release in its range and starts exporting to the platform's collector under its tenant.
+- **A BOM that pins one of the six** below its new floor: pin the floor (`examples/customer-bom.yaml`).
+- **An installation that sets a component's OTLP keys itself** (`<component>.observability.otel.*`, `mcp-kubernetes.mcpKubernetes.instrumentation.otlp*` / `.tracingExporter`): the explicit value wins, and its egress rule follows it. To follow the platform's collector, delete it.
+- **Recognising it worked**: `sum by (service) (increase(traces_spanmetrics_calls_total{service=~"model-manager|agent-manager|vm-manager|cluster-manager|backstage|mcp-kubernetes"}[1h]))` is non-zero once each component served a request.
+
 ## \<current\> → \<next\> (`global.observability.traces.otlp` is the collector of every exporter, not only the data plane's)
 
 giantswarm/giantswarm#36711: `global.observability.traces.otlp` used to reach the agentgateway data plane only, empty by default, and a set endpoint won over `gateway.parameters.dataPlaneEnv`. It now names the collector of every exporter of the platform: its default is `endpoint: http://otlp-gateway.kube-system.svc:4317`, `protocol: grpc` and the new `tenant: giantswarm`, and the meta chart writes it into every component key that is `auto`, the new default of kagent's, muster's, klaus-gateway's and Substrate's OTLP keys, of the tenant pod labels and of the data plane's two OTLP env entries. A component key set to anything else wins over it, the data plane's `dataPlaneEnv` entries included.
