@@ -516,6 +516,36 @@ def hold_dataplane_buffer(here: str, there: str) -> tuple:
 RANDOM_SAMPLING_VALUE = re.compile(r'^(\s+)tracing:\n\1  randomSampling: "0\.1"\n', re.M)
 
 
+# giantswarm/agent-platform#603: the LLM listener routes by model —
+# llmRouting.backend is llmRouting.models, the models attach to the listener
+# directly so llmRouting.pathPrefixes and llmRouting.routes are gone,
+# llmRouting.external is new, and gateway.metricLabels gains the held api_key
+# entry — and the meta chart forwards them in the connectivity release's
+# values. Those keys are left out of the meta renders' comparison, inside the
+# forwarded llmRouting block and the one metric label; dropped once GOLDEN_REF
+# carries #603.
+LLM_BACKEND = re.compile(r"^( +)backend:\n\1  name: anthropic\n\1  provider: anthropic\n", re.M)
+LLM_CHANGED_KEYS = re.compile(r"^( +)(?:external|models|pathPrefixes|routes):\n(?:\1[ -].*\n)+", re.M)
+API_KEY_LABEL = re.compile(r"^( +)api_key:\n\1  enabled: true\n\1  expression: apiKey\.name\n", re.M)
+
+
+def hold_llm_endpoint(here: str, there: str) -> tuple:
+    """The two meta renders with #603's forwarded llmRouting and metric-label keys left out."""
+    def strip(render: str) -> str:
+        render = API_KEY_LABEL.sub("", render)
+        start = render.find("\n    llmRouting:\n")
+        if start < 0:
+            return render
+        end = start + len("\n    llmRouting:\n")
+        while end < len(render) and render[end:].startswith("      "):
+            end = render.index("\n", end) + 1
+        block = LLM_CHANGED_KEYS.sub("", LLM_BACKEND.sub("", render[start:end]))
+        return render[:start] + block + render[end:]
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #603 hold — the forwarded llmRouting.backend/models/external/pathPrefixes/routes and gateway.metricLabels.api_key are left out of the golden comparison")
+    return h, strip(there)
+
+
 def hold_dataplane_sampling(here: str, there: str) -> tuple:
     """The two meta renders with the forwarded random sampling left out."""
     if (h := RANDOM_SAMPLING_VALUE.sub("", here)) != here or RANDOM_SAMPLING_VALUE.search(there):
@@ -597,6 +627,31 @@ def hold_substrate_bootstrap(here: str, there: str) -> tuple:
         return "\n---\n".join(d for d in render.split("\n---\n") if BOOTSTRAP_SOURCE not in d)
     if (h := strip(here)) != here or strip(there) != there:
         print("note: #37705 hold — the Substrate bootstrap hook (the egress MITM CA pool) is left out of the golden comparison")
+    return h, strip(there)
+
+
+CREDENTIAL_PROVIDER_POLICIES = ("  name: substrate-k8s-credential-provider\n", "  name: substrate-k8s-credential-provider-ingress\n")
+CREDENTIAL_PROVIDER_RULE = """    # The credential provider: the Secret values a policy's credential
+    # injection names (the Substrate line from 1.1.0), asked per request.
+    - toEndpoints:
+        - matchLabels:
+            app: k8s-credential-provider
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+"""
+
+
+def hold_credential_provider_netpol(here: str, there: str) -> tuple:
+    """The two connectivity renders without the credential provider's network
+    policies and the egress gateway's rule to it (giantswarm/giantswarm#37705;
+    GOLDEN_REF renders neither). Dropped once GOLDEN_REF carries them."""
+    def strip(render: str) -> str:
+        docs = [d for d in render.split("\n---\n") if not any(n in d for n in CREDENTIAL_PROVIDER_POLICIES)]
+        return "\n---\n".join(docs).replace(CREDENTIAL_PROVIDER_RULE, "")
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #37705 hold — the credential provider's network policies and the egress gateway's rule to it are left out of the golden comparison")
     return h, strip(there)
 
 
@@ -718,6 +773,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_repin_1_1(here, there)
                 here, there = hold_otlp_endpoints(here, there)
                 here, there = hold_dataplane_sampling(here, there)
+                here, there = hold_llm_endpoint(here, there)
             else:
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)
@@ -725,6 +781,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_bootstrap_memory(here, there)
                 here, there = hold_substrate_bootstrap(here, there)
                 here, there = hold_credential_provider_exception(here, there)
+                here, there = hold_credential_provider_netpol(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
