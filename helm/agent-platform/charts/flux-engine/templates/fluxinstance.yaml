@@ -3,8 +3,11 @@ The one FluxInstance. The operator reconciles exactly the instance named `flux`
 in its own namespace (a CEL rule on the CRD rejects any other name; other
 namespaces are ignored), so name and namespace are not values. Deleting it
 makes the operator uninstall Flux — controllers and CRDs — which is how the meta
-chart's ordered teardown removes the engine (its pre-delete hook deletes this
-object while the operator still runs).
+chart's ordered teardown removes the engine. It carries helm.sh/resource-policy:
+keep (flux-engine.keep): Helm's delete pass builds every object before deleting
+any and fails the uninstall on a kind no longer served, so Flux has to be served
+throughout that pass; the meta chart's post-delete hook deletes this object
+afterwards, while the operator still runs (hooks/teardown.yaml).
 */ -}}
 apiVersion: fluxcd.controlplane.io/v1
 kind: FluxInstance
@@ -14,6 +17,7 @@ metadata:
   labels:
     {{- include "flux-engine.labels" . | nindent 4 }}
   annotations:
+    {{- include "flux-engine.keep" . | nindent 4 }}
     fluxcd.controlplane.io/reconcileEvery: {{ .Values.instance.reconcileEvery | quote }}
     fluxcd.controlplane.io/reconcileTimeout: {{ .Values.instance.reconcileTimeout | quote }}
 spec:

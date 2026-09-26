@@ -1249,7 +1249,7 @@ verify-max-tokens: ## Assert the ModelConfig output bound: the connectivity char
 	@echo "All max-tokens behaviors verified."
 
 .PHONY: verify-engine
-verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks). HELM selects the binary.
+verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks at pre-delete and post-delete, resource-policy keep on exactly the engine objects they remove). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-engine.py $(CHART_DIR)
 	@echo "flux engine shapes verified."
@@ -3410,13 +3410,13 @@ STORAGE_RESTORE := t-kagent-storage-version-restore
 STORAGE_CM := kagent-storage-version-migration
 
 .PHONY: verify-hooks-netpol
-verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with networkPolicy on, ONE policy selecting app.kubernetes.io/instance=<release> + component=hooks with egress to the apiserver only — a CiliumNetworkPolicy (kube-apiserver entity) when the flavour resolves to cilium, a NetworkPolicy (networkPolicy.kubernetes.apiServerCIDR, Egress only) otherwise — as a hook object at weight -10 with the identity's delete policy, at all five events with the engine on, at the storage-version hooks' four with the engine off; none with networkPolicy off, none when no hook renders (engine off, kagent off); every hook Job's pod carries the selected labels.
+verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with networkPolicy on, ONE policy selecting app.kubernetes.io/instance=<release> + component=hooks with egress to the apiserver only — a CiliumNetworkPolicy (kube-apiserver entity) when the flavour resolves to cilium, a NetworkPolicy (networkPolicy.kubernetes.apiServerCIDR, Egress only) otherwise — as a hook object at weight -10 with the identity's delete policy, at all six events with the engine on, at the storage-version hooks' four with the engine off; none with networkPolicy off, none when no hook renders (engine off, kagent off); every hook Job's pod carries the selected labels.
 	@echo "====> $@ ($(CHART_DIR))"
-	@echo "--> engine on, cilium served: a CiliumNetworkPolicy hook at -10, all five events"
+	@echo "--> engine on, cilium served: a CiliumNetworkPolicy hook at -10, all six events"
 	@helm template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 >/tmp/vhn-cil.out 2>&1 || { cat /tmp/vhn-cil.out; exit 1; }
 	@$(PICK) /tmp/vhn-cil.out CiliumNetworkPolicy t-hooks >/tmp/vhn-cnp.out || { echo "FAIL: no CiliumNetworkPolicy t-hooks"; exit 1; }
 	@if $(PICK) /tmp/vhn-cil.out NetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the kubernetes-flavour policy renders next to the cilium one"; exit 1; fi
-	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' /tmp/vhn-cnp.out || { echo "FAIL: engine on: the policy is not at all five hook events"; grep helm.sh/hook /tmp/vhn-cnp.out; exit 1; }
+	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete$$' /tmp/vhn-cnp.out || { echo "FAIL: engine on: the policy is not at all six hook events"; grep helm.sh/hook /tmp/vhn-cnp.out; exit 1; }
 	@grep -q 'helm.sh/hook-weight: "-10"' /tmp/vhn-cnp.out || { echo "FAIL: the policy is not at weight -10 (with the identity, ahead of every hook Job)"; exit 1; }
 	@grep -q 'helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded' /tmp/vhn-cnp.out || { echo "FAIL: the policy does not carry the hook identity's delete policy"; exit 1; }
 	@grep -q 'app.kubernetes.io/instance: "t"' /tmp/vhn-cnp.out || { echo "FAIL: the policy does not select the release's instance label"; exit 1; }
@@ -3429,7 +3429,7 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 	@helm template t $(CHART_DIR) $(STORAGE_ON) --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >/tmp/vhn-k8s.out 2>&1 || { cat /tmp/vhn-k8s.out; exit 1; }
 	@$(PICK) /tmp/vhn-k8s.out NetworkPolicy t-hooks >/tmp/vhn-np.out || { echo "FAIL: no NetworkPolicy t-hooks in the kubernetes flavour"; exit 1; }
 	@if $(PICK) /tmp/vhn-k8s.out CiliumNetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the cilium policy renders without cilium.io/v2"; exit 1; fi
-	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' /tmp/vhn-np.out || { echo "FAIL: kubernetes flavour: the policy is not at all five hook events"; exit 1; }
+	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete$$' /tmp/vhn-np.out || { echo "FAIL: kubernetes flavour: the policy is not at all six hook events"; exit 1; }
 	@grep -q 'policyTypes: \[Egress\]' /tmp/vhn-np.out || { echo "FAIL: the NetworkPolicy is not Egress only"; exit 1; }
 	@grep -q 'cidr: "10.9.0.1/32"' /tmp/vhn-np.out || { echo "FAIL: the NetworkPolicy does not use networkPolicy.kubernetes.apiServerCIDR"; grep cidr /tmp/vhn-np.out; exit 1; }
 	@echo "--> flavour forced: networkPolicy.flavor=cilium without the API renders the CiliumNetworkPolicy"
@@ -3818,7 +3818,7 @@ verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks 
 	@echo "ok: restore script"
 	@echo "--> the hook identity is created for the hooks' events (pre-install,pre-upgrade,post-install,post-upgrade) and the engine's pre-delete"
 	@for kind in ServiceAccount ClusterRoleBinding; do \
-		$(PICK) /tmp/vsv-on.out $$kind t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' || { echo "FAIL: the hook $$kind t-hooks is not created for pre-install,pre-upgrade,post-install,post-upgrade,pre-delete"; $(PICK) /tmp/vsv-on.out $$kind t-hooks | grep helm.sh/hook; exit 1; }; \
+		$(PICK) /tmp/vsv-on.out $$kind t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete$$' || { echo "FAIL: the hook $$kind t-hooks is not created for pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete"; $(PICK) /tmp/vsv-on.out $$kind t-hooks | grep helm.sh/hook; exit 1; }; \
 	done
 	@echo "ok: identity events"
 	@echo "--> engine off (the fleet, a cluster's own Flux): the same pair and the identity at their events, nothing else hooked"
@@ -3831,10 +3831,10 @@ verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks 
 	done
 	@if grep -q 'helm.sh/hook: .*pre-delete' /tmp/vsv-off.out; then echo "FAIL: engine off renders a pre-delete hook"; exit 1; fi
 	@echo "ok: engine off"
-	@echo "--> kagent off: none of it; the identity back to pre-delete (engine on), gone (engine off)"
+	@echo "--> kagent off: none of it; the identity back to the teardown's pre-delete,post-delete (engine on), gone (engine off)"
 	@helm template t $(CHART_DIR) $(STORAGE_ON) --set components.kagent.enabled=false >/tmp/vsv-kagoff.out 2>&1 || { cat /tmp/vsv-kagoff.out; exit 1; }
 	@if grep -q 'kagent-storage-version' /tmp/vsv-kagoff.out; then echo "FAIL: the storage-version hooks render with kagent off"; exit 1; fi
-	@$(PICK) /tmp/vsv-kagoff.out ServiceAccount t-hooks | grep -q 'helm.sh/hook: pre-delete$$' || { echo "FAIL: kagent off: the hook identity is not back to pre-delete only"; exit 1; }
+	@$(PICK) /tmp/vsv-kagoff.out ServiceAccount t-hooks | grep -q 'helm.sh/hook: pre-delete,post-delete$$' || { echo "FAIL: kagent off: the hook identity is not back to the teardown's pre-delete,post-delete only"; exit 1; }
 	@helm template t $(CHART_DIR) $(STORAGE_ON) --set components.kagent.enabled=false --set components.flux.enabled=false >/tmp/vsv-alloff.out 2>&1 || { cat /tmp/vsv-alloff.out; exit 1; }
 	@if grep -q 'helm.sh/hook\|t-hooks' /tmp/vsv-alloff.out; then echo "FAIL: engine off, kagent off: a hook or the hook identity renders (the pure app-of-apps render)"; exit 1; fi
 	@echo "ok: kagent off"
