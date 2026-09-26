@@ -26,7 +26,7 @@ spec:
     signed gsoci copy (giantswarm/vllm-openai, pinned by digest in
     retagger). The model's architecture (MuseGlimmerForConditionalGeneration)
     and its parsers first ship in vLLM 0.28.0, and the platform's llm-d
-    runtime carries vLLM 0.23 (llm-d v0.9.0 ships 0.26); this preset names
+    runtime carries vLLM 0.26 (llm-d v0.9.0); this preset names
     its image for that reason only, and moves to the well-known runtime once
     an llm-d release carries vLLM 0.28 or later.
     Weights: an OCI model image, giantswarm/models/muse-glimmer-30b-fp8 at

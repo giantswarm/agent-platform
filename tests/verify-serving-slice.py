@@ -23,7 +23,7 @@ property the slice relies on:
   a differing copy of the operator's fails the render naming both;
 - modelServing.serving.runtimeClassName: nvidia reaches the connectivity release;
 - the model pods' traces (giantswarm/giantswarm#36711): kserve-runtime-configs on
-  the 0.6.x line carries the tracing preset's endpoint and tenant pod label from
+  the 0.7.x line carries the tracing preset's endpoint and tenant pod label from
   global.observability.traces.otlp (agent-platform.shape.otlp); an explicit preset
   endpoint wins; <release>-model-serving-otlp-egress opens the preset's endpoint
   (modelServing.networkPolicy.otlpEndpoint) to the workload pods in both flavours;
@@ -894,8 +894,8 @@ def check_tracing(meta: str, connectivity: str) -> None:
     profile = ["-f", f"{meta}/examples/serving-slice.yaml", *VM, *INSTALLATION]
     with open(f"{meta}/values.yaml", encoding="utf-8") as f:
         rng = yaml.safe_load(f)["components"]["kserve-runtime-configs"]["versionRange"]
-    if rng != "0.6.x":
-        sys.exit(f"FAIL: components.kserve-runtime-configs.versionRange is {rng!r}; 0.6.x is the line that opens kserve.llmisvcConfigs.tracing (giantswarm/kserve#99)")
+    if rng != "0.7.x":
+        sys.exit(f"FAIL: components.kserve-runtime-configs.versionRange is {rng!r}; 0.7.x is the line that carries kserve.llmisvcConfigs.tracing (giantswarm/kserve#99) and .rolloutStrategy (giantswarm/kserve#101)")
 
     def tracing(render: str) -> dict:
         return release_values(render, "kserve-runtime-configs")["kserve"]["llmisvcConfigs"].get("tracing", {})
@@ -1001,10 +1001,21 @@ def check_prepull_prefix(meta: str, connectivity: str) -> None:
     ok(f"the pre-pull's runtime image {images[0]} is the well-known config's llm-d-cuda at the prefix the slice passes as imageRegistry ({registry})")
 
 
+def check_rollout(meta: str) -> None:
+    """A served model's predictor rolls without a surge pod (#682): the kserve-runtime-configs release sets the single-node presets' rolloutStrategy."""
+    render = helm(meta, ["-f", f"{meta}/examples/serving-slice.yaml", *VM, *INSTALLATION])
+    got = release_values(render, "kserve-runtime-configs")["kserve"]["llmisvcConfigs"].get("rolloutStrategy")
+    want = {"maxSurge": 0, "maxUnavailable": 1}
+    if got != want:
+        sys.exit(f"FAIL: the kserve-runtime-configs release carries rolloutStrategy {got}, expected {want}: a model that fills its GPU cannot start a surge pod, so its roll never finishes")
+    ok(f"the kserve-runtime-configs release sets the single-node presets' rolloutStrategy {want}: the old predictor pod stops before the new one starts")
+
+
 def main(meta: str, connectivity: str) -> int:
     check_prepull_prefix(meta, connectivity)
     forwarded = check_profile(meta)
     check_tracing(meta, connectivity)
+    check_rollout(meta)
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
         f.write(forwarded)
         values = f.name
