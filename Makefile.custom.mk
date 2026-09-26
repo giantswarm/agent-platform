@@ -1220,6 +1220,34 @@ verify-prompt-caching: ## Assert Anthropic prompt caching: the meta chart forwar
 	else echo "ok: provider guard"; fi
 	@echo "All prompt-caching behaviors verified."
 
+# The ModelConfig output bound (giantswarm/agent-platform#702).
+.PHONY: verify-max-tokens
+verify-max-tokens: ## Assert the ModelConfig output bound: the connectivity chart's Anthropic catalog entries inherit kagent.providers.anthropic.config.maxTokens in the one provider block next to the listener baseUrl, an entry's own maxTokens wins, an OpenAI entry takes its own under spec.openAI and inherits nothing, the chart alone renders nothing; maxTokens on a provider without the field fails the render naming the entry.
+	@echo "====> $@"
+	@echo "--> an Anthropic entry inherits the platform bound in one block next to the listener baseUrl; an OpenAI entry inherits nothing"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >/tmp/vmt-ci.out 2>&1 || { cat /tmp/vmt-ci.out; exit 1; }
+	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vmt-ci.out >/tmp/vmt-sonnet.out
+	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' /tmp/vmt-sonnet.out && grep -q '^    maxTokens: 32000$$' /tmp/vmt-sonnet.out || { cat /tmp/vmt-sonnet.out; echo "FAIL: an Anthropic entry without its own maxTokens did not inherit 32000 under spec.anthropic next to the listener baseUrl; it would stop at kagent's 8192"; exit 1; }
+	@if [ "$$(grep -c '^  anthropic:$$' /tmp/vmt-sonnet.out)" != "1" ]; then cat /tmp/vmt-sonnet.out; echo "FAIL: the anthropic block renders more than once"; exit 1; fi
+	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' /tmp/vmt-ci.out >/tmp/vmt-openai.out
+	@if grep -q 'maxTokens' /tmp/vmt-openai.out; then cat /tmp/vmt-openai.out; echo "FAIL: an OpenAI entry inherited the Anthropic default's maxTokens"; exit 1; fi
+	@echo "ok: inherited by Anthropic entries only"
+	@echo "--> an entry's own maxTokens wins; an OpenAI entry's own lands under spec.openAI"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].maxTokens=64000' --set 'kagent.modelConfigs[2].maxTokens=16000' >/tmp/vmt-own.out 2>&1 || { cat /tmp/vmt-own.out; exit 1; }
+	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' /tmp/vmt-own.out | grep -q '^    maxTokens: 64000$$' || { cat /tmp/vmt-own.out; echo "FAIL: an entry's own maxTokens 64000 did not win over the platform bound"; exit 1; }
+	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' /tmp/vmt-own.out | grep -A3 '^  openAI:$$' | grep -q 'maxTokens: 16000' || { cat /tmp/vmt-own.out; echo "FAIL: an OpenAI entry's own maxTokens is not under spec.openAI"; exit 1; }
+	@echo "ok: own maxTokens wins"
+	@echo "--> the connectivity chart alone (no platform bound): nothing renders"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"plain","provider":"Anthropic","model":"m","apiKeySecret":"s","apiKeySecretKey":"k"}]' >/tmp/vmt-plain.out 2>&1 || { cat /tmp/vmt-plain.out; exit 1; }
+	@if grep -q 'maxTokens' /tmp/vmt-plain.out; then cat /tmp/vmt-plain.out; echo "FAIL: the connectivity chart invents a maxTokens of its own; the platform owns the bound"; exit 1; fi
+	@echo "ok: nothing by default"
+	@echo "--> guard: maxTokens on a provider without the field fails naming the entry"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"gemini-bounded","provider":"Gemini","model":"m","apiKeySecret":"s","maxTokens":1000}]' >/tmp/vmt-foreign.out 2>&1; then \
+		echo "FAIL: maxTokens on a Gemini entry rendered; the API server would prune it"; exit 1; \
+	elif ! grep -q 'gemini-bounded' /tmp/vmt-foreign.out; then cat /tmp/vmt-foreign.out; echo "FAIL: the provider guard does not name the entry"; exit 1; \
+	else echo "ok: provider guard"; fi
+	@echo "All max-tokens behaviors verified."
+
 .PHONY: verify-engine
 verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"

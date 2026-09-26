@@ -947,6 +947,18 @@ template refuses them instead.
 {{- end -}}
 
 {{/*
+Key of the ModelConfigSpec provider block that carries maxTokens, for a
+spec.provider value in any case: Anthropic, AnthropicVertexAI, AzureOpenAI,
+Mistral and OpenAI. Emits nothing for every other provider (empty string =
+falsy): the API server would prune the field and the model would answer at
+kagent's own default in silence, so the template refuses it instead.
+*/}}
+{{- define "agent-platform.modelConfigMaxTokensKey" -}}
+{{- $keys := dict "anthropic" "anthropic" "anthropicvertexai" "anthropicVertexAI" "azureopenai" "azureOpenAI" "mistral" "mistral" "openai" "openAI" -}}
+{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the model-price ConfigMap — defaults to <release>-model-catalog.
 */}}
 {{- define "agent-platform.modelCatalogName" -}}

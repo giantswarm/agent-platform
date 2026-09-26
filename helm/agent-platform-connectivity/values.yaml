@@ -1712,6 +1712,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # provider refuses the keys: ModelConfigSpec has none for it.
   #   promptCaching: true
   #   cacheTTL: "5m"   # or "1h"
+  #   # Optional (Anthropic, AnthropicVertexAI, AzureOpenAI, Mistral, OpenAI).
+  #   # The output bound, thinking included. An Anthropic entry without it
+  #   # inherits kagent.providers.anthropic.config.maxTokens; unset everywhere,
+  #   # kagent's built-in 8192 applies. Any other provider refuses the key.
+  #   maxTokens: 32000
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
