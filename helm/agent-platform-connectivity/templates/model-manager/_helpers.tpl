@@ -122,10 +122,29 @@ clusters cluster-manager composes onto. Ports default to 443 and 6443. JSON.
 */}}
 {{- define "agent-platform.modelManager.workloadClusters" -}}
 {{- $wc := dig "networkPolicy" "workloadClusters" dict .Values.modelManager -}}
+{{- $at := "modelManager.networkPolicy.workloadClusters" -}}
 {{- if not $wc -}}
 {{- $wc = dig "networkPolicy" "workloadClusters" dict .Values.clusterManager -}}
+{{- $at = "clusterManager.networkPolicy.workloadClusters" -}}
 {{- end -}}
-{{- dict "fqdns" (dig "fqdns" list $wc) "cidrs" (dig "cidrs" list $wc) "ports" (dig "ports" (list 443 6443) $wc) | toJson -}}
+{{- $fqdns := include "agent-platform.workloadClusterFQDNs" (dict "wc" $wc "at" $at) | fromJsonArray -}}
+{{- dict "fqdns" $fqdns "cidrs" (dig "cidrs" list $wc) "ports" (dig "ports" (list 443 6443) $wc) | toJson -}}
+{{- end -}}
+
+{{/*
+The Cilium FQDN selectors of the workload clusters' API servers: a
+workloadClusters block's fqdns next to its provider's preset (aws: the CAPA
+API server load balancers, `*.*.elb.amazonaws.com` — Cilium's `*` matches one
+DNS label). Takes dict wc (the block) and at (its path, for the refusal).
+JSON list.
+*/}}
+{{- define "agent-platform.workloadClusterFQDNs" -}}
+{{- $presets := dict "aws" (list (dict "matchPattern" "*.*.elb.amazonaws.com")) -}}
+{{- $provider := dig "provider" "" .wc -}}
+{{- if and $provider (not (hasKey $presets $provider)) -}}
+{{- fail (printf "%s.provider %q: want one of %s, or empty for none" .at $provider (keys $presets | sortAlpha | join ", ")) -}}
+{{- end -}}
+{{- concat (dig "fqdns" list .wc) (get $presets $provider | default list) | toJson -}}
 {{- end -}}
 
 {{/*
@@ -253,15 +272,6 @@ agent-platform.idpHosts names from the provider alone) and when neither is set.
 {{- if eq (include "agent-platform.modelManager.oauthProvider" .) "dex" -}}
 {{- dig "oauth" "dex" "issuerURL" "" $chart | default .Values.global.identity.issuerUrl -}}
 {{- end -}}
-{{- end -}}
-
-{{/*
-The public hostname of the model-manager route: the override when set, else
-agentgateway.<global.domain> — the same hostname as the kagent controller route.
-*/}}
-{{- define "agent-platform.modelManager.hostname" -}}
-{{- $route := .Values.modelManager.route -}}
-{{- include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" $route.hostname "key" "modelManager.route.hostname") -}}
 {{- end -}}
 
 {{/*

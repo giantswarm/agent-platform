@@ -69,7 +69,7 @@ LINEUP_24GB = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b")
 RETIRED_24GB = ("qwen3-4b-instruct", "qwen3-8b-fp8", "qwen3-14b")
 # The two four-GPU presets (giantswarm/agent-platform#591): tensor parallel across four L40S.
 FOUR_GPU = ("mistral-small-4", "gpt-oss-120b")
-OCI_PRESETS = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b", "gemma-4-31b", "qwen3-6-35b-a3b", "qwen3-8-27b-l40s", "mistral-small-4", "gpt-oss-120b", "qwen3-8-flash-next-nvfp4")
+OCI_PRESETS = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b", "gemma-4-31b", "qwen3-6-35b-a3b", "qwen3-8-27b-l40s", "mistral-small-4", "gpt-oss-120b", "qwen3-8-flash-next-nvfp4", "muse-glimmer-30b")
 # The discovery block this change adds, cut out for the byte-identity check.
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
@@ -262,8 +262,12 @@ else:
         fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
         uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
+        fp8kv = lineup and "--kv-cache-dtype=fp8" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
+        muse = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/muse-glimmer-30b.yaml")
+        tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
+        routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
@@ -372,6 +376,14 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: the 48 GB presets carry their fitted context lengths on this side (#591) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # gemma-4-31b serves 32k with an fp8 KV cache on this side
+    # (giantswarm/agent-platform#611); a golden from before renders it at 8k
+    # with a bf16 cache, so its ConfigMap is left out of the comparison. Drop
+    # this once GOLDEN_REF carries the change.
+    if not fp8kv:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-gemma-4-31b"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-gemma-4-31b"), None)
+        print(f"note: gemma-4-31b serves 32k with an fp8 KV cache on this side (#611) and not on {ref}: its ConfigMap is left out of the comparison")
     # The four 24 GB presets of the September 2026 line-up ship on this side
     # (giantswarm/agent-platform#591) and the three Qwen3 small presets they
     # replace do not; a golden from before has it the other way round, so the
@@ -408,6 +420,27 @@ else:
         for side in (head, golden):
             side.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-27b-l40s"), None)
         print(f"note: the 48 GB line-up ships on this side (#591) and not on {ref}: the new presets' ConfigMaps and discovery names, the retired presets' on the golden, and the L40S preset's ConfigMap on both sides are left out of the comparison")
+    # muse-glimmer-30b and its chat template ship on this side
+    # (giantswarm/agent-platform#597) and not on a golden from before, so its
+    # ConfigMaps and discovery name are left out of the head. Drop this once
+    # GOLDEN_REF carries #597.
+    if not muse:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-muse-glimmer-30b"), None)
+        head.pop(("ConfigMap", "agent-platform-chat-template-muse-glimmer-30b"), None)
+        if DISCOVERY in head:
+            head[DISCOVERY], ncuts = re.subn(r"^ +- muse-glimmer-30b\n", "", head[DISCOVERY], flags=re.M)
+            expect("the new preset muse-glimmer-30b cut out of the discovery list once", ncuts, 1)
+        print(f"note: muse-glimmer-30b ships on this side (#597) and not on {ref}: its ConfigMaps and discovery name are left out of the comparison")
+    # The gpt-oss presets serve the model images that carry the tiktoken
+    # encodings and name them in TIKTOKEN_ENCODINGS_BASE on this side
+    # (giantswarm/agent-platform#606); a golden from before renders the older
+    # tags without the variable, so both ConfigMaps are left out of the
+    # comparison. Drop this once GOLDEN_REF carries #606.
+    if not tiktoken:
+        for name in ("gpt-oss-20b", "gpt-oss-120b"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: the gpt-oss presets carry their tiktoken encodings on this side (#606) and not on {ref}: their ConfigMaps are left out of the comparison")
     # The serving namespace is kept whatever the cache switch says
     # (giantswarm/agent-platform#565; modelServing.namespace.keep) and its
     # template's comment says so; the untainted render has the cache off, so a
@@ -449,6 +482,16 @@ else:
             for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-egress")]:
                 side.pop(key)
         print(f"note: model-manager's egress reaches the served models' runtimes on this side (#602) and not on {ref}: its policy is left out of the comparison")
+    # model-manager's REST route is retired on this side
+    # (giantswarm/agent-platform#271): its ingress policy names muster and the
+    # additional peers only, and says so; a golden from before still names the
+    # data plane in it, so that policy is left out of the comparison on both
+    # sides. Drop this once GOLDEN_REF carries #271.
+    if routed:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-ingress")]:
+                side.pop(key)
+        print(f"note: model-manager has no route on this side (#271) and does on {ref}: its ingress policy is left out of the comparison")
     # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
     # are new documents of the serving render; a golden from before has neither,
     # so both are left out of the comparison on both sides. Drop this once

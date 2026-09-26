@@ -1123,19 +1123,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | model-manager.networkPolicy.enabled | bool | `false` |  |
-| modelManager.route.enabled | bool | `false` |  |
-| modelManager.route.pathPrefix | string | `"/model-manager"` |  |
-| modelManager.route.hostname | string | `""` |  |
-| modelManager.route.parentRef.name | string | `"giantswarm-default"` |  |
-| modelManager.route.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| modelManager.route.jwtAuthentication.enabled | bool | `false` |  |
-| modelManager.route.jwtAuthentication.mode | string | `"Strict"` |  |
-| modelManager.route.jwtAuthentication.issuer | string | `""` |  |
-| modelManager.route.jwtAuthentication.jwks.host | string | `"dex.giantswarm.svc.cluster.local"` |  |
-| modelManager.route.jwtAuthentication.jwks.port | int | `5556` |  |
-| modelManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
-| modelManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
-| modelManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | modelManager.kserve.requireApi | bool | `true` |  |
 | modelManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
@@ -1240,6 +1227,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.prewarmPriorityClass.name | string | `"agent-platform-prewarm-placeholder"` |  |
 | clusterManager.prewarmPriorityClass.value | int | `-1000` |  |
 | clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.provider | string | `""` |  |
 | clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.cidrs | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.ports[0] | int | `443` |  |

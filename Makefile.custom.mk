@@ -1220,6 +1220,34 @@ verify-prompt-caching: ## Assert Anthropic prompt caching: the meta chart forwar
 	else echo "ok: provider guard"; fi
 	@echo "All prompt-caching behaviors verified."
 
+# The ModelConfig output bound (giantswarm/agent-platform#702).
+.PHONY: verify-max-tokens
+verify-max-tokens: ## Assert the ModelConfig output bound: the connectivity chart's Anthropic catalog entries inherit kagent.providers.anthropic.config.maxTokens in the one provider block next to the listener baseUrl, an entry's own maxTokens wins, an OpenAI entry takes its own under spec.openAI and inherits nothing, the chart alone renders nothing; maxTokens on a provider without the field fails the render naming the entry.
+	@echo "====> $@"
+	@echo "--> an Anthropic entry inherits the platform bound in one block next to the listener baseUrl; an OpenAI entry inherits nothing"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >/tmp/vmt-ci.out 2>&1 || { cat /tmp/vmt-ci.out; exit 1; }
+	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' /tmp/vmt-ci.out >/tmp/vmt-sonnet.out
+	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' /tmp/vmt-sonnet.out && grep -q '^    maxTokens: 32000$$' /tmp/vmt-sonnet.out || { cat /tmp/vmt-sonnet.out; echo "FAIL: an Anthropic entry without its own maxTokens did not inherit 32000 under spec.anthropic next to the listener baseUrl; it would stop at kagent's 8192"; exit 1; }
+	@if [ "$$(grep -c '^  anthropic:$$' /tmp/vmt-sonnet.out)" != "1" ]; then cat /tmp/vmt-sonnet.out; echo "FAIL: the anthropic block renders more than once"; exit 1; fi
+	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' /tmp/vmt-ci.out >/tmp/vmt-openai.out
+	@if grep -q 'maxTokens' /tmp/vmt-openai.out; then cat /tmp/vmt-openai.out; echo "FAIL: an OpenAI entry inherited the Anthropic default's maxTokens"; exit 1; fi
+	@echo "ok: inherited by Anthropic entries only"
+	@echo "--> an entry's own maxTokens wins; an OpenAI entry's own lands under spec.openAI"
+	@helm template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].maxTokens=64000' --set 'kagent.modelConfigs[2].maxTokens=16000' >/tmp/vmt-own.out 2>&1 || { cat /tmp/vmt-own.out; exit 1; }
+	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' /tmp/vmt-own.out | grep -q '^    maxTokens: 64000$$' || { cat /tmp/vmt-own.out; echo "FAIL: an entry's own maxTokens 64000 did not win over the platform bound"; exit 1; }
+	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' /tmp/vmt-own.out | grep -A3 '^  openAI:$$' | grep -q 'maxTokens: 16000' || { cat /tmp/vmt-own.out; echo "FAIL: an OpenAI entry's own maxTokens is not under spec.openAI"; exit 1; }
+	@echo "ok: own maxTokens wins"
+	@echo "--> the connectivity chart alone (no platform bound): nothing renders"
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"plain","provider":"Anthropic","model":"m","apiKeySecret":"s","apiKeySecretKey":"k"}]' >/tmp/vmt-plain.out 2>&1 || { cat /tmp/vmt-plain.out; exit 1; }
+	@if grep -q 'maxTokens' /tmp/vmt-plain.out; then cat /tmp/vmt-plain.out; echo "FAIL: the connectivity chart invents a maxTokens of its own; the platform owns the bound"; exit 1; fi
+	@echo "ok: nothing by default"
+	@echo "--> guard: maxTokens on a provider without the field fails naming the entry"
+	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"gemini-bounded","provider":"Gemini","model":"m","apiKeySecret":"s","maxTokens":1000}]' >/tmp/vmt-foreign.out 2>&1; then \
+		echo "FAIL: maxTokens on a Gemini entry rendered; the API server would prune it"; exit 1; \
+	elif ! grep -q 'gemini-bounded' /tmp/vmt-foreign.out; then cat /tmp/vmt-foreign.out; echo "FAIL: the provider guard does not name the entry"; exit 1; \
+	else echo "ok: provider guard"; fi
+	@echo "All max-tokens behaviors verified."
+
 .PHONY: verify-engine
 verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks at pre-delete and post-delete, resource-policy keep on exactly the engine objects they remove). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
@@ -1353,7 +1381,7 @@ MANAGERS_ON := $(VM) --namespace agent-platform --set ingress.mode=agentgateway-
 # modelManager.networkPolicy.registeredBackends (giantswarm/agent-platform#478): a block and a name; the block alone for the kubernetes flavor.
 REGISTERED_BACKENDS := --set 'modelManager.networkPolicy.registeredBackends[0].cidr=192.0.2.0/24' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434' --set 'modelManager.networkPolicy.registeredBackends[1].fqdn=ollama.models.svc.cluster.local' --set 'modelManager.networkPolicy.registeredBackends[1].port=1234'
 REGISTERED_BACKENDS_CIDR := --set 'modelManager.networkPolicy.registeredBackends[0].cidr=192.0.2.0/24' --set 'modelManager.networkPolicy.registeredBackends[0].port=11434'
-MANAGERS_ROUTES := --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true
+MANAGERS_ROUTES := --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true
 # A minimal on-state that trips no other guard, for probing one guard at a time.
 MANAGERS_MIN := $(VM) --set components.kagent.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.identity.existingSecret=platform-oauth --set global.domain=ci.example.com
 
@@ -1927,25 +1955,29 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@grep -q '10.0.0.1/32' /tmp/vmg-one-form.out || { echo "FAIL: backend: ollama does not open the Ollama endpoint"; exit 1; }
 	@grep -q '10.0.0.1/32' /tmp/vmg-list-form.out || { echo "FAIL: backends: [ollama] does not open the Ollama endpoint"; exit 1; }
 	@echo "ok: static forms"
-	@echo "--> cilium: routes, JWT policies and network policies of both components"
+	@echo "--> cilium: agent-manager's route and JWT policy, the network policies of both components"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) >/tmp/vmg-cilium.out 2>&1 || { cat /tmp/vmg-cilium.out; exit 1; }
+	@for obj in "AgentgatewayBackend agent-manager" "AgentgatewayBackend agent-manager-jwks" "HTTPRoute agent-manager" "HTTPRoute agent-manager-public" "AgentgatewayPolicy agent-manager-jwt" \
+		"CiliumNetworkPolicy agent-platform-connectivity-dataplane-to-agent-manager"; do \
+		kind=$${obj% *}; n=$${obj#* }; \
+		grep -A3 "^kind: $$kind$$" /tmp/vmg-cilium.out | grep -q "^  name: $$n$$" || { echo "FAIL: $$kind $$n missing from the cilium render"; exit 1; }; \
+	done
 	@for name in model-manager agent-manager; do \
-		for obj in "AgentgatewayBackend $$name" "AgentgatewayBackend $$name-jwks" "HTTPRoute $$name" "HTTPRoute $$name-public" "AgentgatewayPolicy $$name-jwt" \
-			"CiliumNetworkPolicy agent-platform-connectivity-$$name-ingress" "CiliumNetworkPolicy agent-platform-connectivity-$$name-egress" \
-			"CiliumNetworkPolicy agent-platform-connectivity-dataplane-to-$$name" "CiliumNetworkPolicy agent-platform-connectivity-muster-to-$$name"; do \
-			kind=$${obj% *}; n=$${obj#* }; \
-			grep -A3 "^kind: $$kind$$" /tmp/vmg-cilium.out | grep -q "^  name: $$n$$" || { echo "FAIL: $$kind $$n missing from the cilium render"; exit 1; }; \
+		for n in $$name-ingress $$name-egress muster-to-$$name; do \
+			grep -A3 "^kind: CiliumNetworkPolicy$$" /tmp/vmg-cilium.out | grep -q "^  name: agent-platform-connectivity-$$n$$" || { echo "FAIL: CiliumNetworkPolicy agent-platform-connectivity-$$n missing from the cilium render"; exit 1; }; \
 		done; \
 	done
 	@echo "ok: all objects present"
+	@echo "--> model-manager has no route: no HTTPRoute, AgentgatewayBackend or AgentgatewayPolicy of its own and no data-plane leg (giantswarm/agent-platform#271)"
+	@if awk '/^kind: (HTTPRoute|AgentgatewayBackend|AgentgatewayPolicy)$$/{k=1;next} k&&/^  name: model-manager/{print;exit} /^---/{k=0}' /tmp/vmg-cilium.out | grep -q .; then echo "FAIL: an agentgateway object named model-manager* renders"; exit 1; fi
+	@if grep -q 'dataplane-to-model-manager' /tmp/vmg-cilium.out; then echo "FAIL: the data-plane egress to model-manager renders"; exit 1; fi
+	@echo "ok: no model-manager route"
 	@grep -q 'replacePrefixMatch: /' /tmp/vmg-cilium.out || { echo "FAIL: the inner route does not strip the path prefix"; exit 1; }
-	@grep -q 'value: /model-manager' /tmp/vmg-cilium.out || { echo "FAIL: model-manager path prefix missing"; exit 1; }
 	@grep -q 'value: /agent-manager' /tmp/vmg-cilium.out || { echo "FAIL: agent-manager path prefix missing"; exit 1; }
-	@grep -q 'host: model-manager.agent-platform.svc.cluster.local' /tmp/vmg-cilium.out || { echo "FAIL: the AgentgatewayBackend does not target the pinned model-manager Service"; exit 1; }
 	@grep -q 'host: agent-manager.agent-platform.svc.cluster.local' /tmp/vmg-cilium.out || { echo "FAIL: the AgentgatewayBackend does not target the pinned agent-manager Service"; exit 1; }
-	@[ "$$(grep -c 'issuer: "https://dex.ci.example.com"' /tmp/vmg-cilium.out)" = "2" ] || { echo "FAIL: the JWT policies do not default their issuer from global.identity.issuerUrl"; exit 1; }
-	@[ "$$(grep -c '"agentgateway.ci.example.com"' /tmp/vmg-cilium.out)" = "2" ] || { echo "FAIL: the public routes do not derive their hostname from global.domain"; exit 1; }
-	@echo "ok: routes + JWT policies"
+	@[ "$$(grep -c 'issuer: "https://dex.ci.example.com"' /tmp/vmg-cilium.out)" = "1" ] || { echo "FAIL: the JWT policy does not default its issuer from global.identity.issuerUrl"; exit 1; }
+	@[ "$$(grep -c '"agentgateway.ci.example.com"' /tmp/vmg-cilium.out)" = "1" ] || { echo "FAIL: the public route does not derive its hostname from global.domain"; exit 1; }
+	@echo "ok: route + JWT policy"
 	@grep -q 'matchName: dex.ci.example.com' /tmp/vmg-cilium.out || { echo "FAIL: no FQDN egress to the identity provider"; exit 1; }
 	@grep -q 'matchName: gsoci.azurecr.io' /tmp/vmg-cilium.out || { echo "FAIL: agent-manager egress does not name the agent chart registry"; exit 1; }
 	@grep -qE "matchPattern: ['\"]\*\.blob\.core\.windows\.net['\"]" /tmp/vmg-cilium.out || { echo "FAIL: agent-manager egress lost the registry blob front"; exit 1; }
@@ -2066,7 +2098,7 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@echo "--> kubernetes flavor: NetworkPolicy objects, no cilium.io kinds"
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set networkPolicy.flavor=kubernetes >/tmp/vmg-k8s.out 2>&1 || { cat /tmp/vmg-k8s.out; exit 1; }
 	@if grep -q 'cilium.io' /tmp/vmg-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavor"; exit 1; fi
-	@for n in model-manager-ingress model-manager-egress dataplane-to-model-manager muster-to-model-manager agent-manager-ingress agent-manager-egress dataplane-to-agent-manager muster-to-agent-manager; do \
+	@for n in model-manager-ingress model-manager-egress muster-to-model-manager agent-manager-ingress agent-manager-egress dataplane-to-agent-manager muster-to-agent-manager; do \
 		grep -A3 '^kind: NetworkPolicy$$' /tmp/vmg-k8s.out | grep -q "^  name: agent-platform-connectivity-$$n$$" || { echo "FAIL: NetworkPolicy agent-platform-connectivity-$$n missing from the kubernetes render"; exit 1; }; \
 	done
 	@echo "ok: kubernetes flavor"
@@ -2115,7 +2147,8 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	$(call managers_must_fail,OAuth needs the client secret,$(VM) --set components.kagent.enabled=true --set components.agent-manager.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=platform --set global.domain=ci.example.com,needs the platform client's secret)
 	$(call managers_must_pass,OAuth off needs none of it,$(VM) --set components.kagent.enabled=true --set components.agent-manager.enabled=true --set agent-manager.oauth.enabled=false)
 	$(call managers_must_fail,route needs an agentgateway mode,$(MANAGERS_MIN) --set components.agent-manager.enabled=true --set agentManager.route.enabled=true,requires an agentgateway-\* ingress.mode)
-	$(call managers_must_fail,JWT policy needs jwksEgress,$(MANAGERS_ON) --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set gateway.jwksEgress.enabled=false,gateway.jwksEgress.enabled is false)
+	$(call managers_must_fail,JWT policy needs jwksEgress,$(MANAGERS_ON) --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true --set gateway.jwksEgress.enabled=false,gateway.jwksEgress.enabled is false)
+	$(call managers_must_fail,the retired model-manager route,$(MANAGERS_ON) --set modelManager.route.enabled=true,modelManager.route is removed)
 	$(call managers_must_fail,parentRef needs both halves,$(MANAGERS_ON) --set agentManager.route.enabled=true --set agentManager.route.parentRef.name=edge --set agentManager.route.parentRef.namespace=,parentRef.name is set but .namespace is empty)
 	$(call managers_must_fail,path prefix must be absolute,$(MANAGERS_ON) --set agentManager.route.enabled=true --set agentManager.route.pathPrefix=agent-manager,must start with /)
 	$(call managers_must_fail,MCPServer CR needs muster,$(MANAGERS_MIN) --set components.agent-manager.enabled=true --set components.muster.enabled=false,the MCPServer CRD ships with muster)
@@ -2483,7 +2516,7 @@ WIRING_BACKSTAGE_NETPOL_EDGE := $(WIRING_BACKSTAGE_NETPOL) --set gatewayApi.gate
 WIRING_PG := $(VM) --namespace agent-platform --set postgres.enabled=true
 WIRING_PG_SET := $(WIRING_PG) --set 'postgres.imagePullSecrets[0].name=mirror-pull-secret' --set postgres.affinity.enablePodAntiAffinity=true --set postgres.affinity.topologyKey=topology.kubernetes.io/zone
 # Every wired component on: the render the app-config assertions read.
-WIRING_BACKSTAGE_FULL := $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set modelManager.route.enabled=true --set gateway.jwksEgress.enabled=true
+WIRING_BACKSTAGE_FULL := $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.model-manager.enabled=true --set model-manager.ollama.endpoint=http://10.0.0.1:11434 --set gateway.jwksEgress.enabled=true
 # The controller's JWKS egress: an agentgateway-* mode with the kagent controller
 # route and its JWT policy on. JWKS_INCLUSTER keeps values.yaml's in-cluster host
 # (dex.giantswarm.svc.cluster.local), which gateway.jwksEgress covers alone;
@@ -2521,7 +2554,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		grep -q -- "$$pattern" /tmp/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' /tmp/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
-	@if grep -qE '^ +modelManager:$$|apiBaseUrl: .*/model-manager$$' /tmp/vw-bs-cm.out; then echo "FAIL: the portal's app-config carries a model-manager entry under agentPlatform with model-manager and its route on; the portal reaches model-manager through muster as the person (giantswarm/backstage#2294) and reads no such key"; exit 1; fi
+	@if grep -qE '^ +modelManager:$$|apiBaseUrl: .*/model-manager$$' /tmp/vw-bs-cm.out; then echo "FAIL: the portal's app-config carries a model-manager entry under agentPlatform with model-manager on; the portal reaches model-manager through muster as the person (giantswarm/backstage#2294) and reads no such key"; exit 1; fi
 	@if grep -q 'musterMcpUrl' /tmp/vw-bs-cm.out; then echo "FAIL: agentPlatform.musterMcpUrl is back in the portal's app-config — the Dev Portal reads no such key (create_agent takes no muster argument); where muster is reaches agent-manager as muster.url (verify-identity)"; exit 1; fi
 	@grep -q 'configMapRef: agent-platform-backstage-app-config' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta chart's backstage: block no longer mounts the ConfigMap this chart renders"; exit 1; }
 	@echo "ok: app-config"
@@ -2602,7 +2635,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		grep -q -e "$$pattern" /tmp/vw-ms.out || { echo "FAIL: the model serving render lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -qE 'serving\.kserve\.io|ClusterServingRuntime|kind: InferenceService|kserve-controller-manager|spec\.runtime|^      runtimes?:' /tmp/vw-ms.out; then echo "FAIL: the serving render carries a classic serving object or key"; grep -nE 'serving\.kserve\.io|ClusterServingRuntime|InferenceService|kserve-controller-manager|runtimes?:' /tmp/vw-ms.out | head; exit 1; fi
-	@[ "$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)" = "13" ] || { echo "FAIL: expected the 13 shipped presets, got $$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)"; exit 1; }
+	@[ "$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)" = "14" ] || { echo "FAIL: expected the 14 shipped presets, got $$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' /tmp/vw-ms.out)"; exit 1; }
 	@if grep -q 'kind: NetworkPolicy' /tmp/vw-ms.out; then echo "FAIL: a kubernetes NetworkPolicy rendered under the cilium flavor"; exit 1; fi
 	@if grep -q '^kind: PersistentVolumeClaim' /tmp/vw-ms.out; then echo "FAIL: the cache claim rendered as a release resource (Helm's wait would wait for a Bind only the first predictor brings: #483)"; exit 1; fi
 	@echo "ok: model serving fleet shape"
@@ -2871,11 +2904,10 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) >/dev/null 2>&1 || { echo "FAIL: an external JWKS host is refused without gateway.jwksEgress"; exit 1; }
 	@if helm template t $(CONNECTIVITY_DIR) $(JWKS_BASE) --set global.identity.issuerUrl=https://dex.ci.example.com >/dev/null 2>&1; then \
 		echo "FAIL: an in-cluster JWKS host was accepted without gateway.jwksEgress"; exit 1; fi
-	@echo "--> port 443 implies TLS on all three routes, against the system trust: the platform CA is for an issuer jwks.tls.enabled names"
-	@for route in kagent-controller model-manager agent-manager; do \
+	@echo "--> port 443 implies TLS on both routes, against the system trust: the platform CA is for an issuer jwks.tls.enabled names"
+	@for route in kagent-controller agent-manager; do \
 		case $$route in \
 			kagent-controller) flags="$(JWKS_EXTERNAL)"; key=kagent.controllerRoute.jwtAuthentication;; \
-			model-manager) flags="$(MANAGERS_ON) --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set modelManager.route.jwtAuthentication.jwks.host=www.googleapis.com --set modelManager.route.jwtAuthentication.jwks.port=443"; key=modelManager.route.jwtAuthentication;; \
 			agent-manager) flags="$(MANAGERS_ON) --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true --set agentManager.route.jwtAuthentication.jwks.host=www.googleapis.com --set agentManager.route.jwtAuthentication.jwks.port=443"; key=agentManager.route.jwtAuthentication;; \
 		esac; \
 		helm template t $(CONNECTIVITY_DIR) $$flags --set global.identity.ca.secretName=platform-ca 2>/dev/null | awk "/^  name: $$route-jwks\$$/{f=1} f&&/^---\$$/{exit} f" >/tmp/vw-jwks-tls-$$route.out; \
@@ -2912,7 +2944,6 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	done
 	@echo "--> an external host is selected in its normalized form: lower case, no root dot"
 	@helm template t $(CONNECTIVITY_DIR) $(JWKS_EXTERNAL) --set kagent.controllerRoute.jwtAuthentication.jwks.host=WWW.GoogleAPIs.com. --set networkPolicy.flavor=cilium 2>/dev/null | $(CTRL_POLICY) | grep -q 'matchName: "www.googleapis.com"' || { echo "FAIL: the external JWKS host is not selected in its normalized form"; exit 1; }
-	$(call managers_must_fail,the model-manager route rejects the same shape,$(MANAGERS_ON) --set modelManager.route.enabled=true --set modelManager.route.jwtAuthentication.enabled=true --set 'modelManager.route.jwtAuthentication.jwks.host=keys.example.com:443',which carries a port)
 	$(call managers_must_fail,the agent-manager route rejects the same shape,$(MANAGERS_ON) --set agentManager.route.enabled=true --set agentManager.route.jwtAuthentication.enabled=true --set 'agentManager.route.jwtAuthentication.jwks.host=keys.example.com:443',which carries a port)
 	@echo "--> a host of fewer than three labels fails the render, Service short name and public issuer alike"
 	$(call managers_must_fail,a two-label public issuer,$(JWKS_INCLUSTER) --set kagent.controllerRoute.jwtAuthentication.jwks.host=okta.com --set kagent.controllerRoute.jwtAuthentication.jwks.port=5556,fewer than three labels)
