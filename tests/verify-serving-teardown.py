@@ -119,7 +119,8 @@ def check_absent(chart: str) -> None:
 
 # A stub kubectl for the script: every call is logged; the controller's Deployment is listed once (the wait loops),
 # the CRD stores v1alpha2, the namespace holds two configs of kserve-runtime-configs and one of another release, each
-# with the llm-d finalizer and one of someone else. STUB_GONE: everything is gone already (a re-run).
+# with the llm-d finalizer and one of someone else. STUB_GONE: everything is gone already (a re-run). STUB_NO_FLUX:
+# Flux's HelmRelease API is gone too (a retried uninstall after the bundled engine's teardown).
 STUB_KUBECTL = r"""#!/bin/sh
 echo "$*" >> "$STUB_LOG"
 cfg() { printf '{"metadata":{"name":"%s","namespace":"agent-platform","annotations":{"meta.helm.sh/release-name":"%s"},"finalizers":["%s","example.com/keep"]}}' "$1" "$2" "$FINALIZER"; }
@@ -128,6 +129,7 @@ case "$*" in
   "get deployments "*)
     if [ -z "$STUB_GONE" ] && [ ! -e "$STUB_LOG.deployment" ]; then touch "$STUB_LOG.deployment"; echo deployment.apps/llmisvc-controller-manager; fi ;;
   "get validatingwebhookconfigurations "*) ;;
+  "get customresourcedefinitions helmreleases.helm.toolkit.fluxcd.io "*) [ -n "$STUB_NO_FLUX" ] || echo customresourcedefinition.apiextensions.k8s.io/helmreleases.helm.toolkit.fluxcd.io ;;
   "get customresourcedefinitions "*) [ -n "$STUB_GONE" ] || printf v1alpha2 ;;
   "get llminferenceserviceconfigs.v1alpha2.serving.kserve.io --namespace agent-platform -o json")
     printf '{"items":[%s,%s,%s]}' "$(cfg kserve-config-llm-template kserve-runtime-configs)" "$(cfg kserve-config-llm-tracing kserve-runtime-configs)" "$(cfg someone-elses other)" ;;
@@ -139,7 +141,7 @@ esac
 """
 
 
-def run_script(job: dict, gone: bool) -> list[str]:
+def run_script(job: dict, gone: bool, no_flux: bool = False) -> list[str]:
     script = job["spec"]["template"]["spec"]["containers"][0]["args"][0]
     with tempfile.TemporaryDirectory() as d:
         for name, body in (("kubectl", STUB_KUBECTL), ("sleep", "#!/bin/sh\n")):
@@ -148,7 +150,7 @@ def run_script(job: dict, gone: bool) -> list[str]:
                 f.write(body)
             os.chmod(path, 0o755)
         log = os.path.join(d, "calls")
-        env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}", STUB_LOG=log, FINALIZER=FINALIZER, STUB_GONE="1" if gone else "")
+        env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}", STUB_LOG=log, FINALIZER=FINALIZER, STUB_GONE="1" if gone else "", STUB_NO_FLUX="1" if no_flux else "")
         result = subprocess.run(["sh", "-eu", "-c", script], env=env, capture_output=True, text=True, check=False)
         if result.returncode != 0:
             sys.exit(f"FAIL: the script exited {result.returncode}\n{result.stdout}{result.stderr}")
@@ -190,6 +192,10 @@ def check_script(job: dict) -> None:
     if any(re.match(r"^(delete|patch) llminferenceserviceconfigs", c) for c in calls) or not re.match(r"^delete helmreleases\S* --namespace agent-platform kserve-runtime-configs ", calls[-1]):
         sys.exit("FAIL: a re-run with everything gone must touch no config and end with the configs' release:\n" + "\n".join(calls))
     ok("the script re-run with everything gone completes without touching a config")
+    calls = run_script(job, gone=True, no_flux=True)
+    if any(re.match(r"^(delete|patch) ", c) for c in calls):
+        sys.exit("FAIL: a retry after the bundled engine's teardown (no HelmRelease API) must delete nothing:\n" + "\n".join(calls))
+    ok("the script retried with Flux's HelmRelease API gone completes without a delete")
 
 
 def main(chart: str) -> int:
