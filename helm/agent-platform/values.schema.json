@@ -1382,9 +1382,6 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                        "name": {
-                            "type": "string"
-                        },
                         "kubeConfig": {
                             "type": "object",
                             "additionalProperties": false,
@@ -1402,6 +1399,9 @@
                                     }
                                 }
                             }
+                        },
+                        "name": {
+                            "type": "string"
                         }
                     }
                 },
