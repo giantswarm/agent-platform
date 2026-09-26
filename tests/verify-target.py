@@ -440,6 +440,24 @@ def hold_muster_floor(here: str, there: str) -> tuple:
     if t != there:
         print("note: muster#1323 hold — the golden side's muster range is read at the 5.31.4 floor")
     return here, t
+
+
+# giantswarm/giantswarm-management-clusters#2589: every OCIRepository polls on
+# gitops.sourceInterval (1m) instead of gitops.interval (10m). GOLDEN_REF's
+# OCIRepositories are read at this tree's cadence, so the hold is inert once
+# GOLDEN_REF carries it and any HelmRelease interval change still fails the
+# comparison; drop once GOLDEN_REF carries it.
+SOURCE_INTERVAL = re.compile(r"^(spec:\n  interval: )10m(\n  url: )", re.M)
+
+
+def hold_source_interval(here: str, there: str) -> tuple:
+    """The golden meta render with its OCIRepositories at this tree's 1m poll."""
+    t = SOURCE_INTERVAL.sub(r"\g<1>1m\2", there)
+    if t != there:
+        print("note: gitops.sourceInterval hold — the golden side's OCIRepositories are read at the 1m poll")
+    return here, t
+
+
 # giantswarm/giantswarm#37705: the Substrate line at 1.1.0 splits image.registry
 # into the registry host and image.repository, and kagent 1.1.0 carries the
 # platform Harness's compaction (kagent.harness.compaction). Both blocks are
@@ -940,6 +958,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_hook_pods(here, there)
                 here, there = hold_substrate_range(here, there)
                 here, there = hold_muster_floor(here, there)
+                here, there = hold_source_interval(here, there)
                 here, there = hold_repin_1_1(here, there)
                 here, there = hold_repin_1_2(here, there)
                 here, there = hold_otlp_endpoints(here, there)
