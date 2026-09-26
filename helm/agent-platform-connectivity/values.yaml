@@ -211,7 +211,6 @@ gateway:
     # policy this chart renders and pushes the keys to the data plane over xDS,
     # so the controller's egress must reach each issuer. The routes already
     # name host and port (kagent.controllerRoute.jwtAuthentication.jwks,
-    # modelManager.route.jwtAuthentication.jwks,
     # agentManager.route.jwtAuthentication.jwks) and the controller policy
     # opens each host that is not in-cluster on its own port: a Cilium toFQDNs
     # matchName in the cilium flavour, an address block on that port in the
@@ -2269,51 +2268,8 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
 # (it reads this block, not the chart's). Inert while
 # components.model-manager.enabled is false.
 modelManager:  # @schema skipProperties: true; additionalProperties: true
-  # Expose the model-manager API on the agentgateway data plane at
-  # https://agentgateway.<domain><pathPrefix>: an AgentgatewayBackend for the
-  # Service, an HTTPRoute that strips the prefix (model-manager then sees
-  # /api/v1/...), and — when the chart-owned edge is not the data plane — the
-  # public HTTPRoute on the outer Gateway (the same shape as
-  # kagent.controllerRoute). The portal's Models pages call this route.
-  # Requires an agentgateway-* ingress.mode.
-  route:
-    enabled: false
-    pathPrefix: /model-manager
-    # Public hostname; empty derives agentgateway.<global.domain>.
-    hostname: ""
-    # Outer (public) Gateway that terminates TLS, the Giant Swarm public
-    # Gateway by default (as kagent.controllerRoute). Both halves or neither:
-    # empty follows the chart-owned edge, else global.gatewayApi.parentRefs.
-    parentRef:
-      name: giantswarm-default
-      namespace: envoy-gateway-system
-    # Validate the bearer JWT (signature, issuer, expiry) at the gateway
-    # before forwarding: no token, no API. The issuer defaults to
-    # global.identity.issuerUrl; the JWKS is fetched from the issuer's
-    # in-cluster endpoint through a static AgentgatewayBackend (needs
-    # gateway.jwksEgress when network policies are on).
-    jwtAuthentication:
-      enabled: false
-      mode: Strict
-      issuer: ""
-      jwks:
-        # The issuer's hostname, qualified: three labels or more, and for an
-        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
-        # The egress rule the agentgateway controller's network policy renders
-        # is built from this and `port` below, so the port never belongs here,
-        # and an address belongs in gateway.jwksEgress.external.cidrs.
-        host: dex.giantswarm.svc.cluster.local
-        port: 5556
-        path: /keys
-        # Originate TLS to the issuer and verify against caSecretName (a
-        # Secret with ca.crt), else the system trust. Implied by `port: 443`,
-        # which serves no plain HTTP. `enabled: true` names the platform's own
-        # identity provider, so it falls back to global.identity.ca.secretName
-        # as well; TLS implied by the port does not, because that CA signed no
-        # public issuer's certificate and the fetch would fail closed.
-        tls:
-          enabled: false
-          caSecretName: ""
+  # model-manager has no route on the edge: the portal, agents and every other
+  # caller reach it through muster (its MCPServer CR) as the signed-in person.
   kserve:
     # Fail the render when model-manager.backend is kserve and the
     # serving.kserve.io/v1alpha2 API (LLMInferenceService) is not on the
@@ -2322,8 +2278,8 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
     # false skips the check.
     requireApi: true
   # Network policy inputs. The policies render under networkPolicy (enabled +
-  # flavor) like every other component's wiring. Ingress: the agentgateway
-  # data plane (route on), muster (MCPServer on) and the kubelet's probes.
+  # flavor) like every other component's wiring. Ingress: muster (MCPServer
+  # on), additionalPeers and the kubelet's probes.
   # Egress: DNS, the Kubernetes API, the identity provider (oauth on: the Dex
   # issuer by name, or for model-manager.oauth.provider google its discovery,
   # JWKS/userinfo and token hosts), the Ollama endpoint (ollama backend) or the
@@ -2572,7 +2528,7 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
 agentManager:  # @schema skipProperties: true; additionalProperties: true
   # Expose the agent-manager API on the agentgateway data plane at
   # https://agentgateway.<domain><pathPrefix> (the same shape as
-  # modelManager.route). Off by default: the MCP tools reach muster in-cluster
+  # kagent.controllerRoute). Off by default: the MCP tools reach muster in-cluster
   # without it; turn it on for a portal or CLI that calls the REST API.
   # Requires an agentgateway-* ingress.mode.
   route:

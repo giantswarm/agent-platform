@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`modelManager.route`: model-manager's REST route, its JWT policy and the data-plane legs of its network policies** (giantswarm/agent-platform#271). The portal, agents and the agentlab proofs reach model-manager through muster as the signed-in person (its `MCPServer` CR, `x_model-manager_*`), so nothing called the route. The connectivity chart renders no `AgentgatewayBackend`, `HTTPRoute` or `AgentgatewayPolicy` for model-manager, its ingress policy admits muster, `additionalPeers` and the probes, and `dataplane-to-model-manager` is gone in both flavours. A set `modelManager.route` fails the render naming the issue; model-manager's `oauth.baseURL` stays `https://agentgateway.<global.domain>/model-manager`. `agentManager.route`, `kagent.controllerRoute` and `gateway.jwksEgress` are unchanged. UPGRADE.md.
+
 ### Added
 
 - **The Klaus Gateway board shows the whole turn as a person sees it: "Turn done (final flush), p50 and p95"** (giantswarm/giantswarm#37787). The panel sits beside "Time to first text" and shows the time from the message's arrival to the last edit of the answer in the channel, from `klaus_gateway_turn_phase_seconds{phase="final_flush"}`. Before, the board showed only this phase's p95, inside "Turn phases, p95".
