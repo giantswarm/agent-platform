@@ -60,8 +60,8 @@ GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 # component -> (repository, versionRange, dependsOn, a line only the standalone's
 # defaults put into the forwarded values, or None when the block is empty)
 NEW = {
-    "backstage": (GSOCI, ">=1.0.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
-    "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
+    "backstage": (GSOCI, ">=2.68.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
+    "mcp-kubernetes": (GSOCI, ">=1.3.0 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts", "0.29.x", [], "repository: gsoci.azurecr.io/giantswarm/cloudnative-pg"),
     "kserve-llmisvc-crd": (GSOCI, "0.5.x", [], None),
     # The one KServe controller: it renders the control plane's shared objects
@@ -83,7 +83,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.1.0 <1.2.0"
+KAGENT_RANGE = ">=1.2.0 <1.3.0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
 # both landing in ate-system, both following components.kagent. The pin is the
@@ -101,20 +101,20 @@ LINE = {
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
+    "agent-manager": (GSOCI, ">=1.2.0 <2.0.0", ["muster", "kagent"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
-    "model-manager": (GSOCI, ">=1.0.8 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
+    "model-manager": (GSOCI, ">=1.3.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
     # 0.22.0 carries serviceMonitor.enabled / .labels (giantswarm/vm-manager#73,
     # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
     # from the generated CircleCI pipeline with its guest image artifact
     # (gsoci, the catalog). muster alone: the MCPServer CR.
-    "vm-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster"]),
+    "vm-manager": (GSOCI, ">=0.24.0 <1.0.0", ["muster"]),
     # 0.4.2 is the first cluster-manager release with the muster registration and
     # the identity contract the meta chart forwards that also tolerates a cluster
     # without the Cluster API group. muster alone: the MCPServer CR.
-    "cluster-manager": (GSOCI, ">=0.4.2 <1.0.0", ["muster"]),
+    "cluster-manager": (GSOCI, ">=0.19.0 <1.0.0", ["muster"]),
     # Swarmgeist on the line: the line speaks A2A v1 over gRPC to the controller
     # GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10 REST client and
     # belongs to the 3.x meta chart. The floor is 2.0.0, the Slack-only line

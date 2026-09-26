@@ -2,6 +2,53 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the managers, the portal and mcp-kubernetes export traces)
+
+giantswarm/giantswarm#36711: model-manager, agent-manager, vm-manager, cluster-manager, backstage and mcp-kubernetes export their traces over OTLP to `global.observability.traces.otlp`, and their ranges start at the releases that do (model-manager `1.3.0`, agent-manager `1.2.0`, vm-manager `0.24.0`, cluster-manager `0.19.0`, backstage `2.68.0`, mcp-kubernetes `1.3.0`).
+
+### Operator action
+
+- **None** for an installation on the defaults: each component resolves the new release in its range and starts exporting to the platform's collector under its tenant.
+- **A BOM that pins one of the six** below its new floor: pin the floor (`examples/customer-bom.yaml`).
+- **An installation that sets a component's OTLP keys itself** (`<component>.observability.otel.*`, `mcp-kubernetes.mcpKubernetes.instrumentation.otlp*` / `.tracingExporter`): the explicit value wins, and its egress rule follows it. To follow the platform's collector, delete it.
+- **Recognising it worked**: `sum by (service) (increase(traces_spanmetrics_calls_total{service=~"model-manager|agent-manager|vm-manager|cluster-manager|backstage|mcp-kubernetes"}[1h]))` is non-zero once each component served a request.
+
+## \<current\> → \<next\> (`kagent.harness.compaction.tokenThreshold` is `600000`)
+
+giantswarm/giantswarm#37792: the platform Harness compacts an agent's history only once a prompt passes 600 000 tokens (was 24 000), keeping the last four events and summarising on the agent's own model. Below that every follow-up re-reads its history from the prompt cache.
+
+### Operator action
+
+- **None** for an installation on the defaults. The kagent release upgrades once and the Harness's `spec.kagent.compaction` changes; every admitted AgentTemplate recompiles once (about 20 s per template).
+- **An installation whose agents run on a model with a context window below 600 000 tokens** (a self-served model): set `kagent.harness.compaction.tokenThreshold` below that window, or those agents fill it before compacting.
+- **An installation that set `kagent.harness.compaction` itself**: nothing changes, the explicit value wins.
+- **Recognising it worked**: `kubectl -n kagent get harness kagent -o jsonpath='{.spec.kagent.compaction}'` prints `{"eventRetentionSize":4,"tokenThreshold":600000}`, and one agent turn answers.
+
+## \<current\> → \<next\> (`global.observability.traces.otlp` is the collector of every exporter, not only the data plane's)
+
+giantswarm/giantswarm#36711: `global.observability.traces.otlp` used to reach the agentgateway data plane only, empty by default, and a set endpoint won over `gateway.parameters.dataPlaneEnv`. It now names the collector of every exporter of the platform: its default is `endpoint: http://otlp-gateway.kube-system.svc:4317`, `protocol: grpc` and the new `tenant: giantswarm`, and the meta chart writes it into every component key that is `auto`, the new default of kagent's, muster's, klaus-gateway's and Substrate's OTLP keys, of the tenant pod labels and of the data plane's two OTLP env entries. A component key set to anything else wins over it, the data plane's `dataPlaneEnv` entries included.
+
+### Operator action
+
+- **None** for an installation on the defaults: every component gets the endpoint, protocol and tenant it had. `global` is part of every component release's values, so each HelmRelease upgrades once with manifests that do not change.
+- **An installation that set `global.observability.traces.otlp.endpoint`** (to move the data plane's traces): the value now moves kagent, muster, klaus-gateway and Substrate too, with their egress rules. Keep it if that collector should take everything; otherwise set the other components' own keys. Set `tenant` too if the collector's tenant is not `giantswarm`, or empty if it takes none. An `X-Scope-OrgID` in `headers` is now the tenant: it fails the render unless it matches `tenant`, so move it there.
+- **An installation that set `global.observability.traces.otlp.protocol: http/protobuf`**: the render fails while klaus-gateway, Substrate or kagent's log exporter would take the endpoint (they speak gRPC only). Set `klausGateway.observability.otlpEndpoint`, `substrate.otel.endpoint` and `kagent.otel.logging.exporter.otlp.endpoint` to the collector's gRPC endpoint, as the message names.
+- **An installation that set both `global.observability.traces.otlp.endpoint` and its own `gateway.parameters.dataPlaneEnv`**: the list now wins. Write its OTLP values as `auto` (or drop them) to follow the global endpoint again.
+- **An installation that sets a component key itself** (`kagent.otel.*`, `muster.muster.observability.otel.*`, `klausGateway.observability.otlp*`, `substrate.otel.endpoint`, the tenant pod labels): nothing changes, the explicit value wins. To follow the platform's collector, delete it.
+- **Recognising it worked**: `kubectl -n <release namespace> get helmrelease muster -o jsonpath='{.spec.values.muster.observability.otel.endpoint}'` and the same for `klaus-gateway` (`{.spec.values.observability.otlpEndpoint}`), `substrate` (`{.spec.values.otel.endpoint}`) and `kagent` (`{.spec.values.otel.tracing.exporter.otlp.endpoint}`) print the collector's endpoint, and the platform's spans reach it under the tenant.
+
+## \<current\> → \<next\> (the kagent line at `1.2.0`: upstream kagent `main@dd3b2405`, `kagent.otel` in the SDK-spec shape)
+
+giantswarm/giantswarm#37742: the kagent line re-pinned on 2026-09-25 onto upstream `main@dd3b2405` (A2A over HTTP/JSON-RPC and per-instance Agent Cards, kagent-dev/kagent#2933; SDK-spec OTel variables, kagent-dev/kagent#2909), on the same Substrate `1.1.0`. `components.kagent*.versionRange` move to `>=1.2.0 <1.3.0`. The kagent chart takes its OTel settings as `otel.exporter.otlp.{endpoint,protocol,timeout}`, `otel.traces.enabled` and `otel.logs.enabled`, and compiles the actors' telemetry settings itself; the former `otel.tracing` and `otel.logging` blocks are ignored.
+
+### Operator action
+
+- **None** for an installation on the defaults: `kagent.otel` carries the new shape, its `auto` endpoint and protocol still follow `global.observability.traces.otlp`, `enabled: auto` still follows the monitoring API, and the Harness env loses `OTEL_LOGGING_ENABLED` and `KAGENT_TRACE_FLUSH_TIMEOUT_MS`, which the line no longer reads.
+- **`kagent.otel.tracing` or `kagent.otel.logging` set in your values**: move them to `kagent.otel.exporter.otlp.endpoint` / `.protocol` (both signals) or `kagent.otel.traces.endpoint` / `kagent.otel.logs.endpoint` (one signal, a full URL), and `kagent.otel.traces.enabled` / `kagent.otel.logs.enabled`. `insecure` is gone: the endpoint's scheme decides. Left as they are, the keys are ignored and kagent exports to the collector `global.observability.traces.otlp` names.
+- **`KAGENT_TRACE_FLUSH_TIMEOUT_MS` set on a Harness**: use `kagent.otel.exporter.otlp.timeout` (milliseconds; `500` by default), which bounds every export and so the flush before a turn's response.
+- **A BOM pin** (`components.kagent*.versionRange` at `1.1.x`): pin `1.2.0` for both.
+- **Recognising it worked**: `kubectl -n kagent get configmap kagent-controller -o yaml` shows `OTEL_TRACES_EXPORTER: otlp`, `OTEL_LOGS_EXPORTER: otlp` and `OTEL_EXPORTER_OTLP_TIMEOUT: "500"`; one agent turn is a trace in Tempo for the `giantswarm` tenant with the controller's and the actor's spans, and the actor's logs are in Loki.
+
 ## \<current\> → \<next\> (the LLM listener routes by model: `llmRouting.backend` is `llmRouting.models`, and `llmRouting.pathPrefixes` and `llmRouting.routes` are gone)
 
 giantswarm/agent-platform#603: with `llmRouting.enabled` the LLM listener's backend is the model router instead of one `AgentgatewayBackend`: the request's `model` picks an `AgentgatewayModel`. The chart renders one per `llmRouting.models` entry — by default `anthropic`, provider Anthropic, `match: claude-*` — attached directly to the data-plane Gateway's LLM listener (`sectionName: llm`), with no `HTTPRoute` in front: agentgateway strips a route's matched `PathPrefix` before the model router, which then saw `/messages`, proxied it as Passthrough and recorded no token or cost metric. The in-cluster `HTTPRoute` `<name>-llm`, the Gateway-scoped route-type map (`AgentgatewayPolicy` `<name>-llm`) and the `AgentgatewayBackend` `anthropic` are removed with the upgrade. With the external endpoint on, `<name>-llm-external` matches `PathPrefix: /`, and behind a public Gateway it moves to a data-plane listener of its own, `llmRouting.external.listener` (`llm-external`, `8082`). With a serving model-manager (this release's slice, or a GPU node pool's) the chart renders the LLMEndpoint document, the ConfigMap `<name>-llm-endpoint` labelled `agent-platform.giantswarm.io/llm-endpoint: "true"`, so model-manager attaches the served models to the same parents; the serving slice's discovery ConfigMap no longer carries `spec.llmEndpoint`.

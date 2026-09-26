@@ -272,9 +272,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster, detected once by the meta chart (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
 | global.observability.metrics.serviceMonitor.labels | object | `{}` |  |
-| global.observability.traces.otlp.endpoint | string | `""` |  |
-| global.observability.traces.otlp.protocol | string | `""` |  |
-| global.observability.traces.otlp.headers | object | `{}` |  |
+| global.observability.traces.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` | The collector's URL. Empty exports nothing: every `auto` endpoint is emptied and kagent's exporters (`auto`) resolve off. |
+| global.observability.traces.otlp.protocol | string | `"grpc"` | `grpc` or `http/protobuf`. klaus-gateway, Substrate and kagent's log exporter speak gRPC only: with `http/protobuf` the render fails while one of them would take this endpoint: set its own key. |
+| global.observability.traces.otlp.tenant | string | `"giantswarm"` | The collector's tenant. Sent as the X-Scope-OrgID header by the exporters that take headers (kagent, muster, klaus-gateway), and as the pod label observability.giantswarm.io/tenant on the ones that do not (Substrate, the agentgateway data plane). Empty sends neither. |
+| global.observability.traces.otlp.headers | object | `{}` | More headers for the exporters that take headers. An X-Scope-OrgID here that differs from `tenant` fails the render. Values in this block are plain values: keep credentials out of it. |
 | gitops.engine | string | `"flux"` |  |
 | gitops.interval | string | `"10m"` |  |
 | gitops.namespace | string | `""` |  |
@@ -329,7 +330,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.1.0 <1.2.0"` |  |
+| components.kagent.versionRange | string | `">=1.2.0 <1.3.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -350,7 +351,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.1.0 <1.2.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.2.0 <1.3.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
@@ -388,7 +389,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=1.0.8 <2.0.0"` |  |
+| components.model-manager.versionRange | string | `">=1.3.0 <2.0.0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
@@ -396,14 +397,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `"1.x"` |  |
+| components.agent-manager.versionRange | string | `">=1.2.0 <2.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.vm-manager.versionRange | string | `">=0.22.0 <1.0.0"` |  |
+| components.vm-manager.versionRange | string | `">=0.24.0 <1.0.0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
@@ -411,7 +412,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.cluster-manager.chart | string | `"cluster-manager"` |  |
 | components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.cluster-manager.versionRange | string | `">=0.4.2 <1.0.0"` |  |
+| components.cluster-manager.versionRange | string | `">=0.19.0 <1.0.0"` |  |
 | components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
@@ -419,7 +420,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.backstage.versionRange | string | `">=1.0.0 <3.0.0"` |  |
+| components.backstage.versionRange | string | `">=2.68.0 <3.0.0"` |  |
 | components.backstage.valuesFrom | string | `"backstage"` |  |
 | components.backstage.omitKeys[0] | string | `"hostname"` |  |
 | components.backstage.omitKeys[1] | string | `"parentRefs"` |  |
@@ -436,7 +437,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.mcp-kubernetes.chart | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.mcp-kubernetes.versionRange | string | `">=1.1.1 <2.0.0"` |  |
+| components.mcp-kubernetes.versionRange | string | `">=1.3.0 <2.0.0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
@@ -459,7 +460,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kserve-llmisvc-resources.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
 | components.kserve-runtime-configs.chart | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.kserve-runtime-configs.versionRange | string | `"0.5.x"` |  |
+| components.kserve-runtime-configs.versionRange | string | `"0.6.x"` |  |
 | components.kserve-runtime-configs.valuesFrom | string | `"kserve-runtime-configs"` |  |
 | components.kserve-runtime-configs.enabled | bool | `false` |  |
 | components.kserve-runtime-configs.dependsOn[0] | string | `"kserve-llmisvc-crd"` |  |
@@ -540,9 +541,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.containerSecurityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | gateway.parameters.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | gateway.parameters.dataPlaneEnv[0].name | string | `"OTEL_EXPORTER_OTLP_ENDPOINT"` |  |
-| gateway.parameters.dataPlaneEnv[0].value | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| gateway.parameters.dataPlaneEnv[0].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneEnv[1].name | string | `"OTEL_EXPORTER_OTLP_PROTOCOL"` |  |
-| gateway.parameters.dataPlaneEnv[1].value | string | `"grpc"` |  |
+| gateway.parameters.dataPlaneEnv[1].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneVolumes | list | `[]` |  |
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.cpu | string | `"100m"` |  |
@@ -558,7 +559,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.parameters.spread.maxSkew | int | `1` |  |
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
-| gateway.parameters.podLabels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| gateway.parameters.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | gateway.http.maxBufferSize | string | `"8Mi"` |  |
 | gateway.tracing.randomSampling | string | `"0.1"` |  |
 | gateway.metricLabels.agent.enabled | bool | `true` |  |
@@ -673,7 +674,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | muster.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | muster.podDisruptionBudget.enabled | bool | `true` |  |
-| muster.podDisruptionBudget.minAvailable | int | `1` |  |
+| muster.podDisruptionBudget.minAvailable | string | `""` |  |
+| muster.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | muster.gatewayAPI.enabled | bool | `false` |  |
 | muster.muster.oauth.server.enabled | bool | `true` |  |
 | muster.muster.oauth.server.baseUrl | string | `""` |  |
@@ -688,9 +690,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, vm-manager, cluster-manager and muster's core tools."` |  |
 | muster.muster.toolsetPresets.agent-platform.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=agent-platform"` |  |
 | muster.muster.toolsetPresets.agent-platform.include[1].pattern | string | `"core_*"` |  |
-| muster.muster.observability.otel.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| muster.muster.observability.otel.protocol | string | `"grpc"` |  |
-| muster.muster.observability.otel.headers | string | `"X-Scope-OrgID=giantswarm"` |  |
+| muster.muster.observability.otel.endpoint | string | `"auto"` |  |
+| muster.muster.observability.otel.protocol | string | `"auto"` |  |
+| muster.muster.observability.otel.headers | string | `"auto"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.enabled | string | `"auto"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.interval | string | `"60s"` |  |
 | muster.muster.observability.metrics.prometheus.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
@@ -703,8 +705,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.podDisruptionBudget.enabled | bool | `true` |  |
-| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
-| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.minAvailable | string | `nil` |  |
+| valkey.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
@@ -753,8 +755,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
 | kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | kagent.controller.pdb.enabled | bool | `true` |  |
-| kagent.controller.pdb.minAvailable | int | `1` |  |
-| kagent.controller.pdb.maxUnavailable | string | `""` |  |
 | kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.controller.resources.requests.cpu | string | `"100m"` |  |
 | kagent.controller.resources.requests.memory | string | `"128Mi"` |  |
@@ -775,7 +775,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.metrics.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.controller.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
+| kagent.controller.env[0].value | string | `"auto"` |  |
 | kagent.ui.image.repository | string | `"giantswarm/kagent/ui"` |  |
 | kagent.substrateWorkerPool.create | bool | `true` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
@@ -809,13 +809,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.apiKey | string | `""` |  |
 | kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
 | kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
-| kagent.otel.tracing.enabled | string | `"auto"` |  |
-| kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |
-| kagent.otel.tracing.exporter.otlp.insecure | bool | `true` |  |
-| kagent.otel.logging.enabled | string | `"auto"` |  |
-| kagent.otel.logging.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.logging.exporter.otlp.insecure | bool | `true` |  |
+| kagent.otel.exporter.otlp.endpoint | string | `"auto"` |  |
+| kagent.otel.exporter.otlp.protocol | string | `"auto"` |  |
+| kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
+| kagent.otel.traces.enabled | string | `"auto"` |  |
+| kagent.otel.logs.enabled | string | `"auto"` |  |
 | kagent.oauth2-proxy.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
@@ -867,7 +865,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. The connectivity chart renders it in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it); this chart derives agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's `agentPlatform.fluxServiceAccountName` is rendered from the same value — ONE value, three consumers, so they cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
 | kagent.harness.create | bool | `true` |  |
 | kagent.harness.image | string | `""` |  |
-| kagent.harness.compaction.tokenThreshold | int | `24000` |  |
+| kagent.harness.compaction.tokenThreshold | int | `600000` |  |
 | kagent.harness.compaction.eventRetentionSize | int | `4` |  |
 | kagent.harness.snapshotLocation | string | `""` |  |
 | kagent.harness.snapshotStore.prefix | string | `"kagent"` |  |
@@ -910,12 +908,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
 | kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
 | kagent.harness.env[0].value | string | `"true"` |  |
-| kagent.harness.env[1].name | string | `"OTEL_LOGGING_ENABLED"` |  |
-| kagent.harness.env[1].value | string | `"true"` |  |
-| kagent.harness.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.harness.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
-| kagent.harness.env[3].name | string | `"KAGENT_TRACE_FLUSH_TIMEOUT_MS"` |  |
-| kagent.harness.env[3].value | string | `"500"` |  |
+| kagent.harness.env[1].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.harness.env[1].value | string | `"auto"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."agent-platform.giantswarm.io/harness" | string | `"kagent"` |  |
 | kagent.harness.allowedAgentTemplates.selector.matchLabels."kagent.dev/harness" | string | `""` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
@@ -1036,12 +1030,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | klausGateway.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | klausGateway.podDisruptionBudget.enabled | bool | `true` |  |
-| klausGateway.podDisruptionBudget.minAvailable | int | `1` |  |
+| klausGateway.podDisruptionBudget.minAvailable | string | `""` |  |
+| klausGateway.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | klausGateway.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
 | klausGateway.observability.enabled | string | `"auto"` |  |
-| klausGateway.observability.otlpEndpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| klausGateway.observability.otlpHeaders.X-Scope-OrgID | string | `"giantswarm"` |  |
+| klausGateway.observability.otlpEndpoint | string | `"auto"` |  |
+| klausGateway.observability.otlpHeaders | string | `"auto"` |  |
 | klausGateway.serviceMonitor.enabled | string | `"auto"` |  |
 | klausGateway.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | klausGateway.slack.enabled | bool | `false` |  |
@@ -1106,6 +1101,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentSandbox.podSecurity.containerSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentSandbox.podSecurity.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | model-manager.fullnameOverride | string | `"model-manager"` |  |
+| model-manager.observability.otel.endpoint | string | `"auto"` |  |
+| model-manager.observability.otel.protocol | string | `"auto"` |  |
+| model-manager.observability.otel.headers | string | `"auto"` |  |
 | model-manager.ollama.endpoint | string | `""` |  |
 | model-manager.ollama.agentHost | string | `""` |  |
 | model-manager.lemonade.endpoint | string | `""` |  |
@@ -1151,6 +1149,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.registeredBackends | list | `[]` |  |
 | vm-manager.fullnameOverride | string | `"vm-manager"` |  |
+| vm-manager.observability.otel.endpoint | string | `"auto"` |  |
+| vm-manager.observability.otel.protocol | string | `"auto"` |  |
+| vm-manager.observability.otel.headers | string | `"auto"` |  |
 | vm-manager.persistence.existingClaim | string | `""` |  |
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |
@@ -1172,6 +1173,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | vmManager.networkPolicy.guestEgress.cidrs[0] | string | `"0.0.0.0/0"` |  |
 | vmManager.networkPolicy.guestEgress.except | list | `[]` |  |
 | agent-manager.fullnameOverride | string | `"agent-manager"` |  |
+| agent-manager.observability.otel.endpoint | string | `"auto"` |  |
+| agent-manager.observability.otel.protocol | string | `"auto"` |  |
+| agent-manager.observability.otel.headers | string | `"auto"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
@@ -1201,8 +1205,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | agentManager.podDisruptionBudget.enabled | bool | `true` |  |
-| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
-| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.minAvailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
@@ -1218,6 +1222,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.githubToken.key | string | `"token"` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
+| cluster-manager.observability.otel.endpoint | string | `"auto"` |  |
+| cluster-manager.observability.otel.protocol | string | `"auto"` |  |
+| cluster-manager.observability.otel.headers | string | `"auto"` |  |
 | cluster-manager.installation.name | string | `""` |  |
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
@@ -1239,6 +1246,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| backstage.observability.otel.endpoint | string | `"auto"` |  |
+| backstage.observability.otel.protocol | string | `"auto"` |  |
+| backstage.observability.otel.headers | string | `"auto"` |  |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |
@@ -1287,6 +1297,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.backstage.extraVolumeMounts[0].mountPath | string | `"/etc/agent-platform/idp-ca"` |  |
 | backstage.backstage.extraVolumeMounts[0].readOnly | bool | `true` |  |
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.tracingExporter | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.otlpInsecure | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.otlpProtocol | string | `"auto"` |  |
+| mcp-kubernetes.mcpKubernetes.instrumentation.otlpHeaders | string | `"auto"` |  |
 | mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.enabled | string | `"auto"` |  |
 | mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
@@ -1315,8 +1330,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.postgres.connectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
 | substrate.rustfs.enabled | bool | `false` |  |
-| substrate.otel.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| substrate.podLabels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| substrate.otel.endpoint | string | `"auto"` |  |
+| substrate.otel.metrics.enabled | bool | `false` |  |
+| substrate.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | substrate.images.postgres | string | `"gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"` |  |
 | substrate.images.rustfs | string | `"gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358"` |  |
 | substrate.images.awsCli | string | `"amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73"` |  |
@@ -1344,6 +1360,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.enabled | bool | `true` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint | string | `"auto"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.tracing.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | kserve-runtime-configs.kserve.servingruntime.enabled | bool | `false` |  |
 | gpu-operator.driver.enabled | bool | `false` |  |
 | gpu-operator.toolkit.enabled | bool | `false` |  |
@@ -1415,6 +1433,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.imageVerification.kyvernoEgress.hosts[3].matchName | string | `"rekor.sigstore.dev"` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
 | modelServing.networkPolicy.additionalIngressNamespaces | list | `[]` |  |
+| modelServing.networkPolicy.otlpEndpoint | string | `"auto"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
@@ -1429,6 +1448,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.modelsGateway.tls.issuerRef.name | string | `""` |  |
 | modelServing.modelsGateway.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
 | modelServing.modelsGateway.tls.issuerRef.group | string | `"cert-manager.io"` |  |
+| modelServing.modelsGateway.service.annotations."service.beta.kubernetes.io/aws-load-balancer-scheme" | string | `"internet-facing"` |  |
 | modelServing.modelsGateway.externalDns.enabled | bool | `true` |  |
 | modelServing.modelsGateway.jwtAuthentication.mode | string | `"Strict"` |  |
 | modelServing.modelsGateway.jwtAuthentication.issuer | string | `""` |  |

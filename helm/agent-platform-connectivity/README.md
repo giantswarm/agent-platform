@@ -359,10 +359,12 @@ Gateway and keeps agentgateway's defaults for the LLM path.
 The chart turns on the data plane's trace export with ONE Gateway-scoped
 `AgentgatewayPolicy`, `<release>-tracing`
 (`templates/agentgateway/tracing.yaml`, `frontend.tracing`). The policy sends
-spans to the endpoint in `gateway.parameters.dataPlaneEnv`, or to
-`global.observability.traces.otlp` when its endpoint is set. The exporter
+spans to the endpoint in `gateway.parameters.dataPlaneEnv`, whose `auto`
+values take `global.observability.traces.otlp`'s endpoint and protocol (the
+platform's one collector; an entry set to anything else wins). The exporter
 sends no headers, so the tenant comes from the pod label in
-`gateway.parameters.podLabels`.
+`gateway.parameters.podLabels`, which the meta chart derives from
+`global.observability.traces.otlp.tenant`.
 
 The incoming `traceparent` decides if the data plane traces a request:
 
@@ -396,6 +398,72 @@ value that is not a number between 0 and 1 or a boolean (`10%`, `1.5`).
 plus the random share of the others. Use `agentgateway_requests_total` for
 rates. `make verify-dataplane-tracing` asserts the policy, the sampling value
 and the schema.
+
+## The model pods' traces
+
+The llm-d controller (KServe's llmisvc controller, v0.20.0) has no
+OpenTelemetry code, so it emits no spans. The data plane does: the vLLM `main`
+container of the workload pod and, when the service has one, the endpoint
+picker. The controller configures both from the `LLMInferenceService`'s
+merged `spec.tracing`. It adds `--otlp-traces-endpoint`,
+`--collect-detailed-traces all` and the `OTEL_*` variables to vLLM, and
+`--tracing=true` with the same variables to the endpoint picker.
+
+**The switch is `spec.tracing`, not `baseRefs`.** When the merged spec carries
+`tracing`, even an empty `tracing: {}`, the controller appends the well-known
+`kserve-config-llm-tracing` preset itself, the way it appends the template
+presets. Nobody lists the preset in `baseRefs`. A service without `tracing`
+exports nothing. The service's own `spec.tracing` keys win over the preset's.
+
+The platform fills in that preset through components.kserve-runtime-configs,
+from `global.observability.traces.otlp` like every other exporter
+(`auto` keys, resolved by the meta chart):
+
+| Preset field | Default | Source |
+|---|---|---|
+| `spec.tracing.exporterEndpoint` | `http://otlp-gateway.kube-system.svc:4317` | `global.observability.traces.otlp.endpoint` |
+| `spec.labels` | `observability.giantswarm.io/tenant: giantswarm` | `global.observability.traces.otlp.tenant` (no label when empty) |
+| `spec.tracing.sampler`, `samplerArg` | `parentbased_traceidratio`, `0.05` | upstream's |
+
+The exporters send no headers, so otlp-gateway routes the spans to a tenant
+by the pod label. The controller copies `spec.labels` onto the workload pod
+template, so only the pods that export carry the label. vLLM and the endpoint
+picker export over gRPC only, and the API has no protocol field: an
+`http/protobuf` global protocol fails the render while the preset's endpoint
+is `auto`, naming
+`kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint`.
+
+An explicit preset endpoint wins, as every exporter's own key does. This chart
+opens the model pods' egress, `<release>-model-serving-otlp-egress` (both
+flavours), to `modelServing.networkPolicy.otlpEndpoint`. The
+kserve-runtime-configs block never reaches this release, so the meta chart
+writes the preset's resolved endpoint there, and the egress follows an
+explicit preset endpoint too. Rendered on its own, this chart resolves the
+`auto` from the global endpoint. With an empty global endpoint the preset keeps
+upstream's endpoint and no egress renders.
+
+Not covered: the prefill pods of a disaggregated service and the endpoint
+picker pods get neither the label nor the egress. The platform's presets run
+neither.
+
+**Who turns it on: the owner of the `LLMInferenceService`.** For the models
+model-manager serves, model-manager sets `spec.tracing: {}` on every service
+it composes. It does not set any endpoint or sampler, so the preset stays the
+single place for them. The author of a hand-written `LLMInferenceService` adds
+`tracing: {}` themselves. Why not ask every author to opt in: every model on
+the platform is model-manager's, the preset path already lets an operator
+change the endpoint and the sampler in one place, and a per-author opt-in is
+the step that gets forgotten. The cost is that vLLM's detailed traces are on
+for every served model. The controller always passes
+`--collect-detailed-traces all`, which vLLM documents as possibly costly. So
+model-manager should take the switch from the discovery ConfigMap, where an
+installation can turn it off, not hardcode it. model-manager does not set
+`spec.tracing` yet: until it does, a served model exports nothing.
+
+`make verify-serving-slice` asserts the derived endpoint, the label, the
+guards and the egress. `make verify-model-serving-policies` asserts that the
+egress selects the workload pod and nothing else. The live half, a vLLM span
+in Tempo for the `giantswarm` tenant, needs a GPU cluster that serves a model.
 
 ## Data-plane availability
 
@@ -906,9 +974,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
 | global.observability.metrics.serviceMonitor.labels | object | `{}` |  |
-| global.observability.traces.otlp.endpoint | string | `""` |  |
-| global.observability.traces.otlp.protocol | string | `""` |  |
-| global.observability.traces.otlp.headers | object | `{}` |  |
+| global.observability.traces.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` | The collector's URL. Empty: the data plane exports nothing. |
+| global.observability.traces.otlp.protocol | string | `"grpc"` | `grpc` or `http/protobuf`; empty is grpc. |
+| global.observability.traces.otlp.tenant | string | `"giantswarm"` | The collector's tenant. Read by the meta chart (the X-Scope-OrgID header, the observability.giantswarm.io/tenant pod label); the data plane's label arrives resolved in gateway.parameters.podLabels. |
+| global.observability.traces.otlp.headers | object | `{}` | More OTLP headers, appended to the data-plane env. |
 | components.muster.enabled | bool | `true` |  |
 | components.dicebear.enabled | bool | `true` |  |
 | components.agentgateway.enabled | bool | `false` |  |
@@ -964,9 +1033,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.parameters.containerSecurityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | gateway.parameters.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | gateway.parameters.dataPlaneEnv[0].name | string | `"OTEL_EXPORTER_OTLP_ENDPOINT"` |  |
-| gateway.parameters.dataPlaneEnv[0].value | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| gateway.parameters.dataPlaneEnv[0].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneEnv[1].name | string | `"OTEL_EXPORTER_OTLP_PROTOCOL"` |  |
-| gateway.parameters.dataPlaneEnv[1].value | string | `"grpc"` |  |
+| gateway.parameters.dataPlaneEnv[1].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneVolumes | list | `[]` |  |
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.cpu | string | `"100m"` |  |
@@ -1107,8 +1176,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.podDisruptionBudget.enabled | bool | `true` |  |
-| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
-| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.minAvailable | string | `nil` |  |
+| valkey.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
@@ -1216,13 +1285,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.otel.tracing.enabled | string | `"auto"` |  |
-| kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |
-| kagent.otel.tracing.exporter.otlp.insecure | bool | `true` |  |
-| kagent.otel.logging.enabled | string | `"auto"` |  |
-| kagent.otel.logging.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.logging.exporter.otlp.insecure | bool | `true` |  |
+| kagent.otel.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| kagent.otel.exporter.otlp.protocol | string | `"grpc"` |  |
+| kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
+| kagent.otel.traces.enabled | string | `"auto"` |  |
+| kagent.otel.logs.enabled | string | `"auto"` |  |
 | kagent.oauth2-proxy.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
@@ -1545,8 +1612,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | agentManager.podDisruptionBudget.enabled | bool | `true` |  |
-| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
-| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.minAvailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
@@ -1694,6 +1761,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.imageVerification.kyvernoEgress.hosts[3].matchName | string | `"rekor.sigstore.dev"` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
 | modelServing.networkPolicy.additionalIngressNamespaces | list | `[]` |  |
+| modelServing.networkPolicy.otlpEndpoint | string | `"auto"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
@@ -1709,6 +1777,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.modelsGateway.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
 | modelServing.modelsGateway.tls.issuerRef.group | string | `"cert-manager.io"` |  |
 | modelServing.modelsGateway.replicas | int | `1` |  |
+| modelServing.modelsGateway.service.annotations."service.beta.kubernetes.io/aws-load-balancer-scheme" | string | `"internet-facing"` |  |
 | modelServing.modelsGateway.externalDns.enabled | bool | `true` |  |
 | modelServing.modelsGateway.externalDns.annotations."giantswarm.io/external-dns" | string | `"managed"` |  |
 | modelServing.modelsGateway.jwtAuthentication.mode | string | `"Strict"` |  |

@@ -28,13 +28,13 @@ forwards "" — a value every path stores. This test asserts:
     (kagent.dev/harness) blanked — and no image, no workerPoolRef (the chart's
     defaults: its stamped digest, the WorkerPool substrateWorkerPool.name);
   - the env follows the kagent OTel exporters the way the controller's tenant
-    header does (giantswarm/agent-platform#456): KAGENT_PROPAGATE_TOKEN and
-    KAGENT_TRACE_FLUSH_TIMEOUT_MS=500 always (the pre-response flush cap: the
-    turn's tail while the collector is slow or unreachable); with an exporter
-    on, OTEL_EXPORTER_OTLP_HEADERS (the tenant); with logging on,
-    OTEL_LOGGING_ENABLED (the actors' log exporter over gRPC — without it the
-    Go ADK's built-in exporter posts HTTP to the gRPC port). Both exporters
-    resolve off without the monitoring API (auto) or explicitly;
+    header does: KAGENT_PROPAGATE_TOKEN always; with an exporter on,
+    OTEL_EXPORTER_OTLP_HEADERS (the tenant). Both exporters resolve off without
+    the monitoring API (auto) or explicitly. The controller compiles every other
+    telemetry setting into the actors from kagent.otel, whose export timeout
+    (500 ms) is the cap of the Go ADK's flush before a turn's response — the
+    turn's tail while the collector is slow or unreachable
+    (giantswarm/agent-platform#456);
   - the live-shaped path: the kagent release's values carry no null anywhere,
     and replayed as a merge patch onto a release that never held the key, then
     coalesced with the chart's default and stripped of empty values the way the
@@ -67,9 +67,8 @@ SNAPSHOT = "s3://bucket/agents"
 CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true"]
 MONITORING_API = ["--api-versions", "monitoring.coreos.com/v1"]  # the observability platform: the auto knobs resolve on
 ENV_PROPAGATE = {"name": "KAGENT_PROPAGATE_TOKEN", "value": "true"}
-ENV_LOGGING = {"name": "OTEL_LOGGING_ENABLED", "value": "true"}
 ENV_HEADERS = {"name": "OTEL_EXPORTER_OTLP_HEADERS", "value": "X-Scope-OrgID=giantswarm"}
-ENV_FLUSH = {"name": "KAGENT_TRACE_FLUSH_TIMEOUT_MS", "value": "500"}
+EXPORT_TIMEOUT = "500"  # kagent.otel.exporter.otlp.timeout, milliseconds (#456)
 
 
 def fail(msg: str) -> None:
@@ -134,38 +133,48 @@ def main(connectivity: str, meta: str) -> int:
     expected = {
         "create": True,
         "snapshotLocation": SNAPSHOT,
-        "env": [ENV_PROPAGATE, ENV_FLUSH],
+        "env": [ENV_PROPAGATE],
         "allowedAgentTemplates": {"selector": {"matchLabels": {HARNESS_LABEL: "kagent", CHART_LABEL: ""}}},
-        "compaction": {"tokenThreshold": 24000, "eventRetentionSize": 4},
+        "compaction": {"tokenThreshold": 600000, "eventRetentionSize": 4},
     }
     if harness != expected:
         fail(f"the forwarded kagent.harness is not the GS policy alone:\n  got      {harness}\n  expected {expected}\n"
              "(no image by default — the chart's stamped digest is the Harness image; no workerPoolRef — the chart defaults it to "
              f"substrateWorkerPool.name; {CHART_LABEL} is forwarded EMPTY, never null: the line's Harness template drops an "
              "empty-valued selector label, while a null is lost on the patch of a pre-existing HelmRelease — #418; with both "
-             "OTel exporters resolved off the env is KAGENT_PROPAGATE_TOKEN and the flush cap alone — #456)")
-    print(f"ok: the meta chart forwards the platform Harness policy — create, the snapshot location, KAGENT_PROPAGATE_TOKEN and "
-          f"KAGENT_TRACE_FLUSH_TIMEOUT_MS (exporters off), {HARNESS_LABEL}: kagent with {CHART_LABEL} blanked; no image, no workerPoolRef")
+             "OTel exporters resolved off the env is KAGENT_PROPAGATE_TOKEN alone)")
+    print(f"ok: the meta chart forwards the platform Harness policy — create, the snapshot location, KAGENT_PROPAGATE_TOKEN "
+          f"(exporters off), {HARNESS_LABEL}: kagent with {CHART_LABEL} blanked; no image, no workerPoolRef")
 
-    # The actors' telemetry follows the exporters (#456).
-    for label, args, want in (
-        ("both exporters on (auto, monitoring API served)", [*MONITORING_API], [ENV_PROPAGATE, ENV_LOGGING, ENV_HEADERS, ENV_FLUSH]),
-        ("tracing on, logging off", [*MONITORING_API, "--set", "kagent.otel.logging.enabled=false"], [ENV_PROPAGATE, ENV_HEADERS, ENV_FLUSH]),
-        ("logging on alone (explicit, no monitoring API)", ["--set", "kagent.otel.logging.enabled=true"], [ENV_PROPAGATE, ENV_LOGGING, ENV_HEADERS, ENV_FLUSH]),
-        ("both off explicitly with the monitoring API served", [*MONITORING_API, "--set", "kagent.otel.tracing.enabled=false", "--set", "kagent.otel.logging.enabled=false"], [ENV_PROPAGATE, ENV_FLUSH]),
+    # The actors' tenant header follows the exporters; the signals reach the
+    # kagent chart resolved, in its SDK-spec shape.
+    for label, args, want, signals in (
+        ("both exporters on (auto, monitoring API served)", [*MONITORING_API], [ENV_PROPAGATE, ENV_HEADERS], (True, True)),
+        ("traces on, logs off", [*MONITORING_API, "--set", "kagent.otel.logs.enabled=false"], [ENV_PROPAGATE, ENV_HEADERS], (True, False)),
+        ("logs on alone (explicit, no monitoring API)", ["--set", "kagent.otel.logs.enabled=true"], [ENV_PROPAGATE, ENV_HEADERS], (False, True)),
+        ("both off explicitly with the monitoring API served", [*MONITORING_API, "--set", "kagent.otel.traces.enabled=false", "--set", "kagent.otel.logs.enabled=false"], [ENV_PROPAGATE], (False, False)),
     ):
-        got = kagent_values(render(meta, [*base, *args]))["harness"]["env"]
+        values = kagent_values(render(meta, [*base, *args]))
+        got = values["harness"]["env"]
         if got != want:
-            fail(f"Harness env with {label}:\n  got      {got}\n  expected {want}\n(OTEL_LOGGING_ENABLED travels with the logging "
-                 "exporter, OTEL_EXPORTER_OTLP_HEADERS with either exporter, the flush cap always — #456)")
+            fail(f"Harness env with {label}:\n  got      {got}\n  expected {want}\n(OTEL_EXPORTER_OTLP_HEADERS travels with "
+                 "either exporter)")
+        otel = values.get("otel", {})
+        resolved = (otel.get("traces", {}).get("enabled"), otel.get("logs", {}).get("enabled"))
+        if resolved != signals:
+            fail(f"kagent.otel traces/logs enabled with {label}: got {resolved}, expected {signals} (booleans: the kagent "
+                 "chart renders OTEL_<SIGNAL>_EXPORTER from them with ternary, which takes any non-empty string as true)")
+        timeout = otel.get("exporter", {}).get("otlp", {}).get("timeout")
+        if timeout != EXPORT_TIMEOUT:
+            fail(f"kagent.otel.exporter.otlp.timeout with {label}: got {timeout!r}, expected {EXPORT_TIMEOUT!r} (the flush cap — #456)")
     ctrl_env = kagent_values(render(meta, [*base, *MONITORING_API]))["controller"]["env"]
     if ENV_HEADERS not in ctrl_env:
         fail(f"the controller's tenant header is gone with the exporters on: {ctrl_env}")
     ctrl_env = kagent_values(render(meta, base))["controller"]["env"]
     if ENV_HEADERS in ctrl_env:
         fail(f"the controller's tenant header stays with both exporters off: {ctrl_env}")
-    print("ok: the Harness env follows the exporters — OTEL_LOGGING_ENABLED with logging, the tenant header with either, "
-          "KAGENT_TRACE_FLUSH_TIMEOUT_MS=500 always; the controller's header as before")
+    print("ok: the Harness env follows the exporters — the tenant header with either; kagent.otel reaches the chart with "
+          f"resolved booleans and the {EXPORT_TIMEOUT} ms export timeout; the controller's header as before")
 
     # The live-shaped path (#418): an installation upgraded from 3.x has a kagent
     # HelmRelease already, and the meta chart's upgrade patches its spec.values.

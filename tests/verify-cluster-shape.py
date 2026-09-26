@@ -94,8 +94,8 @@ EXPLICIT_FLEET_COPIES = [
     "--set", "muster.muster.observability.metrics.prometheus.prometheusRule.enabled=true",
     "--set", "muster.muster.observability.grafanaDashboard.enabled=true",
     "--set", "valkey.ciliumNetworkPolicy.enabled=true",
-    "--set", "kagent.otel.tracing.enabled=true",
-    "--set", "kagent.otel.logging.enabled=true",
+    "--set", "kagent.otel.traces.enabled=true",
+    "--set", "kagent.otel.logs.enabled=true",
     "--set", "kagent.oauth2-proxy.metrics.serviceMonitor.enabled=true",
     "--set", "agentgateway.monitoring.enabled=true",
     "--set", "vm-manager.serviceMonitor.enabled=true",
@@ -237,7 +237,7 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
         expect(pod_monitor == "false", f"{where} valkey podMonitor.enabled = {pod_monitor!r}, want 'false'")
 
     kagent = hr["kagent"]
-    for path in (["otel", "tracing", "enabled"], ["otel", "logging", "enabled"],
+    for path in (["otel", "traces", "enabled"], ["otel", "logs", "enabled"],
                  ["oauth2-proxy", "metrics", "serviceMonitor", "enabled"]):
         got = leaf(kagent, path)
         expect(got == yes(monitors), f"{where} kagent values {'.'.join(path)} = {got!r}, want {yes(monitors)!r}")
@@ -323,7 +323,7 @@ def main(meta: str, connectivity: str) -> int:
 
     m = helm_releases(render(meta, [*ci, *ON, *fleet, "--set", "global.observability.metrics.serviceMonitor.enabled=false"]))
     expect(leaf(m["muster"], ["muster", "observability", "metrics", "prometheus", "serviceMonitor", "enabled"]) == "false"
-           and leaf(m["kagent"], ["otel", "tracing", "enabled"]) == "false"
+           and leaf(m["kagent"], ["otel", "traces", "enabled"]) == "false"
            and OTLP_HEADER not in "\n".join(m["kagent"])
            and leaf(m["agentgateway"], ["monitoring", "enabled"]) == "false"
            and leaf(m["valkey"], ["valkey", "metrics", "podMonitor", "enabled"]) == "false"

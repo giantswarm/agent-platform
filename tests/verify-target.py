@@ -122,6 +122,8 @@ def hold_otlp_endpoints(here: str, there: str) -> tuple:
     if (h := strip(here)) != here or strip(there) != there:
         print("note: #36711 hold — muster's and Substrate's OTLP endpoint blocks and the data plane's tenant pod label are left out of the golden comparison")
     return h, strip(there)
+
+
 # giantswarm/agentgateway#60: this tree turns the packaging chart's own
 # monitoring on (its controller ServiceMonitor, proxy PodMonitor and dashboard
 # ConfigMap), which GOLDEN_REF's defaults leave off and whose block it does not
@@ -158,10 +160,43 @@ MCP_KUBERNETES_MONITORING_HOLD = [
 # forwarded values and the range compare equal; dropped once GOLDEN_REF
 # carries them.
 VM_MANAGER_MONITOR_HOLD = [
-    "--set", "components.vm-manager.versionRange=>=0.22.0 <1.0.0",
+    "--set", "components.vm-manager.versionRange=>=0.24.0 <1.0.0",
     "--set", "vm-manager.serviceMonitor.enabled=false",
     "--set", "vm-manager.serviceMonitor.interval=60s",
     "--set", "vm-manager.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
+]
+# giantswarm/giantswarm#36711: the managers', the portal's and mcp-kubernetes'
+# OTLP trace keys, which this tree derives from global.observability.traces.otlp
+# and GOLDEN_REF's blocks do not carry (open blocks, so they forward as
+# written), and the floors of the releases that take them. Written on BOTH
+# sides with the values this tree derives by default; dropped once GOLDEN_REF
+# carries them.
+COMPONENT_TRACES_HOLD = [
+    "--set", "components.model-manager.versionRange=>=1.3.0 <2.0.0",
+    "--set", "components.agent-manager.versionRange=>=1.2.0 <2.0.0",
+    "--set", "components.cluster-manager.versionRange=>=0.19.0 <1.0.0",
+    "--set", "components.backstage.versionRange=>=2.68.0 <3.0.0",
+    "--set", "components.mcp-kubernetes.versionRange=>=1.3.0 <2.0.0",
+    "--set", "model-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "model-manager.observability.otel.protocol=grpc",
+    "--set", "model-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "agent-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "agent-manager.observability.otel.protocol=grpc",
+    "--set", "agent-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "vm-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "vm-manager.observability.otel.protocol=grpc",
+    "--set", "vm-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "cluster-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "cluster-manager.observability.otel.protocol=grpc",
+    "--set", "cluster-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "backstage.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
+    "--set", "backstage.observability.otel.protocol=grpc",
+    "--set", "backstage.observability.otel.headers=X-Scope-OrgID=giantswarm",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.tracingExporter=otlp",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint=otlp-gateway.kube-system.svc:4317",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpInsecure=true",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpProtocol=grpc",
+    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpHeaders=X-Scope-OrgID=giantswarm",
 ]
 # giantswarm/kserve#88, giantswarm/giantswarm#36711: the llmisvc controller's
 # ServiceMonitor and plain-HTTP metrics, keys GOLDEN_REF's
@@ -425,6 +460,25 @@ def hold_repin_1_1(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+# giantswarm/giantswarm#37742: the kagent line at 1.2 takes its OTel settings in
+# the SDK-spec shape (kagent.otel.exporter.otlp, .traces, .logs) and compiles
+# the actors' telemetry itself, so the platform Harness drops
+# OTEL_LOGGING_ENABLED and KAGENT_TRACE_FLUSH_TIMEOUT_MS. The kagent otel block,
+# either shape, and the two env entries are dropped from BOTH sides by name;
+# drop once GOLDEN_REF carries them.
+KAGENT_OTEL_BLOCK = re.compile(r"^( +)otel:\n(?:\1  (?:exporter|logs|traces|logging|tracing):\n(?:\1    .*\n)*)+", re.M)
+RETIRED_HARNESS_ENV = re.compile(r'^( +)- name: (?:OTEL_LOGGING_ENABLED|KAGENT_TRACE_FLUSH_TIMEOUT_MS)\n\1  value: "[^"]*"\n', re.M)
+
+
+def hold_repin_1_2(here: str, there: str) -> tuple:
+    """The two meta renders without the kagent otel block and the Harness env entries #37742 retires."""
+    def strip(render: str) -> str:
+        return RETIRED_HARNESS_ENV.sub("", KAGENT_OTEL_BLOCK.sub("", render))
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #37742 hold — the kagent otel block and the retired Harness env entries are left out of the golden comparison")
+    return h, strip(there)
+
+
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -546,6 +600,40 @@ def hold_mm_workload_clusters(here: str, there: str) -> tuple:
     if (h := MM_WORKLOAD_CLUSTERS.sub("", here)) != here or MM_WORKLOAD_CLUSTERS.search(there):
         print("note: #687 hold — model-manager's forwarded, empty networkPolicy.workloadClusters is left out of the golden comparison")
     return h, MM_WORKLOAD_CLUSTERS.sub("", there)
+
+
+# giantswarm/agent-platform#697: the single-replica budgets are maxUnavailable: 1
+# (muster and klaus-gateway with minAvailable: "" to clear their charts'
+# default, the kagent controller on its chart's default) and a lone Postgres
+# instance renders enablePDB: false. The budgets' minAvailable/maxUnavailable
+# lines, in the meta renders' forwarded podDisruptionBudget/pdb blocks and in
+# the connectivity renders' PodDisruptionBudgets, and the enablePDB line with
+# its comment are left out on both sides; dropped once GOLDEN_REF carries #697.
+BUDGET_BLOCK = re.compile(r"^( *)(?:podDisruptionBudget|pdb):\n")
+BUDGET_KEY = re.compile(r"^ *(?:minAvailable|maxUnavailable): .*$")
+LONE_PRIMARY_PDB = re.compile(r"^( +)# One instance: the operator's budget.*\n(?:\1#.*\n)*\1enablePDB: false\n", re.M)
+
+
+def hold_disruption(here: str, there: str) -> tuple:
+    """The two renders with #697's budget bounds and enablePDB left out."""
+    def strip(render: str) -> str:
+        docs = []
+        for doc in render.split("\n---\n"):
+            pdb_doc = "\nkind: PodDisruptionBudget\n" in f"\n{doc}"
+            out, indent = [], None
+            for line in doc.split("\n"):
+                if indent is not None and line.strip() and len(line) - len(line.lstrip()) <= indent:
+                    indent = None
+                if m := BUDGET_BLOCK.match(line + "\n"):
+                    indent = len(m.group(1))
+                if (indent is not None or pdb_doc) and BUDGET_KEY.match(line):
+                    continue
+                out.append(line)
+            docs.append("\n".join(out))
+        return LONE_PRIMARY_PDB.sub("", "\n---\n".join(docs))
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #697 hold — the budgets' minAvailable/maxUnavailable and a lone Postgres primary's enablePDB are left out of the golden comparison")
+    return h, strip(there)
 
 
 def hold_llm_endpoint(here: str, there: str) -> tuple:
@@ -689,6 +777,35 @@ def hold_credential_provider_exception(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+SCRAPE_PORTS_COMMENT = """# The metrics port serves no API and is admitted from the cluster entity, as
+# the platform's other metrics ports are.
+"""
+ATENET_EGRESS_POLICIES = ("  name: substrate-atenet-egress\n", "  name: substrate-atenet-egress-ingress\n")
+ATENET_EGRESS_METRICS = re.compile(r'\n(\s+)- port: "?9090"?\n\s+protocol: TCP(\n\1- port: "?15020"?)')
+KAGENT_CONTROLLER_POLICIES = ("-kagent-from-agentgateway\n", "-kagent-controller-ingress\n")
+KAGENT_METRICS_RULE = re.compile(
+    r"\n    - fromEntities:\n        - cluster\n      toPorts:\n        - ports:\n            - port: \"\d+\"\n              protocol: TCP(?=\n---|\n*$)"
+    r"|\n    - ports:\n        - port: \d+\n          protocol: TCP(?=\n---|\n*$)")
+
+
+def hold_scrape_ports(here: str, there: str) -> tuple:
+    """The two connectivity renders without the metrics ports opened on the kagent
+    controller and atenet-egress's ext-proc (giantswarm/giantswarm#36711;
+    GOLDEN_REF admits neither). Dropped once GOLDEN_REF carries them."""
+    def strip(render: str) -> str:
+        docs = []
+        for d in render.replace(SCRAPE_PORTS_COMMENT, "").split("\n---\n"):
+            if any(n in d for n in ATENET_EGRESS_POLICIES):
+                d = ATENET_EGRESS_METRICS.sub(r"\2", d)
+            elif any(n in d for n in KAGENT_CONTROLLER_POLICIES):
+                d = KAGENT_METRICS_RULE.sub("", d)
+            docs.append(d)
+        return "\n---\n".join(docs)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #36711 hold — the kagent controller's and atenet-egress's metrics ports are left out of the golden comparison")
+    return h, strip(there)
+
+
 DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
 DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
 
@@ -768,8 +885,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the klaus-gateway no-op key removal (#636) since 4.62.0.
         golden_only = {meta: [], connectivity: []}
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
@@ -783,6 +900,7 @@ def check_golden(meta: str, connectivity: str) -> None:
             here, there = hold_opus_5_5_price(here, there)
             here, there = hold_dataplane_buffer(here, there)
             here, there = hold_retired_servicemonitor(here, there)
+            here, there = hold_disruption(here, there)
             if chart == meta:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)
@@ -790,6 +908,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_substrate_range(here, there)
                 here, there = hold_muster_floor(here, there)
                 here, there = hold_repin_1_1(here, there)
+                here, there = hold_repin_1_2(here, there)
                 here, there = hold_otlp_endpoints(here, there)
                 here, there = hold_dataplane_sampling(here, there)
                 here, there = hold_llm_endpoint(here, there)
@@ -802,6 +921,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_substrate_bootstrap(here, there)
                 here, there = hold_credential_provider_exception(here, there)
                 here, there = hold_credential_provider_netpol(here, there)
+                here, there = hold_scrape_ports(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

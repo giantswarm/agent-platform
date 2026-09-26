@@ -22,6 +22,12 @@ property the slice relies on:
   kserve.controller.gateway.ingressGateway.kserveGateway = <namespace>/<gateway>,
   a differing copy of the operator's fails the render naming both;
 - modelServing.serving.runtimeClassName: nvidia reaches the connectivity release;
+- the model pods' traces (giantswarm/giantswarm#36711): kserve-runtime-configs on
+  the 0.6.x line carries the tracing preset's endpoint and tenant pod label from
+  global.observability.traces.otlp (agent-platform.shape.otlp); an explicit preset
+  endpoint wins; <release>-model-serving-otlp-egress opens the preset's endpoint
+  (modelServing.networkPolicy.otlpEndpoint) to the workload pods in both flavours;
+  an http/protobuf global fails naming the key; no endpoint, no policy;
 - with the target knob (ci/test-target-values.yaml) agentgateway is on and every
   HelmRelease carries the kubeConfig;
 - the controller policy of the slice on a workload cluster (components.agentgateway
@@ -115,6 +121,7 @@ G6_XLARGE_VCPU, G6_XLARGE_GIB = 4, 16
 USABLE_VCPU = G6_XLARGE_VCPU - 1.0
 USABLE_GIB = G6_XLARGE_GIB * 0.95 - 3.3
 AUDIENCE = "dex-k8s-authenticator"
+SCHEME = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 
 
 def helm(chart: str, flags: list[str], expect_failure: str = "") -> str:
@@ -315,6 +322,7 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
         sys.exit("FAIL: no Gateway models in the connectivity render")
     for needle in ("  gatewayClassName: agentgateway", "      protocol: HTTPS", '      hostname: "models.wc01.example.com"', "            name: wildcard-tls", "          from: All",
                    "      external-dns.alpha.kubernetes.io/hostname: models.wc01.example.com", "      giantswarm.io/external-dns: managed",
+                   f"      {SCHEME}: internet-facing",
                    "      kind: AgentgatewayParameters\n      name: models"):
         need(gw, needle, "the models Gateway")
     params = docs.get(("AgentgatewayParameters", "models"))
@@ -351,6 +359,20 @@ def check_gateway(connectivity: str, base: list[str]) -> None:
     for needle in ("      gateway:\n        enabled: true", "        endpoint: https://models.wc01.example.com", "        pathConvention: /<namespace>/<model>/v1"):
         need(cm, needle, "the discovery ConfigMap")
     ok("connectivity: the models Gateway on models.<domain> with the wildcard, its data plane's parameters (the platform's security contexts, one replica, LoadBalancer), the external-dns hostname and filter, one Strict policy (audience, Override, issuer), the JWKS backend at the issuer on 443/TLS, the discovery entry")
+
+    # The data plane's Service inherits the Gateway's infrastructure annotations: an internet-facing NLB by default
+    # (#690: the AWS Load Balancer Controller's own default is internal), an explicit scheme replaces it, and it does
+    # not hang on external-dns.
+    scheme_key = "modelServing.modelsGateway.service.annotations." + SCHEME.replace(".", "\\.")
+    private = documents(helm(connectivity, [*base, "--set", f"{scheme_key}=internal"]))[("Gateway", "models")]
+    need(private, f"      {SCHEME}: internal", "the models Gateway with an explicit scheme")
+    if f"{SCHEME}: internet-facing" in private:
+        sys.exit(f"FAIL: an explicit scheme did not replace the default:\n{private}")
+    no_dns = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.externalDns.enabled=false"]))[("Gateway", "models")]
+    need(no_dns, f"    annotations:\n      {SCHEME}: internet-facing", "the models Gateway without external-dns")
+    if "external-dns.alpha.kubernetes.io/hostname:" in no_dns or "giantswarm.io/external-dns:" in no_dns:
+        sys.exit(f"FAIL: externalDns.enabled false still rendered an external-dns annotation:\n{no_dns}")
+    ok("the models data plane's Service is internet-facing by default, an explicit scheme replaces it, with and without external-dns")
 
     cert = documents(helm(connectivity, [*base, "--set", "modelServing.modelsGateway.tls.issuerRef.name=platform-ca"]))
     c = cert.get(("Certificate", "models-tls"))
@@ -855,6 +877,117 @@ def resource_requests(text: str, name: str) -> tuple:
     return vcpu, gib
 
 
+# global.observability.traces.otlp's defaults (endpoint, tenant), which the
+# tracing preset of kserve-runtime-configs follows through agent-platform.shape.otlp.
+GLOBAL_OTLP = "http://otlp-gateway.kube-system.svc:4317"
+TENANT_LABEL = {"observability.giantswarm.io/tenant": "giantswarm"}
+OTLP_POLICY = "agent-platform-connectivity-model-serving-otlp-egress"
+PRESET_ENDPOINT = "kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint"
+
+
+def release_values(render: str, name: str) -> dict:
+    return yaml.safe_load(values_block(documents(render)[("HelmRelease", name)]))
+
+
+def check_tracing(meta: str, connectivity: str) -> None:
+    """The model pods' traces (giantswarm/giantswarm#36711): the tracing preset follows global.observability.traces.otlp, and the egress follows the preset."""
+    profile = ["-f", f"{meta}/examples/serving-slice.yaml", *VM, *INSTALLATION]
+    with open(f"{meta}/values.yaml", encoding="utf-8") as f:
+        rng = yaml.safe_load(f)["components"]["kserve-runtime-configs"]["versionRange"]
+    if rng != "0.6.x":
+        sys.exit(f"FAIL: components.kserve-runtime-configs.versionRange is {rng!r}; 0.6.x is the line that opens kserve.llmisvcConfigs.tracing (giantswarm/kserve#99)")
+
+    def tracing(render: str) -> dict:
+        return release_values(render, "kserve-runtime-configs")["kserve"]["llmisvcConfigs"].get("tracing", {})
+
+    def egress(conn_values: dict, flavor: str) -> tuple:
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            yaml.safe_dump(conn_values, f)
+            path = f.name
+        try:
+            out = helm(connectivity, ["-f", path, "--namespace", "agent-platform", *FLEET_APIS, "--set", f"networkPolicy.flavor={flavor}"])
+        finally:
+            os.unlink(path)
+        kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
+        docs = {k: yaml.safe_load(v) for k, v in documents(out).items()}
+        return docs.get((kind, OTLP_POLICY)), docs
+
+    def cilium_peer(render: str) -> list:
+        policy, _ = egress(release_values(render, "agent-platform-connectivity"), "cilium")
+        return policy["spec"]["egress"][0]["toEndpoints"]
+
+    render = helm(meta, profile)
+    got = tracing(render)
+    want = {"exporterEndpoint": GLOBAL_OTLP, "podLabels": TENANT_LABEL}
+    if got != want:
+        sys.exit(f"FAIL: the kserve-runtime-configs release carries tracing {got}, expected {want} (global.observability.traces.otlp's endpoint and tenant, upstream's sampler)")
+    conn = release_values(render, "agent-platform-connectivity")
+    if conn["modelServing"]["networkPolicy"]["otlpEndpoint"] != GLOBAL_OTLP:
+        sys.exit(f"FAIL: the connectivity release gets modelServing.networkPolicy.otlpEndpoint {conn['modelServing']['networkPolicy']['otlpEndpoint']!r}, expected the preset's {GLOBAL_OTLP}")
+    for flavor in ("cilium", "kubernetes"):
+        policy, docs = egress(conn, flavor)
+        if policy is None:
+            sys.exit(f"FAIL: no {OTLP_POLICY} in the {flavor} flavour: the model pods' exports are dropped")
+        workload = docs[("CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy",
+                         "agent-platform-connectivity-model-serving-llmisvc-workload" + ("" if flavor == "cilium" else "-egress"))]
+        spec, own = policy["spec"], workload["spec"]
+        if flavor == "cilium":
+            if spec["endpointSelector"] != own["endpointSelector"] or policy["metadata"]["namespace"] != "model-serving":
+                sys.exit(f"FAIL: {OTLP_POLICY} selects {spec['endpointSelector']} in {policy['metadata']['namespace']}, not the model pods")
+            expected = [{"toEndpoints": [{"matchLabels": {"io.kubernetes.pod.namespace": "kube-system"}}], "toPorts": [{"ports": [{"port": "4317", "protocol": "TCP"}]}]}]
+        else:
+            if spec["podSelector"] != own["podSelector"] or spec["policyTypes"] != ["Egress"]:
+                sys.exit(f"FAIL: {OTLP_POLICY} selects {spec['podSelector']}, not the model pods, or is not an egress policy")
+            expected = [{"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}}], "ports": [{"port": 4317, "protocol": "TCP"}]}]
+        if spec["egress"] != expected:
+            sys.exit(f"FAIL: {OTLP_POLICY} ({flavor}) egress is {spec['egress']}, expected {expected}")
+    ok(f"tracing preset: exporterEndpoint {GLOBAL_OTLP} and the tenant pod label from global.observability.traces.otlp, upstream's sampler; {OTLP_POLICY} opens kube-system:4317 to the model pods, both flavours")
+
+    moved = helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint=http://collector.tracing.svc:4317", "--set", "global.observability.traces.otlp.tenant=acme"])
+    if tracing(moved) != {"exporterEndpoint": "http://collector.tracing.svc:4317", "podLabels": {"observability.giantswarm.io/tenant": "acme"}}:
+        sys.exit(f"FAIL: the tracing preset does not follow global.observability.traces.otlp: {tracing(moved)}")
+    if cilium_peer(moved) != [{"matchLabels": {"io.kubernetes.pod.namespace": "tracing"}}]:
+        sys.exit(f"FAIL: the model pods' egress does not follow global.observability.traces.otlp.endpoint: {cilium_peer(moved)}")
+    untenanted = tracing(helm(meta, [*profile, "--set", "global.observability.traces.otlp.tenant="]))
+    if "observability.giantswarm.io/tenant" in (untenanted.get("podLabels") or {}):
+        sys.exit(f"FAIL: an empty tenant still labels the model pods: {untenanted}")
+    ip = release_values(helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint=http://10.0.0.5:4317"]), "agent-platform-connectivity")
+    if egress(ip, "cilium")[0]["spec"]["egress"][0].get("toEntities") != ["cluster"]:
+        sys.exit("FAIL: an endpoint outside a Service address should open the cluster entity")
+    if egress(ip, "kubernetes")[0]["spec"]["egress"][0]["to"] != [{"ipBlock": {"cidr": "0.0.0.0/0"}}]:
+        sys.exit("FAIL: an endpoint outside a Service address should open an ipBlock in the kubernetes flavour")
+    ok("the preset follows global.observability.traces.otlp's endpoint and tenant (an empty tenant drops the label), the egress follows the endpoint; an address outside a Service opens the cluster entity / an ipBlock")
+
+    own = helm(meta, [*profile, "--set", f"{PRESET_ENDPOINT}=http://other.tracing2.svc:4317"])
+    if tracing(own)["exporterEndpoint"] != "http://other.tracing2.svc:4317" or cilium_peer(own) != [{"matchLabels": {"io.kubernetes.pod.namespace": "tracing2"}}]:
+        sys.exit(f"FAIL: an explicit preset endpoint must win and move the egress with it: {tracing(own)}, {cilium_peer(own)}")
+    pinned = helm(meta, [*profile, "--set", "modelServing.networkPolicy.otlpEndpoint=http://sidecar.tracing3.svc:4317"])
+    if tracing(pinned)["exporterEndpoint"] != GLOBAL_OTLP or cilium_peer(pinned) != [{"matchLabels": {"io.kubernetes.pod.namespace": "tracing3"}}]:
+        sys.exit("FAIL: an explicit modelServing.networkPolicy.otlpEndpoint must change the egress alone")
+    ok(f"an explicit {PRESET_ENDPOINT} wins and the egress follows it; an explicit modelServing.networkPolicy.otlpEndpoint changes the egress alone")
+
+    helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint=http://collector.tracing.svc:4318", "--set", "global.observability.traces.otlp.protocol=http/protobuf"],
+         expect_failure=PRESET_ENDPOINT)
+    helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint=http://collector.tracing.svc:4318", "--set", "global.observability.traces.otlp.protocol=http/protobuf",
+                "--set", f"{PRESET_ENDPOINT}=http://collector.tracing.svc:4317"])
+    standalone = dict(conn, modelServing={**conn["modelServing"], "networkPolicy": {**conn["modelServing"]["networkPolicy"], "otlpEndpoint": "auto"}},
+                      **{"global": {**conn["global"], "observability": {**conn["global"]["observability"], "traces": {"otlp": {"endpoint": "http://collector.tracing.svc:4318", "protocol": "http/protobuf"}}}}})
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(standalone, f)
+        path = f.name
+    try:
+        helm(connectivity, ["-f", path, "--namespace", "agent-platform", *FLEET_APIS], expect_failure="modelServing.networkPolicy.otlpEndpoint")
+    finally:
+        os.unlink(path)
+    empty = helm(meta, [*profile, "--set", "global.observability.traces.otlp.endpoint="])
+    if "exporterEndpoint" in tracing(empty):
+        sys.exit(f"FAIL: an empty global endpoint still set the preset's: {tracing(empty)}")
+    none = release_values(empty, "agent-platform-connectivity")
+    for flavor in ("cilium", "kubernetes"):
+        if egress(none, flavor)[0] is not None:
+            sys.exit(f"FAIL: {OTLP_POLICY} renders ({flavor}) with no OTLP endpoint")
+    ok(f"an http/protobuf global fails naming {PRESET_ENDPOINT} (an explicit gRPC preset endpoint passes) and, in the connectivity chart alone, modelServing.networkPolicy.otlpEndpoint; no endpoint, no preset endpoint (upstream's) and no egress policy")
+
 def check_prepull_prefix(meta: str, connectivity: str) -> None:
     """The pre-pull's runtime image is the well-known config's llm-d-cuda at the prefix the slice passes (#568)."""
     with open(f"{meta}/values.yaml", encoding="utf-8") as f:
@@ -871,6 +1004,7 @@ def check_prepull_prefix(meta: str, connectivity: str) -> None:
 def main(meta: str, connectivity: str) -> int:
     check_prepull_prefix(meta, connectivity)
     forwarded = check_profile(meta)
+    check_tracing(meta, connectivity)
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
         f.write(forwarded)
         values = f.name
