@@ -263,6 +263,7 @@ else:
         uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
         muse = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/muse-glimmer-30b.yaml")
+        tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
@@ -420,6 +421,16 @@ else:
             head[DISCOVERY], ncuts = re.subn(r"^ +- muse-glimmer-30b\n", "", head[DISCOVERY], flags=re.M)
             expect("the new preset muse-glimmer-30b cut out of the discovery list once", ncuts, 1)
         print(f"note: muse-glimmer-30b ships on this side (#597) and not on {ref}: its ConfigMaps and discovery name are left out of the comparison")
+    # The gpt-oss presets serve the model images that carry the tiktoken
+    # encodings and name them in TIKTOKEN_ENCODINGS_BASE on this side
+    # (giantswarm/agent-platform#606); a golden from before renders the older
+    # tags without the variable, so both ConfigMaps are left out of the
+    # comparison. Drop this once GOLDEN_REF carries #606.
+    if not tiktoken:
+        for name in ("gpt-oss-20b", "gpt-oss-120b"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: the gpt-oss presets carry their tiktoken encodings on this side (#606) and not on {ref}: their ConfigMaps are left out of the comparison")
     # The serving namespace is kept whatever the cache switch says
     # (giantswarm/agent-platform#565; modelServing.namespace.keep) and its
     # template's comment says so; the untainted render has the cache off, so a
