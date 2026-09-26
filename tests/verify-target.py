@@ -325,6 +325,25 @@ def releases(manifest: str) -> set[str]:
     return {name for kind, name in documents(manifest) if kind == "HelmRelease"}
 
 
+def targeted(doc: str) -> str:
+    """A default-render Flux document as the target knob places it (#688): its own,
+    its chartRef's and its dependsOn names prefixed with the release name, its
+    workloads and their Helm storage in agent-platform."""
+    out, section = [], ""
+    for line in doc.split("\n"):
+        if re.match(r"^  \S", line):
+            section = line.strip()
+        if re.match(r"^  name: ", line) and section.startswith("name:"):
+            line = line.replace("name: ", "name: t-", 1)
+        elif section in ("chartRef:", "dependsOn:") and re.match(r"^    (- )?name: ", line):
+            line = line.replace("name: ", "name: t-", 1)
+        elif line == "  targetNamespace: default":
+            out.append("  targetNamespace: agent-platform")
+            line = "  storageNamespace: agent-platform"
+        out.append(line)
+    return "\n".join(out)
+
+
 def ok(msg: str) -> None:
     print(f"ok: {msg}")
 
@@ -345,14 +364,19 @@ def check_knob(meta: str) -> None:
             sys.exit(f"FAIL: {len(missing)} of {len(hrs)} HelmReleases lack the kubeConfig block with {flags}")
         if knob.count("  kubeConfig:") != len(hrs):
             sys.exit("FAIL: kubeConfig rendered outside a HelmRelease")
-        # The Flux documents minus the kubeConfig lines are the default's; what else
-        # leaves the render is the hook family (ci-values turn kagent on, and the
-        # storage-version hooks run where the chart is installed — check_hooks).
+        # The Flux documents minus the kubeConfig lines are the default's placed on
+        # a target (targeted: the names prefixed, the workloads and their Helm
+        # storage in agent-platform); what else leaves the render is the hook
+        # family (ci-values turn kagent on, and the storage-version hooks run where
+        # the chart is installed — check_hooks).
         stripped = {k: "\n".join(line for line in d.split("\n") if line not in lines) for k, d in docs.items() if k[0] in FLUX_KINDS}
-        if stripped != {k: d for k, d in documents(plain).items() if k[0] in FLUX_KINDS}:
-            sys.exit(f"FAIL: the knob changed an OCIRepository / HelmRelease beyond the kubeConfig lines ({flags})")
-        gone = {k for k in documents(plain) if k not in docs}
-        if not gone <= HOOK_OBJECTS or {k for k in docs if k not in documents(plain)}:
+        expected = {(k[0], f"t-{k[1]}"): targeted(d) for k, d in documents(plain).items() if k[0] in FLUX_KINDS}
+        if stripped != expected:
+            diff = sorted(k for k in set(stripped) | set(expected) if stripped.get(k) != expected.get(k))
+            sys.exit(f"FAIL: the knob changed an OCIRepository / HelmRelease beyond the kubeConfig lines and the target placement ({flags}): {diff}")
+        placed = {(k[0], f"t-{k[1]}") if k[0] in FLUX_KINDS else k: k for k in documents(plain)}
+        gone = {k for p, k in placed.items() if p not in docs}
+        if not gone <= HOOK_OBJECTS or {k for k in docs if k not in placed}:
             sys.exit(f"FAIL: the knob changed the render beyond the kubeConfig lines and the hooks: gone={sorted(gone)}")
         ok(f"every one of the {len(hrs)} HelmReleases carries the kubeConfig secretRef ({', '.join(f.split('.')[-1] for f in flags[1::2])}), nothing else changed")
     for f in ("test-target-values.yaml", "test-slice-serving-values.yaml", "test-slice-runtime-values.yaml"):
@@ -991,12 +1015,47 @@ def check_slices(meta: str) -> None:
     ok(f"serving ({len(s)}) + runtime ({len(r)}) = one release of {len(b)} HelmReleases; the first slice's documents unchanged when the second is switched on")
 
     target = helm(meta, ["-f", f"{ci}/test-slice-serving-values.yaml", "-f", f"{ci}/test-target-values.yaml"])
-    t = releases(target)
+    t = {name.removeprefix("t-") for name in releases(target)}
     if t != s | {"agentgateway"}:
         sys.exit(f"FAIL: the serving slice with the target knob should add exactly agentgateway: {sorted(t)}")
     if target.count("  kubeConfig:") != len(t) or "      name: wc01-kubeconfig" not in target:
         sys.exit("FAIL: not every HelmRelease of the targeted slice carries the kubeConfig")
     ok("agentgateway follows the target: off beside the platform's release, on with the knob; every targeted HelmRelease carries the kubeConfig")
+
+
+def check_placement(meta: str) -> None:
+    """giantswarm/agent-platform#688: a targeted release's children are named per
+    target and land, Helm storage included, in a namespace of the platform's own on
+    the target; two targeted releases in one namespace share no child."""
+    slice_ = ["-f", f"{meta}/ci/test-slice-serving-values.yaml", "-f", f"{meta}/ci/test-target-values.yaml"]
+    def flux(release: str, extra: list[str]) -> dict[tuple[str, str], str]:
+        out = subprocess.run([HELM, "template", release, meta, "--namespace", "org-acme", *slice_, *extra],
+                             capture_output=True, text=True, check=False)
+        if out.returncode != 0:
+            sys.exit(f"FAIL: render of the targeted slice {release} failed\n{out.stderr}")
+        return {k: d for k, d in documents(out.stdout).items() if k[0] in FLUX_KINDS}
+    one, two = flux("wc01-agent-platform", []), flux("wc02-agent-platform", ["--set", "gitops.target.kubeConfig.secretRef.name=wc02-kubeconfig"])
+    if set(one) & set(two):
+        sys.exit(f"FAIL: two targeted releases in one namespace share children: {sorted(set(one) & set(two))}")
+    for (kind, name), doc in one.items():
+        if not name.startswith("wc01-agent-platform-"):
+            sys.exit(f"FAIL: {kind} {name} is not named after its release")
+        if kind == "HelmRelease":
+            component = name.removeprefix("wc01-agent-platform-")
+            for line in (f"  releaseName: {component}", "  targetNamespace: agent-platform", "  storageNamespace: agent-platform",
+                         f"    name: {name}"):
+                if f"\n{line}\n" not in f"\n{doc}\n":
+                    sys.exit(f"FAIL: HelmRelease {name} lacks `{line.strip()}`")
+            for dep in re.findall(r"^    - name: (\S+)$", doc, re.M):
+                if not dep.startswith("wc01-agent-platform-"):
+                    sys.exit(f"FAIL: HelmRelease {name} depends on {dep}, not a child of its own release")
+    set_ = flux("wc01-agent-platform", ["--set", "gitops.target.name=wc01", "--set", "gitops.targetNamespace=ai"])
+    names = {name for _, name in set_}
+    if names != {"wc01-" + name.removeprefix("wc01-agent-platform-") for _, name in one}:
+        sys.exit(f"FAIL: gitops.target.name does not name the children: {sorted(names)}")
+    if any("  targetNamespace: ai\n" not in d for (k, _), d in set_.items() if k == "HelmRelease"):
+        sys.exit("FAIL: gitops.targetNamespace does not place a targeted release's children")
+    ok(f"a targeted release's {len(one)} Flux children are named after it, install and store into agent-platform, and share no name with a second targeted release in the namespace; gitops.target.name and gitops.targetNamespace override both")
 
 
 def main(meta: str, connectivity: str) -> int:
@@ -1006,6 +1065,7 @@ def main(meta: str, connectivity: str) -> int:
     check_guards(meta)
     check_hooks(meta)
     check_slices(meta)
+    check_placement(meta)
     return 0
 
 

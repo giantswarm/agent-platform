@@ -153,7 +153,7 @@ def main(meta: str) -> int:
     ok("the pre-installed-driver row: toolkit on, driver off")
 
     # --- the target knob ------------------------------------------------------------
-    target = documents(helm(meta, [*ON, "--set", "gitops.target.kubeConfig.secretRef.name=wc1-kubeconfig"]))[("HelmRelease", NAME)]
+    target = documents(helm(meta, [*ON, "--set", "gitops.target.kubeConfig.secretRef.name=wc1-kubeconfig"]))[("HelmRelease", f"t-{NAME}")]
     if "  kubeConfig:\n    secretRef:\n      name: wc1-kubeconfig\n" not in target:
         fail("the target knob did not stamp spec.kubeConfig.secretRef onto the gpu-operator release")
     ok("the target knob stamps kubeConfig.secretRef on the release")

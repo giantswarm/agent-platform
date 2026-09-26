@@ -232,7 +232,7 @@ flux-giantswarm on Giant Swarm clusters) so the child HelmReleases are not
 rejected by the flux-multi-tenancy admission policy. gitops.targetNamespace
 then routes the actual workloads to a separate namespace. */ -}}
 {{- $ns := $g.namespace | default $root.Release.Namespace -}}
-{{- $targetNs := $g.targetNamespace | default $root.Release.Namespace -}}
+{{- $targetNs := include "agent-platform.targetNamespace" $root -}}
 {{- /* The tenant identity every platform HelmRelease runs under. With the bundled
 engine on, the multi-tenancy lockdown makes a HelmRelease without one run as the
 rights-less default account, so the engine's agent-platform-flux is the default;
@@ -270,6 +270,7 @@ guards and wires what the manager releases run with. */ -}}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
 {{- $name := $c.chart }}
+{{- $child := include "agent-platform.childName" (dict "root" $root "name" $name) }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}
 {{- if $c.forwardAllValues }}
@@ -325,7 +326,7 @@ this chart's tag (see releasedWithChart above) — this chart's exact version. *
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: {{ $name }}
+  name: {{ $child }}
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
@@ -345,7 +346,7 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: {{ $name }}
+  name: {{ $child }}
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
@@ -353,7 +354,10 @@ spec:
   interval: {{ $g.interval }}
   releaseName: {{ $name }}
   targetNamespace: {{ $c.targetNamespace | default $targetNs }}
-  {{- with $c.targetNamespace }}
+  {{- /* On a target the Helm release is stored where its workloads land: the
+  HelmRelease's own namespace (an org namespace of the installation) need not
+  exist there. */ -}}
+  {{- with ($c.targetNamespace | default (ternary $targetNs "" (ne $target ""))) }}
   storageNamespace: {{ . }}
   {{- end }}
   {{- with $sa }}
@@ -369,7 +373,7 @@ spec:
   {{- end }}
   chartRef:
     kind: OCIRepository
-    name: {{ $name }}
+    name: {{ $child }}
     namespace: {{ $ns }}
   install:
     createNamespace: true
@@ -400,7 +404,7 @@ spec:
   {{- with $deps }}
   dependsOn:
     {{- range . }}
-    - name: {{ . }}
+    - name: {{ include "agent-platform.childName" (dict "root" $root "name" .) }}
     {{- end }}
   {{- end }}
   {{- with $c.postRenderers }}

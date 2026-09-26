@@ -182,7 +182,7 @@ def main(meta: str, connectivity: str) -> int:
     ok("modelManager.namespace follows the platform's namespace; an own value must agree")
 
     # --- the target knob ------------------------------------------------------------
-    target = documents(helm(meta, [*ON, "--set", "gitops.target.kubeConfig.secretRef.name=wc1-kubeconfig"]))[("HelmRelease", NAME)]
+    target = documents(helm(meta, [*ON, "--set", "gitops.target.kubeConfig.secretRef.name=wc1-kubeconfig"]))[("HelmRelease", f"t-{NAME}")]
     if "  kubeConfig:\n    secretRef:\n      name: wc1-kubeconfig\n" not in target:
         fail("the target knob did not stamp spec.kubeConfig.secretRef onto the release")
     ok("the target knob stamps kubeConfig.secretRef on the release")
