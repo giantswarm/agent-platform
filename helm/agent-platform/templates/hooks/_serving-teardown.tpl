@@ -83,8 +83,18 @@ gone() {
     sleep 2
   done
 }
+# release <name>: delete the child HelmRelease and wait for helm-controller to
+# uninstall it. With Flux's HelmRelease API gone (a retried uninstall after the
+# bundled engine's teardown removed Flux) no child release is left to order.
+release() {
+  if [ -n "$(kubectl get customresourcedefinitions "$hr" --ignore-not-found -o name)" ]; then
+    kubectl delete "$hr" --namespace {{ $ns }} "$1" --ignore-not-found --wait --timeout=5m
+  else
+    echo "no $hr API: $1 is not a HelmRelease any more"
+  fi
+}
 echo "1/3 the llm-d controller's release {{ $controller.chart }}: its webhook denies every delete of a well-known config while it runs"
-kubectl delete "$hr" --namespace {{ $ns }} {{ $controller.chart }} --ignore-not-found --wait --timeout=5m
+release {{ $controller.chart }}
 gone "the llm-d controller" deployments --namespace {{ $controllerNs }} --selector control-plane=llmisvc-controller-manager
 gone "the llmisvc webhook" validatingwebhookconfigurations llminferenceserviceconfig.serving.kserve.io
 echo "2/3 the configs of {{ $configs.chart }} in {{ $configsNs }}, through the CRD's storage version, with $finalizer taken off"
@@ -106,5 +116,5 @@ if [ -n "$version" ]; then
   fi
 fi
 echo "3/3 the configs' release {{ $configs.chart }}"
-kubectl delete "$hr" --namespace {{ $ns }} {{ $configs.chart }} --ignore-not-found --wait --timeout=5m
+release {{ $configs.chart }}
 {{- end -}}

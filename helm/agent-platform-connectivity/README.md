@@ -1644,6 +1644,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.prewarmPriorityClass.name | string | `"agent-platform-prewarm-placeholder"` |  |
 | clusterManager.prewarmPriorityClass.value | int | `-1000` |  |
 | clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.provider | string | `""` |  |
 | clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.cidrs | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.ports[0] | int | `443` |  |

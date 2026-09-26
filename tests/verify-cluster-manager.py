@@ -234,6 +234,18 @@ def main(meta: str, connectivity: str) -> int:
         fail("cilium egress: the IdP, the workload ports and the extra egress do not all open 443")
     ok("cilium: ingress (muster + probes), egress (DNS proxy, kube-apiserver, the Dex issuer, the workload clusters by name and address on 443/6443, the extra names and blocks), muster-to")
 
+    # --- the provider preset of the workload clusters' API servers (#487) ----------------------
+    aws = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=cilium",
+                                        "--set", f"{WIRING}.networkPolicy.workloadClusters.provider=aws"], ci_values=False))
+    for pol in (f"{prefix}-egress", "agent-platform-connectivity-model-manager-egress"):
+        must_have(aws[("CiliumNetworkPolicy", pol)], ("matchPattern: '*.*.elb.amazonaws.com'\n", '- port: "6443"\n'), f"{pol} with provider aws")
+    if "elb.amazonaws.com" in cilium[("CiliumNetworkPolicy", f"{prefix}-egress")]:
+        fail("without a provider the egress names the AWS load balancers")
+    bad = helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=cilium", "--set", f"{WIRING}.networkPolicy.workloadClusters.provider=gcp"], expect_fail=True, ci_values=False)
+    if "clusterManager.networkPolicy.workloadClusters.provider \"gcp\": want one of aws" not in bad:
+        fail(f"an unknown provider is not refused naming the presets: {bad[-400:]}")
+    ok("provider aws adds the CAPA API server load balancers (*.*.elb.amazonaws.com) to cluster-manager's and model-manager's egress on 443/6443; none without it; an unknown provider is refused naming the presets")
+
     # --- the prewarm placeholder's PriorityClass (#539) ---------------------------------------
     pc = cilium.get(PRIORITY_CLASS)
     if not pc:
