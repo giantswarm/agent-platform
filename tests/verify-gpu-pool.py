@@ -269,6 +269,7 @@ else:
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
+        runtime09 = "llm-d-cuda:v0.9.0" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -431,6 +432,19 @@ else:
             head[DISCOVERY], ncuts = re.subn(r"^ +- muse-glimmer-30b\n", "", head[DISCOVERY], flags=re.M)
             expect("the new preset muse-glimmer-30b cut out of the discovery list once", ncuts, 1)
         print(f"note: muse-glimmer-30b ships on this side (#597) and not on {ref}: its ConfigMaps and discovery name are left out of the comparison")
+    # The runtime is llm-d v0.9.0 (vLLM 0.26.0) on this side
+    # (giantswarm/agent-platform#682): the pre-pull DaemonSet names
+    # llm-d-fast/llm-d-cuda:v0.9.0, and the gemma-4-31b and muse-glimmer-30b
+    # descriptions name the runtime's vLLM. A golden from before renders
+    # v0.8.0, so those objects are left out of the comparison on both sides.
+    # Drop this once GOLDEN_REF carries #682.
+    if not runtime09:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
+                side.pop(key)
+            for name in ("gemma-4-31b", "muse-glimmer-30b"):
+                side.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: the runtime is llm-d v0.9.0 on this side (#682) and v0.8.0 on {ref}: the pre-pull DaemonSet and the gemma-4-31b and muse-glimmer-30b ConfigMaps are left out of the comparison")
     # The gpt-oss presets serve the model images that carry the tiktoken
     # encodings and name them in TIKTOKEN_ENCODINGS_BASE on this side
     # (giantswarm/agent-platform#606); a golden from before renders the older

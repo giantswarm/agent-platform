@@ -9,7 +9,7 @@ giantswarm/agent-platform#682: the three kserve components move from `0.5.x` / `
 ### Operator action
 
 - **None** for an installation on the defaults, or with the kserve components off. The upgrade rolls every served model's predictor once, onto the new runtime image. The strategy lands with the same upgrade, so each model is down from the old pod's exit until the new one is Ready, a cold start on a node that has the image pre-pulled.
-- **A BOM pin** (`components.kserve-*.versionRange` at `0.5.x` / `0.6.x`): pin `0.7.0` for all three. The `0.6.x` runtime-configs schema refuses `rolloutStrategy`.
+- **A BOM pin** (`components.kserve-*.versionRange` at `0.5.x` / `0.6.x`): pin `0.7.1` for all three: the `0.6.x` runtime-configs schema refuses `rolloutStrategy`, and `0.7.0`'s controller reports `Ready` with no replica available under it.
 - **An installation that sets `modelServing.prepull.images` or `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry`** moves its reference to `llm-d-cuda:v0.9.0` at its own prefix.
 - **A values preset of the installation's own** names parsers from vLLM 0.26.0's registry: the `minimax` tool parser is gone (`minimax_m2` or `minimax_m3`).
 - **Recognising it worked**: `kubectl -n <serving namespace> get deploy -l kserve.io/component=workload -o jsonpath='{range .items[*]}{.metadata.name} {.spec.strategy.rollingUpdate}{"\n"}{end}'` prints `{"maxSurge":0,"maxUnavailable":1}` for every predictor, and its pods run `llm-d-cuda:v0.9.0`.
