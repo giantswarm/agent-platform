@@ -112,7 +112,10 @@ gitops:
   # so set `namespace: flux-giantswarm` there.
   namespace: ""
   # Namespace the child releases install their WORKLOADS into (HelmRelease
-  # targetNamespace). Empty = the release namespace.
+  # targetNamespace). Empty = the release namespace; with the target knob
+  # (target.kubeConfig below) `agent-platform`, a namespace of the platform's own
+  # on the target, never the release's (an org namespace) there
+  # (giantswarm/agent-platform#688).
   # Pair with `namespace` above to render the Flux CRs in an exempt namespace while
   # the workloads land in the platform namespace (e.g. agent-platform).
   targetNamespace: ""
@@ -143,7 +146,14 @@ gitops:
   # see the installation on this path, so what the target already runs is the
   # composer's to detect. Empty (the default) renders exactly what it did
   # before the key existed.
+  # With the knob set, every OCIRepository and HelmRelease on the installation
+  # is named `<target.name>-<component>` (target.name empty = the release name),
+  # so two targeted releases in one namespace never share a child; each child's
+  # Helm release keeps the component's name and is stored on the target in
+  # targetNamespace, where its workloads land (giantswarm/agent-platform#688).
   target:
+    # The prefix of the child objects' names; empty = the release name.
+    name: ""
     kubeConfig:
       secretRef:
         name: ""

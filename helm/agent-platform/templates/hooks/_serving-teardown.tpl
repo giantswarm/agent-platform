@@ -64,7 +64,7 @@ where the last attempt stopped.
 {{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
 {{- $controller := index .Values.components "kserve-llmisvc-resources" -}}
 {{- $configs := index .Values.components "kserve-runtime-configs" -}}
-{{- $targetNs := .Values.gitops.targetNamespace | default .Release.Namespace -}}
+{{- $targetNs := include "agent-platform.targetNamespace" . -}}
 {{- $controllerNs := $controller.targetNamespace | default $targetNs -}}
 {{- $configsNs := $configs.targetNamespace | default $targetNs -}}
 hr=helmreleases.helm.toolkit.fluxcd.io

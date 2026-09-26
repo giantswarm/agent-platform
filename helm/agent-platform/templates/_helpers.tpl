@@ -189,7 +189,7 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 platform's own namespace (gitops.targetNamespace, else the release namespace).
 create_node_pool writes the kserve backend ConfigMap of model-manager's
 runtime-registration contract there. */ -}}
-{{- $ns := .root.Values.gitops.targetNamespace | default .root.Release.Namespace -}}
+{{- $ns := include "agent-platform.targetNamespace" .root -}}
 {{- $own := dig "modelManager" "namespace" "" (index .root.Values "cluster-manager" | default dict) -}}
 {{- if and $own (ne $own $ns) -}}
 {{- fail (printf "cluster-manager.modelManager.namespace (%s) differs from the platform's namespace (%s), where the model-manager component lands: cluster-manager registers a serving cluster's kserve backend through model-manager's ConfigMap there — leave cluster-manager.modelManager.namespace unset" $own $ns) -}}
@@ -277,7 +277,7 @@ LLMInferenceService route attaches to: the llm-d controller reads it from the
 shared inferenceservice-config ConfigMap its own release renders. */ -}}
 {{- $mg := dig "modelsGateway" dict (.root.Values.modelServing | default dict) -}}
 {{- if $mg.enabled -}}
-{{- $gw := printf "%s/%s" (.root.Values.gitops.targetNamespace | default .root.Release.Namespace) ($mg.name | default "models") -}}
+{{- $gw := printf "%s/%s" (include "agent-platform.targetNamespace" .root) ($mg.name | default "models") -}}
 {{- $own := dig "kserve" "controller" "gateway" "ingressGateway" "kserveGateway" "" (index .root.Values "kserve-llmisvc-resources" | default dict) -}}
 {{- if and $own (ne $own $gw) -}}
 {{- fail (printf "kserve-llmisvc-resources.kserve.controller.gateway.ingressGateway.kserveGateway (%s) differs from the models Gateway the connectivity release renders (%s): every LLMInferenceService route attaches to modelServing.modelsGateway — set modelServing.modelsGateway.name, or modelsGateway.enabled: false to bring a Gateway of your own, and leave the kserve-llmisvc-resources copy unset" $own $gw) -}}
@@ -1816,7 +1816,7 @@ Usage: include "agent-platform.kagent.hookNamespace" .
 {{- define "agent-platform.kagent.hookNamespace" -}}
 {{- if and (eq (include "agent-platform.engineEnabled" .) "true") (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
 {{- $ns := dig "namespaceOverride" "" (.Values.kagent | default dict) -}}
-{{- $target := .Values.gitops.targetNamespace | default .Release.Namespace -}}
+{{- $target := include "agent-platform.targetNamespace" . -}}
 {{- if and $ns (ne $ns $target) }}{{ $ns }}{{ end -}}
 {{- end -}}
 {{- end -}}
@@ -1829,7 +1829,7 @@ else the release namespace). The storage-version hooks keep their record there
 Usage: include "agent-platform.kagent.namespace" .
 */}}
 {{- define "agent-platform.kagent.namespace" -}}
-{{- dig "namespaceOverride" "" (.Values.kagent | default dict) | default (.Values.gitops.targetNamespace | default .Release.Namespace) -}}
+{{- dig "namespaceOverride" "" (.Values.kagent | default dict) | default (include "agent-platform.targetNamespace" .) -}}
 {{- end -}}
 
 {{/*
@@ -1950,6 +1950,33 @@ chart on one cluster (both need the same cluster-scoped CRDs).
 {{- end -}}
 
 {{/*
+The namespace the component releases install their workloads into on the
+cluster they land on: gitops.targetNamespace; empty, the release namespace, or
+with the target knob `agent-platform` — the release namespace is an org
+namespace of the installation, and on the target the components get a
+namespace of the platform's own (giantswarm/agent-platform#688).
+Usage: include "agent-platform.targetNamespace" .
+*/}}
+{{- define "agent-platform.targetNamespace" -}}
+{{- .Values.gitops.targetNamespace | default (ternary "agent-platform" .Release.Namespace (ne (include "agent-platform.targetSecretName" .) "")) -}}
+{{- end -}}
+
+{{/*
+The name of a component's OCIRepository and HelmRelease on the installation:
+the component's chart name; with the target knob `<gitops.target.name>-<chart>`
+(target.name empty = the release name), so two targeted releases in one
+namespace never share a child (giantswarm/agent-platform#688).
+Usage: include "agent-platform.childName" (dict "root" $ "name" $chart)
+*/}}
+{{- define "agent-platform.childName" -}}
+{{- if include "agent-platform.targetSecretName" .root -}}
+{{- printf "%s-%s" (dig "target" "name" "" .root.Values.gitops | default .root.Release.Name) .name -}}
+{{- else -}}
+{{- .name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Render guard of the target knob: the components install into the target through
 the installation's helm-controller, so the bundled engine has no place in such a
 release — no Flux is ever installed into a workload cluster, nor into a cluster
@@ -2022,7 +2049,7 @@ show it (README, "The GPU operator").
 {{- if and $c (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "gpu-operator")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
 {{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
 {{- $release := $c.chart -}}
-{{- $releaseNs := $c.targetNamespace | default .Values.gitops.targetNamespace | default .Release.Namespace -}}
+{{- $releaseNs := $c.targetNamespace | default (include "agent-platform.targetNamespace" .) -}}
 {{- $foreign := list -}}
 {{- if .Capabilities.APIVersions.Has "nvidia.com/v1" -}}
 {{- range ((lookup "nvidia.com/v1" "ClusterPolicy" "" "").items | default list) -}}
