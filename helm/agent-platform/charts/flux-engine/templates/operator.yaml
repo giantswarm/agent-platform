@@ -7,6 +7,10 @@ its Secret, HTTPRoute/Ingress, RBAC roles and its only NetworkPolicy; the
 ServiceMonitor, FlowSchema and marketplace settings are not carried. The
 Deployment's labels carry no app.kubernetes.io/component=helm-controller, so
 the meta chart's render guard never mistakes this operator for a foreign Flux.
+The Deployment, its ServiceAccount and its ClusterRoleBinding carry
+helm.sh/resource-policy: keep (flux-engine.keep): the operator has to outlive
+Helm's delete pass to uninstall Flux after it, and the meta chart's post-delete
+hooks remove it (hooks/teardown.yaml). The metrics Service goes with the pass.
 */ -}}
 apiVersion: v1
 kind: ServiceAccount
@@ -15,6 +19,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "flux-engine.labels" . | nindent 4 }}
+  annotations:
+    {{- include "flux-engine.keep" . | nindent 4 }}
 automountServiceAccountToken: true
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -23,6 +29,8 @@ metadata:
   name: agent-platform-flux-operator
   labels:
     {{- include "flux-engine.labels" . | nindent 4 }}
+  annotations:
+    {{- include "flux-engine.keep" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -55,6 +63,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "flux-engine.labels" . | nindent 4 }}
+  annotations:
+    {{- include "flux-engine.keep" . | nindent 4 }}
 spec:
   selector:
     matchLabels:

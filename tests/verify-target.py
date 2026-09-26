@@ -406,6 +406,27 @@ def hold_hook_pods(here: str, there: str) -> tuple:
         print("note: #593 hold — the hook pods' resources block (the memory limit and its comment) and the backup's release pre-filter lines are left out of the golden comparison")
     return h, strip(there)
 
+# giantswarm/agent-platform#708: the bundled engine goes after Helm's delete
+# pass. The FluxInstance and the operator's Deployment, ServiceAccount and
+# ClusterRoleBinding carry helm.sh/resource-policy: keep, the hook identity and
+# its network policy render at post-delete too, and the engine's teardown Jobs
+# move to post-delete (teardown-engine, teardown-operator). verify-engine and
+# verify-self assert all of it; here both renders are held to one shape.
+ENGINE_TEARDOWN_JOB = re.compile(r"^kind: Job\nmetadata:\n  name: [a-z0-9-]+-teardown-(?:engine|operator)\n", re.M)
+
+
+def hold_engine_teardown(here: str, there: str) -> tuple:
+    """The two meta renders with #708's engine teardown held equal on both sides."""
+    def strip(render: str) -> str:
+        docs = [d for d in re.split(r"(?m)^---\n", render) if not ENGINE_TEARDOWN_JOB.search(d)]
+        render = "---\n".join(docs)
+        render = re.sub(r"^  annotations:\n    helm\.sh/resource-policy: keep\n(?! {4})", "", render, flags=re.M)
+        render = re.sub(r"^    helm\.sh/resource-policy: keep\n", "", render, flags=re.M)
+        return re.sub(r"^( +helm\.sh/hook: .*pre-delete),post-delete$", r"\g<1>", render, flags=re.M)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #708 hold — the engine's resource-policy keep, the post-delete hook events and the engine teardown Jobs are left out of the golden comparison")
+    return h, strip(there)
+
 # giantswarm/agent-platform#608: the Substrate range moved from the former
 # `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` shape to `>=1.0.0 <1.1.0`, and each side's
 # validateRange refuses the other's shape, so the range cannot be held by --set.
@@ -938,6 +959,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = drop_new_roster_entries(here, there)
                 here, there = hold_llmd_only(here, there)
                 here, there = hold_hook_pods(here, there)
+                here, there = hold_engine_teardown(here, there)
                 here, there = hold_substrate_range(here, there)
                 here, there = hold_muster_floor(here, there)
                 here, there = hold_repin_1_1(here, there)

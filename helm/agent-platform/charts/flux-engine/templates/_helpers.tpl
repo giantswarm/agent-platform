@@ -49,3 +49,15 @@ on the same name.
 {{- define "flux-engine.tenantServiceAccountName" -}}
 agent-platform-flux
 {{- end -}}
+
+{{/*
+The annotation on the objects of the engine that outlive Helm's delete pass —
+the FluxInstance and the operator's Deployment, ServiceAccount and
+ClusterRoleBinding. Helm leaves them out of the pass (it neither builds nor
+deletes them), so Flux is still served while Helm removes the rest of the
+release; the meta chart's post-delete hooks remove them (hooks/teardown.yaml).
+Switching components.flux.enabled off in place leaves them running too (README).
+*/}}
+{{- define "flux-engine.keep" -}}
+helm.sh/resource-policy: keep
+{{- end -}}
