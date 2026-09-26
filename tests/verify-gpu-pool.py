@@ -262,6 +262,7 @@ else:
         fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
         uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
+        fp8kv = lineup and "--kv-cache-dtype=fp8" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
@@ -372,6 +373,14 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: the 48 GB presets carry their fitted context lengths on this side (#591) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # gemma-4-31b serves 32k with an fp8 KV cache on this side
+    # (giantswarm/agent-platform#611); a golden from before renders it at 8k
+    # with a bf16 cache, so its ConfigMap is left out of the comparison. Drop
+    # this once GOLDEN_REF carries the change.
+    if not fp8kv:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-gemma-4-31b"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-gemma-4-31b"), None)
+        print(f"note: gemma-4-31b serves 32k with an fp8 KV cache on this side (#611) and not on {ref}: its ConfigMap is left out of the comparison")
     # The four 24 GB presets of the September 2026 line-up ship on this side
     # (giantswarm/agent-platform#591) and the three Qwen3 small presets they
     # replace do not; a golden from before has it the other way round, so the
