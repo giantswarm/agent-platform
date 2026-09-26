@@ -175,7 +175,7 @@ def main(chart: str) -> int:
     hr = on.get(("HelmRelease", NAMESPACE, RELEASE))
     if not oci or not hr:
         fail("engine on: the self OCIRepository / HelmRelease did not render by default (gitops.self.enabled: auto must follow the engine)")
-    needles(oci, "self OCIRepository", "\n  interval: 10m\n", f"\n  url: oci://gsoci.azurecr.io/charts/giantswarm/{RELEASE}\n", f'semver: "{derived}"', "app.kubernetes.io/component: self-management")
+    needles(oci, "self OCIRepository", "\n  interval: 1m\n", f"\n  url: oci://gsoci.azurecr.io/charts/giantswarm/{RELEASE}\n", f'semver: "{derived}"', "app.kubernetes.io/component: self-management")
     if "insecure" in oci:
         fail("self OCIRepository sets insecure by default")
     if self_filter:
@@ -292,10 +292,10 @@ def main(chart: str) -> int:
     # --- knobs
     knobs = docs(helm(chart, [*ci, "--set", "gitops.self.repository=oci://localhost:5000/charts/", "--set", "gitops.self.insecure=true",
                               "--set", "gitops.self.versionRange=>=3.0.0 <4.0.0", "--set-json", 'gitops.self.semverFilter=".*-dev\\\\.x\\\\..*"',
-                              "--set", "gitops.self.interval=1m", "--api-versions", "helm.toolkit.fluxcd.io/v2"]))
+                              "--set", "gitops.self.interval=5m", "--set", "gitops.sourceInterval=30s", "--api-versions", "helm.toolkit.fluxcd.io/v2"]))
     needles(knobs[("OCIRepository", NAMESPACE, RELEASE)], "self OCIRepository with knobs", f"\n  url: oci://localhost:5000/charts/{RELEASE}\n", "\n  insecure: true\n", 'semver: ">=3.0.0 <4.0.0"',
-            '\n    semverFilter: ".*-dev\\\\.x\\\\..*"', "\n  interval: 1m\n")
-    needles(knobs[("HelmRelease", NAMESPACE, RELEASE)], "self HelmRelease with the HelmRelease API served offline", "\n  suspend: true\n", "\n  interval: 1m\n")
+            '\n    semverFilter: ".*-dev\\\\.x\\\\..*"', "\n  interval: 30s\n")
+    needles(knobs[("HelmRelease", NAMESPACE, RELEASE)], "self HelmRelease with the HelmRelease API served offline", "\n  suspend: true\n", "\n  interval: 5m\n")
     custom = docs(helm(chart, [*ci, "--set", "gitops.serviceAccountName=custom-sa"]))
     needles(custom[("HelmRelease", NAMESPACE, RELEASE)], "self HelmRelease with gitops.serviceAccountName", "\n  serviceAccountName: custom-sa\n")
     needles(custom[("ValidatingAdmissionPolicy", "", POLICY)], "the policy with gitops.serviceAccountName", f'"system:serviceaccount:{NAMESPACE}:custom-sa"')

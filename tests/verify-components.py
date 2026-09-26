@@ -462,7 +462,16 @@ def main(meta: str, connectivity: str) -> int:
         vals = hr_values(on[("HelmRelease", name)]) + "\n"
         if not re.search(rf"^kagent:\n(?:  .*\n)*?  apiVersion: {KAGENT_API_VERSION}$", vals, re.M):
             fail(f"{name} release values do not pin kagent.apiVersion: {KAGENT_API_VERSION} — left to `auto`, a pod that started under kagent 0.10 keeps v1alpha2 across the upgrade (giantswarm/agent-platform#401)")
-    print(f"ok: the extras on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges, the managers pinned to kagent.dev/{KAGENT_API_VERSION}")
+    for (kind, name), doc in ((k, d) for k, d in on.items() if k[0] in ("OCIRepository", "HelmRelease")):
+        want = "1m" if kind == "OCIRepository" else "10m"
+        if f"\n  interval: {want}\n" not in doc:
+            fail(f"{kind} {name} does not reconcile on {want} (gitops.sourceInterval for sources, gitops.interval for releases)")
+    knobs = docs(render(meta, [*ci, "--set", "gitops.sourceInterval=30s", "--set", "gitops.interval=5m"]))
+    for (kind, name), doc in ((k, d) for k, d in knobs.items() if k[0] in ("OCIRepository", "HelmRelease")):
+        want = "30s" if kind == "OCIRepository" else "5m"
+        if f"\n  interval: {want}\n" not in doc:
+            fail(f"{kind} {name} does not follow {'gitops.sourceInterval' if kind == 'OCIRepository' else 'gitops.interval'}={want}")
+    print(f"ok: the extras on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges, the managers pinned to kagent.dev/{KAGENT_API_VERSION}; sources poll on gitops.sourceInterval, releases on gitops.interval")
 
     # --- the dev channel: semverFilter ----------------------------------------------
     check_semver_filters(meta, ci)

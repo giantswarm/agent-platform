@@ -278,6 +278,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | global.observability.traces.otlp.headers | object | `{}` | More headers for the exporters that take headers. An X-Scope-OrgID here that differs from `tenant` fails the render. Values in this block are plain values: keep credentials out of it. |
 | gitops.engine | string | `"flux"` |  |
 | gitops.interval | string | `"10m"` |  |
+| gitops.sourceInterval | string | `"1m"` |  |
 | gitops.namespace | string | `""` |  |
 | gitops.targetNamespace | string | `""` |  |
 | gitops.serviceAccountName | string | `""` |  |
