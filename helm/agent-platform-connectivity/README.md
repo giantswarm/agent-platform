@@ -1661,7 +1661,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
-| backstage.configReload.image.version | string | `"v1.37.0"` |  |
+| backstage.configReload.image.version | string | `"v1.37.1"` |  |
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
