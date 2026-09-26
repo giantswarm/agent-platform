@@ -1285,13 +1285,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.otel.tracing.enabled | string | `"auto"` |  |
-| kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |
-| kagent.otel.tracing.exporter.otlp.insecure | bool | `true` |  |
-| kagent.otel.logging.enabled | string | `"auto"` |  |
-| kagent.otel.logging.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.logging.exporter.otlp.insecure | bool | `true` |  |
+| kagent.otel.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| kagent.otel.exporter.otlp.protocol | string | `"grpc"` |  |
+| kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
+| kagent.otel.traces.enabled | string | `"auto"` |  |
+| kagent.otel.logs.enabled | string | `"auto"` |  |
 | kagent.oauth2-proxy.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
@@ -1646,6 +1644,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.prewarmPriorityClass.name | string | `"agent-platform-prewarm-placeholder"` |  |
 | clusterManager.prewarmPriorityClass.value | int | `-1000` |  |
 | clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.provider | string | `""` |  |
 | clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.cidrs | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.ports[0] | int | `443` |  |

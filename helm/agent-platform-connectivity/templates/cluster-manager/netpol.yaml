@@ -15,6 +15,7 @@ rendered as one more ingress peer in the flavor's own dialect. */ -}}
 {{- end }}
 {{- end }}
 {{- $wc := $cm.networkPolicy.workloadClusters }}
+{{- $wcFQDNs := include "agent-platform.workloadClusterFQDNs" (dict "wc" $wc "at" "clusterManager.networkPolicy.workloadClusters") | fromJsonArray }}
 {{- $egress := $cm.networkPolicy.egress }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
@@ -96,7 +97,7 @@ spec:
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.clusterManager.oauthProvider" .) "issuerUrl" (include "agent-platform.clusterManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
-    {{- with $wc.fqdns }}
+    {{- with $wcFQDNs }}
     # The workload clusters' API servers by name.
     - toFQDNs:
         {{- toYaml . | nindent 8 }}
