@@ -162,7 +162,7 @@ gitops:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/kubectl
-      tag: v1.37.0
+      tag: v1.37.1
     helmImage:
       registry: gsoci.azurecr.io
       repository: giantswarm/alpine-k8s
@@ -4606,7 +4606,7 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
       registry: gsoci.azurecr.io
       name: giantswarm/kubectl
       # registry: gsoci.azurecr.io/giantswarm/kubectl
-      version: "v1.37.0"
+      version: "v1.37.1"
   # --- The backstage chart's own values (forwarded verbatim) ---
   ingress:
     enabled: false
