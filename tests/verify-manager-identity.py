@@ -115,9 +115,10 @@ def main() -> None:
         sys.exit("FAIL: derived: model-manager's egress does not reach the derived issuer")
     print("ok: derived")
 
-    print("--> the route's hostname override is the base URL's host")
-    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("modelManager.route.hostname=models.ci.example.com")])
-    expect("model-manager oauth.baseURL", oauth(rels, "model-manager").get("baseURL"), "https://models.ci.example.com/model-manager")
+    print("--> agent-manager's route hostname override is its base URL's host; model-manager, which has no route, keeps agentgateway.<domain>")
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("agentManager.route.hostname=agents.ci.example.com")])
+    expect("agent-manager oauth.baseURL", oauth(rels, "agent-manager").get("baseURL"), "https://agents.ci.example.com/agent-manager")
+    expect("model-manager oauth.baseURL", oauth(rels, "model-manager").get("baseURL"), "https://agentgateway.ci.example.com/model-manager")
     print("ok: route hostname")
 
     print("--> explicit wins: a manager's own client, Secret, audiences and base URL stand")
@@ -160,7 +161,7 @@ def main() -> None:
     for what, extra, fragments in (
         ("no Secret", sets("muster.muster.oauth.server.existingSecret="), ("none of model-manager.oauth.existingSecret", "set muster.muster.oauth.server.existingSecret")),
         ("no client", sets("muster.muster.oauth.server.dex.clientId="), ("model-manager.oauth.dex.clientID is empty", "set muster.muster.oauth.server.dex.clientId")),
-        ("no base URL (muster-direct, no domain)", sets("ingress.mode=muster-direct", "global.domain="), ("model-manager.oauth.baseURL is empty", "modelManager.route.hostname")),
+        ("no base URL (muster-direct, no domain)", sets("ingress.mode=muster-direct", "global.domain="), ("model-manager.oauth.baseURL is empty", "set global.domain")),
     ):
         flags = [*base, *LOGIN, *sets("components.kagent.enabled=true", "global.domain=ci.example.com", "ingress.mode=agentgateway-muster", "components.agentgateway.enabled=true"), *extra]
         rels = releases(meta, flags)

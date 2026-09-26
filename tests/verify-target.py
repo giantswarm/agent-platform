@@ -602,6 +602,39 @@ def hold_mm_workload_clusters(here: str, there: str) -> tuple:
     return h, MM_WORKLOAD_CLUSTERS.sub("", there)
 
 
+# giantswarm/agent-platform#271: modelManager.route is retired, so the meta
+# chart no longer forwards its defaults in the connectivity release's
+# modelManager block. The golden side's forwarded route block (the one whose
+# pathPrefix is /model-manager) is left out; dropped once GOLDEN_REF carries
+# #271.
+MM_ROUTE_BLOCK = re.compile(r"^( +)route:\n(?:\1 .*\n)*?\1  pathPrefix: /model-manager\n", re.M)
+
+
+def hold_mm_route(here: str, there: str) -> tuple:
+    """The two meta renders without the golden side's forwarded modelManager.route."""
+    if MM_ROUTE_BLOCK.search(there) and not MM_ROUTE_BLOCK.search(here):
+        print("note: #271 hold — the golden side's forwarded modelManager.route is left out of the golden comparison")
+    return here, MM_ROUTE_BLOCK.sub("", there)
+
+
+# The same retirement rewords model-manager's ingress policy comment in the
+# connectivity render (muster and additionalPeers, no data plane); the golden
+# side's wording is read as this side's. Dropped once GOLDEN_REF carries #271.
+MM_INGRESS_COMMENT_OLD = ("# Ingress to model-manager: the agentgateway data plane (the portal's route)\n"
+                          "# and muster (the MCP endpoint), both in the release namespace, on the Service\n"
+                          "# port only — plus the kubelet's probes (host entity), which a policy that\n")
+MM_INGRESS_COMMENT_NEW = ("# Ingress to model-manager: muster (the MCP endpoint, the one platform caller)\n"
+                          "# and additionalPeers, in the release namespace, on the Service port only —\n"
+                          "# plus the kubelet's probes (host entity), which a policy that\n")
+
+
+def hold_mm_ingress_comment(here: str, there: str) -> tuple:
+    """The two connectivity renders with the golden side's model-manager ingress comment reworded."""
+    if MM_INGRESS_COMMENT_OLD in there and MM_INGRESS_COMMENT_NEW in here:
+        print("note: #271 hold — model-manager's reworded ingress policy comment is read as this side's")
+    return here, there.replace(MM_INGRESS_COMMENT_OLD, MM_INGRESS_COMMENT_NEW)
+
+
 # giantswarm/agent-platform#697: the single-replica budgets are maxUnavailable: 1
 # (muster and klaus-gateway with minAvailable: "" to clear their charts'
 # default, the kagent controller on its chart's default) and a lone Postgres
@@ -913,7 +946,9 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_dataplane_sampling(here, there)
                 here, there = hold_llm_endpoint(here, there)
                 here, there = hold_mm_workload_clusters(here, there)
+                here, there = hold_mm_route(here, there)
             else:
+                here, there = hold_mm_ingress_comment(here, there)
                 here, there = hold_dataplane_podmonitor(here, there)
                 here, there = hold_dataplane_tracing(here, there)
                 here, there = hold_substrate_otlp_egress(here, there)
