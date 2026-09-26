@@ -18,9 +18,9 @@ cover the first run. Weight -10 next to the hook identity's ServiceAccount and
 ClusterRoleBinding (rbac.yaml), the same delete policy — hook-succeeded removes
 it with the identity once every hook of the event succeeded, before-hook-creation
 brings it back for the next event — at every event a hook Job of this chart
-runs: with the bundled engine all five (the self hooks run at pre-upgrade or
+runs: with the bundled engine all six (the self hooks run at pre-upgrade or
 post-install/post-upgrade depending on the self shape, the teardown at
-pre-delete), without it the events of the storage-version hooks and the
+pre-delete and post-delete), without it the events of the storage-version hooks and the
 serving teardown (agent-platform.hooks.serviceAccountEvents). The self-management resumer Job is
 not a hook and carries app.kubernetes.io/component: self-management — it is
 not this policy's. Gated like the identity (rbac.yaml) and, like every policy
@@ -32,7 +32,7 @@ NetworkPolicy has no entity selectors); no ingress — the hook serves nothing.
 */ -}}
 {{- $engine := eq (include "agent-platform.engineEnabled" .) "true" }}
 {{- if and .Values.networkPolicy.enabled (or $engine (include "agent-platform.kagent.storageVersionHooks" .) (include "agent-platform.serving.teardownEvent" .)) }}
-{{- $events := ternary "pre-install,pre-upgrade,post-install,post-upgrade,pre-delete" (include "agent-platform.hooks.serviceAccountEvents" .) $engine }}
+{{- $events := ternary "pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete" (include "agent-platform.hooks.serviceAccountEvents" .) $engine }}
 {{- if eq (include "agent-platform.shape.networkPolicyFlavor" .) "cilium" }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

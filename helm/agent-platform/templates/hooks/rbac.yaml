@@ -5,7 +5,8 @@ wait on their finalizers; the kagent namespace hook creates a namespace; the
 storage-version hooks delete CRDs and re-create ModelConfigs). Weight -10 so
 it exists before any hook Job; the hook-succeeded policy removes both once
 every hook of the event has succeeded, and before-hook-creation brings them
-back for the next event. Created for pre-delete (the ordered teardown) and —
+back for the next event. Created for pre-delete and post-delete (the ordered
+teardown) and —
 while the kagent namespace hook and the storage-version hooks render — for
 pre-install, pre-upgrade, post-install and post-upgrade too
 (agent-platform.hooks.serviceAccountEvents). Rendered with the bundled engine,

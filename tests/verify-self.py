@@ -198,12 +198,13 @@ def main(chart: str) -> int:
     hooks = {(k, n): hook_meta(d) for (k, _, n), d in on.items() if "helm.sh/hook:" in d}
     expected_hooks = {
         # ci-values turn kagent on: the kagent namespace hook and the storage-version hooks (verify-engine.py) and the hook identity at their events
-        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10), ("NetworkPolicy", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10),
+        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10), ("NetworkPolicy", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10),
         ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
         **{("Job", n): ev for n, ev in STORAGE_HOOKS.items()},
         ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-delete", -5),
         ("Job", f"{RELEASE}-self-values"): ("post-install,post-upgrade", 0),
-        ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("pre-delete", 5),
+        ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("post-delete", 0),
+        ("Job", f"{RELEASE}-teardown-operator"): ("post-delete", 5),
     }
     if hooks != expected_hooks:
         fail(f"engine on, self on: hooks differ from the expected events/weights:\n  got      {hooks}\n  expected {expected_hooks}")
@@ -254,12 +255,12 @@ def main(chart: str) -> int:
         expected_off[("Job", f"{RELEASE}-self-stop-resumer")] = ("pre-upgrade,pre-delete", -6)
         expected_off[("Job", f"{RELEASE}-self-suspend")] = ("pre-upgrade,pre-delete", -5)
         if label != "self off":
-            # the lab values leave kagent off: no kagent namespace hook, no storage-version hooks, the hook identity at pre-delete only
+            # the lab values leave kagent off: no kagent namespace hook, no storage-version hooks, the hook identity at the teardown's events only
             del expected_off[("Job", f"{RELEASE}-kagent-namespace")]
             for n in STORAGE_HOOKS:
                 del expected_off[("Job", n)]
-            expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-delete", -10)
-            expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-delete", -10)
+            expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-delete,post-delete", -10)
+            expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-delete,post-delete", -10)
             # and networkPolicy.enabled: false — no policy for the identity (#413)
             del expected_off[("NetworkPolicy", f"{RELEASE}-hooks")]
         if hooks_off != expected_off:
