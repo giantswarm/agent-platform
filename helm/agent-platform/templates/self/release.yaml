@@ -39,7 +39,7 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
     app.kubernetes.io/component: self-management
 spec:
-  interval: {{ .Values.gitops.self.interval }}
+  interval: {{ .Values.gitops.sourceInterval }}
   url: {{ printf "%s/%s" (trimSuffix "/" .Values.gitops.self.repository) .Chart.Name }}
   {{- if .Values.gitops.self.insecure }}
   insecure: true

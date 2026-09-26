@@ -330,7 +330,7 @@ metadata:
   labels:
     {{- include "labels.common" $root | nindent 4 }}
 spec:
-  interval: {{ $g.interval }}
+  interval: {{ $g.sourceInterval }}
   url: {{ printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart }}
   {{- if $c.insecure }}
   insecure: true

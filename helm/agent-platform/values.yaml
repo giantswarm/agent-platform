@@ -103,7 +103,12 @@ global:
 # platform. Any other value fails the schema and the render.
 gitops:
   engine: flux  # @schema enum: [flux]
-  interval: 10m                # cadence Flux re-evaluates the version range
+  interval: 10m                # cadence every child HelmRelease reconciles (drift detection, remediation)
+  # Cadence every OCIRepository this chart renders (the components' and the
+  # self-management one) polls the registry: a chart pushed to gsoci is
+  # installed within about this long. A poll is one tag list per chart, so it
+  # stays short while the HelmReleases keep `interval`.
+  sourceInterval: 1m
   # Namespace the rendered OCIRepository/HelmRelease objects are CREATED in.
   # Empty = the release namespace. Set this to a namespace that is exempt from a
   # multi-tenancy admission policy when one is enforced — on Giant Swarm clusters
@@ -218,8 +223,9 @@ gitops:
     # the next stable release and every other branch's dev builds. Empty
     # (default) filters nothing.
     semverFilter: ""
-    # Interval the OCIRepository polls the registry and the HelmRelease
-    # reconciles; a values Secret change is picked up at once (watch label).
+    # Interval the self HelmRelease reconciles; its OCIRepository polls on
+    # gitops.sourceInterval. A values Secret change is picked up at once
+    # (watch label).
     interval: 10m
   # install/upgrade remediation retries for every child HelmRelease. Lets the
   # children self-heal transient/ordering failures (e.g. a component installs
