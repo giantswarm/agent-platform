@@ -1732,11 +1732,13 @@ manager's own value wins, and so does global.identity (the connectivity chart
 fails the render when either disagrees with muster's). Only for the dex
 provider, while muster's OAuth server is on (with it off, model-manager's oauth
 is off: componentDerivedValues).
-oauth.baseURL of the two routed managers is https://<host><route.pathPrefix>
-under an agentgateway-* ingress.mode, host being the hostname the connectivity
-chart gives the route (modelManager.route.hostname / agentManager.route.hostname,
-else agentgateway.<global.domain>); without one it stays unset and the
-connectivity chart's guard names the key.
+oauth.baseURL of model-manager and agent-manager is
+https://<host><pathPrefix> under an agentgateway-* ingress.mode: for
+agent-manager the hostname and prefix of its route (agentManager.route.hostname,
+else agentgateway.<global.domain>), for model-manager, which has no route,
+agentgateway.<global.domain> and /model-manager, the resource URL it has always
+announced; without a host it stays unset and the connectivity chart's guard
+names the key.
 Runs on the $shaped copy in components.yaml after scheduling.apply, so each
 manager release and the connectivity release — its guards, the managers'
 identity-provider egress — read the same filled block. Emits nothing.
@@ -1769,6 +1771,7 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- end -}}
 {{- if and $wiring (not $oauth.baseURL) (or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
 {{- $route := dig $wiring "route" dict $v -}}
+{{- if eq $wiring "modelManager" }}{{ $route = dict "pathPrefix" "/model-manager" }}{{ end -}}
 {{- $host := $route.hostname -}}
 {{- if and (not $host) $domain }}{{ $host = printf "agentgateway.%s" $domain }}{{ end -}}
 {{- if and $host $route.pathPrefix }}{{ $_ := set $oauth "baseURL" (printf "https://%s%s" $host $route.pathPrefix) }}{{ end -}}

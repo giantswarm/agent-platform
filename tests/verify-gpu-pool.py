@@ -267,6 +267,7 @@ else:
         tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
+        routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
@@ -481,6 +482,16 @@ else:
             for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-egress")]:
                 side.pop(key)
         print(f"note: model-manager's egress reaches the served models' runtimes on this side (#602) and not on {ref}: its policy is left out of the comparison")
+    # model-manager's REST route is retired on this side
+    # (giantswarm/agent-platform#271): its ingress policy names muster and the
+    # additional peers only, and says so; a golden from before still names the
+    # data plane in it, so that policy is left out of the comparison on both
+    # sides. Drop this once GOLDEN_REF carries #271.
+    if routed:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-ingress")]:
+                side.pop(key)
+        print(f"note: model-manager has no route on this side (#271) and does on {ref}: its ingress policy is left out of the comparison")
     # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
     # are new documents of the serving render; a golden from before has neither,
     # so both are left out of the comparison on both sides. Drop this once

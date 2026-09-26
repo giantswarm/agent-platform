@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`modelManager.route`: model-manager's REST route, its JWT policy and the data-plane legs of its network policies** (giantswarm/agent-platform#271). The portal, agents and the agentlab proofs reach model-manager through muster as the signed-in person (its `MCPServer` CR, `x_model-manager_*`), so nothing called the route. The connectivity chart renders no `AgentgatewayBackend`, `HTTPRoute` or `AgentgatewayPolicy` for model-manager, its ingress policy admits muster, `additionalPeers` and the probes, and `dataplane-to-model-manager` is gone in both flavours. A set `modelManager.route` fails the render naming the issue; model-manager's `oauth.baseURL` stays `https://agentgateway.<global.domain>/model-manager`. `agentManager.route`, `kagent.controllerRoute` and `gateway.jwksEgress` are unchanged. UPGRADE.md.
+
 ### Added
 
 - **`muse-glimmer-30b`: Meta's Muse Glimmer 30B on one 48 GB GPU, on vLLM's own server image** (giantswarm/agent-platform#597). Red Hat AI's FP8 block quantization (`RedHatAI/Muse-Glimmer-30B-FP8-block`, 32 GiB, served from the signed model image `giantswarm/models/muse-glimmer-30b-fp8:1deb4641ff84`) at 32k context, four concurrent requests, one image per prompt, reasoning and tools with vLLM's `muse_glimmer` parsers under vLLM v0.30.0's Muse Glimmer chat template (`chat-templates/muse-glimmer-30b.jinja`). The model's architecture and parsers first ship in vLLM 0.28.0 and the llm-d runtime carries an older vLLM, so the preset names its runtime in `spec.template`: `gsoci.azurecr.io/giantswarm/vllm-openai:v0.30.0`, the signed copy of `vllm/vllm-openai` that retagger pins by digest (giantswarm/retagger#1245). The well-known template's command runs it unchanged. Sized for a `g6e.2xlarge` or `g6e.4xlarge`.

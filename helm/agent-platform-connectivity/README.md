@@ -232,7 +232,7 @@ rest. Each entry is `{expression: <one-line CEL>, enabled: <bool, absent =
 true>}`; the expression goes through `tpl`. An entry whose expression reads
 `jwt` — `jwt.<claim>` or `jwt["<claim>"]` — is rendered only while a route of
 the Gateway verifies a bearer (the kagent controller route with its JWT
-policy, agent-manager's, model-manager's); without one it would read `unknown`
+policy, agent-manager's); without one it would read `unknown`
 on every series.
 
 ```yaml
@@ -277,7 +277,7 @@ dashboard and the portal's Cost page read both labels.
 verifies in `Strict` mode and writes into `x-user-id`
 (`kagent.controller.auth.userIdClaim`, `email`; `docs/authentication.md`),
 read through `tpl` so the label follows the knob — and the same knob names the
-claim on agent-manager's and model-manager's routes, kagent on or off.
+claim on agent-manager's route, kagent on or off.
 klaus-gateway makes every controller call with the linked person's Dex
 id_token and never as itself, so on that route every series carries a verified
 person: a Slack turn is one `lf.a2a.v1.A2AService/SendStreamingMessage`
@@ -553,24 +553,24 @@ its container and its probes.
 | DNS | CoreDNS in `kube-system`, with the proxy clause the FQDN selectors need | CoreDNS in `kube-system` |
 | The identity provider | the issuer host by name on 443, plus the `cluster` entity on 443 and 10443 for an issuer behind an in-cluster Gateway | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs` on 443 |
 | The kube-apiserver | the `kube-apiserver` entity | `networkPolicy.kubernetes.apiServerCIDR` |
-| The edge | the `cluster` entity leg the identity-provider include renders, on 443 and 10443 | the Envoy pods of the Gateways the muster, kagent-controller and model-manager routes attach to, on 443 and 10443, plus the agentgateway data plane on 443 for each of those routes that attaches to it |
+| The edge | the `cluster` entity leg the identity-provider include renders, on 443 and 10443 | the Envoy pods of the Gateways the muster and kagent-controller routes attach to, on 443 and 10443, plus the agentgateway data plane on 443 for each of those routes that attaches to it |
 | muster | its pods in this namespace, on the muster Service port | the same, as a `podSelector` |
 | The portal's database | its CNPG pods by `cnpg.io/cluster`, on 5432, while `backstage.database.engine` is `postgresql` | the same, as a `podSelector` |
 | The scaffolder catalog | `github.com`, `api.github.com` and `raw.githubusercontent.com` on 443, while `backstage.catalogs.version` is set | the world rule above |
 
-The app-config addresses muster, the kagent controller and the model manager by
-their public hostnames, so those calls leave through the edge rather than
-through muster's own pod leg. That edge is the one *those* routes attach to
-(`ingress.parentRefs` for muster, `kagent.controllerRoute.parentRef` and
-`modelManager.route.parentRef` for the other two, each falling back to the
-chart-owned edge, else `global.gatewayApi.parentRefs`) — never
+The app-config addresses muster and the kagent controller by their public
+hostnames, so those calls leave through the edge rather than through muster's
+own pod leg. That edge is the one *those* routes attach to
+(`ingress.parentRefs` for muster, `kagent.controllerRoute.parentRef` for the
+controller, each falling back to the chart-owned edge, else
+`global.gatewayApi.parentRefs`) — never
 `backstage.parentRefs`, which moves the portal's own route only. The address they resolve to is the edge's
 LoadBalancer, which both flavours translate to the proxy pods before the policy
 decides: an Envoy Gateway proxy binds the listener's port plus 10000, so a
 listener on 443 is a pod on 10443 and both ports are open. In the cilium
 flavour that leg is the `cluster` entity the identity-provider include renders
 — narrowing that include to the issuer alone would take the portal's calls to
-the kagent controller and the model manager with it.
+the kagent controller with it.
 
 A private identity provider inside one of `worldExcludedCIDRs` needs its
 address in `networkPolicy.additionalEgressCIDRs`. The policy names the proxy
@@ -723,11 +723,10 @@ muster, DNS and the destinations below. Without a rule for the issuer the fetch
 is denied on a default-deny cluster and every request that carries a valid
 token is answered `401 token uses the unknown key`.
 
-Three route blocks name a JWKS host and port, and the controller policy reads
+Two route blocks name a JWKS host and port, and the controller policy reads
 them directly — there is no second list to keep in sync:
 
 - `kagent.controllerRoute.jwtAuthentication.jwks`
-- `modelManager.route.jwtAuthentication.jwks`
 - `agentManager.route.jwtAuthentication.jwks`
 
 Only a rendered policy contributes: the component, its route and its
@@ -1540,19 +1539,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | model-manager.networkPolicy.enabled | bool | `false` |  |
-| modelManager.route.enabled | bool | `false` |  |
-| modelManager.route.pathPrefix | string | `"/model-manager"` |  |
-| modelManager.route.hostname | string | `""` |  |
-| modelManager.route.parentRef.name | string | `"giantswarm-default"` |  |
-| modelManager.route.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| modelManager.route.jwtAuthentication.enabled | bool | `false` |  |
-| modelManager.route.jwtAuthentication.mode | string | `"Strict"` |  |
-| modelManager.route.jwtAuthentication.issuer | string | `""` |  |
-| modelManager.route.jwtAuthentication.jwks.host | string | `"dex.giantswarm.svc.cluster.local"` |  |
-| modelManager.route.jwtAuthentication.jwks.port | int | `5556` |  |
-| modelManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
-| modelManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
-| modelManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | modelManager.kserve.requireApi | bool | `true` |  |
 | modelManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
