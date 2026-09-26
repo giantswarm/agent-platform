@@ -220,7 +220,7 @@ def check_profile(meta: str) -> str:
     ok("kserveGateway: a differing operator copy fails naming both, an equal one is a no-op, no derivation with the Gateway off")
 
     target = helm(meta, ["-f", profile, "-f", f"{meta}/ci/test-target-values.yaml", *VM, *INSTALLATION])
-    t = releases(target)
+    t = {name.removeprefix("t-") for name in releases(target)}
     if t != SERVING | {"agentgateway"}:
         sys.exit(f"FAIL: the profile with the target knob should add exactly agentgateway: {sorted(t)}")
     if target.count("  kubeConfig:") != len(t) or "      name: wc01-kubeconfig" not in target:

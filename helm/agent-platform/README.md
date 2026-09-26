@@ -281,6 +281,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gitops.namespace | string | `""` |  |
 | gitops.targetNamespace | string | `""` |  |
 | gitops.serviceAccountName | string | `""` |  |
+| gitops.target.name | string | `""` |  |
 | gitops.target.kubeConfig.secretRef.name | string | `""` |  |
 | gitops.target.kubeConfig.secretRef.key | string | `""` |  |
 | gitops.hooks.image.registry | string | `"gsoci.azurecr.io"` |  |
