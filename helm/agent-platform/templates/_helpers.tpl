@@ -1338,7 +1338,7 @@ answers, but only where the leaf is left at `auto`:
                                (the dashboard ConfigMap is only picked up by the
                                same observability platform),
                                kagent.oauth2-proxy.metrics.serviceMonitor.enabled,
-                               kagent.otel.tracing.enabled / .logging.enabled (the
+                               kagent.otel.traces.enabled / .logs.enabled (the
                                OTLP gateway they export to is part of that platform;
                                off while the signal has no endpoint),
                                agentgateway.monitoring.enabled (the packaging
@@ -1365,9 +1365,8 @@ Two leaves have no `auto` form and are derived directly, off only:
       fleet's HelmRelease values are unchanged. An explicit value is kept.
   kagent.controller.env[name=OTEL_EXPORTER_OTLP_HEADERS] — the tenant header
       of the OTLP gateway; dropped when both kagent OTel exporters resolve off.
-  kagent.harness.env — the actors' copies: OTEL_EXPORTER_OTLP_HEADERS dropped
-      the same way, OTEL_LOGGING_ENABLED (the actors' log exporter) dropped
-      when kagent.otel.logging resolves off (agent-platform.shape.dropEnv).
+  kagent.harness.env — the actors' copy: OTEL_EXPORTER_OTLP_HEADERS dropped
+      the same way (agent-platform.shape.dropEnv).
   klausGateway.observability.otlpEndpoint / .otlpHeaders — emptied when
       klausGateway.observability.enabled (auto | true | false; auto follows the
       monitors) resolves off, so the klaus-gateway release exports nothing; the
@@ -1409,7 +1408,7 @@ connectivity release both read the resolved value. */ -}}
 {{- if kindIs "map" (dig "postgres" nil (index $v "substrate" | default dict)) -}}
 {{- $_ := set (index $v "substrate" "postgres") "enabled" (eq (include "agent-platform.substrate.postgresMode" $root) "bundled") -}}
 {{- end -}}
-{{- include "agent-platform.shape.otlp" (dict "root" $root "values" $v "monitors" $monitors) -}}
+{{- include "agent-platform.shape.otlp" (dict "root" $root "values" $v) -}}
 {{- /* Derived component copies: only a leaf left at auto is written. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "networkPolicy" "flavor") "value" $flavor) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "valkey" "ciliumNetworkPolicy" "enabled") "value" (eq $flavor "cilium")) -}}
@@ -1422,8 +1421,9 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes" "grafanaDashboards" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "substrate" "metrics" "podMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "controller" "metrics" "serviceMonitor" "enabled") "value" $monitors) -}}
-{{- range $signal := list "tracing" "logging" -}}
-{{- $endpoint := dig "otel" $signal "exporter" "otlp" "endpoint" "" (index $v "kagent" | default dict) | toString | trim -}}
+{{- range $signal := list "traces" "logs" -}}
+{{- $kagent := index $v "kagent" | default dict -}}
+{{- $endpoint := dig "otel" $signal "endpoint" "" $kagent | default (dig "otel" "exporter" "otlp" "endpoint" "" $kagent) | toString | trim -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" $signal "enabled") "value" (and $monitors (ne $endpoint ""))) -}}
 {{- end -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "vm-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
@@ -1441,20 +1441,16 @@ connectivity release both read the resolved value. */ -}}
 {{- end -}}
 {{- end -}}
 {{- /* kagent OTLP env: the tenant header on the controller and on the Harness
-(the actors) is gone when neither OTel exporter is on; the actors' log exporter
-(OTEL_LOGGING_ENABLED on the Harness) when the logging exporter is off. */ -}}
+(the actors) is gone when neither OTel exporter is on. */ -}}
 {{- $kagent := index $v "kagent" | default dict -}}
 {{- if kindIs "map" $kagent -}}
-{{- $tracing := eq (toString (dig "otel" "tracing" "enabled" false $kagent)) "true" -}}
-{{- $logging := eq (toString (dig "otel" "logging" "enabled" false $kagent)) "true" -}}
+{{- $traces := eq (toString (dig "otel" "traces" "enabled" false $kagent)) "true" -}}
+{{- $logs := eq (toString (dig "otel" "logs" "enabled" false $kagent)) "true" -}}
 {{- $drop := list -}}
-{{- if and (not $tracing) (not $logging) -}}
+{{- if and (not $traces) (not $logs) -}}
 {{- $drop = append $drop "OTEL_EXPORTER_OTLP_HEADERS" -}}
 {{- end -}}
 {{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "controller") "names" $drop) -}}
-{{- if not $logging -}}
-{{- $drop = append $drop "OTEL_LOGGING_ENABLED" -}}
-{{- end -}}
 {{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "harness") "names" $drop) -}}
 {{- end -}}
 {{- /* klaus-gateway's trace export follows the same answer: the knob resolved
@@ -1476,13 +1472,11 @@ shaped values tree where they are `auto` (agent-platform.shape.derive: a copy se
 to anything else wins, and nothing fails over the difference: the same rule as
 the monitor gates). Runs inside agent-platform.shape.apply before the kagent and
 klaus-gateway gates read the endpoints. Emits nothing.
-  endpoint -> kagent.otel.{tracing,logging}.exporter.otlp.endpoint,
+  endpoint -> kagent.otel.exporter.otlp.endpoint,
               muster.muster.observability.otel.endpoint,
               klausGateway.observability.otlpEndpoint, substrate.otel.endpoint,
               gateway.parameters.dataPlaneEnv[OTEL_EXPORTER_OTLP_ENDPOINT]
-              (the entry dropped when the endpoint is empty);
-              kagent.otel.{tracing,logging}.exporter.otlp.insecure: false for
-              an https:// endpoint, true otherwise; with no endpoint, every
+              (the entry dropped when the endpoint is empty); with no endpoint, every
               Substrate signal that names no endpoint of its own is turned off
               (substrate.otel.<signal>.enabled: false);
               kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint
@@ -1496,7 +1490,7 @@ klaus-gateway gates read the endpoints. Emits nothing.
               protocol's default when it names none), with .otlpInsecure false for an
               https:// endpoint, true otherwise, and .tracingExporter otlp,
               none when the endpoint is empty
-  protocol -> kagent.otel.tracing.exporter.otlp.protocol,
+  protocol -> kagent.otel.exporter.otlp.protocol,
               muster.muster.observability.otel.protocol,
               <manager>.observability.otel.protocol,
               mcp-kubernetes.mcpKubernetes.instrumentation.otlpProtocol,
@@ -1513,17 +1507,15 @@ klaus-gateway gates read the endpoints. Emits nothing.
               kagent.{controller,harness}.env[OTEL_EXPORTER_OTLP_HEADERS]
               ("k=v,k=v"; the entry dropped when empty),
               klausGateway.observability.otlpHeaders (a map)
-klaus-gateway, Substrate, kagent's log exporter (the actors' Go ADK) and the
-model pods' tracing preset (vLLM, the llm-d endpoint picker) speak gRPC only: an http/protobuf protocol fails the render while one of them is on
-and would take the endpoint, naming the key to set instead. .monitors is the
-resolved global.observability.metrics.serviceMonitor.enabled, which kagent's
-`auto` log exporter follows.
-Usage: include "agent-platform.shape.otlp" (dict "root" $ "values" $shaped "monitors" $monitors)
+klaus-gateway, Substrate and the model pods' tracing preset (vLLM, the llm-d
+endpoint picker) speak gRPC only: an http/protobuf protocol fails the render
+while one of them is on and would take the endpoint, naming the key to set
+instead.
+Usage: include "agent-platform.shape.otlp" (dict "root" $ "values" $shaped)
 */}}
 {{- define "agent-platform.shape.otlp" -}}
 {{- $root := .root -}}
 {{- $v := .values -}}
-{{- $monitors := .monitors -}}
 {{- $otlp := dig "observability" "traces" "otlp" dict (index $v "global" | default dict) | default dict -}}
 {{- $endpoint := dig "endpoint" "" $otlp | default "" | toString | trim -}}
 {{- $protocol := dig "protocol" "" $otlp | default "grpc" | toString | lower -}}
@@ -1552,9 +1544,6 @@ Usage: include "agent-platform.shape.otlp" (dict "root" $ "values" $shaped "moni
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "substrate")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "substrate" "otel" "endpoint"))) -}}
 {{- $grpcOnly = append $grpcOnly "substrate.otel.endpoint" -}}
 {{- end -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "kagent" "otel" "logging" "exporter" "otlp" "endpoint"))) (has (toString (dig "otel" "logging" "enabled" "auto" (index $v "kagent" | default dict))) (ternary (list "true" "auto") (list "true") $monitors)) -}}
-{{- $grpcOnly = append $grpcOnly "kagent.otel.logging.exporter.otlp.endpoint (or kagent.otel.logging.enabled: false)" -}}
-{{- end -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "kserve-runtime-configs")) (include "agent-platform.shape.isAuto" (dict "values" $v "path" (list "kserve-runtime-configs" "kserve" "llmisvcConfigs" "tracing" "exporterEndpoint"))) -}}
 {{- $grpcOnly = append $grpcOnly "kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint" -}}
 {{- end -}}
@@ -1573,16 +1562,10 @@ is turned off, where the chart would export to the SDK's localhost default. */ -
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- range $path := list (list "kagent" "otel" "tracing" "exporter" "otlp" "endpoint") (list "kagent" "otel" "logging" "exporter" "otlp" "endpoint") (list "muster" "muster" "observability" "otel" "endpoint") (list "klausGateway" "observability" "otlpEndpoint") (list "substrate" "otel" "endpoint") -}}
+{{- range $path := list (list "kagent" "otel" "exporter" "otlp" "endpoint") (list "muster" "muster" "observability" "otel" "endpoint") (list "klausGateway" "observability" "otlpEndpoint") (list "substrate" "otel" "endpoint") -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" $path "value" $endpoint) -}}
 {{- end -}}
-{{- /* kagent's INSECURE follows each signal's resolved endpoint: the SDKs read it
-after the endpoint, so true would send plaintext to an https collector. */ -}}
-{{- range $signal := list "tracing" "logging" -}}
-{{- $resolved := dig "otel" $signal "exporter" "otlp" "endpoint" "" (index $v "kagent" | default dict) | toString | trim | lower -}}
-{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" $signal "exporter" "otlp" "insecure") "value" (not (hasPrefix "https://" $resolved))) -}}
-{{- end -}}
-{{- range $path := list (list "kagent" "otel" "tracing" "exporter" "otlp" "protocol") (list "muster" "muster" "observability" "otel" "protocol") -}}
+{{- range $path := list (list "kagent" "otel" "exporter" "otlp" "protocol") (list "muster" "muster" "observability" "otel" "protocol") -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" $path "value" $protocol) -}}
 {{- end -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "otel" "headers") "value" $joined) -}}

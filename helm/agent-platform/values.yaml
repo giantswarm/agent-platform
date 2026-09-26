@@ -524,8 +524,11 @@ components:  # @schema additionalProperties: true
     # (giantswarm/kagent-upstream#81): the release whose ModelConfig carries
     # spec.ollama.think, which model-manager writes on the Ollama models it
     # wires that have the thinking capability, so their agents answer instead of
-    # thinking before every answer or replying with nothing.
-    versionRange: ">=1.1.0 <1.2.0"
+    # thinking before every answer or replying with nothing. From 1.2.0 the
+    # chart takes its OTel settings in the SDK-spec shape kagent.otel below
+    # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
+    # ignores them and exports nothing.
+    versionRange: ">=1.2.0 <1.3.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -624,7 +627,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.2.0 <1.3.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -2728,30 +2731,33 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         cacheTTL: "5m"
 
   # OTel — traces and logs to the collector global.observability.traces.otlp
-  # names: an `auto` endpoint or protocol takes its value there, the tenant
-  # travels as the X-Scope-OrgID header (controller.env, harness.env). An
-  # `enabled: auto` follows the resolved
+  # names, in the kagent chart's SDK-spec shape: the controller exports with
+  # these settings and compiles them into every actor (OTEL_EXPORTER_OTLP_*,
+  # OTEL_TRACES_EXPORTER, OTEL_LOGS_EXPORTER). An `auto` endpoint or protocol
+  # takes its value there, the tenant travels as the X-Scope-OrgID header
+  # (controller.env, harness.env). A signal's own endpoint (traces.endpoint,
+  # logs.endpoint, a full URL) wins over exporter.otlp.endpoint; the endpoint's
+  # scheme decides TLS. An `enabled: auto` follows the resolved
   # global.observability.metrics.serviceMonitor.enabled (the collector is part
   # of the same observability platform whose monitoring.coreos.com/v1 CRDs
-  # that knob detects) and resolves off with no endpoint. An `insecure: auto`
-  # is false for an https:// endpoint and true otherwise: the SDKs read the
-  # INSECURE variable after the endpoint, so a true would send plaintext to a
-  # TLS collector. The meta chart replaces every `auto` before forwarding; an
-  # explicit value wins.
+  # that knob detects) and resolves off with no endpoint. The meta chart
+  # replaces every `auto` before forwarding; an explicit value wins. The export
+  # timeout (milliseconds) bounds every export, and so the flush the Go ADK
+  # runs before a turn's response closes: a turn's A2A stream ends only after
+  # it, so its deadline is the turn's tail whenever the collector is slow or
+  # unreachable; an in-cluster export takes tens of milliseconds
+  # (giantswarm/agent-platform#456). kagent's own metrics are scraped
+  # (kagent.controller.metrics), not exported.
   otel:
-    tracing:
-      enabled: auto  # auto | true | false
-      exporter:
-        otlp:
-          endpoint: auto
-          protocol: auto
-          insecure: auto
-    logging:
-      enabled: auto  # auto | true | false
-      exporter:
-        otlp:
-          endpoint: auto
-          insecure: auto
+    exporter:
+      otlp:
+        endpoint: auto
+        protocol: auto
+        timeout: "500"
+    traces:
+      enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+    logs:
+      enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
 
   # --- UI auth: oauth2-proxy in front of the kagent UI ---
   # Disabled by default. Enable and supply Dex OIDC credentials to secure the UI.
@@ -3057,33 +3063,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
             key: ""
     # The Harness's environment. KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
     # the caller's bearer on its MCP calls, so muster sees the person, not the
-    # platform. The OTel entries wire the actors' telemetry to the OTLP gateway
-    # kagent.otel names — the controller forwards only its tracing variables to
-    # the actors (OTEL_TRACING_ENABLED, the endpoint, the protocol):
-    # OTEL_LOGGING_ENABLED makes the Go ADK export the actors' logs over gRPC to
-    # that endpoint (without it the ADK's built-in log exporter posts HTTP to
-    # the gRPC port and every batch ends in EOF); OTEL_EXPORTER_OTLP_HEADERS is
-    # the tenant header the controller sends (kagent.controller.env), which the
-    # controller deliberately keeps from the actors. The meta chart drops
-    # OTEL_LOGGING_ENABLED when kagent.otel.logging resolves off and the header
-    # when both exporters do (auto: no observability platform), like the
-    # controller's header. KAGENT_TRACE_FLUSH_TIMEOUT_MS bounds the Go ADK's
-    # pre-response trace flush (KAGENT_PRE_RESPONSE_TRACE_FLUSH, set by the
-    # controller on Substrate actors — a checkpoint runtime has no later export
-    # window): a turn's A2A stream closes only after it, so its deadline is the
-    # turn's tail whenever the collector is slow or unreachable — 3 s by the
-    # ADK's default, 0.5 s here; an in-cluster export takes tens of
-    # milliseconds (giantswarm/agent-platform#456). Nothing else today (a
-    # per-namespace skills credential is a later, separate decision).
+    # platform. OTEL_EXPORTER_OTLP_HEADERS is the tenant header of the OTLP
+    # gateway kagent.otel names: the controller compiles the rest of the
+    # actors' telemetry settings from kagent.otel and passes this one through
+    # from the Harness, like the controller's own copy (kagent.controller.env).
+    # The meta chart drops it when both exporters resolve off (auto: no
+    # observability platform). Nothing else today (a per-namespace skills
+    # credential is a later, separate decision).
     env:
       - name: KAGENT_PROPAGATE_TOKEN
         value: "true"
-      - name: OTEL_LOGGING_ENABLED
-        value: "true"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: auto
-      - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
-        value: "500"
     # The admission contract: a template is admitted by the ONE label the
     # Generic agent chart 1.x stamps (the value is the Harness's name). Helm
     # merges maps on coalesce, so the kagent chart's own default key

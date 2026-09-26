@@ -484,6 +484,25 @@ def hold_repin_1_1(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+# giantswarm/giantswarm#37742: the kagent line at 1.2 takes its OTel settings in
+# the SDK-spec shape (kagent.otel.exporter.otlp, .traces, .logs) and compiles
+# the actors' telemetry itself, so the platform Harness drops
+# OTEL_LOGGING_ENABLED and KAGENT_TRACE_FLUSH_TIMEOUT_MS. The kagent otel block,
+# either shape, and the two env entries are dropped from BOTH sides by name;
+# drop once GOLDEN_REF carries them.
+KAGENT_OTEL_BLOCK = re.compile(r"^( +)otel:\n(?:\1  (?:exporter|logs|traces|logging|tracing):\n(?:\1    .*\n)*)+", re.M)
+RETIRED_HARNESS_ENV = re.compile(r'^( +)- name: (?:OTEL_LOGGING_ENABLED|KAGENT_TRACE_FLUSH_TIMEOUT_MS)\n\1  value: "[^"]*"\n', re.M)
+
+
+def hold_repin_1_2(here: str, there: str) -> tuple:
+    """The two meta renders without the kagent otel block and the Harness env entries #37742 retires."""
+    def strip(render: str) -> str:
+        return RETIRED_HARNESS_ENV.sub("", KAGENT_OTEL_BLOCK.sub("", render))
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #37742 hold — the kagent otel block and the retired Harness env entries are left out of the golden comparison")
+    return h, strip(there)
+
+
 def drop_new_roster_entries(here: str, there: str) -> tuple:
     """The two meta renders with the roster entries only one side has removed.
 
@@ -913,6 +932,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_substrate_range(here, there)
                 here, there = hold_muster_floor(here, there)
                 here, there = hold_repin_1_1(here, there)
+                here, there = hold_repin_1_2(here, there)
                 here, there = hold_otlp_endpoints(here, there)
                 here, there = hold_dataplane_sampling(here, there)
                 here, there = hold_llm_endpoint(here, there)
