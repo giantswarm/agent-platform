@@ -11,13 +11,13 @@
 # checked.
 #
 # `runtime` is the parser registry of the vLLM the platform's llm-d runtime
-# carries (llm-d v0.8.0: vLLM v0.23.0, vllm/tool_parsers/__init__.py and
+# carries (llm-d v0.9.0: vLLM v0.26.0, vllm/tool_parsers/__init__.py and
 # vllm/reasoning/__init__.py): a row may name only a parser vLLM registers
 # without a plugin. Refresh it with the runtime image.
 runtime:
-  vllm: 0.23.0
-  toolCallParsers: [deepseek_v3, deepseek_v31, deepseek_v32, deepseek_v4, cohere_command3, cohere_command4, ernie45, glm45, glm47, granite, granite4, hermes, poolside_v1, hunyuan_a13b, hy_v3, internlm, jamba, lfm2, kimi_k2, llama3_json, llama4_json, llama4_pythonic, longcat, mimo, minimax_m2, minimax, minicpm5, mistral, olmo3, openai, phi4_mini_json, pythonic, qwen3_coder, qwen3_xml, seed_oss, step3, step3p5, xlam, gigachat3, functiongemma, gemma4, apertus]
-  reasoningParsers: [deepseek_r1, deepseek_v3, deepseek_v4, poolside_v1, cohere_command3, cohere_command4, ernie45, gemma4, glm45, openai_gptoss, granite, holo2, hunyuan_a13b, hy_v3, kimi_k2, mimo, minimax_m2, minimax_m2_append_think, mistral, nemotron_v3, olmo3, qwen3, seed_oss, step3, step3p5]
+  vllm: 0.26.0
+  toolCallParsers: [deepseek_v3, deepseek_v31, deepseek_v32, deepseek_v4, cohere_command3, cohere_command4, ernie45, glm45, glm47, granite, granite4, hermes, poolside_v1, hunyuan_a13b, hy_v3, internlm, jamba, lfm2, kimi_k2, llama3_json, llama4_json, llama4_pythonic, longcat, mimo, minimax_m2, minimax_m3, minicpm5, mistral, olmo3, openai, phi4_mini_json, pythonic, qwen3_coder, qwen3_xml, seed_oss, step3, step3p5, inkling, xlam, gigachat3, functiongemma, gemma4, apertus]
+  reasoningParsers: [deepseek_r1, deepseek_v3, deepseek_v4, poolside_v1, cohere_command3, cohere_command4, ernie45, gemma4, glm45, glm47, openai_gptoss, granite, holo2, hunyuan_a13b, hy_v3, kimi_k2, mimo, minimax_m2, minimax_m2_append_think, minimax_m3, mistral, nemotron_v3, olmo3, qwen3, seed_oss, step3, step3p5, inkling]
 
 # One row per family: `match`, a regular expression on the preset's
 # spec.model.id (exactly one row may match a preset); `toolCallParsers`, the

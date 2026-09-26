@@ -22,7 +22,7 @@ spec:
     under vLLM's Gemma 4 chat template — the template the model card's vLLM
     instructions and vLLM's Gemma 4 recipe both serve the model with,
     shipped as chat-templates/gemma-4-31b.jinja from vLLM v0.23.0's
-    examples (the vLLM inside llm-d v0.8.0, the platform's runtime image).
+    examples (the vLLM of llm-d v0.8.0, the runtime the preset was proven on).
     Thinking is off by default; a request turns it on with enable_thinking.
     Weights: an OCI model image, giantswarm/models/gemma-4-31b-fp8 at the
     checkpoint revision, pulled onto the node by containerd (KServe's
