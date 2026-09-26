@@ -72,3 +72,10 @@ families:
     reasoningParser: qwen3
     chatTemplate: optional
     source: https://recipes.vllm.ai/Qwen/Qwen3.8-27B, https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next
+  - name: Muse Glimmer
+    match: (^|/)Muse-Glimmer-
+    toolCallParsers: [muse_glimmer]
+    reasoningParser: muse_glimmer
+    chatTemplate: required
+    source: vLLM v0.30.0 examples/tool_chat_template_muse_glimmer.jinja and its muse_glimmer tool-call and reasoning parsers (vllm-project/vllm#51655, first in v0.28.0)
+    runtimeImage: gsoci.azurecr.io/giantswarm/vllm-openai:v0.30.0

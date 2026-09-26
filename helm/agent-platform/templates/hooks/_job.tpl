@@ -36,8 +36,11 @@ engine. Hook weights in use:
        once kagent-crds serves it (hooks/kagent-crds-storage-version.yaml,
        post-install + post-upgrade);
        write the user-supplied values into the values Secret and start the
-       resumer (hooks/self.yaml, post-install + post-upgrade)
-    5  delete the FluxInstance and wait (teardown.yaml, pre-delete)
+       resumer (hooks/self.yaml, post-install + post-upgrade);
+       delete the FluxInstance, kept through Helm's pass, and wait for the
+       operator to uninstall Flux (teardown.yaml, post-delete)
+    5  delete the Flux Operator, kept through Helm's pass (teardown.yaml,
+       post-delete)
 before-hook-creation clears a previous run's Job (a failed one is left in place
 for inspection until the next attempt), hook-succeeded removes every hook
 object once ALL hooks of the event succeeded — Helm applies that policy after

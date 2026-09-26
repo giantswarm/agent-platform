@@ -275,15 +275,6 @@ agent-platform.idpHosts names from the provider alone) and when neither is set.
 {{- end -}}
 
 {{/*
-The public hostname of the model-manager route: the override when set, else
-agentgateway.<global.domain> — the same hostname as the kagent controller route.
-*/}}
-{{- define "agent-platform.modelManager.hostname" -}}
-{{- $route := .Values.modelManager.route -}}
-{{- include "agent-platform.hostname" (dict "ctx" . "prefix" "agentgateway" "override" $route.hostname "key" "modelManager.route.hostname") -}}
-{{- end -}}
-
-{{/*
 Labels of every object the umbrella renders for the component.
 */}}
 {{- define "agent-platform.modelManager.labels" -}}

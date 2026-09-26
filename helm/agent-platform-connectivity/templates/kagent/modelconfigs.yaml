@@ -67,15 +67,26 @@ spec:
   {{- if and $cacheTTL (not (has (toString $cacheTTL) (list "5m" "1h"))) }}
   {{- fail (printf "kagent.modelConfigs[].cacheTTL %q on %q is not one of the CRD's values 5m, 1h" (toString $cacheTTL) .name) }}
   {{- end }}
-  {{- $cache := dict }}
-  {{- if not (kindIs "invalid" $promptCaching) }}{{ $_ := set $cache "promptCaching" $promptCaching }}{{ end }}
-  {{- with $cacheTTL }}{{ $_ := set $cache "cacheTTL" (toString .) }}{{ end }}
-  {{- if or $baseUrl $cache }}
-  {{ $urlKey | default $cacheKey }}:
+  {{- /* The output bound: an entry's own maxTokens wins; an Anthropic entry
+  without one inherits kagent.providers.anthropic.config.maxTokens like the
+  cache keys, so the catalog's models answer as long as the default model does
+  instead of stopping at kagent's built-in 8192 (thinking included). A provider
+  whose block has no maxTokens refuses it naming the entry. */}}
+  {{- $maxTokensKey := include "agent-platform.modelConfigMaxTokensKey" $provider }}
+  {{- if and .maxTokens (not $maxTokensKey) }}
+  {{- fail (printf "kagent.modelConfigs[].maxTokens is set on %q, whose provider %s has no maxTokens in ModelConfigSpec (Anthropic, AnthropicVertexAI, AzureOpenAI, Mistral and OpenAI have one; the API server would prune it)" .name $provider) }}
+  {{- end }}
+  {{- $maxTokens := .maxTokens | default $inherit.maxTokens }}
+  {{- $fields := dict }}
+  {{- if not (kindIs "invalid" $promptCaching) }}{{ $_ := set $fields "promptCaching" $promptCaching }}{{ end }}
+  {{- with $cacheTTL }}{{ $_ := set $fields "cacheTTL" (toString .) }}{{ end }}
+  {{- with $maxTokens }}{{ $_ := set $fields "maxTokens" (int .) }}{{ end }}
+  {{- if or $baseUrl $fields }}
+  {{ $urlKey | default $cacheKey | default $maxTokensKey }}:
     {{- with $baseUrl }}
     baseUrl: {{ . | quote }}
     {{- end }}
-    {{- with $cache }}
+    {{- with $fields }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
   {{- end }}

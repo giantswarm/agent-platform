@@ -46,6 +46,10 @@ kagent:
         # verify-prompt-caching asserts the inheritance and the precedence.
         promptCaching: true
         cacheTTL: "5m"
+        # The platform's output bound (the platform manager renders it for
+        # every installation): the Anthropic entries below inherit it too,
+        # verify-max-tokens asserts the inheritance and the precedence.
+        maxTokens: 32000
   # Three extra, chart-owned ModelConfigs. The first names no baseUrl, so the
   # chart fills in the listener: a new entry is metered unless somebody names
   # another upstream. The second names its own, which wins — that is how a model

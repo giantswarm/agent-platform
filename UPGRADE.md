@@ -2,6 +2,17 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (`modelManager.route` is removed)
+
+giantswarm/agent-platform#271: model-manager is reached through muster only. The connectivity chart no longer renders its REST route (`AgentgatewayBackend`, `HTTPRoute` and the public `HTTPRoute`), its JWT policy and JWKS backend, or the data plane's ingress and egress legs to it.
+
+### Operator action
+
+- **None** for an installation on the defaults: the route was off, and model-manager's Deployment, Service, `MCPServer` CR and muster legs render unchanged.
+- **An installation that sets `modelManager.route`** (any key under it, `enabled: false` included): the render fails naming this issue. Delete the block. A REST client of `https://agentgateway.<domain>/model-manager/api/v1` moves to the `x_model-manager_*` tools through muster as the person.
+- **An installation that set `modelManager.route.hostname`** to move model-manager's OAuth resource URL: set `model-manager.oauth.baseURL` instead; without it the URL is `https://agentgateway.<global.domain>/model-manager`.
+- **Recognising it worked**: `kubectl -n agent-platform get httproutes,agentgatewaybackends,agentgatewaypolicies | grep model-manager` prints nothing, and `x_model-manager_list_backends` answers through muster.
+
 ## \<current\> → \<next\> (the managers, the portal and mcp-kubernetes export traces)
 
 giantswarm/giantswarm#36711: model-manager, agent-manager, vm-manager, cluster-manager, backstage and mcp-kubernetes export their traces over OTLP to `global.observability.traces.otlp`, and their ranges start at the releases that do (model-manager `1.3.0`, agent-manager `1.2.0`, vm-manager `0.24.0`, cluster-manager `0.19.0`, backstage `2.68.0`, mcp-kubernetes `1.3.0`).

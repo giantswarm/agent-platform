@@ -352,8 +352,8 @@ target has no controller of its own) in the default mode. */ -}}
 {{- /* muster-direct runs without the agentgateway component, so its CRDs are
 not on the cluster: anything that renders an agentgateway.dev object or attaches
 to the agentgateway Gateway must fail here, naming the knob, instead of shipping
-objects the API server rejects (the model-manager / agent-manager routes already
-guard themselves the same way). */ -}}
+objects the API server rejects (the agent-manager route already
+guards itself the same way). */ -}}
 {{- if eq $mode "muster-direct" -}}
 {{- $mcpsValues := index .Values "agent-platform-mcps" | default dict -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) (dig "agentgateway" "enabled" false $mcpsValues) (dig "mcpServers" (list) $mcpsValues) -}}
@@ -817,15 +817,14 @@ listener; a ModelConfig of another provider keeps its own path.
 
 {{/*
 Truthy (emits "true") when a policy of this chart verifies a bearer JWT on a
-route of the data-plane Gateway: the kagent controller route's, agent-manager's
-or model-manager's (each template's own gate, repeated here). Only such a
+route of the data-plane Gateway: the kagent controller route's or agent-manager's
+(each template's own gate, repeated here). Only such a
 request carries `jwt.<claim>` when the metric labels are evaluated.
 */}}
 {{- define "agent-platform.jwtRouteRendered" -}}
 {{- $k := dig "controllerRoute" dict (.Values.kagent | default dict) -}}
 {{- $a := dig "route" dict (.Values.agentManager | default dict) -}}
-{{- $m := dig "route" dict (.Values.modelManager | default dict) -}}
-{{- if or (and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (dig "enabled" false $k) (dig "jwtAuthentication" "enabled" false $k)) (and (include "agent-platform.agentManager.enabled" .) (dig "enabled" false $a) (dig "jwtAuthentication" "enabled" false $a)) (and (include "agent-platform.modelManager.enabled" .) (dig "enabled" false $m) (dig "jwtAuthentication" "enabled" false $m)) -}}true{{- end -}}
+{{- if or (and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (dig "enabled" false $k) (dig "jwtAuthentication" "enabled" false $k)) (and (include "agent-platform.agentManager.enabled" .) (dig "enabled" false $a) (dig "jwtAuthentication" "enabled" false $a)) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -943,6 +942,18 @@ template refuses them instead.
 */}}
 {{- define "agent-platform.modelConfigCacheKey" -}}
 {{- $keys := dict "anthropic" "anthropic" "bedrock" "bedrock" -}}
+{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
+{{- end -}}
+
+{{/*
+Key of the ModelConfigSpec provider block that carries maxTokens, for a
+spec.provider value in any case: Anthropic, AnthropicVertexAI, AzureOpenAI,
+Mistral and OpenAI. Emits nothing for every other provider (empty string =
+falsy): the API server would prune the field and the model would answer at
+kagent's own default in silence, so the template refuses it instead.
+*/}}
+{{- define "agent-platform.modelConfigMaxTokensKey" -}}
+{{- $keys := dict "anthropic" "anthropic" "anthropicvertexai" "anthropicVertexAI" "azureopenai" "azureOpenAI" "mistral" "mistral" "openai" "openAI" -}}
 {{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
 {{- end -}}
 
@@ -1159,9 +1170,9 @@ Usage: include "agent-platform.backstage.routeToDataPlane" .
 {{/*
 The edge the portal's app-config reaches by public hostname, as a JSON object
 `{"dataPlane": bool, "namespaces": [...]}`: the parents of the routes that
-serve those hostnames — muster (`ingress.parentRefs`), the kagent controller
-and the model manager (their own `parentRef`, each counted only while its route
-is enabled) — resolved in the precedence agent-platform.parentRefs uses. A
+serve those hostnames — muster (`ingress.parentRefs`) and the kagent
+controller (its own `parentRef`, counted only while its route is enabled) —
+resolved in the precedence agent-platform.parentRefs uses. A
 route that resolves to the chart-owned data plane sets `dataPlane`; every other
 one contributes its Gateway's namespace. `backstage.parentRefs` is not among
 them: it moves the portal's own route, not the routes the portal calls.
@@ -1174,12 +1185,6 @@ Usage: include "agent-platform.backstage.appConfigEdge" . | fromJson
 {{- if and $kagentRoute.enabled (dig "parentRef" "name" "" $kagentRoute) -}}
 {{- $overrides = append $overrides (list $kagentRoute.parentRef) -}}
 {{- else if $kagentRoute.enabled -}}
-{{- $overrides = append $overrides list -}}
-{{- end -}}
-{{- $mmRoute := dig "route" dict (.Values.modelManager | default dict) -}}
-{{- if and $mmRoute.enabled (dig "parentRef" "name" "" $mmRoute) -}}
-{{- $overrides = append $overrides (list $mmRoute.parentRef) -}}
-{{- else if $mmRoute.enabled -}}
 {{- $overrides = append $overrides list -}}
 {{- end -}}
 {{- $dataPlane := false -}}
@@ -1471,9 +1476,6 @@ the form a Cilium toFQDNs matchName is matched in.
 {{- end -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (.Values.kagent.controllerRoute).enabled (.Values.kagent.controllerRoute.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.kagent.controllerRoute.jwtAuthentication.jwks -}}
-{{- end -}}
-{{- if and (include "agent-platform.modelManager.enabled" .) (.Values.modelManager.route).enabled (.Values.modelManager.route.jwtAuthentication).enabled -}}
-{{- $sources = append $sources .Values.modelManager.route.jwtAuthentication.jwks -}}
 {{- end -}}
 {{- if and (include "agent-platform.agentManager.enabled" .) (.Values.agentManager.route).enabled (.Values.agentManager.route.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.agentManager.route.jwtAuthentication.jwks -}}

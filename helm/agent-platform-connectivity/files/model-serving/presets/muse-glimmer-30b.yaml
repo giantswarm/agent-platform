@@ -1,0 +1,111 @@
+# Muse Glimmer 30B, Red Hat AI's FP8 block quantization of Meta's dense 30B
+# instruction-tuned model on one 48 GB GPU of the L40S family, served from an
+# OCI model image on vLLM's own server image: the model's architecture and its
+# muse_glimmer parsers first ship in vLLM 0.28.0, newer than the vLLM inside
+# the platform's llm-d runtime.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: muse-glimmer-30b
+spec:
+  displayName: Muse Glimmer 30B (FP8, one 48 GB GPU)
+  description: |
+    Meta's dense 30B instruction-tuned model with tool calling, reasoning
+    and vision, served as Red Hat AI's FP8 block quantization (32 GiB of
+    weights, compressed-tensors) on one 48 GB GPU of the L40S family:
+    g6e.2xlarge or g6e.4xlarge (g6e.xlarge leaves a predictor 3 vCPU /
+    27 GiB, less than the 4 vCPU / 32 GiB requested here). 32k of the
+    model's 128k context, four concurrent requests, one image per prompt:
+    52 layers with 2 KV heads of 128 dimensions keep a token's KV cache at
+    52 KiB, so four 32k sequences take 6.5 GiB beside the weights at
+    --gpu-memory-utilization=0.92. Tool calls and reasoning use the model's
+    own ATEM protocol, parsed with vLLM's muse_glimmer tool and reasoning
+    parsers under vLLM's Muse Glimmer chat template, shipped as
+    chat-templates/muse-glimmer-30b.jinja from vLLM v0.30.0's examples.
+    Runtime: vLLM's own server image, vllm/vllm-openai v0.30.0, from its
+    signed gsoci copy (giantswarm/vllm-openai, pinned by digest in
+    retagger). The model's architecture (MuseGlimmerForConditionalGeneration)
+    and its parsers first ship in vLLM 0.28.0, and the platform's llm-d
+    runtime carries vLLM 0.23 (llm-d v0.9.0 ships 0.26); this preset names
+    its image for that reason only, and moves to the well-known runtime once
+    an llm-d release carries vLLM 0.28 or later.
+    Weights: an OCI model image, giantswarm/models/muse-glimmer-30b-fp8 at
+    the checkpoint revision, pulled onto the node by containerd (KServe's
+    modelcar path: no download, no cache claim); the runtime runs as a
+    non-root uid on the read-only image, so HOME, HF_HOME and
+    VLLM_CACHE_ROOT live under /tmp. 33 + 11 GiB exceed a 24 GB L4/A10G and
+    a 16 GB T4.
+  model:
+    id: RedHatAI/Muse-Glimmer-30B-FP8-block
+    # The tag is the first 12 characters of the checkpoint revision
+    # 1deb4641ff84f9a728dd11b27cac1f6a02a9ed14 (2 safetensors shards under
+    # /models). modelServing.modelImages.registry swaps the host at render;
+    # the path, giantswarm/models/muse-glimmer-30b-fp8:1deb4641ff84, stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/muse-glimmer-30b-fp8:1deb4641ff84
+    format: vLLM
+    contextLength: 32768
+    capabilities: [chat, tools, reasoning, vision, coding]
+    license: apache-2.0
+  env:
+    # The modelcar path runs the runtime as the platform KServe's modelcar uid
+    # on a read-only model image: the home, the Hub cache and vLLM's compile
+    # cache go under /tmp (the cache claim's compile cache is not mounted).
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf
+    - name: VLLM_CACHE_ROOT
+      value: /tmp/vllm-cache
+    # The predictor runs as the modelcar uid (1010), which the runtime image's
+    # passwd does not know: torch's inductor cache-dir lookup asks getpass for
+    # a user name and dies on getpwuid(1010) at `import vllm` unless the name
+    # comes from the environment, so the name and the cache dir are set here.
+    - name: USER
+      value: vllm
+    - name: LOGNAME
+      value: vllm
+    - name: TORCHINDUCTOR_CACHE_DIR
+      value: /tmp/torchinductor
+  args:
+    - --gpu-memory-utilization=0.92
+    - --max-model-len=32768
+    - --max-num-seqs=4
+    - --enable-chunked-prefill
+    - --enable-prefix-caching
+    # One argument, the JSON single-quoted inside it: the well-known runtime
+    # template re-parses every argument through a shell (eval "… $@"), which
+    # would split a bare JSON at its whitespace and eat its double quotes.
+    - "--limit-mm-per-prompt='{\"image\": 1}'"
+    - --no-enable-log-requests
+    - --reasoning-parser=muse_glimmer
+    # kagent agents call /v1/chat/completions with tools and tool_choice auto;
+    # without a parser vLLM rejects every agent request (400).
+    - --enable-auto-tool-choice
+    - --tool-call-parser=muse_glimmer
+  # vLLM's Muse Glimmer tool-calling chat template
+  # (examples/tool_chat_template_muse_glimmer.jinja at v0.30.0, the runtime
+  # this preset names). Publishing appends --chat-template from it.
+  chatTemplate:
+    file: muse-glimmer-30b.jinja
+  # The runtime image: vLLM's own server at v0.30.0 (see description) — the
+  # well-known template's command runs it unchanged (bash, `vllm serve
+  # /mnt/models`, the version-gated flags read from `vllm --version`).
+  template:
+    containers:
+      - name: main
+        image: gsoci.azurecr.io/giantswarm/vllm-openai:v0.30.0
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 32Gi
+    limits:
+      cpu: "8"
+      memory: 48Gi
+  requirements:
+    # The Hub's safetensors index sizes the weights at 32.03 GiB
+    # (make verify-preset-weights); 11 GiB of overhead is the KV cache of four
+    # 32k sequences (6.5 GiB), the vision encoder, CUDA graphs and the
+    # runtime — 44 GiB in all on a 48 GB card at 0.92.
+    weightsGiB: 33
+    overheadGiB: 11
