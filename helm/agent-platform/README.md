@@ -1371,6 +1371,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.gpuPool.taint.value | string | `""` |  |
 | modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
+| modelServing.fastLinks | list | `[]` |  |
 | modelServing.prepull.enabled | bool | `true` |  |
 | modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
 | modelServing.prepull.nodeSelector | object | `{}` |  |

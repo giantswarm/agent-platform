@@ -137,6 +137,33 @@ spec:
               protocol: TCP
 {{- end }}
 
+{{- if $ms.fastLinks }}
+---
+# The pods of a model split across nodes (modelServing.fastLinks): the leader
+# and its workers reach each other on every port — vLLM's rendezvous at the
+# leader, Gloo's and NCCL's bootstrap sockets on ports they choose. The
+# tensor-parallel traffic itself runs over the fast link's own network
+# attachments, outside this policy.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-multi-node
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" $ | nindent 4 }}
+spec:
+  endpointSelector:
+    matchExpressions:
+      {{- toYaml $shape.multiNodeExpressions | nindent 6 }}
+  ingress:
+    - fromEndpoints:
+        - matchExpressions:
+            {{- toYaml $shape.multiNodeExpressions | nindent 12 }}
+  egress:
+    - toEndpoints:
+        - matchExpressions:
+            {{- toYaml $shape.multiNodeExpressions | nindent 12 }}
+{{- end }}
 {{- else }}
 ---
 # {{ $shape.kind }} pods: ingress on the workload port from the callers of the
@@ -248,5 +275,32 @@ spec:
   egress:
     {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
     {{- include "agent-platform.modelServing.huggingFaceEgress.kubernetes" . | trim | nindent 4 }}
+{{- if $ms.fastLinks }}
+---
+# The pods of a model split across nodes (modelServing.fastLinks): the leader
+# and its workers reach each other on every port (the cilium flavor says why).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-model-serving-multi-node
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      {{- toYaml $shape.multiNodeExpressions | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              {{- toYaml $shape.multiNodeExpressions | nindent 14 }}
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              {{- toYaml $shape.multiNodeExpressions | nindent 14 }}
+{{- end }}
 {{- end }}
 {{- end }}

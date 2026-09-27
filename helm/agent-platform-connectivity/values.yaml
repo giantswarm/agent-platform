@@ -3131,6 +3131,29 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # it with the pool); empty selects no pool. Label values are strings:
     # quote a number.
     nodeSelector: {}
+  # Nodes joined by a fast link (RDMA), published in the discovery ConfigMap
+  # as spec.fastLinks for model-manager (giantswarm/model-manager#190): one
+  # model can be split across the nodes of one fast link — tensor parallel
+  # over the link, the portal recommending it — and never across nodes
+  # without one. Per entry: name, nodes (two or more, by node name), the
+  # network attachments every pod of a split joins (NetworkAttachmentDefinition
+  # names, the pod annotation k8s.v1.cni.cncf.io/networks), the extra
+  # resources it requests (the RDMA device plugin's), and the environment
+  # that points NCCL at the link's devices. With one declared, the chart lets
+  # a split's leader and workers (a LeaderWorkerSet) add the multi-node
+  # template's capabilities (IPC_LOCK, SYS_RAWIO, NET_RAW; PolicyException
+  # model-serving-fast-links) and reach each other on every port (network
+  # policy <release>-model-serving-multi-node). Empty: no split anywhere.
+  #   fastLinks:
+  #     - name: gpu-pair
+  #       nodes: [gpu-a, gpu-b]
+  #       networks: [roce-a, roce-b]
+  #       resources:
+  #         rdma/rdma_shared_device_a: "1"
+  #         rdma/rdma_shared_device_b: "1"
+  #       env:
+  #         - {name: NCCL_IB_HCA, value: "mlx5_0,mlx5_1"}
+  fastLinks: []
   # Pre-pulling the serving runtime image on the pool's nodes
   # (giantswarm/agent-platform#545). A predictor pulls its runtime image only
   # when its main container starts — after the storage-initializer has

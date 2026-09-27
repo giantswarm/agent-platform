@@ -20,6 +20,7 @@ metadata:
   name: qwen3-4b-instruct-kserve-7d9f8c6b5d-x2k9q
   namespace: model-serving
   labels:
+    app.kubernetes.io/component: llminferenceservice-workload
     app.kubernetes.io/name: qwen3-4b-instruct
     app.kubernetes.io/part-of: llminferenceservice
     kserve.io/component: workload
