@@ -3139,11 +3139,11 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   # network attachments every pod of a split joins (NetworkAttachmentDefinition
   # names, the pod annotation k8s.v1.cni.cncf.io/networks), the extra
   # resources it requests (the RDMA device plugin's), and the environment
-  # that points NCCL at the link's devices. With one declared, the chart lets
-  # a split's leader and workers (a LeaderWorkerSet) add the multi-node
-  # template's capabilities (IPC_LOCK, SYS_RAWIO, NET_RAW; PolicyException
-  # model-serving-fast-links) and reach each other on every port (network
-  # policy <release>-model-serving-multi-node). Empty: no split anywhere.
+  # that points NCCL at the link's devices. With one declared, a split's
+  # leader and workers (a LeaderWorkerSet) reach each other on every port
+  # (network policy <release>-model-serving-multi-node); they run with the
+  # single-node model pod's security context, no added capability. Empty: no
+  # split anywhere.
   #   fastLinks:
   #     - name: gpu-pair
   #       nodes: [gpu-a, gpu-b]

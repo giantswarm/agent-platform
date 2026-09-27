@@ -119,18 +119,9 @@ if "kserve.io/component" in json.dumps(by_labels):
     fail("the model pod selector still requires kserve.io/component, which a LeaderWorkerSet's workers do not carry")
 ok("the model pods' PolicyException covers a LeaderWorkerSet's pods (by app.kubernetes.io/component) and StatefulSets")
 
-caps = named(linked, "PolicyException", "model-serving-fast-links")
-if not caps:
-    fail("no model-serving-fast-links PolicyException with a fast link declared")
-rules = {r for e in caps["spec"]["exceptions"] for r in e["ruleNames"]}
-if rules != {"adding-capabilities", "autogen-adding-capabilities", "adding-capabilities-strict", "autogen-adding-capabilities-strict"}:
-    fail(f"model-serving-fast-links excepts {rules!r}, want exactly the adding-capabilities rules")
-selected = caps["spec"]["match"]["any"][0]["resources"]["selector"]["matchExpressions"]
-if components(selected) != MULTI:
-    fail(f"model-serving-fast-links selects {components(selected)!r}; a single-node model pod must not add capabilities")
-if named(docs(helm(CONN, KYVERNO)), "PolicyException", "model-serving-fast-links"):
-    fail("model-serving-fast-links renders without a fast link")
-ok("with a fast link, only a LeaderWorkerSet's pods may add capabilities (adding-capabilities[-strict]); no exception without one")
+if named(linked, "PolicyException", "model-serving-fast-links"):
+    fail("model-serving-fast-links renders; a split's pods add no capability (giantswarm/model-manager#193)")
+ok("no PolicyException lets a split's pods add capabilities")
 
 meta = yaml.safe_load(open(os.path.join(META, "values.yaml"), encoding="utf-8"))
 conn = yaml.safe_load(open(os.path.join(CONN, "values.yaml"), encoding="utf-8"))

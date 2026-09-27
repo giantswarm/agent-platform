@@ -19,12 +19,10 @@ policies and the mutations, giantswarm/agent-platform#506), and the Deployment
 llm-d controller gives it (<llminferenceservice>-kserve[-<role>]).
 
 A model split across the nodes of a fast link (modelServing.fastLinks,
-giantswarm/model-manager#190) runs as a LeaderWorkerSet whose pods take the
-well-known multi-node template's capabilities IPC_LOCK (pinning the RDMA
-buffers NCCL registers), SYS_RAWIO and NET_RAW. The second exception,
-rendered only with a fast link declared, lets exactly those pods — a
-LeaderWorkerSet's leader and workers, never a single-node model pod — add
-capabilities; nothing privileged, no host namespace.
+giantswarm/model-manager#190) runs as a LeaderWorkerSet whose leader and
+workers carry the same security context as a single-node model pod
+(giantswarm/model-manager#193): the first match below covers them, no
+capability is added.
 */ -}}
 {{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled }}
 apiVersion: kyverno.io/v2
@@ -65,40 +63,4 @@ spec:
         - {{ include "agent-platform.modelServing.namespace" . }}
         names:
         - "*-kserve*"
-{{- end }}
-{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled .Values.modelServing.fastLinks }}
----
-apiVersion: kyverno.io/v2
-kind: PolicyException
-metadata:
-  name: model-serving-fast-links
-  namespace: {{ .Values.kyvernoPolicies.policyExceptionNamespace }}
-  labels:
-    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
-spec:
-  exceptions:
-  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "adding-capabilities" "adding-capabilities-strict")) | nindent 2 }}
-  match:
-    any:
-    {{- with (include "agent-platform.modelServing.podShape" . | fromJson) }}
-    # The pods of a LeaderWorkerSet and their StatefulSets, by their labels.
-    - resources:
-        kinds:
-        - Pod
-        - StatefulSet
-        namespaces:
-        - {{ include "agent-platform.modelServing.namespace" $ }}
-        selector:
-          matchExpressions:
-          {{- toYaml .multiNodeExpressions | nindent 10 }}
-    {{- end }}
-    # A LeaderWorkerSet's StatefulSets, evaluated at their own admission, by
-    # the name the LeaderWorkerSet gives them (<llminferenceservice>-kserve-mn[-…]).
-    - resources:
-        kinds:
-        - StatefulSet
-        namespaces:
-        - {{ include "agent-platform.modelServing.namespace" . }}
-        names:
-        - "*-kserve-mn*"
 {{- end }}
