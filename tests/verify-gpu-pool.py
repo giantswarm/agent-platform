@@ -542,6 +542,20 @@ else:
             for key in [k for k in side if k[0] in ("PodDisruptionBudget", "Cluster")]:
                 side.pop(key)
         print(f"note: the single-replica budgets are drainable on this side (#697) and not on {ref}: the budgets and the Postgres Cluster are left out of the comparison")
+    # A preset added to or retired from the shipped line-up renders its preset
+    # ConfigMap on one side only: a line-up change, not the pool's scheduling,
+    # so it is left out of the comparison (the presets both sides ship are
+    # still compared).
+    lineup = sorted(k for k in set(head) ^ set(golden) if k[0] == "ConfigMap" and k[1].startswith("agent-platform-serving-preset-"))
+    for key in lineup:
+        head.pop(key, None)
+        golden.pop(key, None)
+        name = re.escape(key[1].removeprefix("agent-platform-serving-preset-"))
+        for side in (head, golden):
+            if DISCOVERY in side:
+                side[DISCOVERY] = re.sub(rf"^ +- {name}\n", "", side[DISCOVERY], flags=re.M)
+    if lineup:
+        print(f"note: the preset line-up differs from {ref} ({', '.join(k[1].removeprefix('agent-platform-serving-preset-') for k in lineup)}): those preset ConfigMaps are left out of the comparison")
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):
