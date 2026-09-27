@@ -8,6 +8,13 @@ spec.fastLinks exactly as written; empty (the default) renders no key, so the
 discovery document of an installation without fast links is unchanged. The
 meta chart forwards the block with modelServing.
 
+A split runs as a LeaderWorkerSet: its workers carry no
+kserve.io/component=workload, so the model pod selector every serving policy
+renders from matches them by app.kubernetes.io/component; their StatefulSets
+fall under the model pods' PolicyException; and, with a fast link declared,
+the leader and workers may add the multi-node template's capabilities and
+reach each other on every port — a single-node model pod gains neither.
+
 usage: verify-fast-links.py <meta chart dir> <connectivity chart dir>
 """
 import json
@@ -68,6 +75,62 @@ spec = discovery(helm(CONN, [*SERVING, "--set-json", "modelServing.fastLinks=" +
 if spec.get("fastLinks") != LINKS:
     fail(f"spec.fastLinks {spec.get('fastLinks')!r} != modelServing.fastLinks {LINKS!r}")
 ok("set: spec.fastLinks published as written (name, nodes, networks, resources, env)")
+
+MULTI = {"llminferenceservice-workload-leader", "llminferenceservice-workload-worker",
+         "llminferenceservice-workload-leader-prefill", "llminferenceservice-workload-worker-prefill"}
+
+
+def docs(render: str) -> list:
+    return [d for d in yaml.safe_load_all(render) if d]
+
+
+def named(objects: list, kind: str, name: str):
+    return next((d for d in objects if d["kind"] == kind and d["metadata"]["name"] == name), None)
+
+
+def components(expressions: list) -> set:
+    for e in expressions:
+        if e["key"] == "app.kubernetes.io/component" and e["operator"] == "In":
+            return set(e["values"])
+    fail(f"no app.kubernetes.io/component In selector in {expressions!r}")
+
+
+for flavor in ("cilium", "kubernetes"):
+    flags = [*SERVING, "--set", f"networkPolicy.flavor={flavor}"]
+    plain, linked = docs(helm(CONN, flags)), docs(helm(CONN, [*flags, "--set-json", "modelServing.fastLinks=" + json.dumps(LINKS)]))
+    kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
+    if named(plain, kind, "agent-platform-connectivity-model-serving-multi-node"):
+        fail(f"{flavor}: the multi-node policy renders without a fast link")
+    pol = named(linked, kind, "agent-platform-connectivity-model-serving-multi-node")
+    if not pol:
+        fail(f"{flavor}: no multi-node policy with a fast link declared")
+    sel = pol["spec"]["endpointSelector" if flavor == "cilium" else "podSelector"]["matchExpressions"]
+    if components(sel) != MULTI:
+        fail(f"{flavor}: the multi-node policy selects {components(sel)!r}, want the LeaderWorkerSet pods {MULTI!r}")
+    ok(f"{flavor}: with a fast link the leader and workers reach each other on every port; none without")
+
+KYVERNO = [*SERVING, "--api-versions", "kyverno.io/v1"]
+linked = docs(helm(CONN, [*KYVERNO, "--set-json", "modelServing.fastLinks=" + json.dumps(LINKS)]))
+pods = named(linked, "PolicyException", "model-serving-predictors")
+by_labels = pods["spec"]["match"]["any"][0]["resources"]
+if "StatefulSet" not in by_labels["kinds"] or not MULTI <= components(by_labels["selector"]["matchExpressions"]):
+    fail(f"model-serving-predictors does not cover a LeaderWorkerSet's pods and StatefulSets: {by_labels!r}")
+if "kserve.io/component" in json.dumps(by_labels):
+    fail("the model pod selector still requires kserve.io/component, which a LeaderWorkerSet's workers do not carry")
+ok("the model pods' PolicyException covers a LeaderWorkerSet's pods (by app.kubernetes.io/component) and StatefulSets")
+
+caps = named(linked, "PolicyException", "model-serving-fast-links")
+if not caps:
+    fail("no model-serving-fast-links PolicyException with a fast link declared")
+rules = {r for e in caps["spec"]["exceptions"] for r in e["ruleNames"]}
+if rules != {"adding-capabilities", "autogen-adding-capabilities", "adding-capabilities-strict", "autogen-adding-capabilities-strict"}:
+    fail(f"model-serving-fast-links excepts {rules!r}, want exactly the adding-capabilities rules")
+selected = caps["spec"]["match"]["any"][0]["resources"]["selector"]["matchExpressions"]
+if components(selected) != MULTI:
+    fail(f"model-serving-fast-links selects {components(selected)!r}; a single-node model pod must not add capabilities")
+if named(docs(helm(CONN, KYVERNO)), "PolicyException", "model-serving-fast-links"):
+    fail("model-serving-fast-links renders without a fast link")
+ok("with a fast link, only a LeaderWorkerSet's pods may add capabilities (adding-capabilities[-strict]); no exception without one")
 
 meta = yaml.safe_load(open(os.path.join(META, "values.yaml"), encoding="utf-8"))
 conn = yaml.safe_load(open(os.path.join(CONN, "values.yaml"), encoding="utf-8"))
