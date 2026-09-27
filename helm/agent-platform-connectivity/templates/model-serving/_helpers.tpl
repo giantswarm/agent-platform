@@ -353,6 +353,22 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- fail (printf "%s: spec.%s is no longer a preset field — the classic InferenceService path was removed; a preset composes onto the well-known LLMInferenceServiceConfigs, and LLMInferenceService template fields go under spec.template (see UPGRADE.md)" $where $removed) -}}
 {{- end -}}
 {{- end -}}
+{{- /* spec.router.scheduler is the per-preset switch for the llm-d endpoint
+       picker model-manager composes; nothing else goes under router. */ -}}
+{{- if hasKey $spec "router" -}}
+{{- $router := get $spec "router" -}}
+{{- if not (kindIs "map" $router) -}}
+{{- fail (printf "%s: spec.router must be a mapping" $where) -}}
+{{- end -}}
+{{- range $key, $value := $router -}}
+{{- if ne $key "scheduler" -}}
+{{- fail (printf "%s: spec.router.%s is not a preset field; spec.router carries scheduler only" $where $key) -}}
+{{- end -}}
+{{- if not (kindIs "bool" $value) -}}
+{{- fail (printf "%s: spec.router.scheduler must be true or false" $where) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if not (get $spec "displayName") -}}
 {{- fail (printf "%s: spec.displayName is required" $where) -}}
 {{- end -}}
