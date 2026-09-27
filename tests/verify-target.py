@@ -672,6 +672,20 @@ def hold_mm_workload_clusters(here: str, there: str) -> tuple:
     return h, MM_WORKLOAD_CLUSTERS.sub("", there)
 
 
+# giantswarm/agent-platform#504: the agentgateway release gets the Gateway API
+# Inference Extension (inferenceExtension.enabled: true), so InferencePool
+# backends resolve on the models Gateway. The forwarded block is left out of the
+# meta renders' comparison; dropped once GOLDEN_REF carries #504.
+INFERENCE_EXTENSION = re.compile(r"^( +)inferenceExtension:\n\1  enabled: true\n", re.M)
+
+
+def hold_inference_extension(here: str, there: str) -> tuple:
+    """The two meta renders without the agentgateway release's inferenceExtension."""
+    if (h := INFERENCE_EXTENSION.sub("", here)) != here and not INFERENCE_EXTENSION.search(there):
+        print("note: #504 hold — the agentgateway release's inferenceExtension is left out of the golden comparison")
+    return h, INFERENCE_EXTENSION.sub("", there)
+
+
 # giantswarm/agent-platform#271: modelManager.route is retired, so the meta
 # chart no longer forwards its defaults in the connectivity release's
 # modelManager block. The golden side's forwarded route block (the one whose
@@ -1019,6 +1033,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_llm_endpoint(here, there)
                 here, there = hold_mm_workload_clusters(here, there)
                 here, there = hold_mm_route(here, there)
+                here, there = hold_inference_extension(here, there)
             else:
                 here, there = hold_mm_ingress_comment(here, there)
                 here, there = hold_dataplane_podmonitor(here, there)
