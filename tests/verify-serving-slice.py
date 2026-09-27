@@ -732,6 +732,19 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
                "spec": {"displayName": "No docs", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "args": ["--enforce-eager", flag]}}
         err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="removes the runtime's /openapi.json")
         need(err, f'serving preset "nodocs" (values): spec.args carries "{flag}"', f"the guard's message for {flag}")
+    # spec.router.scheduler is published unchanged; nothing else goes under router.
+    doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "picked"},
+           "spec": {"displayName": "Picked", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "router": {"scheduler": True}}}
+    cm = documents(helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])]))[("ConfigMap", "agent-platform-serving-preset-picked")]
+    published = yaml.safe_load(yaml.safe_load(cm)["data"]["preset.yaml"])
+    if published["spec"].get("router") != {"scheduler": True}:
+        sys.exit(f"FAIL: the values preset's spec.router is published as {published['spec'].get('router')!r}, not {{'scheduler': True}}")
+    for what, router, message in (("an unknown key", {"scheduler": True, "somethingElse": 1}, "spec.router.somethingElse is not a preset field"),
+                                  ("a string", {"scheduler": "yes"}, "spec.router.scheduler must be true or false"),
+                                  ("a list", [True], "spec.router must be a mapping")):
+        doc["spec"]["router"] = router
+        err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure=message)
+        need(err, 'serving preset "picked" (values)', f"the router guard's message for {what}")
     bad = {"bare JSON in two arguments": ["--default-chat-template-kwargs", '{"enable_thinking": false}'],
            "a space": ["--x=a b"], "a stray single quote": ["--x=it's"], "a double quote": ['--x="a"'],
            "a brace expansion": ["--x={a,b}"], "a variable": ["--x=$HOME"], "a glob": ["--x=*"]}
@@ -744,6 +757,7 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
        f"each one's resources.gpus equals its tensor-parallel size, "
        f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
        f"none carries --disable-fastapi-docs and a values preset with it fails the render naming the flag (the route list model-manager reads the interfaces from); "
+       f"a values preset's spec.router.scheduler is published unchanged and any other router key or a non-boolean fails the render; "
        f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
 
 
@@ -780,6 +794,8 @@ def check_presets(connectivity: str) -> None:
             sys.exit(f"FAIL: preset {name}'s description does not name the instance it is sized for (g6.xlarge)")
     if "template" not in spec_keys:
         sys.exit("FAIL: the preset schema has no spec.template")
+    if set(schema["properties"]["spec"]["properties"].get("router", {}).get("properties", {})) != {"scheduler"}:
+        sys.exit("FAIL: the preset schema's spec.router does not carry exactly scheduler")
     ok(f"presets {', '.join(PRESETS)}: schema keys, a signed model image and no serving image, tools and reasoning on with their parsers, one GPU, <= 24 GiB, "
        f"requests within a g6.xlarge's {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB; the schema knows spec.template")
 
