@@ -94,6 +94,14 @@
             "overheadGiB": {"type": "number", "minimum": 0, "default": 30, "description": "Headroom for KV cache, activations, CUDA graphs and the runtime."}
           }
         },
+        "router": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The LLMInferenceService's router shape for this preset alone. scheduler: true composes the llm-d endpoint picker (an InferencePool the models Gateway resolves only with the Gateway API Inference Extension on); false leaves it out whatever the backend's default; unset follows the backend document's spec.kserve.router.scheduler. Default: the route alone.",
+          "properties": {
+            "scheduler": {"type": "boolean"}
+          }
+        },
         "scheduling": {
           "type": "object",
           "additionalProperties": false,
