@@ -282,6 +282,13 @@ REPIN_1_1_RANGES_HOLD = [
     "--set", "components.substrate-crds.versionRange=>=1.1.0 <1.2.0",
     "--set", "agent-manager.agentChart.semver=>=1.5.0 <2.0.0",
 ]
+# giantswarm/agent-platform#580: this tree forwards the bucket-init Job's
+# aws-cli as the gsoci copy (the Substrate line runs the Job as a hook from
+# 1.1.2); GOLDEN_REF forwards Docker Hub's short name. Written on BOTH sides;
+# dropped once GOLDEN_REF carries it.
+SUBSTRATE_AWSCLI_HOLD = [
+    "--set", "substrate.images.awsCli=gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73",
+]
 AGENTGATEWAY_IMAGES_HOLD = [
     "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
     "--set", "agentgateway.controller.image.tag=2.0.0",
@@ -981,8 +988,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the klaus-gateway no-op key removal (#636) since 4.62.0.
         golden_only = {meta: [], connectivity: []}
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD, *SUBSTRATE_AWSCLI_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD, *SUBSTRATE_AWSCLI_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
