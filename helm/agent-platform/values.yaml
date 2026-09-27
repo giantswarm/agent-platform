@@ -3747,6 +3747,16 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     # for the controller wait for a schema fix there
     # (giantswarm/agentgateway#51).
     replicaCount: 2
+  # The Gateway API Inference Extension: the controller resolves
+  # InferencePool backendRefs (AGW_ENABLE_INFER_EXT, plus read access to
+  # inferencepools and their status). An LLMInferenceService composed with the
+  # llm-d endpoint picker (a preset's spec.router.scheduler: true) routes its
+  # /v1/* rules on the models Gateway to an InferencePool; with this off the
+  # route stays ResolvedRefs=False BackendNotFound and the model is never
+  # Ready. Without the InferencePool CRD (no serving slice on the cluster) the
+  # controller waits for it and routes everything else as before.
+  inferenceExtension:
+    enabled: true
   proxy:
     image:
       registry: gsoci.azurecr.io

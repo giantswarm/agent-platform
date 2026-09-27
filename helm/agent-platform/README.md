@@ -1071,6 +1071,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
 | agentgateway.controller.image.tag | string | `"2.1.2"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
+| agentgateway.inferenceExtension.enabled | bool | `true` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
 | agentgateway.proxy.image.tag | string | `"2.1.2"` |  |
