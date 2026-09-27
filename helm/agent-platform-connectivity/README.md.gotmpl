@@ -392,7 +392,7 @@ and the schema.
 
 ## The model pods' traces
 
-The llm-d controller (KServe's llmisvc controller, v0.20.0) has no
+The llm-d controller (KServe's llmisvc controller, v0.21.0) has no
 OpenTelemetry code, so it emits no spans. The data plane does: the vLLM `main`
 container of the workload pod and, when the service has one, the endpoint
 picker. The controller configures both from the `LLMInferenceService`'s
@@ -850,6 +850,10 @@ Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecut
 ### The prewarm placeholder's PriorityClass
 
 A pool created with prewarm (`create_node_pool {prewarm: true}`; the pool chart's `pool.prewarm`) launches its first node with the release: a one-shot placeholder Job holds one GPU at negative priority until the first predictor preempts it. A `PriorityClass` is cluster-scoped, and a pool release is delivered under Flux multi-tenancy as the organisation's tenant ServiceAccount, whose rights are namespaced — a pool chart that rendered the class failed `InstallFailed` on it, and the pool never came up (giantswarm/agent-platform#539). So the pool chart renders none, and **this chart ships the one class every pool of the installation names**: `PriorityClass agent-platform-prewarm-placeholder` — `value: -1000` (below the default priority 0, so any workload preempts the placeholder), `preemptionPolicy: Never` (the placeholder preempts nothing itself), `globalDefault: false`, the `cluster-manager` component label — from `clusterManager.prewarmPriorityClass` (`enabled`, `name`, `value`; `templates/cluster-manager/priorityclass.yaml`). The name is the contract with the pool chart: `pool.prewarm.priorityClassName` defaults to it. The class renders **with the cluster-manager component**, not the model-serving switch: cluster-manager composes the pool releases and is on in exactly one release per installation, the platform's, so the class has one owner — the serving slice, where model serving runs on an installation, never carries it, and a class gated on the switch would arrive after the pool's Job and leave with the slice. `enabled: false` renders none; a placeholder pod naming a class the cluster lacks is rejected at admission, and the pool comes up without a prewarmed node. `value` is immutable on the API: to change it, rename the class (and point the pool chart's value at the new name). Three guards fail the render naming the key: a `value` at or above 0 or fractional, a `name` that is not a DNS-1123 subdomain, the reserved `system-` prefix. The meta chart mirrors the block (`make verify-meta` holds every leaf equal); `make verify-cluster-manager` asserts the class, its knobs, the guards and that nothing renders while the component is off.
+
+### Rolling a served model
+
+A change to a served model's `LLMInferenceService` rolls its predictor Deployment: a preset change, or a chart upgrade that moves the well-known runtime image. The Deployment default, a 25 % surge, starts the new pod beside the old one on the same node. A model fills its GPU, so that pod never starts: on a one-GPU node it has no GPU to schedule on, and on a unified-memory node its vLLM finds the memory taken and crash-loops. The roll never finishes (giantswarm/agent-platform#682). The meta chart's `kserve-runtime-configs:` block therefore passes `kserve.llmisvcConfigs.rolloutStrategy: {maxSurge: 0, maxUnavailable: 1}` (the `kserve-runtime-configs` chart from 0.7.0, KServe v0.21.0's `spec.rolloutStrategy`). The chart sets it on the single-node workload presets, and the llm-d controller merges those into every `LLMInferenceService`, the ones served before the upgrade included. The old pod stops before the new one starts. The cost is a short outage per roll of a one-replica model, which is all one GPU allows anyway. A service's own `spec.rolloutStrategy` wins over the preset's. `make verify-serving-slice` asserts the forwarded value.
 
 ### Pre-pulling the runtime image
 
