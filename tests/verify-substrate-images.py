@@ -32,12 +32,6 @@ line tagged a patch whose data plane moved (#654). What is checked instead:
     failure — the pin holds the floor's bits of the same service until a re-pin
     of the floor moves it.
 
-`images.awsCli` is the exception (TOLERATED): the rustfs-bucket-init Job is a
-release resource and a Job's pod template is immutable, so its default stays
-the chart's own short name, and a pin must be exactly the floor's value until
-the line ships a Job that can be recreated (values.yaml says why;
-tests/verify-images.py tolerates the rendered value by name).
-
 Network: gsoci.azurecr.io (the substrate charts the range admits and the
 registry manifests of their defaults). Needs PyYAML.
 Usage: verify-substrate-images.py <meta chart dir>
@@ -70,10 +64,8 @@ REGISTRY = "gsoci.azurecr.io"
 KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
 # The bundled shapes: the database StatefulSet, the store Deployment and its Job.
 BUNDLED = ["--set", "rustfs.enabled=true", "--set", "postgres.enabled=true"]
-# Keys whose default stays off gsoci on purpose, with the reason.
-TOLERATED = {
-    "awsCli": "the rustfs-bucket-init Job's pod template is immutable; its image moves with a release whose Job can be recreated",
-}
+# Keys whose default stays off gsoci on purpose, with the reason: none.
+TOLERATED: dict[str, str] = {}
 # Keys the release's own default rules, never a forwarded value, with the reason.
 FOLLOWS_RELEASE = {
     "agentgateway": "atenet-router and atenet-egress run the static config the release renders, written for the agentgateway build it stamps; "
