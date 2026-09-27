@@ -249,7 +249,7 @@ def check_policy_exception(connectivity: str, base: list[str]) -> None:
         sys.exit("FAIL: no PolicyException model-serving-predictors: the fleet's restricted PSS policies deny the predictor Deployment")
     for needle in ("  namespace: policy-exceptions", "  - policyName: disallow-capabilities-strict", "      - require-drop-all", "      - autogen-require-drop-all",
                    "  - policyName: disallow-privilege-escalation", "      - autogen-privilege-escalation", "  - policyName: require-run-as-nonroot", "      - autogen-run-as-non-root",
-                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: kserve.io/component", "          - key: app.kubernetes.io/part-of",
+                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: app.kubernetes.io/component", "            - llminferenceservice-workload-worker\n", "        - StatefulSet\n", "          - key: app.kubernetes.io/part-of",
                    "            - llminferenceservice",
                    '        - "*-kserve*"'):
         need(pe, needle, "the predictors' PolicyException")
