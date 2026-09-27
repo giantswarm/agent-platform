@@ -1329,6 +1329,11 @@ verify-model-serving-policies: ## Assert the model-serving policies over the LLM
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@python3 tests/verify-model-serving-policies.py $(CONNECTIVITY_DIR) $(CHART_DIR)
 
+.PHONY: verify-fast-links
+verify-fast-links: ## Assert the fast-link input of the model serving layer (giantswarm/model-manager#190): modelServing.fastLinks published as the discovery ConfigMap's spec.fastLinks exactly as written (name, nodes, networks, resources, env) for model-manager's split placement; empty (the default) renders no key; both charts default it to [] and the meta chart forwards it with modelServing. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-fast-links.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+
 .PHONY: verify-gpu-pool
 verify-gpu-pool: ## Assert the GPU node pool input of the model serving layer (giantswarm/agent-platform#315): modelServing.gpuPool.taint tolerated by every published preset (the pool's entry first, a preset's equal entry once; Exists without a value, Equal with one), modelServing.gpuPool.nodeSelector merged under the presets' own (their keys win), both published as spec.gpuPool in the discovery ConfigMap model-manager >= 0.23.0 reads; an empty taint key renders no toleration and no taint and leaves the serving render byte-identical to GOLDEN_REF but for the discovery block; the guards (effect, key, string label values); the meta chart forwards the block. Fixture: ci/test-model-serving-gpu-pool-values.yaml. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"

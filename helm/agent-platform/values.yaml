@@ -5205,6 +5205,12 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # it with the pool); empty selects no pool. Label values are strings:
     # quote a number.
     nodeSelector: {}
+  # Nodes joined by a fast link (RDMA), published as the discovery
+  # ConfigMap's spec.fastLinks for model-manager (giantswarm/model-manager#190):
+  # a model is split across the nodes of one fast link, never across nodes
+  # without one. Mirrored from the connectivity chart (its values document
+  # an entry); empty: no split anywhere.
+  fastLinks: []
   # Pre-pulling the serving runtime image on the pool's nodes
   # (giantswarm/agent-platform#545); mirrored from the connectivity chart leaf
   # for leaf (make verify-meta holds the two equal: the forwarded copy shadows
