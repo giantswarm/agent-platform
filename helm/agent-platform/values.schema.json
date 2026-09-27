@@ -1378,6 +1378,9 @@
                 "serviceAccountName": {
                     "type": "string"
                 },
+                "sourceInterval": {
+                    "type": "string"
+                },
                 "target": {
                     "type": "object",
                     "additionalProperties": false,
@@ -1399,6 +1402,9 @@
                                     }
                                 }
                             }
+                        },
+                        "name": {
+                            "type": "string"
                         }
                     }
                 },
