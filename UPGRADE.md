@@ -2,6 +2,16 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (the Substrate line at `1.1.2`: the bucket-init Job's image from gsoci)
+
+giantswarm/agent-platform#580: `components.substrate{,-crds}.versionRange` is `>=1.1.2 <1.2.0` and `substrate.images.awsCli` is `gsoci.azurecr.io/giantswarm/aws-cli:2.17.0` (same digest as Docker Hub's `amazon/aws-cli:2.17.0`). From 1.1.2 on, Substrate's `rustfs-bucket-init` Job is a Helm hook (`post-install,post-upgrade`, deleted once it succeeds), so its image can change on an upgrade.
+
+### Operator action
+
+- **None** for an installation on the defaults. With the bundled store on (`substrate.rustfs.enabled`), the upgrade deletes the old completed Job, and the hook Job runs from gsoci and is removed when it succeeds. The kagent WorkerPool's worker image follows the floor to `ateom-gvisor:1.1.2`.
+- **An installation that pins `components.substrate{,-crds}.versionRange` below 1.1.2** and takes this value must also drop its `substrate.images.awsCli` override or pin 1.1.2: on 1.1.0 or 1.1.1 the Job is a release resource, and a changed image fails the upgrade on the immutable pod template.
+- **Recognising it worked**: `kubectl -n ate-system get job rustfs-bucket-init` answers NotFound after the upgrade (the hook ran and was removed), and `helm -n ate-system get hooks substrate` shows the Job with `gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@…`.
+
 ## \<current\> → \<next\> (`modelManager.route` is removed)
 
 giantswarm/agent-platform#271: model-manager is reached through muster only. The connectivity chart no longer renders its REST route (`AgentgatewayBackend`, `HTTPRoute` and the public `HTTPRoute`), its JWT policy and JWKS backend, or the data plane's ingress and egress legs to it.

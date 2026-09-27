@@ -684,7 +684,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.1.2 <1.2.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -706,7 +706,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.1.2 <1.2.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -4901,18 +4901,11 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     # The bundled snapshot store (rustfs.enabled).
     rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
-    # The rustfs-bucket-init Job's image, kept at the chart's own short name
-    # ON PURPOSE (its gsoci copy exists: giantswarm/aws-cli:2.17.0, the same
-    # digest). The Job is a release resource and a Job's pod template is
-    # immutable: any change of this value fails the upgrade of every
-    # installation running the bundled store — `Job.batch "rustfs-bucket-init"
-    # is invalid: spec.template: … field is immutable` — until someone deletes
-    # the completed Job by hand. It moves to gsoci with the release of the
-    # Substrate line that lets the Job be recreated (a hook Job, or a name
-    # carrying the template's hash); tests/verify-images.py tolerates it by
-    # name until then. Set here so the rendered release carries it and the
-    # check sees it, as it sees the other three.
-    awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+    # The rustfs-bucket-init Job's image. The Job is a hook, recreated on every
+    # install and upgrade (the Substrate line from 1.1.2), so the value can
+    # move; before that its immutable pod template failed every upgrade that
+    # changed it.
+    awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3
