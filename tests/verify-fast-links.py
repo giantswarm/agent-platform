@@ -28,11 +28,11 @@ SERVING = [
     "--set", "components.modelServing.enabled=true",
 ]
 LINKS = [{
-    "name": "sparks",
-    "nodes": ["spark-8723", "spark-e119"],
+    "name": "gpu-pair",
+    "nodes": ["gpu-a", "gpu-b"],
     "networks": ["roce-a", "roce-b"],
     "resources": {"rdma/rdma_shared_device_a": "1", "rdma/rdma_shared_device_b": "1"},
-    "env": [{"name": "NCCL_IB_HCA", "value": "rocep1s0f1,roceP2p1s0f1"}],
+    "env": [{"name": "NCCL_IB_HCA", "value": "mlx5_0,mlx5_1"}],
 }]
 
 
