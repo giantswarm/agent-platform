@@ -2,17 +2,26 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
-## \<current\> → \<next\> (the serving slice on KServe v0.21.0 and llm-d v0.9.0)
+## \<current\> → \<next\> (the serving slice on KServe v0.21.0, predictors roll without a surge pod)
 
-giantswarm/agent-platform#682: the three kserve components move from `0.5.x` / `0.6.x` to `0.7.x`, the charts of KServe v0.21.0. The well-known runtime image moves from `llm-d-cuda:v0.8.0` (vLLM 0.23.0) to `v0.9.0` (vLLM 0.26.0), and `kserve.llmisvcConfigs.rolloutStrategy: {maxSurge: 0, maxUnavailable: 1}` makes every predictor roll stop the old pod first.
+giantswarm/agent-platform#682: the three kserve components move from `0.5.x` / `0.6.x` to `0.7.x`, the charts of KServe v0.21.0, and `kserve.llmisvcConfigs.rolloutStrategy: {maxSurge: 0, maxUnavailable: 1}` makes every predictor roll stop the old pod first. The runtime image stays `llm-d-cuda:v0.8.0`, pinned per preset under `kserve.llmisvcConfigs.images`.
 
 ### Operator action
 
-- **None** for an installation on the defaults, or with the kserve components off. The upgrade rolls every served model's predictor once, onto the new runtime image. The strategy lands with the same upgrade, so each model is down from the old pod's exit until the new one is Ready, a cold start on a node that has the image pre-pulled.
+- **None** for an installation on the defaults, or with the kserve components off. The upgrade rolls every served model's predictor once (the new presets' command and routers). The strategy lands with the same upgrade, so each model is down from the old pod's exit until the new one is Ready, a cold start on a node that has the image pre-pulled.
 - **A BOM pin** (`components.kserve-*.versionRange` at `0.5.x` / `0.6.x`): pin `0.7.1` for all three: the `0.6.x` runtime-configs schema refuses `rolloutStrategy`, and `0.7.0`'s controller reports `Ready` with no replica available under it.
-- **An installation that sets `modelServing.prepull.images` or `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry`** moves its reference to `llm-d-cuda:v0.9.0` at its own prefix.
-- **A values preset of the installation's own** names parsers from vLLM 0.26.0's registry: the `minimax` tool parser is gone (`minimax_m2` or `minimax_m3`).
-- **Recognising it worked**: `kubectl -n <serving namespace> get deploy -l kserve.io/component=workload -o jsonpath='{range .items[*]}{.metadata.name} {.spec.strategy.rollingUpdate}{"\n"}{end}'` prints `{"maxSurge":0,"maxUnavailable":1}` for every predictor, and its pods run `llm-d-cuda:v0.9.0`.
+- **An installation that sets `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry`** also sets `kserve.llmisvcConfigs.images.<preset>.main` for the six GPU presets at its own prefix: the pins name gsoci's `llm-d-fast/` and win over the registry rewrite.
+- **Recognising it worked**: `kubectl -n <serving namespace> get deploy -l kserve.io/component=workload -o jsonpath='{range .items[*]}{.metadata.name} {.spec.strategy.rollingUpdate}{"\n"}{end}'` prints `{"maxSurge":0,"maxUnavailable":1}` for every predictor, and its pods still run `llm-d-cuda:v0.8.0`.
+
+## \<current\> → \<next\> (the Substrate line at `1.1.2`: the bucket-init Job's image from gsoci)
+
+giantswarm/agent-platform#580: `components.substrate{,-crds}.versionRange` is `>=1.1.2 <1.2.0` and `substrate.images.awsCli` is `gsoci.azurecr.io/giantswarm/aws-cli:2.17.0` (same digest as Docker Hub's `amazon/aws-cli:2.17.0`). From 1.1.2 on, Substrate's `rustfs-bucket-init` Job is a Helm hook (`post-install,post-upgrade`, deleted once it succeeds), so its image can change on an upgrade.
+
+### Operator action
+
+- **None** for an installation on the defaults. With the bundled store on (`substrate.rustfs.enabled`), the upgrade deletes the old completed Job, and the hook Job runs from gsoci and is removed when it succeeds. The kagent WorkerPool's worker image follows the floor to `ateom-gvisor:1.1.2`.
+- **An installation that pins `components.substrate{,-crds}.versionRange` below 1.1.2** and takes this value must also drop its `substrate.images.awsCli` override or pin 1.1.2: on 1.1.0 or 1.1.1 the Job is a release resource, and a changed image fails the upgrade on the immutable pod template.
+- **Recognising it worked**: `kubectl -n ate-system get job rustfs-bucket-init` answers NotFound after the upgrade (the hook ran and was removed), and `helm -n ate-system get hooks substrate` shows the Job with `gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@…`.
 
 ## \<current\> → \<next\> (`modelManager.route` is removed)
 

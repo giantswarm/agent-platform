@@ -249,7 +249,7 @@ def check_policy_exception(connectivity: str, base: list[str]) -> None:
         sys.exit("FAIL: no PolicyException model-serving-predictors: the fleet's restricted PSS policies deny the predictor Deployment")
     for needle in ("  namespace: policy-exceptions", "  - policyName: disallow-capabilities-strict", "      - require-drop-all", "      - autogen-require-drop-all",
                    "  - policyName: disallow-privilege-escalation", "      - autogen-privilege-escalation", "  - policyName: require-run-as-nonroot", "      - autogen-run-as-non-root",
-                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: kserve.io/component", "          - key: app.kubernetes.io/part-of",
+                   "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: app.kubernetes.io/component", "            - llminferenceservice-workload-worker\n", "        - StatefulSet\n", "          - key: app.kubernetes.io/part-of",
                    "            - llminferenceservice",
                    '        - "*-kserve*"'):
         need(pe, needle, "the predictors' PolicyException")
@@ -998,7 +998,11 @@ def check_prepull_prefix(meta: str, connectivity: str) -> None:
         sys.exit(f"FAIL: the kserve-runtime-configs block passes imageRegistry {registry!r}, expected the llm-d-fast/ prefix {FAST_PREFIX!r}")
     if not images or not images[0].startswith(f"{registry}llm-d-cuda:"):
         sys.exit(f"FAIL: modelServing.prepull.images {images} does not start with the well-known config's llm-d-cuda at the slice's imageRegistry {registry!r}: the pre-pull would warm an image no predictor runs")
-    ok(f"the pre-pull's runtime image {images[0]} is the well-known config's llm-d-cuda at the prefix the slice passes as imageRegistry ({registry})")
+    pins = yaml.safe_load(open(f"{meta}/values.yaml", encoding="utf-8"))["kserve-runtime-configs"]["kserve"]["llmisvcConfigs"].get("images") or {}
+    mains = {preset: containers.get("main") for preset, containers in pins.items()}
+    if not mains or set(mains.values()) != {images[0]}:
+        sys.exit(f"FAIL: the well-known presets' main images {mains} are not the pre-pulled {images[0]}: the runtime pin (#682) and the pre-pull move together")
+    ok(f"the pre-pull's runtime image {images[0]} is the well-known config's llm-d-cuda at the prefix the slice passes as imageRegistry ({registry}), the main image of all {len(mains)} pinned presets")
 
 
 def check_rollout(meta: str) -> None:

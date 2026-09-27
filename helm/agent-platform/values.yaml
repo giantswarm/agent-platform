@@ -684,7 +684,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.1.2 <1.2.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -706,7 +706,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.1.0 <1.2.0"
+    versionRange: ">=1.1.2 <1.2.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -4904,18 +4904,11 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     # The bundled snapshot store (rustfs.enabled).
     rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
-    # The rustfs-bucket-init Job's image, kept at the chart's own short name
-    # ON PURPOSE (its gsoci copy exists: giantswarm/aws-cli:2.17.0, the same
-    # digest). The Job is a release resource and a Job's pod template is
-    # immutable: any change of this value fails the upgrade of every
-    # installation running the bundled store — `Job.batch "rustfs-bucket-init"
-    # is invalid: spec.template: … field is immutable` — until someone deletes
-    # the completed Job by hand. It moves to gsoci with the release of the
-    # Substrate line that lets the Job be recreated (a hook Job, or a name
-    # carrying the template's hash); tests/verify-images.py tolerates it by
-    # name until then. Set here so the rendered release carries it and the
-    # check sees it, as it sees the other three.
-    awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+    # The rustfs-bucket-init Job's image. The Job is a hook, recreated on every
+    # install and upgrade (the Substrate line from 1.1.2), so the value can
+    # move; before that its immutable pod template failed every upgrade that
+    # changed it.
+    awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3
@@ -5044,11 +5037,23 @@ kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties:
 # served before included. A model fills its GPU, so a surge pod beside the old
 # one never starts and the roll never finishes (giantswarm/agent-platform#682):
 # the old pod stops first, a short outage per roll of a one-replica model.
+# images: the runtime of every GPU preset stays llm-d v0.8.0 (vLLM 0.23.0),
+# while the 0.7.x presets name llm-d v0.9.0 (vLLM 0.26.0), whose transformers
+# cannot load Gemma 4 (the gemma-4 presets crash-loop on 'head_dim is a
+# per-layer attribute'). The pin moves with an llm-d release that serves
+# Gemma 4, and modelServing.prepull.images moves with it.
 kserve-runtime-configs:  # @schema skipProperties: true; additionalProperties: true
   kserve:
     llmisvcConfigs:
       enabled: true
       imageRegistry: gsoci.azurecr.io/giantswarm/llm-d-fast/
+      images:
+        kserve-config-llm-template: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-worker-data-parallel: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-decode-template: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-decode-worker-data-parallel: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-prefill-template: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-prefill-worker-data-parallel: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
       tracing:
         exporterEndpoint: auto
         podLabels:
@@ -5216,6 +5221,12 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # it with the pool); empty selects no pool. Label values are strings:
     # quote a number.
     nodeSelector: {}
+  # Nodes joined by a fast link (RDMA), published as the discovery
+  # ConfigMap's spec.fastLinks for model-manager (giantswarm/model-manager#190):
+  # a model is split across the nodes of one fast link, never across nodes
+  # without one. Mirrored from the connectivity chart (its values document
+  # an entry); empty: no split anywhere.
+  fastLinks: []
   # Pre-pulling the serving runtime image on the pool's nodes
   # (giantswarm/agent-platform#545); mirrored from the connectivity chart leaf
   # for leaf (make verify-meta holds the two equal: the forwarded copy shadows
@@ -5260,7 +5271,7 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # runtime configs would pre-pull the wrong image. Empty with enabled: true
     # fails the render.
     images:
-      - gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.9.0
+      - gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0
     # The nodes. Empty (the default): Karpenter's label on every node of a GPU
     # instance type, karpenter.k8s.aws/instance-gpu-manufacturer: nvidia (a
     # fractional-GPU type such as g6f carries it too). The template holds that

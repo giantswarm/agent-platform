@@ -359,13 +359,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.1.0 <1.2.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.1.2 <1.2.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.1.0 <1.2.0"` |  |
+| components.substrate.versionRange | string | `">=1.1.2 <1.2.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -1325,7 +1325,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | substrate.images.postgres | string | `"gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"` |  |
 | substrate.images.rustfs | string | `"gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358"` |  |
-| substrate.images.awsCli | string | `"amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73"` |  |
+| substrate.images.awsCli | string | `"gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73"` |  |
 | substrate.atelet.storageBackend | string | `"s3"` |  |
 | substrate.atelet.nodeSelector | object | `{}` |  |
 | substrate.atelet.tolerations | list | `[]` |  |
@@ -1350,6 +1350,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.enabled | bool | `true` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.images.kserve-config-llm-template.main | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.images.kserve-config-llm-worker-data-parallel.main | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.images.kserve-config-llm-decode-template.main | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.images.kserve-config-llm-decode-worker-data-parallel.main | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.images.kserve-config-llm-prefill-template.main | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
+| kserve-runtime-configs.kserve.llmisvcConfigs.images.kserve-config-llm-prefill-worker-data-parallel.main | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint | string | `"auto"` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.tracing.podLabels."observability.giantswarm.io/tenant" | string | `"auto"` |  |
 | kserve-runtime-configs.kserve.llmisvcConfigs.rolloutStrategy.maxSurge | int | `0` |  |
@@ -1373,8 +1379,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.gpuPool.taint.value | string | `""` |  |
 | modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
+| modelServing.fastLinks | list | `[]` |  |
 | modelServing.prepull.enabled | bool | `true` |  |
-| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.9.0"` |  |
+| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
 | modelServing.prepull.nodeSelector | object | `{}` |  |
 | modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |
 | modelServing.prepull.pauseImage.registry | string | `"gsoci.azurecr.io"` |  |

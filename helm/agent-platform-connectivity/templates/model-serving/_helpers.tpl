@@ -611,10 +611,14 @@ wildcard (gatewayApi.gateway.tls.secretName).
 {{- end -}}
 
 {{/*
-The pod the llm-d controller runs for a served model: the LLMInferenceService
-workload pod, which carries kserve.io/component=workload with
-app.kubernetes.io/part-of=llminferenceservice and app.kubernetes.io/name=<name>
-and serves from `main` (giantswarm/agent-platform#506). Every selector of the
+The pods the llm-d controller runs for a served model: the LLMInferenceService
+workload pods, which carry app.kubernetes.io/part-of=llminferenceservice,
+app.kubernetes.io/name=<name> and an app.kubernetes.io/component of
+llminferenceservice-workload[-prefill] — a single-node Deployment's pod — or
+llminferenceservice-workload-{leader,worker}[-prefill] — the pods of a
+LeaderWorkerSet, a model split across nodes (modelServing.fastLinks) — and
+serve from `main` (giantswarm/agent-platform#506). kserve.io/component=workload
+is no selector: a LeaderWorkerSet's workers do not carry it. Every selector of the
 serving namespace's model pods — the Kyverno mutations, the network policies,
 the PolicyException — renders from this one description, so they never
 disagree. JSON:
@@ -623,13 +627,16 @@ disagree. JSON:
     "nameLabel": <the label that carries the served model's name>,
     "runtimeContainer": <the container that serves>,
     "port": <the port the pod is reached on, its Service's target: modelServing.networkPolicy.llmisvcWorkload.port>,
-    "matchExpressions": [<the label selector of the pod>] }
+    "matchExpressions": [<the label selector of the pod>],
+    "multiNodeExpressions": [<the label selector of a LeaderWorkerSet's pods>] }
 Usage: $shape := include "agent-platform.modelServing.podShape" . | fromJson
 */}}
 {{- define "agent-platform.modelServing.podShape" -}}
 {{- $np := .Values.modelServing.networkPolicy -}}
 {{- $llmisvc := dict "name" "llmisvc-workload" "kind" "LLMInferenceService" "nameLabel" "app.kubernetes.io/name" "runtimeContainer" "main" "port" (int $np.llmisvcWorkload.port) -}}
-{{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "kserve.io/component" "operator" "In" "values" (list "workload")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
+{{- $components := list "llminferenceservice-workload" "llminferenceservice-workload-prefill" "llminferenceservice-workload-leader" "llminferenceservice-workload-worker" "llminferenceservice-workload-leader-prefill" "llminferenceservice-workload-worker-prefill" -}}
+{{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "app.kubernetes.io/component" "operator" "In" "values" $components) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
+{{- $_ := set $llmisvc "multiNodeExpressions" (list (dict "key" "app.kubernetes.io/component" "operator" "In" "values" (list "llminferenceservice-workload-leader" "llminferenceservice-workload-worker" "llminferenceservice-workload-leader-prefill" "llminferenceservice-workload-worker-prefill")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
 {{- $llmisvc | toJson -}}
 {{- end -}}
 

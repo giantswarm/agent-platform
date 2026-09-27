@@ -3,7 +3,7 @@
 the llm-d controller creates (giantswarm/agent-platform#506, #518, #520, #522, #525, #574).
 
 A served model runs as the LLMInferenceService workload pod the llm-d
-controller creates (kserve.io/component=workload,
+controller creates (app.kubernetes.io/component=llminferenceservice-workload,
 app.kubernetes.io/part-of=llminferenceservice, app.kubernetes.io/name=<name>,
 runtime container main); the classic InferenceService predictor went with the
 classic serving path (#574). The chart renders every selector of the serving
