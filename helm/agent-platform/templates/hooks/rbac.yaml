@@ -5,14 +5,16 @@ wait on their finalizers; the kagent namespace hook creates a namespace; the
 storage-version hooks delete CRDs and re-create ModelConfigs). Weight -10 so
 it exists before any hook Job; the hook-succeeded policy removes both once
 every hook of the event has succeeded, and before-hook-creation brings them
-back for the next event. Created for pre-delete (the ordered teardown) and —
+back for the next event. Created for pre-delete and post-delete (the ordered
+teardown) and —
 while the kagent namespace hook and the storage-version hooks render — for
 pre-install, pre-upgrade, post-install and post-upgrade too
 (agent-platform.hooks.serviceAccountEvents). Rendered with the bundled engine,
-and without it only while the storage-version hooks render (the one hook
-family a cluster's own Flux runs, giantswarm/agent-platform#396).
+and without it only while the storage-version hooks or the serving teardown
+render (the hook families a cluster's own Flux runs,
+giantswarm/agent-platform#396, #527).
 */ -}}
-{{- if or (eq (include "agent-platform.engineEnabled" .) "true") (include "agent-platform.kagent.storageVersionHooks" .) }}
+{{- if or (eq (include "agent-platform.engineEnabled" .) "true") (include "agent-platform.kagent.storageVersionHooks" .) (include "agent-platform.serving.teardownEvent" .) }}
 {{- $events := include "agent-platform.hooks.serviceAccountEvents" . }}
 apiVersion: v1
 kind: ServiceAccount

@@ -2,10 +2,13 @@
 as overrides of a tracing configuration it already has, so the env the
 parameters set starts no exporter on its own: this Gateway-scoped policy is what
 turns tracing on. It takes the endpoint the env names
-(agent-platform.dataPlaneOtlp), so one value keeps moving both. Sampling stays
-at agentgateway's defaults: a request that arrives with a sampled traceparent
-(an agent's turn, a klaus-gateway A2A call) is traced, one without is not. The
-exporter sends no headers; the tenant comes from gateway.parameters.podLabels.
+(agent-platform.dataPlaneOtlp), so one value keeps moving both. A request that
+arrives with a sampled traceparent (an agent's turn, a klaus-gateway A2A call)
+is traced at agentgateway's default; one with no traceparent is traced at
+gateway.tracing.randomSampling, a CEL expression the proxy evaluates per
+request (a number reaches it as its literal, so 0.1 stays a float and a bare 1
+an int, which the proxy clamps the same way). The exporter sends no headers;
+the tenant comes from gateway.parameters.podLabels.
 The egress policies let the export out of the data plane's default-deny
 policy. */ -}}
 {{- if (include "agent-platform.ingress.agentgateway" .) }}
@@ -28,6 +31,9 @@ spec:
     tracing:
       url: {{ $otlpCfg.endpoint | quote }}
       protocol: {{ ternary "HTTP" "GRPC" (eq $otlpCfg.protocol "http/protobuf") }}
+      {{- with (.Values.gateway.tracing | default dict).randomSampling }}
+      randomSampling: {{ . | toString | quote }}
+      {{- end }}
 {{- if .Values.networkPolicy.enabled }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---

@@ -34,7 +34,7 @@ spec:
   values:
     agentChart:
       ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-      semver: 1.x
+      semver: '>=1.5.0 <2.0.0'
     flux:
       helmReleaseServiceAccount: kagent-flux
     fullnameOverride: agent-manager
@@ -55,9 +55,10 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     kagent:
       apiVersion: v1alpha3
@@ -83,6 +84,11 @@ spec:
       provider: dex
       sso:
         allowPrivateIPs: true
+    observability:
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        headers: X-Scope-OrgID=giantswarm
+        protocol: grpc
     skills:
       repositories:
       - https://github.com/giantswarm/agent-skills
@@ -127,7 +133,7 @@ spec:
     agent-manager:
       agentChart:
         ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-        semver: 1.x
+        semver: '>=1.5.0 <2.0.0'
       fullnameOverride: agent-manager
       kagent:
         apiVersion: v1alpha3
@@ -152,6 +158,11 @@ spec:
         provider: dex
         sso:
           allowPrivateIPs: true
+      observability:
+        otel:
+          endpoint: http://otlp-gateway.kube-system.svc:4317
+          headers: X-Scope-OrgID=giantswarm
+          protocol: grpc
       skills:
         repositories:
         - https://github.com/giantswarm/agent-skills
@@ -185,8 +196,8 @@ spec:
           additionalPeers: []
       podDisruptionBudget:
         enabled: true
-        maxUnavailable: null
-        minAvailable: 1
+        maxUnavailable: 1
+        minAvailable: null
         unhealthyPodEvictionPolicy: AlwaysAllow
       route:
         enabled: false
@@ -226,11 +237,13 @@ spec:
       controller:
         image:
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.0.0
+          tag: 2.1.2
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
         registry: gsoci.azurecr.io
+      inferenceExtension:
+        enabled: true
       monitoring:
         enabled: false
         grafanaDashboard:
@@ -255,7 +268,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.0.0
+          tag: 2.1.2
       resources:
         limits:
           cpu: 500m
@@ -335,6 +348,11 @@ spec:
       ingress:
         enabled: false
       installationName: agent-platform
+      observability:
+        otel:
+          endpoint: http://otlp-gateway.kube-system.svc:4317
+          headers: X-Scope-OrgID=giantswarm
+          protocol: grpc
       parentRefs: []
       resources:
         verticalPodAutoscaler:
@@ -342,7 +360,9 @@ spec:
       skillsRepositories:
       - https://github.com/giantswarm/agent-skills
       startUrlSearchParams: {}
-    cloudnative-pg: {}
+    cloudnative-pg:
+      image:
+        repository: gsoci.azurecr.io/giantswarm/cloudnative-pg
     components:
       agent-manager:
         enabled: true
@@ -407,6 +427,8 @@ spec:
     extraObjects: []
     gateway:
       gatewayClassName: agentgateway
+      http:
+        maxBufferSize: 8Mi
       jwksEgress:
         enabled: false
         external:
@@ -432,6 +454,9 @@ spec:
           enabled: true
           expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-namespace"]
             : source.unverifiedWorkload.namespace'
+        api_key:
+          enabled: true
+          expression: apiKey.name
         user:
           enabled: true
           expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-user"]
@@ -482,6 +507,8 @@ spec:
           topologyKeys:
           - kubernetes.io/hostname
           whenUnsatisfiable: ScheduleAnyway
+      tracing:
+        randomSampling: "0.1"
     gatewayApi:
       gateway:
         create: false
@@ -505,9 +532,10 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     hooks:
       kubectlImage:
@@ -548,11 +576,18 @@ spec:
         image:
           repository: giantswarm/kagent/controller
         metrics:
-          enabled: false
+          bindAddress: :8080
+          enabled: true
+          secureServing: false
+          service:
+            port: 8080
+          serviceMonitor:
+            enabled: false
+            interval: 60s
+            labels:
+              observability.giantswarm.io/tenant: giantswarm
         pdb:
           enabled: true
-          maxUnavailable: ""
-          minAvailable: 1
           unhealthyPodEvictionPolicy: AlwaysAllow
         podAnnotations:
           karpenter.sh/do-not-disrupt: "true"
@@ -621,12 +656,13 @@ spec:
             matchLabels:
               agent-platform.giantswarm.io/harness: kagent
               kagent.dev/harness: ""
+        compaction:
+          eventRetentionSize: 4
+          tokenThreshold: 600000
         create: true
         env:
         - name: KAGENT_PROPAGATE_TOKEN
           value: "true"
-        - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
-          value: "500"
         image: ""
         snapshotLocation: s3://ci-agent-snapshots/agents
         snapshotStore:
@@ -746,19 +782,15 @@ spec:
         sessionStorage:
           type: cookie
       otel:
-        logging:
+        exporter:
+          otlp:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            protocol: grpc
+            timeout: "500"
+        logs:
           enabled: false
-          exporter:
-            otlp:
-              endpoint: http://otlp-gateway.kube-system.svc:4317
-              insecure: true
-        tracing:
+        traces:
           enabled: false
-          exporter:
-            otlp:
-              endpoint: http://otlp-gateway.kube-system.svc:4317
-              insecure: true
-              protocol: grpc
       podSecurityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -783,11 +815,6 @@ spec:
           - ALL
         seccompProfile:
           type: RuntimeDefault
-      serviceMonitor:
-        enabled: false
-        interval: 60s
-        labels:
-          observability.giantswarm.io/tenant: giantswarm
       substrateWorkerPool:
         create: true
         name: kagent-default
@@ -833,22 +860,12 @@ spec:
         defaultAgent: ""
         enabled: false
         fallbackIconUrlTemplate: ""
-        saToken:
-          audience: kagent
-          enabled: false
         url: grpc://agentgateway.agent-platform.svc.cluster.local:8080
-      agentgateway:
-        enabled: false
       agentgatewayRoute:
         enabled: false
         hostname: ""
-      cli:
-        enabled: false
       image:
         registry: gsoci.azurecr.io
-      lifecycle:
-        driver: static
-        staticInstances: ""
       obo:
         callbackBaseUrl: ""
         connectors:
@@ -870,10 +887,10 @@ spec:
         karpenter.sh/do-not-disrupt: "true"
       podDisruptionBudget:
         enabled: true
-        minAvailable: 1
+        maxUnavailable: 1
+        minAvailable: ""
         unhealthyPodEvictionPolicy: AlwaysAllow
       routing:
-        defaultTTL: 24h
         store: memory
       serviceMonitor:
         enabled: false
@@ -889,8 +906,6 @@ spec:
         mode: events
         secretName: ""
         signingSecret: ""
-      upstream:
-        agentgatewayURL: ""
     kserve-llmisvc-crd: {}
     kserve-llmisvc-resources:
       kserve:
@@ -926,10 +941,20 @@ spec:
         run-as-non-root: require-run-as-nonroot
         run-as-non-root-user: require-run-as-non-root-user
     llmRouting:
-      backend:
-        name: anthropic
-        provider: anthropic
       enabled: false
+      external:
+        apiKeys:
+          configMapSelector:
+            matchLabels: {}
+          secretRef:
+            name: ""
+          secretSelector:
+            matchLabels: {}
+        enabled: false
+        hostPrefix: llm
+        listener:
+          name: llm-external
+          port: 8082
       listener:
         name: llm
         port: 8081
@@ -964,6 +989,12 @@ spec:
                   cacheWrite: "6.25"
                   input: "5"
                   output: "25"
+              claude-opus-5-5:
+                rates:
+                  cacheRead: "0.2"
+                  cacheWrite: "5"
+                  input: "4"
+                  output: "20"
               claude-sonnet-4-5:
                 rates:
                   cacheRead: "0.3"
@@ -984,12 +1015,11 @@ spec:
                   output: "10"
       modelConfigPolicy:
         enabled: true
-      pathPrefixes:
-      - /v1
-      routes:
-        '*': Passthrough
-        /v1/messages: Messages
-        /v1/messages/count_tokens: AnthropicTokenCount
+      models:
+      - baseURL: https://api.anthropic.com/v1
+        match: claude-*
+        name: anthropic
+        provider: Anthropic
     mcp-kubernetes:
       fullnameOverride: mcp-kubernetes
       grafanaDashboards:
@@ -1001,10 +1031,15 @@ spec:
       kubernetesAudience: dex-k8s-authenticator
       mcpKubernetes:
         instrumentation:
+          otlpEndpoint: otlp-gateway.kube-system.svc:4317
+          otlpHeaders: X-Scope-OrgID=giantswarm
+          otlpInsecure: true
+          otlpProtocol: grpc
           serviceMonitor:
             enabled: false
             labels:
               observability.giantswarm.io/tenant: giantswarm
+          tracingExporter: otlp
         oauth:
           allowPrivateURLs: true
           enableDownstreamOAuth: true
@@ -1044,6 +1079,11 @@ spec:
         provider: dex
         sso:
           allowPrivateIPs: true
+      observability:
+        otel:
+          endpoint: http://otlp-gateway.kube-system.svc:4317
+          headers: X-Scope-OrgID=giantswarm
+          protocol: grpc
       ollama:
         agentHost: ""
         endpoint: ""
@@ -1065,24 +1105,7 @@ spec:
         ingress:
           additionalPeers: []
         registeredBackends: []
-      route:
-        enabled: false
-        hostname: ""
-        jwtAuthentication:
-          enabled: false
-          issuer: ""
-          jwks:
-            host: dex.giantswarm.svc.cluster.local
-            path: /keys
-            port: 5556
-            tls:
-              caSecretName: ""
-              enabled: false
-          mode: Strict
-        parentRef:
-          name: giantswarm-default
-          namespace: envoy-gateway-system
-        pathPrefix: /model-manager
+        workloadClusters: {}
     muster:
       crds:
         install: false
@@ -1150,7 +1173,8 @@ spec:
         karpenter.sh/do-not-disrupt: "true"
       podDisruptionBudget:
         enabled: true
-        minAvailable: 1
+        maxUnavailable: 1
+        minAvailable: ""
       rbac:
         mcpServerEditor:
           subjects:
@@ -1308,15 +1332,32 @@ spec:
         storageBackend: s3
         tolerations: []
       createNamespace: false
+      credentialProvider:
+        namespacePolicies:
+        - allowedNamespaces:
+          - kagent
+          atespace: kagent
+        - allowedNamespaces:
+          - kagent
+          atespace: ate-golden
       image:
-        registry: gsoci.azurecr.io/giantswarm/substrate
+        registry: gsoci.azurecr.io
+        repository: giantswarm/substrate
       images:
-        agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0
-        awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+        awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
         postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
         rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
+      metrics:
+        podMonitor:
+          enabled: false
+          labels:
+            observability.giantswarm.io/tenant: giantswarm
       otel:
         endpoint: http://otlp-gateway.kube-system.svc:4317
+        metrics:
+          enabled: false
+      podLabels:
+        observability.giantswarm.io/tenant: giantswarm
       postgres:
         connectionString: ""
         enabled: true
@@ -1329,8 +1370,8 @@ spec:
         enabled: false
       podDisruptionBudget:
         enabled: true
-        maxUnavailable: null
-        minAvailable: 1
+        maxUnavailable: 1
+        minAvailable: null
         unhealthyPodEvictionPolicy: AlwaysAllow
       valkey:
         auth:
@@ -1407,6 +1448,11 @@ spec:
         provider: dex
         sso:
           allowPrivateIPs: true
+      observability:
+        otel:
+          endpoint: http://otlp-gateway.kube-system.svc:4317
+          headers: X-Scope-OrgID=giantswarm
+          protocol: grpc
       persistence:
         create: false
         existingClaim: ""
@@ -1539,7 +1585,7 @@ spec:
     controller:
       image:
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.0.0
+        tag: 2.1.2
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1559,12 +1605,15 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     image:
       registry: gsoci.azurecr.io
+    inferenceExtension:
+      enabled: true
     monitoring:
       enabled: false
       grafanaDashboard:
@@ -1589,7 +1638,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.0.0
+        tag: 2.1.2
     resources:
       limits:
         cpu: 500m
@@ -1689,11 +1738,18 @@ spec:
       image:
         repository: giantswarm/kagent/controller
       metrics:
-        enabled: false
+        bindAddress: :8080
+        enabled: true
+        secureServing: false
+        service:
+          port: 8080
+        serviceMonitor:
+          enabled: false
+          interval: 60s
+          labels:
+            observability.giantswarm.io/tenant: giantswarm
       pdb:
         enabled: true
-        maxUnavailable: ""
-        minAvailable: 1
         unhealthyPodEvictionPolicy: AlwaysAllow
       podAnnotations:
         karpenter.sh/do-not-disrupt: "true"
@@ -1736,9 +1792,10 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     grafana-mcp:
       enabled: false
@@ -1748,12 +1805,13 @@ spec:
           matchLabels:
             agent-platform.giantswarm.io/harness: kagent
             kagent.dev/harness: ""
+      compaction:
+        eventRetentionSize: 4
+        tokenThreshold: 600000
       create: true
       env:
       - name: KAGENT_PROPAGATE_TOKEN
         value: "true"
-      - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
-        value: "500"
       snapshotLocation: s3://ci-agent-snapshots/agents
     kagent-tools:
       enabled: false
@@ -1819,19 +1877,15 @@ spec:
       sessionStorage:
         type: cookie
     otel:
-      logging:
+      exporter:
+        otlp:
+          endpoint: http://otlp-gateway.kube-system.svc:4317
+          protocol: grpc
+          timeout: "500"
+      logs:
         enabled: false
-        exporter:
-          otlp:
-            endpoint: http://otlp-gateway.kube-system.svc:4317
-            insecure: true
-      tracing:
+      traces:
         enabled: false
-        exporter:
-          otlp:
-            endpoint: http://otlp-gateway.kube-system.svc:4317
-            insecure: true
-            protocol: grpc
     podSecurityContext:
       runAsNonRoot: true
       seccompProfile:
@@ -1870,7 +1924,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.0.0
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.1.2
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -1944,17 +1998,10 @@ spec:
       defaultAgent: ""
       enabled: false
       fallbackIconUrlTemplate: ""
-      saToken:
-        audience: kagent
-        enabled: false
       url: grpc://agentgateway.agent-platform.svc.cluster.local:8080
-    agentgateway:
-      enabled: false
     agentgatewayRoute:
       enabled: false
       hostname: ""
-    cli:
-      enabled: false
     global:
       domain: ""
       gatewayApi:
@@ -1972,15 +2019,13 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     image:
       registry: gsoci.azurecr.io
-    lifecycle:
-      driver: static
-      staticInstances: ""
     obo:
       callbackBaseUrl: ""
       connectors:
@@ -2001,10 +2046,10 @@ spec:
       karpenter.sh/do-not-disrupt: "true"
     podDisruptionBudget:
       enabled: true
-      minAvailable: 1
+      maxUnavailable: 1
+      minAvailable: ""
       unhealthyPodEvictionPolicy: AlwaysAllow
     routing:
-      defaultTTL: 24h
       store: memory
     serviceMonitor:
       enabled: false
@@ -2020,8 +2065,6 @@ spec:
       mode: events
       secretName: ""
       signingSecret: ""
-    upstream:
-      agentgatewayURL: ""
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: helm.toolkit.fluxcd.io/v2
@@ -2074,9 +2117,10 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     kagent:
       apiVersion: v1alpha3
@@ -2108,6 +2152,11 @@ spec:
       provider: dex
       sso:
         allowPrivateIPs: true
+    observability:
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        headers: X-Scope-OrgID=giantswarm
+        protocol: grpc
     ollama:
       agentHost: ""
       endpoint: ""
@@ -2169,9 +2218,10 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     image:
       registry: gsoci.azurecr.io
@@ -2233,7 +2283,8 @@ spec:
       karpenter.sh/do-not-disrupt: "true"
     podDisruptionBudget:
       enabled: true
-      minAvailable: 1
+      maxUnavailable: 1
+      minAvailable: ""
     rbac:
       mcpServerEditor:
         subjects:
@@ -2298,15 +2349,32 @@ spec:
       storageBackend: s3
       tolerations: []
     createNamespace: false
+    credentialProvider:
+      namespacePolicies:
+      - allowedNamespaces:
+        - kagent
+        atespace: kagent
+      - allowedNamespaces:
+        - kagent
+        atespace: ate-golden
     image:
-      registry: gsoci.azurecr.io/giantswarm/substrate
+      registry: gsoci.azurecr.io
+      repository: giantswarm/substrate
     images:
-      agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0
-      awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+      awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
       postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
       rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
+    metrics:
+      podMonitor:
+        enabled: false
+        labels:
+          observability.giantswarm.io/tenant: giantswarm
     otel:
       endpoint: http://otlp-gateway.kube-system.svc:4317
+      metrics:
+        enabled: false
+    podLabels:
+      observability.giantswarm.io/tenant: giantswarm
     postgres:
       connectionString: ""
       enabled: true
@@ -2396,9 +2464,10 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     valkey:
       auth:
@@ -2509,9 +2578,10 @@ spec:
             labels: {}
         traces:
           otlp:
-            endpoint: ""
+            endpoint: http://otlp-gateway.kube-system.svc:4317
             headers: {}
-            protocol: ""
+            protocol: grpc
+            tenant: giantswarm
       registry: gsoci.azurecr.io
     muster:
       mcpServer:
@@ -2528,6 +2598,11 @@ spec:
       provider: dex
       sso:
         allowPrivateIPs: true
+    observability:
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        headers: X-Scope-OrgID=giantswarm
+        protocol: grpc
     persistence:
       create: false
       existingClaim: ""
@@ -2552,10 +2627,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-manager
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: "1.x"
+    semver: ">=1.2.0 <2.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2572,8 +2650,11 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-connectivity
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
     semver: "1.1.35"
 ---
@@ -2592,8 +2673,11 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-mcps
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
     semver: "0.x"
 ---
@@ -2612,8 +2696,11 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-sandbox
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
     semver: "0.x"
 ---
@@ -2632,8 +2719,11 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agentgateway
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
     semver: ">=2.4.0 <3.0.0"
 ---
@@ -2652,8 +2742,11 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/dicebear
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
     semver: "0.x"
 ---
@@ -2672,10 +2765,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: ">=1.0.0 <1.1.0"
+    semver: ">=1.2.0 <1.3.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2692,10 +2788,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent-crds
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: ">=1.0.0 <1.1.0"
+    semver: ">=1.2.0 <1.3.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2712,10 +2811,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/klaus-gateway
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: ">=1.20.0 <3.0.0"
+    semver: ">=3.3.0 <4.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2732,10 +2834,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/model-manager
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: ">=0.23.0 <2.0.0"
+    semver: ">=1.3.0 <2.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2752,10 +2857,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/muster
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: ">=5.12.0 <6.0.0"
+    semver: ">=5.31.4 <6.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2772,10 +2880,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: ">=1.0.0 <1.1.0"
+    semver: ">=1.1.2 <1.2.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2792,10 +2903,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate-crds
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: ">=1.0.0 <1.1.0"
+    semver: ">=1.1.2 <1.2.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2812,8 +2926,11 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/valkey
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
     semver: "0.x"
 ---
@@ -2832,10 +2949,13 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
-  interval: 10m
+  interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/vm-manager
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
   ref:
-    semver: ">=0.22.0 <1.0.0"
+    semver: ">=0.24.0 <1.0.0"
 ---
 # Source: agent-platform/templates/hooks/netpol.yaml
 apiVersion: networking.k8s.io/v1

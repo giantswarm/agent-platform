@@ -42,11 +42,13 @@ spec:
   model:
     id: openai/gpt-oss-20b
     # The tag is the first 12 characters of the checkpoint revision
-    # 6cee5e81ee83917806bbde320786a8fb61efebee (three safetensors shards under
-    # /models; the original/ and metal/ checkpoints of the Hub repository are
-    # not in the image). modelServing.modelImages.registry swaps the host at
-    # render; the path, giantswarm/models/gpt-oss-20b:6cee5e81ee83, stays.
-    storageUri: oci://gsoci.azurecr.io/giantswarm/models/gpt-oss-20b:6cee5e81ee83
+    # 6cee5e81ee83917806bbde320786a8fb61efebee and the digest of the image's
+    # extra files, the two tiktoken encodings under /models/tiktoken (three
+    # safetensors shards under /models; the original/ and metal/ checkpoints
+    # of the Hub repository are not in the image). modelServing.modelImages.registry
+    # swaps the host at render; the path,
+    # giantswarm/models/gpt-oss-20b:6cee5e81ee83-7abb6426, stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/gpt-oss-20b:6cee5e81ee83-7abb6426
     format: vLLM
     contextLength: 32768
     capabilities: [chat, tools, reasoning]
@@ -71,6 +73,12 @@ spec:
       value: vllm
     - name: TORCHINDUCTOR_CACHE_DIR
       value: /tmp/torchinductor
+    # The harmony renderer loads the tiktoken encodings (o200k_base,
+    # cl100k_base) at the first request, from the network unless this names a
+    # local directory; the pod's egress is closed, so the model image carries
+    # both files under /models/tiktoken (giantswarm/agent-platform#606).
+    - name: TIKTOKEN_ENCODINGS_BASE
+      value: /mnt/models/tiktoken
   args:
     - --gpu-memory-utilization=0.90
     - --max-model-len=32768

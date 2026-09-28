@@ -14,9 +14,11 @@ The helm.sh/chart label: <name>-<version> as a valid label value. A label is at
 most 63 characters and must end on an alphanumeric: Helm's `+` build metadata
 (helm-controller appends the OCI digest to every chart version it installs,
 `3.20.0+8c89e1be4cbf`) becomes `_`, and after the cut every trailing `-`, `.`
-and `_` goes — a branch build's long prerelease version (abs:
-`3.19.1-dev.<branch>.<date>.h<sha>`) made the cut land on the `_` once, and the
-apiserver rejected every object of the release. tests/verify-labels.py.
+and `_` goes — a branch build's long prerelease version (the superseded abs
+shape `3.19.1-dev.<branch>.<date>.h<sha>`; gitsemver 3's
+`X.Y.Z-r<branch-hash>t<time>h<sha>` holds neither `.` nor `-`, so only the `_`
+is left to land on) made the cut land on the `_` once, and the apiserver
+rejected every object of the release. tests/verify-labels.py.
 */ -}}
 {{- define "chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-._" -}}
@@ -350,8 +352,8 @@ target has no controller of its own) in the default mode. */ -}}
 {{- /* muster-direct runs without the agentgateway component, so its CRDs are
 not on the cluster: anything that renders an agentgateway.dev object or attaches
 to the agentgateway Gateway must fail here, naming the knob, instead of shipping
-objects the API server rejects (the model-manager / agent-manager routes already
-guard themselves the same way). */ -}}
+objects the API server rejects (the agent-manager route already
+guards itself the same way). */ -}}
 {{- if eq $mode "muster-direct" -}}
 {{- $mcpsValues := index .Values "agent-platform-mcps" | default dict -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) (dig "agentgateway" "enabled" false $mcpsValues) (dig "mcpServers" (list) $mcpsValues) -}}
@@ -608,53 +610,52 @@ Truthy when the kagent controller's VerticalPodAutoscaler renders
 {{- end -}}
 
 {{/*
-OTEL exporter env for the agentgateway data-plane container, from
-global.observability.traces.otlp. Emits nothing when the endpoint is empty.
-Rendered as YAML list items.
+The data-plane container's env as a JSON list: gateway.parameters.dataPlaneEnv,
+in order, with the `auto` value of OTEL_EXPORTER_OTLP_ENDPOINT and
+OTEL_EXPORTER_OTLP_PROTOCOL taken from global.observability.traces.otlp (the
+endpoint entry dropped when that endpoint is empty; an empty protocol is grpc),
+and OTEL_EXPORTER_OTLP_HEADERS from its headers appended when they are set and
+the list names no such entry. An entry set to anything else wins. The tenant is
+not a header here: the data plane's tenant is its pod label
+(gateway.parameters.podLabels). The meta chart resolves the same `auto` values
+before it forwards the list (agent-platform.shape.otlp there).
+Usage: include "agent-platform.dataPlaneEnv" . | fromJsonArray
 */}}
-{{- define "agent-platform.otlpEnv" -}}
-{{- with .Values.global.observability.traces.otlp }}
-{{- if .endpoint }}
-- name: OTEL_EXPORTER_OTLP_ENDPOINT
-  value: {{ .endpoint | quote }}
-{{- with .protocol }}
-- name: OTEL_EXPORTER_OTLP_PROTOCOL
-  value: {{ . | quote }}
-{{- end }}
-{{- if .headers }}
-{{- $pairs := list }}
-{{- range $key, $value := .headers }}
-{{- $pairs = append $pairs (printf "%s=%s" $key $value) }}
-{{- end }}
-- name: OTEL_EXPORTER_OTLP_HEADERS
-  value: {{ join "," $pairs | quote }}
-{{- end }}
-{{- end }}
-{{- end }}
+{{- define "agent-platform.dataPlaneEnv" -}}
+{{- $otlp := dig "observability" "traces" "otlp" dict (.Values.global | default dict) | default dict -}}
+{{- $derived := dict "OTEL_EXPORTER_OTLP_ENDPOINT" (dig "endpoint" "" $otlp | default "" | toString | trim) "OTEL_EXPORTER_OTLP_PROTOCOL" (dig "protocol" "" $otlp | default "grpc" | toString) -}}
+{{- $env := list -}}
+{{- $names := dict -}}
+{{- range (.Values.gateway.parameters.dataPlaneEnv | default list) -}}
+{{- $name := toString .name -}}
+{{- $_ := set $names $name true -}}
+{{- if and (hasKey $derived $name) (eq (toString .value) "auto") -}}
+{{- with (index $derived $name) -}}{{- $env = append $env (dict "name" $name "value" .) -}}{{- end -}}
+{{- else -}}
+{{- $env = append $env . -}}
+{{- end -}}
+{{- end -}}
+{{- $headers := dig "headers" dict $otlp | default dict -}}
+{{- if and $headers (not (hasKey $names "OTEL_EXPORTER_OTLP_HEADERS")) -}}
+{{- $pairs := list -}}
+{{- range $key, $value := $headers -}}{{- $pairs = append $pairs (printf "%s=%s" $key $value) -}}{{- end -}}
+{{- $env = append $env (dict "name" "OTEL_EXPORTER_OTLP_HEADERS" "value" (join "," $pairs)) -}}
+{{- end -}}
+{{- $env | toJson -}}
 {{- end -}}
 
 {{/*
 The OTLP endpoint and protocol the data plane exports to, as JSON
-{endpoint, protocol}: global.observability.traces.otlp when its endpoint is set,
-else the OTEL_EXPORTER_OTLP_ENDPOINT / _PROTOCOL entries of
-gateway.parameters.dataPlaneEnv — the same precedence the parameters apply to
-the env. An empty endpoint means no export.
+{endpoint, protocol}: the OTEL_EXPORTER_OTLP_ENDPOINT / _PROTOCOL entries of the
+data-plane env (agent-platform.dataPlaneEnv). An empty endpoint means no export.
 Usage: include "agent-platform.dataPlaneOtlp" . | fromJson
 */}}
 {{- define "agent-platform.dataPlaneOtlp" -}}
 {{- $endpoint := "" -}}
 {{- $protocol := "" -}}
-{{- with .Values.global.observability.traces.otlp -}}
-{{- if .endpoint -}}
-{{- $endpoint = .endpoint -}}
-{{- $protocol = .protocol | default "" -}}
-{{- end -}}
-{{- end -}}
-{{- if not $endpoint -}}
-{{- range (.Values.gateway.parameters.dataPlaneEnv | default list) -}}
+{{- range (include "agent-platform.dataPlaneEnv" . | fromJsonArray) -}}
 {{- if eq .name "OTEL_EXPORTER_OTLP_ENDPOINT" -}}{{- $endpoint = .value | default "" -}}{{- end -}}
 {{- if eq .name "OTEL_EXPORTER_OTLP_PROTOCOL" -}}{{- $protocol = .value | default "" -}}{{- end -}}
-{{- end -}}
 {{- end -}}
 {{- dict "endpoint" ($endpoint | toString | trim) "protocol" ($protocol | default "grpc" | toString | lower) | toJson -}}
 {{- end -}}
@@ -741,16 +742,89 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
+Truthy when the LLM endpoint is also published outside the cluster
+(llmRouting.external).
+*/}}
+{{- define "agent-platform.llmRouting.external" -}}
+{{- if and (include "agent-platform.llmRouting" .) .Values.llmRouting.external.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the external LLM route needs a data-plane listener of its own
+(llmRouting.external.listener): behind a public Gateway, which forwards the
+hostname there. The external route matches `/` (a root model route), and the
+agentgateway controller refuses one on a listener with directly attached
+models (ModelRoutingConflict), which the LLM listener has. With the chart's
+own edge the route is on the HTTPS listener instead, and this is empty.
+*/}}
+{{- define "agent-platform.llmRouting.externalListener" -}}
+{{- if and (include "agent-platform.llmRouting.external" .) (not (include "agent-platform.edgeIsDataPlane" .)) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The public hostname of the external LLM endpoint: <llmRouting.external.hostPrefix>.<global.domain>.
+*/}}
+{{- define "agent-platform.llmRouting.externalHost" -}}
+{{- include "agent-platform.hostname" (dict "ctx" . "prefix" .Values.llmRouting.external.hostPrefix "override" "" "key" "llmRouting.external.hostPrefix") -}}
+{{- end -}}
+
+{{/*
+What a model of the LLM endpoint attaches to, as a YAML list of parent
+references: the data-plane Gateway's LLM listener directly (no path prefix: a
+listener-attached model matches the serving endpoints, /v1/messages,
+/v1/chat/completions, ..., and those outrank the agent-platform-mcps
+catch-all), and the external route with llmRouting.external — the same list
+the LLMEndpoint document hands model-manager for the served models
+(templates/llm/llm-endpoint.yaml, spec.parentRefs).
+*/}}
+{{- define "agent-platform.llmRouting.modelParents" -}}
+- group: gateway.networking.k8s.io
+  kind: Gateway
+  name: {{ .Values.gateway.name }}
+  namespace: {{ .Release.Namespace }}
+  sectionName: {{ .Values.llmRouting.listener.name }}
+{{- if (include "agent-platform.llmRouting.external" .) }}
+- group: gateway.networking.k8s.io
+  kind: HTTPRoute
+  name: {{ include "name" . }}-llm-external
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The API-key source of the external LLM endpoint's policy, as YAML: the set ones
+of llmRouting.external.apiKeys (secretRef with a name, a selector with labels);
+validateLlmRouting holds it to exactly one.
+*/}}
+{{- define "agent-platform.llmRouting.apiKeySource" -}}
+{{- $k := .Values.llmRouting.external.apiKeys | default dict -}}
+{{- $out := dict -}}
+{{- with (dig "secretRef" "name" "" $k) }}{{- $_ := set $out "secretRef" (dict "name" .) -}}{{- end -}}
+{{- with (dig "secretSelector" "matchLabels" dict $k) }}{{- $_ := set $out "secretSelector" (dict "matchLabels" .) -}}{{- end -}}
+{{- with (dig "configMapSelector" "matchLabels" dict $k) }}{{- $_ := set $out "configMapSelector" (dict "matchLabels" .) -}}{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{/*
+The provider whose ModelConfigs ride the LLM listener: the first
+llmRouting.models entry's, lower-cased (anthropic). kagent.modelConfigs entries
+and the MutatingAdmissionPolicy point a ModelConfig of this provider at the
+listener; a ModelConfig of another provider keeps its own path.
+*/}}
+{{- define "agent-platform.llmRouting.provider" -}}
+{{- with .Values.llmRouting.models -}}{{- lower (first .).provider -}}{{- end -}}
+{{- end -}}
+
+{{/*
 Truthy (emits "true") when a policy of this chart verifies a bearer JWT on a
-route of the data-plane Gateway: the kagent controller route's, agent-manager's
-or model-manager's (each template's own gate, repeated here). Only such a
+route of the data-plane Gateway: the kagent controller route's or agent-manager's
+(each template's own gate, repeated here). Only such a
 request carries `jwt.<claim>` when the metric labels are evaluated.
 */}}
 {{- define "agent-platform.jwtRouteRendered" -}}
 {{- $k := dig "controllerRoute" dict (.Values.kagent | default dict) -}}
 {{- $a := dig "route" dict (.Values.agentManager | default dict) -}}
-{{- $m := dig "route" dict (.Values.modelManager | default dict) -}}
-{{- if or (and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (dig "enabled" false $k) (dig "jwtAuthentication" "enabled" false $k)) (and (include "agent-platform.agentManager.enabled" .) (dig "enabled" false $a) (dig "jwtAuthentication" "enabled" false $a)) (and (include "agent-platform.modelManager.enabled" .) (dig "enabled" false $m) (dig "jwtAuthentication" "enabled" false $m)) -}}true{{- end -}}
+{{- if or (and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (dig "enabled" false $k) (dig "jwtAuthentication" "enabled" false $k)) (and (include "agent-platform.agentManager.enabled" .) (dig "enabled" false $a) (dig "jwtAuthentication" "enabled" false $a)) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -772,6 +846,7 @@ Usage: include "agent-platform.metricLabels" . | fromYamlArray
 {{- define "agent-platform.metricLabels" -}}
 {{- $root := . -}}
 {{- $jwtRoute := include "agent-platform.jwtRouteRendered" . -}}
+{{- $apiKeyRoute := include "agent-platform.llmRouting.external" . -}}
 {{- /* The data plane's own labels (agentgateway telemetry/metrics.rs) and the scrape's. */ -}}
 {{- $reserved := list "bind" "gateway" "listener" "route" "route_rule" "backend" "protocol" "method" "status" "reason" "gen_ai_operation_name" "gen_ai_system" "gen_ai_request_model" "gen_ai_response_model" "gen_ai_token_type" "resource_type" "server" "resource" -}}
 {{- $scrape := list "namespace" "pod" "instance" "job" "container" "service" "endpoint" -}}
@@ -804,7 +879,8 @@ Usage: include "agent-platform.metricLabels" . | fromYamlArray
 {{- if contains "\n" $expr -}}
 {{- fail (printf "gateway.metricLabels.%s spans more than one line; write the CEL expression on one line" $name) -}}
 {{- end -}}
-{{- if or (not (regexMatch "(^|[^A-Za-z0-9_.])jwt\\s*[.\\[]" $expr)) $jwtRoute -}}
+{{- $held := or (and (regexMatch "(^|[^A-Za-z0-9_.])jwt\\s*[.\\[]" $expr) (not $jwtRoute)) (and (regexMatch "(^|[^A-Za-z0-9_.])apiKey\\s*[.\\[]" $expr) (not $apiKeyRoute)) -}}
+{{- if not $held -}}
 {{- $labels = append $labels (dict "name" $name "expression" $expr) -}}
 {{- end -}}
 {{- end -}}
@@ -843,7 +919,7 @@ entry.
 {{/*
 Key of the ModelConfigSpec provider block that carries baseUrl, for a
 spec.provider value in any case (the CRD's spelling from a catalog entry, the
-lower-cased agentgateway name from llmRouting.backend.provider). The key is not
+lower-cased provider of agent-platform.llmRouting.provider). The key is not
 the lower-cased provider name (openAI, sapAICore), and only three of the ten
 providers have a baseUrl at all — Ollama names its host, AzureOpenAI and Foundry
 an endpoint, the rest a region or a project: a block the CRD does not know is
@@ -870,6 +946,18 @@ template refuses them instead.
 {{- end -}}
 
 {{/*
+Key of the ModelConfigSpec provider block that carries maxTokens, for a
+spec.provider value in any case: Anthropic, AnthropicVertexAI, AzureOpenAI,
+Mistral and OpenAI. Emits nothing for every other provider (empty string =
+falsy): the API server would prune the field and the model would answer at
+kagent's own default in silence, so the template refuses it instead.
+*/}}
+{{- define "agent-platform.modelConfigMaxTokensKey" -}}
+{{- $keys := dict "anthropic" "anthropic" "anthropicvertexai" "anthropicVertexAI" "azureopenai" "azureOpenAI" "mistral" "mistral" "openai" "openAI" -}}
+{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the model-price ConfigMap — defaults to <release>-model-catalog.
 */}}
 {{- define "agent-platform.modelCatalogName" -}}
@@ -890,7 +978,7 @@ lookup — the same state as no ConfigMap at all, but with an object to explain.
 Validate the LLM routing block. Rendered exactly once via templates/validate.yaml.
 
 The feature has no data plane of its own: it adds a listener to the
-agentgateway Gateway and a policy the agentgateway controller reconciles. With
+agentgateway Gateway and models the agentgateway controller reconciles. With
 the component off (which includes the default ingress.mode: muster-direct) the
 listener would exist in values only, kagent's base URL would point at nothing,
 and every agent would lose inference at the cutover. Fail the render instead.
@@ -903,24 +991,50 @@ and every agent would lose inference at the cutover. Fail the render instead.
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) -}}
 {{- fail "llmRouting.enabled requires components.agentgateway.enabled: true; the LLM listener is reconciled by the agentgateway controller" -}}
 {{- end -}}
-{{- $port := .Values.llmRouting.listener.port | int -}}
-{{- range .Values.gateway.listeners -}}
-{{- if eq (.port | int) $port -}}
-{{- fail (printf "llmRouting.listener.port %d is already taken by the %s listener in gateway.listeners" $port .name) -}}
+{{- /* Every listener the LLM path adds takes a port of its own: the LLM
+listener, and behind a public Gateway the external route's. */ -}}
+{{- $own := list (dict "key" "llmRouting.listener.port" "port" (.Values.llmRouting.listener.port | int)) -}}
+{{- if (include "agent-platform.llmRouting.externalListener" .) -}}
+{{- $own = append $own (dict "key" "llmRouting.external.listener.port" "port" (.Values.llmRouting.external.listener.port | int)) -}}
+{{- end -}}
+{{- range $own -}}
+{{- $o := . -}}
+{{- range $.Values.gateway.listeners -}}
+{{- if eq (.port | int) $o.port -}}
+{{- fail (printf "%s %d is already taken by the %s listener in gateway.listeners" $o.key $o.port .name) -}}
 {{- end -}}
 {{- end -}}
-{{- /* An empty list renders a route that matches nothing; a bare "/" ties with
-the agent-platform-mcps catch-all route on the same Gateway and loses the
-tiebreak, so every inference call would reach the MCP backend instead. */ -}}
-{{- if not .Values.llmRouting.pathPrefixes -}}
-{{- fail "llmRouting.pathPrefixes must list at least one prefix; an empty list renders an LLM route that matches nothing" -}}
 {{- end -}}
-{{- range .Values.llmRouting.pathPrefixes -}}
-{{- if eq . "/" -}}
-{{- fail "llmRouting.pathPrefixes must be more specific than \"/\": the agent-platform-mcps catch-all route attaches to the same Gateway and wins an equal match, so every inference call would reach the MCP backend" -}}
+{{- if and (eq (len $own) 2) (eq (index $own 0).port (index $own 1).port) -}}
+{{- fail (printf "llmRouting.external.listener.port %d is the LLM listener's (llmRouting.listener.port); the external route matches / and the agentgateway controller refuses such a route on a listener with directly attached models" (index $own 1).port) -}}
 {{- end -}}
-{{- if not (hasPrefix "/" .) -}}
-{{- fail (printf "llmRouting.pathPrefixes entry %q must start with /" .) -}}
+{{- if (include "agent-platform.llmRouting.external" .) -}}
+{{- $set := keys (include "agent-platform.llmRouting.apiKeySource" . | fromYaml) -}}
+{{- if ne (len $set) 1 -}}
+{{- fail (printf "llmRouting.external.apiKeys sets %d key sources (%s); set exactly one of secretRef.name, secretSelector.matchLabels or configMapSelector.matchLabels — the external LLM endpoint admits a request only with one of the installation's API keys" (len $set) (join ", " ($set | sortAlpha))) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString .Values.llmRouting.external.hostPrefix)) -}}
+{{- fail (printf "llmRouting.external.hostPrefix %q must be a DNS label; the endpoint's hostname is <hostPrefix>.<global.domain>" (toString .Values.llmRouting.external.hostPrefix)) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The model router tries its candidates in name order and takes the
+first whose match fits, so two entries of one name would be one object and a
+wildcard must be the CRD's shape (`*`, `gpt-*`, `*-latest`). */ -}}
+{{- if not .Values.llmRouting.models -}}
+{{- fail "llmRouting.models must list at least one model; the model router of an empty list answers 404 model_not_found to every agent" -}}
+{{- end -}}
+{{- $names := dict -}}
+{{- range .Values.llmRouting.models -}}
+{{- if not (and .name .provider .baseURL) -}}
+{{- fail (printf "llmRouting.models: every entry names its AgentgatewayModel (name), a managed provider (provider) and the provider's API origin with its version path (baseURL, e.g. https://api.anthropic.com/v1: the upstream path is the baseURL's path plus the format's suffix); got %v" .) -}}
+{{- end -}}
+{{- if hasKey $names .name -}}
+{{- fail (printf "llmRouting.models names %q twice; every entry is one AgentgatewayModel of that name" .name) -}}
+{{- end -}}
+{{- $_ := set $names .name true -}}
+{{- $m := .match | default "" -}}
+{{- if and (contains "*" $m) (not (or (eq $m "*") (and (hasPrefix "*" $m) (eq (len (splitList "*" $m)) 2)) (and (hasSuffix "*" $m) (eq (len (splitList "*" $m)) 2)))) -}}
+{{- fail (printf "llmRouting.models[%s].match %q: a wildcard is `*`, a suffix like `gpt-*` or a prefix like `*-latest`, one `*` at an end" .name $m) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1056,9 +1170,9 @@ Usage: include "agent-platform.backstage.routeToDataPlane" .
 {{/*
 The edge the portal's app-config reaches by public hostname, as a JSON object
 `{"dataPlane": bool, "namespaces": [...]}`: the parents of the routes that
-serve those hostnames — muster (`ingress.parentRefs`), the kagent controller
-and the model manager (their own `parentRef`, each counted only while its route
-is enabled) — resolved in the precedence agent-platform.parentRefs uses. A
+serve those hostnames — muster (`ingress.parentRefs`) and the kagent
+controller (its own `parentRef`, counted only while its route is enabled) —
+resolved in the precedence agent-platform.parentRefs uses. A
 route that resolves to the chart-owned data plane sets `dataPlane`; every other
 one contributes its Gateway's namespace. `backstage.parentRefs` is not among
 them: it moves the portal's own route, not the routes the portal calls.
@@ -1071,12 +1185,6 @@ Usage: include "agent-platform.backstage.appConfigEdge" . | fromJson
 {{- if and $kagentRoute.enabled (dig "parentRef" "name" "" $kagentRoute) -}}
 {{- $overrides = append $overrides (list $kagentRoute.parentRef) -}}
 {{- else if $kagentRoute.enabled -}}
-{{- $overrides = append $overrides list -}}
-{{- end -}}
-{{- $mmRoute := dig "route" dict (.Values.modelManager | default dict) -}}
-{{- if and $mmRoute.enabled (dig "parentRef" "name" "" $mmRoute) -}}
-{{- $overrides = append $overrides (list $mmRoute.parentRef) -}}
-{{- else if $mmRoute.enabled -}}
 {{- $overrides = append $overrides list -}}
 {{- end -}}
 {{- $dataPlane := false -}}
@@ -1368,9 +1476,6 @@ the form a Cilium toFQDNs matchName is matched in.
 {{- end -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (.Values.kagent.controllerRoute).enabled (.Values.kagent.controllerRoute.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.kagent.controllerRoute.jwtAuthentication.jwks -}}
-{{- end -}}
-{{- if and (include "agent-platform.modelManager.enabled" .) (.Values.modelManager.route).enabled (.Values.modelManager.route.jwtAuthentication).enabled -}}
-{{- $sources = append $sources .Values.modelManager.route.jwtAuthentication.jwks -}}
 {{- end -}}
 {{- if and (include "agent-platform.agentManager.enabled" .) (.Values.agentManager.route).enabled (.Values.agentManager.route.jwtAuthentication).enabled -}}
 {{- $sources = append $sources .Values.agentManager.route.jwtAuthentication.jwks -}}
@@ -1899,7 +2004,8 @@ controller, not the subchart (#421). The port is the tools Service's targetPort.
 {{/*
 Where Substrate's control-plane database lives: "bundled" (the substrate chart's
 StatefulSet — substrate.postgres.enabled true, or `auto` while neither of the
-other two applies), "external" (an explicit substrate.postgres.connectionString),
+other two applies), "external" (an explicit substrate.postgres.connectionString,
+or connectionStringSecretRef naming the Secret that holds one),
 "cnpg" (the platform's CNPG Cluster, through postgres.databases.substrate and its
 derived Secret), or "" for none — the meta chart refuses the last and resolves
 `auto` to the boolean the substrate chart takes; this chart's guard says the
@@ -1909,13 +2015,16 @@ same on its own render.
 {{- $sub := .Values.substrate | default dict -}}
 {{- $bundled := dig "postgres" "enabled" "auto" $sub | toString -}}
 {{- $conn := dig "postgres" "connectionString" "" $sub -}}
+{{- $ref := dig "postgres" "connectionStringSecretRef" dict $sub -}}
+{{- $refOn := or (dig "enabled" false $ref) (dig "name" "" $ref) -}}
 {{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
 {{- if not (has $bundled (list "auto" "true" "false")) -}}
 {{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
 {{- end -}}
-{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg)) -}}bundled
+{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg) (not $refOn)) -}}bundled
 {{- else if $conn -}}external
 {{- else if $cnpg -}}cnpg
+{{- else if $refOn -}}external
 {{- end -}}
 {{- end -}}
 
@@ -2002,12 +2111,12 @@ Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list 
 
 {{/*
 kagent.otel.<signal>.enabled resolved to "true" or "false" — .signal is
-"tracing" or "logging". `auto` (the chart default) follows the resolved
+"traces" or "logs". `auto` (the chart default) follows the resolved
 global.observability.metrics.serviceMonitor.enabled, the rule the meta chart
 applies before forwarding (the OTLP gateway the exporters send to is part of
 the observability platform whose monitoring.coreos.com/v1 CRDs that knob
 detects); an explicit true / false wins.
-Usage: include "agent-platform.kagent.otelSignal" (dict "root" $ "signal" "tracing")
+Usage: include "agent-platform.kagent.otelSignal" (dict "root" $ "signal" "traces")
 */}}
 {{- define "agent-platform.kagent.otelSignal" -}}
 {{- $v := dig "otel" .signal "enabled" "auto" (.root.Values.kagent | default dict) -}}
@@ -2084,21 +2193,57 @@ list item; include with nindent under `egress:`.
 {{- end -}}
 
 {{/*
+The egress rule to the OTLP gateway of a component whose chart block carries
+observability.otel (the managers, backstage): .chart is that block, .who names
+the sender in the rule's comment, .flavor is cilium or kubernetes. The pods of
+the endpoint's namespace on its port (agent-platform.otlpTarget), else the
+cluster entity (cilium) or any address (kubernetes) on that port. Nothing when
+the endpoint is empty. Rendered as a YAML list item; include with nindent under
+`egress:`.
+*/}}
+{{- define "agent-platform.componentOtlpEgress" -}}
+{{- $endpoint := dig "observability" "otel" "endpoint" "" .chart | toString | trim -}}
+{{- if and $endpoint (ne $endpoint "auto") -}}
+{{- $otlp := include "agent-platform.otlpTarget" (dict "endpoint" $endpoint "protocol" (dig "observability" "otel" "protocol" "grpc" .chart)) | fromJson -}}
+{{- if eq .flavor "cilium" -}}
+{{- include "agent-platform.otlpEgressRule" (dict "target" $otlp "who" .who) -}}
+{{- else }}
+# The OTLP gateway {{ .who }} ({{ $otlp.endpoint }}).
+- to:
+    {{- if $otlp.namespace }}
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ $otlp.namespace }}
+    {{- else }}
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    {{- end }}
+  ports:
+    - port: {{ $otlp.port | int }}
+      protocol: TCP
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The OTLP gateways kagent's exporters send to, for a network policy: a JSON
 list of {endpoint, namespace, port} (agent-platform.otlpTarget), one per
-distinct destination of the signals that are on (kagent.otel.tracing /
-.logging: exporter.otlp.endpoint). Empty when both signals are off: no
-export, no rule.
+distinct destination of the signals that are on (kagent.otel.traces /
+.logs), read the way the kagent chart renders them: a signal's own endpoint
+and protocol, else kagent.otel.exporter.otlp's. Empty when both signals are
+off: no export, no rule.
 Usage: include "agent-platform.kagent.otlpTargets" . | fromJsonArray
 */}}
 {{- define "agent-platform.kagent.otlpTargets" -}}
 {{- $targets := list -}}
 {{- $seen := dict -}}
 {{- $kagent := .Values.kagent | default dict -}}
-{{- $protocol := dig "otel" "tracing" "exporter" "otlp" "protocol" "grpc" $kagent | toString | lower -}}
-{{- range $signal := list "tracing" "logging" -}}
+{{- $otlp := dig "otel" "exporter" "otlp" dict $kagent -}}
+{{- range $signal := list "traces" "logs" -}}
 {{- if eq (include "agent-platform.kagent.otelSignal" (dict "root" $ "signal" $signal)) "true" -}}
-{{- $endpoint := dig "otel" $signal "exporter" "otlp" "endpoint" "" $kagent | toString | trim -}}
+{{- $own := dig "otel" $signal dict $kagent -}}
+{{- $endpoint := $own.endpoint | default $otlp.endpoint | default "" | toString | trim -}}
+{{- $protocol := $own.protocol | default $otlp.protocol | default "grpc" | toString | lower -}}
 {{- if $endpoint -}}
 {{- $t := include "agent-platform.otlpTarget" (dict "endpoint" $endpoint "protocol" $protocol) | fromJson -}}
 {{- $key := printf "%s:%s" $t.namespace $t.port -}}
@@ -2110,6 +2255,38 @@ Usage: include "agent-platform.kagent.otlpTargets" . | fromJsonArray
 {{- end -}}
 {{- end -}}
 {{- $targets | toJson -}}
+{{- end -}}
+
+{{/*
+The cilium egress rules to the OTLP gateways Substrate's control plane exports
+to (ate-api-server, ate-controller, atelet and the atenet router), one per
+distinct destination of the signals that are on. A signal exports when it is
+enabled (the substrate chart's default) and resolves to an endpoint: its own
+substrate.otel.<signal>.endpoint, else substrate.otel.endpoint — the chart's
+substrate.otel.signalEndpoint. The chart's exporters speak gRPC only. Empty
+when no signal has an endpoint.
+*/}}
+{{- define "agent-platform.substrate.otlpEgress" -}}
+{{- $otel := dig "otel" dict (.Values.substrate | default dict) -}}
+{{- $seen := dict -}}
+{{- $first := true -}}
+{{- range $signal := list "traces" "metrics" "logs" -}}
+{{- $cfg := index $otel $signal | default dict -}}
+{{- if ne (toString (dig "enabled" true $cfg)) "false" -}}
+{{- $endpoint := $cfg.endpoint | default $otel.endpoint | default "" | toString | trim -}}
+{{- if $endpoint -}}
+{{- $t := include "agent-platform.otlpTarget" (dict "endpoint" $endpoint "protocol" "grpc") | fromJson -}}
+{{- $key := printf "%s:%s" $t.namespace $t.port -}}
+{{- if not (hasKey $seen $key) -}}
+{{- $_ := set $seen $key true -}}
+{{- if not $first }}
+{{ end -}}
+{{- $first = false -}}
+{{- include "agent-platform.otlpEgressRule" (dict "target" $t "who" "Substrate's exporters send to") -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

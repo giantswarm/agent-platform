@@ -8,7 +8,8 @@ namespace the FluxInstance labels warns on anything less), as the hook
 ServiceAccount (rbac.yaml, cluster-admin, itself a hook at the events its Jobs
 need) or — the self-management hooks — as the regular ServiceAccount
 <release>-self (self/rbac.yaml, a namespaced Role). Every hook but the
-storage-version pair renders only with the bundled engine. Hook weights in use:
+storage-version pair and the serving teardown renders only with the bundled
+engine. Hook weights in use:
   -10  the hook ServiceAccount + ClusterRoleBinding (rbac.yaml, pre-delete; and
        pre-install + pre-upgrade while the kagent namespace hook or the
        storage-version backup hook renders, post-install + post-upgrade while
@@ -16,6 +17,9 @@ storage-version pair renders only with the bundled engine. Hook weights in use:
        network policy (netpol.yaml: egress to the apiserver for every pod
        labelled component: hooks, at every event a hook of this chart runs —
        a default-deny cluster admits nothing else, #413)
+   -9  server-side apply the four Flux Operator CRDs of the flux-engine
+       subchart (hooks/flux-operator-crds.yaml; pre-install, pre-upgrade;
+       their ConfigMap at -10)
    -8  create the namespace the kagent component installs into if it is
        missing (hooks/kagent-namespace.yaml; pre-install, pre-upgrade)
    -7  record the objects of the kagent CRDs still stored at v1alpha2 and
@@ -25,14 +29,21 @@ storage-version pair renders only with the bundled engine. Hook weights in use:
        pre-delete — and pre-upgrade when self-management is off, the hand-back)
    -5  suspend the chart's own HelmRelease and drop the values Secret
        (hooks/self.yaml; same events as -6)
+   -2  the serving teardown: the llm-d controller's release, the well-known
+       LLMInferenceServiceConfigs with their finalizer, the configs' release
+       (hooks/serving-teardown.yaml; pre-delete, or pre-upgrade when the
+       serving slice is switched off in place; a script in the helm image)
     0  delete the platform HelmReleases in reverse dependency order and wait
        per wave (teardown.yaml, pre-delete; a script in the helm image);
        re-create the recorded ModelConfigs no Helm release owned at v1alpha3
        once kagent-crds serves it (hooks/kagent-crds-storage-version.yaml,
        post-install + post-upgrade);
        write the user-supplied values into the values Secret and start the
-       resumer (hooks/self.yaml, post-install + post-upgrade)
-    5  delete the FluxInstance and wait (teardown.yaml, pre-delete)
+       resumer (hooks/self.yaml, post-install + post-upgrade);
+       delete the FluxInstance, kept through Helm's pass, and wait for the
+       operator to uninstall Flux (teardown.yaml, post-delete)
+    5  delete the Flux Operator, kept through Helm's pass (teardown.yaml,
+       post-delete)
 before-hook-creation clears a previous run's Job (a failed one is left in place
 for inspection until the next attempt), hook-succeeded removes every hook
 object once ALL hooks of the event succeeded — Helm applies that policy after
@@ -65,6 +76,7 @@ One hook Job. Arguments (a dict):
   script  a shell script (run as `sh -eu -c` in the helm image)
   image   the image, default gitops.hooks.image (pass the helm image for a script)
   serviceAccountName  default the hook ServiceAccount <release>-hooks
+  configMap  a ConfigMap mounted read-only at /manifests (optional)
   about   one line for the humans reading the manifest
 */}}
 {{- define "agent-platform.hooks.job" -}}
@@ -157,7 +169,17 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .configMap }}
+            - name: manifests
+              mountPath: /manifests
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- with .configMap }}
+        - name: manifests
+          configMap:
+            name: {{ . }}
+        {{- end }}
 {{- end -}}

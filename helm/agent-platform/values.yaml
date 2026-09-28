@@ -63,13 +63,32 @@ global:
         # empty keeps the per-component labels.
         labels: {}  # @schema type: object; additionalProperties: true
     traces:
-      # OTLP exporter env (OTEL_EXPORTER_OTLP_*) for the agentgateway data
-      # plane. An empty endpoint renders nothing and
-      # gateway.parameters.dataPlaneEnv applies unchanged; a set endpoint wins
-      # over same-named entries in that list.
+      # The one OTLP collector every exporter of the platform sends to. The
+      # meta chart writes it into each component's own key where that key is
+      # `auto` (the default), before it forwards the component's values:
+      # kagent.otel.{tracing,logging}.exporter.otlp, the Harness's and the
+      # controller's OTEL_EXPORTER_OTLP_HEADERS, muster.muster.observability
+      # .otel, klausGateway.observability.otlpEndpoint / otlpHeaders,
+      # substrate.otel.endpoint and substrate.podLabels, and the data plane's
+      # gateway.parameters.dataPlaneEnv and podLabels. A component key set to
+      # anything else wins. The connectivity chart's egress rules follow each
+      # component's resolved endpoint: its namespace and its port.
       otlp:
-        endpoint: ""
-        protocol: ""
+        # -- The collector's URL. Empty exports nothing: every `auto` endpoint
+        # is emptied and kagent's exporters (`auto`) resolve off.
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        # -- `grpc` or `http/protobuf`. klaus-gateway, Substrate and kagent's
+        # log exporter speak gRPC only: with `http/protobuf` the render fails
+        # while one of them would take this endpoint: set its own key.
+        protocol: grpc  # @schema enum: ["", grpc, http/protobuf]
+        # -- The collector's tenant. Sent as the X-Scope-OrgID header by the
+        # exporters that take headers (kagent, muster, klaus-gateway), and as
+        # the pod label observability.giantswarm.io/tenant on the ones that
+        # do not (Substrate, the agentgateway data plane). Empty sends neither.
+        tenant: giantswarm
+        # -- More headers for the exporters that take headers. An
+        # X-Scope-OrgID here that differs from `tenant` fails the render.
+        # Values in this block are plain values: keep credentials out of it.
         headers: {}  # @schema type: object; additionalProperties: true
 
 # === Meta-package release flow ===
@@ -84,7 +103,12 @@ global:
 # platform. Any other value fails the schema and the render.
 gitops:
   engine: flux  # @schema enum: [flux]
-  interval: 10m                # cadence Flux re-evaluates the version range
+  interval: 10m                # cadence every child HelmRelease reconciles (drift detection, remediation)
+  # Cadence every OCIRepository this chart renders (the components' and the
+  # self-management one) polls the registry: a chart pushed to gsoci is
+  # installed within about this long. A poll is one tag list per chart, so it
+  # stays short while the HelmReleases keep `interval`.
+  sourceInterval: 1m
   # Namespace the rendered OCIRepository/HelmRelease objects are CREATED in.
   # Empty = the release namespace. Set this to a namespace that is exempt from a
   # multi-tenancy admission policy when one is enforced — on Giant Swarm clusters
@@ -93,7 +117,10 @@ gitops:
   # so set `namespace: flux-giantswarm` there.
   namespace: ""
   # Namespace the child releases install their WORKLOADS into (HelmRelease
-  # targetNamespace). Empty = the release namespace.
+  # targetNamespace). Empty = the release namespace; with the target knob
+  # (target.kubeConfig below) `agent-platform`, a namespace of the platform's own
+  # on the target, never the release's (an org namespace) there
+  # (giantswarm/agent-platform#688).
   # Pair with `namespace` above to render the Flux CRs in an exempt namespace while
   # the workloads land in the platform namespace (e.g. agent-platform).
   targetNamespace: ""
@@ -124,7 +151,14 @@ gitops:
   # see the installation on this path, so what the target already runs is the
   # composer's to detect. Empty (the default) renders exactly what it did
   # before the key existed.
+  # With the knob set, every OCIRepository and HelmRelease on the installation
+  # is named `<target.name>-<component>` (target.name empty = the release name),
+  # so two targeted releases in one namespace never share a child; each child's
+  # Helm release keeps the component's name and is stored on the target in
+  # targetNamespace, where its workloads land (giantswarm/agent-platform#688).
   target:
+    # The prefix of the child objects' names; empty = the release name.
+    name: ""
     kubeConfig:
       secretRef:
         name: ""
@@ -199,8 +233,9 @@ gitops:
     # the next stable release and every other branch's dev builds. Empty
     # (default) filters nothing.
     semverFilter: ""
-    # Interval the OCIRepository polls the registry and the HelmRelease
-    # reconciles; a values Secret change is picked up at once (watch label).
+    # Interval the self HelmRelease reconciles; its OCIRepository polls on
+    # gitops.sourceInterval. A values Secret change is picked up at once
+    # (watch label).
     interval: 10m
   # install/upgrade remediation retries for every child HelmRelease. Lets the
   # children self-heal transient/ordering failures (e.g. a component installs
@@ -258,11 +293,15 @@ gitops:
 #   semverFilter — Go regexp the OCI tags must match BEFORE versionRange is
 #       evaluated (OCIRepository.spec.ref.semverFilter); unset = every tag.
 #       Selects a dev channel: the dev builds of one branch (see "Dev channel"
-#       in the README), e.g. ".*-dev\\.<sanitized-branch>\\..*" together with
-#       a prerelease-admitting range such as ">=3.0.0-0 <4.0.0-0" — a range
-#       without the `-0` bounds never matches a prerelease, and Masterminds
-#       semver (Flux's) rejects the RFC's "*-*". The stable tags never act as
-#       fallback while a filter is set.
+#       in the README), "^.*-r<branch-hash>t[0-9]{14}h[0-9a-f]{7}$" — gitsemver
+#       3's dev shape X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>, the hash
+#       printed by `gitsemver branch-hash <branch>` — together with a
+#       prerelease-admitting range such as ">=4.0.0-0 <5.0.0-0" whose floor
+#       lies below the branch's base (a re-pinned line's builds count from the
+#       upstream tag or 0.0.0 again: ">=0.0.0-0") — a range without a `-0`
+#       bound never matches a prerelease, and Masterminds semver (Flux's)
+#       rejects the RFC's "*-*". The stable tags never act as fallback while a
+#       filter is set.
 #   crds         — Helm CRD lifecycle (CreateReplace) for a component that ships its
 #       own CRDs in its chart's crds/ dir (app-owned CRDs). Such a component owns its
 #       CRD version; its CR consumers dependsOn it instead.
@@ -337,14 +376,18 @@ components:  # @schema additionalProperties: true
     # rbac.mcpServerEditor/workflowEditor.subjects. Both are bound to the
     # Giant Swarm admin groups below, so the guard is satisfied.
     #
-    # Floor 5.12.0: the muster values below define toolsetPresets that select
-    # by the tool-group label (`label:` rules, muster#1168), and a muster
-    # before 5.12.0 refuses to start on such a preset. With the floor here the
+    # The muster values below define toolsetPresets that select by the
+    # tool-group label (`label:` rules, muster#1168), and a muster before
+    # 5.12.0 refuses to start on such a preset. With the floor here the
     # source re-resolves to a chart that has the rule before the release
     # applies the values that need it, so the two never meet on a cluster.
+    # Floor 5.31.4: a session on a forwarded bearer (an agent's on-behalf-of
+    # token, a forwarded ID token) ends at the bearer's exp, instead of its
+    # pooled connections forwarding the expired token to every backend until
+    # three rejections evict each of them (giantswarm/muster#1323).
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.12.0 <6.0.0"
+    versionRange: ">=5.31.4 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -464,7 +507,8 @@ components:  # @schema additionalProperties: true
     # releases as the line's own stable semver (X.Y.Z, decoupled from the
     # upstream version, which FORK.md and the images' annotation
     # io.giantswarm.upstream.version record) and, on every push to the
-    # consumed branch, dev builds X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7>.
+    # consumed branch, dev builds X.Y.Z-r588f3d76t<YYYYMMDDHHMMSS>h<sha7>
+    # (gitsemver 3's dev shape; r588f3d76 is `gitsemver branch-hash giantswarm`).
     # Upstream's chart shape: keys at the chart root, the CRDs as their own
     # chart (kagent-crds below), no values schema.
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
@@ -476,14 +520,21 @@ components:  # @schema additionalProperties: true
     # range with Masterminds semver, which skips every prerelease while no bound
     # of the range carries one — and evaluates them all as soon as one bound
     # does — so the range carries no `-0`: `<1.1.0-0` would admit the line's
-    # 1.0.x-dev.giantswarm.… builds (the dev channel is a consumer's `-0` range
+    # 1.0.x-r588f3d76t… builds (the dev channel is a consumer's `-0` range
     # plus a semverFilter, README "Dev channel"). The build's image tag and Go
     # ADK digest travel inside
     # the chart (stamped at publish), not here. Re-pinning the line is one
     # values change: this range and kagent-crds' range move together, and the
     # Substrate range follows when the line's own Substrate pin moves (README
-    # "Re-pinning the kagent line").
-    versionRange: ">=1.0.0 <1.1.0"
+    # "Re-pinning the kagent line"). The floor is 1.0.3
+    # (giantswarm/kagent-upstream#81): the release whose ModelConfig carries
+    # spec.ollama.think, which model-manager writes on the Ollama models it
+    # wires that have the thinking capability, so their agents answer instead of
+    # thinking before every answer or replying with nothing. From 1.2.0 the
+    # chart takes its OTel settings in the SDK-spec shape kagent.otel below
+    # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
+    # ignores them and exports nothing.
+    versionRange: ">=1.2.0 <1.3.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -520,9 +571,10 @@ components:  # @schema additionalProperties: true
     # of the platform edits this release's objects in place (no HPA on its
     # Deployments, no webhook-injected field, no hook). An object of the
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
-    # disabled. kagent's and muster's only by default — turning it on for
-    # another release is a decision per release, its objects must tolerate the
-    # re-apply (tests/verify-kagent-wiring.py asserts the set).
+    # disabled. kagent's, muster's and kserve-runtime-configs' only by
+    # default — turning it on for another release is a decision per release,
+    # its objects must tolerate the re-apply (tests/verify-kagent-wiring.py
+    # asserts the set).
     driftDetection:  # @schema additionalProperties: true
       mode: enabled
     # These keys are the connectivity chart's, not kagent's: it reads them for
@@ -545,7 +597,6 @@ components:  # @schema additionalProperties: true
       - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
-      - serviceMonitor
       - uiRoute
       # The worker PodDisruptionBudget is the connectivity chart's (the kagent
       # chart has no budget template for the WorkerPool; #472).
@@ -582,7 +633,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.0.0 <1.1.0"
+    versionRange: ">=1.2.0 <1.3.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -600,7 +651,8 @@ components:  # @schema additionalProperties: true
     # gsoci.azurecr.io/giantswarm/substrate, signed with the Giant Swarm
     # CircleCI identity, as releases of the line's own stable semver (X.Y.Z,
     # decoupled from the upstream version FORK.md records) and as dev builds
-    # X.Y.Z-dev.giantswarm.<date>.<time>.h<sha7> on every push. Two roster
+    # X.Y.Z-r588f3d76t<YYYYMMDDHHMMSS>h<sha7> on every push (gitsemver 3's
+    # dev shape, the hash of the branch name giantswarm). Two roster
     # entries, the kagent-crds shape: this one renders the three ate.dev CRDs
     # (WorkerPool, SandboxConfig, CSIDriverConfig) as templates; substrate
     # below renders the control plane. Both FOLLOW components.kagent when they
@@ -612,8 +664,9 @@ components:  # @schema additionalProperties: true
     # 1.0 releases, whose WorkerPool CRD carries spec.template
     # .topologySpreadConstraints and podAntiAffinity (agent-platform.substrate
     # .workerPoolSpreadFloor, the render guard on kagent.substrateWorkerPool
-    # .template) and whose egress gateway runs the agentgateway line's release
-    # named in substrate.images.agentgateway below. The worker image the kagent
+    # .template) and whose router and egress gateway run the agentgateway
+    # line's build each release stamps (substrate.images below forwards no
+    # data plane: it follows the release). The worker image the kagent
     # WorkerPool runs is DERIVED from this range's floor
     # (agent-platform.substrate.workerImage: substrate.image.registry,
     # ateom-gvisor, the floor), never taken from the kagent chart's stamp: the
@@ -631,7 +684,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.0.0 <1.1.0"
+    versionRange: ">=1.1.2 <1.2.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -653,7 +706,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.0.0 <1.1.0"
+    versionRange: ">=1.1.2 <1.2.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -680,22 +733,31 @@ components:  # @schema additionalProperties: true
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # klaus-gateway 1.x speaks kagent API v2: A2A v1 over gRPC through the
-    # controller GRPCRoute this line renders (klausGateway.a2a.url is a
-    # grpc:// target), AgentTemplate discovery, one AgentInstance per thread
+    # The line speaks kagent API v2: A2A v1 over gRPC through the controller
+    # GRPCRoute this line renders (klausGateway.a2a.url is a grpc:// target),
+    # AgentTemplate discovery, one AgentInstance per thread
     # (giantswarm/klaus-gateway#234). A 0.x gateway talks REST to the 0.10
     # controller and gets 404s on this line; the 3.x meta chart keeps 0.x.
-    # The floor is 1.20.0: the chart's closed serviceMonitor block takes the
-    # labels the meta chart forwards by default from there (the tenant label,
-    # giantswarm/klaus-gateway#316); an older chart's schema refuses them.
-    # The ceiling admits the 2.x line: 2.0.0 is the Slack-only gateway
-    # (giantswarm/klaus-gateway#319, PR #320) — the web and CLI channels, the
-    # /v1 front door and the Klaus instance path are gone, and the values keys
-    # this block still forwards for them (cli, lifecycle, upstream,
-    # agentgateway, routing.defaultTTL, a2a.saToken) are accepted as no-ops
-    # until the next major of that chart. They stay forwarded here until the
-    # 2.x line has rolled; a later change drops them.
-    versionRange: ">=1.20.0 <3.0.0"
+    # The floor is 2.0.0, the Slack-only gateway (giantswarm/klaus-gateway#319,
+    # PR #320): the web and CLI channels, the /v1 front door and the Klaus
+    # instance path are gone there, and the keys that served them (cli,
+    # lifecycle, upstream, agentgateway, routing.defaultTTL, a2a.saToken) are
+    # no-ops this block does not forward. That is what puts the floor at 2.0.0
+    # rather than 1.20.0: a 1.x gateway reads lifecycle.driver, and with none
+    # forwarded it falls back to its own default (operator, no operatorMCPURL)
+    # and does not start — UPGRADE.md, "the `klausGateway` keys the Slack-only
+    # gateway ignores are no longer forwarded". The ceiling stops before the
+    # next major of that chart, which deletes the six keys from its schema.
+    # The ceiling admits the 3.x line: 3.0.0 deletes the values keys the 2.x
+    # chart accepted as no-ops for the removed web and CLI channels
+    # (giantswarm/klaus-gateway#319, PR B); this chart (>= 4.62.0) forwards none
+    # of them, so the 3.x chart rolls unchanged.
+    # The floor is 3.3.0: a turn that fails before the agent answered names
+    # what broke, a tool-set or platform failure is sent once more, and
+    # turn_complete and klaus_gateway_turn_total carry failure_class
+    # (giantswarm/klaus-gateway#329). An alert on a burst of one class reads
+    # every installation only once none runs an older gateway.
+    versionRange: ">=3.3.0 <4.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
@@ -733,16 +795,20 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # model-manager stays on its 0.x line through the kagent API v2 change: it
     # renders its ModelConfigs at the kagent.dev version the cluster serves,
-    # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74). The floor is
-    # 0.23.0 (giantswarm/model-manager#86): the release that reads the GPU node
-    # pool input the discovery ConfigMap publishes (spec.gpuPool, from
-    # modelServing.gpuPool; giantswarm/agent-platform#315) — and, from 0.22.0
-    # (#68), zero-backend start-up and the runtime backend registry. The
-    # ceiling is 2.0.0: model-manager 1.0.0 is the release that composes
+    # v1alpha3 here, from 0.20.0 (giantswarm/model-manager#74). 1.0.8
+    # (giantswarm/model-manager#157) is the release that writes
+    # spec.ollama.options.num_ctx on every Ollama ModelConfig it wires, so an
+    # agent prompt is not cut to Ollama's VRAM-tiered default of 4096 tokens on
+    # a host with less than 24 GiB of VRAM. It carries 0.23.0's GPU node pool
+    # input (spec.gpuPool, from modelServing.gpuPool;
+    # giantswarm/agent-platform#315) and 0.22.0's zero-backend start-up and
+    # runtime backend registry. The ceiling is 2.0.0: model-manager 1.0.0 is the release that composes
     # LLMInferenceServices only (the classic InferenceService kind and its
     # kserve.servingKind / kserve.runtime values are gone), and nothing this
     # chart forwards names either, so the 0.24 → 1.0 move rolls on its own.
-    versionRange: ">=0.23.0 <2.0.0"
+    # The floor is 1.3.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=1.3.0 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -766,7 +832,9 @@ components:  # @schema additionalProperties: true
     # composes agents for kagent 0.10 (v1alpha2) and never meets this chart.
     # Until 1.0.0 is published the range resolves nothing (the component is
     # off by default; a lab follows a branch build through semverFilter).
-    versionRange: "1.x"
+    # The floor is 1.2.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=1.2.0 <2.0.0"
     valuesFrom: agent-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -792,7 +860,9 @@ components:  # @schema additionalProperties: true
     # guest-image job failed; 0.19.x were on ghcr.io, with the guest image as
     # a node path). The ceiling stays the next major, so minor releases roll
     # on their own.
-    versionRange: ">=0.22.0 <1.0.0"
+    # The floor is 0.24.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=0.24.0 <1.0.0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -820,7 +890,9 @@ components:  # @schema additionalProperties: true
     # that does not exist is refused naming it, get_info reports clusterApi and
     # the real version); the ceiling stays the next major, so minor releases
     # roll on their own.
-    versionRange: ">=0.4.2 <1.0.0"
+    # The floor is 0.19.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=0.19.0 <1.0.0"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -862,7 +934,10 @@ components:  # @schema additionalProperties: true
     # range spans both majors so the component resolves the complete portal,
     # not the 1.2.0 without the backend. Bounded below 3.0.0: the next major
     # is the next cut-over.
-    versionRange: ">=1.0.0 <3.0.0"
+    # The floor is 2.68.0: the image preloads the OpenTelemetry SDK and the
+    # chart takes observability.otel, the OTLP trace export
+    # global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
+    versionRange: ">=2.68.0 <3.0.0"
     valuesFrom: backstage
     # The backstage chart validates its values with additionalProperties: false,
     # and these keys are not its own: the connectivity chart reads them for the
@@ -895,26 +970,31 @@ components:  # @schema additionalProperties: true
     # presenting the forwarded token to the kube-apiserver. Registered with
     # muster through an MCPServer CR the connectivity chart renders.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # Floor 1.1.1: the mcp-kubernetes block below leaves the issuer, client,
-    # Secret and CA to the chart's global.identity fallbacks, which a chart
-    # before 1.1.1 does not have. The next major is the ceiling.
-    versionRange: ">=1.1.1 <2.0.0"
+    # The mcp-kubernetes block below leaves the issuer, client, Secret and CA
+    # to the chart's global.identity fallbacks (from 1.1.1). The floor is
+    # 1.3.0: the chart takes mcpKubernetes.instrumentation.otlpProtocol and
+    # .otlpHeaders, so its traces reach the collector's gRPC endpoint with the
+    # tenant header (giantswarm/giantswarm#36711). The next major is the ceiling.
+    versionRange: ">=1.3.0 <2.0.0"
     valuesFrom: mcp-kubernetes
-    # The connectivity chart's key, not the chart's (which validates strictly):
-    # the audience muster requests for the forwarded token, read for the
-    # MCPServer CR (templates/mcp-kubernetes/mcpserver.yaml there).
+    # The connectivity chart's keys, not the chart's (which validates strictly):
+    # the audience muster requests for the forwarded token and the shape of the
+    # registration, read for the MCPServer CR
+    # (templates/mcp-kubernetes/mcpserver.yaml there).
     omitKeys:
       - kubernetesAudience
+      - mcpServer
     enabled: false
   cloudnative-pg:  # @schema additionalProperties: true
     chart: cloudnative-pg
-    # The upstream CloudNativePG operator (cloudnative-pg/charts). The CNPG
-    # Cluster the connectivity chart renders under postgres.enabled and the
-    # Backstage database need its postgresql.cnpg.io API on the cluster; a
-    # management cluster runs the operator as its own app and keeps this off.
-    # The chart renders its CRDs as templates (crds.create), so they upgrade
-    # with the release.
-    repository: oci://ghcr.io/cloudnative-pg/charts
+    # The upstream CloudNativePG operator (cloudnative-pg/charts), from its
+    # gsoci copy under the upstream path (giantswarm/retagger, digests
+    # preserved). The CNPG Cluster the connectivity chart renders under
+    # postgres.enabled and the Backstage database need its postgresql.cnpg.io
+    # API on the cluster; a management cluster runs the operator as its own
+    # app and keeps this off. The chart renders its CRDs as templates
+    # (crds.create), so they upgrade with the release.
+    repository: oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts
     # One chart minor is one operator line (0.29.x ships CNPG 1.30), and an
     # operator upgrade rolls every instance pod it manages, so the range holds
     # the minor: moving to the next CNPG line is a deliberate edit here, not a
@@ -934,12 +1014,14 @@ components:  # @schema additionalProperties: true
     # one Helm release Secret; as its own release it does.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The kserve charts come from one repository and move together; the
-    # forwarded blocks below assume the 0.5.x key shape (createSharedResources,
+    # forwarded blocks below assume their key shape (createSharedResources,
     # controller.deploymentMode, llmisvc.controller.metricsSecure and
     # .serviceMonitor, giantswarm/kserve#88), so the range holds the line.
+    # 0.7.x is KServe v0.21.0 (giantswarm/kserve#101): the first
+    # LLMInferenceService API with spec.rolloutStrategy.
     # Every image default is a gsoci reference (giantswarm/agent-platform#575)
     # and the storage-initializer's resources follow kserve.storage.resources.
-    versionRange: "0.5.x"
+    versionRange: "0.7.x"
     valuesFrom: kserve-llmisvc-crd
     enabled: false
     ownedCrds:
@@ -955,7 +1037,7 @@ components:  # @schema additionalProperties: true
     # (kserve-llmisvc-resources.kserve.createSharedResources below) — and
     # ships the Gateway API Inference Extension CRDs as templates.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.5.x"
+    versionRange: "0.7.x"
     valuesFrom: kserve-llmisvc-resources
     enabled: false
     # Its webhook configurations and the shared objects need the CRDs
@@ -978,10 +1060,38 @@ components:  # @schema additionalProperties: true
     # LLMInferenceService CRDs only (the configs are CRs of theirs), not the
     # controller.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.5.x"
+    # kserve.llmisvcConfigs.tracing (from 0.6.0, giantswarm/kserve#99) and
+    # .rolloutStrategy (from 0.7.0, giantswarm/kserve#101) are what the
+    # kserve-runtime-configs: block below and the derived endpoint set.
+    versionRange: "0.7.x"
     valuesFrom: kserve-runtime-configs
     enabled: false
     dependsOn: [kserve-llmisvc-crd]
+    # Drift detection on this release (HelmRelease v2 spec.driftDetection): on
+    # every reconcile — gitops.interval — helm-controller re-applies a config
+    # that differs from the release manifest or is missing, as a server-side
+    # apply, without a Helm revision. Because a slice torn down at once left
+    # the configs terminating under their controller's finalizer, the next
+    # install adopted them, the new controller then finished their deletion,
+    # and the release stayed "in-sync" with no config behind it: every
+    # LLMInferenceService composed from them failed ConfigNotFound until a
+    # forced reconcile (giantswarm/agent-platform#508). With it a missing
+    # config is back within one interval. The configs' spec is ignored: once
+    # Helm has applied them, KServe writes the fields its API types default
+    # (spec.model.uri, a port's protocol and appProtocol, an empty resources,
+    # a backendRef's group) into kserve-config-llm-scheduler and
+    # -latency-predictor, and helm-controller, comparing against the chart's
+    # manifest, corrected them on every reconcile and never came back Ready —
+    # a fresh install hung there (giantswarm/agent-platform#508). A missing
+    # config is still re-created: an object that is gone is drift whatever
+    # the ignore rules say. The llm-d controller's finalizer is metadata and
+    # was never drift.
+    driftDetection:  # @schema additionalProperties: true
+      mode: enabled
+      ignore:
+        - paths: ["/spec"]
+          target:  # @schema additionalProperties: true
+            kind: LLMInferenceServiceConfig
   # Model serving on llm-d: a feature switch, not a component — no chart, so
   # the loop renders no release for it; the flag is forwarded to the
   # connectivity release like every other, and that chart renders the objects
@@ -1232,7 +1342,6 @@ gateway:
     # provider inside networkPolicy.kubernetes.worldExcludedCIDRs, or an issuer
     # the cluster resolves over IPv6. The hosts the routes
     # DO name (kagent.controllerRoute.jwtAuthentication.jwks,
-    # modelManager.route.jwtAuthentication.jwks,
     # agentManager.route.jwtAuthentication.jwks) need nothing here: the
     # controller policy opens each of them on its own port. This block applies
     # whether or not gateway.jwksEgress.enabled is set.
@@ -1270,14 +1379,14 @@ gateway:
         drop: [ALL]
       seccompProfile:
         type: RuntimeDefault
-    # Strategic-merge env appended to the data-plane container.
-    # Defaults push OTel traces to the cluster-wide otlp-gateway in kube-system.
-    # Override or extend for per-cluster backends.
+    # Strategic-merge env appended to the data-plane container. The two
+    # `auto` values take global.observability.traces.otlp's endpoint and
+    # protocol (an empty endpoint drops its entry); a value set here wins.
     dataPlaneEnv:
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://otlp-gateway.kube-system.svc:4317
+        value: auto
       - name: OTEL_EXPORTER_OTLP_PROTOCOL
-        value: grpc
+        value: auto
     dataPlaneVolumes: []
     dataPlaneVolumeMounts: []
     # Resources for the agentgateway data-plane container. ephemeral-storage
@@ -1387,10 +1496,54 @@ gateway:
     # gateway.parameters.podDisruptionBudget above.
     podAnnotations: {}  # @schema additionalProperties: true
     # Labels on the data-plane pods. The data plane's OTLP exporter sends no
-    # headers, so the tenant label is how otlp-gateway routes its spans to the
-    # giantswarm Tempo tenant. The connectivity chart reads this.
+    # headers, so the tenant label is how the collector routes its spans to a
+    # tenant: `auto` takes global.observability.traces.otlp.tenant (empty drops
+    # the label). The connectivity chart reads this.
     podLabels:  # @schema additionalProperties: true
-      observability.giantswarm.io/tenant: giantswarm
+      observability.giantswarm.io/tenant: auto
+  # === Buffer size ===
+  # The most the data plane buffers of one HTTP body, from ONE Gateway-scoped
+  # AgentgatewayPolicy, <release>-http (templates/agentgateway/http-policy.yaml,
+  # frontend.http.maxBufferSize). On the MCP path every tool answer of every
+  # server behind muster is read whole here before it is parsed and forwarded,
+  # and an answer above the limit is refused with agentgateway's `body exceeded
+  # buffer limit`, so this number is the cap on what a tool may answer through
+  # the platform. agentgateway's own default is 2 MiB, a value chosen for
+  # nothing here: a whole-registry dry run of the platform manager (fourteen
+  # installations) was above it (giantswarm/agent-platform#630). 8Mi is sized
+  # from what the platform's tools answer: the manager bounds its own answers
+  # at 1 MiB and muster's call_tool wraps the text once more on the way (about
+  # a seventh on top), so the largest bounded answer is ~1.2 MiB, and a server
+  # with no bound of its own (a kubectl get over a namespace, a rendered
+  # fileset) has the same room several times over; a dozen answers at the
+  # limit buffered at once stay inside the data plane's 512Mi memory limit
+  # (gateway.parameters.dataPlaneResources). A Kubernetes quantity (8Mi, 16Mi)
+  # or a byte count; the CRD refuses zero and anything above 4 GiB. Empty
+  # renders no policy and leaves agentgateway's default in force. Field-level
+  # merge on the Gateway: this policy owns frontend.http, -metrics and -tracing
+  # own theirs (verify-dataplane-buffer asserts no other policy carries it).
+  # README "The data plane's buffer".
+  http:
+    maxBufferSize: 8Mi  # @schema type: [string, integer]; pattern: ^([0-9]+(\.[0-9]+)?([KMGTPE]i|[kMGTPE])?)?$
+  # === Trace sampling ===
+  # The share of requests that arrive with no trace context which the data
+  # plane starts a trace for: frontend.tracing.randomSampling of the
+  # Gateway-scoped <release>-tracing AgentgatewayPolicy
+  # (templates/agentgateway/tracing.yaml), a CEL expression the proxy evaluates
+  # per request to a float between 0 and 1 or a boolean. It applies only to a
+  # request with no traceparent (an MCP client such as Claude Code through
+  # muster); a request with a sampled traceparent (an agent's turn, a
+  # klaus-gateway A2A call) is always traced, one with an unsampled traceparent
+  # never is. A started trace sends a sampled traceparent upstream, so muster
+  # and the server behind it add their spans under the data plane's. 0.1: on
+  # gazelle about 6,400 requests a day arrive untraced, with no traceparent or
+  # an unsampled one, so at most ~640 of them are traced (~1,100 spans),
+  # enough for a repeated failure to reach Tempo in minutes. The span metrics of service="agentgateway" mix every traced
+  # request with this share of the rest; rates come from
+  # agentgateway_requests_total. Empty or 0 turns random sampling off.
+  # README "The data plane's traces".
+  tracing:
+    randomSampling: "0.1"  # @schema type: [string, number]; pattern: ^((0(\.[0-9]+)?|1(\.0+)?)|true|false)?$; minimum: 0; maximum: 1
   # === Metric labels ===
   # Custom Prometheus labels on every metric the data plane emits, from ONE
   # Gateway-scoped AgentgatewayPolicy, <release>-metrics
@@ -1438,6 +1591,13 @@ gateway:
     user:
       enabled: true
       expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-user"] : jwt.{{ include "agent-platform.kagent.userIdClaim" . }}'
+    # The API key behind a call on the external LLM endpoint
+    # (llmRouting.external): the key entry's metadata.name. Held — rendered
+    # only — while that endpoint's route verifies API keys, like a jwt label
+    # while a route verifies a bearer.
+    api_key:
+      enabled: true
+      expression: apiKey.name
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -1467,7 +1627,7 @@ gatewayApi:
 #
 # Two values turn it on, and the order matters:
 #   1. llmRouting.enabled: true  — renders the `llm` listener on the data-plane
-#      Gateway plus the AgentgatewayBackend / HTTPRoute / AgentgatewayPolicy
+#      Gateway plus the AgentgatewayModels attached to it (llmRouting.models)
 #      that carry the traffic, and the model-price ConfigMap. Nothing routes
 #      through it yet.
 #   2. kagent.providers.anthropic.config.baseUrl:
@@ -1482,37 +1642,76 @@ llmRouting:
   enabled: false
   # One more entry in the data-plane Gateway's listener list. HTTP and
   # cluster-internal: the data-plane NetworkPolicy admits world traffic on 443
-  # only, and the LLM HTTPRoute pins itself to this listener by sectionName so
-  # it never attaches to the public HTTPS listener in edge mode.
+  # only, and every model attaches to this listener directly by sectionName —
+  # no HTTPRoute and no path prefix: a listener-attached model matches the
+  # serving endpoints (/v1/messages, /v1/chat/completions, ...), which
+  # outrank the agent-platform-mcps catch-all, and never the public HTTPS
+  # listener in edge mode.
   listener:
     name: llm
     port: 8081
-  # The Anthropic AgentgatewayBackend. No host, port or model override: the
-  # provider defaults resolve to api.anthropic.com:443 with system-trust TLS
-  # and the /v1/messages path suffix. No backend auth — see above.
-  backend:
-    name: anthropic
-    provider: anthropic
-  # Client path prefixes the LLM HTTPRoute matches. They must be MORE specific
-  # than `/`: agent-platform-mcps renders a catch-all route on the same Gateway
-  # that attaches to every listener, and on an equal match the older,
-  # alphabetically earlier MCP route wins — every inference call would answer
-  # `mcp: client must accept both application/json and text/event-stream`.
-  # Character count in the path match outranks those tiebreaks, so one prefix
-  # covering the provider's API is enough (`/v1` for Anthropic and every
-  # OpenAI-compatible provider). A path outside these prefixes reaches the MCP
-  # backend, not the provider.
-  pathPrefixes:
-    - /v1
-  # Client path -> body format the gateway parses, on the Gateway-scoped
-  # AgentgatewayPolicy. Mandatory: without it an `ai` backend parses every body
-  # as OpenAI Completions and mis-parses Anthropic bodies. Keys match the client
-  # path by suffix, so the "*" entry forwards every other path unchanged
-  # instead of falling back to Completions.
-  routes:  # @schema type: object; additionalProperties: true
-    "/v1/messages": Messages
-    "/v1/messages/count_tokens": AnthropicTokenCount
-    "*": Passthrough
+  # The models the listener serves, picked by the request's `model` (the
+  # model router: every AgentgatewayModel attached to the listener is a
+  # candidate). One
+  # AgentgatewayModel per entry: `name` (a DNS label, the object's name),
+  # `provider` (an agentgateway managed provider: Anthropic, OpenAI, Gemini,
+  # ...), `baseURL` (the provider's API origin WITH its version path,
+  # https://api.anthropic.com/v1: agentgateway 2.1 builds the upstream path
+  # from the baseURL's path plus the format's suffix, and a model without one
+  # sends Anthropic `/messages`), `match` (the model names it takes: exact,
+  # `claude-*`, `*-latest`; empty matches `name` alone) and `visibility`
+  # (Public, or Internal for a model only a virtual model selects). No
+  # credential: TLS against system trust, and a client's own key passes
+  # through untouched, so reach to the listener grants no spend. Candidates are tried in name order and the first
+  # whose `match` takes the model wins, so a `*` entry would shadow every model
+  # named after it — a served model (model-manager, the LLMEndpoint
+  # document) joins under its preset's name. The first entry's
+  # provider is the one whose ModelConfigs ride the listener
+  # (kagent.modelConfigs, modelConfigPolicy).
+  models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "baseURL": {"type": "string", "pattern": "^https?://[^/]+/.+"}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
+    - name: anthropic
+      provider: Anthropic
+      baseURL: https://api.anthropic.com/v1
+      match: claude-*
+  # The LLM endpoint outside the cluster (llmRouting.external): a public
+  # hostname, <hostPrefix>.<global.domain>, with a route of its own on the
+  # data plane that every model of the endpoint also attaches to, behind API
+  # keys (mode Strict: a request without a valid key answers 401). The route
+  # matches `/` (a root model route: the hostname outranks the hostname-less
+  # MCP catch-all, and nothing version-like is stripped), and the
+  # agentgateway controller refuses one on a listener with directly attached
+  # models, so it never shares the LLM listener: where the chart owns the
+  # edge (gatewayApi.gateway.create) it is on the data plane's HTTPS
+  # listener; else on `listener`, a data-plane listener of its own (HTTP,
+  # routes of the release namespace), to which a route on
+  # global.gatewayApi.parentRefs forwards the hostname. The in-cluster
+  # listener stays credential-free as it is. `apiKeys` sets exactly one
+  # source in the release namespace, the installation's own: `secretRef.name`
+  # (a Secret whose entries are keys or {"key"|"keyHash", "metadata"}),
+  # `secretSelector.matchLabels` or `configMapSelector.matchLabels` (a
+  # ConfigMap's entries must be {"keyHash": "sha256:<hex>", "metadata":
+  # {...}}). Give every entry `"metadata": {"name": "<who>"}`: the data
+  # plane's metrics carry it as the `api_key` label
+  # (gateway.metricLabels.api_key). A key reaches every model on the
+  # endpoint — agentgateway does not enforce a key's allowedModels on the
+  # Kubernetes API-key contract yet (giantswarm/giantswarm#37742) — so a paid
+  # provider model next to consumer keys is the installation's decision.
+  external:
+    enabled: false
+    hostPrefix: llm
+    # The external route's data-plane listener behind a public Gateway; not
+    # rendered with the chart's own edge. Its port is the public forwarder's
+    # target and must differ from every other listener's.
+    listener:
+      name: llm-external
+      port: 8082
+    apiKeys:
+      secretRef:
+        name: ""
+      secretSelector:
+        matchLabels: {}  # @schema additionalProperties: {"type": "string"}
+      configMapSelector:
+        matchLabels: {}  # @schema additionalProperties: {"type": "string"}
   # A MutatingAdmissionPolicy that sends a ModelConfig the connectivity chart
   # does NOT render through the LLM listener — one created by Backstage,
   # agent-manager or kubectl. Rendered only on Kubernetes 1.36 and later, where
@@ -1544,6 +1743,8 @@ llmRouting:
             rates: {input: "5", output: "25", cacheRead: "0.5", cacheWrite: "6.25"}
           claude-opus-5:
             rates: {input: "5", output: "25", cacheRead: "0.5", cacheWrite: "6.25"}
+          claude-opus-5-5:
+            rates: {input: "4", output: "20", cacheRead: "0.2", cacheWrite: "5"}
           claude-sonnet-4-5:
             rates: {input: "3", output: "15", cacheRead: "0.3", cacheWrite: "3.75"}
           claude-sonnet-4-6:
@@ -1656,7 +1857,7 @@ kyvernoPolicies:
 # Where the platform's single-replica stateful pods run: muster (the MCP
 # aggregator, hostNetwork), muster-valkey (muster's OAuth token store, an RWO
 # volume), the kagent controller (every streaming turn) and klaus-gateway (the
-# Slack/CLI/web turns in flight, an RWO volume). #431's guards
+# Slack turns in flight, an RWO volume). #431's guards
 # (karpenter.sh/do-not-disrupt, PodDisruptionBudget minAvailable: 1) hold off
 # Karpenter's VOLUNTARY disruption — consolidation, drift, expiry. They do
 # nothing against a spot reclaim: the instance goes two minutes after the
@@ -1778,15 +1979,18 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     # and person runs through it. Karpenter's consolidation works around the
     # node instead of evicting the pod mid-session; set "false" to opt out.
     karpenter.sh/do-not-disrupt: "true"
-  # The muster chart's PodDisruptionBudget: with one replica, minAvailable: 1
-  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
-  # node drain waits for its drain timeout — 30 min terminationGracePeriod on
-  # the fleet's Karpenter NodePools, the MachineDeployment's nodeDrainTimeout
-  # elsewhere) — the interim guard until the component runs two replicas.
-  # `enabled: false` removes the budget.
+  # The muster chart's PodDisruptionBudget: maxUnavailable: 1 lets a node drain (a cluster upgrade rolling its
+  # machines) evict the single replica and go on, where minAvailable: 1 would
+  # refuse every eviction and hold the drain until its timeout. Karpenter's
+  # consolidation is kept away by the pod's do-not-disrupt annotation, not by
+  # the budget. The empty minAvailable clears the
+  # chart's default of 1 (a null is consumed by Helm before the value reaches
+  # the chart). Two replicas with minAvailable: 1 is the HA shape once muster
+  # runs them. `enabled: false` removes the budget.
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
+    minAvailable: ""
+    maxUnavailable: 1
   # Disabled: the umbrella owns muster's public route now (see ingress.*). Gates
   # only muster's HTTPRoute + its BackendTrafficPolicy; Service/Deployment untouched.
   gatewayAPI:
@@ -1860,18 +2064,16 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     # meta chart replaces them before it forwards the block); an explicit
     # true / false wins.
     observability:
-      # OTLP traces and logs to the same collector kagent, agentgateway and
-      # klaus-gateway use; X-Scope-OrgID routes to the giantswarm Loki/Tempo
-      # tenant. giantswarm/giantswarm#36711: until now this stayed empty, so
-      # the two spans per MCP tool call muster's docs describe reached
-      # nothing. Metrics stay on the ServiceMonitor scrape below —
-      # muster.observability.metrics.exporter empty defers to serviceMonitor
-      # when it is enabled, so setting this endpoint does not also push
-      # metrics over OTLP.
+      # OTLP traces and logs to the collector global.observability.traces
+      # .otlp names: each `auto` takes its endpoint, protocol and headers (the
+      # tenant as X-Scope-OrgID); a value set here wins. Metrics stay on the
+      # ServiceMonitor scrape below — muster.observability.metrics.exporter
+      # empty defers to serviceMonitor when it is enabled, so this endpoint
+      # does not also push metrics over OTLP.
       otel:
-        endpoint: http://otlp-gateway.kube-system.svc:4317
-        protocol: grpc
-        headers: "X-Scope-OrgID=giantswarm"
+        endpoint: auto
+        protocol: auto
+        headers: auto
       metrics:
         prometheus:
           serviceMonitor:
@@ -1942,18 +2144,20 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
   # chart in the release namespace (neither the wrapper nor the upstream valkey
   # subchart has a knob of its own; giantswarm/agent-platform#439, the #431
   # pattern). muster's OAuth token store lives here: while the pod is gone
-  # every token refresh blocks inside muster. With one replica, minAvailable: 1
-  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
-  # node drain waits for its drain timeout); AlwaysAllow keeps a pod that is
-  # not Ready evictable. Exactly one of minAvailable / maxUnavailable (int or
-  # percentage); the render refuses both, neither, and a policy outside the
-  # API's enum. `enabled: false` removes the budget. Inert while
+  # every token refresh blocks inside muster. maxUnavailable: 1 lets a node drain (a cluster upgrade rolling its
+  # machines) evict the single replica and go on, where minAvailable: 1 would
+  # refuse every eviction and hold the drain until its timeout. Karpenter's
+  # consolidation is kept away by the pod's do-not-disrupt annotation, not by
+  # the budget. AlwaysAllow keeps a pod
+  # that is not Ready evictable. Exactly one of minAvailable / maxUnavailable
+  # (int or percentage); the render refuses both, neither, and a policy outside
+  # the API's enum. `enabled: false` removes the budget. Inert while
   # components.valkey.enabled is false. Never forwarded to the valkey release
   # (components.valkey.omitKeys).
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
-    maxUnavailable: null
+    minAvailable: null
+    maxUnavailable: 1
     unhealthyPodEvictionPolicy: AlwaysAllow
   valkey:
     fullnameOverride: muster-valkey
@@ -1989,6 +2193,14 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
       # Secret so muster and Valkey read one value. The inline alternative,
       # aclUsers.default.password, lands in the HelmRelease values and Helm
       # release storage (gitops.forbidInlineSecrets rejects it).
+      # Valkey reads the password once, at start. A rotation reaches the pod
+      # through usersExistingSecretChecksum (valkey-app 0.1.5 and later), a
+      # mark the Valkey chart renders verbatim as the pod's
+      # checksum/users-secret annotation: set it in the same change that
+      # rotates the Secret (a hash over the new data, a counter, a date) and
+      # the pod restarts onto the new password. Not set here: without a mark a
+      # rotation alone leaves the pod on the old password until a hand-run
+      # restart, and a default would only change every installation's render.
       usersExistingSecret: ""
       aclUsers:
         default:
@@ -2214,21 +2426,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # holds every streaming turn (A2A SendStreamingMessage, the portal's SSE)
     # and the actor sessions behind them; an eviction mid-turn leaves the task
     # `working` with no end of stream reaching the person. The annotation keeps
-    # Karpenter's consolidation away from the node (set "false" to opt out);
-    # the chart's budget refuses voluntary evictions of the single replica
-    # (Karpenter: DisruptionBlocked; a node drain waits for its drain timeout)
-    # and AlwaysAllow keeps a pod that is not Ready evictable, so a
-    # crash-looping controller never wedges a drain. The chart defaults to
-    # maxUnavailable: 1 and refuses both fields; a null set here is consumed by
-    # Helm before the value reaches the chart (the default would come back
-    # next to minAvailable), the empty string travels and the chart reads it
-    # as unset. `pdb.enabled: false` removes the budget.
+    # Karpenter's consolidation away from the node (set "false" to opt out).
+    # The chart's budget keeps its default, maxUnavailable: 1, so a node drain
+    # (a cluster upgrade rolling its machines) evicts the single replica and
+    # goes on; minAvailable: 1 would hold the drain until its timeout. The
+    # chart refuses both fields: a minAvailable set here needs
+    # `maxUnavailable: ""` next to it (a null is consumed by Helm before the
+    # value reaches the chart). AlwaysAllow keeps a pod that is not Ready
+    # evictable. `pdb.enabled: false` removes the budget.
     podAnnotations:
       karpenter.sh/do-not-disrupt: "true"
     pdb:
       enabled: true
-      minAvailable: 1
-      maxUnavailable: ""
       unhealthyPodEvictionPolicy: AlwaysAllow
     # The kagent chart's defaults with the memory limit raised from 512Mi
     # (giantswarm/agent-platform#455 follow-up): on gazelle the controller's
@@ -2271,21 +2480,41 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       maxAllowed:
         cpu: 1900m
         memory: 1280Mi
-    # The kagent line serves no Prometheus /metrics: the controller binds its
-    # metrics server to "0", and the upstream chart's controller.metrics knob
-    # renders a Service and the METRICS_* env to that dead port. Explicitly
-    # off; the connectivity chart's kagent.serviceMonitor below stays off for
-    # the same reason. Both go back on together when upstream serves metrics
-    # (an upstream item under giantswarm/giantswarm#37742).
+    # The controller's Prometheus /metrics (controller-runtime and the gRPC
+    # server's kagent_grpc_server_* families) on bindAddress. The connectivity
+    # chart's controller ingress policy admits that port from the cluster
+    # entity whenever enabled is true; the API port stays closed to everything
+    # but the gateway and the UI.
     metrics:
-      enabled: false
-    # X-Scope-OrgID routes OTLP traces and logs to the correct Loki/Tempo
-    # tenant. The configmap template has no headers field so we inject via env.
-    # The meta chart drops the OTEL_EXPORTER_OTLP_HEADERS entry when both OTel
-    # exporters below resolve off (no OTLP gateway to send the tenant to).
+      enabled: true
+      bindAddress: ":8080"
+      secureServing: false
+      service:
+        port: 8080
+      # The chart's own ServiceMonitor over that Service, from 1.0.2 on.
+      # `auto` follows the resolved
+      # global.observability.metrics.serviceMonitor.enabled. The endpoint
+      # follows secureServing: port name, scheme, bearer token and TLS all
+      # derive from it. With secureServing on, the scrape is authorized only
+      # once <fullname>-metrics-reader is bound to the collector's
+      # ServiceAccount (controller.metrics.serviceMonitor
+      # .prometheusServiceAccount), which is why this platform scrapes plain
+      # HTTP on a port that serves nothing but metrics.
+      serviceMonitor:
+        enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+        interval: 60s
+        labels:
+          # Mimir routes a scrape by this label; a monitor without it writes
+          # to no tenant of the GS observability platform.
+          observability.giantswarm.io/tenant: giantswarm
+    # The OTLP headers of kagent's exporters (the configmap template has no
+    # headers field, so they go in as env). `auto` takes
+    # global.observability.traces.otlp's headers, the tenant as X-Scope-OrgID;
+    # the meta chart drops the entry when they are empty or when both OTel
+    # exporters below resolve off (no collector to send them to).
     env:
       - name: OTEL_EXPORTER_OTLP_HEADERS
-        value: "X-Scope-OrgID=giantswarm"
+        value: auto
 
   ui:
     image:
@@ -2511,43 +2740,34 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         promptCaching: true
         cacheTTL: "5m"
 
-  # The controller metrics Service and ServiceMonitor the connectivity chart
-  # renders under the global.observability.metrics.serviceMonitor gate (which
-  # detects monitoring.coreos.com/v1); this is the object's own toggle
-  # underneath that gate. Off: the kagent line serves no Prometheus /metrics
-  # (controller.metrics above), so the monitor would scrape a refused port
-  # and the target would sit at up=0 — and nothing reads those metrics: the
-  # fleet's KagentControllerDown rule reads the Deployment's
-  # kube-state-metrics series. Back to true together with controller.metrics
-  # when upstream serves them.
-  serviceMonitor:
-    enabled: false
-    interval: 60s
-    # Extra labels on the ServiceMonitor metadata. The tenant label routes
-    # metrics to the correct Mimir instance in the GS Observability Platform.
-    labels:
-      observability.giantswarm.io/tenant: giantswarm
-
-  # OTel — traces and logs to the GS Observability Platform OTLP gateway.
-  # X-Scope-OrgID header routes to the correct Loki/Tempo tenant. `auto` (the
-  # default) follows the resolved global.observability.metrics.serviceMonitor
-  # .enabled — the gateway is part of the same observability platform whose
-  # monitoring.coreos.com/v1 CRDs that knob detects; the meta chart replaces
-  # it before forwarding. An explicit true / false wins.
+  # OTel — traces and logs to the collector global.observability.traces.otlp
+  # names, in the kagent chart's SDK-spec shape: the controller exports with
+  # these settings and compiles them into every actor (OTEL_EXPORTER_OTLP_*,
+  # OTEL_TRACES_EXPORTER, OTEL_LOGS_EXPORTER). An `auto` endpoint or protocol
+  # takes its value there, the tenant travels as the X-Scope-OrgID header
+  # (controller.env, harness.env). A signal's own endpoint (traces.endpoint,
+  # logs.endpoint, a full URL) wins over exporter.otlp.endpoint; the endpoint's
+  # scheme decides TLS. An `enabled: auto` follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled (the collector is part
+  # of the same observability platform whose monitoring.coreos.com/v1 CRDs
+  # that knob detects) and resolves off with no endpoint. The meta chart
+  # replaces every `auto` before forwarding; an explicit value wins. The export
+  # timeout (milliseconds) bounds every export, and so the flush the Go ADK
+  # runs before a turn's response closes: a turn's A2A stream ends only after
+  # it, so its deadline is the turn's tail whenever the collector is slow or
+  # unreachable; an in-cluster export takes tens of milliseconds
+  # (giantswarm/agent-platform#456). kagent's own metrics are scraped
+  # (kagent.controller.metrics), not exported.
   otel:
-    tracing:
-      enabled: auto  # auto | true | false
-      exporter:
-        otlp:
-          endpoint: http://otlp-gateway.kube-system.svc:4317
-          protocol: grpc
-          insecure: true
-    logging:
-      enabled: auto  # auto | true | false
-      exporter:
-        otlp:
-          endpoint: http://otlp-gateway.kube-system.svc:4317
-          insecure: true
+    exporter:
+      otlp:
+        endpoint: auto
+        protocol: auto
+        timeout: "500"
+    traces:
+      enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+    logs:
+      enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
 
   # --- UI auth: oauth2-proxy in front of the kagent UI ---
   # Disabled by default. Enable and supply Dex OIDC credentials to secure the UI.
@@ -2691,6 +2911,23 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # Set by a dev loop that runs the platform on a locally built image; it
     # travels only when set (components.kagent.omitEmptyKeys).
     image: ""
+    # Context compaction for every agent the Harness admits
+    # (Harness.spec.kagent.compaction, where kagent-dev/kagent#2790 put it; the
+    # AgentTemplate has no such field). Tail retention: once a prompt passes
+    # tokenThreshold tokens, everything but the newest eventRetentionSize
+    # events is summarised before the next model call, on the agent's own
+    # model (no summariser model is set). 600 000 compacts only a session
+    # heading for the edge of the 1M context window: below it every follow-up
+    # re-reads its history from the prompt cache (0.1x), which is cheaper and
+    # faster than a summary and keeps what a summary drops; a compaction costs
+    # the turn tens of seconds before its first token and loses facts across
+    # turns. A model with a smaller window needs a lower value. 4 keeps the
+    # last two tool exchanges raw. An empty block leaves every history
+    # uncompacted. Needs the kagent line at 1.1.0 or later; an earlier chart
+    # ignores the key.
+    compaction:
+      tokenThreshold: 600000
+      eventRetentionSize: 4
     # Where Substrate keeps the actors' snapshots for this Harness — the
     # Harness's snapshotPolicy.location: an object-store URL, s3://<bucket>/<prefix>
     # (the prefix keeps one bucket's Harnesses apart). REQUIRED whenever
@@ -2836,33 +3073,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
             key: ""
     # The Harness's environment. KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
     # the caller's bearer on its MCP calls, so muster sees the person, not the
-    # platform. The OTel entries wire the actors' telemetry to the OTLP gateway
-    # kagent.otel names — the controller forwards only its tracing variables to
-    # the actors (OTEL_TRACING_ENABLED, the endpoint, the protocol):
-    # OTEL_LOGGING_ENABLED makes the Go ADK export the actors' logs over gRPC to
-    # that endpoint (without it the ADK's built-in log exporter posts HTTP to
-    # the gRPC port and every batch ends in EOF); OTEL_EXPORTER_OTLP_HEADERS is
-    # the tenant header the controller sends (kagent.controller.env), which the
-    # controller deliberately keeps from the actors. The meta chart drops
-    # OTEL_LOGGING_ENABLED when kagent.otel.logging resolves off and the header
-    # when both exporters do (auto: no observability platform), like the
-    # controller's header. KAGENT_TRACE_FLUSH_TIMEOUT_MS bounds the Go ADK's
-    # pre-response trace flush (KAGENT_PRE_RESPONSE_TRACE_FLUSH, set by the
-    # controller on Substrate actors — a checkpoint runtime has no later export
-    # window): a turn's A2A stream closes only after it, so its deadline is the
-    # turn's tail whenever the collector is slow or unreachable — 3 s by the
-    # ADK's default, 0.5 s here; an in-cluster export takes tens of
-    # milliseconds (giantswarm/agent-platform#456). Nothing else today (a
-    # per-namespace skills credential is a later, separate decision).
+    # platform. OTEL_EXPORTER_OTLP_HEADERS is the tenant header of the OTLP
+    # gateway kagent.otel names: the controller compiles the rest of the
+    # actors' telemetry settings from kagent.otel and passes this one through
+    # from the Harness, like the controller's own copy (kagent.controller.env).
+    # The meta chart drops it when both exporters resolve off (auto: no
+    # observability platform). Nothing else today (a per-namespace skills
+    # credential is a later, separate decision).
     env:
       - name: KAGENT_PROPAGATE_TOKEN
         value: "true"
-      - name: OTEL_LOGGING_ENABLED
-        value: "true"
       - name: OTEL_EXPORTER_OTLP_HEADERS
-        value: "X-Scope-OrgID=giantswarm"
-      - name: KAGENT_TRACE_FLUSH_TIMEOUT_MS
-        value: "500"
+        value: auto
     # The admission contract: a template is admitted by the ONE label the
     # Generic agent chart 1.x stamps (the value is the Harness's name). Helm
     # merges maps on coalesce, so the kagent chart's own default key
@@ -3303,35 +3525,34 @@ postgres:
         subnetName: node-subnet
         privateDnsZoneRef: ""
 
-# Klaus Gateway — channel front door (Slack, CLI, web) for Klaus instances.
-# Disabled by default; set components.klaus-gateway.enabled: true to deploy.
-# The chart's own agentgateway sub-dependency is disabled here because the
-# umbrella already manages the agentgateway controller via the `agentgateway`
-# dependency above; set upstream.agentgatewayURL to the data-plane service
-# URL once the agentgateway deployment is known (typically post-install).
+# Klaus Gateway — the Slack front door of the kagent agents. Disabled by
+# default; set components.klaus-gateway.enabled: true to deploy. The whole
+# block is forwarded to the klaus-gateway release verbatim (valuesFrom), so
+# every key here is a key of the klaus-gateway 2.x chart, which serves Slack
+# only: there is no web or CLI channel, no /v1 front door and no Klaus
+# instance path to configure.
 klausGateway:  # @schema skipProperties: true; additionalProperties: true
   image:
     registry: gsoci.azurecr.io
 
   # Voluntary disruption (giantswarm/agent-platform#431): the gateway pod
-  # carries the Slack/CLI/web turns in flight and the OBO link store. The
-  # annotation keeps Karpenter's consolidation away from its node (set "false"
-  # to opt out); the chart's budget refuses voluntary evictions of the single
-  # replica (Karpenter: DisruptionBlocked; a node drain waits for its drain
-  # timeout), AlwaysAllow keeps a pod that is not Ready evictable. Both knobs
-  # need klaus-gateway chart 1.1.0 or later (giantswarm/klaus-gateway#241);
-  # the 1.x range above resolves it. `podDisruptionBudget.enabled: false`
-  # removes the budget.
+  # carries the Slack turns in flight and the OBO link store. The annotation
+  # keeps Karpenter's consolidation away from its node (set "false" to opt
+  # out). The chart's budget is maxUnavailable: 1, so a node drain (a cluster
+  # upgrade rolling its machines) evicts the single replica and goes on;
+  # minAvailable: 1 would hold the drain until its timeout. The empty
+  # minAvailable clears the chart's default of 1 (a null is consumed by Helm
+  # before the value reaches the chart). AlwaysAllow keeps a pod that is not
+  # Ready evictable. Both knobs need klaus-gateway chart 1.1.0 or later
+  # (giantswarm/klaus-gateway#241); the 1.x range above resolves it.
+  # `podDisruptionBudget.enabled: false` removes the budget.
   podAnnotations:
     karpenter.sh/do-not-disrupt: "true"
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
+    minAvailable: ""
+    maxUnavailable: 1
     unhealthyPodEvictionPolicy: AlwaysAllow
-
-  # Do not deploy a second agentgateway; reuse the umbrella's.
-  agentgateway:
-    enabled: false
 
   # Routing store: the binding of every thread to its agent instance and the
   # record of the turn in flight (klaus-gateway 1.6.0). "memory" loses both on
@@ -3346,28 +3567,15 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # for the Secret link store (obo.store: secret).
   routing:
     store: memory
-    defaultTTL: "24h"
     # valkey:
     #   url: ""             # default: <valkey.valkey.fullnameOverride>:6379
     #   existingSecret: ""  # default: valkey.valkey.auth.usersExistingSecret
     #   passwordKey: ""     # default: valkey.valkey.auth.aclUsers.default.passwordKey
 
-  # Lifecycle driver. agent-platform bundles kagent, not klaus-operator, so
-  # "static" is the correct default. Populate staticInstances with
-  # name=baseURL pairs pointing at kagent agent services per-cluster.
-  lifecycle:
-    driver: static
-    staticInstances: ""
-
-  # Point at the bundled agentgateway data-plane service once deployed.
-  # Empty disables proxying; the gateway talks directly to instance BaseURLs.
-  upstream:
-    agentgatewayURL: ""
-
-  # OTel traces to the GS Observability Platform's OTLP gateway, the tenant
-  # header selecting the Loki/Tempo tenant — the target kagent's exporters send
-  # to (kagent.otel). Every channel turn is one trace: the gateway's
-  # `slack.turn` span is the parent of the kagent controller's
+  # OTel traces to the collector global.observability.traces.otlp names (each
+  # `auto` below takes its endpoint, and its headers with the tenant as
+  # X-Scope-OrgID; a value set here wins). Every channel turn is one trace: the
+  # gateway's `slack.turn` span is the parent of the kagent controller's
   # SendStreamingMessage and of the actor's spans under it, the Slack API calls
   # and a token refresh hang off it too (giantswarm/klaus-gateway#263;
   # klaus-gateway 1.10.0 or later for the headers knob and the URL endpoint).
@@ -3381,9 +3589,8 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # endpoint (-klausgateway-otlp-egress).
   observability:
     enabled: auto  # auto | true | false
-    otlpEndpoint: http://otlp-gateway.kube-system.svc:4317
-    otlpHeaders:
-      X-Scope-OrgID: giantswarm
+    otlpEndpoint: auto
+    otlpHeaders: auto  # @schema type: [object, string]; additionalProperties: true
 
   # The chart's own ServiceMonitor over the gateway's admin port
   # (klaus_gateway_* requests, turns and their phases, Slack streaming). `auto`
@@ -3473,10 +3680,6 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     connectors:
       enabled: false
 
-  # CLI channel adapter (remote klausctl users). Off by default.
-  cli:
-    enabled: false
-
   # A2A client adapter. Routes channel turns to a kagent A2A endpoint.
   # defaultAgent is the fallback agentRef when the channel does not supply one.
   # Omit defaultAgent to require callers to pass agentRef explicitly.
@@ -3495,12 +3698,10 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # iconUrl. "{agent}" is replaced with the agentRef. Empty disables the fallback.
     # Example: https://avatars.{codename}.{base}/v1/{agent}.png
     fallbackIconUrlTemplate: ""
-    saToken:
-      enabled: false
-      audience: kagent
 
-  # Agentgateway route — exposes /v1, /web, /cli/v1 on the agentgateway
-  # data-plane Gateway (agentgateway-* ingress modes only).
+  # Agentgateway route — exposes the Slack channel path (/channels/slack, with
+  # slack.enabled) on the agentgateway data-plane Gateway (agentgateway-*
+  # ingress modes only).
   agentgatewayRoute:
     enabled: false
     # Hostname on which the agentgateway Gateway will match these paths.
@@ -3520,12 +3721,15 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   # name (a value wins over a chart default; a default that moves alone
   # renders a tag that exists under another name). The connectivity chart's
   # agentgateway.proxy.image (the AgentgatewayParameters of its data planes)
-  # and the Substrate line's egress dataplane (substrate.images.agentgateway)
-  # name the same release; move all of them together.
+  # names the same release; move them together. The Substrate line's router
+  # and egress run the build their Substrate release stamps, a release of
+  # this line under proxy.image's repository (`make verify-substrate-images`),
+  # from a static config the release renders rather than this controller's
+  # xDS: they follow components.substrate.versionRange, not this tag.
   controller:
     image:
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.0.0"
+      tag: "2.1.2"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -3545,11 +3749,21 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     # for the controller wait for a schema fix there
     # (giantswarm/agentgateway#51).
     replicaCount: 2
+  # The Gateway API Inference Extension: the controller resolves
+  # InferencePool backendRefs (AGW_ENABLE_INFER_EXT, plus read access to
+  # inferencepools and their status). An LLMInferenceService composed with the
+  # llm-d endpoint picker (a preset's spec.router.scheduler: true) routes its
+  # /v1/* rules on the models Gateway to an InferencePool; with this off the
+  # route stays ResolvedRefs=False BackendNotFound and the model is never
+  # Ready. Without the InferencePool CRD (no serving slice on the cluster) the
+  # controller waits for it and routes everything else as before.
+  inferenceExtension:
+    enabled: true
   proxy:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.0.0"
+      tag: "2.1.2"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -3690,6 +3904,13 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # off; the connectivity chart renders the policies (modelManager below).
 model-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: model-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   # No backend is configured here: model-manager (>= 0.22.0) starts with none
   # and the backends — Ollama, LM Studio, Lemonade, KServe — are registered at
   # runtime as labelled ConfigMaps in its namespace (the add_backend tool, the
@@ -3743,51 +3964,8 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
 # (it reads this block, not the chart's). Inert while
 # components.model-manager.enabled is false.
 modelManager:  # @schema skipProperties: true; additionalProperties: true
-  # Expose the model-manager API on the agentgateway data plane at
-  # https://agentgateway.<domain><pathPrefix>: an AgentgatewayBackend for the
-  # Service, an HTTPRoute that strips the prefix (model-manager then sees
-  # /api/v1/...), and — when the chart-owned edge is not the data plane — the
-  # public HTTPRoute on the outer Gateway (the same shape as
-  # kagent.controllerRoute). The portal's Models pages call this route.
-  # Requires an agentgateway-* ingress.mode.
-  route:
-    enabled: false
-    pathPrefix: /model-manager
-    # Public hostname; empty derives agentgateway.<global.domain>.
-    hostname: ""
-    # Outer (public) Gateway that terminates TLS, the Giant Swarm public
-    # Gateway by default (as kagent.controllerRoute). Both halves or neither:
-    # empty follows the chart-owned edge, else global.gatewayApi.parentRefs.
-    parentRef:
-      name: giantswarm-default
-      namespace: envoy-gateway-system
-    # Validate the bearer JWT (signature, issuer, expiry) at the gateway
-    # before forwarding: no token, no API. The issuer defaults to
-    # global.identity.issuerUrl; the JWKS is fetched from the issuer's
-    # in-cluster endpoint through a static AgentgatewayBackend (needs
-    # gateway.jwksEgress when network policies are on).
-    jwtAuthentication:
-      enabled: false
-      mode: Strict
-      issuer: ""
-      jwks:
-        # The issuer's hostname, qualified: three labels or more, and for an
-        # in-cluster Service its <service>.<namespace>.svc.cluster.local form.
-        # The egress rule the agentgateway controller's network policy renders
-        # is built from this and `port` below, so the port never belongs here,
-        # and an address belongs in gateway.jwksEgress.external.cidrs.
-        host: dex.giantswarm.svc.cluster.local
-        port: 5556
-        path: /keys
-        # Originate TLS to the issuer and verify against caSecretName (a
-        # Secret with ca.crt), else the system trust. Implied by `port: 443`,
-        # which serves no plain HTTP. `enabled: true` names the platform's own
-        # identity provider, so it falls back to global.identity.ca.secretName
-        # as well; TLS implied by the port does not, because that CA signed no
-        # public issuer's certificate and the fetch would fail closed.
-        tls:
-          enabled: false
-          caSecretName: ""
+  # model-manager has no route on the edge: the portal, agents and every other
+  # caller reach it through muster (its MCPServer CR) as the signed-in person.
   kserve:
     # Fail the render when model-manager.backend is kserve and the
     # serving.kserve.io/v1alpha2 API (LLMInferenceService) is not on the
@@ -3796,8 +3974,8 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
     # false skips the check.
     requireApi: true
   # Network policy inputs. The policies render under networkPolicy (enabled +
-  # flavor) like every other component's wiring. Ingress: the agentgateway
-  # data plane (route on), muster (MCPServer on) and the kubelet's probes.
+  # flavor) like every other component's wiring. Ingress: muster (MCPServer
+  # on), additionalPeers and the kubelet's probes.
   # Egress: DNS, the Kubernetes API, the identity provider (oauth on: the Dex
   # issuer by name, or for model-manager.oauth.provider google its discovery,
   # JWKS/userinfo and token hosts), the Ollama endpoint (ollama backend) or the
@@ -3839,6 +4017,17 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
       cidrs: []
+    # The workload clusters' API servers the kserve backend calls as the caller:
+    # a backend cluster-manager registers targets a workload cluster's apiserver
+    # (list_backends, loads and fits all go there). Same shape as
+    # clusterManager.networkPolicy.workloadClusters (fqdns: Cilium FQDN
+    # selectors; cidrs: IP blocks, in the kubernetes flavor these blocks or else
+    # every public destination; ports: default 443 and 6443). Empty, the
+    # default, it follows clusterManager.networkPolicy.workloadClusters, since
+    # model-manager serves on the clusters cluster-manager composes onto; set,
+    # it replaces that value as a whole. Rendered with a kserve backend
+    # (static, or cluster-manager on).
+    workloadClusters: {}
     # Further destinations of the service on 443, whatever the backend — the
     # same knob as agentManager.networkPolicy.egress: a private identity
     # provider, a model mirror.
@@ -3916,6 +4105,13 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
 # the connectivity chart renders the policies (vmManager below).
 vm-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: vm-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   persistence:
     existingClaim: ""
     create: false
@@ -4006,6 +4202,13 @@ vmManager:  # @schema skipProperties: true; additionalProperties: true
 # (agentManager below).
 agent-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: agent-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   kagent:
     namespace: kagent
     # Pinned as model-manager's: the one version the 4.x line serves, and the
@@ -4018,8 +4221,11 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # kagent.dev/v1alpha3 AgentTemplates for this release's kagent, 0.x the
     # v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases of
     # the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart.
-    semver: 1.x
+    # and moves only with this chart. From 1.5.0 the chart renders no
+    # spec.context.compaction on the AgentTemplate: the kagent line from 1.1.0
+    # refuses the field and the platform Harness carries the compaction
+    # (kagent.harness.compaction). The floor moves with components.kagent.
+    semver: ">=1.5.0 <2.0.0"
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:
@@ -4052,7 +4258,7 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
 agentManager:  # @schema skipProperties: true; additionalProperties: true
   # Expose the agent-manager API on the agentgateway data plane at
   # https://agentgateway.<domain><pathPrefix> (the same shape as
-  # modelManager.route). Off by default: the MCP tools reach muster in-cluster
+  # kagent.controllerRoute). Off by default: the MCP tools reach muster in-cluster
   # without it; turn it on for a portal or CLI that calls the REST API.
   # Requires an agentgateway-* ingress.mode.
   route:
@@ -4086,17 +4292,18 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
           caSecretName: ""
   # PodDisruptionBudget on the agent-manager pods, rendered by the connectivity
   # chart in the release namespace (the component chart has no knob of its
-  # own; giantswarm/agent-platform#431). With one replica, minAvailable: 1
-  # refuses every voluntary eviction (Karpenter reports DisruptionBlocked, a
-  # node drain waits for its drain timeout); AlwaysAllow keeps a pod that is
-  # not Ready evictable. Exactly one of minAvailable / maxUnavailable (int or
-  # percentage); the render refuses both, neither, and a policy outside the
-  # API's enum. `enabled: false` removes the budget. Inert while
-  # components.agent-manager.enabled is false.
+  # own; giantswarm/agent-platform#431). maxUnavailable: 1 lets a node drain (a
+  # cluster upgrade rolling its machines) evict the single replica and go on,
+  # where minAvailable: 1 would refuse every eviction and hold the drain until
+  # its timeout; its calls are short MCP requests, so a restart costs a retry.
+  # AlwaysAllow keeps a pod that is not Ready evictable. Exactly one of
+  # minAvailable / maxUnavailable (int or percentage); the render refuses both,
+  # neither, and a policy outside the API's enum. `enabled: false` removes the
+  # budget. Inert while components.agent-manager.enabled is false.
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
-    maxUnavailable: null
+    minAvailable: null
+    maxUnavailable: 1
     unhealthyPodEvictionPolicy: AlwaysAllow
   flux:
     # Fail the render when the Flux APIs agent-manager writes
@@ -4202,6 +4409,13 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
 # it or the render fails).
 cluster-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: cluster-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   installation:
     name: ""
   mcp:
@@ -4277,13 +4491,22 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       additionalPeers: []
     # The workload clusters' API servers cluster-manager reads and writes as
     # the caller: a cluster's operator and serving layer are detected through
-    # its own apiserver, and a pool is targeted there. On Giant Swarm
-    # installations that is api.<cluster>.<base domain> on 443.
+    # its own apiserver, and a pool is targeted there. cluster-manager dials
+    # the `server:` of the cluster's Cluster API kubeconfig Secret
+    # (`<cluster>-kubeconfig`), never `api.<cluster>.<base domain>`: on a CAPA
+    # installation that is the API server's load balancer,
+    # `<cluster>-apiserver-<id>.<region>.elb.amazonaws.com`.
     workloadClusters:
-      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
-      # resolved through the DNS proxy rule the policy renders — for a Giant
-      # Swarm installation `- matchPattern: "api.*.<base domain>"`. Ignored by
-      # the kubernetes flavor (see cidrs).
+      # The installation's provider, a preset of the names below: `aws` adds
+      # `matchPattern: "*.*.elb.amazonaws.com"`, the API server load balancers
+      # of CAPA clusters. Empty, the default, adds none. cilium flavor only.
+      provider: ""
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) of the
+      # kubeconfig Secrets' `server:` hosts, resolved through the DNS proxy
+      # rule the policy renders, next to the provider's preset. Cilium's `*`
+      # matches one DNS label, never a dot: `*.elb.amazonaws.com` selects no
+      # load balancer name, `*.*.elb.amazonaws.com` does. Ignored by the
+      # kubernetes flavor (see cidrs).
       fqdns: []
       # IP blocks of the workload clusters' API servers. kubernetes flavor:
       # vanilla NetworkPolicy selects addresses, never names, so an empty list
@@ -4350,6 +4573,13 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # configReload. Their meaning is documented in the connectivity chart's
 # values.yaml; the defaults are the standalone's.
 backstage:  # @schema skipProperties: true; additionalProperties: true
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
   # --- Wiring (read by the connectivity chart, not passed to the backstage chart) ---
   # Public hostname; empty derives backstage.<global.domain>.
   hostname: ""
@@ -4468,6 +4698,14 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: mcp-kubernetes
   mcpKubernetes:
     instrumentation:
+      # OTLP trace export: `auto` takes global.observability.traces.otlp
+      # (otlpEndpoint as host:port, otlpInsecure from its scheme, otlp as the
+      # exporter while it is set, the tenant as X-Scope-OrgID next to headers).
+      tracingExporter: auto
+      otlpEndpoint: auto
+      otlpInsecure: auto
+      otlpProtocol: auto
+      otlpHeaders: auto
       # The chart serves /metrics on its own port whatever this holds
       # (mcpKubernetes.metrics, on by default); this renders the monitor that
       # collects it. `auto` follows the resolved
@@ -4510,10 +4748,16 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
 
 # === CloudNativePG operator (cloudnative-pg) ===
 # Values forwarded verbatim to the cloudnative-pg component release (the
-# upstream chart, cloudnative-pg/charts). Empty: the chart's defaults install
-# the operator cluster-wide with its CRDs (crds.create) and without a
-# PodMonitor (monitoring.podMonitorEnabled), the shape the standalone shipped.
-cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
+# upstream chart, cloudnative-pg/charts). Besides the image, the chart's
+# defaults: the operator cluster-wide with its CRDs (crds.create) and without
+# a PodMonitor (monitoring.podMonitorEnabled), the shape the standalone
+# shipped.
+cloudnative-pg:  # @schema skipProperties: true; additionalProperties: true
+  # The operator image from its gsoci copy: the upstream image at the same
+  # digest, signed with the Giant Swarm identity. The tag stays the chart's
+  # appVersion, so the image follows the chart.
+  image:
+    repository: gsoci.azurecr.io/giantswarm/cloudnative-pg
 # === kagent-crds (the kagent line's CRD chart) ===
 # Values forwarded verbatim to the kagent-crds component release (the CRDs of
 # the kagent line as their own chart, which the kagent release dependsOn). The
@@ -4531,9 +4775,9 @@ kagent-crds:  # @schema skipProperties: true; additionalProperties: true
 # Values forwarded verbatim to the substrate component release — the chart of
 # the Giant Swarm Substrate line (giantswarm/substrate, branch giantswarm; keys
 # at the chart root, no schema). The chart's image references are stamped at
-# publish (image.registry gsoci.azurecr.io/giantswarm/substrate, image.tag the build);
-# an installation that mirrors them sets image.registry here and
-# components.substrate.repository. What Substrate needs and the chart does not
+# publish (image.registry gsoci.azurecr.io, image.repository giantswarm/substrate,
+# image.tag the build); an installation that mirrors them sets image.registry
+# here and components.substrate.repository. What Substrate needs and the chart does not
 # render — the CA and JWT pools, the actor-identity trust anchor, ate-api-
 # server's authentication config — the connectivity release's bootstrap hook
 # mints (README "Agent Substrate"); what the cluster must bring — Kubernetes
@@ -4546,13 +4790,47 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   createNamespace: false
   # The line's images: published as gsoci.azurecr.io/giantswarm/substrate/<component>
   # (the chart's stamp; multi-arch, signed with the Giant Swarm CircleCI
-  # identity), releases and dev builds alike. The registry is the one value a
-  # mirror moves: the control plane's images (<registry>/<component>:<tag>,
-  # the tag the chart's stamp) and the derived worker image
+  # identity), releases and dev builds alike. The registry is the host only
+  # and the repository the path under it (the Substrate chart refuses a
+  # registry with a path); a mirror moves the registry, and the control
+  # plane's images (<registry>/<repository>/<component>:<tag>, the tag the
+  # chart's stamp) and the derived worker image
   # (agent-platform.substrate.workerImage, kagent.substrateWorkerPool above)
   # follow it. The dev channel needs no registry override.
   image:
-    registry: gsoci.azurecr.io/giantswarm/substrate
+    registry: gsoci.azurecr.io
+    repository: giantswarm/substrate
+  # One PodMonitor per workload that serves metrics: ate-api-server, atelet,
+  # atenet-router, atenet-egress, k8s-credential-provider and ate-controller,
+  # each pinned to the port name its own pod declares. The fleet's metrics
+  # collector discovers monitors and nothing else, so without these the whole
+  # ate registry is served and thrown away. `auto` follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled; the chart's own
+  # default is off.
+  metrics:
+    podMonitor:
+      enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
+      labels:
+        # Mimir routes a scrape by this label; a monitor without it writes to
+        # no tenant of the GS observability platform.
+        observability.giantswarm.io/tenant: giantswarm
+  # The credential provider (the Substrate line from 1.1.0): the egress
+  # gateway injects an agent's credentials — model keys, MCP headers, the
+  # skills' git credentials — into the request from Secrets it reads on the
+  # agent's behalf, and it reads a namespace only where a policy allows it.
+  # kagent names the atespace after the AgentTemplate's namespace and the
+  # Secrets live next to the AgentTemplate, so every namespace that hosts
+  # AgentTemplates needs one entry with itself as the allowed namespace. The
+  # golden actor of every template boots in Substrate's own atespace
+  # ate-golden and fetches the template's git skills with the same
+  # credentials, so ate-golden needs every one of those namespaces too. The
+  # default covers the kagent namespace, where the agent charts install.
+  credentialProvider:
+    namespacePolicies:
+      - atespace: kagent
+        allowedNamespaces: [kagent]
+      - atespace: ate-golden
+        allowedNamespaces: [kagent]
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows
     # the platform: with the platform's CNPG Cluster on (postgres.enabled) the
@@ -4580,32 +4858,57 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # (the chart's `substrate.otel.env` helper reads this single endpoint as
   # the fallback for the per-signal traces / metrics / logs endpoints below,
   # all `enabled: true` in the chart's own defaults). Same collector as
-  # kagent, agentgateway and klaus-gateway. giantswarm/giantswarm#36711:
-  # until now this stayed empty and all three signals went nowhere.
+  # kagent, agentgateway and klaus-gateway. The connectivity chart's Substrate
+  # policies open this endpoint's namespace and port for the four exporters
+  # (agent-platform.substrate.otlpEgress). `auto` takes
+  # global.observability.traces.otlp.endpoint; the chart speaks gRPC only. With
+  # no endpoint the meta chart also turns off every signal that names none of
+  # its own (the chart's exporters would otherwise fall back to localhost:4317).
   #
-  # The chart has no OTLP-headers key for any of the four components (only
-  # atelet.extraEnv / ateApiServer.extraEnv exist, and ate-controller /
-  # atenet-router have neither), so X-Scope-OrgID cannot be set here the way
-  # it is for kagent below — every Substrate span, metric and log point
-  # reaches the collector untenanted until the chart grows one.
+  # Traces keep the chart's parentbased_traceidratio at 0.01: a span under a
+  # kagent turn follows the turn's own decision (kagent's ate-api client
+  # propagates it), so the ratio applies only to Substrate's parentless
+  # background work — reconciles, workflows, the atelet loops.
+  #
+  # Metrics are scraped (the substrate PodMonitors, tenant label on), not
+  # pushed: with both paths every ateapi, atelet, atenet-router and
+  # atecontroller series reached Mimir twice under two names. `false` renders
+  # OTEL_METRICS_EXPORTER=none, which the Go components honor from
+  # giantswarm/substrate#82 on and ignore before it. The worker pods' ateom
+  # exports through the WorkerPool's environment and is not affected.
+  # The scrape is kept because OTLP metrics reach Mimir with only job and
+  # instance as labels (no namespace, pod, cluster_id or installation, and no
+  # `up`). Substrate is OTLP-first upstream: once giantswarm/giantswarm#37935
+  # gives OTLP metrics those labels, push instead: this key back on, the
+  # PodMonitors of the pushing components off.
   otel:
-    endpoint: http://otlp-gateway.kube-system.svc:4317
-  # The chart's own third-party image defaults, pinned to their gsoci copies
-  # (giantswarm/agent-platform#575, #580). The chart names Docker Hub —
-  # `postgres:18-alpine@…`, `rustfs/rustfs:…`, `amazon/aws-cli:…`, short names
-  # whose registry is the node runtime's call (containerd defaults to
-  # docker.io; CRI-O in short-name enforcing mode refuses them) — and the
-  # agentgateway line's ghcr build, and this block travels verbatim into the
-  # substrate release, where `make verify-images` could not see them. Each
-  # value here is the SAME DIGEST under gsoci.azurecr.io/giantswarm — retagger's
-  # mirrors of library/postgres, rustfs/rustfs and the agentgateway line's
-  # release tags — so the pods roll once onto identical bits. These pins hold
-  # for the Substrate release components.substrate.versionRange confines: a
-  # re-pin moves them with it (`make verify-substrate-images` renders the
-  # pinned release with this block and refuses a digest or tag that drifted
-  # from the release's own defaults, or an image left off gsoci). The line's
-  # own defaults are the durable fix; until its release carries them this
-  # block is the fleet's.
+    endpoint: auto
+    metrics:
+      enabled: false
+  # The chart has no OTLP-headers key, so X-Scope-OrgID cannot be set the way
+  # it is for kagent below: the collector takes the tenant of a headerless
+  # export from this pod label instead, `auto` taking
+  # global.observability.traces.otlp.tenant (empty drops the label). The
+  # chart's podLabels key is kagent-dev/substrate#48, carried from Substrate
+  # 1.1.0 (giantswarm/substrate#55); an older release ignores it and every
+  # Substrate signal reaches the collector without a tenant.
+  podLabels:
+    observability.giantswarm.io/tenant: auto
+  # The chart's third-party images (giantswarm/agent-platform#575, #580, #654).
+  # The Substrate line stamps each default at publish — the gsoci copies of
+  # postgres, rustfs and busybox, and the agentgateway line's build its release
+  # was written for — so the release pulls them from the one registry `make
+  # verify-images` holds every default to. A key here wins over that default
+  # (this block travels verbatim into the substrate release), which makes it a
+  # hold, not a copy: `make verify-substrate-images` requires every release the
+  # range admits to name its defaults on gsoci and published, and a key here to
+  # carry the floor's digest (or tag) — a newer admitted patch naming another
+  # default is no failure, the pin holds the floor's bits until the floor moves.
+  # The atenet data plane (images.agentgateway) is never pinned here: the
+  # release's router and egress run the static config it renders, written for
+  # the build it stamps, so an installation that floats onto a Substrate patch
+  # runs that patch's data plane — the check refuses the key. An installation
+  # that mirrors the registry sets images.* itself.
   images:
     # The bundled control-plane database (postgres.enabled true, or auto
     # without the platform Cluster). The chart pins Docker Hub's floating
@@ -4613,25 +4916,11 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     # The bundled snapshot store (rustfs.enabled).
     rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
-    # The rustfs-bucket-init Job's image, kept at the chart's own short name
-    # ON PURPOSE (its gsoci copy exists: giantswarm/aws-cli:2.17.0, the same
-    # digest). The Job is a release resource and a Job's pod template is
-    # immutable: any change of this value fails the upgrade of every
-    # installation running the bundled store — `Job.batch "rustfs-bucket-init"
-    # is invalid: spec.template: … field is immutable` — until someone deletes
-    # the completed Job by hand. It moves to gsoci with the release of the
-    # Substrate line that lets the Job be recreated (a hook Job, or a name
-    # carrying the template's hash); tests/verify-images.py tolerates it by
-    # name until then. Set here so the rendered release carries it and the
-    # check sees it, as it sees the other three.
-    awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
-    # The agentgateway build atenet-router and atenet-egress run: the release
-    # of the agentgateway line the Substrate release was published with (its
-    # egress config is written for that build's config schema), the line's own
-    # stable semver under its nested name on gsoci — the same release the
-    # agentgateway block above names for the controller and the data plane.
-    # The three move together; this one moves with the Substrate pin.
-    agentgateway: gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.0.0
+    # The rustfs-bucket-init Job's image. The Job is a hook, recreated on every
+    # install and upgrade (the Substrate line from 1.1.2), so the value can
+    # move; before that its immutable pod template failed every upgrade that
+    # changed it.
+    awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3
@@ -4748,12 +5037,42 @@ kserve-llmisvc-resources:  # @schema skipProperties: true; additionalProperties:
 # prefix; modelServing.prepull.images below names the same llm-d-cuda
 # reference — keep the two in step. servingruntime off: the chart's
 # ServingRuntimes are the classic InferenceService path, which the platform
-# does not serve.
+# does not serve. tracing: the kserve-config-llm-tracing preset, which the llm-d
+# controller merges into every LLMInferenceService whose spec carries
+# `tracing` (README "The model pods' traces"). `auto` follows
+# global.observability.traces.otlp (agent-platform.shape.otlp): the endpoint,
+# and the tenant as the pod label otlp-gateway routes a headerless export by
+# (dropped with an empty tenant). The sampler stays upstream's
+# (parentbased_traceidratio, 0.05). rolloutStrategy: the rollout of every
+# served model's predictor Deployment, which the llm-d controller merges from
+# the single-node workload presets into each LLMInferenceService, the ones
+# served before included. A model fills its GPU, so a surge pod beside the old
+# one never starts and the roll never finishes (giantswarm/agent-platform#682):
+# the old pod stops first, a short outage per roll of a one-replica model.
+# images: the runtime of every GPU preset stays llm-d v0.8.0 (vLLM 0.23.0),
+# while the 0.7.x presets name llm-d v0.9.0 (vLLM 0.26.0), whose transformers
+# cannot load Gemma 4 (the gemma-4 presets crash-loop on 'head_dim is a
+# per-layer attribute'). The pin moves with an llm-d release that serves
+# Gemma 4, and modelServing.prepull.images moves with it.
 kserve-runtime-configs:  # @schema skipProperties: true; additionalProperties: true
   kserve:
     llmisvcConfigs:
       enabled: true
       imageRegistry: gsoci.azurecr.io/giantswarm/llm-d-fast/
+      images:
+        kserve-config-llm-template: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-worker-data-parallel: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-decode-template: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-decode-worker-data-parallel: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-prefill-template: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+        kserve-config-llm-prefill-worker-data-parallel: {main: gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0}
+      tracing:
+        exporterEndpoint: auto
+        podLabels:
+          observability.giantswarm.io/tenant: auto
+      rolloutStrategy:
+        maxSurge: 0
+        maxUnavailable: 1
     servingruntime:
       enabled: false
 
@@ -4862,6 +5181,30 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # Node selector of every model pod, e.g. the GPU node pool; a preset's
     # scheduling.nodeSelector is merged on top.
     nodeSelector: {}
+    # The sizeLimit of every emptyDir KServe composes into a model pod (home,
+    # tmp-dir, dshm and model-cache; kserve-provision-location on an oci://
+    # modelcar pod), set by the chart's Kyverno mutation on the pod and on
+    # its Deployment's pod template (modelServing.policies): the volumes are
+    # bounded, and the fleet's require-emptydir-requests-and-limits audit
+    # has nothing to report. shmSizeLimit bounds dshm, the memory-backed
+    # /dev/shm of vLLM's worker processes: a tensor-parallel preset (four
+    # GPUs on one pod) passes activations through it wherever the cards have
+    # no peer-to-peer path (NCCL's shared-memory transport, as on PCIe L40S),
+    # and KServe's own multi-GPU templates set 8Gi — the single-node
+    # template's 1Gi is replaced. Memory-backed, so what is written counts
+    # against the runtime container's memory limit; the bound reserves
+    # nothing. modelCacheSizeLimit bounds the volume the storage-initializer
+    # downloads an hf:// model into (model-cache or kserve-provision-location,
+    # by KServe release) when modelServing.cache.enabled is false — with the
+    # cache on the claim takes its place —, so it holds the weights; a whole
+    # number of Gi or Ti, and the render fails when a preset in effect with
+    # an hf:// storageUri needs more (requirements.weightsGiB; the largest
+    # shipped one, nemotron-3-super-nvfp4, has 75). Every other emptyDir
+    # without a sizeLimit gets emptyDirSizeLimit; a sizeLimit KServe's
+    # template sets on one of those stays.
+    shmSizeLimit: 8Gi
+    modelCacheSizeLimit: 100Gi
+    emptyDirSizeLimit: 1Gi
   # The GPU node pool the served models run on (giantswarm/agent-platform#315;
   # bumblebee-plans#46, the plan's D3). A pool created through the platform
   # (the gpu-node-pool chart) arrives tainted nvidia.com/gpu NoSchedule — only
@@ -4890,6 +5233,12 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # it with the pool); empty selects no pool. Label values are strings:
     # quote a number.
     nodeSelector: {}
+  # Nodes joined by a fast link (RDMA), published as the discovery
+  # ConfigMap's spec.fastLinks for model-manager (giantswarm/model-manager#190):
+  # a model is split across the nodes of one fast link, never across nodes
+  # without one. Mirrored from the connectivity chart (its values document
+  # an entry); empty: no split anywhere.
+  fastLinks: []
   # Pre-pulling the serving runtime image on the pool's nodes
   # (giantswarm/agent-platform#545); mirrored from the connectivity chart leaf
   # for leaf (make verify-meta holds the two equal: the forwarded copy shadows
@@ -5363,6 +5712,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # kagent agent pods and the release namespace: e.g. the namespace of a
     # Gateway of the operator's own or of Prometheus.
     additionalIngressNamespaces: []
+    # The OTLP endpoint the model pods export their traces to, which
+    # <release>-model-serving-otlp-egress opens (README "The model pods'
+    # traces"). `auto` follows global.observability.traces.otlp.endpoint; the
+    # meta chart writes the tracing preset's resolved endpoint here
+    # (kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint),
+    # so an explicit preset endpoint moves the egress with it. Empty: no rule.
+    otlpEndpoint: auto
     # Where the weights come from, TCP 443: the KServe storage-initializer
     # (hf:// presets), the runtime's own Hub lookups, model-manager's
     # pre-warm download Jobs and — on the kserve backend — model-manager
@@ -5441,6 +5797,16 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
         name: ""
         kind: ClusterIssuer
         group: cert-manager.io
+    # The data plane's LoadBalancer Service: annotations on the Gateway's
+    # infrastructure, which the Service inherits. The models host is public by
+    # design (the JWT is checked at the gateway), so the default asks the AWS
+    # Load Balancer Controller for an internet-facing NLB — its own default is
+    # internal, which publishes the host with private addresses. An
+    # installation that wants a private models host sets the scheme to
+    # internal; other providers ignore the annotation.
+    service:
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
     # external-dns: the hostname annotation on the Gateway's infrastructure,
     # which the data plane's LoadBalancer Service inherits.
     externalDns:

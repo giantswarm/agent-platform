@@ -84,6 +84,9 @@ spec:
   policyTypes: [Egress]
   egress:
     {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $backstage "who" "the portal's traces go to" "flavor" "kubernetes") }}
+    {{- . | nindent 4 }}
+    {{- end }}
     - to:
         - ipBlock:
             cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}

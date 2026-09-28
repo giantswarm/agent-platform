@@ -2,6 +2,160 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## CRDs on an upgrade, per install path
+
+Every component ships its own CRDs and upgrades them with its release; there is no CRD chart to upgrade first ([README: CRD lifecycle](./README.md#crd-lifecycle)). Who applies a changed CRD, and what is left to the operator:
+
+| Install path | Component CRDs | Flux CRDs | Operator action |
+|---|---|---|---|
+| **The bundled engine, self-managed** (`components.flux.enabled: true`, `gitops.self.enabled: auto`: the Helm CLI is day 0 only) | helm-controller, with each component release: `crds: CreateReplace` on the charts that carry `crds/` (muster, agentgateway, agent-sandbox); the charts that render their CRDs as templates (kagent-crds, substrate-crds, kserve-llmisvc-crd, cloudnative-pg) apply them with every release | the Flux Operator keeps the seven source- and helm-controller CRDs current with Flux inside `2.x`. Its own four `fluxcd.controlplane.io` CRDs, which the operator does not manage and Helm never upgrades from `crds/`, the chart's pre-upgrade hook server-side applies with every upgrade (field manager `agent-platform`) | nothing |
+| **The bundled engine, Helm CLI on day 2** (`gitops.self.enabled: false`, the lab shape) | the same: the component releases are helm-controller's either way | the same | the same |
+| **The cluster's own Flux** (`components.flux.enabled: false`) | the same, through that Flux | the cluster's own, never the chart's | nothing |
+| **Raw Helm, no Flux** (each component chart installed by hand, [README](./README.md#raw-helm-without-the-engine)) | the template CRDs upgrade with their release; a chart's `crds/` (muster, agentgateway, agent-sandbox) Helm installs once and never upgrades | — | on every upgrade of muster, agentgateway or agent-sandbox, apply its CRDs first: `helm show crds <chart> --version <new> \| kubectl apply --server-side -f -` |
+
+A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
+
+## \<current\> → \<next\> (the Flux Operator CRDs upgrade with the chart)
+
+giantswarm/agent-platform#728: with the bundled engine, a pre-install/pre-upgrade hook Job `<release>-flux-operator-crds` (weight -9, the hook identity, `gitops.hooks.image`) server-side applies the four `fluxcd.controlplane.io` CRDs from a hook ConfigMap that carries the subchart's `crds/flux-operator.yaml`. Until now they stayed as the first install applied them.
+
+- **None.** The upgrade to this release runs the hook once: the CRDs move to field manager `agent-platform` (from `helm`) and to the schema of the operator the chart pins; no `FluxInstance`, `FluxReport` or `ResourceSet` changes. The seven Flux CRDs stay the operator's. The manual `helm show crds … \| kubectl apply --server-side` step for a Flux Operator bump is gone.
+- **Recognising it worked**: `kubectl get crd fluxinstances.fluxcd.controlplane.io -o jsonpath='{.metadata.managedFields[*].manager}'` names `agent-platform`, and `kubectl get crd fluxinstances.fluxcd.controlplane.io -o jsonpath='{.metadata.labels.app\.kubernetes\.io/version}'` the operator the chart pins.
+
+## \<current\> → \<next\> (the serving slice on KServe v0.21.0, predictors roll without a surge pod)
+
+giantswarm/agent-platform#682: the three kserve components move from `0.5.x` / `0.6.x` to `0.7.x`, the charts of KServe v0.21.0, and `kserve.llmisvcConfigs.rolloutStrategy: {maxSurge: 0, maxUnavailable: 1}` makes every predictor roll stop the old pod first. The runtime image stays `llm-d-cuda:v0.8.0`, pinned per preset under `kserve.llmisvcConfigs.images`.
+
+### Operator action
+
+- **None** for an installation on the defaults, or with the kserve components off. The upgrade rolls every served model's predictor once (the new presets' command and routers). The strategy lands with the same upgrade, so each model is down from the old pod's exit until the new one is Ready, a cold start on a node that has the image pre-pulled.
+- **A BOM pin** (`components.kserve-*.versionRange` at `0.5.x` / `0.6.x`): pin `0.7.1` for all three: the `0.6.x` runtime-configs schema refuses `rolloutStrategy`, and `0.7.0`'s controller reports `Ready` with no replica available under it.
+- **An installation that sets `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry`** also sets `kserve.llmisvcConfigs.images.<preset>.main` for the six GPU presets at its own prefix: the pins name gsoci's `llm-d-fast/` and win over the registry rewrite.
+- **Recognising it worked**: `kubectl -n <serving namespace> get deploy -l kserve.io/component=workload -o jsonpath='{range .items[*]}{.metadata.name} {.spec.strategy.rollingUpdate}{"\n"}{end}'` prints `{"maxSurge":0,"maxUnavailable":1}` for every predictor, and its pods still run `llm-d-cuda:v0.8.0`.
+
+## \<current\> → \<next\> (the Substrate line at `1.1.2`: the bucket-init Job's image from gsoci)
+
+giantswarm/agent-platform#580: `components.substrate{,-crds}.versionRange` is `>=1.1.2 <1.2.0` and `substrate.images.awsCli` is `gsoci.azurecr.io/giantswarm/aws-cli:2.17.0` (same digest as Docker Hub's `amazon/aws-cli:2.17.0`). From 1.1.2 on, Substrate's `rustfs-bucket-init` Job is a Helm hook (`post-install,post-upgrade`, deleted once it succeeds), so its image can change on an upgrade.
+
+### Operator action
+
+- **None** for an installation on the defaults. With the bundled store on (`substrate.rustfs.enabled`), the upgrade deletes the old completed Job, and the hook Job runs from gsoci and is removed when it succeeds. The kagent WorkerPool's worker image follows the floor to `ateom-gvisor:1.1.2`.
+- **An installation that pins `components.substrate{,-crds}.versionRange` below 1.1.2** and takes this value must also drop its `substrate.images.awsCli` override or pin 1.1.2: on 1.1.0 or 1.1.1 the Job is a release resource, and a changed image fails the upgrade on the immutable pod template.
+- **Recognising it worked**: `kubectl -n ate-system get job rustfs-bucket-init` answers NotFound after the upgrade (the hook ran and was removed), and `helm -n ate-system get hooks substrate` shows the Job with `gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@…`.
+
+## \<current\> → \<next\> (`modelManager.route` is removed)
+
+giantswarm/agent-platform#271: model-manager is reached through muster only. The connectivity chart no longer renders its REST route (`AgentgatewayBackend`, `HTTPRoute` and the public `HTTPRoute`), its JWT policy and JWKS backend, or the data plane's ingress and egress legs to it.
+
+### Operator action
+
+- **None** for an installation on the defaults: the route was off, and model-manager's Deployment, Service, `MCPServer` CR and muster legs render unchanged.
+- **An installation that sets `modelManager.route`** (any key under it, `enabled: false` included): the render fails naming this issue. Delete the block. A REST client of `https://agentgateway.<domain>/model-manager/api/v1` moves to the `x_model-manager_*` tools through muster as the person.
+- **An installation that set `modelManager.route.hostname`** to move model-manager's OAuth resource URL: set `model-manager.oauth.baseURL` instead; without it the URL is `https://agentgateway.<global.domain>/model-manager`.
+- **Recognising it worked**: `kubectl -n agent-platform get httproutes,agentgatewaybackends,agentgatewaypolicies | grep model-manager` prints nothing, and `x_model-manager_list_backends` answers through muster.
+
+## \<current\> → \<next\> (the managers, the portal and mcp-kubernetes export traces)
+
+giantswarm/giantswarm#36711: model-manager, agent-manager, vm-manager, cluster-manager, backstage and mcp-kubernetes export their traces over OTLP to `global.observability.traces.otlp`, and their ranges start at the releases that do (model-manager `1.3.0`, agent-manager `1.2.0`, vm-manager `0.24.0`, cluster-manager `0.19.0`, backstage `2.68.0`, mcp-kubernetes `1.3.0`).
+
+### Operator action
+
+- **None** for an installation on the defaults: each component resolves the new release in its range and starts exporting to the platform's collector under its tenant.
+- **A BOM that pins one of the six** below its new floor: pin the floor (`examples/customer-bom.yaml`).
+- **An installation that sets a component's OTLP keys itself** (`<component>.observability.otel.*`, `mcp-kubernetes.mcpKubernetes.instrumentation.otlp*` / `.tracingExporter`): the explicit value wins, and its egress rule follows it. To follow the platform's collector, delete it.
+- **Recognising it worked**: `sum by (service) (increase(traces_spanmetrics_calls_total{service=~"model-manager|agent-manager|vm-manager|cluster-manager|backstage|mcp-kubernetes"}[1h]))` is non-zero once each component served a request.
+
+## \<current\> → \<next\> (`kagent.harness.compaction.tokenThreshold` is `600000`)
+
+giantswarm/giantswarm#37792: the platform Harness compacts an agent's history only once a prompt passes 600 000 tokens (was 24 000), keeping the last four events and summarising on the agent's own model. Below that every follow-up re-reads its history from the prompt cache.
+
+### Operator action
+
+- **None** for an installation on the defaults. The kagent release upgrades once and the Harness's `spec.kagent.compaction` changes; every admitted AgentTemplate recompiles once (about 20 s per template).
+- **An installation whose agents run on a model with a context window below 600 000 tokens** (a self-served model): set `kagent.harness.compaction.tokenThreshold` below that window, or those agents fill it before compacting.
+- **An installation that set `kagent.harness.compaction` itself**: nothing changes, the explicit value wins.
+- **Recognising it worked**: `kubectl -n kagent get harness kagent -o jsonpath='{.spec.kagent.compaction}'` prints `{"eventRetentionSize":4,"tokenThreshold":600000}`, and one agent turn answers.
+
+## \<current\> → \<next\> (`global.observability.traces.otlp` is the collector of every exporter, not only the data plane's)
+
+giantswarm/giantswarm#36711: `global.observability.traces.otlp` used to reach the agentgateway data plane only, empty by default, and a set endpoint won over `gateway.parameters.dataPlaneEnv`. It now names the collector of every exporter of the platform: its default is `endpoint: http://otlp-gateway.kube-system.svc:4317`, `protocol: grpc` and the new `tenant: giantswarm`, and the meta chart writes it into every component key that is `auto`, the new default of kagent's, muster's, klaus-gateway's and Substrate's OTLP keys, of the tenant pod labels and of the data plane's two OTLP env entries. A component key set to anything else wins over it, the data plane's `dataPlaneEnv` entries included.
+
+### Operator action
+
+- **None** for an installation on the defaults: every component gets the endpoint, protocol and tenant it had. `global` is part of every component release's values, so each HelmRelease upgrades once with manifests that do not change.
+- **An installation that set `global.observability.traces.otlp.endpoint`** (to move the data plane's traces): the value now moves kagent, muster, klaus-gateway and Substrate too, with their egress rules. Keep it if that collector should take everything; otherwise set the other components' own keys. Set `tenant` too if the collector's tenant is not `giantswarm`, or empty if it takes none. An `X-Scope-OrgID` in `headers` is now the tenant: it fails the render unless it matches `tenant`, so move it there.
+- **An installation that set `global.observability.traces.otlp.protocol: http/protobuf`**: the render fails while klaus-gateway, Substrate or kagent's log exporter would take the endpoint (they speak gRPC only). Set `klausGateway.observability.otlpEndpoint`, `substrate.otel.endpoint` and `kagent.otel.logging.exporter.otlp.endpoint` to the collector's gRPC endpoint, as the message names.
+- **An installation that set both `global.observability.traces.otlp.endpoint` and its own `gateway.parameters.dataPlaneEnv`**: the list now wins. Write its OTLP values as `auto` (or drop them) to follow the global endpoint again.
+- **An installation that sets a component key itself** (`kagent.otel.*`, `muster.muster.observability.otel.*`, `klausGateway.observability.otlp*`, `substrate.otel.endpoint`, the tenant pod labels): nothing changes, the explicit value wins. To follow the platform's collector, delete it.
+- **Recognising it worked**: `kubectl -n <release namespace> get helmrelease muster -o jsonpath='{.spec.values.muster.observability.otel.endpoint}'` and the same for `klaus-gateway` (`{.spec.values.observability.otlpEndpoint}`), `substrate` (`{.spec.values.otel.endpoint}`) and `kagent` (`{.spec.values.otel.tracing.exporter.otlp.endpoint}`) print the collector's endpoint, and the platform's spans reach it under the tenant.
+
+## \<current\> → \<next\> (the kagent line at `1.2.0`: upstream kagent `main@dd3b2405`, `kagent.otel` in the SDK-spec shape)
+
+giantswarm/giantswarm#37742: the kagent line re-pinned on 2026-09-25 onto upstream `main@dd3b2405` (A2A over HTTP/JSON-RPC and per-instance Agent Cards, kagent-dev/kagent#2933; SDK-spec OTel variables, kagent-dev/kagent#2909), on the same Substrate `1.1.0`. `components.kagent*.versionRange` move to `>=1.2.0 <1.3.0`. The kagent chart takes its OTel settings as `otel.exporter.otlp.{endpoint,protocol,timeout}`, `otel.traces.enabled` and `otel.logs.enabled`, and compiles the actors' telemetry settings itself; the former `otel.tracing` and `otel.logging` blocks are ignored.
+
+### Operator action
+
+- **None** for an installation on the defaults: `kagent.otel` carries the new shape, its `auto` endpoint and protocol still follow `global.observability.traces.otlp`, `enabled: auto` still follows the monitoring API, and the Harness env loses `OTEL_LOGGING_ENABLED` and `KAGENT_TRACE_FLUSH_TIMEOUT_MS`, which the line no longer reads.
+- **`kagent.otel.tracing` or `kagent.otel.logging` set in your values**: move them to `kagent.otel.exporter.otlp.endpoint` / `.protocol` (both signals) or `kagent.otel.traces.endpoint` / `kagent.otel.logs.endpoint` (one signal, a full URL), and `kagent.otel.traces.enabled` / `kagent.otel.logs.enabled`. `insecure` is gone: the endpoint's scheme decides. Left as they are, the keys are ignored and kagent exports to the collector `global.observability.traces.otlp` names.
+- **`KAGENT_TRACE_FLUSH_TIMEOUT_MS` set on a Harness**: use `kagent.otel.exporter.otlp.timeout` (milliseconds; `500` by default), which bounds every export and so the flush before a turn's response.
+- **A BOM pin** (`components.kagent*.versionRange` at `1.1.x`): pin `1.2.0` for both.
+- **Recognising it worked**: `kubectl -n kagent get configmap kagent-controller -o yaml` shows `OTEL_TRACES_EXPORTER: otlp`, `OTEL_LOGS_EXPORTER: otlp` and `OTEL_EXPORTER_OTLP_TIMEOUT: "500"`; one agent turn is a trace in Tempo for the `giantswarm` tenant with the controller's and the actor's spans, and the actor's logs are in Loki.
+
+## \<current\> → \<next\> (the LLM listener routes by model: `llmRouting.backend` is `llmRouting.models`, and `llmRouting.pathPrefixes` and `llmRouting.routes` are gone)
+
+giantswarm/agent-platform#603: with `llmRouting.enabled` the LLM listener's backend is the model router instead of one `AgentgatewayBackend`: the request's `model` picks an `AgentgatewayModel`. The chart renders one per `llmRouting.models` entry — by default `anthropic`, provider Anthropic, `match: claude-*` — attached directly to the data-plane Gateway's LLM listener (`sectionName: llm`), with no `HTTPRoute` in front: agentgateway strips a route's matched `PathPrefix` before the model router, which then saw `/messages`, proxied it as Passthrough and recorded no token or cost metric. The in-cluster `HTTPRoute` `<name>-llm`, the Gateway-scoped route-type map (`AgentgatewayPolicy` `<name>-llm`) and the `AgentgatewayBackend` `anthropic` are removed with the upgrade. With the external endpoint on, `<name>-llm-external` matches `PathPrefix: /`, and behind a public Gateway it moves to a data-plane listener of its own, `llmRouting.external.listener` (`llm-external`, `8082`). With a serving model-manager (this release's slice, or a GPU node pool's) the chart renders the LLMEndpoint document, the ConfigMap `<name>-llm-endpoint` labelled `agent-platform.giantswarm.io/llm-endpoint: "true"`, so model-manager attaches the served models to the same parents; the serving slice's discovery ConfigMap no longer carries `spec.llmEndpoint`.
+
+### Operator action
+
+- **None** for an installation that sets `llmRouting.enabled` alone: agents whose ModelConfigs send `claude-*` model names (kagent's default ModelConfig, the chart's `kagent.modelConfigs`, the portal's) route to Anthropic as before, with the client's own key, metered by the same data plane. ModelConfig base URLs stay `http://agentgateway.<release namespace>.svc:8081` with no path.
+- **An installation that set `llmRouting.backend`**: the schema refuses the key. Name the provider as the first `llmRouting.models` entry instead — `provider` is agentgateway's managed provider name (`Anthropic`, `OpenAI`, …) and `match` the model names it takes; the first entry's provider is the one whose ModelConfigs ride the listener, as `backend.provider`'s was.
+- **An installation that set `llmRouting.pathPrefixes` or `llmRouting.routes`**: the schema refuses both keys. Remove them: the models match the serving endpoints on the listener, and the router classifies each request itself.
+- **An installation with `llmRouting.external` behind a public Gateway**: the data plane gains the listener `llm-external` on `8082`. Set `llmRouting.external.listener.port` when `8082` is taken; the render refuses a port another listener has.
+- **A ModelConfig on the listener whose model name the default does not take** (an Anthropic model not named `claude-*`): add an entry whose `match` takes it, or the listener answers `404 model_not_found`.
+- **Recognising it worked**: `kubectl -n <release namespace> get agentgatewaymodel` lists `anthropic` (plus one per served model on an installation with a serving model-manager), `kubectl -n <release namespace> get httproute` lists no `<name>-llm`, an agent turn on the default ModelConfig answers, and `agentgateway_gen_ai_client_token_usage` grows for it.
+
+## \<current\> → \<next\> (the portal's app-config carries no `agentPlatform.modelManager`)
+
+giantswarm/agent-platform#318: the connectivity chart no longer renders `agentPlatform.modelManager.installations.<installation>.apiBaseUrl` into the Backstage app-config. Since giantswarm/backstage#2294 (Backstage 2.19.0 and later) the Models pages call model-manager's `x_model-manager_*` tools through muster as the signed-in person, and the portal backend has no model-manager client that would read the key. The `muster.installations` entry and model-manager's `MCPServer` are unchanged; the model-manager route (`modelManager.route`) stays for REST clients.
+
+### Operator action
+
+- **None** for an installation on Backstage 2.19.0 or later (the chart's range admits `>=1.0.0 <3.0.0`; the Models pages already use muster). The app-config changes, so the config-reload hook rolls the portal once.
+- **An installation that added a Backstage peer to `modelManager.networkPolicy.ingress.additionalPeers`** for the portal's REST path can drop it: the portal no longer calls model-manager directly.
+- **Recognising it worked**: `kubectl -n <release namespace> get configmap agent-platform-backstage-app-config -o yaml` shows no `modelManager:` under `agentPlatform`, and the Models pages list the installation's models.
+
+## \<current\> → \<next\> (the managers' OAuth client, secret, issuer and base URL follow muster's login)
+
+giantswarm/agent-platform#484: the meta chart fills what `model-manager.oauth`, `agent-manager.oauth`, `vm-manager.oauth` and `cluster-manager.oauth` and `global.identity` leave unset from muster's OAuth server block, the platform's one login: `oauth.dex.issuerURL` ← `muster.muster.oauth.server.dex.issuerUrl`, `oauth.dex.clientID` and `oauth.trustedAudiences` ← `dex.clientId`, `oauth.existingSecret` ← `existingSecret` (a Secret with key `dex-client-secret`), for the dex provider while muster's OAuth server is on; `oauth.baseURL` of model-manager and agent-manager ← `https://<modelManager|agentManager.route.hostname, else agentgateway.<global.domain>><route.pathPrefix>` under an agentgateway-* `ingress.mode`. A manager's own value wins; so does `global.identity`, which the charts read themselves. model-manager's render-time guard in the connectivity chart fires again on absence once muster's OAuth server names a Dex issuer.
+
+### Operator action
+
+- **None** for an installation that sets `global.identity.{issuerUrl, clientId, existingSecret}` and the managers' base URLs: it renders byte-identically.
+- **Optional clean-up**: `global.identity.clientId` / `existingSecret` and the managers' `oauth.dex.clientID` / `oauth.existingSecret` / `oauth.trustedAudiences` that repeat muster's values can go; an installation whose muster logs in with its own Dex client (`muster.muster.oauth.server.dex.clientId`) needs no per-installation value for the managers. `model-manager.oauth.baseURL` / `agent-manager.oauth.baseURL` of the shape `https://<agentgateway hostname>/<manager>` can go under an agentgateway-* `ingress.mode` where `global.domain` or the route's `hostname` names that host.
+- **The connectivity release fails naming the value** when muster's login is named but incomplete for model-manager — no client (`muster.muster.oauth.server.dex.clientId` or `global.identity.clientId`), no Secret (`muster.muster.oauth.server.existingSecret` or `global.identity.existingSecret`), no base URL (`modelManager.route.hostname`, `global.domain` or `model-manager.oauth.baseURL`): set the named value. Before, the model-manager release failed with the chart's own message.
+
+## \<current\> → \<next\> (the dev channel's filter reads gitsemver 3's tag shape)
+
+architect-orb 10.10.0 (2026-09-23) tags dev builds `X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>` (gitsemver 3) instead of `X.Y.Z-dev.<branch>.<YYYY-MM-DD>.<HH-MM-SS>.h<sha7>`; this repository, the kagent line and the Substrate line build with it. A `semverFilter` written for the superseded shape matches no build made since and keeps its channel on the last one.
+
+### Operator action
+
+- **None** for an installation on the defaults: no default carries a filter, and the stable ranges carry no `-0`, so they refuse a dev build of either shape (at one `X.Y.Z` a current tag sorts above the `-gs.N` and `-dev.` tags and, for a hash starting `0`–`b`, below `-rc.N`).
+- **An installation on a dev channel** (`components.<name>.semverFilter` or `gitops.self.semverFilter` set): replace the filter with `^.*-r<branch-hash>t[0-9]{14}h[0-9a-f]{7}$`, where `gitsemver branch-hash <branch>` prints the hash (`588f3d76` for the kagent and Substrate lines' branch `giantswarm`), and keep the range's floor below the branch's base (`>=0.0.0-0` for a line whose re-pin restarted its count). The channel moves to the branch's newest current build on the next reconcile, even where a superseded build carries a higher base.
+- **Recognising it worked**: `kubectl -n <release namespace> get ocirepository <name> -o jsonpath='{.status.artifact.revision}'` names a `-r…t…h…` tag.
+
+## \<current\> → \<next\> (the `klausGateway` keys the Slack-only gateway ignores are no longer forwarded)
+
+giantswarm/klaus-gateway#319: klaus-gateway 2.0.0 serves Slack only, `components.klaus-gateway.versionRange` is `>=2.0.0 <3.0.0`, and this chart stops forwarding the six keys that served the removed paths — `klausGateway.cli`, `klausGateway.lifecycle`, `klausGateway.upstream`, `klausGateway.agentgateway`, `klausGateway.routing.defaultTTL` and `klausGateway.a2a.saToken`. The klaus-gateway `HTTPRoute` the connectivity chart renders (`klausGateway.agentgatewayRoute.enabled`) drops `/v1`, `/web` and `/cli/v1`, which answer 404 on 2.x, and carries `/channels/slack` alone; with `klausGateway.slack.enabled` off it now renders nothing at all, the route having nothing left to publish. The OBO route (`/auth/slack/`, `/connectors/complete`) is untouched.
+
+### Operator action
+
+- **None** for an installation on the defaults. The klaus-gateway release loses six values it did nothing with; the pod does not roll on them alone.
+- **An installation whose own values still set one of the six keys** (the `agent-platform` patch in giantswarm-configs): the key keeps travelling to the release and is still accepted as a no-op by the 2.x chart. Drop it from your values before klaus-gateway's next major, which deletes the keys from its schema — a values file that still sets one then fails the release.
+- **An installation on the BOM** (`examples/customer-bom.yaml`): the pin moves from `1.20.0` to `2.0.0`, the Slack-only release. Flux upgrades the klaus-gateway release once; a Slack turn in flight ends with the pod, so land it in a quiet window.
+- **An installation with its own pin below `2.0.0`** (`components.klaus-gateway.versionRange` set in your values, which replaces the chart's range — the render accepts it, nothing checks it): **move the pin to `2.0.0`**, and act before you take this release. A 1.x chart reads the six keys, and with none forwarded it falls back to its own defaults — `lifecycle.driver: operator` with no `operatorMCPURL`, where this chart forwarded `static` — and the pod does not start. Moving the pin is the fix; `klausGateway.lifecycle.driver: static` in your own values holds a 1.x gateway up in the meantime. The other five defaults match what this chart forwarded, so they change nothing.
+- **Recognising it worked**: `kubectl -n <release namespace> get helmrelease klaus-gateway -o jsonpath='{.spec.values.cli}{.spec.values.lifecycle}{.spec.values.upstream}{.spec.values.agentgateway}{.spec.values.routing.defaultTTL}{.spec.values.a2a.saToken}'` prints nothing, and with the route on, `kubectl -n <release namespace> get httproute klausgateway -o jsonpath='{.spec.rules[*].matches[*].path.value}'` prints `/channels/slack`.
+
 ## \<current\> → \<next\> (the kagent controller's memory limit is `1536Mi`; the VPA's cap is `1280Mi`)
 
 The meta chart sets `kagent.controller.resources`: the kagent chart's defaults, with the memory limit raised from `512Mi` to `1536Mi`. `kagent.controller.vpa.maxAllowed.memory` moves from `480Mi` to `1280Mi` in both charts, a step under the new limit.
@@ -21,6 +175,19 @@ giantswarm/giantswarm#36711: `components.kserve-llmisvc-crd`, `components.kserve
 - **None** for an installation on the defaults, or with the kserve components off.
 - **A BOM pin** (`components.kserve-*.versionRange` at a `0.4.x` release): pin `0.5.0` for all three. A `0.4.x` pin makes the `kserve-llmisvc-resources` release fail on the new keys.
 - **Recognising it worked**: `kubectl -n <release namespace> get servicemonitor llmisvc-controller-manager` exists when the cluster serves `monitoring.coreos.com/v1`, and `up{job="llmisvc-controller-manager-service"}` is `1` in Mimir for the `giantswarm` tenant.
+## \<current\> → \<next\> (the kagent line and the Substrate line at `1.1.0`: upstream kagent `main@1069fd2` on Substrate v0.2.0-beta5, the Generic agent chart at `1.5.0`, the data planes at agentgateway `2.1.2`)
+
+giantswarm/giantswarm#37705: the three lines re-pinned on 2026-09-22 and again on 2026-09-24 (kagent `main@1069fd2`, Substrate v0.2.0-beta5, agentgateway `main@3528a428`). Substrate v0.2.0-beta4 brings gateway credential injection: the egress gateway terminates the actors' TLS, injects every credential (model keys, MCP headers, the skills' git credentials) into the request, and the actor holds only placeholders. kagent `main@844ea06b` compiles against it and moves context compaction from the AgentTemplate to the Harness.
+
+### Operator action
+
+- **None** for an installation on the defaults. The connectivity release's bootstrap hook mints the fifth pool, `egress-mitm-ca-pool`, before the `substrate` release upgrades; the chart's `substrate.image` block carries the split registry and repository; the platform Harness carries the compaction the agent chart used to render.
+- **`substrate.image.registry` set in your values** (a mirror): it must be the registry host alone, `mirror.example.com`, with the path in `substrate.image.repository`. The Substrate chart refuses a registry that carries a path, and the derived worker image follows both values.
+- **AgentTemplates outside the `kagent` namespace**: add that namespace to `substrate.credentialProvider.namespacePolicies` twice: one entry with `atespace` and `allowedNamespaces` both the namespace, and the namespace appended to the `allowedNamespaces` of the `ate-golden` entry (the golden actors' atespace, where a template's private git skills are fetched first). Without the first every model call of those agents fails with the runtime's 401; without the second the golden boot of a template with a private skill fails with git's 403 (`atespace "ate-golden" is not permitted to resolve secrets`).
+- **A private skill or plugin source with `credentialRef`**: the Secret key must hold `base64("<username>:<token>")` (GitHub: `x-access-token:<token>`), the value the gateway sends as `Authorization: Basic`. Before, it held the raw token. Change the Secret before the AgentTemplate re-admits on the new kagent.
+- **Agents on the Generic agent chart**: `agent-manager.agentChart.semver` moves to `>=1.5.0 <2.0.0`; every agent namespace's OCIRepository follows and the agents re-render on 1.5.0, whose AgentTemplate carries no `spec.context` (the 1.4.x render is refused by this kagent). An installation that pinned the chart itself moves the pin.
+- **`context.compaction` in an agent chart's values**: the AgentTemplate no longer has the field; the Generic agent chart stops rendering it (its own release) and the platform Harness compacts every admitted agent with `kagent.harness.compaction`. Per-agent opt-out is gone until upstream offers it.
+- **Recognising it worked**: `kubectl -n ate-system get secret egress-mitm-ca-pool` exists; `kubectl -n ate-system get deploy` shows the credential provider next to the control plane; `kubectl -n kagent get harness kagent -o jsonpath='{.spec.kagent.compaction}'` prints the block; one agent turn through a model answers.
 
 ## \<current\> → \<next\> (the three upstream lines at their decoupled releases: kagent `1.0.0`, Substrate `1.0.0`, agentgateway `2.0.0`)
 
@@ -205,7 +372,7 @@ giantswarm/agent-platform#329 (bumblebee-plans#46 round 3, D3/D4/D5/D7; epic gia
 - **An installation that set nothing for model-manager** gains exactly the model-manager objects on its next reconcile: the OCIRepository and HelmRelease, and in the connectivity release the MCPServer CR, the JWT policy and the network policies, rendered from `global.identity` and the shared OAuth secret as for the other resource servers — no per-installation value is required. The default egress opens the identity provider only: no model server, no Hub.
 - **An installation with a static backend** (`model-manager.backend: ollama` with `model-manager.ollama.endpoint`, or `model-manager.backends: [...]`) renders byte-identically: the guards demand an endpoint only for a backend that *is* listed, exactly as before, and `backend: ollama` / `backends: [ollama]` without an endpoint still fail the render.
 - **With `components.kagent` off** the meta chart derives `kagent.disableWiring: true` for the model-manager release — the release must not wire ModelConfigs into a kagent the installation does not run. With kagent on, `model-manager.kagent.disableWiring` stands as set. **With `components.muster` off** it derives `muster.mcpServer.enabled: false`: the MCPServer CRD ships with muster, so model-manager's MCP surface follows it and the REST API stays. **With muster's OAuth server off** (`muster.muster.oauth.server.enabled: false`, the lab shape of `examples/kind-lab-dex.yaml`) it derives `oauth.enabled: false`: a platform without a login has no issuer for model-manager to trust.
-- **Model-manager's OAuth guard** follows the muster guard's convention: a `model-manager.oauth.dex.issuerURL` / `dex.clientID` / `existingSecret` that disagrees with `global.identity` fails the render (the platform has one login provider), checked only where both sides are set; a missing input is reported by the model-manager release itself, as for muster — a render that sets `global.domain` or `global.identity.issuerUrl` alone is untouched; every fleet installation sets the contract and keeps the actionable message.
+- **Model-manager's OAuth guard**: a `model-manager.oauth.dex.issuerURL` / `dex.clientID` / `existingSecret` that disagrees with `global.identity` fails the render (the platform has one login provider), checked only where both sides are set. A missing input was reported by the model-manager release itself, which failed on the installations that set `global.identity.issuerUrl` alone; since giantswarm/agent-platform#484 the meta chart fills model-manager's client, secret, issuer and base URL from muster's OAuth server block and the connectivity render names what is still missing (see that entry above).
 - **A backend registered at runtime and an enforcing network policy** (giantswarm/agent-platform#478): the connectivity chart's egress policy for model-manager is rendered from the static inputs, so a backend registered at runtime is not opened by it — under the cilium flavour an in-cluster Ollama on `:11434` is dropped, under the kubernetes flavour everything but 443. `modelManager.networkPolicy.registeredBackends` is the one input: a list of the destinations the installation allows — `{cidr, port}` entries in both flavours, `{fqdn, port}` under cilium (a name for an in-cluster Service: Cilium's CIDR rules match neither pods nor nodes) — rendered as one more egress rule each next to the static-backend rules; empty (the default) renders nothing.
 
 ### Operator action

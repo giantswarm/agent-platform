@@ -60,13 +60,13 @@ GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 # component -> (repository, versionRange, dependsOn, a line only the standalone's
 # defaults put into the forwarded values, or None when the block is empty)
 NEW = {
-    "backstage": (GSOCI, ">=1.0.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
-    "mcp-kubernetes": (GSOCI, ">=1.1.1 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
-    "cloudnative-pg": ("oci://ghcr.io/cloudnative-pg/charts", "0.29.x", [], None),
-    "kserve-llmisvc-crd": (GSOCI, "0.5.x", [], None),
+    "backstage": (GSOCI, ">=2.68.0 <3.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
+    "mcp-kubernetes": (GSOCI, ">=1.3.0 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
+    "cloudnative-pg": ("oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts", "0.29.x", [], "repository: gsoci.azurecr.io/giantswarm/cloudnative-pg"),
+    "kserve-llmisvc-crd": (GSOCI, "0.7.x", [], None),
     # The one KServe controller: it renders the control plane's shared objects
     # itself, since the classic controller (kserve-resources) is gone.
-    "kserve-llmisvc-resources": (GSOCI, "0.5.x", ["kserve-llmisvc-crd"], "createSharedResources: true"),
+    "kserve-llmisvc-resources": (GSOCI, "0.7.x", ["kserve-llmisvc-crd"], "createSharedResources: true"),
 }
 
 # The wiring chart has no range of its own: released off the same tag as the
@@ -80,10 +80,10 @@ CONNECTIVITY = "agent-platform-connectivity"
 # repository, versionRange, dependsOn with every component on): the kagent line's
 # two charts on the line's release range (one build, kagent after its CRDs), the
 # managers on the lines that speak v1alpha3 (agent-manager 1.x; model-manager
-# 0.x from 0.20.0, dual-version), klaus-gateway 1.x (A2A v1 over gRPC). kagent-crds
+# 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.0.0 <1.1.0"
+KAGENT_RANGE = ">=1.2.0 <1.3.0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
 # both landing in ate-system, both following components.kagent. The pin is the
@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.0.0 <1.1.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.0.0 <1.1.0"
-SUBSTRATE_PIN = "1.0.0"  # the range's floor, the BOM pin and the worker image's tag: the line's first release of its own stable semver, published to gsoci from CircleCI and signed (giantswarm/giantswarm#37873)
+SUBSTRATE_RANGE = ">=1.1.2 <1.2.0"
+SUBSTRATE_PIN = "1.1.2"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.2.0-beta5 (giantswarm/giantswarm#37705, the 2026-09-24 re-pin), whose atenet data plane is the agentgateway line's 2.1.2; the 1.0 line stays on release-1.0
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
@@ -101,28 +101,29 @@ LINE = {
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, "1.x", ["muster", "kagent"]),
+    "agent-manager": (GSOCI, ">=1.2.0 <2.0.0", ["muster", "kagent"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
-    "model-manager": (GSOCI, ">=0.23.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
+    "model-manager": (GSOCI, ">=1.3.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
     # 0.22.0 carries serviceMonitor.enabled / .labels (giantswarm/vm-manager#73,
     # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
     # from the generated CircleCI pipeline with its guest image artifact
     # (gsoci, the catalog). muster alone: the MCPServer CR.
-    "vm-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster"]),
+    "vm-manager": (GSOCI, ">=0.24.0 <1.0.0", ["muster"]),
     # 0.4.2 is the first cluster-manager release with the muster registration and
     # the identity contract the meta chart forwards that also tolerates a cluster
     # without the Cluster API group. muster alone: the MCPServer CR.
-    "cluster-manager": (GSOCI, ">=0.4.2 <1.0.0", ["muster"]),
-    # Swarmgeist on the line: klaus-gateway 1.x speaks A2A v1 over gRPC to the
-    # controller GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10
-    # REST client and belongs to the 3.x meta chart. The floor is 1.10.0, the
-    # first chart whose observability block takes the otlpHeaders knob the meta
-    # chart forwards by default (giantswarm/klaus-gateway#263). The ceiling
-    # admits the 2.x Slack-only line (giantswarm/klaus-gateway#319): the keys
-    # forwarded for the removed channels are no-ops there.
-    "klaus-gateway": (GSOCI, ">=1.20.0 <3.0.0", []),
+    "cluster-manager": (GSOCI, ">=0.19.0 <1.0.0", ["muster"]),
+    # Swarmgeist on the line: the line speaks A2A v1 over gRPC to the controller
+    # GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10 REST client and
+    # belongs to the 3.x meta chart. The floor is 2.0.0, the Slack-only line
+    # (giantswarm/klaus-gateway#319): the klausGateway block forwards no
+    # lifecycle.driver, and a 1.x gateway without one falls back to operator
+    # with no operatorMCPURL and does not start. 3.3.0 names a turn's failure
+    # class in the thread, the turn record and the turn metric
+    # (giantswarm/klaus-gateway#329).
+    "klaus-gateway": (GSOCI, ">=3.3.0 <4.0.0", []),
 }
 
 # The kagent.dev API version the 4.x line serves, pinned into both managers'
@@ -461,7 +462,16 @@ def main(meta: str, connectivity: str) -> int:
         vals = hr_values(on[("HelmRelease", name)]) + "\n"
         if not re.search(rf"^kagent:\n(?:  .*\n)*?  apiVersion: {KAGENT_API_VERSION}$", vals, re.M):
             fail(f"{name} release values do not pin kagent.apiVersion: {KAGENT_API_VERSION} — left to `auto`, a pod that started under kagent 0.10 keeps v1alpha2 across the upgrade (giantswarm/agent-platform#401)")
-    print(f"ok: the extras on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges, the managers pinned to kagent.dev/{KAGENT_API_VERSION}")
+    for (kind, name), doc in ((k, d) for k, d in on.items() if k[0] in ("OCIRepository", "HelmRelease")):
+        want = "1m" if kind == "OCIRepository" else "10m"
+        if f"\n  interval: {want}\n" not in doc:
+            fail(f"{kind} {name} does not reconcile on {want} (gitops.sourceInterval for sources, gitops.interval for releases)")
+    knobs = docs(render(meta, [*ci, "--set", "gitops.sourceInterval=30s", "--set", "gitops.interval=5m"]))
+    for (kind, name), doc in ((k, d) for k, d in knobs.items() if k[0] in ("OCIRepository", "HelmRelease")):
+        want = "30s" if kind == "OCIRepository" else "5m"
+        if f"\n  interval: {want}\n" not in doc:
+            fail(f"{kind} {name} does not follow {'gitops.sourceInterval' if kind == 'OCIRepository' else 'gitops.interval'}={want}")
+    print(f"ok: the extras on — one OCIRepository + HelmRelease each, sources, ranges, defaults, global, CRD-before-CR dependsOn, blocks forwarded, wiring keys omitted, the switch renders no release; the kagent line and the managers on their ranges, the managers pinned to kagent.dev/{KAGENT_API_VERSION}; sources poll on gitops.sourceInterval, releases on gitops.interval")
 
     # --- the dev channel: semverFilter ----------------------------------------------
     check_semver_filters(meta, ci)
@@ -506,9 +516,11 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"examples/customer-bom.yaml does not pin components.{name}.versionRange")
         pin = m.group(1)
         # Exact: X.Y.Z — the kagent and Substrate lines release stable semver of
-        # their own; a dogfooding BOM may pin a line's dev build
-        # (X.Y.Z-dev.<branch>.<date>.<time>.h<sha7>) instead.
-        if not re.fullmatch(r"\d+\.\d+\.\d+(-dev\.[a-z0-9-]+\.\d{4}-\d{2}-\d{2}\.\d{2}-\d{2}-\d{2}\.h[0-9a-f]{7})?", pin):
+        # their own; a dogfooding BOM may pin a line's dev build instead:
+        # gitsemver 3's X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>, or the
+        # superseded X.Y.Z-dev.<branch>.<date>.<time>.h<sha7> of a build made
+        # before architect-orb 10.10.0, which the registry still holds.
+        if not re.fullmatch(r"\d+\.\d+\.\d+(-r[0-9a-f]{8}t\d{14}h[0-9a-f]{7}|-dev\.[a-z0-9-]+\.\d{4}-\d{2}-\d{2}\.\d{2}-\d{2}-\d{2}\.h[0-9a-f]{7})?", pin):
             fail(f"the BOM pin for {name} is not an exact version: {pin!r}")
         if f'semver: "{pin}"' not in bom[("OCIRepository", name)]:
             fail(f"the BOM pin {pin} for {name} did not reach its OCIRepository")

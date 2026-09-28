@@ -53,9 +53,24 @@ a prerelease included) — because `helm pull --version <range>` reads the
 constraint with its own semver and, for the kagent line's prerelease releases,
 differently. A BOM pin that resolves to no published tag FAILS: a BOM no
 installation can install is a broken BOM, not something to render a substitute
-for. A RANGE that admits nothing published yet (a line re-pinned ahead of its
-release) is rendered against the newest chart the line has while UNRELEASED
-names the release it waits for (fallback()); the entry goes with the release.
+for. The layer is resolved the way Flux does too: every rendered OCIRepository
+selects the Helm chart layer, and the resolved artifact must carry it
+(flux_layer) — `helm pull` finds the chart by media type wherever it sits, so a
+pull that succeeds says nothing about the OCIRepository (cloudnative-pg 0.29.1,
+whose provenance layer sorts first, giantswarm/agent-platform#649). A RANGE
+that admits nothing published yet (a line re-pinned ahead of its release) is
+rendered against the newest chart the line has while UNRELEASED names the
+release it waits for (fallback()); the entry goes with the release.
+
+`--strict` is the tag pipeline's run (giantswarm/agent-platform#624): a release
+naming a chart nobody can pull is a release nobody can install, so UNRELEASED and
+RENDER_AGAINST do not apply, and a range that admits nothing published, or a BOM
+pin that is not published, FAILS naming the component and the version the
+release waits for — the range's floor. A GitHub release or a tag of the
+component is not evidence its chart exists; a tag pipeline that failed after
+tagging (klaus-gateway 1.20.0) leaves neither chart nor image. A release refused
+this way is recovered by rerunning the tag's workflow from failed once the chart
+is out; the branch pipeline keeps rendering against the fallbacks.
 
 Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
 chart (three attempts each); the tag
@@ -96,24 +111,40 @@ HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
-# line has (see fallback()); the entry goes when the release exists. Empty
-# today: agentgateway waits for the release that opens its monitoring values
-# (giantswarm/agentgateway#60 — through 2.3.0 the schema closes
-# monitoring.serviceMonitor.extraLabels and monitoring.grafanaDashboard.labels
-# and the dashboard ConfigMap renders no annotations). Nothing published carries
-# that schema, releases and branch builds alike, so RENDER_AGAINST cannot name
-# one and this check stays red until 2.4.0 exists; both entries go with it.
-# klaus-gateway waits for the release that opens serviceMonitor.labels
-# (giantswarm/klaus-gateway#316; through 1.19.1 the schema closes the block);
-# RENDER_AGAINST names that PR's branch build, which carries the schema.
-UNRELEASED: dict[str, str] = {"agentgateway": "2.4.0", "klaus-gateway": "1.20.0"}
+# line has (see fallback()); the entry goes when the release exists.
+UNRELEASED: dict[str, str] = {}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
-RENDER_AGAINST: dict[str, str] = {"klaus-gateway": "1.19.2-dev.feat-servi--itor-labels.2026-09-22.12-12-32.hf3c302d"}
+RENDER_AGAINST: dict[str, str] = {}
+# The layer every OCIRepository of the meta chart selects, and the manifest
+# types a Helm chart artifact is fetched as.
+HELM_CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 # An exact version, prerelease included (a dev build is one) — what a BOM
 # line may carry; a range is not a version this check can render "the pin" at.
 EXACT_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
+# --strict: the tag pipeline's run — no fallback, a release that names an
+# unpublished chart fails (main() sets it from the command line).
+STRICT = False
+
+
+def floor(constraint: str) -> str:
+    """The lowest version a constraint admits, as the release it waits for: the
+    `>=` bound of a range, an exact version itself."""
+    m = re.search(r">=\s*v?([0-9A-Za-z.+-]+)", constraint)
+    return m.group(1) if m else constraint.strip()
+
+
+def waits_for(name: str, url: str, constraint: str, tags: list[str]) -> str:
+    """The FAIL line of the strict run: which component, which version, what is
+    published instead, and how the release is recovered."""
+    newest = fluxsemver.resolve(tags, ">=0.0.0")
+    return (
+        f"{name}: nothing published at {url} satisfies {constraint!r}; the release waits for {name} {floor(constraint)} "
+        f"(the newest published chart is {newest or 'none'}). A GitHub release or a tag of the component is not its chart: "
+        f"once `devctl release wait` on it exits 0, rerun this tag's workflow from failed — no new tag"
+    )
 QUICKSTART = [
     "--set", "global.domain=example.com",
     "--set", "global.identity.issuerUrl=https://dex.example.com",
@@ -204,42 +235,91 @@ def source(doc: str) -> tuple[str, str]:
     return url, semver
 
 
-def registry_tags(url: str) -> list[str]:
-    """Every tag of an OCI repository (`oci://host/path`), anonymously, following
-    the distribution API's token challenge and Link pagination."""
-    host, _, path = url.removeprefix("oci://").partition("/")
-    next_url, token, tags = f"https://{host}/v2/{path}/tags/list?n=1000", None, []
-    for _ in range(100):
-        req = urllib.request.Request(next_url, headers={"Authorization": f"Bearer {token}"} if token else {})
+# Anonymous bearer tokens, one per OCI repository (`oci://host/path`).
+TOKENS: dict[str, str] = {}
+
+
+def registry_get(url: str, target: str, accept: str = "application/json") -> tuple[dict, dict]:
+    """GET one distribution API URL of an OCI repository (`oci://host/path`)
+    anonymously, answering the token challenge (again, once, when a held token
+    is refused); the JSON body and the response headers."""
+    for attempt in range(2):
+        headers = {"Accept": accept}
+        if url in TOKENS:
+            headers["Authorization"] = f"Bearer {TOKENS[url]}"
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                tags += json.load(r).get("tags") or []
-                link = r.headers.get("Link", "")
+            with urllib.request.urlopen(urllib.request.Request(target, headers=headers), timeout=60) as r:
+                return json.load(r), r.headers
         except urllib.error.HTTPError as e:
-            if e.code != 401 or token:
+            if e.code != 401 or attempt:
                 raise
             challenge = dict(re.findall(r'(\w+)="([^"]*)"', e.headers.get("Www-Authenticate", "")))
             with urllib.request.urlopen(f"{challenge['realm']}?service={challenge['service']}&scope={challenge['scope']}", timeout=60) as t:
                 body = json.load(t)
-            token = body.get("access_token") or body.get("token")
-            continue
-        m = re.search(r"<([^>]+)>", link)
+            TOKENS[url] = body.get("access_token") or body.get("token")
+    raise AssertionError("unreachable")
+
+
+def registry_tags(url: str) -> list[str]:
+    """Every tag of an OCI repository (`oci://host/path`), anonymously,
+    following the distribution API's Link pagination."""
+    host, _, path = url.removeprefix("oci://").partition("/")
+    next_url, tags = f"https://{host}/v2/{path}/tags/list?n=1000", []
+    for _ in range(100):
+        body, headers = registry_get(url, next_url)
+        tags += body.get("tags") or []
+        m = re.search(r"<([^>]+)>", headers.get("Link", ""))
         if not m:
             return tags
         next_url = m.group(1) if m.group(1).startswith("http") else f"https://{host}{m.group(1)}"
     fail(f"the tag list of {url} did not end after 100 pages")
 
 
-def fallback(name: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
+def layer_selector(doc: str) -> str:
+    """The media type a rendered OCIRepository's layerSelector names. Every
+    OCIRepository of the meta chart must name the Helm chart's: without a
+    selector source-controller takes layers[0], and on a signed chart that is
+    the provenance on about every other release (`helm push` orders the two
+    layers by digest; cloudnative-pg 0.29.1, giantswarm/agent-platform#649)."""
+    m = re.search(r"^  layerSelector:\n    mediaType: (\S+)\n    operation: copy$", doc, re.M)
+    name = re.search(r"^  name: (\S+)", doc, re.M).group(1)
+    if not m or m.group(1) != HELM_CHART_LAYER:
+        fail(f"the OCIRepository {name} does not select the Helm chart layer (layerSelector {{mediaType: {HELM_CHART_LAYER}, operation: copy}}): "
+             "source-controller then takes layers[0], which on a signed chart is its provenance about every other release")
+    return m.group(1)
+
+
+def flux_layer(name: str, url: str, version: str, doc: str) -> None:
+    """The layer source-controller takes from the artifact at `version` must be
+    the Helm chart: the first layer of the selector's media type
+    (OCIRepositoryReconciler.selectLayer; none is a failed OCIRepository).
+    `helm pull` picks by media type and succeeds either way, so the pull below
+    does not see this."""
+    selector = layer_selector(doc)
+    host, _, path = url.removeprefix("oci://").partition("/")
+    try:
+        manifest, _ = registry_get(url, f"https://{host}/v2/{path}/manifests/{version}", OCI_MANIFEST)
+    except urllib.error.URLError as e:
+        fail(f"{name} {version}: the manifest at {url} could not be fetched: {e}")
+    layers = [layer["mediaType"] for layer in manifest.get("layers") or []]
+    if selector not in layers:
+        fail(f"{name} {version}: the artifact at {url} has no {selector} layer ({layers}); the OCIRepository fails to find one")
+    print(f"ok: {name} {version}: source-controller takes the Helm chart, layer {layers.index(selector)} of {len(layers)} ({', '.join(layers)})")
+
+
+def fallback(name: str, url: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
     """The chart to render a RANGE against while nothing the constraint admits is
     published: the kagent build the values name (the kagent range's floor — the
     chart version of the same build), the branch build RENDER_AGAINST names, else
     the newest release tag. Only for a range UNRELEASED names, or for a BOM pin
     that IS the version UNRELEASED names — the one release the range waits for;
-    any other unpublished pin fails, because no installation on it can install."""
+    any other unpublished pin fails, because no installation on it can install.
+    Under --strict there is no fallback: the release waits for the floor."""
+    if STRICT:
+        fail(waits_for(name, url, constraint, tags))
     if name not in UNRELEASED:
-        fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED)")
-    chosen = kagent_tag if name in KAGENT else RENDER_AGAINST.get(name) or fluxsemver.resolve(tags, ">=0.0.0")
+        fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED); the release would wait for {name} {floor(constraint)}")
+    chosen = RENDER_AGAINST.get(name) or (kagent_tag if name in KAGENT else fluxsemver.resolve(tags, ">=0.0.0"))
     if not chosen or chosen not in tags:
         fail(f"no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
     print(f"NOTE: {name}: {constraint!r} matches no published chart yet (waits for {UNRELEASED[name]}); rendering against {chosen}")
@@ -344,9 +424,14 @@ def main(meta: str) -> int:
     rendered = {n for kind, n in wide if kind == "OCIRepository" and n != RELEASE}
     if rendered != set(charts.values()):
         fail(f"the render's OCIRepositories {sorted(rendered)} are not the roster's charts {sorted(charts.values())}")
+    for (kind, _), doc in [*wide.items(), *pinned.items()]:
+        if kind == "OCIRepository":
+            layer_selector(doc)
     kagent_oci = wide.get(("OCIRepository", charts.get("kagent", "kagent")))
     kagent_tag = source(kagent_oci)[1].split()[0].lstrip(">=") if kagent_oci else ""  # the range's floor = the build the values name
     print(f"--> {len(components)} components (the meta chart's roster): {len(pins)} pinned by the BOM, {len(released)} released with the chart")
+    if STRICT:
+        print("--> strict (the tag pipeline): every range and every BOM pin must resolve to a published chart; UNRELEASED and RENDER_AGAINST do not apply")
     with tempfile.TemporaryDirectory() as tmp:
         for name in sorted(components):
             chart = charts[name]
@@ -369,16 +454,18 @@ def main(meta: str) -> int:
             if pin != pins[name]:
                 fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
             tags = registry_tags(url)
-            version_range = fluxsemver.resolve(tags, rng) or fallback(name, rng, tags, kagent_tag)
+            version_range = fluxsemver.resolve(tags, rng) or fallback(name, url, rng, tags, kagent_tag)
             version_pin = fluxsemver.resolve(tags, pin)
-            if not version_pin and pin == UNRELEASED.get(name):
-                version_pin = fallback(name, pin, tags, kagent_tag)
+            if not version_pin and pin == UNRELEASED.get(name) and not STRICT:
+                version_pin = fallback(name, url, pin, tags, kagent_tag)
             if not version_pin:
-                fail(f"{name}: the BOM pins {pin!r}, which {url} does not publish — no installation on this BOM can install it")
+                fail(f"{name}: the BOM pins {pin!r}, which {url} does not publish — no installation on this BOM can install it"
+                     + (f"; {waits_for(name, url, pin, tags)}" if STRICT else ""))
             axes = [("range", rng, version_range, values_range), ("BOM pin", pin, version_pin, values_pin)]
             if version_range == version_pin and values_range == values_pin:
                 axes = [("range = BOM pin", f"{rng} = {pin}", version_range, values_range)]
             for label, constraint, version, values in axes:
+                flux_layer(name, url, version, wide[("OCIRepository", chart)])
                 chart_dir = f"{tmp}/{name}/{version}"
                 resolved = pull(url, version, chart_dir)
                 render_component(name, f"{chart_dir}/{chart}", values, f"{name} {resolved} (the {label} {constraint!r})", tmp)
@@ -386,4 +473,8 @@ def main(meta: str) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    args = [a for a in sys.argv[1:] if a != "--strict"]
+    STRICT = len(args) != len(sys.argv) - 1
+    if len(args) != 1:
+        sys.exit(f"usage: {sys.argv[0]} <meta chart dir> [--strict]")
+    sys.exit(main(args[0]))

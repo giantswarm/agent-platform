@@ -5,8 +5,8 @@ configmaps and namespaces, and on the podcert signers' cluster-scoped
 ClusterTrustBundles the bootstrap publishes — get, list, watch, create and
 patch (server-side apply), never delete — plus `attest` on the two podcert
 signers, which the apiserver demands of whoever writes a bundle naming them,
-on persistentvolumeclaims while this chart applies model serving's cache
-claim (templates/model-serving/cache-pvc.yaml), and delete on the pre-pull
+on persistentvolumeclaims (and get on storageclasses) while this chart applies
+model serving's cache claim (templates/model-serving/cache-pvc.yaml), and delete on the pre-pull
 DaemonSet by name while it renders (templates/model-serving/prepull.yaml: the
 DaemonSet is a post-install/post-upgrade hook object, and the pre-delete hook
 Job removes it). Cluster-scoped because the
@@ -56,9 +56,14 @@ rules:
   # applies the claim into the serving namespace: get says created or present
   # and reads the phase, create + patch are what an apply of a missing and of
   # an existing object need. Never delete: the claim outlives the release.
+  # get on StorageClasses: whether the claim's class still exists, and its
+  # parameters, which the hook stamps on the claim as its tier (#605).
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "create", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get"]
   {{- end }}
   {{- if include "agent-platform.modelServing.prepull.enabled" . }}
   # The pre-pull cleanup hook (templates/model-serving/prepull.yaml, pre-delete)

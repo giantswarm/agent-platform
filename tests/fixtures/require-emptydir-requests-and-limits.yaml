@@ -1,0 +1,67 @@
+# The fleet ClusterPolicy require-emptydir-requests-and-limits as a Giant Swarm
+# management cluster runs it (Kyverno Audit, background): a container mounting
+# an emptyDir without a sizeLimit needs ephemeral-storage requests and limits.
+# The model-serving policies bound every emptyDir of a model pod and of its
+# Deployment's template (giantswarm/agent-platform#556), so it passes both;
+# tests/verify-model-serving-policies.py asserts that with `kyverno apply`.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-emptydir-requests-and-limits
+  annotations:
+    policies.kyverno.io/category: Cost and Resource Optimization
+    policies.kyverno.io/description: 'Pods which mount emptyDir volumes may be allowed
+      to potentially overrun the medium backing the emptyDir volume. This sample ensures
+      that any initContainers or containers mounting an emptyDir volume have ephemeral-storage
+      requests and limits set. Policy will be skipped if the volume has already a
+      sizeLimit set.      '
+    policies.kyverno.io/minversion: 1.9.0
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/title: Require Requests and Limits for emptyDir
+spec:
+  admission: true
+  background: true
+  emitWarning: false
+  rules:
+  - context:
+    - name: emptydirnames
+      variable:
+        jmesPath: request.object.spec.volumes[?contains(keys(@), 'emptyDir') && !contains(keys(emptyDir),
+          'sizeLimit')].name
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    name: check-emptydir-requests-limits
+    preconditions:
+      all:
+      - key: '{{request.object.spec.volumes[?contains(keys(@), ''emptyDir'')] || `[]`
+          | length(@) }}'
+        operator: GreaterThanOrEquals
+        value: 1
+      - key: '{{ request.operation || ''BACKGROUND''}}'
+        operator: AnyIn
+        value:
+        - CREATE
+        - UPDATE
+    skipBackgroundRequests: true
+    validate:
+      allowExistingViolations: true
+      foreach:
+      - list: request.object.spec.[initContainers, containers][]
+        pattern:
+          resources:
+            limits:
+              ephemeral-storage: ?*
+            requests:
+              ephemeral-storage: ?*
+        preconditions:
+          any:
+          - key: '{{ element.volumeMounts[].name }}'
+            operator: AnyIn
+            value: '{{ emptydirnames }}'
+      message: Containers mounting emptyDir volumes must specify requests and limits
+        for ephemeral-storage.
+  validationFailureAction: Audit

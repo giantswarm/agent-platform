@@ -47,15 +47,18 @@ spec:
       group: agentgateway.dev
       kind: AgentgatewayParameters
       name: {{ $mg.name }}
+    {{- $annotations := deepCopy (($mg.service).annotations | default dict) }}
     {{- if $mg.externalDns.enabled }}
-    # Inherited by the data plane's LoadBalancer Service, where external-dns
-    # reads them: the hostname, and the filter annotation the installation's
+    {{- $annotations = merge (dict "external-dns.alpha.kubernetes.io/hostname" $host) ($mg.externalDns.annotations | default dict) $annotations }}
+    {{- end }}
+    {{- with $annotations }}
+    # Inherited by the data plane's LoadBalancer Service: service.annotations
+    # (the load balancer's shape, by default an internet-facing NLB where the
+    # AWS Load Balancer Controller runs, #690) and, where external-dns reads
+    # them, the hostname and the filter annotation the installation's
     # external-dns selects Services by.
     annotations:
-      external-dns.alpha.kubernetes.io/hostname: {{ $host }}
-      {{- with $mg.externalDns.annotations }}
       {{- toYaml . | nindent 6 }}
-      {{- end }}
     {{- end }}
 ---
 # The models data plane: one agentgateway Deployment per Gateway, shaped like

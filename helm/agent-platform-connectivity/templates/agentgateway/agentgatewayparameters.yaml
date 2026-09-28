@@ -1,21 +1,7 @@
 {{- if and (include "agent-platform.ingress.agentgateway" .) .Values.gateway.parameters.enabled }}
-{{- /* Data-plane env: OTEL_* from global.observability.traces.otlp first, then
-gateway.parameters.dataPlaneEnv minus entries the global block already named —
-so a set global endpoint wins over the defaults without duplicating env names. */ -}}
-{{- $otlp := list }}
-{{- with (include "agent-platform.otlpEnv" .) }}
-{{- $otlp = . | fromYamlArray }}
-{{- end }}
-{{- $otlpNames := dict }}
-{{- range $otlp }}
-{{- $_ := set $otlpNames .name true }}
-{{- end }}
-{{- $env := $otlp }}
-{{- range (.Values.gateway.parameters.dataPlaneEnv | default list) }}
-{{- if not (hasKey $otlpNames .name) }}
-{{- $env = append $env . }}
-{{- end }}
-{{- end }}
+{{- /* Data-plane env: gateway.parameters.dataPlaneEnv with its `auto` OTEL_*
+values taken from global.observability.traces.otlp (agent-platform.dataPlaneEnv). */ -}}
+{{- $env := include "agent-platform.dataPlaneEnv" . | fromJsonArray }}
 {{- $params := .Values.gateway.parameters }}
 {{- /* The replica count. A key Helm deleted — `replicas: null` set through the
 meta chart, or an emptied entry in a values file — is not a value the schema's

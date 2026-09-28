@@ -2,13 +2,13 @@
 {{- $mm := .Values.modelManager }}
 {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson }}
 {{- $port := include "agent-platform.modelManager.servicePort" . }}
-{{- $backends := include "agent-platform.modelManager.backends" . | fromJsonArray }}
 {{- /* A kserve backend exists as a static entry of modelManager.backends, or
 is registered at runtime by cluster-manager (its model-backend-kserve
 ConfigMap, invisible to the chart): either way model-manager calls the Hugging
 Face Hub for it (search, fit checks, revision lookups), so the hub egress
 renders whenever components.cluster-manager is on (#494). */ -}}
-{{- $kserveOn := or (has "kserve" $backends) (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "cluster-manager")) "true") }}
+{{- $kserveOn := include "agent-platform.modelManager.kserveOn" . }}
+{{- $wc := include "agent-platform.modelManager.workloadClusters" . | fromJson }}
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.modelManager.oauthEnabled" . }}
@@ -36,12 +36,25 @@ holds byte for byte. */ -}}
 egress to their servers: every endpoint split into host, port and whether it
 is an address — one model-manager may front several. */ -}}
 {{- $servers := include "agent-platform.modelManager.hostTargets" (dict "root" . "key" "endpoint") | fromJsonArray }}
+{{- /* model-manager reads a Ready model's runtime — GET /version and
+GET /openapi.json on the workload port — for the API interfaces it answers,
+wherever it serves: the serving slice of this release, or a slice a GPU node
+pool brought as a second release of the chart (cluster-manager's
+create_node_pool; model-manager's kserve backend then comes from cluster-manager,
+and this release's modelServing stays off). The namespace is
+agent-platform.modelManager.servingNamespace; the serving
+namespace's own policy admits the release namespace on that port
+(model-serving/netpol.yaml; a node pool's slice through
+modelServing.networkPolicy.additionalIngressNamespaces). */ -}}
+{{- $readsServing := include "agent-platform.modelManager.serves" . }}
+{{- $servingNs := include "agent-platform.modelManager.servingNamespace" . }}
+{{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
-# Ingress to model-manager: the agentgateway data plane (the portal's route)
-# and muster (the MCP endpoint), both in the release namespace, on the Service
-# port only — plus the kubelet's probes (host entity), which a policy that
+# Ingress to model-manager: muster (the MCP endpoint, the one platform caller)
+# and additionalPeers, in the release namespace, on the Service port only —
+# plus the kubelet's probes (host entity), which a policy that
 # selects the pod would otherwise deny.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -56,11 +69,6 @@ spec:
       {{- include "agent-platform.modelManager.podSelector" . | nindent 6 }}
   ingress:
     - fromEndpoints:
-        {{- if $mm.route.enabled }}
-        - matchLabels:
-            gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
-            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
-        {{- end }}
         {{- if $mcpOn }}
         - matchLabels:
             app.kubernetes.io/name: muster
@@ -71,7 +79,7 @@ spec:
             {{- toYaml . | nindent 12 }}
             io.kubernetes.pod.namespace: {{ $.Release.Namespace }}
         {{- end }}
-        {{- if not (or $mm.route.enabled $mcpOn $peers) }}
+        {{- if not (or $mcpOn $peers) }}
         # No platform caller is on: nothing reaches the API but the probes.
         - matchLabels:
             io.kubernetes.pod.namespace: {{ .Release.Namespace }}
@@ -111,6 +119,9 @@ spec:
       {{- include "agent-platform.modelManager.podSelector" . | nindent 6 }}
   egress:
     {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "model-manager's traces go to" "flavor" "cilium") }}
+    {{- . | nindent 4 }}
+    {{- end }}
     - toEntities:
         - kube-apiserver
     {{- if $oauthOn }}
@@ -136,6 +147,42 @@ spec:
             - port: "443"
               protocol: TCP
     {{- end }}
+    {{- with $wc.fqdns }}
+    # The workload clusters' API servers a kserve backend targets, by name
+    # (modelManager.networkPolicy.workloadClusters, by default cluster-manager's).
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $wc.ports }}
+            - port: {{ . | toString | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    {{- with $wc.cidrs }}
+    # The workload clusters' API servers by address.
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $wc.ports }}
+            - port: {{ . | toString | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    {{- end }}
+    {{- if $readsServing }}
+    # The served models' runtimes, on the workload port: a Ready model's
+    # GET /version and GET /openapi.json, the API interfaces it answers.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ $servingNs }}
+          matchExpressions:
+            {{- toYaml $shape.matchExpressions | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: {{ $shape.port | quote }}
+              protocol: TCP
     {{- end }}
     {{- with $egress.fqdns }}
     # Further destinations of the service by name, whatever the backend
@@ -226,31 +273,6 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
-{{- if $mm.route.enabled }}
----
-# Egress from the agentgateway data plane to model-manager (the same namespace;
-# Cilium policies are additive to the data plane's own).
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: {{ include "name" . }}-dataplane-to-model-manager
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "agent-platform.modelManager.labels" . | nindent 4 }}
-spec:
-  endpointSelector:
-    matchLabels:
-      gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            {{- include "agent-platform.modelManager.podSelector" . | nindent 12 }}
-            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
-      toPorts:
-        - ports:
-            - port: {{ $port | quote }}
-              protocol: TCP
-{{- end }}
 {{- if $mcpOn }}
 ---
 # Egress from muster to the model-manager MCP endpoint. muster's own policy
@@ -280,8 +302,8 @@ spec:
 
 {{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
-# Ingress to model-manager: the agentgateway data plane (the portal's route)
-# and muster (the MCP endpoint), on the Service port only.
+# Ingress to model-manager: muster (the MCP endpoint, the one platform caller)
+# and additionalPeers, on the Service port only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -296,11 +318,6 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        {{- if $mm.route.enabled }}
-        - podSelector:
-            matchLabels:
-              gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
-        {{- end }}
         {{- if $mcpOn }}
         - podSelector:
             matchLabels:
@@ -311,7 +328,7 @@ spec:
             matchLabels:
               {{- toYaml . | nindent 14 }}
         {{- end }}
-        {{- if not (or $mm.route.enabled $mcpOn $peers) }}
+        {{- if not (or $mcpOn $peers) }}
         # No platform caller is on: nothing reaches the API but the probes.
         - podSelector:
             matchLabels:
@@ -341,6 +358,9 @@ spec:
       {{- include "agent-platform.modelManager.podSelector" . | nindent 6 }}
   policyTypes: [Egress]
   egress:
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "model-manager's traces go to" "flavor" "kubernetes") }}
+    {{- . | nindent 4 }}
+    {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:
@@ -367,6 +387,20 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
+    {{- if $readsServing }}
+    # The served models' runtimes, on the workload port: a Ready model's
+    # GET /version and GET /openapi.json, the API interfaces it answers.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $servingNs }}
+          podSelector:
+            matchExpressions:
+              {{- toYaml $shape.matchExpressions | nindent 14 }}
+      ports:
+        - port: {{ $shape.port }}
+          protocol: TCP
+    {{- end }}
     {{- if and $kserveOn $hf.cidrs }}
     # Hugging Face by address (huggingFace.cidrs): these blocks only.
     - to:
@@ -377,6 +411,25 @@ spec:
       ports:
         - port: 443
           protocol: TCP
+    {{- end }}
+    {{- if $kserveOn }}
+    # The workload clusters' API servers a kserve backend targets
+    # (modelManager.networkPolicy.workloadClusters, by default cluster-manager's):
+    # vanilla NetworkPolicy has no FQDN selector, so their blocks when set,
+    # else every public destination on their ports.
+    - to:
+        {{- range ($wc.cidrs | default (list "0.0.0.0/0")) }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+            {{- if eq . "0.0.0.0/0" }}
+            except: {{ toYaml $.Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+            {{- end }}
+        {{- end }}
+      ports:
+        {{- range $wc.ports }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
     {{- end }}
     {{- if or $oauthOn (and $kserveOn (not $hf.cidrs)) }}
     - to:
@@ -438,31 +491,6 @@ spec:
         - port: {{ .port | int }}
           protocol: TCP
     {{- end }}
-{{- if $mm.route.enabled }}
----
-# Egress from the agentgateway data plane to model-manager (additive to the
-# data plane's own policy, which lists its targets explicitly).
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "name" . }}-dataplane-to-model-manager
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "agent-platform.modelManager.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
-  policyTypes: [Egress]
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              {{- include "agent-platform.modelManager.podSelector" . | nindent 14 }}
-      ports:
-        - port: {{ $port | int }}
-          protocol: TCP
-{{- end }}
 {{- if $mcpOn }}
 ---
 # Egress from muster to the model-manager MCP endpoint (additive to muster's

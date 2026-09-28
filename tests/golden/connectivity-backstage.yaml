@@ -15,7 +15,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
     app.kubernetes.io/component: valkey
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
@@ -1339,7 +1339,7 @@ data:
           },
           "gridPos": {
             "h": 7,
-            "w": 12,
+            "w": 8,
             "x": 0,
             "y": 26
           },
@@ -1438,8 +1438,8 @@ data:
           },
           "gridPos": {
             "h": 7,
-            "w": 12,
-            "x": 12,
+            "w": 8,
+            "x": 8,
             "y": 26
           },
           "id": 18,
@@ -1487,6 +1487,117 @@ data:
             }
           ],
           "title": "Time to first text, p50 and p95",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "From the message's arrival to the last edit of the answer in the channel: the whole turn as the person sees it.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": 0
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 26
+          },
+          "id": 22,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "12.1.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(klaus_gateway_turn_phase_seconds_bucket{cluster_id=~\"$cluster\", channel=~\"$channel\", phase=\"final_flush\"}[$__rate_interval])))",
+              "instant": false,
+              "legendFormat": "p95",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(klaus_gateway_turn_phase_seconds_bucket{cluster_id=~\"$cluster\", channel=~\"$channel\", phase=\"final_flush\"}[$__rate_interval])))",
+              "instant": false,
+              "legendFormat": "p50",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Turn done (final flush), p50 and p95",
           "type": "timeseries"
         },
         {
@@ -2471,7 +2582,7 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "max(redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"}) / max(redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0)",
+              "expr": "max(redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} / (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0))",
               "instant": false,
               "legendFormat": "used",
               "range": true,
@@ -3734,9 +3845,9 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "max by (namespace) (redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"}) / max by (namespace) (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0)",
+              "expr": "max by (job) (redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} / (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0))",
               "instant": false,
-              "legendFormat": "{{namespace}}",
+              "legendFormat": "{{job}}",
               "range": true,
               "refId": "A"
             }
@@ -9038,9 +9149,9 @@ spec:
     - toEntities: ["kube-apiserver"]
 ---
 # Source: agent-platform-connectivity/templates/model-manager/netpol.yaml
-# Ingress to model-manager: the agentgateway data plane (the portal's route)
-# and muster (the MCP endpoint), both in the release namespace, on the Service
-# port only — plus the kubelet's probes (host entity), which a policy that
+# Ingress to model-manager: muster (the MCP endpoint, the one platform caller)
+# and additionalPeers, in the release namespace, on the Service port only —
+# plus the kubelet's probes (host entity), which a policy that
 # selects the pod would otherwise deny.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

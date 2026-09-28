@@ -13,6 +13,12 @@ render, minted once by a pre-install / pre-upgrade hook Job and kept.
     ate-system — ate-api-server mints actor identity tokens and certificates
     from them — and the trust anchor actor-id-ca-certs derived from the latter
     (its active root as PEM; atenet-egress trusts actor certificates against it);
+  * the CA pool egress-mitm-ca-pool in ate-system — atenet-egress terminates
+    every TLS connection an actor opens and re-originates it, and mints the
+    per-host leaf the actor sees from this pool; the egress Deployment mounts
+    the pool's tls.crt and tls.key and does not start without it. The actors
+    project the pool's roots as the trust bundle egress-mitm.ate.dev. ECDSA
+    P-256, the key type agentgateway signs leaves with;
   * the ConfigMap ate-api-authentication — ate-api-server accepts the cluster's
     ServiceAccount tokens for the audience api.ate-system.svc, verified against
     the apiserver's own issuer, spelled exactly as its OpenID discovery document
@@ -48,6 +54,18 @@ substrate release then adopts them — helm-controller takes ownership of a bare
 object). The kagent chart's WorkerPool and the platform Harness come with
 kagent and the kagent wiring; the pools' rotation is an operational procedure
 of Substrate, not this chart's.
+
+The main container's memory limit is 256Mi, twice the hooks' default
+(agent-platform.hooks.job's memory): the script pipes one kubectl into another
+(the actor-id-ca-certs Secret, `kubectl create --dry-run=client | kubectl
+apply --server-side`) and kubectl into jq, so up to two kubectl processes —
+some 30 MiB resident each, the binary's file pages and the discovery cache
+under /tmp — are charged to the pod's memory cgroup at once, next to jq, the
+shell and the candidates on the in-memory /work. At 128Mi the Job's first pod
+was OOM-killed on a busy node and the install completed only on the Job's
+retry (giantswarm/agent-platform#513); a hook that exhausts its backoffLimit
+fails the release. The request stays 32Mi, the openssl init container keeps
+the default.
 */ -}}
 {{- if include "agent-platform.substrate.enabled" . }}
 {{- $ns := include "agent-platform.substrate.namespace" . }}
@@ -55,6 +73,7 @@ of Substrate, not this chart's.
 {{ include "agent-platform.hooks.job" (dict "root" $ "name" "substrate-bootstrap" "hook" "pre-install,pre-upgrade"
       "about" (printf "mint the Agent Substrate CA/JWT pools and ate-api-server's authentication config in %s and %s when they are missing, keep them when they exist; publish the trust anchors derived from the pools (actor-id-ca-certs, the podcert signers' ClusterTrustBundles)" $ns $pcNs)
       "init" (dict "name" "openssl" "image" (include "agent-platform.hooks.imageRef" .Values.hooks.opensslImage) "script" (include "agent-platform.substrate.bootstrap.mint" .))
+      "memory" "256Mi"
       "script" (include "agent-platform.substrate.bootstrap.apply" (dict "root" $ "ns" $ns "pcNs" $pcNs))) }}
 {{- end }}
 
@@ -64,7 +83,13 @@ an unused candidate dies with the pod's in-memory volume. */ -}}
 {{- define "agent-platform.substrate.bootstrap.mint" -}}
 ca_pool() {
   mkdir -p "/work/$1"
-  openssl genpkey -algorithm ed25519 -out "/work/$1/key.pem"
+  if [ "${2:-}" = "ec" ]; then
+    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "/work/$1/key.pem"
+    echo "ECDSA P-256" > "/work/$1/algorithm"
+  else
+    openssl genpkey -algorithm ed25519 -out "/work/$1/key.pem"
+    echo "ED25519" > "/work/$1/algorithm"
+  fi
   openssl req -x509 -new -key "/work/$1/key.pem" -days 365 -subj "/CN=$(openssl rand -hex 12)" \
     -addext basicConstraints=critical,CA:TRUE \
     -addext keyUsage=critical,digitalSignature,keyCertSign \
@@ -84,8 +109,9 @@ jwt_pool() {
 ca_pool service-dns-ca-pool
 ca_pool pod-identity-ca-pool
 ca_pool actor-id-ca-pool
+ca_pool egress-mitm-ca-pool ec
 jwt_pool actor-id-jwt-pool
-echo "candidates minted for 3 CA pools and 1 JWT authority pool"
+echo "candidates minted for 4 CA pools and 1 JWT authority pool"
 {{- end -}}
 
 {{- define "agent-platform.substrate.bootstrap.apply" -}}
@@ -111,7 +137,7 @@ ca_pool() {
     '{CAs: [{ID: $id, SigningKeyPKCS8: $key, RootCertificateDER: $der}], ActiveForSigning: $id}')
   kubectl -n "$1" create secret generic "$2" --type=kubernetes.io/tls \
     --from-literal=pool="$pool" --from-file=tls.crt="/work/$2/cert.pem" --from-file=tls.key="/work/$2/key.pem" >/dev/null
-  echo "CA pool $1/$2: created (ED25519 root, id $pool_id, 365 days)"
+  echo "CA pool $1/$2: created ($(cat "/work/$2/algorithm") root, id $pool_id, 365 days)"
 }
 jwt_pool() {
   if kubectl -n "$1" get secret "$2" >/dev/null 2>&1; then
@@ -165,6 +191,7 @@ trust_bundle "$pc_ns" service-dns-ca-pool servicedns.podcert.ate.dev/identity
 trust_bundle "$pc_ns" pod-identity-ca-pool podidentity.podcert.ate.dev/identity
 jwt_pool "$ns" actor-id-jwt-pool
 ca_pool "$ns" actor-id-ca-pool
+ca_pool "$ns" egress-mitm-ca-pool
 # The trust anchor: the active root of actor-id-ca-pool as PEM (DER is already
 # base64 in the pool; PEM is that base64 in 64-column lines between the markers).
 root=$(kubectl -n "$ns" get secret actor-id-ca-pool -o jsonpath='{.data.pool}' | base64 -d \

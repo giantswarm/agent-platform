@@ -1,5 +1,5 @@
-# LLM routing on: the `llm` listener, the Anthropic AgentgatewayBackend, the
-# pinned HTTPRoute, the Gateway-scoped AgentgatewayPolicy (the route-type map;
+# LLM routing on: the `llm` listener, the pinned HTTPRoute whose backend is the
+# model router, the Anthropic AgentgatewayModel, the Gateway-scoped AgentgatewayPolicy (the route-type map;
 # the metric labels are the Gateway's own -metrics policy, gateway.metricLabels,
 # rendered with or without this), the model-price ConfigMap and its
 # AgentgatewayParameters reference, and the data-plane PodMonitor.
@@ -46,6 +46,10 @@ kagent:
         # verify-prompt-caching asserts the inheritance and the precedence.
         promptCaching: true
         cacheTTL: "5m"
+        # The platform's output bound (the platform manager renders it for
+        # every installation): the Anthropic entries below inherit it too,
+        # verify-max-tokens asserts the inheritance and the precedence.
+        maxTokens: 32000
   # Three extra, chart-owned ModelConfigs. The first names no baseUrl, so the
   # chart fills in the listener: a new entry is metered unless somebody names
   # another upstream. The second names its own, which wins — that is how a model

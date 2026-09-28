@@ -116,7 +116,7 @@ MODEL_CONFIG = "default-model-config"
 PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API_KEY"}
 # The Generic agent chart, 1.x = kagent API v2 (0.x rendered the retired Agent).
 AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
-AGENT_CHART_SEMVER = "1.x"
+AGENT_CHART_SEMVER = ">=1.5.0 <2.0.0"  # agent-manager.agentChart.semver on the 1.1 lines: the Generic chart from 1.5.0 (no spec.context)
 # The toolset of the smoke's managed agents: a shipped muster preset, so the
 # agent chart renders the agent's own RemoteMCPServer — the toolset carrier,
 # the X-Muster-Toolset header on it; ["preset:none"] alone renders none.
@@ -176,7 +176,7 @@ READY_TIMEOUT_S = SCENARIO.ready_timeout_s
 # Self-management in the smoke: the chart's own OCIRepository follows the
 # in-cluster registry the candidate was pushed to, at the candidate's exact
 # version. Exact, not the chart's derived range: a branch build carries a
-# prerelease version (3.19.1-dev.<branch>.<date>.h<sha>, abs), and Masterminds
+# prerelease version (3.19.1-r<branch-hash>t<time>h<sha>, abs), and Masterminds
 # semver — Flux's — never matches a prerelease against a release-only bound
 # (`>=X <4.0.0`), so the derived range would find no tag. A released chart
 # has no prerelease; verify-self asserts the derived range offline.

@@ -640,7 +640,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "max(redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"}) / max(redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0)",
+          "expr": "max(redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} / (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0))",
           "instant": false,
           "legendFormat": "used",
           "range": true,
@@ -1903,9 +1903,9 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "max by (namespace) (redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"}) / max by (namespace) (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0)",
+          "expr": "max by (job) (redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} / (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0))",
           "instant": false,
-          "legendFormat": "{{namespace}}",
+          "legendFormat": "{{job}}",
           "range": true,
           "refId": "A"
         }

@@ -85,6 +85,9 @@ spec:
       {{- include "agent-platform.vmManager.podSelector" . | nindent 6 }}
   egress:
     {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "vm-manager's traces go to" "flavor" "cilium") }}
+    {{- . | nindent 4 }}
+    {{- end }}
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.vmManager.oauthProvider" .) "issuerUrl" (include "agent-platform.vmManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
@@ -197,6 +200,9 @@ spec:
       {{- include "agent-platform.vmManager.podSelector" . | nindent 6 }}
   policyTypes: [Egress]
   egress:
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "vm-manager's traces go to" "flavor" "kubernetes") }}
+    {{- . | nindent 4 }}
+    {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:

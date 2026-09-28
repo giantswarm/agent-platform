@@ -48,11 +48,11 @@ Two values turn the path on, and the order matters.
      enabled: true
    ```
 
-   This adds an `llm` listener to the data-plane Gateway, an
-   `AgentgatewayBackend` for the provider, an `HTTPRoute` pinned to that
-   listener, one Gateway-scoped `AgentgatewayPolicy` (the route-type map), and
-   the model-price ConfigMap the cost counter reads. Nothing routes through it
-   yet. The metric labels are not this path's: the Gateway's own `-metrics`
+   This adds an `llm` listener to the data-plane Gateway, one
+   `AgentgatewayModel` per `llmRouting.models` entry attached directly to that
+   listener (by default `anthropic`: provider Anthropic, `match: claude-*`),
+   and the model-price ConfigMap the cost counter reads. Nothing routes
+   through it yet. The metric labels are not this path's: the Gateway's own `-metrics`
    policy carries them whether or not LLM routing is on (below).
 
    Verify the listener answers before you continue. From a pod in the release
@@ -96,26 +96,104 @@ On the installation, after the cutover:
 ### Notes
 
 - The `llm` listener is cluster-internal. The data-plane network policy admits
-  world traffic on 443 only, and the LLM route pins itself to its own listener
-  by `sectionName`, so it never attaches to the public HTTPS listener in edge
-  mode.
-- Pinning is not enough on its own: `agent-platform-mcps` renders a catch-all
-  `HTTPRoute` (`PathPrefix: /`, no `sectionName`, no hostname) that attaches to
-  every listener of the same Gateway. An equal match is broken by creation
-  timestamp and then alphabetically, both of which that route wins, so the LLM
-  route matches `llmRouting.pathPrefixes` (`/v1`) instead — character count in
-  the path match outranks both tiebreaks. A path outside those prefixes reaches
-  the MCP backend and answers `mcp: client must accept both application/json
-  and text/event-stream`, so `"*": Passthrough` in `llmRouting.routes` covers
-  the other provider paths *under* the prefixes, not every path on the port.
+  world traffic on 443 only, and every model attaches to the listener itself
+  (`parentRefs`: the Gateway with `sectionName: llm`), never to the public
+  HTTPS listener in edge mode.
+- **No route in front of the models.** agentgateway strips the matched
+  `PathPrefix` of an `HTTPRoute` rule whose backend is the model router: the
+  prefix is a serving prefix in front of `/v1/...`, so a route matching `/v1`
+  hands the router `/messages`, which it cannot classify. Such a request is
+  proxied as Passthrough and records no `agentgateway_gen_ai_*` token or cost
+  metric. A model attached to the listener directly matches the serving
+  endpoints themselves (`/v1/messages`, `/v1/chat/completions`, ...), which
+  outrank the `agent-platform-mcps` catch-all `HTTPRoute` (`PathPrefix: /`,
+  no `sectionName`, no hostname) attached to every listener of the Gateway; any
+  other path on the port reaches the MCP backend. No `AgentgatewayBackend`
+  remains on the path, so there is no route-type map either: the router
+  classifies each request itself. The ModelConfig base URL is the listener's
+  origin with no path (`http://agentgateway.<release namespace>.svc:8081`); the
+  client appends `/v1/messages`.
+- The request's `model` picks the model: the router tries the models attached to
+  the listener in name order and takes the first whose `match` takes the name
+  (exact, `claude-*`, `*-latest`, `*`), so a `*` entry would shadow every model
+  named after it; a name no model takes answers `404 model_not_found`, and
+  `GET /v1/models` lists the public ones. The gateway holds no credential: a
+  managed provider model carries no `policies.auth`, and the client's own key
+  passes through untouched.
+- **Served models on the endpoint: the LLMEndpoint document.** With LLM routing
+  and a serving model-manager — this release's serving slice, or a GPU node
+  pool's, which cluster-manager brings as a second release of this chart with
+  model-manager off while this release keeps `modelServing` off — the chart
+  renders the ConfigMap `<name>-llm-endpoint` in the release namespace,
+  labelled `agent-platform.giantswarm.io/llm-endpoint: "true"`, whose
+  `llm-endpoint.yaml` is the contract model-manager reads:
+
+  ```yaml
+  apiVersion: agent-platform.giantswarm.io/v1alpha1
+  kind: LLMEndpoint
+  spec:
+    parentRefs:          # exactly the provider models' own
+      - group: gateway.networking.k8s.io
+        kind: Gateway
+        name: agentgateway
+        namespace: <release namespace>
+        sectionName: llm
+      - group: gateway.networking.k8s.io   # with llmRouting.external
+        kind: HTTPRoute
+        name: <name>-llm-external
+        namespace: <release namespace>
+    endpoint: http://agentgateway.<release namespace>.svc:8081
+    externalEndpoint: https://llm.<global.domain>   # with llmRouting.external
+  ```
+
+  With it, model-manager holds a Role on the release namespace's
+  `agentgatewaymodels` and nothing else, and the data plane may reach the
+  serving namespace's workload pods on the workload port (both network policy
+  flavours; the namespace is where model-manager serves). model-manager then
+  attaches one `AgentgatewayModel` per served model to those parents under the
+  preset's name (giantswarm/model-manager#145), so a client sends
+  `model: <preset>` to the same listener. None of it renders without LLM
+  routing or without a serving model-manager.
+- **The endpoint outside the cluster** (`llmRouting.external`): `enabled: true`
+  puts the listener's models on `https://<hostPrefix>.<global.domain>`
+  (`llm` by default) behind the installation's API keys — a route of its own
+  whose backend is the model router, attached to by every model of the
+  endpoint (provider models and served ones), with an `AgentgatewayPolicy`
+  whose `apiKeyAuthentication` is `Strict` over exactly one source in the
+  release namespace: `apiKeys.secretRef.name` (a Secret: an entry per key, the
+  key or `{"key"|"keyHash": …, "metadata": {…}}`), `apiKeys.secretSelector` or
+  `apiKeys.configMapSelector` (`matchLabels`; a ConfigMap's entries carry
+  `keyHash: sha256:<hex>` only). The route matches `PathPrefix: /`, which the
+  agentgateway controller treats as a root model route: nothing version-like is
+  stripped, and its hostname outranks the hostname-less MCP catch-all. The
+  controller refuses a root model route on a listener that also has directly
+  attached models (`ModelRoutingConflict`), so the route never shares the LLM
+  listener: with the chart's own edge (`gatewayApi.gateway.create`) it is on the
+  data plane's HTTPS listener; behind a public Gateway
+  (`global.gatewayApi.parentRefs`) it is on a data-plane listener of its own,
+  `llmRouting.external.listener` (`llm-external`, `8082`, HTTP, routes of the
+  release namespace), to which that Gateway forwards the hostname
+  (`<name>-llm-public`); the data-plane network policies admit that port from
+  the cluster as they do the LLM listener's. A call by the Service's name to the
+  LLM listener stays credential-free. Give every key entry `"metadata": {"name":
+  "<who>"}`: the data plane's metrics carry it as `api_key`
+  (`gateway.metricLabels.api_key`, held until this route renders). The
+  LLMEndpoint document names the route and `externalEndpoint`, so model-manager
+  puts served models on it too. **Every key reaches every model**: agentgateway
+  does not enforce a key's `allowedModels` on the Kubernetes API-key contract
+  yet (giantswarm/giantswarm#37742), so putting a paid provider model next to
+  consumer keys is the installation's decision.
 - Agent pods keep their `world:443` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
-- The LLM policy carries no `frontend.metrics`: the data plane honours one
+- The LLM path adds no `frontend.metrics` policy: the data plane honours one
   metrics policy per Gateway, and the labels describe every route, so they live
   in the Gateway's own `-metrics` policy — see [Metric labels](#metric-labels).
+- `ingress.httpRoute.timeouts` reaches the external routes only: the in-cluster
+  path has no `HTTPRoute` to carry route timeouts.
 - An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
-  own `baseUrl` or names a provider other than `llmRouting.backend.provider`.
+  own `baseUrl` or names a provider other than the first `llmRouting.models`
+  entry's.
   The `baseUrl` lands under the CRD's block for the entry's provider —
   `anthropic`, `openAI`, `sapAICore`, the three `ModelConfigSpec` gives one —
   never the lower-cased provider name, which the API server would prune; the
@@ -154,7 +232,7 @@ rest. Each entry is `{expression: <one-line CEL>, enabled: <bool, absent =
 true>}`; the expression goes through `tpl`. An entry whose expression reads
 `jwt` — `jwt.<claim>` or `jwt["<claim>"]` — is rendered only while a route of
 the Gateway verifies a bearer (the kagent controller route with its JWT
-policy, agent-manager's, model-manager's); without one it would read `unknown`
+policy, agent-manager's); without one it would read `unknown`
 on every series.
 
 ```yaml
@@ -199,7 +277,7 @@ dashboard and the portal's Cost page read both labels.
 verifies in `Strict` mode and writes into `x-user-id`
 (`kagent.controller.auth.userIdClaim`, `email`; `docs/authentication.md`),
 read through `tpl` so the label follows the knob — and the same knob names the
-claim on agent-manager's and model-manager's routes, kagent on or off.
+claim on agent-manager's route, kagent on or off.
 klaus-gateway makes every controller call with the linked person's Dex
 id_token and never as itself, so on that route every series carries a verified
 person: a Slack turn is one `lf.a2a.v1.A2AService/SendStreamingMessage`
@@ -234,6 +312,158 @@ wherever it is read as CEL — the controller route's identity header, the
 compile takes the whole policy down. `make verify-metric-labels` asserts all
 of it, and that no other policy of the chart carries a `frontend.metrics`
 section.
+
+## The data plane's buffer
+
+The data plane reads some bodies whole before it acts on them, and the most
+it holds of one is `frontend.http.maxBufferSize` of the Gateway. On the MCP
+path that is every tool answer of every server behind muster: the `/mcp`
+route to the data plane, the `agent-platform-mcps` backend with the muster
+target, the JSON-RPC answer parsed here and forwarded. An answer above the
+limit is refused — the caller sees agentgateway's `http upstream error: http
+request failed: body exceeded buffer limit`, the server never learns of it —
+so this number is the cap on what a tool may answer through the platform.
+
+agentgateway's own default is 2 MiB, a value chosen for nothing here; a
+whole-registry dry run of the platform manager was above it
+(giantswarm/agent-platform#630). The chart renders the platform's own bound
+from ONE Gateway-scoped `AgentgatewayPolicy`, `<release>-http`
+(`templates/agentgateway/http-policy.yaml`, `frontend.http`), whenever the
+data plane is: `gateway.http.maxBufferSize`, **8Mi** by default. The number is
+sized from what the platform's tools answer: the platform manager bounds its
+own answers at 1 MiB and muster's `call_tool` wraps the text once more on the
+way (about a seventh on top), so the largest bounded answer is about 1.2 MiB,
+and a server with no bound of its own — a `kubectl get` over a namespace, a
+rendered fileset — has the same room several times over; a dozen answers at
+the limit buffered at once stay inside the data plane's 512Mi memory limit
+(`gateway.parameters.dataPlaneResources`).
+
+```yaml
+gateway:
+  http:
+    maxBufferSize: 16Mi   # a Kubernetes quantity, or a byte count (16777216)
+```
+
+**One field, one policy.** Frontend policies of one Gateway merge field by
+field, never deeper: of two policies that both set `http`, one wins whole.
+This policy therefore owns `frontend.http` alone, as `-metrics` owns
+`frontend.metrics` and `-tracing` owns `frontend.tracing`, and no other policy
+of the chart carries an `http` section (`make verify-dataplane-buffer` asserts
+it). Empty renders no policy and leaves agentgateway's default in force. The
+CRD refuses zero and anything above 4 GiB; the schema refuses what is not a
+quantity (`8MB`). The models Gateway of the serving slice is not this
+Gateway and keeps agentgateway's defaults for the LLM path.
+
+## The data plane's traces
+
+The chart turns on the data plane's trace export with ONE Gateway-scoped
+`AgentgatewayPolicy`, `<release>-tracing`
+(`templates/agentgateway/tracing.yaml`, `frontend.tracing`). The policy sends
+spans to the endpoint in `gateway.parameters.dataPlaneEnv`, whose `auto`
+values take `global.observability.traces.otlp`'s endpoint and protocol (the
+platform's one collector; an entry set to anything else wins). The exporter
+sends no headers, so the tenant comes from the pod label in
+`gateway.parameters.podLabels`, which the meta chart derives from
+`global.observability.traces.otlp.tenant`.
+
+The incoming `traceparent` decides if the data plane traces a request:
+
+| Incoming request | Traced |
+|---|---|
+| A sampled `traceparent` (`-01`): an agent's turn, a klaus-gateway A2A call | Always |
+| No `traceparent`: an MCP client such as Claude Code through muster | At `gateway.tracing.randomSampling` |
+| An unsampled `traceparent` (`-00`) | Never |
+
+`gateway.tracing.randomSampling` is **0.1** by default. The proxy evaluates it
+per request as a CEL expression, so the value is a number between 0 and 1 or
+a boolean. When the data plane starts a trace, it sends a sampled
+`traceparent` upstream, so muster and the server behind it add their spans
+under the data plane's span. On gazelle, about 6,400 requests a day arrive
+untraced, with no `traceparent` or an unsampled one. At 0.1, at most 640 of
+them get a trace (about 1,100 spans), so a repeated failure reaches Tempo in
+minutes.
+
+```yaml
+gateway:
+  tracing:
+    randomSampling: "0.01"   # a number between 0 and 1, true or false
+```
+
+An empty value or 0 turns random sampling off, and the policy still exports
+the requests that arrive with a sampled `traceparent`. The schema refuses a
+value that is not a number between 0 and 1 or a boolean (`10%`, `1.5`).
+
+**Span metrics are not request rates.** `traces_spanmetrics_calls_total` for
+`service="agentgateway"` counts every request with a sampled `traceparent`
+plus the random share of the others. Use `agentgateway_requests_total` for
+rates. `make verify-dataplane-tracing` asserts the policy, the sampling value
+and the schema.
+
+## The model pods' traces
+
+The llm-d controller (KServe's llmisvc controller, v0.21.0) has no
+OpenTelemetry code, so it emits no spans. The data plane does: the vLLM `main`
+container of the workload pod and, when the service has one, the endpoint
+picker. The controller configures both from the `LLMInferenceService`'s
+merged `spec.tracing`. It adds `--otlp-traces-endpoint`,
+`--collect-detailed-traces all` and the `OTEL_*` variables to vLLM, and
+`--tracing=true` with the same variables to the endpoint picker.
+
+**The switch is `spec.tracing`, not `baseRefs`.** When the merged spec carries
+`tracing`, even an empty `tracing: {}`, the controller appends the well-known
+`kserve-config-llm-tracing` preset itself, the way it appends the template
+presets. Nobody lists the preset in `baseRefs`. A service without `tracing`
+exports nothing. The service's own `spec.tracing` keys win over the preset's.
+
+The platform fills in that preset through components.kserve-runtime-configs,
+from `global.observability.traces.otlp` like every other exporter
+(`auto` keys, resolved by the meta chart):
+
+| Preset field | Default | Source |
+|---|---|---|
+| `spec.tracing.exporterEndpoint` | `http://otlp-gateway.kube-system.svc:4317` | `global.observability.traces.otlp.endpoint` |
+| `spec.labels` | `observability.giantswarm.io/tenant: giantswarm` | `global.observability.traces.otlp.tenant` (no label when empty) |
+| `spec.tracing.sampler`, `samplerArg` | `parentbased_traceidratio`, `0.05` | upstream's |
+
+The exporters send no headers, so otlp-gateway routes the spans to a tenant
+by the pod label. The controller copies `spec.labels` onto the workload pod
+template, so only the pods that export carry the label. vLLM and the endpoint
+picker export over gRPC only, and the API has no protocol field: an
+`http/protobuf` global protocol fails the render while the preset's endpoint
+is `auto`, naming
+`kserve-runtime-configs.kserve.llmisvcConfigs.tracing.exporterEndpoint`.
+
+An explicit preset endpoint wins, as every exporter's own key does. This chart
+opens the model pods' egress, `<release>-model-serving-otlp-egress` (both
+flavours), to `modelServing.networkPolicy.otlpEndpoint`. The
+kserve-runtime-configs block never reaches this release, so the meta chart
+writes the preset's resolved endpoint there, and the egress follows an
+explicit preset endpoint too. Rendered on its own, this chart resolves the
+`auto` from the global endpoint. With an empty global endpoint the preset keeps
+upstream's endpoint and no egress renders.
+
+Not covered: the prefill pods of a disaggregated service and the endpoint
+picker pods get neither the label nor the egress. The platform's presets run
+neither.
+
+**Who turns it on: the owner of the `LLMInferenceService`.** For the models
+model-manager serves, model-manager sets `spec.tracing: {}` on every service
+it composes. It does not set any endpoint or sampler, so the preset stays the
+single place for them. The author of a hand-written `LLMInferenceService` adds
+`tracing: {}` themselves. Why not ask every author to opt in: every model on
+the platform is model-manager's, the preset path already lets an operator
+change the endpoint and the sampler in one place, and a per-author opt-in is
+the step that gets forgotten. The cost is that vLLM's detailed traces are on
+for every served model. The controller always passes
+`--collect-detailed-traces all`, which vLLM documents as possibly costly. So
+model-manager should take the switch from the discovery ConfigMap, where an
+installation can turn it off, not hardcode it. model-manager does not set
+`spec.tracing` yet: until it does, a served model exports nothing.
+
+`make verify-serving-slice` asserts the derived endpoint, the label, the
+guards and the egress. `make verify-model-serving-policies` asserts that the
+egress selects the workload pod and nothing else. The live half, a vLLM span
+in Tempo for the `giantswarm` tenant, needs a GPU cluster that serves a model.
 
 ## Data-plane availability
 
@@ -323,24 +553,24 @@ its container and its probes.
 | DNS | CoreDNS in `kube-system`, with the proxy clause the FQDN selectors need | CoreDNS in `kube-system` |
 | The identity provider | the issuer host by name on 443, plus the `cluster` entity on 443 and 10443 for an issuer behind an in-cluster Gateway | `0.0.0.0/0` minus `networkPolicy.kubernetes.worldExcludedCIDRs` on 443 |
 | The kube-apiserver | the `kube-apiserver` entity | `networkPolicy.kubernetes.apiServerCIDR` |
-| The edge | the `cluster` entity leg the identity-provider include renders, on 443 and 10443 | the Envoy pods of the Gateways the muster, kagent-controller and model-manager routes attach to, on 443 and 10443, plus the agentgateway data plane on 443 for each of those routes that attaches to it |
+| The edge | the `cluster` entity leg the identity-provider include renders, on 443 and 10443 | the Envoy pods of the Gateways the muster and kagent-controller routes attach to, on 443 and 10443, plus the agentgateway data plane on 443 for each of those routes that attaches to it |
 | muster | its pods in this namespace, on the muster Service port | the same, as a `podSelector` |
 | The portal's database | its CNPG pods by `cnpg.io/cluster`, on 5432, while `backstage.database.engine` is `postgresql` | the same, as a `podSelector` |
 | The scaffolder catalog | `github.com`, `api.github.com` and `raw.githubusercontent.com` on 443, while `backstage.catalogs.version` is set | the world rule above |
 
-The app-config addresses muster, the kagent controller and the model manager by
-their public hostnames, so those calls leave through the edge rather than
-through muster's own pod leg. That edge is the one *those* routes attach to
-(`ingress.parentRefs` for muster, `kagent.controllerRoute.parentRef` and
-`modelManager.route.parentRef` for the other two, each falling back to the
-chart-owned edge, else `global.gatewayApi.parentRefs`) — never
+The app-config addresses muster and the kagent controller by their public
+hostnames, so those calls leave through the edge rather than through muster's
+own pod leg. That edge is the one *those* routes attach to
+(`ingress.parentRefs` for muster, `kagent.controllerRoute.parentRef` for the
+controller, each falling back to the chart-owned edge, else
+`global.gatewayApi.parentRefs`) — never
 `backstage.parentRefs`, which moves the portal's own route only. The address they resolve to is the edge's
 LoadBalancer, which both flavours translate to the proxy pods before the policy
 decides: an Envoy Gateway proxy binds the listener's port plus 10000, so a
 listener on 443 is a pod on 10443 and both ports are open. In the cilium
 flavour that leg is the `cluster` entity the identity-provider include renders
 — narrowing that include to the issuer alone would take the portal's calls to
-the kagent controller and the model manager with it.
+the kagent controller with it.
 
 A private identity provider inside one of `worldExcludedCIDRs` needs its
 address in `networkPolicy.additionalEgressCIDRs`. The policy names the proxy
@@ -385,7 +615,9 @@ platform needs:
   `pre-install,pre-upgrade` hook Job that mints the CA pools
   `service-dns-ca-pool` and `pod-identity-ca-pool` (`podcertificate-controller-system`),
   the JWT authority pool `actor-id-jwt-pool`, the CA pool `actor-id-ca-pool`
-  and the trust anchor `actor-id-ca-certs` derived from it (`ate-system`), and
+  and the trust anchor `actor-id-ca-certs` derived from it, the CA pool
+  `egress-mitm-ca-pool` atenet-egress mints the actors' per-host TLS leaves
+  from (ECDSA P-256; all in `ate-system`), and
   the ConfigMap `ate-api-authentication` with the apiserver's issuer read from
   its OpenID discovery document. Key material comes from `openssl` in an init
   container (`hooks.opensslImage`), the objects from `kubectl`
@@ -402,8 +634,9 @@ platform needs:
   install never reaches a pod with roots the current pools do not have
   (giantswarm/agent-platform#384; a re-run says `present`, `created` or
   `republished`). Identity: `<release>-hooks`, a ClusterRole on secrets,
-  configmaps, namespaces and clustertrustbundles (on persistentvolumeclaims
-  while model serving's cache claim is this chart's, [The Hugging Face cache
+  configmaps, namespaces and clustertrustbundles (on persistentvolumeclaims,
+  and `get` on storageclasses, while model serving's cache claim is this
+  chart's, [The Hugging Face cache
   claim](#the-hugging-face-cache-claim); `delete` on the pre-pull DaemonSet by
   name while it renders, for its `pre-delete` cleanup Job — [Pre-pulling the
   runtime image](#pre-pulling-the-runtime-image)), with `attest` on the two
@@ -490,11 +723,10 @@ muster, DNS and the destinations below. Without a rule for the issuer the fetch
 is denied on a default-deny cluster and every request that carries a valid
 token is answered `401 token uses the unknown key`.
 
-Three route blocks name a JWKS host and port, and the controller policy reads
+Two route blocks name a JWKS host and port, and the controller policy reads
 them directly — there is no second list to keep in sync:
 
 - `kagent.controllerRoute.jwtAuthentication.jwks`
-- `modelManager.route.jwtAuthentication.jwks`
 - `agentManager.route.jwtAuthentication.jwks`
 
 Only a rendered policy contributes: the component, its route and its
@@ -628,6 +860,10 @@ Three render guards: the effect is `NoSchedule`, `PreferNoSchedule` or `NoExecut
 
 A pool created with prewarm (`create_node_pool {prewarm: true}`; the pool chart's `pool.prewarm`) launches its first node with the release: a one-shot placeholder Job holds one GPU at negative priority until the first predictor preempts it. A `PriorityClass` is cluster-scoped, and a pool release is delivered under Flux multi-tenancy as the organisation's tenant ServiceAccount, whose rights are namespaced — a pool chart that rendered the class failed `InstallFailed` on it, and the pool never came up (giantswarm/agent-platform#539). So the pool chart renders none, and **this chart ships the one class every pool of the installation names**: `PriorityClass agent-platform-prewarm-placeholder` — `value: -1000` (below the default priority 0, so any workload preempts the placeholder), `preemptionPolicy: Never` (the placeholder preempts nothing itself), `globalDefault: false`, the `cluster-manager` component label — from `clusterManager.prewarmPriorityClass` (`enabled`, `name`, `value`; `templates/cluster-manager/priorityclass.yaml`). The name is the contract with the pool chart: `pool.prewarm.priorityClassName` defaults to it. The class renders **with the cluster-manager component**, not the model-serving switch: cluster-manager composes the pool releases and is on in exactly one release per installation, the platform's, so the class has one owner — the serving slice, where model serving runs on an installation, never carries it, and a class gated on the switch would arrive after the pool's Job and leave with the slice. `enabled: false` renders none; a placeholder pod naming a class the cluster lacks is rejected at admission, and the pool comes up without a prewarmed node. `value` is immutable on the API: to change it, rename the class (and point the pool chart's value at the new name). Three guards fail the render naming the key: a `value` at or above 0 or fractional, a `name` that is not a DNS-1123 subdomain, the reserved `system-` prefix. The meta chart mirrors the block (`make verify-meta` holds every leaf equal); `make verify-cluster-manager` asserts the class, its knobs, the guards and that nothing renders while the component is off.
 
+### Rolling a served model
+
+A change to a served model's `LLMInferenceService` rolls its predictor Deployment: a preset change, or a chart upgrade that moves the well-known runtime image. The Deployment default, a 25 % surge, starts the new pod beside the old one on the same node. A model fills its GPU, so that pod never starts: on a one-GPU node it has no GPU to schedule on, and on a unified-memory node its vLLM finds the memory taken and crash-loops. The roll never finishes (giantswarm/agent-platform#682). The meta chart's `kserve-runtime-configs:` block therefore passes `kserve.llmisvcConfigs.rolloutStrategy: {maxSurge: 0, maxUnavailable: 1}` (the `kserve-runtime-configs` chart from 0.7.0, KServe v0.21.0's `spec.rolloutStrategy`). The chart sets it on the single-node workload presets, and the llm-d controller merges those into every `LLMInferenceService`, the ones served before the upgrade included. The old pod stops before the new one starts. The cost is a short outage per roll of a one-replica model, which is all one GPU allows anyway. A service's own `spec.rolloutStrategy` wins over the preset's. `make verify-serving-slice` asserts the forwarded value.
+
 ### Pre-pulling the runtime image
 
 A predictor pulls its runtime image only when its main container starts — after the storage-initializer has finished the weights — so on a pool scaling from zero the two longest steps of a cold start run one after the other (measured on a fresh node: weights 116 s, then 115 s for the 8.8 GB `llm-d-cuda` image; with prewarm the node is Ready about two minutes before the model is even requested). The image is the same for every served model of an installation, and a node knows it is a GPU node the moment it joins. So `modelServing.prepull` (on by default; giantswarm/agent-platform#545) renders **a DaemonSet in the serving namespace** (`<release>-model-serving-prepull`; `templates/model-serving/prepull.yaml`) with one init container per image of `prepull.images` running `/bin/true` and a pause main container (`prepull.pauseImage`, the cluster's sandbox image mirrored; `prepull.resources` on every container, never a GPU): the kubelet pulls the images the moment the node joins, in parallel with the storage-initializer, and containerd keeps them for the predictor, whose `Pulled` event then reads "already present on machine".
@@ -657,7 +893,7 @@ The verification is Kyverno's admission controller's own work: it fetches the im
 
 `modelServing.cache.pvc` (`hf-cache`, `100Gi`, on the chart's own StorageClass — below — unless `storageClassName` names a class of the operator's, `"-"` the empty class for a pre-provisioned volume; `volumeName` binds one) is one claim in the serving namespace with one subdirectory per served model; the Kyverno policies mount it into every model pod's storage-initializer and runtime, model-manager's pre-warm downloads land in the same layout. The claim has **no consumer of its own** — the first predictor (or download Job) that mounts it is what Binds it — and under a StorageClass with `volumeBindingMode: WaitForFirstConsumer` (kind's `standard`, the fleet's default `gp3`, the chart's own) it stays `Pending` until then. Helm's wait counts a Pending claim as not ready, so as a release resource it failed every install and upgrade with the switch on (giantswarm/agent-platform#483).
 
-The claim is therefore **applied by a `post-install,post-upgrade` hook Job** (`templates/model-serving/cache-pvc.yaml`; the hook include `agent-platform.hooks.job`, the identity `<release>-hooks` with `get`, `create`, `patch` on `persistentvolumeclaims` while the claim is the chart's, never `delete`), not rendered as a release resource: `kubectl apply --server-side --force-conflicts` under the field manager `agent-platform-connectivity`, the log says `created` or `present` and the claim's phase, nothing waits for a Bind. It binds where its first consumer schedules — the GPU pool's zone, which is what a zonal volume needs. What follows from the claim not being Helm's:
+The claim is therefore **applied by a `post-install,post-upgrade` hook Job** (`templates/model-serving/cache-pvc.yaml`; the hook include `agent-platform.hooks.job`, the identity `<release>-hooks` with `get`, `create`, `patch` on `persistentvolumeclaims` and `get` on `storageclasses` while the claim is the chart's, never `delete`), not rendered as a release resource: `kubectl apply --server-side --force-conflicts` under the field manager `agent-platform-connectivity`, the log says `created` or `present` and the claim's phase, nothing waits for a Bind. It binds where its first consumer schedules — the GPU pool's zone, which is what a zonal volume needs. What follows from the claim not being Helm's:
 
 - an uninstall or a `cache.enabled` flip leaves it — the intent of the `helm.sh/resource-policy: keep` it carries (hundreds of gigabytes of downloads outlive the release), now by construction — and the serving namespace with it (below);
 - a `size` change is applied by the next upgrade's hook (the StorageClass has to allow expansion; the chart's own does); a change to an immutable field (`storageClassName`, `accessModes`, `volumeName`) fails the hook — and the release — naming the field;
@@ -672,15 +908,37 @@ A namespace Helm deletes takes every object in it along, the claim's `keep` notw
 
 The cluster's default class is the slowest tier of its kind: the fleet's `gp3` at its baseline (125 MiB/s, 3000 IOPS) reads a served model's weights at exactly that rate — 8.8 GiB in 71 s — and the storage-initializer's download writes into the same cap (giantswarm/agent-platform#537). `modelServing.cache.storageClass` (default `create: true`) renders a class of the claim's own (`templates/model-serving/storageclass.yaml`): cluster-scoped, named `<chart>-<claim>` (`agent-platform-connectivity-hf-cache`) unless `name` says otherwise, `provisioner: ebs.csi.aws.com` with the EBS CSI driver's `parameters` (`type: gp3`, `iops: "4000"`, `throughput: "1000"` — a StorageClass takes strings), `volumeBindingMode: WaitForFirstConsumer` (the volume is provisioned in the zone of the pod that first mounts the claim, the GPU pool's), `allowVolumeExpansion: true` (a `size` change reaches the volume), `reclaimPolicy: Delete` — the claim is the durable object, the volume goes when the claim does. The applied claim references it. The class is Helm-owned, unlike the claim: an uninstall removes it and leaves the claim; a bound volume works on without its class, a claim still Pending binds once the next install renders the class again. The default is AWS's; another cloud sets `provisioner` and `parameters` to its own driver's (a per-provider default is a follow-up), `create: false` with `name` references an existing class and renders none, `create: false` without a name leaves the claim on the cluster's default class. `pvc.storageClassName` still names a class of the operator's (`"-"` the empty class for a pre-provisioned volume) and requires `storageClass.create: false`; the render refuses both. An installation whose claim already exists on another class keeps it — `storageClassName` is immutable, the hook would fail naming it: `storageClass.create: false`, `name: <the claim's class>`.
 
+### The claim's tier
+
+The claim outlives its class — the chart's is Helm-owned and digest-named, so an uninstall or a parameter change removes it while the claim stays — and a bound volume works on without it, but the class was the only place the volume's tier could be read from, and cluster-manager prices a claim from its capacity and tier. So the hook **stamps the tier on the claim** (giantswarm/agent-platform#605), as the EBS CSI class parameters the volume was provisioned with:
+
+| Annotation | Class parameter |
+|---|---|
+| `agent-platform.giantswarm.io/volume-type` | `type` (`gp3`) |
+| `agent-platform.giantswarm.io/volume-iops` | `iops` (`3000`) |
+| `agent-platform.giantswarm.io/volume-throughput` | `throughput`, MiB/s (`500`) |
+
+On the class this chart renders the values are its `parameters` as rendered; on any other class (`storageClass.name`, `pvc.storageClassName`, the cluster's default) they are what that class carries when the hook runs; a parameter the class does not carry is not stamped. **Once**: at create, or on the first run that finds a claim without any of the three while its class exists (a claim from before this release); a claim that carries one is left alone whatever a later release renders, since a claim keeps its class and its volume's tier. `kubectl annotate` writes them, not the claim's apply, so no later apply under the chart's field manager removes them. A claim whose class is already gone, or that names none, is not stamped; the hook's log says so, like it says what was stamped.
+
 ### vLLM's compile cache and Triton's kernel cache on the claim
 
 vLLM's cache — the torch.compile artifacts of a model, tens of seconds of work per pod — and Triton's — the compiled kernels and, with vLLM's default `TRITON_CACHE_AUTOTUNING=1`, the autotuning results of every `@triton.jit` kernel the model runs, the GDN and Mamba kernels of the hybrid architectures among them — are directories of the claim's own: the redirect rule mounts the claim a second time on the runtime container, at `/mnt/vllm-cache` from the claim-wide subPath `.vllm-cache`, and sets `VLLM_CACHE_ROOT=/mnt/vllm-cache` and `TRITON_CACHE_DIR=/mnt/vllm-cache/triton` on that container in the same rule (not through `modelServing.policies.env`: a pod without the cache keeps vLLM's and Triton's default cache roots instead of an env naming a path nothing mounts). The directory is shared by every model — the artifacts are keyed by model and configuration inside it — so a model's next pod skips the compile (giantswarm/agent-platform#537); in an emptyDir, or in the container's `~/.triton/cache`, they died with the pod. A preset that compiles has Triton's cache on the claim either way — at compile init vLLM redirects `TRITON_CACHE_DIR` in-process to `torch_compile_cache/<hash>/rank_<n>/triton_cache`, so the rule's env is the floor for what Triton compiles before that point; a preset that serves `--enforce-eager` never compiles, that redirect never runs, and without the rule's env every pod recompiled and re-autotuned its kernels during the profiling run (giantswarm/agent-platform#572). It is not a model directory and the storage-initializer never touches it: the initializer's Hugging Face client creates `<model>/.cache/huggingface` as uid 1000, mode 755, during the download, so a cache root under `/mnt/models` (4.31.0) was not writable for the runtime — another uid, gid 1000 through the claim's `fsGroup` — and every cold start crash-looped on `PermissionError: /mnt/models/.cache/vllm` (giantswarm/agent-platform#541). The kubelet creates a subPath directory that does not exist yet with the claim root's group and mode (`root:1000 2775`), which gid 1000 writes; `torch_compile_cache/` and `triton/` below it are created by vLLM and Triton themselves as the runtime's uid — the group write bit of `.vllm-cache` lets the runtime create them, its setgid bit gives them group 1000, and the creating uid owns them, so the model's next pod (the same image, the same uid) writes them again. The runtime's `/mnt/models` mount keeps the attributes KServe declares (the classic predictor's is read-only): the runtime writes nothing into the model's directory.
 
-`make verify-serving-slice` asserts the hook, its claim, the identity, the kept namespace (with the cache on and off; not with `namespace.keep: false`), the StorageClass and the class knobs, and that `cache.enabled: false` or an `existingClaim` render none of the cache; `make verify-model-serving-policies` the cache mount with `VLLM_CACHE_ROOT` and `TRITON_CACHE_DIR` naming it on the runtime container alone (both under the mount, neither on a pod without the cache), the model mount's `readOnly` as KServe declared it and that no mount or env value of the pod names a path under `/mnt/models`, over both pod shapes; `make verify-wiring` the serving shape without a `PersistentVolumeClaim` object; `make verify-meta` that the meta chart mirrors the namespace, cache and policy defaults it forwards.
+`make verify-serving-slice` asserts the hook, its claim, the tier it stamps, the identity, the kept namespace (with the cache on and off; not with `namespace.keep: false`), the StorageClass and the class knobs, and that `cache.enabled: false` or an `existingClaim` render none of the cache; `make verify-model-serving-policies` the cache mount with `VLLM_CACHE_ROOT` and `TRITON_CACHE_DIR` naming it on the runtime container alone (both under the mount, neither on a pod without the cache), the model mount's `readOnly` as KServe declared it and that no mount or env value of the pod names a path under `/mnt/models`, over both pod shapes; `make verify-wiring` the serving shape without a `PersistentVolumeClaim` object; `make verify-meta` that the meta chart mirrors the namespace, cache and policy defaults it forwards.
 
 ## The storage-initializer's memory limit
 
 `modelServing.policies.storageInitializerMemoryLimit` (`8Gi`) is the memory limit the `storage-initializer-memory` rule sets on the KServe storage-initializer of every model pod (KServe's own default is `1Gi`, OOM-killed by an 8 GB download; empty leaves it). The limit has to hold more than the download client's in-flight chunks: the file pages the initializer writes are page cache the kernel charges to the writing container's cgroup until write-back has drained them to the disk, so a download that arrives faster than the disk drains accumulates dirty pages inside the limit. On the cache claim and on a large node they stay small. The former `4Gi` default was OOM-killed (`exit 137`) on a 4 vCPU / 16 GiB L4 node a minute into a 9.4 GB download into the emptyDir KServe mounts — the node's local disk — because the download ran **inside the runtime pre-pull's unpack**: the GPU became allocatable about 77 s before the pre-pull had finished gunzipping the 8.8 GB runtime image, so the download and a CPU-bound gunzip shared four vCPUs (load average 30, the page cache filling the node, write-back saturated) and the download's dirty pages stayed charged to the initializer (giantswarm/agent-platform#576). Earlier runs of the same download passed because it started after the pre-pull had ended, and a 16 vCPU node with the same overlap was fine. What removes the collision on the L4 size is the zstd re-layered runtime image from the `llm-d-fast/` prefix (giantswarm/agent-platform#568): its unpack takes about 30 s and the pre-pull ends before the GPU appears. The `8Gi` limit is the headroom for a download that still overlaps an unpack — a bigger model, a slower disk — not the fix. What the value costs on the node: an init container that declares only a limit requests that much while it runs, and init and main containers do not run at once, so the pod's effective request is the larger of the initializer's `8Gi` and the predictor's own — `10Gi` for the smallest preset — and `8Gi` adds nothing to what the node has to hold; it fits the smallest curated L4 size, a 16 GiB node that leaves about 12 GiB to pods after the kubelet's reservations. `make verify-model-serving-policies` asserts the limit on both pod shapes; `make verify-meta` that the meta chart mirrors the default.
+
+## The model pod's emptyDir bounds
+
+Every `emptyDir` KServe composes into a model pod carries a `sizeLimit` after admission, so the volumes are bounded and the fleet's Kyverno audit `require-emptydir-requests-and-limits` (a container mounting an `emptyDir` without `sizeLimit` needs `ephemeral-storage` requests and limits) has nothing to report (giantswarm/agent-platform#556). The `emptydir-size-limits-llmisvc-workload` rule of the pods policy sets them on every model pod, `hf://` and `oci://` alike, and the `emptydir-size-limits` rule of the Deployments policy on the Deployment's pod template, which the audit reports too. The volumes are found by the pod spec's own list, so none is added and none needs naming (an `hf://` pod's `model-cache`, an `oci://` modelcar pod's `kserve-provision-location`); each is patched at its index, so a reinvoked webhook sets the same value again and KServe's volume order stays.
+
+- `modelServing.serving.shmSizeLimit` (`8Gi`) bounds `dshm`, the memory-backed `/dev/shm` of vLLM's worker processes, replacing the single-node template's `1Gi`: a tensor-parallel preset passes activations through it wherever its cards have no peer-to-peer path (NCCL's shared-memory transport), and KServe's multi-GPU templates set `8Gi`. What is written counts against the runtime container's memory limit; the bound reserves nothing.
+- `modelServing.serving.modelCacheSizeLimit` (`100Gi`) bounds the volume the storage-initializer downloads an `hf://` model into at `/mnt/models` (`model-cache` or `kserve-provision-location`, by KServe release) when `modelServing.cache.enabled` is `false`; with the cache on, the claim is mounted there instead and the volume holds nothing. A whole number of `Gi` or `Ti`; the render fails when a preset in effect with an `hf://` storageUri has more `requirements.weightsGiB` (the largest shipped one has 75).
+- `modelServing.serving.emptyDirSizeLimit` (`1Gi`) bounds every other `emptyDir` without a `sizeLimit` (`home`, `tmp-dir`, and with the cache on `model-cache` and `kserve-provision-location`); a `sizeLimit` KServe's template sets on one stays.
+
+`make verify-model-serving-policies` applies both rules to the `hf://` and `oci://` shapes of the workload pod and their Deployments, and asserts with `kyverno apply` that the fleet policy (`tests/fixtures/require-emptydir-requests-and-limits.yaml`) fails them as KServe composes them and reports nothing on them mutated.
 
 ## Voluntary disruption
 
@@ -719,9 +977,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
 | global.observability.metrics.serviceMonitor.labels | object | `{}` |  |
-| global.observability.traces.otlp.endpoint | string | `""` |  |
-| global.observability.traces.otlp.protocol | string | `""` |  |
-| global.observability.traces.otlp.headers | object | `{}` |  |
+| global.observability.traces.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` | The collector's URL. Empty: the data plane exports nothing. |
+| global.observability.traces.otlp.protocol | string | `"grpc"` | `grpc` or `http/protobuf`; empty is grpc. |
+| global.observability.traces.otlp.tenant | string | `"giantswarm"` | The collector's tenant. Read by the meta chart (the X-Scope-OrgID header, the observability.giantswarm.io/tenant pod label); the data plane's label arrives resolved in gateway.parameters.podLabels. |
+| global.observability.traces.otlp.headers | object | `{}` | More OTLP headers, appended to the data-plane env. |
 | components.muster.enabled | bool | `true` |  |
 | components.dicebear.enabled | bool | `true` |  |
 | components.agentgateway.enabled | bool | `false` |  |
@@ -777,9 +1036,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.parameters.containerSecurityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | gateway.parameters.containerSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | gateway.parameters.dataPlaneEnv[0].name | string | `"OTEL_EXPORTER_OTLP_ENDPOINT"` |  |
-| gateway.parameters.dataPlaneEnv[0].value | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| gateway.parameters.dataPlaneEnv[0].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneEnv[1].name | string | `"OTEL_EXPORTER_OTLP_PROTOCOL"` |  |
-| gateway.parameters.dataPlaneEnv[1].value | string | `"grpc"` |  |
+| gateway.parameters.dataPlaneEnv[1].value | string | `"auto"` |  |
 | gateway.parameters.dataPlaneVolumes | list | `[]` |  |
 | gateway.parameters.dataPlaneVolumeMounts | list | `[]` |  |
 | gateway.parameters.dataPlaneResources.requests.cpu | string | `"100m"` |  |
@@ -796,24 +1055,33 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.parameters.spread.whenUnsatisfiable | string | `"ScheduleAnyway"` |  |
 | gateway.parameters.podAnnotations | object | `{}` |  |
 | gateway.parameters.podLabels | object | `{}` |  |
+| gateway.http.maxBufferSize | string | `"8Mi"` |  |
+| gateway.tracing.randomSampling | string | `"0.1"` |  |
 | gateway.metricLabels.agent.enabled | bool | `true` |  |
 | gateway.metricLabels.agent.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent\"] : source.unverifiedWorkload.serviceAccount"` |  |
 | gateway.metricLabels.agent_namespace.enabled | bool | `true` |  |
 | gateway.metricLabels.agent_namespace.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-namespace\"] : source.unverifiedWorkload.namespace"` |  |
 | gateway.metricLabels.user.enabled | bool | `true` |  |
 | gateway.metricLabels.user.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-user\"] : jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
+| gateway.metricLabels.api_key.enabled | bool | `true` |  |
+| gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
 | llmRouting.enabled | bool | `false` |  |
 | llmRouting.listener.name | string | `"llm"` |  |
 | llmRouting.listener.port | int | `8081` |  |
-| llmRouting.backend.name | string | `"anthropic"` |  |
-| llmRouting.backend.provider | string | `"anthropic"` |  |
-| llmRouting.pathPrefixes[0] | string | `"/v1"` |  |
-| llmRouting.routes./v1/messages | string | `"Messages"` |  |
-| llmRouting.routes./v1/messages/count_tokens | string | `"AnthropicTokenCount"` |  |
-| llmRouting.routes.* | string | `"Passthrough"` |  |
+| llmRouting.models[0].name | string | `"anthropic"` |  |
+| llmRouting.models[0].provider | string | `"Anthropic"` |  |
+| llmRouting.models[0].baseURL | string | `"https://api.anthropic.com/v1"` |  |
+| llmRouting.models[0].match | string | `"claude-*"` |  |
+| llmRouting.external.enabled | bool | `false` |  |
+| llmRouting.external.hostPrefix | string | `"llm"` |  |
+| llmRouting.external.listener.name | string | `"llm-external"` |  |
+| llmRouting.external.listener.port | int | `8082` |  |
+| llmRouting.external.apiKeys.secretRef.name | string | `""` |  |
+| llmRouting.external.apiKeys.secretSelector.matchLabels | object | `{}` |  |
+| llmRouting.external.apiKeys.configMapSelector.matchLabels | object | `{}` |  |
 | llmRouting.modelConfigPolicy.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
@@ -830,6 +1098,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.output | string | `"25"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.cacheRead | string | `"0.5"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.cacheWrite | string | `"6.25"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.input | string | `"4"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.output | string | `"20"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.cacheRead | string | `"0.2"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.cacheWrite | string | `"5"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.input | string | `"3"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.output | string | `"15"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.cacheRead | string | `"0.3"` |  |
@@ -907,8 +1179,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.podDisruptionBudget.enabled | bool | `true` |  |
-| valkey.podDisruptionBudget.minAvailable | int | `1` |  |
-| valkey.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| valkey.podDisruptionBudget.minAvailable | string | `nil` |  |
+| valkey.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | valkey.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | valkey.valkey.fullnameOverride | string | `"muster-valkey"` |  |
 | valkey.valkey.replicaCount | int | `1` |  |
@@ -989,12 +1261,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controller.skillsInitImage.repository | string | `"kagent-skills-init"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
-| kagent.controller.env[0].name | string | `"METRICS_BIND_ADDRESS"` |  |
-| kagent.controller.env[0].value | string | `":8080"` |  |
-| kagent.controller.env[1].name | string | `"METRICS_SECURE"` |  |
-| kagent.controller.env[1].value | string | `"false"` |  |
-| kagent.controller.env[2].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.controller.env[2].value | string | `"X-Scope-OrgID=giantswarm"` |  |
+| kagent.controller.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.controller.env[0].value | string | `"X-Scope-OrgID=giantswarm"` |  |
 | kagent.controller.vpa.enabled | string | `"auto"` |  |
 | kagent.controller.vpa.updateMode | string | `"InPlaceOrRecreate"` |  |
 | kagent.controller.vpa.controlledValues | string | `"RequestsOnly"` |  |
@@ -1020,16 +1288,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.serviceMonitor.enabled | bool | `false` |  |
-| kagent.serviceMonitor.interval | string | `"60s"` |  |
-| kagent.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
-| kagent.otel.tracing.enabled | string | `"auto"` |  |
-| kagent.otel.tracing.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.tracing.exporter.otlp.protocol | string | `"grpc"` |  |
-| kagent.otel.tracing.exporter.otlp.insecure | bool | `true` |  |
-| kagent.otel.logging.enabled | string | `"auto"` |  |
-| kagent.otel.logging.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
-| kagent.otel.logging.exporter.otlp.insecure | bool | `true` |  |
+| kagent.otel.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
+| kagent.otel.exporter.otlp.protocol | string | `"grpc"` |  |
+| kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
+| kagent.otel.traces.enabled | string | `"auto"` |  |
+| kagent.otel.logs.enabled | string | `"auto"` |  |
 | kagent.oauth2-proxy.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
@@ -1212,12 +1475,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.backup.crossplane.azure.subnetName | string | `"node-subnet"` |  |
 | postgres.backup.crossplane.azure.privateDnsZoneRef | string | `""` |  |
 | klausGateway.image.registry | string | `"gsoci.azurecr.io"` |  |
-| klausGateway.agentgateway.enabled | bool | `false` |  |
 | klausGateway.routing.store | string | `"memory"` |  |
-| klausGateway.routing.defaultTTL | string | `"24h"` |  |
-| klausGateway.lifecycle.driver | string | `"static"` |  |
-| klausGateway.lifecycle.staticInstances | string | `""` |  |
-| klausGateway.upstream.agentgatewayURL | string | `""` |  |
 | klausGateway.observability.otlpEndpoint | string | `""` |  |
 | klausGateway.slack.enabled | bool | `false` |  |
 | klausGateway.slack.mode | string | `"events"` |  |
@@ -1234,21 +1492,18 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | klausGateway.reviews.enabled | bool | `false` |  |
 | klausGateway.reviews.audience | string | `"klaus-gateway"` |  |
 | klausGateway.reviews.allowedCallers | list | `[]` |  |
-| klausGateway.cli.enabled | bool | `false` |  |
 | klausGateway.a2a.enabled | bool | `false` |  |
 | klausGateway.a2a.defaultAgent | string | `""` |  |
 | klausGateway.a2a.url | string | `"grpc://agentgateway.agent-platform.svc.cluster.local:8080"` |  |
-| klausGateway.a2a.saToken.enabled | bool | `false` |  |
-| klausGateway.a2a.saToken.audience | string | `"kagent"` |  |
 | klausGateway.agentgatewayRoute.enabled | bool | `false` |  |
 | klausGateway.agentgatewayRoute.hostname | string | `""` |  |
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.0.0"` |  |
+| agentgateway.controller.image.tag | string | `"2.1.2"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.0.0"` |  |
+| agentgateway.proxy.image.tag | string | `"2.1.2"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1288,19 +1543,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | model-manager.networkPolicy.enabled | bool | `false` |  |
-| modelManager.route.enabled | bool | `false` |  |
-| modelManager.route.pathPrefix | string | `"/model-manager"` |  |
-| modelManager.route.hostname | string | `""` |  |
-| modelManager.route.parentRef.name | string | `"giantswarm-default"` |  |
-| modelManager.route.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| modelManager.route.jwtAuthentication.enabled | bool | `false` |  |
-| modelManager.route.jwtAuthentication.mode | string | `"Strict"` |  |
-| modelManager.route.jwtAuthentication.issuer | string | `""` |  |
-| modelManager.route.jwtAuthentication.jwks.host | string | `"dex.giantswarm.svc.cluster.local"` |  |
-| modelManager.route.jwtAuthentication.jwks.port | int | `5556` |  |
-| modelManager.route.jwtAuthentication.jwks.path | string | `"/keys"` |  |
-| modelManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
-| modelManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | modelManager.kserve.requireApi | bool | `true` |  |
 | modelManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
@@ -1309,6 +1551,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelManager.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.workloadClusters | object | `{}` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.registeredBackends | list | `[]` |  |
@@ -1359,8 +1602,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.route.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
 | agentManager.podDisruptionBudget.enabled | bool | `true` |  |
-| agentManager.podDisruptionBudget.minAvailable | int | `1` |  |
-| agentManager.podDisruptionBudget.maxUnavailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.minAvailable | string | `nil` |  |
+| agentManager.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | agentManager.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | agentManager.flux.requireApi | bool | `false` |  |
 | agentManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
@@ -1391,6 +1634,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.prewarmPriorityClass.name | string | `"agent-platform-prewarm-placeholder"` |  |
 | clusterManager.prewarmPriorityClass.value | int | `-1000` |  |
 | clusterManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| clusterManager.networkPolicy.workloadClusters.provider | string | `""` |  |
 | clusterManager.networkPolicy.workloadClusters.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.cidrs | list | `[]` |  |
 | clusterManager.networkPolicy.workloadClusters.ports[0] | int | `443` |  |
@@ -1425,6 +1669,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
+| mcp-kubernetes.mcpServer.enabled | bool | `true` |  |
+| mcp-kubernetes.mcpServer.managementCluster | string | `""` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |
@@ -1448,10 +1694,14 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.serving.gpuResourceName | string | `"nvidia.com/gpu"` |  |
 | modelServing.serving.runtimeClassName | string | `""` |  |
 | modelServing.serving.nodeSelector | object | `{}` |  |
+| modelServing.serving.shmSizeLimit | string | `"8Gi"` |  |
+| modelServing.serving.modelCacheSizeLimit | string | `"100Gi"` |  |
+| modelServing.serving.emptyDirSizeLimit | string | `"1Gi"` |  |
 | modelServing.gpuPool.taint.key | string | `"nvidia.com/gpu"` |  |
 | modelServing.gpuPool.taint.value | string | `""` |  |
 | modelServing.gpuPool.taint.effect | string | `"NoSchedule"` |  |
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
+| modelServing.fastLinks | list | `[]` |  |
 | modelServing.prepull.enabled | bool | `true` |  |
 | modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
 | modelServing.prepull.nodeSelector | object | `{}` |  |
@@ -1505,6 +1755,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.imageVerification.kyvernoEgress.hosts[3].matchName | string | `"rekor.sigstore.dev"` |  |
 | modelServing.networkPolicy.llmisvcWorkload.port | int | `8000` |  |
 | modelServing.networkPolicy.additionalIngressNamespaces | list | `[]` |  |
+| modelServing.networkPolicy.otlpEndpoint | string | `"auto"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[1].matchPattern | string | `"*.huggingface.co"` |  |
 | modelServing.networkPolicy.huggingFace.fqdns[2].matchPattern | string | `"*.hf.co"` |  |
@@ -1520,6 +1771,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.modelsGateway.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
 | modelServing.modelsGateway.tls.issuerRef.group | string | `"cert-manager.io"` |  |
 | modelServing.modelsGateway.replicas | int | `1` |  |
+| modelServing.modelsGateway.service.annotations."service.beta.kubernetes.io/aws-load-balancer-scheme" | string | `"internet-facing"` |  |
 | modelServing.modelsGateway.externalDns.enabled | bool | `true` |  |
 | modelServing.modelsGateway.externalDns.annotations."giantswarm.io/external-dns" | string | `"managed"` |  |
 | modelServing.modelsGateway.jwtAuthentication.mode | string | `"Strict"` |  |

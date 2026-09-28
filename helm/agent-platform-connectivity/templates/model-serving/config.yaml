@@ -47,6 +47,12 @@ data:
           {{- toYaml $ms.gpuPool.nodeSelector | nindent 10 }}
           {{- else }} {}
           {{- end }}
+      {{- with $ms.fastLinks }}
+      # The node groups joined by a fast link (modelServing.fastLinks): a
+      # model is split across the nodes of one, never across nodes without.
+      fastLinks:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       # Whether this chart renders network policies for the serving namespace
       # (networkPolicy.enabled), and in which flavor (kubernetes | cilium).
       networkPolicy:

@@ -15,9 +15,9 @@ spec:
     48 GB GPU of the L40S family: g6e.2xlarge or g6e.4xlarge (g6e.xlarge
     leaves a predictor 3 vCPU / 27 GiB, less than the 4 vCPU / 32 GiB
     requested here). The model's own window is 262,144 tokens; the preset
-    serves 8k, what the KV cache of a 48 GB card holds beside 31 GiB of
-    weights at --gpu-memory-utilization=0.92 (four concurrent requests, one
-    image per prompt, no audio). Tool calls and thinking use Gemma 4's own
+    serves 32k with an fp8 KV cache, what a 48 GB card holds beside 31 GiB
+    of weights at --gpu-memory-utilization=0.92 (four concurrent requests,
+    one image per prompt, no audio). Tool calls and thinking use Gemma 4's own
     token protocol, parsed with vLLM's gemma4 tool and reasoning parsers
     under vLLM's Gemma 4 chat template — the template the model card's vLLM
     instructions and vLLM's Gemma 4 recipe both serve the model with,
@@ -38,7 +38,7 @@ spec:
     # the path, giantswarm/models/gemma-4-31b-fp8:d4ab4f579dd3, stays.
     storageUri: oci://gsoci.azurecr.io/giantswarm/models/gemma-4-31b-fp8:d4ab4f579dd3
     format: vLLM
-    contextLength: 8192
+    contextLength: 32768
     capabilities: [chat, tools, reasoning, vision, coding]
     license: apache-2.0
   env:
@@ -64,13 +64,14 @@ spec:
   # 31.7 GiB of FP8 weights load on the 48 GB card; at --gpu-memory-utilization
   # 0.92 that leaves 7.3 GiB for the KV cache. Gemma 4's KV need is not linear
   # in the context (the local-attention layers hold a window each, the global
-  # layers grow with the length): vLLM measured 12.0 GiB for 64k and 9.5 GiB
-  # for 8k, and named 8640 tokens as the ceiling this card holds. 8k is that
-  # ceiling rounded down; 32k needs an fp8 KV cache, which is not yet proven on
-  # the L40S (giantswarm/agent-platform#611).
+  # layers grow with the length): with a bf16 KV cache vLLM named 8640 tokens
+  # as the ceiling this card holds. An fp8 KV cache halves the need: 32k with
+  # --kv-cache-dtype=fp8 reached Ready on one L40S and served tool calls on
+  # the platform's vLLM 0.23.0 (giantswarm/agent-platform#611).
   args:
     - --gpu-memory-utilization=0.92
-    - --max-model-len=8192
+    - --max-model-len=32768
+    - --kv-cache-dtype=fp8
     - --max-num-seqs=4
     - --max-num-batched-tokens=8192
     - --enable-chunked-prefill
@@ -100,8 +101,8 @@ spec:
       memory: 48Gi
   requirements:
     # The Hub's safetensors index sizes the weights at 30.98 GiB
-    # (make verify-preset-weights); 13 GiB of overhead is the KV cache of
-    # the 64k context, CUDA graphs and the runtime — 44 GiB in all on a
+    # (make verify-preset-weights); 13 GiB of overhead is the fp8 KV cache
+    # of the 32k context, CUDA graphs and the runtime — 44 GiB in all on a
     # 48 GB card at 0.92.
     weightsGiB: 31
     overheadGiB: 13

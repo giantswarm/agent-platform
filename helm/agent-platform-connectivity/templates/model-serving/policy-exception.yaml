@@ -17,6 +17,12 @@ agent-platform.modelServing.podShape — the same selector as the network
 policies and the mutations, giantswarm/agent-platform#506), and the Deployment
 — evaluated at its own admission against its own labels — also by the name the
 llm-d controller gives it (<llminferenceservice>-kserve[-<role>]).
+
+A model split across the nodes of a fast link (modelServing.fastLinks,
+giantswarm/model-manager#190) runs as a LeaderWorkerSet whose leader and
+workers carry the same security context as a single-node model pod
+(giantswarm/model-manager#193): the first match below covers them, no
+capability is added.
 */ -}}
 {{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled }}
 apiVersion: kyverno.io/v2
@@ -32,12 +38,15 @@ spec:
   match:
     any:
     {{- with (include "agent-platform.modelServing.podShape" . | fromJson) }}
-    # {{ .kind }} pods, their ReplicaSets and Deployments, by their labels.
+    # {{ .kind }} pods, their ReplicaSets and Deployments — and the
+    # StatefulSets of a LeaderWorkerSet, a model split across nodes — by
+    # their labels.
     - resources:
         kinds:
         - Pod
         - ReplicaSet
         - Deployment
+        - StatefulSet
         namespaces:
         - {{ include "agent-platform.modelServing.namespace" $ }}
         selector:
@@ -49,6 +58,7 @@ spec:
         - Deployment
         - ReplicaSet
         - Pod
+        - StatefulSet
         namespaces:
         - {{ include "agent-platform.modelServing.namespace" . }}
         names:

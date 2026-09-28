@@ -23,7 +23,15 @@ metadata:
     agent-platform.giantswarm.io/backup: none
     {{- end }}
 spec:
-  instances: {{ .Values.postgres.instances | default 3 }}
+  {{- $instances := int (.Values.postgres.instances | default 3) }}
+  instances: {{ $instances }}
+  {{- if eq $instances 1 }}
+  # One instance: the operator's budget on the primary would refuse every
+  # eviction and hold a node drain until its timeout, with no replica to
+  # switch over to. With two or more instances the operator switches the
+  # primary over when its node is drained, and its budgets stay on.
+  enablePDB: false
+  {{- end }}
   {{- with include "agent-platform.postgres.serviceAccountAnnotations" . }}
   # The operator creates a ServiceAccount named after the Cluster; these
   # annotations bind it to a cloud identity (IRSA role, Azure workload identity)

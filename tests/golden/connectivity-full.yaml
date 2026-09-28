@@ -58,7 +58,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
     app.kubernetes.io/component: valkey
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
@@ -1290,7 +1290,7 @@ data:
           },
           "gridPos": {
             "h": 7,
-            "w": 12,
+            "w": 8,
             "x": 0,
             "y": 26
           },
@@ -1389,8 +1389,8 @@ data:
           },
           "gridPos": {
             "h": 7,
-            "w": 12,
-            "x": 12,
+            "w": 8,
+            "x": 8,
             "y": 26
           },
           "id": 18,
@@ -1438,6 +1438,117 @@ data:
             }
           ],
           "title": "Time to first text, p50 and p95",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "From the message's arrival to the last edit of the answer in the channel: the whole turn as the person sees it.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": 0
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 26
+          },
+          "id": 22,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "12.1.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(klaus_gateway_turn_phase_seconds_bucket{cluster_id=~\"$cluster\", channel=~\"$channel\", phase=\"final_flush\"}[$__rate_interval])))",
+              "instant": false,
+              "legendFormat": "p95",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(klaus_gateway_turn_phase_seconds_bucket{cluster_id=~\"$cluster\", channel=~\"$channel\", phase=\"final_flush\"}[$__rate_interval])))",
+              "instant": false,
+              "legendFormat": "p50",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Turn done (final flush), p50 and p95",
           "type": "timeseries"
         },
         {
@@ -2422,7 +2533,7 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "max(redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"}) / max(redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0)",
+              "expr": "max(redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} / (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0))",
               "instant": false,
               "legendFormat": "used",
               "range": true,
@@ -3685,9 +3796,9 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "max by (namespace) (redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"}) / max by (namespace) (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0)",
+              "expr": "max by (job) (redis_memory_used_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} / (redis_memory_max_bytes{cluster_type=\"management_cluster\", namespace=~\"agent-platform|kagent|mcp-kubernetes|mcp-capi|mcp-prometheus\", cluster_id=~\"$cluster\"} > 0))",
               "instant": false,
-              "legendFormat": "{{namespace}}",
+              "legendFormat": "{{job}}",
               "range": true,
               "refId": "A"
             }
@@ -8947,7 +9058,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.0.0
+    tag: 2.1.2
   service:
     spec:
       type: ClusterIP
@@ -8998,6 +9109,29 @@ spec:
                   value: http://otlp-gateway.kube-system.svc:4317
                 - name: OTEL_EXPORTER_OTLP_PROTOCOL
                   value: grpc
+---
+# Source: agent-platform-connectivity/templates/agentgateway/http-policy.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: agent-platform-connectivity-http
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway
+  frontend:
+    http:
+      maxBufferSize: 8Mi
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/metrics-policy.yaml
 apiVersion: agentgateway.dev/v1alpha1
@@ -9052,6 +9186,7 @@ spec:
     tracing:
       url: "http://otlp-gateway.kube-system.svc:4317"
       protocol: GRPC
+      randomSampling: "0.1"
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/networkpolicy-controller-cilium.yaml
 apiVersion: cilium.io/v2
@@ -9303,6 +9438,8 @@ spec:
 # controller itself decodes the bearer without verifying it, so every other pod
 # is kept off the API port. Agent pods do not call the controller from inside
 # the namespace any more (the Substrate actors' egress is a separate policy).
+# The metrics port serves no API and is admitted from the cluster entity, as
+# the platform's other metrics ports are.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -9431,9 +9568,9 @@ spec:
               protocol: TCP
 ---
 # Source: agent-platform-connectivity/templates/model-manager/netpol.yaml
-# Ingress to model-manager: the agentgateway data plane (the portal's route)
-# and muster (the MCP endpoint), both in the release namespace, on the Service
-# port only — plus the kubelet's probes (host entity), which a policy that
+# Ingress to model-manager: muster (the MCP endpoint, the one platform caller)
+# and additionalPeers, in the release namespace, on the Service port only —
+# plus the kubelet's probes (host entity), which a policy that
 # selects the pod would otherwise deny.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -9703,18 +9840,12 @@ spec:
             - port: "5432"
               protocol: TCP
     # The snapshot store: an S3 (or S3-compatible) endpoint, and a CAPA
-    # cluster's IRSA token exchange with STS; the OTLP gateway.
+    # cluster's IRSA token exchange with STS.
     - toEntities:
         - world
       toPorts:
         - ports:
             - port: "443"
-              protocol: TCP
-    - toEntities:
-        - cluster
-      toPorts:
-        - ports:
-            - port: "4317"
               protocol: TCP
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
@@ -9981,6 +10112,8 @@ spec:
         - cluster
       toPorts:
         - ports:
+            - port: "9090"
+              protocol: TCP
             - port: "15020"
               protocol: TCP
   egress:
@@ -10012,6 +10145,15 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+    # The credential provider: the Secret values a policy's credential
+    # injection names (the Substrate line from 1.1.0), asked per request.
+    - toEndpoints:
+        - matchLabels:
+            app: k8s-credential-provider
+      toPorts:
+        - ports:
+            - port: "50051"
               protocol: TCP
     - toEndpoints:
         - matchLabels:
@@ -10093,6 +10235,65 @@ spec:
             - port: "53"
               protocol: UDP
             - port: "53"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: coredns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: k8s-dns-node-cache
+      toPorts:
+        - ports:
+            - port: "1053"
+              protocol: UDP
+            - port: "1053"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+---
+# Source: agent-platform-connectivity/templates/substrate/netpol.yaml
+# k8s-credential-provider: the egress gateway asks it (50051, mTLS) for the
+# Secret values a policy's credential injection names; it reads those Secrets
+# from the apiserver and nothing else. Prometheus scrapes 9090.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-k8s-credential-provider
+  namespace: ate-system
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    matchLabels:
+      app: k8s-credential-provider
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: atenet-egress
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "9090"
               protocol: TCP
   egress:
     - toEndpoints:
@@ -10588,6 +10789,40 @@ spec:
           matchLabels:
             app: podcertificate-controller
 ---
+# Source: agent-platform-connectivity/templates/substrate/policy-exceptions.yaml
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: substrate-credential-provider
+  namespace: policy-exceptions
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    agent-platform.giantswarm.io/substrate-workload: credential-provider
+spec:
+  exceptions:
+  - policyName: restrict-seccomp-strict
+    ruleNames:
+      - check-seccomp-strict
+      - autogen-check-seccomp-strict
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - Deployment
+        - ReplicaSet
+        namespaces:
+        - ate-system
+        selector:
+          matchLabels:
+            app: k8s-credential-provider
+---
 # Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -10727,7 +10962,13 @@ spec:
             - |
               ca_pool() {
                 mkdir -p "/work/$1"
-                openssl genpkey -algorithm ed25519 -out "/work/$1/key.pem"
+                if [ "${2:-}" = "ec" ]; then
+                  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "/work/$1/key.pem"
+                  echo "ECDSA P-256" > "/work/$1/algorithm"
+                else
+                  openssl genpkey -algorithm ed25519 -out "/work/$1/key.pem"
+                  echo "ED25519" > "/work/$1/algorithm"
+                fi
                 openssl req -x509 -new -key "/work/$1/key.pem" -days 365 -subj "/CN=$(openssl rand -hex 12)" \
                   -addext basicConstraints=critical,CA:TRUE \
                   -addext keyUsage=critical,digitalSignature,keyCertSign \
@@ -10747,8 +10988,9 @@ spec:
               ca_pool service-dns-ca-pool
               ca_pool pod-identity-ca-pool
               ca_pool actor-id-ca-pool
+              ca_pool egress-mitm-ca-pool ec
               jwt_pool actor-id-jwt-pool
-              echo "candidates minted for 3 CA pools and 1 JWT authority pool"
+              echo "candidates minted for 4 CA pools and 1 JWT authority pool"
           env:
             - name: HOME
               value: /tmp
@@ -10797,7 +11039,7 @@ spec:
                   '{CAs: [{ID: $id, SigningKeyPKCS8: $key, RootCertificateDER: $der}], ActiveForSigning: $id}')
                 kubectl -n "$1" create secret generic "$2" --type=kubernetes.io/tls \
                   --from-literal=pool="$pool" --from-file=tls.crt="/work/$2/cert.pem" --from-file=tls.key="/work/$2/key.pem" >/dev/null
-                echo "CA pool $1/$2: created (ED25519 root, id $pool_id, 365 days)"
+                echo "CA pool $1/$2: created ($(cat "/work/$2/algorithm") root, id $pool_id, 365 days)"
               }
               jwt_pool() {
                 if kubectl -n "$1" get secret "$2" >/dev/null 2>&1; then
@@ -10851,6 +11093,7 @@ spec:
               trust_bundle "$pc_ns" pod-identity-ca-pool podidentity.podcert.ate.dev/identity
               jwt_pool "$ns" actor-id-jwt-pool
               ca_pool "$ns" actor-id-ca-pool
+              ca_pool "$ns" egress-mitm-ca-pool
               # The trust anchor: the active root of actor-id-ca-pool as PEM (DER is already
               # base64 in the pool; PEM is that base64 in 64-column lines between the markers).
               root=$(kubectl -n "$ns" get secret actor-id-ca-pool -o jsonpath='{.data.pool}' | base64 -d \
@@ -10899,7 +11142,7 @@ spec:
               cpu: 10m
               memory: 32Mi
             limits:
-              memory: 128Mi
+              memory: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp

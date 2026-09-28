@@ -6,7 +6,9 @@ The helm.sh/chart label is `<name>-<version>` cut to 63 characters. Two things
 make that cut dangerous: helm-controller installs every chart with the OCI
 digest appended as build metadata (`3.20.0+8c89e1be4cbf`; `+` is replaced by
 `_`), and a branch build carries a long prerelease version (abs stamps
-`3.19.1-dev.<branch>.<date>.<time>.h<sha>`). A cut that lands on `_`, `-` or
+gitsemver 3's `X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha>`, whose 33
+characters hold neither `.` nor `-`; builds before architect-orb 10.10.0
+carried `3.19.1-dev.<branch>.<date>.<time>.h<sha>`). A cut that lands on `_`, `-` or
 `.` is rejected by the apiserver for EVERY object of the release ("must start
 and end with an alphanumeric character") — measured once on the self-management
 adoption of a branch build, which then also poisoned `helm uninstall` (the
@@ -32,9 +34,16 @@ def fail(msg: str) -> None:
     sys.exit(f"FAIL: {msg}")
 
 
+# A current dev version as abs stamps it: the meta chart's label is cut inside
+# the digest (`agent-platform-` + 39 characters + `_`), the connectivity
+# chart's inside the prerelease (`agent-platform-connectivity-` + 39 > 63).
+CURRENT_DEV = "4.66.4-r1d9c9567t20260924043558hcde53c0"
+
+
 def versions_cutting_on(name: str, separators: str) -> list[str]:
-    """Prerelease versions (the abs shape) whose label `<name>-<version>_<digest>`
-    has each separator exactly at the 63rd character, plus a short release."""
+    """Prerelease versions of the superseded abs shape whose label
+    `<name>-<version>_<digest>` has each separator exactly at the 63rd
+    character, plus a current dev version and a short release."""
     base = "3.19.1-dev.a.2026-09-08."
     pad = 62 - (len(name) + 1) - len(base)
     assert pad >= 0, (name, base)
@@ -44,6 +53,7 @@ def versions_cutting_on(name: str, separators: str) -> list[str]:
             out.append(base + "x" * pad)
         else:  # the separator inside the prerelease is the 63rd character
             out.append(base + "x" * pad + sep + "h1234567")
+    out.append(CURRENT_DEV)
     out.append("3.20.0")
     return out
 

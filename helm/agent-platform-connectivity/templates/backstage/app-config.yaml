@@ -169,11 +169,11 @@ data:
     {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.controllerRoute.enabled }}
     {{- $kagentRoute = .Values.kagent.controllerRoute }}
     {{- end }}
-    {{- $modelManagerRoute := dict }}
-    {{- if and (include "agent-platform.modelManager.enabled" .) .Values.modelManager.route.enabled }}
-    {{- $modelManagerRoute = .Values.modelManager.route }}
-    {{- end }}
-    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute $modelManagerRoute }}
+    {{- /* No model-manager entry: the portal reaches model-manager as the
+    signed-in person through muster (the x_model-manager_* tools of the
+    muster.installations entry above; giantswarm/backstage#2294), and its
+    backend has no model-manager client to configure. */}}
+    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute }}
     agentPlatform:
       {{- with $fluxSa }}
       {{- /* The tenant identity of the agents' HelmReleases: the ONE value
@@ -205,17 +205,6 @@ data:
         installations:
           {{ $installation }}:
             apiBaseUrl: https://{{ include "agent-platform.kagent.controllerHostname" . }}
-      {{- end }}
-      {{- if $modelManagerRoute }}
-      {{- /* The model-manager API of this installation, through the
-      agentgateway route (templates/model-manager/route.yaml): the prefix is
-      stripped before model-manager, so its REST API sits at
-      <hostname><pathPrefix>/api/v1. The portal backend forwards the user's
-      Dex ID token; the route's JWT policy is the identity boundary. */}}
-      modelManager:
-        installations:
-          {{ $installation }}:
-            apiBaseUrl: https://{{ include "agent-platform.modelManager.hostname" . }}{{ $modelManagerRoute.pathPrefix }}
       {{- end }}
     {{- end }}
 {{- end }}

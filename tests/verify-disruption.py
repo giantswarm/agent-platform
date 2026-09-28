@@ -2,11 +2,11 @@
 """Assert the voluntary-disruption knobs the meta chart forwards to the component
 charts (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on the pods
 of muster, kagent-controller and klaus-gateway through each chart's
-podAnnotations, and each chart's PodDisruptionBudget knob on — muster's
-podDisruptionBudget, kagent's controller.pdb (minAvailable with maxUnavailable
-emptied, because the chart defaults to maxUnavailable: 1 and refuses both, and a
-null set at this layer is consumed by Helm before it reaches the chart), the
-klaus-gateway chart's podDisruptionBudget (1.1.0+). muster-valkey
+podAnnotations, and each chart's PodDisruptionBudget knob on and drainable,
+maxUnavailable: 1 — muster's and the klaus-gateway chart's (1.1.0+)
+podDisruptionBudget with minAvailable emptied (both charts default to
+minAvailable: 1, and a null set at this layer is consumed by Helm before it
+reaches the chart), kagent's controller.pdb on the chart's own default. muster-valkey
 (giantswarm/agent-platform#439): karpenter.sh/do-not-disrupt through the valkey
 subchart's podAnnotations (valkey.valkey.podAnnotations); its budget is the
 connectivity chart's (valkey.podDisruptionBudget travels to the connectivity
@@ -133,7 +133,8 @@ def check_valkey(manifest: str, off: bool) -> None:
     pdb = stripped(connectivity, "valkey", "podDisruptionBudget")
     expect(pdb, "connectivity: valkey.podDisruptionBudget not forwarded")
     expect(f"enabled: {str(not off).lower()}" in pdb, f"connectivity: valkey.podDisruptionBudget.enabled is not {not off}")
-    expect("minAvailable: 1" in pdb, "connectivity: valkey.podDisruptionBudget.minAvailable is not 1")
+    expect("maxUnavailable: 1" in pdb, "connectivity: valkey.podDisruptionBudget.maxUnavailable is not 1 (a single replica must stay drainable)")
+    expect("minAvailable: 1" not in pdb, "connectivity: valkey.podDisruptionBudget still forwards minAvailable: 1")
     expect("unhealthyPodEvictionPolicy: AlwaysAllow" in pdb, "connectivity: the valkey budget does not keep unhealthy pods evictable")
 
 
@@ -157,16 +158,15 @@ def main(argv: list[str]) -> int:
         pdb = [l.strip() for l in block(vals, "podDisruptionBudget")]
         expect(pdb, f"{name}: no podDisruptionBudget forwarded")
         expect(f"enabled: {str(not off).lower()}" in pdb, f"{name}: podDisruptionBudget.enabled is not {not off}")
-        expect("minAvailable: 1" in pdb, f"{name}: podDisruptionBudget.minAvailable is not 1")
-        expect(not any(l.startswith("maxUnavailable") for l in pdb), f"{name}: maxUnavailable travels next to minAvailable")
+        expect("maxUnavailable: 1" in pdb, f"{name}: podDisruptionBudget.maxUnavailable is not 1 (a single replica must stay drainable)")
+        expect('minAvailable: ""' in pdb, f"{name}: podDisruptionBudget.minAvailable must travel as the empty string (a null never reaches the chart and its minAvailable: 1 default would come back next to maxUnavailable)")
     klaus_pdb = [l.strip() for l in block(klaus, "podDisruptionBudget")]
     expect("unhealthyPodEvictionPolicy: AlwaysAllow" in klaus_pdb, "klaus-gateway: the budget does not keep unhealthy pods evictable")
 
     controller = [l.strip() for l in block(kagent, "controller", "pdb")]
     expect(controller, "kagent: no controller.pdb forwarded")
     expect(f"enabled: {str(not off).lower()}" in controller, f"kagent: controller.pdb.enabled is not {not off}")
-    expect("minAvailable: 1" in controller, "kagent: controller.pdb.minAvailable is not 1")
-    expect('maxUnavailable: ""' in controller, "kagent: controller.pdb.maxUnavailable must travel as the empty string (a null never reaches the chart and its maxUnavailable: 1 default would come back next to minAvailable)")
+    expect(not any(l.startswith(("minAvailable", "maxUnavailable")) for l in controller), "kagent: controller.pdb forwards minAvailable or maxUnavailable; the chart's own default, maxUnavailable: 1, keeps the single replica drainable")
     expect("unhealthyPodEvictionPolicy: AlwaysAllow" in controller, "kagent: the controller budget does not keep unhealthy pods evictable")
 
     muster_ann = [l.strip() for l in block(muster, "podAnnotations")]

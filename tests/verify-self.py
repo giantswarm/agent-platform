@@ -175,7 +175,7 @@ def main(chart: str) -> int:
     hr = on.get(("HelmRelease", NAMESPACE, RELEASE))
     if not oci or not hr:
         fail("engine on: the self OCIRepository / HelmRelease did not render by default (gitops.self.enabled: auto must follow the engine)")
-    needles(oci, "self OCIRepository", "\n  interval: 10m\n", f"\n  url: oci://gsoci.azurecr.io/charts/giantswarm/{RELEASE}\n", f'semver: "{derived}"', "app.kubernetes.io/component: self-management")
+    needles(oci, "self OCIRepository", "\n  interval: 1m\n", f"\n  url: oci://gsoci.azurecr.io/charts/giantswarm/{RELEASE}\n", f'semver: "{derived}"', "app.kubernetes.io/component: self-management")
     if "insecure" in oci:
         fail("self OCIRepository sets insecure by default")
     if self_filter:
@@ -198,12 +198,15 @@ def main(chart: str) -> int:
     hooks = {(k, n): hook_meta(d) for (k, _, n), d in on.items() if "helm.sh/hook:" in d}
     expected_hooks = {
         # ci-values turn kagent on: the kagent namespace hook and the storage-version hooks (verify-engine.py) and the hook identity at their events
-        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10), ("NetworkPolicy", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete", -10),
+        ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10), ("NetworkPolicy", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10),
         ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
+        # the Flux Operator CRDs, applied at every install and upgrade with the engine on (verify-engine.py)
+        ("ConfigMap", f"{RELEASE}-flux-operator-crds"): ("pre-install,pre-upgrade", -10), ("Job", f"{RELEASE}-flux-operator-crds"): ("pre-install,pre-upgrade", -9),
         **{("Job", n): ev for n, ev in STORAGE_HOOKS.items()},
         ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-delete", -5),
         ("Job", f"{RELEASE}-self-values"): ("post-install,post-upgrade", 0),
-        ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("pre-delete", 5),
+        ("Job", f"{RELEASE}-teardown-releases"): ("pre-delete", 0), ("Job", f"{RELEASE}-teardown-engine"): ("post-delete", 0),
+        ("Job", f"{RELEASE}-teardown-operator"): ("post-delete", 5),
     }
     if hooks != expected_hooks:
         fail(f"engine on, self on: hooks differ from the expected events/weights:\n  got      {hooks}\n  expected {expected_hooks}")
@@ -254,12 +257,12 @@ def main(chart: str) -> int:
         expected_off[("Job", f"{RELEASE}-self-stop-resumer")] = ("pre-upgrade,pre-delete", -6)
         expected_off[("Job", f"{RELEASE}-self-suspend")] = ("pre-upgrade,pre-delete", -5)
         if label != "self off":
-            # the lab values leave kagent off: no kagent namespace hook, no storage-version hooks, the hook identity at pre-delete only
+            # the lab values leave kagent off: no kagent namespace hook, no storage-version hooks, the hook identity at the engine's own events (the CRD hook, the teardown)
             del expected_off[("Job", f"{RELEASE}-kagent-namespace")]
             for n in STORAGE_HOOKS:
                 del expected_off[("Job", n)]
-            expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-delete", -10)
-            expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-delete", -10)
+            expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-install,pre-upgrade,pre-delete,post-delete", -10)
+            expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-install,pre-upgrade,pre-delete,post-delete", -10)
             # and networkPolicy.enabled: false — no policy for the identity (#413)
             del expected_off[("NetworkPolicy", f"{RELEASE}-hooks")]
         if hooks_off != expected_off:
@@ -292,10 +295,10 @@ def main(chart: str) -> int:
     # --- knobs
     knobs = docs(helm(chart, [*ci, "--set", "gitops.self.repository=oci://localhost:5000/charts/", "--set", "gitops.self.insecure=true",
                               "--set", "gitops.self.versionRange=>=3.0.0 <4.0.0", "--set-json", 'gitops.self.semverFilter=".*-dev\\\\.x\\\\..*"',
-                              "--set", "gitops.self.interval=1m", "--api-versions", "helm.toolkit.fluxcd.io/v2"]))
+                              "--set", "gitops.self.interval=5m", "--set", "gitops.sourceInterval=30s", "--api-versions", "helm.toolkit.fluxcd.io/v2"]))
     needles(knobs[("OCIRepository", NAMESPACE, RELEASE)], "self OCIRepository with knobs", f"\n  url: oci://localhost:5000/charts/{RELEASE}\n", "\n  insecure: true\n", 'semver: ">=3.0.0 <4.0.0"',
-            '\n    semverFilter: ".*-dev\\\\.x\\\\..*"', "\n  interval: 1m\n")
-    needles(knobs[("HelmRelease", NAMESPACE, RELEASE)], "self HelmRelease with the HelmRelease API served offline", "\n  suspend: true\n", "\n  interval: 1m\n")
+            '\n    semverFilter: ".*-dev\\\\.x\\\\..*"', "\n  interval: 30s\n")
+    needles(knobs[("HelmRelease", NAMESPACE, RELEASE)], "self HelmRelease with the HelmRelease API served offline", "\n  suspend: true\n", "\n  interval: 5m\n")
     custom = docs(helm(chart, [*ci, "--set", "gitops.serviceAccountName=custom-sa"]))
     needles(custom[("HelmRelease", NAMESPACE, RELEASE)], "self HelmRelease with gitops.serviceAccountName", "\n  serviceAccountName: custom-sa\n")
     needles(custom[("ValidatingAdmissionPolicy", "", POLICY)], "the policy with gitops.serviceAccountName", f'"system:serviceaccount:{NAMESPACE}:custom-sa"')

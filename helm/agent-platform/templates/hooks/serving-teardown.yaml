@@ -1,0 +1,14 @@
+{{- /*
+The serving slice's ordered teardown (giantswarm/agent-platform#527): the
+llm-d controller's release first, then the well-known configs with their
+finalizer taken off, then the configs' release — at pre-delete, and at
+pre-upgrade when the slice is switched off in place
+(agent-platform.serving.teardownEvent in _serving-teardown.tpl says when and
+why).
+*/ -}}
+{{- with include "agent-platform.serving.teardownEvent" . }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "serving-teardown" "hook" . "weight" -2
+      "image" (include "agent-platform.hooks.helmImage" $)
+      "about" "remove the llm-d controller's release, then the well-known LLMInferenceServiceConfigs with their finalizer, then their release: the controller's webhook denies their delete while it runs, and nothing clears their finalizer once it is gone"
+      "script" (include "agent-platform.serving.teardownScript" $)) }}
+{{- end }}

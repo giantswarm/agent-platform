@@ -353,6 +353,22 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- fail (printf "%s: spec.%s is no longer a preset field — the classic InferenceService path was removed; a preset composes onto the well-known LLMInferenceServiceConfigs, and LLMInferenceService template fields go under spec.template (see UPGRADE.md)" $where $removed) -}}
 {{- end -}}
 {{- end -}}
+{{- /* spec.router.scheduler is the per-preset switch for the llm-d endpoint
+       picker model-manager composes; nothing else goes under router. */ -}}
+{{- if hasKey $spec "router" -}}
+{{- $router := get $spec "router" -}}
+{{- if not (kindIs "map" $router) -}}
+{{- fail (printf "%s: spec.router must be a mapping" $where) -}}
+{{- end -}}
+{{- range $key, $value := $router -}}
+{{- if ne $key "scheduler" -}}
+{{- fail (printf "%s: spec.router.%s is not a preset field; spec.router carries scheduler only" $where $key) -}}
+{{- end -}}
+{{- if not (kindIs "bool" $value) -}}
+{{- fail (printf "%s: spec.router.scheduler must be true or false" $where) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if not (get $spec "displayName") -}}
 {{- fail (printf "%s: spec.displayName is required" $where) -}}
 {{- end -}}
@@ -405,6 +421,11 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
        (--default-chat-template-kwargs='{"enable_thinking": false}'). */ -}}
 {{- range $args -}}
 {{- $arg := toString . -}}
+{{- /* The API interfaces a served model answers are read from its runtime's
+       route list, GET /openapi.json (model-manager); the flag removes it. */ -}}
+{{- if regexMatch "^--disable-fastapi-docs(=|$)" $arg -}}
+{{- fail (printf "%s: spec.args carries %s, which removes the runtime's /openapi.json — the route list the platform reads a served model's API interfaces from (chat completions, Responses, Messages, embeddings); drop the flag" $where (quote $arg)) -}}
+{{- end -}}
 {{- if regexMatch "[[:space:]\"'$`\\\\;&|<>(){}\\[\\]*?]" (regexReplaceAll "'[^']*'" $arg "") -}}
 {{- fail (printf "%s: spec.args %s carries whitespace, a quote or a shell metacharacter outside single quotes; the runtime template re-parses every argument through a shell (eval \"… $@\"), which splits it there and eats the quotes — write the value single-quoted inside one argument, e.g. --default-chat-template-kwargs='{\"enable_thinking\": false}'" $where (quote $arg)) -}}
 {{- end -}}
@@ -606,10 +627,14 @@ wildcard (gatewayApi.gateway.tls.secretName).
 {{- end -}}
 
 {{/*
-The pod the llm-d controller runs for a served model: the LLMInferenceService
-workload pod, which carries kserve.io/component=workload with
-app.kubernetes.io/part-of=llminferenceservice and app.kubernetes.io/name=<name>
-and serves from `main` (giantswarm/agent-platform#506). Every selector of the
+The pods the llm-d controller runs for a served model: the LLMInferenceService
+workload pods, which carry app.kubernetes.io/part-of=llminferenceservice,
+app.kubernetes.io/name=<name> and an app.kubernetes.io/component of
+llminferenceservice-workload[-prefill] — a single-node Deployment's pod — or
+llminferenceservice-workload-{leader,worker}[-prefill] — the pods of a
+LeaderWorkerSet, a model split across nodes (modelServing.fastLinks) — and
+serve from `main` (giantswarm/agent-platform#506). kserve.io/component=workload
+is no selector: a LeaderWorkerSet's workers do not carry it. Every selector of the
 serving namespace's model pods — the Kyverno mutations, the network policies,
 the PolicyException — renders from this one description, so they never
 disagree. JSON:
@@ -618,14 +643,77 @@ disagree. JSON:
     "nameLabel": <the label that carries the served model's name>,
     "runtimeContainer": <the container that serves>,
     "port": <the port the pod is reached on, its Service's target: modelServing.networkPolicy.llmisvcWorkload.port>,
-    "matchExpressions": [<the label selector of the pod>] }
+    "matchExpressions": [<the label selector of the pod>],
+    "multiNodeExpressions": [<the label selector of a LeaderWorkerSet's pods>] }
 Usage: $shape := include "agent-platform.modelServing.podShape" . | fromJson
 */}}
 {{- define "agent-platform.modelServing.podShape" -}}
 {{- $np := .Values.modelServing.networkPolicy -}}
 {{- $llmisvc := dict "name" "llmisvc-workload" "kind" "LLMInferenceService" "nameLabel" "app.kubernetes.io/name" "runtimeContainer" "main" "port" (int $np.llmisvcWorkload.port) -}}
-{{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "kserve.io/component" "operator" "In" "values" (list "workload")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
+{{- $components := list "llminferenceservice-workload" "llminferenceservice-workload-prefill" "llminferenceservice-workload-leader" "llminferenceservice-workload-worker" "llminferenceservice-workload-leader-prefill" "llminferenceservice-workload-worker-prefill" -}}
+{{- $_ := set $llmisvc "matchExpressions" (list (dict "key" "app.kubernetes.io/component" "operator" "In" "values" $components) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
+{{- $_ := set $llmisvc "multiNodeExpressions" (list (dict "key" "app.kubernetes.io/component" "operator" "In" "values" (list "llminferenceservice-workload-leader" "llminferenceservice-workload-worker" "llminferenceservice-workload-leader-prefill" "llminferenceservice-workload-worker-prefill")) (dict "key" "app.kubernetes.io/part-of" "operator" "In" "values" (list "llminferenceservice"))) -}}
 {{- $llmisvc | toJson -}}
+{{- end -}}
+
+{{/*
+The Kyverno foreach entries that bound every emptyDir of a model pod
+(modelServing.serving: shmSizeLimit, modelCacheSizeLimit, emptyDirSizeLimit):
+dshm gets shmSizeLimit whatever KServe's template set, the volume the
+storage-initializer downloads into (model-cache or kserve-provision-location,
+by KServe release) modelCacheSizeLimit when modelServing.cache.enabled is false
+(with the cache on, the redirect rule mounts the claim at /mnt/models instead
+and the emptyDir holds nothing), and every other emptyDir without a sizeLimit
+gets emptyDirSizeLimit; a sizeLimit the template set on one of those stays.
+The volumes are found by the pod spec's own list, so a pod shape's own
+emptyDirs (an hf:// pod's model-cache, an oci:// modelcar pod's
+kserve-provision-location) are bounded without being named and none is added.
+"spec" is the JMESPath of the pod spec (request.object.spec for a Pod,
+request.object.spec.template.spec for a Deployment), "nest" the keys the patch
+nests the spec under (list "spec" or list "spec" "template" "spec").
+Usage: include "agent-platform.modelServing.emptyDirBounds" (dict "root" $ "spec" "request.object.spec" "nest" (list "spec"))
+*/}}
+{{- define "agent-platform.modelServing.emptyDirBounds" -}}
+{{- $ms := .root.Values.modelServing -}}
+{{- $s := $ms.serving -}}
+{{- $named := dict "dshm" (required "modelServing.serving.shmSizeLimit is required: the model pod's /dev/shm is bounded" $s.shmSizeLimit) -}}
+{{- if not $ms.cache.enabled -}}
+{{- $limit := toString (required "modelServing.serving.modelCacheSizeLimit is required with modelServing.cache.enabled false: model-cache holds the download" $s.modelCacheSizeLimit) -}}
+{{- if not (regexMatch "^[1-9][0-9]*(Gi|Ti)$" $limit) -}}
+{{- fail (printf "modelServing.serving.modelCacheSizeLimit (%s) is a whole number of Gi or Ti, compared with the presets' requirements.weightsGiB" $limit) -}}
+{{- end -}}
+{{- $limitGiB := mul (trimSuffix "Gi" (trimSuffix "Ti" $limit) | int) (ternary 1024 1 (hasSuffix "Ti" $limit)) -}}
+{{- range $name, $entry := include "agent-platform.modelServing.presets" .root | fromJson -}}
+{{- $weights := dig "spec" "requirements" "weightsGiB" 0 $entry.preset | int -}}
+{{- if and (hasPrefix "hf://" (dig "spec" "model" "storageUri" "" $entry.preset)) (gt $weights $limitGiB) -}}
+{{- fail (printf "modelServing.serving.modelCacheSizeLimit (%s) is smaller than preset %s's %d GiB of weights: with modelServing.cache.enabled false its pod downloads them into model-cache" $limit $name $weights) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The download's volume: model-cache on KServe releases that mount it at
+       /mnt/models, kserve-provision-location on the current ones. */ -}}
+{{- $_ := set $named "model-cache" $limit -}}
+{{- $_ := set $named "kserve-provision-location" $limit -}}
+{{- end -}}
+{{- $default := required "modelServing.serving.emptyDirSizeLimit is required: every emptyDir of a model pod is bounded" $s.emptyDirSizeLimit -}}
+{{- /* One JSON patch per volume, at its index: an add on an existing member
+       replaces it, so a reinvoked webhook sets the same value again and the
+       volumes keep KServe's order (a strategic merge moves the patched
+       entries to the front of the list). */ -}}
+{{- $value := list -}}
+{{- range $name := keys $named | sortAlpha -}}
+{{- $value = append $value (printf "(element.name == '%s' && '%s')" $name (toString (get $named $name))) -}}
+{{- end -}}
+{{- $value = append $value (printf "element.emptyDir.sizeLimit || '%s'" (toString $default)) }}
+- list: {{ printf "%s.volumes" .spec | quote }}
+  preconditions:
+    all:
+      - key: {{ "{{ contains(keys(element), 'emptyDir') }}" | quote }}
+        operator: Equals
+        value: true
+  patchesJson6902: |-
+    - op: add
+      path: {{ printf "/%s/volumes/{{ elementIndex }}/emptyDir/sizeLimit" (join "/" .nest) }}
+      value: {{ printf "{{ %s }}" (join " || " $value) | quote }}
 {{- end -}}
 
 {{/*
@@ -660,4 +748,28 @@ one at all).
 */}}
 {{- define "agent-platform.modelServing.modelNamePath" -}}
 {{- printf "request.object.metadata.labels.%q" (include "agent-platform.modelServing.podShape" . | fromJson).nameLabel -}}
+{{- end -}}
+
+{{/*
+The OTLP endpoint the model pods export traces to, which
+<release>-model-serving-otlp-egress opens: modelServing.networkPolicy.otlpEndpoint,
+where the meta chart writes the tracing preset's resolved endpoint; `auto`
+(this chart rendered on its own) follows global.observability.traces.otlp.endpoint.
+vLLM and the llm-d endpoint picker export over gRPC only, so `auto` with an
+http/protobuf global protocol fails the render. Empty: no export, no rule.
+Usage: include "agent-platform.modelServing.otlpEndpoint" .
+*/}}
+{{- define "agent-platform.modelServing.otlpEndpoint" -}}
+{{- $own := dig "networkPolicy" "otlpEndpoint" "auto" (.Values.modelServing | default dict) | default "" | toString | trim -}}
+{{- if eq $own "auto" -}}
+{{- $otlp := dig "observability" "traces" "otlp" dict (.Values.global | default dict) | default dict -}}
+{{- $endpoint := dig "endpoint" "" $otlp | default "" | toString | trim -}}
+{{- $protocol := dig "protocol" "" $otlp | default "grpc" | toString | lower -}}
+{{- if and $endpoint (ne $protocol "grpc") -}}
+{{- fail (printf "global.observability.traces.otlp.protocol is %s, but the model pods export OTLP over gRPC only (the LLMInferenceService tracing spec has no protocol): set modelServing.networkPolicy.otlpEndpoint to the collector's gRPC endpoint" $protocol) -}}
+{{- end -}}
+{{- $endpoint -}}
+{{- else -}}
+{{- $own -}}
+{{- end -}}
 {{- end -}}

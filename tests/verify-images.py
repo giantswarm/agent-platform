@@ -89,23 +89,7 @@ INPUTS = ["--set", "global.domain=ci.example.com", "--set", "global.identity.iss
 # References whose gsoci copy is not published yet, each with the change that
 # publishes it and removes the entry: a regular expression over `<path>=<value>`
 # (the rendered object's kind/name, the field path and the value).
-PENDING = {
-    # The upstream CloudNativePG chart, behind a Giant Swarm wrapper release on
-    # the same operator line (giantswarm/agent-platform#580).
-    r"OCIRepository/cloudnative-pg\.spec\.url=oci://ghcr\.io/cloudnative-pg/charts/cloudnative-pg":
-        "the CloudNativePG operator chart from gsoci (giantswarm/agent-platform#580)",
-    # The substrate chart's rustfs-bucket-init Job runs Docker Hub's aws-cli by
-    # its short name, and the meta chart forwards that value unchanged on
-    # purpose (values.yaml substrate.images.awsCli): the Job is a release
-    # resource whose pod template is immutable, so a changed image fails the
-    # upgrade of every installation with the bundled store on; the connectivity
-    # release carries the meta chart's whole tree, so the same value sits under
-    # its values.substrate as well. Its gsoci copy
-    # (giantswarm/aws-cli:2.17.0, the same digest) is named once the Substrate
-    # line ships a release whose Job can be recreated (giantswarm/agent-platform#580).
-    r"HelmRelease/(substrate|agent-platform-connectivity)\.spec\.values(\.substrate)?\.images\.awsCli=amazon/aws-cli:2\.17\.0@sha256:[a-f0-9]{64}":
-        "the rustfs-bucket-init Job recreatable, its image the gsoci copy (giantswarm/agent-platform#580)",
-}
+PENDING: dict[str, str] = {}
 
 findings: list[tuple[str, str, str]] = []
 pending: list[tuple[str, str, str, str]] = []

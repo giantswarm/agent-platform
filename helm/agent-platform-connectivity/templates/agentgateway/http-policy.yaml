@@ -1,0 +1,32 @@
+{{- /* The data plane's HTTP frontend settings: ONE Gateway-scoped policy,
+<release>-http, carrying frontend.http — today the buffer size
+(gateway.http.maxBufferSize), the most the data plane holds of one body. On
+the MCP path every tool answer of every server behind muster is read whole
+before it is parsed and forwarded, and an answer above the limit is refused,
+so this is the cap on what a tool may answer through the platform (README
+"The data plane's buffer"). Frontend policies of one Gateway merge field by
+field, never deeper: this policy owns frontend.http alone, the -metrics and
+-tracing policies own theirs, and no other policy of this chart carries an
+http section (verify-dataplane-buffer asserts it). Not rendered without a
+data plane, nor with the size empty — agentgateway's own default (2 MiB) then
+applies. The value goes through toYaml: a quantity renders as the string, a
+byte count as the integer, both shapes of the CRD's int-or-string field. */ -}}
+{{- if (include "agent-platform.ingress.agentgateway" .) }}
+{{- with .Values.gateway.http.maxBufferSize }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" $ }}-http
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $.Values.gateway.name }}
+  frontend:
+    http:
+      maxBufferSize: {{ . | toYaml }}
+{{- end }}
+{{- end }}

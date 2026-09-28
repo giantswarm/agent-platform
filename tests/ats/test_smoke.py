@@ -34,7 +34,7 @@ module top to bottom; each one builds on the state the previous left):
      agent chart 1.x into the kagent namespace, the HelmRelease runs as
      kagent-flux and reaches Ready, the AgentTemplate reaches Ready on the
      Harness and the agent's RemoteMCPServer (the toolset carrier) is Accepted;
-     and the drift correction on the two releases that carry it: the platform
+     and the drift correction on kagent's and muster's releases: the platform
      Harness deleted by hand (what the 4.8.0 upgrade does to a consumer whose
      pinned connectivity chart skipped 4.7.19's keep) is back on the kagent
      release's next reconcile — a requested reconcile stands in for the
@@ -614,16 +614,16 @@ def test_edited_muster_object_is_reverted_on_the_next_reconcile(kube: Kube, must
     revision = hr["status"]["history"][0]["version"]
     before = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
     assert before, f"no PodDisruptionBudget muster in {NAMESPACE} to edit"
-    assert before["spec"].get("minAvailable") == 1, f"the muster PDB does not budget one pod; pick another drift target: {before['spec']}"
+    assert before["spec"].get("maxUnavailable") == 1, f"the muster PDB does not allow one eviction; pick another drift target: {before['spec']}"
     started = time.monotonic()
-    kube.cmd(["-n", NAMESPACE, "patch", "poddisruptionbudgets", "muster", "--type=merge", "-p", '{"spec":{"minAvailable":2}}'])
-    assert kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)["spec"]["minAvailable"] == 2, "the hand edit did not take"
+    kube.cmd(["-n", NAMESPACE, "patch", "poddisruptionbudgets", "muster", "--type=merge", "-p", '{"spec":{"maxUnavailable":2}}'])
+    assert kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)["spec"]["maxUnavailable"] == 2, "the hand edit did not take"
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     kube.cmd(["-n", NAMESPACE, "annotate", "helmreleases.helm.toolkit.fluxcd.io", "muster", f"reconcile.fluxcd.io/requestedAt={stamp}", "--overwrite"])
 
     def reverted() -> Any:
         pdb = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
-        return pdb if pdb and pdb["spec"].get("minAvailable") == 1 else False
+        return pdb if pdb and pdb["spec"].get("maxUnavailable") == 1 else False
 
     try:
         wait_for("muster PDB reverted by the muster release's reconcile", reverted, 180)
@@ -764,7 +764,7 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     assert (podcert_ns["metadata"].get("annotations") or {}).get("helm.sh/resource-policy") == "keep", podcert_ns["metadata"].get("annotations")
     for pool in PODCERT_SIGNERS.values():
         assert kube.get("secret", pool, namespace=PODCERT_NAMESPACE), f"CA pool {PODCERT_NAMESPACE}/{pool} went with the uninstall"
-    for pool in ("actor-id-ca-pool", "actor-id-jwt-pool", "actor-id-ca-certs"):
+    for pool in ("actor-id-ca-pool", "actor-id-jwt-pool", "actor-id-ca-certs", "egress-mitm-ca-pool"):
         assert kube.get("secret", pool, namespace=ATE_NAMESPACE), f"{ATE_NAMESPACE}/{pool} went with the uninstall"
     bundles = substrate_trust_bundles(kube)
     assert bundles == sorted(s.replace("/", ":") + ":primary-bundle" for s in PODCERT_SIGNERS), f"the podcert signers' ClusterTrustBundles after the uninstall: {bundles}"

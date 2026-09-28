@@ -94,8 +94,8 @@ EXPLICIT_FLEET_COPIES = [
     "--set", "muster.muster.observability.metrics.prometheus.prometheusRule.enabled=true",
     "--set", "muster.muster.observability.grafanaDashboard.enabled=true",
     "--set", "valkey.ciliumNetworkPolicy.enabled=true",
-    "--set", "kagent.otel.tracing.enabled=true",
-    "--set", "kagent.otel.logging.enabled=true",
+    "--set", "kagent.otel.traces.enabled=true",
+    "--set", "kagent.otel.logs.enabled=true",
     "--set", "kagent.oauth2-proxy.metrics.serviceMonitor.enabled=true",
     "--set", "agentgateway.monitoring.enabled=true",
     "--set", "vm-manager.serviceMonitor.enabled=true",
@@ -237,7 +237,7 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
         expect(pod_monitor == "false", f"{where} valkey podMonitor.enabled = {pod_monitor!r}, want 'false'")
 
     kagent = hr["kagent"]
-    for path in (["otel", "tracing", "enabled"], ["otel", "logging", "enabled"],
+    for path in (["otel", "traces", "enabled"], ["otel", "logs", "enabled"],
                  ["oauth2-proxy", "metrics", "serviceMonitor", "enabled"]):
         got = leaf(kagent, path)
         expect(got == yes(monitors), f"{where} kagent values {'.'.join(path)} = {got!r}, want {yes(monitors)!r}")
@@ -261,10 +261,9 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     expect(got == yes(monitors), f"{where} kserve-llmisvc-resources values {'.'.join(KSERVE_MONITOR)} = {got!r}, want {yes(monitors)!r}")
 
     # The connectivity chart on its own, same served groups: the matching objects.
-    # kagent.serviceMonitor is off by default (the kagent line serves no
-    # /metrics), so the one ServiceMonitor the gate can produce is switched on
-    # here to see the gate resolve; the default is verify-global's.
-    rendered = render(connectivity, [*PARENT_REF, *ON, *apis(served), "--set", "kagent.serviceMonitor.enabled=true"])
+    # The controller's ServiceMonitor is the kagent chart's own now, so this
+    # chart renders none of its own; the gate's own resolution is verify-global's.
+    rendered = render(connectivity, [*PARENT_REF, *ON, *apis(served)])
     objects = kinds(rendered)
     cnp, netpol = objects.get("CiliumNetworkPolicy", 0), objects.get("NetworkPolicy", 0)
     expect(not (cnp and netpol), f"{where} connectivity renders both network-policy flavors")
@@ -277,8 +276,11 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     # every shape; the chart's ClusterPolicy is the agent-sandbox one.
     expect(not re.search(r"kagent-declarative-pod-security|kagent-srt-settings|kagent\.dev/v1alpha2", rendered),
            f"{where} connectivity render carries a kagent v1alpha2 Agent mutation or object")
-    expect((objects.get("ServiceMonitor", 0) > 0) == monitors,
-           f"{where} connectivity ServiceMonitor count={objects.get('ServiceMonitor', 0)}, monitoring served={monitors}")
+    # This chart renders no monitor of its own any more: the agentgateway
+    # PodMonitor is the packaging chart's (#616) and the kagent controller's
+    # ServiceMonitor is the kagent chart's (controller.metrics.serviceMonitor).
+    expect(objects.get("ServiceMonitor", 0) == 0,
+           f"{where} connectivity renders {objects.get('ServiceMonitor', 0)} ServiceMonitor(s); every monitor belongs to the component's own chart")
     expect(objects.get("VerticalPodAutoscaler", 0) == (1 if vpa else 0),
            f"{where} connectivity VerticalPodAutoscaler count={objects.get('VerticalPodAutoscaler', 0)}, autoscaling served={vpa}")
 
@@ -321,7 +323,7 @@ def main(meta: str, connectivity: str) -> int:
 
     m = helm_releases(render(meta, [*ci, *ON, *fleet, "--set", "global.observability.metrics.serviceMonitor.enabled=false"]))
     expect(leaf(m["muster"], ["muster", "observability", "metrics", "prometheus", "serviceMonitor", "enabled"]) == "false"
-           and leaf(m["kagent"], ["otel", "tracing", "enabled"]) == "false"
+           and leaf(m["kagent"], ["otel", "traces", "enabled"]) == "false"
            and OTLP_HEADER not in "\n".join(m["kagent"])
            and leaf(m["agentgateway"], ["monitoring", "enabled"]) == "false"
            and leaf(m["valkey"], ["valkey", "metrics", "podMonitor", "enabled"]) == "false"
