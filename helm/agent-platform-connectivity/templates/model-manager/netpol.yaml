@@ -13,6 +13,9 @@ renders whenever components.cluster-manager is on (#494). */ -}}
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.modelManager.oauthEnabled" . }}
+{{- /* Commit mode (model-manager.github.enabled) calls GitHub's API: GET /user
+for the person's App token and the pull request. */ -}}
+{{- $commitOn := dig "github" "enabled" false $chart }}
 {{- /* Extra same-namespace callers admitted on the Service port
 (modelManager.networkPolicy.ingress.additionalPeers): pod label maps, each
 rendered as one more ingress peer in the flavor's own dialect. */ -}}
@@ -115,8 +118,8 @@ spec:
 # (model-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
 # Dex issuer by name, or the three Google hosts for the google provider), for
 # every ollama, lemonade and lmstudio backend its host model server's endpoint, for the
-# kserve backend the Hugging Face Hub, and the names and blocks of
-# modelManager.networkPolicy.egress.
+# kserve backend the Hugging Face Hub, with commit mode (model-manager.github)
+# GitHub's API, and the names and blocks of modelManager.networkPolicy.egress.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -193,6 +196,16 @@ spec:
       toPorts:
         - ports:
             - port: {{ $shape.port | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if $commitOn }}
+    # Commit mode (model-manager.github.enabled): GitHub's API, for GET /user
+    # and the pull request opened as the person.
+    - toFQDNs:
+        - matchName: api.github.com
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP
     {{- end }}
     {{- with $egress.fqdns }}

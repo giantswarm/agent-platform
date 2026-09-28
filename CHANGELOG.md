@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **model-manager's egress opens GitHub's API with commit mode on.** With `model-manager.github.enabled`, which pins the MCPServer to the GitHub App `giantswarm-model-manager`, the connectivity chart's Cilium egress policy for model-manager adds `api.github.com` on 443. model-manager needs it for `GET /user` and for the pull request it opens as the person. agent-manager's default egress already names it. The kubernetes flavor already opens 443 to public destinations while OAuth is on. Off, the default, nothing changes. `make verify-managers` asserts both.
+
 ### Fixed
 
 - **The kagent controller board's `Error ratio` and `Streams / s` panels** (giantswarm/agent-platform#732). Both exprs carried an escaped quote inside a label matcher (`code!=\"OK\"`, `rpc_type=\"stream\"`), which Mimir refuses, so the two stats showed an error on every installation. `Error ratio` also reads `0` instead of no data while every request answers `OK`. `make verify-dashboards` fails on an escaped quote in any board.
