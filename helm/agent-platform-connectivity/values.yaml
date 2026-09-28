@@ -3547,14 +3547,16 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # OIDC issuer is https://oidc.circleci.com and its subject the pipeline
     # definition that ran,
     # https://circleci.com/api/v2/projects/<project id>/pipeline-definitions/<definition id>
-    # (two UUIDs), the pair the orb itself verifies with after signing. The
+    # (two UUIDs; the definition is `nil` for a pipeline a legacy scheduled
+    # trigger started, as retagger's nightly mirror runs sign), the pair the
+    # orb itself verifies with after signing. The
     # subject names no organisation; what scopes the rule to Giant Swarm is
     # `images`: only Giant Swarm pipelines publish under
     # gsoci.azurecr.io/giantswarm/. Empty with enabled: true fails the render.
     attestors:
       - keyless:
           issuer: https://oidc.circleci.com
-          subjectRegExp: ^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$
+          subjectRegExp: ^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/([a-f0-9-]+|nil)$
           rekor:
             url: https://rekor.sigstore.dev
     # Where a signature is looked for (Kyverno's type): SigstoreBundle — the
