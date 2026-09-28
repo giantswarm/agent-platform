@@ -1,0 +1,63 @@
+# Qwen3.5 4B, BF16, on one 24 GB GPU (an L4), downloaded from the Hugging Face
+# Hub: the qwen3-5-4b recipe with hf:// weights instead of the signed OCI model
+# image. The one curated preset that fits a 24 GB card and takes the Hub path,
+# so pull_model, the model cache claim and a predictor starting from the cache
+# can be exercised on the smallest GPU pool. No serving image: the predictor
+# runs the llm-d-cuda the well-known LLMInferenceServiceConfig names
+# (components.kserve-runtime-configs).
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: qwen3-5-4b-hf
+spec:
+  displayName: Qwen3.5 4B from the Hub (BF16, one 24 GB GPU)
+  description: |
+    Qwen3.5 4B, the qwen3-5-4b recipe served from the Hugging Face Hub
+    (hf://Qwen/Qwen3.5-4B) instead of the signed OCI model image: the same
+    arguments, resources and fit (9 + 6 GiB), BF16 at 32k context, four
+    concurrent requests, thinking off by default, reasoning with the qwen3
+    parser, tools on with qwen3_coder, one image and no video per request.
+    Weights: pull_model downloads them into the model cache claim
+    (hf-cache), and a predictor starts from the cache; with the cache off
+    KServe's storage-initializer downloads them into the pod at every start.
+    Use qwen3-5-4b for serving on an installation (no download, no cache
+    claim); this preset is the Hub path on the smallest GPU pool.
+    Sized for a g6.xlarge (4 vCPU, 16 GiB): requests 2 vCPU and 10 GiB,
+    limits 4 vCPU and 12 GiB. An L4 (or A10G) recipe: a T4 predates bf16.
+  model:
+    id: Qwen/Qwen3.5-4B
+    storageUri: hf://Qwen/Qwen3.5-4B
+    format: vLLM
+    contextLength: 32768
+    capabilities: [chat, tools, reasoning, vision]
+    license: apache-2.0
+  args:
+    - --gpu-memory-utilization=0.90
+    - --max-model-len=32768
+    - --max-num-seqs=4
+    - --enable-chunked-prefill
+    - --enable-prefix-caching
+    # One argument, the JSON single-quoted inside it: the well-known runtime
+    # template re-parses every argument through a shell (eval "… $@"), which
+    # would split a bare JSON at its whitespace and eat its double quotes.
+    - "--limit-mm-per-prompt='{\"image\": 1, \"video\": 0}'"
+    - --no-enable-log-requests
+    - --reasoning-parser=qwen3
+    # kagent agents call /v1/chat/completions with tools and tool_choice auto;
+    # without a parser vLLM rejects every agent request (400).
+    - --enable-auto-tool-choice
+    - --tool-call-parser=qwen3_coder
+    - "--default-chat-template-kwargs='{\"enable_thinking\": false}'"
+  resources:
+    gpus: 1
+    requests:
+      cpu: "2"
+      memory: 10Gi
+    limits:
+      cpu: "4"
+      memory: 12Gi
+  requirements:
+    # The Hub's safetensors index sizes the checkpoint at 8.68 GiB
+    # (make verify-preset-weights), as for qwen3-5-4b.
+    weightsGiB: 9
+    overheadGiB: 6
