@@ -78,13 +78,15 @@ make verify-meta verify-modes verify-postgres
 
 ## Prerequisites
 
+Per cluster shape, with the Gateway, certificate, identity-provider and Secret manifests to copy: [docs/install.md](docs/install.md#2-prerequisites).
+
 - Kubernetes ≥ 1.33 on the install target. With `components.kagent.enabled`: **Kubernetes ≥ 1.35 with the `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` feature gates on kube-apiserver, kube-controller-manager and every kubelet** — Agent Substrate itself comes with the chart (the `substrate` and `substrate-crds` components), a live render refuses a cluster that does not serve the API; see [Agent Substrate](#agent-substrate).
 - Flux — **optional**. The chart brings its own engine (the Flux Operator and one `FluxInstance` running source-controller + helm-controller) where a cluster has none; a cluster that already runs Flux installs the chart through it with `components.flux.enabled: false`. See [Installing](#installing).
 - Gateway API v1 CRDs (`gateways.gateway.networking.k8s.io`, `httproutes.gateway.networking.k8s.io`, `gatewayclasses.gateway.networking.k8s.io`) installed cluster-wide. The Agent Platform does **not** install them.
 - No separate CRD chart to install first — every component ships its own CRDs (`AgentgatewayParameters` / `AgentgatewayPolicy` / `AgentgatewayBackend` with the agentgateway component, `MCPServer` / `Workflow` with muster, the `kagent.dev` CRDs with the `kagent-crds` component, the agent-sandbox CRDs with theirs). The meta-package orders each CR consumer after the CRD-owning component for you; see [CRD lifecycle](#crd-lifecycle).
 - A `GatewayClass` CR named `agentgateway` (`status.conditions[type=Accepted]=True`). The bundled `agentgateway` sub-chart creates it on install; operators managing the controller out-of-band must ensure the `GatewayClass` exists.
 - Kyverno for the four `kyverno.io` objects the connectivity chart renders — optional: `kyvernoPolicies.enabled: auto` (the default) renders them only where `kyverno.io/v1` is served. Clusters without Kyverno that enforce restricted PSS through PSA labels also set `components.agent-sandbox.enabled: false`; see [Kyverno](#kyverno) and [Cluster shape](#cluster-shape-auto).
-- Cilium CNI for the `cilium` network-policy flavor — optional: `networkPolicy.flavor: auto` (the default) selects `cilium` where `cilium.io/v2` is served and `kubernetes` otherwise, and muster's flavor and the bundled valkey's Cilium policy follow. Opt out of network policies entirely with `networkPolicy.enabled: false` + `muster.networkPolicy.enabled: false` + `valkey.ciliumNetworkPolicy.enabled: false`.
+- Cilium CNI for the `cilium` network-policy flavor — optional: `networkPolicy.flavor: auto` (the default) selects `cilium` where `cilium.io/v2` is served and `kubernetes` otherwise, and muster's flavor and the bundled valkey's Cilium policy follow. Opt out of network policies entirely with `networkPolicy.enabled: false` + `muster.networkPolicy.enabled: false` + `valkey.ciliumNetworkPolicy.enabled: false`. On Cilium with kube-proxy replacement, `components.kagent.enabled` needs **`socketLB.hostNamespaceOnly: true`**, or Substrate actors cannot resolve names over UDP; see [Agent Substrate](#agent-substrate).
 - cert-manager for `components.kserve-llmisvc-resources` (the llm-d controller's webhook certificate) — only when that component is on.
 - For the standalone's extras (Backstage, mcp-kubernetes, model serving): `global.domain`, `global.identity` and a public Gateway; see [Turning on the standalone's extras](#turning-on-the-standalones-extras).
 
@@ -94,7 +96,7 @@ make verify-meta verify-modes verify-postgres
 
 ### Quick start
 
-Three inputs: the domain, the identity provider, the components. Nothing about Flux.
+**[docs/install.md](docs/install.md) is the step-by-step guide**: the cluster shapes and their example values, the prerequisites per shape, the identity provider with the redirect URIs to register, the `global.*` inputs. The short form, for a cluster with its own public Gateway and Dex ([`examples/own-gateway.yaml`](helm/agent-platform/examples/own-gateway.yaml)):
 
 ```yaml
 # values.yaml
@@ -108,9 +110,17 @@ global:
     parentRefs:                              # the public Gateway every route attaches to
       - name: public
         namespace: gateway-system
-components:
-  kagent: { enabled: true }                  # pick the components you want; muster, dicebear and connectivity are always on
-  agent-manager: { enabled: true }
+muster:
+  muster:
+    oauth:                                   # muster's OAuth server: the same provider, muster's public URL
+      mcpClient:
+        publicUrl: https://muster.platform.example.com
+      server:
+        baseUrl: https://muster.platform.example.com
+        dex:
+          issuerUrl: https://dex.platform.example.com
+          clientId: agent-platform
+        existingSecret: agent-platform-idp
 ```
 
 ```bash
@@ -119,6 +129,8 @@ kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/downloa
 helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platform \
   --namespace agent-platform --create-namespace -f values.yaml --wait --timeout 10m
 ```
+
+Agents (`components.kagent`, `components.agent-manager`) need more from the cluster — Kubernetes 1.35 with the Substrate feature gates, a snapshot bucket, a database: [`examples/managed-cloud.yaml`](helm/agent-platform/examples/managed-cloud.yaml) and [docs/install.md](docs/install.md#agents-managed-cloud).
 
 `--wait` returns when the platform runs: Helm waits for the component `HelmRelease`s to be Ready (Helm 4 waits on custom resources' `Ready` condition), which on a fresh kind cluster takes about two minutes with the default components and about four minutes with kagent on (220 s measured, Substrate included). The cluster-shape knobs (Kyverno, network-policy flavor, monitors, the Envoy-only avatar route) default to `auto` and follow what the cluster serves — see [Cluster shape](#cluster-shape-auto). That `helm install` is the last Helm command besides `helm uninstall`: the release now manages itself through the engine it brought — the chart rolls forward inside its major on its own, and a values change is a rewrite of Secret `agent-platform-values`, not a `helm upgrade` (which is refused) — see [Self-management](#self-management). Component versions roll forward on their own inside their `versionRange`s either way.
 
@@ -357,6 +369,8 @@ kagent API v2 has no runtime without [Agent Substrate](https://github.com/kagent
 **The chart's third-party images.** Next to the line's own components the substrate chart runs images that are not its own — the bundled control-plane database (`postgres`), the bundled snapshot store and its bucket-init Job (`rustfs`, `awsCli`), the agentgateway build of the atenet router and egress (`agentgateway`) — from an `images:` map the Substrate line stamps at publish: the `gsoci.azurecr.io/giantswarm/…` copies, and for `agentgateway` the build of the agentgateway line the release was written for. **The data plane follows the Substrate release** (giantswarm/agent-platform#654): the router and the egress run agentgateway with the static config the release renders (`-f /etc/agentgateway/config.yaml`), written for the build it stamps, so the meta chart forwards no `substrate.images.agentgateway`, and an installation that floats onto a Substrate patch within `components.substrate.versionRange` runs that patch's data plane without a release of this chart. The platform's own controller and data planes (`agentgateway.controller.image`, `agentgateway.proxy.image`) stay named in full and move with this chart; they do not configure the atenet gateways, so the two tags may differ between a Substrate patch and the next agentgateway bump here. `substrate.images` still pins `postgres`, `rustfs` and `awsCli` at the floor's digests under gsoci. The rustfs-bucket-init Job runs as a hook, recreated on every install and upgrade from the Substrate line's 1.1.2 on, so its image can move like the others. A key there wins over the release's default, so it holds the floor's bits. `make verify-substrate-images` pulls every release the range admits and requires each third-party default to be a published gsoci reference (`agentgateway` a release under `agentgateway.proxy.image`'s repository), renders each release with the forwarded block, the bundled store and database on, refusing any third-party image left off gsoci, refuses a forwarded `agentgateway`, and holds the remaining pins to the **floor's** defaults only — a newer patch naming another default keeps `main` green.
 
 **Prerequisites.** Kubernetes **1.35** (Substrate's `PodCertificateRequest` is `certificates.k8s.io/v1beta1`, which 1.34 serves only as `v1alpha1`) with the feature gates `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` on kube-apiserver, kube-controller-manager **and every kubelet**; enabling them rolls the control plane and every node. Where the render is live (the Helm CLI, `--dry-run=server`, helm-controller) it refuses a cluster that does not serve `certificates.k8s.io/v1beta1/PodCertificateRequest`, naming the gates — the kubelet gates cannot be seen from the apiserver and the message says so; `helm template` and CI, which see no cluster, are never refused. On a Giant Swarm cluster the cluster chart's `internal.advancedConfiguration.{controlPlane.apiServer,controlPlane.controllerManager,kubelet}.featureGates` bridges until giantswarm/cluster#1005 makes the gates the default; each list replaces the chart's default list, so repeat the defaults next to the three gates. The line publishes from CircleCI, signed with the Giant Swarm identity: the charts `substrate-crds` and `substrate` at `oci://gsoci.azurecr.io/giantswarm/substrate/helm` and the images under `gsoci.azurecr.io/giantswarm/substrate` (`substrate.image.registry` — the control plane and the derived worker image follow the one value). A proxied installation mirrors `oci://gsoci.azurecr.io/giantswarm/substrate/helm` (`components.substrate.repository`), that registry, the two hook images (`hooks.kubectlImage`, `hooks.opensslImage`) and the gVisor release asset the chart's `SandboxConfig gvisor-default` names (`gs://gvisor/releases/…`, fetched by `atelet` from `storage.googleapis.com` — override `spec.assets` on the SandboxConfig for a mirror). Upgrading a 3.x installation: [UPGRADE.md](./UPGRADE.md).
+
+**Cilium with kube-proxy replacement needs `socketLB.hostNamespaceOnly: true`** (`bpf-lb-sock-hostns-only: "true"` in `cilium-config`; the Giant Swarm Cilium app's default). An actor runs in a network namespace nested inside its worker pod. The worker's `ateom` redirects the actor's TCP into its tunnel, but it only masquerades UDP, so a DNS query to the kube-dns ClusterIP leaves the worker as a forwarded packet and never passes the socket hook that would translate it. With socket LB on for pod namespaces, nothing translates that address: Hubble shows the query to `kube-dns:53` as `world`, denied by the worker's egress policy. Git-sourced skills then fail to materialize (`Could not resolve host: github.com`), and the golden boot retries every minute. `hostNamespaceOnly` keeps socket LB for the host namespace and translates pod traffic in the tc datapath, which is Cilium's documented setting for nested-netns runtimes (gVisor, Kata, KubeVirt). Check a cluster with `kubectl -n kube-system get cm cilium-config -o jsonpath='{.data.bpf-lb-sock-hostns-only}'`. agentlab (kind, no Cilium) never hits this.
 
 ### Backstage, mcp-kubernetes, CloudNativePG and KServe
 
@@ -630,6 +644,8 @@ muster:
         # — both inherited from the umbrella defaults.
 ```
 
+Left empty, `valkey.valkey.auth.usersExistingSecret` and `aclUsers.default.passwordKey` follow the Secret and key muster reads the password with — muster's storage Secret, else `muster.muster.oauth.server.existingSecret`, else `global.identity.existingSecret`, and the key `valkey-password` — so an installation with the platform Secret sets neither.
+
 ACL authentication is enabled by default for the `default` user (`~* &* +@all`), with the cleartext password read from `valkey-password` in the operator-supplied Secret. Muster sends `AUTH <password>` against the default user, which is the standard backwards-compatible form.
 
 Valkey reads the password once, when its pod starts. A password rotated in the Secret reaches it through `valkey.valkey.auth.usersExistingSecretChecksum`, a mark the Valkey chart (0.1.5 and later) renders verbatim as the pod's `checksum/users-secret` annotation: change it in the same change that rotates the Secret and the pod restarts onto the new password. Empty (the default), a rotation alone leaves the running Valkey on the old password until a hand-run restart. muster itself reads the same Secret at start and carries no such mark yet (giantswarm/muster#1315).
@@ -827,7 +843,7 @@ agent-sandbox:
 
 The agentgateway data-plane pod template is rendered at runtime by the controller, not by Helm. To inject restricted-PSS-compatible `securityContext` fields, the umbrella ships an `AgentgatewayParameters` resource referenced from `Gateway.spec.infrastructure.parametersRef`. The controller applies it as a strategic merge patch over the generated Deployment and Service — that's how `gateway.parameters.serviceType: ClusterIP` forces the otherwise-hardcoded `type: LoadBalancer`.
 
-The data-plane pod template hardcodes `sysctls: [net.ipv4.ip_unprivileged_port_start=0]`. This is a namespaced-safe sysctl (no kubelet allowlist required). On clusters with built-in Pod Security Admission `restricted` enforced, the sysctl will be rejected — label the install namespace with `pod-security.kubernetes.io/enforce: baseline` (or allowlist the sysctl in Kyverno's `restrict-sysctls` policy as Giant Swarm workload clusters already do).
+The data-plane pod template hardcodes `sysctls: [net.ipv4.ip_unprivileged_port_start=0]`, a sysctl Pod Security Admission counts as safe: the data plane is admitted under `restricted` (checked with `kubectl label --dry-run=server ns agent-platform pod-security.kubernetes.io/enforce=restricted` on a live install). Kyverno's `restrict-sysctls` policy allowlists it on Giant Swarm clusters.
 
 ## CRD lifecycle
 
