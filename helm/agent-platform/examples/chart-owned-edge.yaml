@@ -1,0 +1,72 @@
+# A cluster without a public Gateway: the chart's own agentgateway data plane
+# is the HTTPS edge.
+#
+# The shape of a vanilla cluster that has the Gateway API CRDs and a
+# LoadBalancer implementation but no Gateway of its own. With
+# gatewayApi.gateway.create the agentgateway data-plane Gateway grows an HTTPS
+# :443 listener for *.<global.domain> (the wildcard certificate in
+# gatewayApi.gateway.tls.secretName), every public route pins to it, and its
+# Service becomes a LoadBalancer — point the DNS wildcard *.<global.domain> at
+# that Service's address. MCP traffic (/mcp) goes through agentgateway to
+# muster; OAuth, discovery and client registration stay on muster's own route
+# (ingress.mode agentgateway-muster). docs/install.md walks through it, the
+# certificate and the DNS record included.
+#
+#   helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platform \
+#     --namespace agent-platform --create-namespace \
+#     -f chart-owned-edge.yaml --wait --timeout 10m
+#
+# Replace platform.example.com and the issuer with your own. `make
+# verify-examples` renders this file with the meta chart and every component
+# chart it turns on.
+global:
+  domain: platform.example.com
+  identity:
+    issuerUrl: https://dex.platform.example.com
+    clientId: agent-platform
+    existingSecret: agent-platform-idp
+  # The traces' collector: none here (the default is a Giant Swarm cluster's
+  # OTLP gateway). Name yours to export the platform's traces.
+  observability:
+    traces:
+      otlp:
+        endpoint: ""
+
+gatewayApi:
+  gateway:
+    create: true
+    # The wildcard certificate for *.<global.domain>, a kubernetes.io/tls
+    # Secret in the release namespace (docs/install.md: cert-manager or by hand).
+    tls:
+      secretName: agent-platform-wildcard-tls
+    serviceType: LoadBalancer
+
+ingress:
+  mode: agentgateway-muster
+  # A streamed MCP response has no upper bound; the route must not cut it.
+  httpRoute:
+    timeouts:
+      request: "0s"
+
+components:
+  agentgateway:
+    enabled: true
+  # The bundled MCP servers, reached through agentgateway via muster.
+  agent-platform-mcps:
+    enabled: true
+
+agent-platform-mcps:
+  agentgateway:
+    viaMuster: true
+
+muster:
+  muster:
+    oauth:
+      mcpClient:
+        publicUrl: https://muster.platform.example.com
+      server:
+        baseUrl: https://muster.platform.example.com
+        dex:
+          issuerUrl: https://dex.platform.example.com
+          clientId: agent-platform
+        existingSecret: agent-platform-idp

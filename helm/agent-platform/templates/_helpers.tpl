@@ -127,6 +127,12 @@ overwrite would hide a values file that still spells the old key.
     default user with (agent-platform.valkeySecretName / valkeyPasswordKey), so
     the switch is one line. These are defaults, not the single-source rule
     above: an operator's own url (an out-of-band Valkey), Secret or key wins.
+  valkey: auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
+    its own block leaves them empty, from the Secret and key muster reads the
+    same password with (agent-platform.valkeySecretName / valkeyPasswordKey:
+    muster's storage Secret, else global.identity.existingSecret; the key
+    valkey-password), so the platform Secret alone authenticates both. Defaults
+    as for klaus-gateway: the valkey block's own values win.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation);
     substrateWorkerPool.workerImage from the Substrate release THIS chart pins
@@ -206,6 +212,16 @@ runtime-registration contract there. */ -}}
 {{- end -}}
 {{- if $valkey -}}{{- $_ := set $derived "routing" (dict "valkey" $valkey) -}}{{- end -}}
 {{- end -}}
+{{- end -}}
+{{- if eq .name "valkey" -}}
+{{- $auth := dig "valkey" "auth" dict (.root.Values.valkey | default dict) -}}
+{{- $out := dict -}}
+{{- $secret := include "agent-platform.valkeySecretName" .root -}}
+{{- if and $secret (not (dig "usersExistingSecret" "" $auth)) -}}{{- $_ := set $out "usersExistingSecret" $secret -}}{{- end -}}
+{{- if and $secret (not (dig "aclUsers" "default" "passwordKey" "" $auth)) -}}
+{{- $_ := set $out "aclUsers" (dict "default" (dict "passwordKey" (include "agent-platform.valkeyPasswordKey" .root))) -}}
+{{- end -}}
+{{- if $out -}}{{- $_ := set $derived "valkey" (dict "auth" $out) -}}{{- end -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
@@ -341,7 +357,8 @@ Usage: include "agent-platform.omitPath" (dict "vals" $vals "path" "a.b")
 Where Agent Substrate's control-plane database lives: "bundled" (the substrate
 chart's single-instance StatefulSet — substrate.postgres.enabled true, or `auto`
 while neither of the other two applies), "external" (an explicit
-substrate.postgres.connectionString), "cnpg" (the platform's CNPG Cluster,
+substrate.postgres.connectionString, or substrate.postgres.connectionStringSecretRef
+naming a Secret that holds one), "cnpg" (the platform's CNPG Cluster,
 postgres.enabled, through postgres.databases.substrate and the derived Secret),
 or "" when none of the three holds (substrate.postgres.enabled false without a
 Cluster or a connection string) — which validateSubstrate refuses. The
@@ -352,13 +369,16 @@ Usage: include "agent-platform.substrate.postgresMode" .
 {{- $sub := .Values.substrate | default dict -}}
 {{- $bundled := dig "postgres" "enabled" "auto" $sub | toString -}}
 {{- $conn := dig "postgres" "connectionString" "" $sub -}}
+{{- $ref := dig "postgres" "connectionStringSecretRef" dict $sub -}}
+{{- $refOn := or (dig "enabled" false $ref) (dig "name" "" $ref) -}}
 {{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
 {{- if not (has $bundled (list "auto" "true" "false")) -}}
 {{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
 {{- end -}}
-{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg)) -}}bundled
+{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg) (not $refOn)) -}}bundled
 {{- else if $conn -}}external
 {{- else if $cnpg -}}cnpg
+{{- else if $refOn -}}external
 {{- end -}}
 {{- end -}}
 
@@ -639,7 +659,7 @@ run it.
 {{- include "agent-platform.substrate.validateRange" . -}}
 {{- end -}}
 {{- if and $substrate (not (include "agent-platform.substrate.postgresMode" .)) -}}
-{{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; postgres.databases.substrate renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionString" -}}
+{{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; postgres.databases.substrate renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionStringSecretRef (a Secret in ate-system holding the connection string) or substrate.postgres.connectionString" -}}
 {{- end -}}
 {{- if and $substrate (.Capabilities.APIVersions.Has "v1/Namespace") -}}
 {{- if not (.Capabilities.APIVersions.Has "certificates.k8s.io/v1beta1/PodCertificateRequest") -}}
@@ -1026,7 +1046,7 @@ Empty when none is named. Usage: include "agent-platform.valkeySecretName" .
 {{- define "agent-platform.valkeySecretName" -}}
 {{- $v := .Values.valkey | default dict -}}
 {{- $m := .Values.muster | default dict -}}
-{{- coalesce (dig "valkey" "auth" "usersExistingSecret" "" $v) (dig "muster" "oauth" "server" "storage" "valkey" "existingSecret" "" $m) (dig "muster" "oauth" "server" "existingSecret" "" $m) (dig "identity" "existingSecret" "" (.Values.global | default dict)) "" -}}
+{{- coalesce (dig "valkey" "auth" "usersExistingSecret" "" $v) (dig "muster" "oauth" "server" "storage" "valkey" "existingSecret" "" $m) (dig "muster" "oauth" "server" "existingSecret" "" $m) (dig "identity" "existingSecret" "" (.Values.global | default dict)) | default "" -}}
 {{- end -}}
 
 {{/*

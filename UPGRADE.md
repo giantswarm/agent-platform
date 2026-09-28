@@ -2,6 +2,19 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## CRDs on an upgrade, per install path
+
+Every component ships its own CRDs and upgrades them with its release; there is no CRD chart to upgrade first ([README: CRD lifecycle](./README.md#crd-lifecycle)). Who applies a changed CRD, and what is left to the operator:
+
+| Install path | Component CRDs | Flux CRDs | Operator action |
+|---|---|---|---|
+| **The bundled engine, self-managed** (`components.flux.enabled: true`, `gitops.self.enabled: auto`: the Helm CLI is day 0 only) | helm-controller, with each component release: `crds: CreateReplace` on the charts that carry `crds/` (muster, agentgateway, agent-sandbox); the charts that render their CRDs as templates (kagent-crds, substrate-crds, kserve-llmisvc-crd, cloudnative-pg) apply them with every release | the Flux Operator keeps the seven source- and helm-controller CRDs current with Flux inside `2.x`. Its own four `fluxcd.controlplane.io` CRDs stay as the first install applied them: the chart carries them in `crds/`, which Helm and helm-controller never upgrade, and the operator does not manage them (their only field manager is `helm`) | nothing, unless a release's entry below says its Flux Operator bump changes those CRDs: then `helm show crds oci://gsoci.azurecr.io/charts/giantswarm/agent-platform --version <new> \| yq 'select(.spec.group == "fluxcd.controlplane.io")' \| kubectl apply --server-side -f -` |
+| **The bundled engine, Helm CLI on day 2** (`gitops.self.enabled: false`, the lab shape) | the same: the component releases are helm-controller's either way | the same | the same |
+| **The cluster's own Flux** (`components.flux.enabled: false`) | the same, through that Flux | the cluster's own, never the chart's | nothing |
+| **Raw Helm, no Flux** (each component chart installed by hand, [README](./README.md#raw-helm-without-the-engine)) | the template CRDs upgrade with their release; a chart's `crds/` (muster, agentgateway, agent-sandbox) Helm installs once and never upgrades | — | on every upgrade of muster, agentgateway or agent-sandbox, apply its CRDs first: `helm show crds <chart> --version <new> \| kubectl apply --server-side -f -` |
+
+A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
+
 ## \<current\> → \<next\> (the serving slice on KServe v0.21.0, predictors roll without a surge pod)
 
 giantswarm/agent-platform#682: the three kserve components move from `0.5.x` / `0.6.x` to `0.7.x`, the charts of KServe v0.21.0, and `kserve.llmisvcConfigs.rolloutStrategy: {maxSurge: 0, maxUnavailable: 1}` makes every predictor roll stop the old pod first. The runtime image stays `llm-d-cuda:v0.8.0`, pinned per preset under `kserve.llmisvcConfigs.images`.

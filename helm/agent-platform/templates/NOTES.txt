@@ -50,3 +50,31 @@ CRD-before-CR ordering: each component ships its own CRDs (app-owned CRDs,
 upgraded via CreateReplace); a CR consumer dependsOn the component that owns the
 CRD it needs. The Gateway API CRDs and GatewayClass remain cluster-level
 prerequisites.
+{{- if .Values.global.domain }}
+{{- $domain := .Values.global.domain }}
+{{- $muster := printf "muster.%s" $domain }}
+{{- with .Values.ingress.hostnames }}{{ $muster = first . }}{{ end }}
+{{- $musterBase := .Values.muster.muster.oauth.server.baseUrl | default (printf "https://%s" $muster) | trimSuffix "/" }}
+
+Next steps (docs/install.md "After the install"):
+
+  URLs, once DNS for *.{{ $domain }} points at {{ if .Values.gatewayApi.gateway.create }}the address of Service {{ .Release.Namespace }}/{{ .Values.gateway.name }} (the chart-owned edge){{ else }}the public Gateway{{ end }}:
+    MCP endpoint (muster)   {{ $musterBase }}/mcp
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") }}
+    Portal (Backstage)      https://{{ .Values.backstage.hostname | default (printf "backstage.%s" $domain) }}
+{{- end }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.uiRoute.enabled }}
+    kagent UI               https://{{ .Values.kagent.uiRoute.hostname | default (printf "kagent.%s" $domain) }}
+{{- end }}
+
+  Redirect URIs to register at the identity provider{{ with .Values.global.identity.issuerUrl }} ({{ . }}){{ end }}:
+{{- if .Values.muster.muster.oauth.server.enabled }}
+    client {{ .Values.muster.muster.oauth.server.dex.clientId | default .Values.global.identity.clientId | default "<global.identity.clientId>" }}: {{ $musterBase }}/oauth/callback
+{{- end }}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") }}
+    client {{ .Values.global.identity.clientId | default "<global.identity.clientId>" }}: https://{{ .Values.backstage.hostname | default (printf "backstage.%s" $domain) }}/api/auth/oidc-agent-platform/handler/frame
+{{- end }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.uiRoute.enabled (index .Values.kagent "oauth2-proxy" "enabled") }}
+    kagent UI's client:     https://{{ .Values.kagent.uiRoute.hostname | default (printf "kagent.%s" $domain) }}/oauth2/callback
+{{- end }}
+{{- end }}

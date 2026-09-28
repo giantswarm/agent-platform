@@ -78,6 +78,8 @@ make verify-meta verify-modes verify-postgres
 
 ## Prerequisites
 
+Per cluster shape, with the Gateway, certificate, identity-provider and Secret manifests to copy: [docs/install.md](docs/install.md#2-prerequisites).
+
 - Kubernetes ≥ 1.33 on the install target. With `components.kagent.enabled`: **Kubernetes ≥ 1.35 with the `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` feature gates on kube-apiserver, kube-controller-manager and every kubelet** — Agent Substrate itself comes with the chart (the `substrate` and `substrate-crds` components), a live render refuses a cluster that does not serve the API; see [Agent Substrate](#agent-substrate).
 - Flux — **optional**. The chart brings its own engine (the Flux Operator and one `FluxInstance` running source-controller + helm-controller) where a cluster has none; a cluster that already runs Flux installs the chart through it with `components.flux.enabled: false`. See [Installing](#installing).
 - Gateway API v1 CRDs (`gateways.gateway.networking.k8s.io`, `httproutes.gateway.networking.k8s.io`, `gatewayclasses.gateway.networking.k8s.io`) installed cluster-wide. The Agent Platform does **not** install them.
@@ -94,7 +96,7 @@ make verify-meta verify-modes verify-postgres
 
 ### Quick start
 
-Three inputs: the domain, the identity provider, the components. Nothing about Flux.
+**[docs/install.md](docs/install.md) is the step-by-step guide**: the cluster shapes and their example values, the prerequisites per shape, the identity provider with the redirect URIs to register, the `global.*` inputs. The short form, for a cluster with its own public Gateway and Dex ([`examples/own-gateway.yaml`](helm/agent-platform/examples/own-gateway.yaml)):
 
 ```yaml
 # values.yaml
@@ -108,9 +110,17 @@ global:
     parentRefs:                              # the public Gateway every route attaches to
       - name: public
         namespace: gateway-system
-components:
-  kagent: { enabled: true }                  # pick the components you want; muster, dicebear and connectivity are always on
-  agent-manager: { enabled: true }
+muster:
+  muster:
+    oauth:                                   # muster's OAuth server: the same provider, muster's public URL
+      mcpClient:
+        publicUrl: https://muster.platform.example.com
+      server:
+        baseUrl: https://muster.platform.example.com
+        dex:
+          issuerUrl: https://dex.platform.example.com
+          clientId: agent-platform
+        existingSecret: agent-platform-idp
 ```
 
 ```bash
@@ -119,6 +129,8 @@ kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/downloa
 helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platform \
   --namespace agent-platform --create-namespace -f values.yaml --wait --timeout 10m
 ```
+
+Agents (`components.kagent`, `components.agent-manager`) need more from the cluster — Kubernetes 1.35 with the Substrate feature gates, a snapshot bucket, a database: [`examples/managed-cloud.yaml`](helm/agent-platform/examples/managed-cloud.yaml) and [docs/install.md](docs/install.md#agents-managed-cloud).
 
 `--wait` returns when the platform runs: Helm waits for the component `HelmRelease`s to be Ready (Helm 4 waits on custom resources' `Ready` condition), which on a fresh kind cluster takes about two minutes with the default components and about four minutes with kagent on (220 s measured, Substrate included). The cluster-shape knobs (Kyverno, network-policy flavor, monitors, the Envoy-only avatar route) default to `auto` and follow what the cluster serves — see [Cluster shape](#cluster-shape-auto). That `helm install` is the last Helm command besides `helm uninstall`: the release now manages itself through the engine it brought — the chart rolls forward inside its major on its own, and a values change is a rewrite of Secret `agent-platform-values`, not a `helm upgrade` (which is refused) — see [Self-management](#self-management). Component versions roll forward on their own inside their `versionRange`s either way.
 
@@ -632,6 +644,8 @@ muster:
         # — both inherited from the umbrella defaults.
 ```
 
+Left empty, `valkey.valkey.auth.usersExistingSecret` and `aclUsers.default.passwordKey` follow the Secret and key muster reads the password with — muster's storage Secret, else `muster.muster.oauth.server.existingSecret`, else `global.identity.existingSecret`, and the key `valkey-password` — so an installation with the platform Secret sets neither.
+
 ACL authentication is enabled by default for the `default` user (`~* &* +@all`), with the cleartext password read from `valkey-password` in the operator-supplied Secret. Muster sends `AUTH <password>` against the default user, which is the standard backwards-compatible form.
 
 Valkey reads the password once, when its pod starts. A password rotated in the Secret reaches it through `valkey.valkey.auth.usersExistingSecretChecksum`, a mark the Valkey chart (0.1.5 and later) renders verbatim as the pod's `checksum/users-secret` annotation: change it in the same change that rotates the Secret and the pod restarts onto the new password. Empty (the default), a rotation alone leaves the running Valkey on the old password until a hand-run restart. muster itself reads the same Secret at start and carries no such mark yet (giantswarm/muster#1315).
@@ -829,7 +843,7 @@ agent-sandbox:
 
 The agentgateway data-plane pod template is rendered at runtime by the controller, not by Helm. To inject restricted-PSS-compatible `securityContext` fields, the umbrella ships an `AgentgatewayParameters` resource referenced from `Gateway.spec.infrastructure.parametersRef`. The controller applies it as a strategic merge patch over the generated Deployment and Service — that's how `gateway.parameters.serviceType: ClusterIP` forces the otherwise-hardcoded `type: LoadBalancer`.
 
-The data-plane pod template hardcodes `sysctls: [net.ipv4.ip_unprivileged_port_start=0]`. This is a namespaced-safe sysctl (no kubelet allowlist required). On clusters with built-in Pod Security Admission `restricted` enforced, the sysctl will be rejected — label the install namespace with `pod-security.kubernetes.io/enforce: baseline` (or allowlist the sysctl in Kyverno's `restrict-sysctls` policy as Giant Swarm workload clusters already do).
+The data-plane pod template hardcodes `sysctls: [net.ipv4.ip_unprivileged_port_start=0]`, a sysctl Pod Security Admission counts as safe: the data plane is admitted under `restricted` (checked with `kubectl label --dry-run=server ns agent-platform pod-security.kubernetes.io/enforce=restricted` on a live install). Kyverno's `restrict-sysctls` policy allowlists it on Giant Swarm clusters.
 
 ## CRD lifecycle
 
