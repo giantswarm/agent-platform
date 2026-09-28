@@ -2049,6 +2049,11 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 		grep -q -e "$$pattern" /tmp/vmg-mm-egress-k8s-policy.out || { echo "FAIL: kubernetes model-manager egress lacks $$pattern"; exit 1; }; \
 	done
 	@echo "ok: model-manager egress knob"
+	@echo "--> model-manager.github.enabled: commit mode opens api.github.com on 443 (cilium); off, the default, it does not"
+	@if grep -q 'matchName: api.github.com' /tmp/vmg-default-egress.out; then echo "FAIL: the default model-manager egress opens api.github.com with commit mode off"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set model-manager.github.enabled=true >/tmp/vmg-mm-github.out 2>&1 || { cat /tmp/vmg-mm-github.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-model-manager-egress$$/,/^---/' /tmp/vmg-mm-github.out | grep -A4 'matchName: api.github.com' | grep -q 'port: "443"' || { echo "FAIL: cilium model-manager egress lacks api.github.com on 443 with model-manager.github.enabled"; exit 1; }
+	@echo "ok: model-manager commit-mode egress"
 	@echo "--> modelManager.networkPolicy.registeredBackends (giantswarm/agent-platform#478): a backend registered at runtime is opened by its block or name on its port, in both flavors, next to the static rules; empty, nothing renders"
 	@if grep -q 'registered at runtime' /tmp/vmg-default-egress.out; then echo "FAIL: the default model-manager egress carries a registered-backend rule with the list empty"; exit 1; fi
 	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(REGISTERED_BACKENDS) >/tmp/vmg-registered.out 2>&1 || { cat /tmp/vmg-registered.out; exit 1; }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **model-manager's egress opens GitHub's API with commit mode on.** With `model-manager.github.enabled`, which pins the MCPServer to the GitHub App `giantswarm-model-manager`, the connectivity chart's Cilium egress policy for model-manager adds `api.github.com` on 443. model-manager needs it for `GET /user` and for the pull request it opens as the person. agent-manager's default egress already names it. The kubernetes flavor already opens 443 to public destinations while OAuth is on. Off, the default, nothing changes. `make verify-managers` asserts both.
+
 ### Changed
 
 - **`nemotron-3-super-nvfp4` serves with CUDA graphs: `--enforce-eager` is gone from its arguments** (giantswarm/giantswarm#37941). Measured on one DGX Spark (128 GB unified memory) with the preset's other arguments unchanged, 134 requests, no error: a single stream decodes at 15.7 instead of 15.1 tok/s, aggregate throughput at 8 to 32 concurrent requests is unchanged (57, 81, 114 tok/s), and the time to first token drops by 10–15 % for short prompts and by 29 % for 5.8k-token prompts (3.3 to 2.3 s). Split across two Sparks the gain is larger: 16.3 to 26.3 tok/s single stream once the tensor-parallel all-reduce also runs over RoCE. The costs: the captured graph pool (2.2 GiB) counts inside `--gpu-memory-utilization=0.72`, so one node keeps 287k instead of 372k KV-cache tokens (35 full 8k contexts), and a start takes about 40 seconds longer on one node (torch.compile 18 s, cached on the model cache claim for the next pod, and 24 s of graph capture), next to the 6 minutes of weight loading. The tool-calling turn with the `qwen3_coder` parser passes unchanged.
