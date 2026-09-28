@@ -12,9 +12,11 @@ property that shape relies on:
   (name, and key when set) onto EVERY HelmRelease the component loop renders and
   changes nothing else — the knob render minus those lines is the default render;
   unset, no HelmRelease carries kubeConfig;
-- the goldens: with the new keys at their defaults, the default and CI renders of
-  the meta chart and the default and full renders of the connectivity chart are
-  byte-identical to GOLDEN_REF (origin/main; GOLDEN_REF= opts out);
+- the goldens: the default and CI renders of the meta chart and the default,
+  full and Backstage renders of the connectivity chart are what tests/golden/
+  says they are. The baseline is committed, so an intended change is
+  `make golden-update` and its diff is reviewed in the pull request; there is
+  nothing to hold equal and nothing to clean up once it merges;
 - the toggles: components.muster.enabled / components.dicebear.enabled off render
   no release of theirs, the roster forwarded to the connectivity release says so,
   and the connectivity chart drops their references — muster's /mcp route, the
@@ -42,10 +44,8 @@ Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
 
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = [
@@ -76,242 +76,6 @@ CONN_FULL = [
     "--set", "components.kagent.enabled=true", "--set", "components.substrate.enabled=true",
     "--set", "components.substrate-crds.enabled=true", "--set", "networkPolicy.musterInClusterMcpPorts[0]=8080",
 ]
-# giantswarm/agent-platform#586: the default metric-label expressions read the
-# kagent runtime's identity headers behind the Substrate egress predicate, and
-# GOLDEN_REF renders the plain source-IP attributes. Held equal on BOTH sides --
-# the three old expressions, which the meta chart forwards as written -- and
-# dropped once GOLDEN_REF carries #586.
-METRIC_LABELS_HOLD = [
-    "--set", "gateway.metricLabels.agent.expression=source.unverifiedWorkload.serviceAccount",
-    "--set", "gateway.metricLabels.agent_namespace.expression=source.unverifiedWorkload.namespace",
-    "--set", "gateway.metricLabels.user.expression=jwt.email",
-]
-# giantswarm/agent-platform#608: both charts name the agentgateway line's 2.0.0
-# under its nested names in full (the controller and the data plane), and
-# GOLDEN_REF names the flattened controller repository and the v1.5.1-gs.4 data
-# plane. Held equal on BOTH sides of the meta and the connectivity renders;
-# dropped once GOLDEN_REF carries #608.
-# giantswarm/giantswarm#36711: the muster board moves to the platform's own
-# Grafana folder and to the organization customers reach, and GOLDEN_REF carries
-# the muster chart's own defaults for both. Held equal on BOTH sides of the meta
-# renders; dropped once GOLDEN_REF carries them.
-MUSTER_DASHBOARD_HOLD = [
-    "--set", "muster.muster.observability.grafanaDashboard.folder=muster",
-    "--set", "muster.muster.observability.grafanaDashboard.giantswarm.organization=Giant Swarm",
-]
-# giantswarm/giantswarm#36711: muster's and Substrate's OTLP endpoints, unset
-# on GOLDEN_REF (the meta chart forwards no otel block for either). Neither
-# key exists on GOLDEN_REF's side at all, so it cannot be held by --set (there
-# is no default to fall back to); the two blocks are cut from the meta
-# renders instead. Dropped once GOLDEN_REF carries them.
-MUSTER_OTEL = re.compile(
-    r"^(\s+)otel:\n\1  endpoint: http://otlp-gateway\.kube-system\.svc:4317\n"
-    r"\1  headers: X-Scope-OrgID=giantswarm\n\1  protocol: grpc\n", re.M)
-SUBSTRATE_OTEL = re.compile(r"^(\s+)otel:\n\1  endpoint: http://otlp-gateway\.kube-system\.svc:4317\n", re.M)
-# The data plane's tenant pod label (gateway.parameters.podLabels), a key
-# GOLDEN_REF's closed gateway.parameters schema refuses, so it is cut too.
-DATAPLANE_POD_LABELS = re.compile(r"^(\s+)podLabels:\n\1  observability\.giantswarm\.io/tenant: giantswarm\n", re.M)
-
-
-def hold_otlp_endpoints(here: str, there: str) -> tuple:
-    """The two meta renders with muster's and Substrate's new OTLP blocks and the data plane's tenant pod label cut out."""
-    def strip(render: str) -> str:
-        render = MUSTER_OTEL.sub("", render)
-        render = DATAPLANE_POD_LABELS.sub("", render)
-        return SUBSTRATE_OTEL.sub("", render)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #36711 hold — muster's and Substrate's OTLP endpoint blocks and the data plane's tenant pod label are left out of the golden comparison")
-    return h, strip(there)
-
-
-# giantswarm/agentgateway#60: this tree turns the packaging chart's own
-# monitoring on (its controller ServiceMonitor, proxy PodMonitor and dashboard
-# ConfigMap), which GOLDEN_REF's defaults leave off and whose block it does not
-# carry at all. The whole block is written on BOTH sides so the forwarded values
-# compare equal; dropped once GOLDEN_REF carries it.
-AGENTGATEWAY_MONITORING_HOLD = [
-    "--set", "agentgateway.monitoring.enabled=false",
-    "--set", "agentgateway.monitoring.serviceMonitor.enabled=true",
-    "--set", "agentgateway.monitoring.serviceMonitor.interval=60s",
-    "--set", "agentgateway.monitoring.serviceMonitor.extraLabels.observability\\.giantswarm\\.io/tenant=giantswarm",
-    "--set", "agentgateway.monitoring.grafanaDashboard.enabled=true",
-    "--set", "agentgateway.monitoring.grafanaDashboard.labels.app\\.giantswarm\\.io/kind=dashboard",
-    "--set", "agentgateway.monitoring.grafanaDashboard.annotations.observability\\.giantswarm\\.io/organization=Shared Org",
-    "--set", "agentgateway.monitoring.grafanaDashboard.annotations.observability\\.giantswarm\\.io/folder=Agent Platform",
-]
-# giantswarm/giantswarm#36711: this tree turns the mcp-kubernetes chart's own
-# ServiceMonitor and its three Grafana boards on, which GOLDEN_REF's defaults
-# leave off and whose keys it does not carry at all. The whole block is written
-# on BOTH sides so the forwarded values compare equal; dropped once GOLDEN_REF
-# carries it.
-MCP_KUBERNETES_MONITORING_HOLD = [
-    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.enabled=false",
-    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
-    "--set", "mcp-kubernetes.grafanaDashboards.enabled=false",
-    "--set", "mcp-kubernetes.grafanaDashboards.folder=Agent Platform",
-    "--set", "mcp-kubernetes.grafanaDashboards.giantswarm.enabled=true",
-    "--set", "mcp-kubernetes.grafanaDashboards.giantswarm.organization=Shared Org",
-]
-# giantswarm/vm-manager#73, giantswarm/giantswarm#36711: the vm-manager chart
-# gains its own ServiceMonitor and this tree resolves its `auto` switch and
-# sets the tenant label, keys GOLDEN_REF's vm-manager block does not carry
-# (an open block, so it forwards them as written), and moves the component's
-# floor to the release that opens the keys. Written on BOTH sides so the
-# forwarded values and the range compare equal; dropped once GOLDEN_REF
-# carries them.
-VM_MANAGER_MONITOR_HOLD = [
-    "--set", "components.vm-manager.versionRange=>=0.24.0 <1.0.0",
-    "--set", "vm-manager.serviceMonitor.enabled=false",
-    "--set", "vm-manager.serviceMonitor.interval=60s",
-    "--set", "vm-manager.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
-]
-# giantswarm/giantswarm#36711: the model-manager, agent-manager and
-# cluster-manager charts gain their own ServiceMonitor and this tree resolves
-# its `auto` switch and sets the tenant label, keys GOLDEN_REF's blocks do not
-# carry (open blocks, so they forward them as written), and moves the floors
-# to the releases that open the keys. Written on BOTH sides, after
-# COMPONENT_TRACES_HOLD so its ranges give way, so the forwarded values and
-# the ranges compare equal; dropped once GOLDEN_REF carries them.
-MANAGER_MONITOR_HOLD = [
-    "--set", "components.model-manager.versionRange=>=1.5.0 <2.0.0",
-    "--set", "components.agent-manager.versionRange=>=1.4.0 <2.0.0",
-    "--set", "components.cluster-manager.versionRange=>=0.22.0 <1.0.0",
-    *[flag for name in ("model-manager", "agent-manager", "cluster-manager") for flag in (
-        "--set", f"{name}.serviceMonitor.enabled=false",
-        "--set", f"{name}.serviceMonitor.interval=60s",
-        "--set", f"{name}.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
-    )],
-]
-# giantswarm/giantswarm#36711: the managers', the portal's and mcp-kubernetes'
-# OTLP trace keys, which this tree derives from global.observability.traces.otlp
-# and GOLDEN_REF's blocks do not carry (open blocks, so they forward as
-# written), and the floors of the releases that take them. Written on BOTH
-# sides with the values this tree derives by default; dropped once GOLDEN_REF
-# carries them.
-COMPONENT_TRACES_HOLD = [
-    "--set", "components.model-manager.versionRange=>=1.3.0 <2.0.0",
-    "--set", "components.agent-manager.versionRange=>=1.2.0 <2.0.0",
-    "--set", "components.cluster-manager.versionRange=>=0.19.0 <1.0.0",
-    "--set", "components.backstage.versionRange=>=2.68.0 <3.0.0",
-    "--set", "components.mcp-kubernetes.versionRange=>=1.3.0 <2.0.0",
-    "--set", "model-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
-    "--set", "model-manager.observability.otel.protocol=grpc",
-    "--set", "model-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
-    "--set", "agent-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
-    "--set", "agent-manager.observability.otel.protocol=grpc",
-    "--set", "agent-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
-    "--set", "vm-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
-    "--set", "vm-manager.observability.otel.protocol=grpc",
-    "--set", "vm-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
-    "--set", "cluster-manager.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
-    "--set", "cluster-manager.observability.otel.protocol=grpc",
-    "--set", "cluster-manager.observability.otel.headers=X-Scope-OrgID=giantswarm",
-    "--set", "backstage.observability.otel.endpoint=http://otlp-gateway.kube-system.svc:4317",
-    "--set", "backstage.observability.otel.protocol=grpc",
-    "--set", "backstage.observability.otel.headers=X-Scope-OrgID=giantswarm",
-    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.tracingExporter=otlp",
-    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint=otlp-gateway.kube-system.svc:4317",
-    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpInsecure=true",
-    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpProtocol=grpc",
-    "--set", "mcp-kubernetes.mcpKubernetes.instrumentation.otlpHeaders=X-Scope-OrgID=giantswarm",
-]
-# giantswarm/kserve#88, giantswarm/giantswarm#36711: the llmisvc controller's
-# ServiceMonitor and plain-HTTP metrics, keys GOLDEN_REF's
-# kserve-llmisvc-resources block does not carry, and the kserve charts' 0.5.x
-# line that opens them. Written on BOTH sides so the forwarded values and the
-# ranges compare equal; dropped once GOLDEN_REF carries them.
-KSERVE_MONITOR_HOLD = [
-    "--set", "components.kserve-llmisvc-crd.versionRange=0.5.x",
-    "--set", "components.kserve-llmisvc-resources.versionRange=0.5.x",
-    "--set", "components.kserve-runtime-configs.versionRange=0.5.x",
-    "--set", "kserve-llmisvc-resources.kserve.llmisvc.controller.metricsSecure=false",
-    "--set", "kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.enabled=false",
-    "--set", "kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.interval=60s",
-    "--set", "kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
-]
-# giantswarm/agent-platform#455 follow-up: this tree sets the kagent
-# controller's resources (the memory limit raised to 1536Mi), a key GOLDEN_REF's
-# kagent.controller block does not carry (an open block, so it forwards it as
-# written), and moves the VPA's memory cap to 1280Mi. Written on BOTH sides so
-# the forwarded values and the rendered VPA compare equal; dropped once
-# GOLDEN_REF carries them.
-KAGENT_CONTROLLER_RESOURCES_HOLD = [
-    "--set", "kagent.controller.resources.requests.cpu=100m",
-    "--set", "kagent.controller.resources.requests.memory=128Mi",
-    "--set", "kagent.controller.resources.limits.cpu=2",
-    "--set", "kagent.controller.resources.limits.memory=1536Mi",
-    "--set", "kagent.controller.vpa.maxAllowed.memory=1280Mi",
-]
-KAGENT_VPA_CAP_HOLD = ["--set", "kagent.controller.vpa.maxAllowed.memory=1280Mi"]
-# giantswarm/klaus-gateway#329: the component's floor is 3.3.0, the release that
-# names a failed turn's class; GOLDEN_REF admits 2.0.0. Written on BOTH sides so
-# the range compares equal; dropped once GOLDEN_REF carries the floor.
-KLAUS_GATEWAY_FLOOR_HOLD = ["--set", "components.klaus-gateway.versionRange=>=3.3.0 <4.0.0"]
-# giantswarm/agent-platform#580: the CloudNativePG operator's chart and image from
-# their gsoci copies. Written on BOTH sides so the source and the forwarded values
-# compare equal; dropped once GOLDEN_REF carries them.
-CNPG_GSOCI_HOLD = [
-    "--set", "components.cloudnative-pg.repository=oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts",
-    "--set", "cloudnative-pg.image.repository=gsoci.azurecr.io/giantswarm/cloudnative-pg",
-]
-# giantswarm/giantswarm#36711: this tree turns the substrate chart's PodMonitors
-# on, which GOLDEN_REF's defaults leave off and whose block it does not carry at
-# all. The whole block is written on BOTH sides so the forwarded values compare
-# equal; dropped once GOLDEN_REF carries it.
-SUBSTRATE_PODMONITOR_HOLD = [
-    "--set", "substrate.metrics.podMonitor.enabled=false",
-    "--set", "substrate.metrics.podMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
-]
-# giantswarm/giantswarm#36711: this tree turns the kagent controller's metrics
-# and the chart's own ServiceMonitor on, which GOLDEN_REF leaves off (the line
-# served no endpoint before 1.0.2, and this chart rendered the monitor itself).
-# Held equal on BOTH sides; dropped once GOLDEN_REF carries it.
-KAGENT_SERVICEMONITOR_HOLD = [
-    "--set", "kagent.controller.metrics.enabled=false",
-    "--set", "kagent.controller.metrics.bindAddress=:8080",
-    "--set", "kagent.controller.metrics.secureServing=false",
-    "--set", "kagent.controller.metrics.service.port=8080",
-    "--set", "kagent.controller.metrics.serviceMonitor.enabled=false",
-]
-# The same change retires kagent.serviceMonitor, this chart's own key for the
-# monitor it no longer renders. GOLDEN_REF still forwards the block, so it is
-# dropped from BOTH sides by name; the other serviceMonitor blocks (muster's,
-# oauth2-proxy's) go with it, which narrows the comparison until GOLDEN_REF
-# carries the change.
-SERVICEMONITOR_KEY = re.compile(r"^(\s+)serviceMonitor:\s*$")
-
-
-def hold_retired_servicemonitor(here: str, there: str) -> tuple:
-    """The two renders without any forwarded serviceMonitor mapping."""
-    def strip(render: str) -> str:
-        return drop_mapping(render, SERVICEMONITOR_KEY)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #36711 hold — the forwarded serviceMonitor blocks are left out of the golden comparison")
-    return h, strip(there)
-# giantswarm/giantswarm#37705: this tree moves the kagent and Substrate lines to
-# 1.1 and the Generic agent chart to 1.5; GOLDEN_REF stays on the 1.0 lines.
-# Written on BOTH sides so the ranges compare equal; dropped once GOLDEN_REF
-# carries them.
-REPIN_1_1_RANGES_HOLD = [
-    "--set", "components.kagent.versionRange=>=1.1.0 <1.2.0",
-    "--set", "components.kagent-crds.versionRange=>=1.1.0 <1.2.0",
-    "--set", "components.substrate.versionRange=>=1.1.0 <1.2.0",
-    "--set", "components.substrate-crds.versionRange=>=1.1.0 <1.2.0",
-    "--set", "agent-manager.agentChart.semver=>=1.5.0 <2.0.0",
-]
-# giantswarm/agent-platform#580: this tree forwards the bucket-init Job's
-# aws-cli as the gsoci copy (the Substrate line runs the Job as a hook from
-# 1.1.2); GOLDEN_REF forwards Docker Hub's short name. Written on BOTH sides;
-# dropped once GOLDEN_REF carries it.
-SUBSTRATE_AWSCLI_HOLD = [
-    "--set", "substrate.images.awsCli=gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73",
-]
-AGENTGATEWAY_IMAGES_HOLD = [
-    "--set", "agentgateway.controller.image.repository=giantswarm/agentgateway-upstream/controller",
-    "--set", "agentgateway.controller.image.tag=2.0.0",
-    "--set", "agentgateway.proxy.image.repository=giantswarm/agentgateway-upstream/agentgateway",
-    "--set", "agentgateway.proxy.image.tag=2.0.0",
-]
 # Makefile.custom.mk's WIRING_BACKSTAGE: the portal on, whose CSP carries the avatars host.
 CONN_BACKSTAGE = [
     *VM, "--namespace", "agent-platform",
@@ -324,7 +88,12 @@ CONN_BACKSTAGE = [
 
 
 def helm(chart: str, flags: list[str], expect_failure: bool = False) -> str:
-    result = subprocess.run([HELM, "template", "t", chart, *flags], capture_output=True, text=True, check=False)
+    try:
+        result = subprocess.run([HELM, "template", "t", chart, *flags], capture_output=True, text=True, check=False)
+    except OSError as e:
+        # HELM names nothing runnable. Say so once, here, rather than in a
+        # traceback from whichever check happens to render first.
+        sys.exit(f"FAIL: cannot run the helm binary HELM={HELM!r}: {e.strerror}")
     if expect_failure:
         if result.returncode == 0:
             sys.exit(f"FAIL: render of {chart} {' '.join(flags)} succeeded, a failure was expected")
@@ -408,709 +177,136 @@ def check_knob(meta: str) -> None:
     ok("the target and slice fixtures each render alone")
 
 
-ROSTER = re.compile(r"(?<=\n    components:\n)((?:      [a-z0-9-]+:\n        enabled: (?:true|false)\n)+)")
-
-# The classic KServe controller went with the classic InferenceService serving
-# path (giantswarm/agent-platform#574): the meta chart forwards no kserve-crd /
-# kserve-resources block any more, the kserve-llmisvc-resources block carries
-# the control plane's shared objects and the controller knobs that lived on
-# kserve-resources, and model-manager's range admits 1.0.0. Held on BOTH sides,
-# each key named; drop once GOLDEN_REF carries #574.
-LLMD_ONLY_BLOCKS = re.compile(r"^    (?:kserve-crd|kserve-resources|kserve-llmisvc-resources):(?: \{\})?\n(?:      .*\n)*", re.M)
-MODEL_MANAGER_RANGE = re.compile(r'(url: oci://gsoci\.azurecr\.io/charts/giantswarm/model-manager\n  ref:\n    semver: )"[^"]*"')
-
-
-def hold_llmd_only(here: str, there: str) -> tuple:
-    """The two meta renders with #574's intended differences held equal on both sides."""
-    def strip(render: str) -> str:
-        render = LLMD_ONLY_BLOCKS.sub("", render)
-        return MODEL_MANAGER_RANGE.sub(r'\1"<held: #574>"', render)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #574 hold — the connectivity release's kserve-crd, kserve-resources and kserve-llmisvc-resources values blocks and model-manager's range are left out of the golden comparison")
-    return h, strip(there)
+GOLDEN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden")
+# The shapes whose rendered output is committed under tests/golden/. `meta` and
+# `connectivity` are substituted for the chart directories at call time.
+GOLDEN_SHAPES = [
+    ("meta-default", "meta", []),
+    ("meta-ci-engine-off", "meta", ["-f", "{meta}/ci/ci-values.yaml", *ENGINE_OFF]),
+    ("connectivity-default", "connectivity", VM),
+    ("connectivity-full", "connectivity", CONN_FULL),
+    ("connectivity-backstage", "connectivity", CONN_BACKSTAGE),
+]
 
 
-# The hook Jobs' pod template (giantswarm/agent-platform#593): every hook Job of
-# the meta chart runs with a 512Mi memory limit and carries the comment on why;
-# GOLDEN_REF renders 128Mi and no comment. Held on BOTH sides by the shape of the
-# hook pods' resources block (requests 10m / 32Mi, one memory limit), at any
-# indentation — the self-management hooks are also rendered inside the values of
-# the chart's own release; drop once GOLDEN_REF carries #593.
-HOOK_POD_RESOURCES = re.compile(
-    r"(?:^ +# .*\n){0,9}(^ +resources:\n +requests:\n +cpu: 10m\n +memory: 32Mi\n +limits:\n +memory: )(?:128Mi|512Mi)$", re.M)
-# The same PR moves the storage-version backup's release pre-filter from a plain
-# grep for the version to the JSON-encoded manifest marker (two comment lines and
-# the grep line, at the script's indentation); both shapes are held to one line.
-HOOK_PREFILTER = re.compile(
-    r"(?:^ +# a manifest that names an object at v1alpha2.*\n^ +# mentions the version.*\n)?^( +)grep -qF? '(?:apiVersion: )?kagent\.dev/v1alpha2(?:\\n)?' /tmp/release\.json \|\| continue$", re.M)
+# A block scalar's header: `key: |`, `key: |-`, `key: >`, and so on. Its content
+# is every following line that is blank or indented deeper than the header.
+BLOCK_SCALAR = re.compile(r"^(\s*)\S.*[|>][-+]?\d*$")
 
 
-def hold_hook_pods(here: str, there: str) -> tuple:
-    """The two meta renders with #593's hook Job pod template held equal on both sides."""
-    def strip(render: str) -> str:
-        render = HOOK_POD_RESOURCES.sub(r"\g<1><held: #593>", render)
-        return HOOK_PREFILTER.sub(r"\g<1><held: #593 pre-filter>", render)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #593 hold — the hook pods' resources block (the memory limit and its comment) and the backup's release pre-filter lines are left out of the golden comparison")
-    return h, strip(there)
+def normalize(render: str) -> str:
+    """The render as it is committed: trailing whitespace off every line, and
+    blank lines dropped OUTSIDE block scalars.
 
-# giantswarm/agent-platform#708: the bundled engine goes after Helm's delete
-# pass. The FluxInstance and the operator's Deployment, ServiceAccount and
-# ClusterRoleBinding carry helm.sh/resource-policy: keep, the hook identity and
-# its network policy render at post-delete too, and the engine's teardown Jobs
-# move to post-delete (teardown-engine, teardown-operator). verify-engine and
-# verify-self assert all of it; here both renders are held to one shape.
-ENGINE_TEARDOWN_JOB = re.compile(r"^kind: Job\nmetadata:\n  name: [a-z0-9-]+-teardown-(?:engine|operator)\n", re.M)
+    This is the whole difference between `helm template` on the 3.17.x CI pins
+    and on a 4.x a developer is likely to have — measured, not assumed, over all
+    five shapes: the two binaries render these charts identically once it is
+    applied.
 
-
-def hold_engine_teardown(here: str, there: str) -> tuple:
-    """The two meta renders with #708's engine teardown held equal on both sides."""
-    def strip(render: str) -> str:
-        docs = [d for d in re.split(r"(?m)^---\n", render) if not ENGINE_TEARDOWN_JOB.search(d)]
-        render = "---\n".join(docs)
-        render = re.sub(r"^  annotations:\n    helm\.sh/resource-policy: keep\n(?! {4})", "", render, flags=re.M)
-        render = re.sub(r"^    helm\.sh/resource-policy: keep\n", "", render, flags=re.M)
-        return re.sub(r"^( +helm\.sh/hook: .*pre-delete),post-delete$", r"\g<1>", render, flags=re.M)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #708 hold — the engine's resource-policy keep, the post-delete hook events and the engine teardown Jobs are left out of the golden comparison")
-    return h, strip(there)
-
-# giantswarm/agent-platform#608: the Substrate range moved from the former
-# `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` shape to `>=1.0.0 <1.1.0`, and each side's
-# validateRange refuses the other's shape, so the range cannot be held by --set.
-# The two substrate OCIRepositories' semver and the kagent release's derived
-# worker image (ateom-gvisor:<floor>) are blanked on BOTH sides instead; drop
-# once GOLDEN_REF carries #608.
-SUBSTRATE_RANGE = re.compile(r'(url: oci://gsoci\.azurecr\.io/giantswarm/substrate/helm/substrate(?:-crds)?\n  ref:\n    semver: )"[^"]*"')
-WORKER_IMAGE = re.compile(r"(workerImage: gsoci\.azurecr\.io/giantswarm/substrate/ateom-gvisor:)\S+")
-
-
-def hold_substrate_range(here: str, there: str) -> tuple:
-    """The two meta renders with #608's Substrate range and derived worker image held equal on both sides."""
-    def strip(render: str) -> str:
-        render = SUBSTRATE_RANGE.sub(r'\1"<held: #608>"', render)
-        return WORKER_IMAGE.sub(r"\1<held: #608>", render)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #608 hold — the substrate and substrate-crds ranges and the derived worker image tag are left out of the golden comparison")
-    return h, strip(there)
-
-
-# giantswarm/muster#1323: muster's floor moves from 5.12.0 to 5.31.4, the
-# release that ends a forwarded-bearer session at the bearer's exp. GOLDEN_REF's
-# muster OCIRepository is given this tree's range for that one transition, so
-# the hold is inert once GOLDEN_REF carries it and any other range change of
-# muster still fails the comparison; drop once GOLDEN_REF carries it.
-MUSTER_FLOOR = re.compile(r'(url: oci://gsoci\.azurecr\.io/charts/giantswarm/muster\n  ref:\n    semver: )">=5\.12\.0 <6\.0\.0"')
-
-
-def hold_muster_floor(here: str, there: str) -> tuple:
-    """The golden meta render with muster's range at this tree's 5.31.4 floor."""
-    t = MUSTER_FLOOR.sub(r'\1">=5.31.4 <6.0.0"', there)
-    if t != there:
-        print("note: muster#1323 hold — the golden side's muster range is read at the 5.31.4 floor")
-    return here, t
-
-
-# giantswarm/giantswarm-management-clusters#2589: every OCIRepository polls on
-# gitops.sourceInterval (1m) instead of gitops.interval (10m). GOLDEN_REF's
-# OCIRepositories are read at this tree's cadence, so the hold is inert once
-# GOLDEN_REF carries it and any HelmRelease interval change still fails the
-# comparison; drop once GOLDEN_REF carries it.
-SOURCE_INTERVAL = re.compile(r"^(spec:\n  interval: )10m(\n  url: )", re.M)
-
-
-def hold_source_interval(here: str, there: str) -> tuple:
-    """The golden meta render with its OCIRepositories at this tree's 1m poll."""
-    t = SOURCE_INTERVAL.sub(r"\g<1>1m\2", there)
-    if t != there:
-        print("note: gitops.sourceInterval hold — the golden side's OCIRepositories are read at the 1m poll")
-    return here, t
-
-
-# giantswarm/giantswarm#37705: the Substrate line at 1.1.0 splits image.registry
-# into the registry host and image.repository, and kagent 1.1.0 carries the
-# platform Harness's compaction (kagent.harness.compaction). Both blocks are
-# blanked on BOTH sides; drop once GOLDEN_REF carries them.
-SUBSTRATE_IMAGE_BLOCK = re.compile(r"^( +)image:\n\1  registry: gsoci\.azurecr\.io(?:/giantswarm/substrate)?\n(?:\1  repository: giantswarm/substrate\n)?", re.M)
-CREDENTIAL_PROVIDER_BLOCK = re.compile(r"^( +)credentialProvider:\n(?:\1 .*\n)+", re.M)
-HARNESS_COMPACTION_BLOCK = re.compile(r"^( +)compaction:\n(?:\1  (?:eventRetentionSize|tokenThreshold): \d+\n)+", re.M)
-
-
-def hold_repin_1_1(here: str, there: str) -> tuple:
-    """The two meta renders with #37705's Substrate image block and Harness compaction held equal on both sides."""
-    def strip(render: str) -> str:
-        render = SUBSTRATE_IMAGE_BLOCK.sub(r"\1image: <held: #37705>\n", render)
-        render = CREDENTIAL_PROVIDER_BLOCK.sub("", render)
-        return HARNESS_COMPACTION_BLOCK.sub("", render)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #37705 hold — the substrate image and credentialProvider blocks and the platform Harness's compaction are left out of the golden comparison")
-    return h, strip(there)
-
-
-# giantswarm/giantswarm#37742: the kagent line at 1.2 takes its OTel settings in
-# the SDK-spec shape (kagent.otel.exporter.otlp, .traces, .logs) and compiles
-# the actors' telemetry itself, so the platform Harness drops
-# OTEL_LOGGING_ENABLED and KAGENT_TRACE_FLUSH_TIMEOUT_MS. The kagent otel block,
-# either shape, and the two env entries are dropped from BOTH sides by name;
-# drop once GOLDEN_REF carries them.
-KAGENT_OTEL_BLOCK = re.compile(r"^( +)otel:\n(?:\1  (?:exporter|logs|traces|logging|tracing):\n(?:\1    .*\n)*)+", re.M)
-RETIRED_HARNESS_ENV = re.compile(r'^( +)- name: (?:OTEL_LOGGING_ENABLED|KAGENT_TRACE_FLUSH_TIMEOUT_MS)\n\1  value: "[^"]*"\n', re.M)
-
-
-def hold_repin_1_2(here: str, there: str) -> tuple:
-    """The two meta renders without the kagent otel block and the Harness env entries #37742 retires."""
-    def strip(render: str) -> str:
-        return RETIRED_HARNESS_ENV.sub("", KAGENT_OTEL_BLOCK.sub("", render))
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #37742 hold — the kagent otel block and the retired Harness env entries are left out of the golden comparison")
-    return h, strip(there)
-
-
-def drop_new_roster_entries(here: str, there: str) -> tuple:
-    """The two meta renders with the roster entries only one side has removed.
-
-    The component loop forwards EVERY roster entry's `enabled` to the connectivity
-    release (templates/components.yaml, the roster), so a component new to the
-    working tree is a roster line the golden ref cannot have — the one difference
-    a new component is allowed. Only the roster block of the connectivity
-    HelmRelease is touched, and only by the entries in the symmetric difference;
-    everything else stays byte for byte.
+    A blank line INSIDE a block scalar is content — a hook Job's script, a
+    dashboard's JSON — so it is kept and a change to one fails the check;
+    the blank lines that TRAIL a scalar are where the two helm minors disagree,
+    so those go. Collapsing them too would have left a drift detector with a blind
+    spot exactly where the rendered text is a program.
     """
-    def entries(render: str) -> set:
-        m = ROSTER.search(render)
-        return set(re.findall(r"^      ([a-z0-9-]+):$", m.group(1), re.M)) if m else set()
-
-    new = entries(here) ^ entries(there)
-    if not new:
-        return here, there
-    def strip(render: str) -> str:
-        m = ROSTER.search(render)
-        if not m:
-            return render
-        block = m.group(1)
-        for name in new:
-            block = re.sub(rf"^      {re.escape(name)}:\n        enabled: (?:true|false)\n", "", block, flags=re.M)
-        return render[:m.start(1)] + block + render[m.end(1):]
-    print(f"note: roster entries only one side has, dropped from the golden comparison: {', '.join(sorted(new))}")
-    return strip(here), strip(there)
-
-
-# giantswarm/agentgateway#60: this chart's own data-plane PodMonitor is gone —
-# the packaging chart's own monitor is the one scrape path, and two monitors of
-# the same pods double every data-plane series. GOLDEN_REF still renders it, so
-# the document is dropped from BOTH sides; dropped once GOLDEN_REF carries it.
-PODMONITOR_SOURCE = "# Source: agent-platform-connectivity/templates/agentgateway/podmonitor.yaml"
-
-
-# giantswarm/agent-platform#649: every OCIRepository selects the Helm chart
-# layer, three lines between `url:` and `ref:` that GOLDEN_REF does not render.
-# Cut from BOTH sides before the other holds, whose OCIRepository patterns read
-# `ref:` right after `url:`; dropped once GOLDEN_REF carries it.
-CHART_LAYER_SELECTOR = re.compile(r"^(\s+)layerSelector:\n\1  mediaType: application/vnd\.cncf\.helm\.chart\.content\.v1\.tar\+gzip\n\1  operation: copy\n", re.M)
-
-
-def hold_chart_layer_selector(here: str, there: str) -> tuple:
-    """Both renders with the OCIRepositories' layerSelector cut out."""
-    h, t = CHART_LAYER_SELECTOR.sub("", here), CHART_LAYER_SELECTOR.sub("", there)
-    if h != here or t != there:
-        print("note: #649 hold — the OCIRepositories' layerSelector is left out of the golden comparison")
-    return h, t
-
-
-# giantswarm/agent-platform#634: the model catalog prices claude-opus-5-5, a key
-# GOLDEN_REF's closed anthropic.models map refuses, so it cannot be held by --set
-# and is cut from every render instead. Dropped once GOLDEN_REF carries it.
-OPUS_5_5_PRICE = re.compile(r"^(\s+)claude-opus-5-5:\n\1  rates:\n(?:\1    \w+: \"[\d.]+\"\n){4}", re.M)
-
-
-def hold_opus_5_5_price(here: str, there: str) -> tuple:
-    """Both renders with the claude-opus-5-5 catalog entry cut out."""
-    h, t = OPUS_5_5_PRICE.sub("", here), OPUS_5_5_PRICE.sub("", there)
-    if h != here or t != there:
-        print("note: #634 hold — the claude-opus-5-5 catalog entry is left out of the golden comparison")
-    return h, t
-
-
-# giantswarm/giantswarm#36711: the data plane's trace export — the Gateway-scoped
-# tracing policy and its egress policy, new objects GOLDEN_REF does not render.
-# Dropped from BOTH sides; dropped once GOLDEN_REF carries them.
-TRACING_SOURCE = "# Source: agent-platform-connectivity/templates/agentgateway/tracing.yaml"
-
-
-# giantswarm/agent-platform#630: the data plane's buffer — gateway.http.maxBufferSize,
-# a key GOLDEN_REF's closed gateway block refuses (so it cannot be held by --set),
-# forwarded by the meta chart to the connectivity release and rendered by the
-# connectivity chart as the Gateway-scoped -http policy, a new object. Both are
-# cut from BOTH sides; dropped once GOLDEN_REF carries them.
-HTTP_BUFFER_VALUE = re.compile(r"^(\s+)http:\n\1  maxBufferSize: 8Mi\n", re.M)
-HTTP_POLICY_SOURCE = "# Source: agent-platform-connectivity/templates/agentgateway/http-policy.yaml"
-
-
-def hold_dataplane_buffer(here: str, there: str) -> tuple:
-    """Both renders with the forwarded buffer size and the -http policy left out."""
-    def strip(render: str) -> str:
-        docs = [d for d in render.split("\n---\n") if HTTP_POLICY_SOURCE not in d]
-        return HTTP_BUFFER_VALUE.sub("", "\n---\n".join(docs))
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #630 hold — the data plane's buffer size (gateway.http.maxBufferSize) and the -http policy are left out of the golden comparison")
-    return h, strip(there)
-
-
-# giantswarm/giantswarm#36711: the data plane's random trace sampling —
-# gateway.tracing.randomSampling, a key GOLDEN_REF's closed gateway block refuses,
-# forwarded by the meta chart to the connectivity release (the connectivity
-# chart renders it inside the -tracing policy, already held above). Cut from the
-# meta render; dropped once GOLDEN_REF carries it.
-RANDOM_SAMPLING_VALUE = re.compile(r'^(\s+)tracing:\n\1  randomSampling: "0\.1"\n', re.M)
-
-
-# giantswarm/agent-platform#603: the LLM listener routes by model —
-# llmRouting.backend is llmRouting.models, the models attach to the listener
-# directly so llmRouting.pathPrefixes and llmRouting.routes are gone,
-# llmRouting.external is new, and gateway.metricLabels gains the held api_key
-# entry — and the meta chart forwards them in the connectivity release's
-# values. Those keys are left out of the meta renders' comparison, inside the
-# forwarded llmRouting block and the one metric label; dropped once GOLDEN_REF
-# carries #603.
-LLM_BACKEND = re.compile(r"^( +)backend:\n\1  name: anthropic\n\1  provider: anthropic\n", re.M)
-LLM_CHANGED_KEYS = re.compile(r"^( +)(?:external|models|pathPrefixes|routes):\n(?:\1[ -].*\n)+", re.M)
-API_KEY_LABEL = re.compile(r"^( +)api_key:\n\1  enabled: true\n\1  expression: apiKey\.name\n", re.M)
-
-
-MM_WORKLOAD_CLUSTERS = re.compile(r"^ +workloadClusters: \{\}\n", re.M)
-
-
-def hold_mm_workload_clusters(here: str, there: str) -> tuple:
-    """The two meta renders without model-manager's forwarded, empty workloadClusters
-    (giantswarm/agent-platform#687: it follows cluster-manager's when empty). Dropped
-    once GOLDEN_REF carries it."""
-    if (h := MM_WORKLOAD_CLUSTERS.sub("", here)) != here or MM_WORKLOAD_CLUSTERS.search(there):
-        print("note: #687 hold — model-manager's forwarded, empty networkPolicy.workloadClusters is left out of the golden comparison")
-    return h, MM_WORKLOAD_CLUSTERS.sub("", there)
-
-
-# giantswarm/agent-platform#504: the agentgateway release gets the Gateway API
-# Inference Extension (inferenceExtension.enabled: true), so InferencePool
-# backends resolve on the models Gateway. The forwarded block is left out of the
-# meta renders' comparison; dropped once GOLDEN_REF carries #504.
-INFERENCE_EXTENSION = re.compile(r"^( +)inferenceExtension:\n\1  enabled: true\n", re.M)
-
-
-def hold_inference_extension(here: str, there: str) -> tuple:
-    """The two meta renders without the agentgateway release's inferenceExtension."""
-    if (h := INFERENCE_EXTENSION.sub("", here)) != here and not INFERENCE_EXTENSION.search(there):
-        print("note: #504 hold — the agentgateway release's inferenceExtension is left out of the golden comparison")
-    return h, INFERENCE_EXTENSION.sub("", there)
-
-
-# giantswarm/agent-platform#728: with the engine on, the Flux Operator CRD hook
-# (a ConfigMap and a Job from hooks/flux-operator-crds.yaml) runs at
-# pre-install and pre-upgrade, and the hook identity is created at those events
-# too. Both documents and the two added events are left out on both sides;
-# dropped once GOLDEN_REF carries #728.
-FLUX_OPERATOR_CRDS_SOURCE = "# Source: agent-platform/templates/hooks/flux-operator-crds.yaml\n"
-FLUX_OPERATOR_CRDS_EVENTS = re.compile(r"^(    helm\.sh/hook: )pre-install,pre-upgrade,(pre-delete(?:,post-delete)?)$", re.M)
-
-
-def hold_flux_operator_crds(here: str, there: str) -> tuple:
-    """The two meta renders without the Flux Operator CRD hook and the identity events it adds."""
-    def strip(render: str) -> str:
-        kept = [d for d in render.split("\n---\n") if FLUX_OPERATOR_CRDS_SOURCE not in d]
-        return FLUX_OPERATOR_CRDS_EVENTS.sub(r"\1\2", "\n---\n".join(kept))
-    h = strip(here)
-    if FLUX_OPERATOR_CRDS_SOURCE in here and FLUX_OPERATOR_CRDS_SOURCE not in there:
-        print("note: #728 hold — the Flux Operator CRD hook and the hook identity's pre-install,pre-upgrade are left out of the golden comparison")
-    return h, strip(there)
-
-
-# giantswarm/agent-platform#271: modelManager.route is retired, so the meta
-# chart no longer forwards its defaults in the connectivity release's
-# modelManager block. The golden side's forwarded route block (the one whose
-# pathPrefix is /model-manager) is left out; dropped once GOLDEN_REF carries
-# #271.
-MM_ROUTE_BLOCK = re.compile(r"^( +)route:\n(?:\1 .*\n)*?\1  pathPrefix: /model-manager\n", re.M)
-
-
-def hold_mm_route(here: str, there: str) -> tuple:
-    """The two meta renders without the golden side's forwarded modelManager.route."""
-    if MM_ROUTE_BLOCK.search(there) and not MM_ROUTE_BLOCK.search(here):
-        print("note: #271 hold — the golden side's forwarded modelManager.route is left out of the golden comparison")
-    return here, MM_ROUTE_BLOCK.sub("", there)
-
-
-# The same retirement rewords model-manager's ingress policy comment in the
-# connectivity render (muster and additionalPeers, no data plane); the golden
-# side's wording is read as this side's. Dropped once GOLDEN_REF carries #271.
-MM_INGRESS_COMMENT_OLD = ("# Ingress to model-manager: the agentgateway data plane (the portal's route)\n"
-                          "# and muster (the MCP endpoint), both in the release namespace, on the Service\n"
-                          "# port only — plus the kubelet's probes (host entity), which a policy that\n")
-MM_INGRESS_COMMENT_NEW = ("# Ingress to model-manager: muster (the MCP endpoint, the one platform caller)\n"
-                          "# and additionalPeers, in the release namespace, on the Service port only —\n"
-                          "# plus the kubelet's probes (host entity), which a policy that\n")
-
-
-def hold_mm_ingress_comment(here: str, there: str) -> tuple:
-    """The two connectivity renders with the golden side's model-manager ingress comment reworded."""
-    if MM_INGRESS_COMMENT_OLD in there and MM_INGRESS_COMMENT_NEW in here:
-        print("note: #271 hold — model-manager's reworded ingress policy comment is read as this side's")
-    return here, there.replace(MM_INGRESS_COMMENT_OLD, MM_INGRESS_COMMENT_NEW)
-
-
-# giantswarm/agent-platform#697: the single-replica budgets are maxUnavailable: 1
-# (muster and klaus-gateway with minAvailable: "" to clear their charts'
-# default, the kagent controller on its chart's default) and a lone Postgres
-# instance renders enablePDB: false. The budgets' minAvailable/maxUnavailable
-# lines, in the meta renders' forwarded podDisruptionBudget/pdb blocks and in
-# the connectivity renders' PodDisruptionBudgets, and the enablePDB line with
-# its comment are left out on both sides; dropped once GOLDEN_REF carries #697.
-BUDGET_BLOCK = re.compile(r"^( *)(?:podDisruptionBudget|pdb):\n")
-BUDGET_KEY = re.compile(r"^ *(?:minAvailable|maxUnavailable): .*$")
-LONE_PRIMARY_PDB = re.compile(r"^( +)# One instance: the operator's budget.*\n(?:\1#.*\n)*\1enablePDB: false\n", re.M)
-
-
-def hold_disruption(here: str, there: str) -> tuple:
-    """The two renders with #697's budget bounds and enablePDB left out."""
-    def strip(render: str) -> str:
-        docs = []
-        for doc in render.split("\n---\n"):
-            pdb_doc = "\nkind: PodDisruptionBudget\n" in f"\n{doc}"
-            out, indent = [], None
-            for line in doc.split("\n"):
-                if indent is not None and line.strip() and len(line) - len(line.lstrip()) <= indent:
-                    indent = None
-                if m := BUDGET_BLOCK.match(line + "\n"):
-                    indent = len(m.group(1))
-                if (indent is not None or pdb_doc) and BUDGET_KEY.match(line):
-                    continue
+    out: list[str] = []
+    pending: list[str] = []  # blank lines inside a scalar, kept only if content follows
+    content_indent: int | None = None
+    for line in (l.rstrip() for l in render.split("\n")):
+        if content_indent is not None:
+            if line == "":
+                pending.append(line)
+                continue
+            if len(line) - len(line.lstrip()) >= content_indent:
+                out.extend(pending)
+                pending = []
                 out.append(line)
-            docs.append("\n".join(out))
-        return LONE_PRIMARY_PDB.sub("", "\n---\n".join(docs))
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #697 hold — the budgets' minAvailable/maxUnavailable and a lone Postgres primary's enablePDB are left out of the golden comparison")
-    return h, strip(there)
-
-
-def hold_llm_endpoint(here: str, there: str) -> tuple:
-    """The two meta renders with #603's forwarded llmRouting and metric-label keys left out."""
-    def strip(render: str) -> str:
-        render = API_KEY_LABEL.sub("", render)
-        start = render.find("\n    llmRouting:\n")
-        if start < 0:
-            return render
-        end = start + len("\n    llmRouting:\n")
-        while end < len(render) and render[end:].startswith("      "):
-            end = render.index("\n", end) + 1
-        block = LLM_CHANGED_KEYS.sub("", LLM_BACKEND.sub("", render[start:end]))
-        return render[:start] + block + render[end:]
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #603 hold — the forwarded llmRouting.backend/models/external/pathPrefixes/routes and gateway.metricLabels.api_key are left out of the golden comparison")
-    return h, strip(there)
-
-
-def hold_dataplane_sampling(here: str, there: str) -> tuple:
-    """The two meta renders with the forwarded random sampling left out."""
-    if (h := RANDOM_SAMPLING_VALUE.sub("", here)) != here or RANDOM_SAMPLING_VALUE.search(there):
-        print("note: #36711 hold — the data plane's random trace sampling (gateway.tracing.randomSampling) is left out of the golden comparison")
-    return h, RANDOM_SAMPLING_VALUE.sub("", there)
-
-
-def hold_dataplane_tracing(here: str, there: str) -> tuple:
-    """The two connectivity renders with the data plane's tracing objects left out."""
-    def strip(render: str) -> str:
-        return "\n---\n".join(d for d in render.split("\n---\n") if TRACING_SOURCE not in d)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #36711 hold — the data plane's tracing policy and its egress policy are left out of the golden comparison")
-    return h, strip(there)
-
-
-# giantswarm/giantswarm#36711: Substrate's OTLP egress follows substrate.otel
-# (agent-platform.substrate.otlpEgress). GOLDEN_REF opens 4317 to the cluster
-# entity for ate-api-server alone, whatever the endpoint; the renders here set
-# no endpoint, so that rule is cut from GOLDEN_REF and the derived rules from
-# this tree. Dropped once GOLDEN_REF carries the helper.
-SUBSTRATE_OTLP_OLD = re.compile(
-    r"(\n\s+# cluster's IRSA token exchange with STS); the OTLP gateway\.(\n(?:.*\n){6}?)"
-    r"\s+- toEntities:\n\s+- cluster\n\s+toPorts:\n\s+- ports:\n\s+- port: \"4317\"\n\s+protocol: TCP\n")
-SUBSTRATE_OTLP_NEW = re.compile(
-    r"^(\s+)# The OTLP gateway Substrate's exporters send to \(.*\)\.\n(?:\1(?:- |  ).*\n)+", re.M)
-
-
-def hold_substrate_otlp_egress(here: str, there: str) -> tuple:
-    """The two connectivity renders with Substrate's OTLP egress rules left out."""
-    h = SUBSTRATE_OTLP_NEW.sub("", here)
-    t = SUBSTRATE_OTLP_OLD.sub(r"\1.\2", there)
-    if h != here or t != there:
-        print("note: #36711 hold — Substrate's OTLP egress rules are left out of the golden comparison")
-    return h, t
-
-
-# giantswarm/agent-platform#513: the Substrate bootstrap hook's kubectl container
-# is limited to 256Mi (GOLDEN_REF: the hooks' shared 128Mi). That one limit is
-# blanked on BOTH sides, in that Job only; make verify-hooks-memory asserts every
-# hook container's resources. Drop once GOLDEN_REF carries #513.
-BOOTSTRAP_JOB = "kind: Job\nmetadata:\n  name: t-substrate-bootstrap\n"
-BOOTSTRAP_SH_LIMIT = re.compile(r"(\n        - name: sh\n(?:.*\n)*?            limits:\n              memory: )\S+")
-
-
-def hold_bootstrap_memory(here: str, there: str) -> tuple:
-    """The two connectivity renders with #513's bootstrap memory limit held equal on both sides."""
-    def strip(render: str) -> str:
-        return "\n---\n".join(BOOTSTRAP_SH_LIMIT.sub(r"\g<1><held: #513>", d, count=1) if BOOTSTRAP_JOB in d else d
-                               for d in render.split("\n---\n"))
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #513 hold — the Substrate bootstrap hook's kubectl container memory limit is left out of the golden comparison")
-    return h, strip(there)
-
-
-def hold_dataplane_podmonitor(here: str, there: str) -> tuple:
-    """The two connectivity renders with this chart's retired PodMonitor left out."""
-    def strip(render: str) -> str:
-        return "\n---\n".join(d for d in render.split("\n---\n") if PODMONITOR_SOURCE not in d)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: agentgateway#60 hold — this chart's retired data-plane PodMonitor is left out of the golden comparison")
-    return h, strip(there)
-
-
-# giantswarm/giantswarm#36711: the platform's own board ConfigMaps and the
-# dashboards block that configures them. GOLDEN_REF has neither — its schema has
-# no `dashboards` key either, so this cannot be held with --set — so the block is
-# dropped from the meta renders' forwarded values and the ConfigMap documents
-# from the connectivity renders. Both go with the line.
-# giantswarm/giantswarm#37705: the bootstrap hook mints a fifth pool,
-# egress-mitm-ca-pool (ECDSA P-256), for the Substrate line at 1.1.0. The hook
-# Job's documents are dropped from BOTH sides; drop once GOLDEN_REF carries it.
-BOOTSTRAP_SOURCE = "# Source: agent-platform-connectivity/templates/substrate/bootstrap.yaml"
-
-
-def hold_substrate_bootstrap(here: str, there: str) -> tuple:
-    """The two connectivity renders with the Substrate bootstrap hook's documents left out."""
-    def strip(render: str) -> str:
-        return "\n---\n".join(d for d in render.split("\n---\n") if BOOTSTRAP_SOURCE not in d)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #37705 hold — the Substrate bootstrap hook (the egress MITM CA pool) is left out of the golden comparison")
-    return h, strip(there)
-
-
-CREDENTIAL_PROVIDER_POLICIES = ("  name: substrate-k8s-credential-provider\n", "  name: substrate-k8s-credential-provider-ingress\n")
-CREDENTIAL_PROVIDER_RULE = """    # The credential provider: the Secret values a policy's credential
-    # injection names (the Substrate line from 1.1.0), asked per request.
-    - toEndpoints:
-        - matchLabels:
-            app: k8s-credential-provider
-      toPorts:
-        - ports:
-            - port: "50051"
-              protocol: TCP
-"""
-
-
-def hold_credential_provider_netpol(here: str, there: str) -> tuple:
-    """The two connectivity renders without the credential provider's network
-    policies and the egress gateway's rule to it (giantswarm/giantswarm#37705;
-    GOLDEN_REF renders neither). Dropped once GOLDEN_REF carries them."""
-    def strip(render: str) -> str:
-        docs = [d for d in render.split("\n---\n") if not any(n in d for n in CREDENTIAL_PROVIDER_POLICIES)]
-        return "\n---\n".join(docs).replace(CREDENTIAL_PROVIDER_RULE, "")
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #37705 hold — the credential provider's network policies and the egress gateway's rule to it are left out of the golden comparison")
-    return h, strip(there)
-
-
-CREDENTIAL_PROVIDER_EXCEPTION = "  name: substrate-credential-provider\n"
-
-
-def hold_credential_provider_exception(here: str, there: str) -> tuple:
-    """The two connectivity renders without the credential provider's PolicyException
-    (giantswarm/giantswarm#37705: Substrate 1.1.0's k8s-credential-provider declares no
-    seccompProfile; GOLDEN_REF renders four Substrate exceptions). Dropped once
-    GOLDEN_REF carries it."""
-    def strip(render: str) -> str:
-        return "\n---\n".join(d for d in render.split("\n---\n") if CREDENTIAL_PROVIDER_EXCEPTION not in d)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #37705 hold — the substrate-credential-provider PolicyException is left out of the golden comparison")
-    return h, strip(there)
-
-
-SCRAPE_PORTS_COMMENT = """# The metrics port serves no API and is admitted from the cluster entity, as
-# the platform's other metrics ports are.
-"""
-ATENET_EGRESS_POLICIES = ("  name: substrate-atenet-egress\n", "  name: substrate-atenet-egress-ingress\n")
-ATENET_EGRESS_METRICS = re.compile(r'\n(\s+)- port: "?9090"?\n\s+protocol: TCP(\n\1- port: "?15020"?)')
-KAGENT_CONTROLLER_POLICIES = ("-kagent-from-agentgateway\n", "-kagent-controller-ingress\n")
-KAGENT_METRICS_RULE = re.compile(
-    r"\n    - fromEntities:\n        - cluster\n      toPorts:\n        - ports:\n            - port: \"\d+\"\n              protocol: TCP(?=\n---|\n*$)"
-    r"|\n    - ports:\n        - port: \d+\n          protocol: TCP(?=\n---|\n*$)")
-
-
-def hold_scrape_ports(here: str, there: str) -> tuple:
-    """The two connectivity renders without the metrics ports opened on the kagent
-    controller and atenet-egress's ext-proc (giantswarm/giantswarm#36711;
-    GOLDEN_REF admits neither). Dropped once GOLDEN_REF carries them."""
-    def strip(render: str) -> str:
-        docs = []
-        for d in render.replace(SCRAPE_PORTS_COMMENT, "").split("\n---\n"):
-            if any(n in d for n in ATENET_EGRESS_POLICIES):
-                d = ATENET_EGRESS_METRICS.sub(r"\2", d)
-            elif any(n in d for n in KAGENT_CONTROLLER_POLICIES):
-                d = KAGENT_METRICS_RULE.sub("", d)
-            docs.append(d)
-        return "\n---\n".join(docs)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #36711 hold — the kagent controller's and atenet-egress's metrics ports are left out of the golden comparison")
-    return h, strip(there)
-
-
-MANAGER_METRICS_RULE = re.compile(
-    r"\n    # The metrics port serves no API and is admitted from the cluster entity,\n"
-    r"    # as the platform's other metrics ports are\.\n"
-    r"    - fromEntities:\n        - cluster\n      toPorts:\n        - ports:\n            - port: \"\d+\"\n              protocol: TCP(?=\n)"
-    r"|\n    # The metrics port serves no API and is admitted from anywhere, as the\n"
-    r"    # platform's other metrics ports are\.\n"
-    r"    - ports:\n        - port: \d+\n          protocol: TCP(?=\n)")
-
-
-def hold_manager_metrics_ports(here: str, there: str) -> tuple:
-    """The two connectivity renders without the metrics port opened on the
-    model-manager, agent-manager and cluster-manager ingress policies
-    (giantswarm/giantswarm#36711; GOLDEN_REF admits none). Dropped once
-    GOLDEN_REF carries them."""
-    def strip(render: str) -> str:
-        return MANAGER_METRICS_RULE.sub("", render)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #36711 hold: the managers' metrics ports are left out of the golden comparison")
-    return h, strip(there)
-
-
-DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
-DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
-
-
-def drop_mapping(render: str, key: re.Pattern) -> str:
-    """The render without the mapping `key` names: its line and every line
-    indented deeper than it."""
-    out, lines, i = [], render.split("\n"), 0
-    while i < len(lines):
-        if m := key.match(lines[i]):
-            indent = len(m.group(1))
-            i += 1
-            while i < len(lines) and (not lines[i].strip()
-                                      or len(lines[i]) - len(lines[i].lstrip(" ")) > indent):
-                i += 1
+                continue
+            pending = []  # the scalar ended: its trailing blanks are the helm 3/4 difference
+            content_indent = None
+        if line == "":
             continue
-        out.append(lines[i])
-        i += 1
-    return "\n".join(out)
+        out.append(line)
+        header = BLOCK_SCALAR.match(line)
+        if header:
+            content_indent = len(header.group(1)) + 1
+    return "\n".join(out).strip() + "\n"
 
 
-def hold_dashboards(here: str, there: str, is_meta: bool) -> tuple:
-    """The two renders with the platform's own boards left out of the comparison."""
-    def strip(render: str) -> str:
-        if is_meta:
-            return drop_mapping(render, DASHBOARDS_KEY)
-        return "\n---\n".join(d for d in render.split("\n---\n") if DASHBOARDS_CONFIGMAP not in d)
-    if (h := strip(here)) != here or strip(there) != there:
-        print("note: #36711 hold — the platform's own dashboards block and board ConfigMaps are left out of the golden comparison")
-    return h, strip(there)
+# The helm minor the committed renders were produced with, and the one CI pins
+# (.circleci/custom.yml). It matters for this check and no other: helm 3 writes
+# a null-valued key into a forwarded values tree (`maxUnavailable: null`, which
+# this chart uses as the "explicitly cleared" marker) and helm 4 omits it, so
+# the two disagree on the committed bytes. Every other target renders both sides
+# with the same binary and never sees it.
+HELM_PIN = "v3.17"
+
+
+def require_pinned_helm(what: str) -> None:
+    try:
+        version = subprocess.run([HELM, "version", "--short"], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        version = ""  # HELM names nothing runnable; the message below says what to point it at
+    if not version.startswith(HELM_PIN):
+        sys.exit(
+            f"FAIL: {what} needs helm {HELM_PIN}.x, the version CI pins and the committed renders "
+            f"were produced with; this is {version or 'not a helm binary'}. helm 3 and helm 4 disagree "
+            "on whether a null-valued key survives into a forwarded values tree, so the bytes would "
+            f"differ for that reason alone. Point HELM at a {HELM_PIN}.x binary:\n"
+            f"    plat=$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')\n"
+            f"    curl -fsSL https://get.helm.sh/helm-{HELM_PIN}.3-$plat.tar.gz | tar xz -C /tmp\n"
+            '    make verify-target HELM="/tmp/$plat/helm"'
+        )
+
+
+def golden_shapes(meta: str, connectivity: str) -> list:
+    charts = {"meta": meta, "connectivity": connectivity}
+    return [(name, charts[which], [f.format(meta=meta) for f in flags]) for name, which, flags in GOLDEN_SHAPES]
 
 
 def check_golden(meta: str, connectivity: str) -> None:
-    ref = os.environ.get("GOLDEN_REF", "origin/main")
-    if not ref:
-        print("skip: GOLDEN_REF is empty (explicit opt-out)")
-        return
-    if subprocess.run(["git", "rev-parse", "--verify", "-q", ref], capture_output=True).returncode != 0:
-        sys.exit(f"FAIL: GOLDEN_REF={ref} does not resolve; fetch it, point GOLDEN_REF at another ref, or run with GOLDEN_REF= to opt out")
-    tree = tempfile.mkdtemp(prefix="ap-target-golden-")
-    shutil.rmtree(tree)
-    subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, ref], check=True)
-    try:
-        # No held-equal flags: GOLDEN_REF is origin/main, which now carries every
-        # feature the holds here used to mask, so each one only narrowed the
-        # comparison (giantswarm/agent-platform#455 and #530 for the one that
-        # narrowed it asymmetrically and broke the target). A NEW intended
-        # difference gets its hold back, applied to BOTH sides and with the key
-        # named, and is dropped again once GOLDEN_REF carries it — the image
-        # defaults' move to gsoci, the kserve 0.4.x ranges and the forwarded
-        # imageVerification defaults (#575) are the newest to have reached that
-        # point.
-        # The hold for giantswarm/agent-platform#608, applied to BOTH sides: the
-        # kagent line at its decoupled 1.0 range, the agentgateway component
-        # floored at the packaging release that renders a bare tag as written,
-        # the Substrate egress dataplane at the agentgateway line's 2.0.0 — meta
-        # chart keys — and AGENTGATEWAY_IMAGES_HOLD on every render. The
-        # Substrate range cannot be set on both sides (GOLDEN_REF's validateRange
-        # admits the former `-gs.N` shape only, this tree's the stable one), so
-        # hold_substrate_range() blanks it and the worker image derived from it
-        # in both renders. Dropped once GOLDEN_REF carries them. METRIC_LABELS_HOLD
-        # (#586) is the other hold in force.
-        hold_608 = ["--set", "components.kagent.versionRange=>=1.0.2 <1.1.0",
-                    "--set", "components.kagent-crds.versionRange=>=1.0.2 <1.1.0",
-                    "--set", "components.agentgateway.versionRange=>=2.4.0 <3.0.0",
-                    "--set", "substrate.images.agentgateway=gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway:2.1.2",
-                    *AGENTGATEWAY_IMAGES_HOLD]
-        # The hold for the switch of giantswarm/agent-platform#575, applied to BOTH
-        # sides: modelServing.imageVerification is on by default now, so a serving
-        # shape under Kyverno renders the image-verification policy that GOLDEN_REF's
-        # defaults do not (both charts mirror the block). Dropped once GOLDEN_REF
-        # carries the switch.
-        hold_iv = ["--set", "modelServing.imageVerification.enabled=false"]
-        # Flags applied to the GOLDEN render only: for keys this tree REMOVED
-        # (a both-sides hold cannot express that — on head `--set <key>=null`
-        # inserts `key: null` where nothing stands). None in force: origin/main
-        # carries the klaus-gateway no-op key removal (#636) since 4.62.0.
-        golden_only = {meta: [], connectivity: []}
-        shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD, *SUBSTRATE_AWSCLI_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD, *SUBSTRATE_AWSCLI_HOLD]),
-            ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
-            ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
-            ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
-        ]
-        for label, chart, flags in shapes:
-            here = helm(chart, flags)
-            there = helm(os.path.join(tree, chart),
-                         [f.replace(f"{meta}/", f"{tree}/{meta}/") for f in flags] + golden_only[chart])
-            here, there = hold_chart_layer_selector(here, there)
-            here, there = hold_dashboards(here, there, chart == meta)
-            here, there = hold_opus_5_5_price(here, there)
-            here, there = hold_dataplane_buffer(here, there)
-            here, there = hold_retired_servicemonitor(here, there)
-            here, there = hold_disruption(here, there)
-            if chart == meta:
-                here, there = drop_new_roster_entries(here, there)
-                here, there = hold_llmd_only(here, there)
-                here, there = hold_hook_pods(here, there)
-                here, there = hold_engine_teardown(here, there)
-                here, there = hold_substrate_range(here, there)
-                here, there = hold_muster_floor(here, there)
-                here, there = hold_source_interval(here, there)
-                here, there = hold_repin_1_1(here, there)
-                here, there = hold_repin_1_2(here, there)
-                here, there = hold_otlp_endpoints(here, there)
-                here, there = hold_dataplane_sampling(here, there)
-                here, there = hold_llm_endpoint(here, there)
-                here, there = hold_mm_workload_clusters(here, there)
-                here, there = hold_mm_route(here, there)
-                here, there = hold_inference_extension(here, there)
-                here, there = hold_flux_operator_crds(here, there)
-            else:
-                here, there = hold_mm_ingress_comment(here, there)
-                here, there = hold_dataplane_podmonitor(here, there)
-                here, there = hold_dataplane_tracing(here, there)
-                here, there = hold_substrate_otlp_egress(here, there)
-                here, there = hold_bootstrap_memory(here, there)
-                here, there = hold_substrate_bootstrap(here, there)
-                here, there = hold_credential_provider_exception(here, there)
-                here, there = hold_credential_provider_netpol(here, there)
-                here, there = hold_scrape_ports(here, there)
-                here, there = hold_manager_metrics_ports(here, there)
-            if here != there:
-                import difflib
-                excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]
-                sys.exit(f"FAIL: the {label} render drifted from {ref}\n" + "\n".join(excerpt))
-        ok(f"{len(shapes)} renders byte-identical to {ref}")
-    finally:
-        subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
+    """Every shape renders what tests/golden/ says it renders.
+
+    The baseline is a file in the repository, not another commit. An intended
+    change is `make golden-update`, whose diff lands in the pull request for a
+    reviewer to read — so the rendered blast radius of a values or helper edit
+    is reviewed rather than suppressed. Nothing has to be held equal, and
+    nothing has to be cleaned up afterwards: the regenerated file IS the new
+    baseline (giantswarm/agent-platform#455, #501, #529, #530, #531 were all
+    cleanups the moving baseline made necessary).
+    """
+    require_pinned_helm("the golden comparison")
+    stale = []
+    for name, chart, flags in golden_shapes(meta, connectivity):
+        path = os.path.join(GOLDEN_DIR, f"{name}.yaml")
+        rendered = normalize(helm(chart, flags))
+        if not os.path.isfile(path):
+            stale.append(f"{name}: tests/golden/{name}.yaml does not exist")
+            continue
+        with open(path) as f:
+            committed = f.read()
+        if rendered == committed:
+            continue
+        import difflib
+        excerpt = list(difflib.unified_diff(
+            committed.splitlines(), rendered.splitlines(),
+            f"tests/golden/{name}.yaml", "this tree", lineterm="", n=2))[:40]
+        stale.append(f"{name} renders something else than tests/golden/{name}.yaml says\n" + "\n".join(excerpt))
+    if stale:
+        sys.exit("FAIL: " + "\n\n".join(stale) + "\n\nIf the change is intended, run `make golden-update` and "
+                 "commit the result: the diff is what a reviewer reads to see which objects moved.")
+    ok(f"{len(GOLDEN_SHAPES)} renders match tests/golden/")
+
+
+def update_golden(meta: str, connectivity: str) -> int:
+    require_pinned_helm("`make golden-update`")
+    os.makedirs(GOLDEN_DIR, exist_ok=True)
+    for name, chart, flags in golden_shapes(meta, connectivity):
+        path = os.path.join(GOLDEN_DIR, f"{name}.yaml")
+        with open(path, "w") as f:
+            f.write(normalize(helm(chart, flags)))
+        print(f"wrote tests/golden/{name}.yaml")
+    return 0
 
 
 def check_toggles(meta: str, connectivity: str) -> None:
@@ -1248,6 +444,9 @@ def main(meta: str, connectivity: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        sys.exit(f"usage: {sys.argv[0]} <meta chart dir> <connectivity chart dir>")
-    sys.exit(main(sys.argv[1], sys.argv[2]))
+    argv = [a for a in sys.argv[1:] if a != "--update"]
+    if len(argv) != 2:
+        sys.exit(f"usage: {sys.argv[0]} [--update] <meta chart dir> <connectivity chart dir>")
+    if "--update" in sys.argv[1:]:
+        sys.exit(update_golden(argv[0], argv[1]))
+    sys.exit(main(argv[0], argv[1]))
