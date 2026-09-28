@@ -195,6 +195,8 @@ GPU_NODE = {"karpenter.k8s.aws/instance-gpu-manufacturer": "nvidia"}
 # An installation's own selector (#562: a GPU node not launched by Karpenter, labelled by the GPU operator's feature
 # discovery) and a pool's label; the Helm annotations that make the DaemonSet a hook object (#563).
 OWN_NODE = {"nvidia.com/gpu.present": "true"}
+# GPU feature discovery's label, set once the device plugin runs: the pre-pull's default gate (#737).
+GPU_READY_LABEL = "nvidia.com/gpu.count"
 POOL_LABEL = {"giantswarm.io/machine-pool": "ci-gpu00"}
 OWN_SELECTOR = ["--set-string", "modelServing.prepull.nodeSelector.nvidia\\.com/gpu\\.present=true"]
 POOL_SELECTOR = ["--set-string", "modelServing.gpuPool.nodeSelector.giantswarm\\.io/machine-pool=ci-gpu00"]
@@ -657,6 +659,16 @@ def check_prepull(connectivity: str, k8s: list[dict], cilium: list[dict], pods_p
     if result.returncode == 0 or "modelServing.prepull.nodeSelector[generation] (6) must be a string" not in result.stderr:
         fail(f"a non-string pre-pull label value must fail the render naming the key; got rc={result.returncode}:\n{result.stderr}")
     ok("modelServing.prepull.nodeSelector set renders alone, empty renders Karpenter's label, the pool's label is merged under either; a non-string label value fails the render naming the key")
+
+    # The GPU gate (#737): the pods wait for the GPU feature discovery label, so the runtime image's unpack stays off the
+    # GPU operator's critical path; an empty label schedules on the selector alone.
+    gate = {"nodeAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": {"nodeSelectorTerms": [
+        {"matchExpressions": [{"key": GPU_READY_LABEL, "operator": "Exists"}]}]}}}
+    if (affinity := spec.get("affinity")) != gate:
+        fail(f"the pre-pull pod's default affinity is {affinity}; expected the required {GPU_READY_LABEL} Exists gate")
+    if "affinity" in (ungated := prepull_pod(render(connectivity, ["--set", "modelServing.prepull.gpuReadyLabel="]))["spec"]):
+        fail(f"modelServing.prepull.gpuReadyLabel empty still renders an affinity: {ungated['affinity']}")
+    ok(f"the pre-pull pods wait for {GPU_READY_LABEL} (a required node affinity, Exists) beside the selector; an empty gpuReadyLabel renders no affinity")
 
     results = validate(pod, None)
     if failed := outcome(results, "fail"):

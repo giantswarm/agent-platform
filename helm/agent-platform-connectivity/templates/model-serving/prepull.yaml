@@ -22,6 +22,14 @@ every node of a GPU instance type. The default is the helper's
 default, so a set map is never merged with it. The pool's label is merged
 under either.
 
+The GPU gate (giantswarm/agent-platform#737): with modelServing.prepull.
+gpuReadyLabel set (the default, nvidia.com/gpu.count, GPU feature discovery's),
+a required node affinity schedules the pods only once the node carries it —
+once its GPU is usable — so the runtime image's unpack stays off the GPU
+operator's critical path: its operand pods pull their images while the node
+comes up, and the unpack beside them slowed each several-fold. The pull still
+overlaps the weights, whose download needs the allocatable GPU first.
+
 The DaemonSet is a HOOK, not a release resource (giantswarm/agent-platform#563).
 A pod whose image cannot be pulled is never Ready, and a release's wait counts
 a DaemonSet ready by its pods: helm-controller from 1.6 waits with the kstatus
@@ -127,6 +135,15 @@ spec:
       {{- with $sched.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pp.gpuReadyLabel }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: {{ . | quote }}
+                    operator: Exists
       {{- end }}
       {{- with $sched.tolerations }}
       tolerations:
