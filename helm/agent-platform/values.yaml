@@ -684,7 +684,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.1.2 <1.2.0"
+    versionRange: ">=1.1.3 <1.2.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -706,7 +706,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.1.2 <1.2.0"
+    versionRange: ">=1.1.3 <1.2.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -4932,6 +4932,16 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     nodeSelector: {}
     tolerations: []
     affinity: {}
+    # atelet's PriorityClass (the Substrate line from 1.1.3). Never: atelet
+    # keeps its priority (1000000000), so it schedules ahead of every other
+    # pending pod, but it evicts nothing: on a node without room for its
+    # requests (50m CPU, 128Mi) it stays Pending until the autoscaler adds
+    # capacity or a pod leaves. The class is ate-node-critical-non-preempting.
+    # PreemptLowerPriority, the Substrate chart's default, lets a first enable
+    # over full nodes evict the cluster's own workloads (monitoring, admission
+    # webhooks) to make room (giantswarm/agent-platform#731).
+    priorityClass:
+      preemptionPolicy: Never
     # An S3-compatible store that is not AWS S3: its endpoint and credentials
     # for atelet's AWS credential chain, e.g.
     #   - {name: AWS_ENDPOINT_URL, value: https://store.example.com}

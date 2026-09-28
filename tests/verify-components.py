@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.2.0 <1.3.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.1.2 <1.2.0"
-SUBSTRATE_PIN = "1.1.2"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.2.0-beta5 (giantswarm/giantswarm#37705, the 2026-09-24 re-pin), whose atenet data plane is the agentgateway line's 2.1.2; the 1.0 line stays on release-1.0
+SUBSTRATE_RANGE = ">=1.1.3 <1.2.0"
+SUBSTRATE_PIN = "1.1.3"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.2.0-beta5 (giantswarm/giantswarm#37705, the 2026-09-24 re-pin), whose atenet data plane is the agentgateway line's 2.1.2; the 1.0 line stays on release-1.0
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
@@ -365,6 +365,10 @@ def main(meta: str, connectivity: str) -> int:
     if pinned_images(["--set", f"substrate.atelet.imageCache.pinnedImages[0]={extra}"]) != [extra]:
         fail("an installation's own substrate.atelet.imageCache.pinnedImages is not forwarded verbatim")
     print("ok: the substrate release pins atelet's runtime images from the kagent release's ConfigMap, an installation's own list only when set")
+    # --- atelet never evicts the cluster's workloads (#731) --------------------------
+    if not re.search(r"^atelet:\n(?:  .*\n)*?  priorityClass:\n    preemptionPolicy: Never$", hr_values(substrate_hr), re.M):
+        fail("the substrate release does not carry atelet.priorityClass.preemptionPolicy: Never; atelet's PriorityClass preempts lower-priority pods and a first enable over full nodes evicts the cluster's own workloads (#731)")
+    print("ok: the substrate release runs atelet on a non-preempting PriorityClass")
 
     # --- the wiring chart is released with the meta chart: one version --------------
     # The OCIRepository carries the meta chart's own exact version, never a range
