@@ -96,7 +96,7 @@ GOLDEN_REF ?= origin/main
 # never by a value: GOLDEN_REF's schema has no `dashboards` key, so --set on it
 # fails the render outright and every document then reads as added
 # (giantswarm/giantswarm#36711). One name per board; the list goes with the line.
-DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview agent-platform-connectivity-dashboard-usage-by-person agent-platform-connectivity-dashboard-klaus-gateway agent-platform-connectivity-dashboard-valkey agent-platform-connectivity-dashboard-llm-usage
+DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview agent-platform-connectivity-dashboard-usage-by-person agent-platform-connectivity-dashboard-klaus-gateway agent-platform-connectivity-dashboard-valkey agent-platform-connectivity-dashboard-llm-usage agent-platform-connectivity-dashboard-kagent-controller
 # Drop those documents from a rendered manifest in place, by metadata.name, and
 # keep the leading document separator whatever was dropped — a stripped first
 # document would otherwise read as a one-line diff of its own.
@@ -283,7 +283,7 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	@echo "--> the default render keeps the CNPG PodMonitor (fleet behavior) and renders NO kagent ServiceMonitor or metrics Service: both are the kagent chart's own (controller.metrics)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set postgres.enabled=true >/tmp/vg-mon-on.out 2>&1 || { cat /tmp/vg-mon-on.out; exit 1; }
 	@if grep -q 'kind: ServiceMonitor' /tmp/vg-mon-on.out; then echo "FAIL: this chart renders a ServiceMonitor; every monitor belongs to the component's own chart (the kagent controller's to controller.metrics.serviceMonitor, the agentgateway data plane's to the packaging chart)"; exit 1; fi
-	@if grep -q 'kagent-controller-metrics' /tmp/vg-mon-on.out; then echo "FAIL: this chart renders the kagent controller metrics Service; the kagent chart renders it under controller.metrics.enabled"; exit 1; fi
+	@if grep -q '^  name: kagent-controller-metrics$$' /tmp/vg-mon-on.out; then echo "FAIL: this chart renders the kagent controller metrics Service; the kagent chart renders it under controller.metrics.enabled"; exit 1; fi
 	@grep -q 'enablePodMonitor: true' /tmp/vg-mon-on.out || { echo "FAIL: default render lost the CNPG PodMonitor"; exit 1; }
 	@grep -q 'helm.sh/resource-policy: keep' /tmp/vg-mon-on.out || { echo "FAIL: the CNPG Cluster lost helm.sh/resource-policy: keep"; exit 1; }
 	@echo "ok: no monitor of this chart's own, CNPG PodMonitor + keep"
