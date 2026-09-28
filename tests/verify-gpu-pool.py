@@ -266,6 +266,7 @@ else:
         muse = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/muse-glimmer-30b.yaml")
         tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
+        graphs = parsed and "--enforce-eager" not in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
         metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
@@ -472,6 +473,14 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: two presets carry their family's parsers on this side (#313) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # nemotron-3-super-nvfp4 serves with CUDA graphs on this side (no
+    # --enforce-eager, giantswarm/giantswarm#37941); a golden from before
+    # renders it eager, so its ConfigMap is left out of the comparison. Drop
+    # this once GOLDEN_REF carries the change.
+    elif not graphs:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
+        print(f"note: nemotron-3-super-nvfp4 serves with CUDA graphs on this side and not on {ref}: its ConfigMap is left out of the comparison")
     # model-manager's egress reaches the serving namespace's workload pods on the
     # workload port with the slice on (giantswarm/agent-platform#602: the route
     # list it reads a served model's API interfaces from); a golden from before
