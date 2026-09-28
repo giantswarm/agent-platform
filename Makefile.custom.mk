@@ -1957,7 +1957,7 @@ verify-worker-image: ## Assert the Substrate worker image follows the chart's ow
 	@echo "ok: $@"
 
 .PHONY: verify-managers
-verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards, and the four managers' OAuth inputs derived from muster's login (giantswarm/agent-platform#484).
+verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards, the four managers' OAuth inputs derived from muster's login (giantswarm/agent-platform#484), and the metrics port of model-manager, agent-manager and cluster-manager (observability.metrics.port, only while observability.metrics.enabled) admitted from the cluster entity, never the API port, in both flavors, with their ServiceMonitors on in the meta render and carrying the tenant label (giantswarm/giantswarm#36711).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> both components off render nothing of theirs (agent-manager is off by default; model-manager is on since giantswarm/agent-platform#329)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.model-manager.enabled=false >/tmp/vmg-off.out 2>&1 || { cat /tmp/vmg-off.out; exit 1; }
@@ -2179,6 +2179,28 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	$(call managers_must_fail,MCPServer CR needs muster,$(MANAGERS_MIN) --set components.agent-manager.enabled=true --set components.muster.enabled=false,the MCPServer CRD ships with muster)
 	$(call managers_must_fail,additionalPeers items are label maps,$(MANAGERS_ON) --set-json 'modelManager.networkPolicy.ingress.additionalPeers=["portal"]',non-empty pod label map)
 	$(call managers_must_fail,additionalPeers items are non-empty,$(MANAGERS_ON) --set-json 'agentManager.networkPolicy.ingress.additionalPeers=[{}]',non-empty pod label map)
+	@echo "--> the managers' metrics ports (observability.metrics.port): admitted from the cluster entity while observability.metrics.enabled, never the API port, in both flavors"
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set components.cluster-manager.enabled=true >/tmp/vmg-metrics.out 2>&1 || { cat /tmp/vmg-metrics.out; exit 1; }
+	@for name in model-manager agent-manager cluster-manager; do \
+		awk "/^  name: agent-platform-connectivity-$$name-ingress$$/,/^---/" /tmp/vmg-metrics.out | grep -A4 -- '- cluster' | grep -q 'port: "9464"' || { echo "FAIL: $$name does not admit the scrape of its metrics port 9464 from the cluster entity"; exit 1; }; \
+		if awk "/^  name: agent-platform-connectivity-$$name-ingress$$/,/^---/" /tmp/vmg-metrics.out | grep -A4 -- '- cluster' | grep -q 'port: "8080"'; then echo "FAIL: the cluster entity reaches $$name's API port"; exit 1; fi; \
+	done
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set components.cluster-manager.enabled=true --set networkPolicy.flavor=kubernetes >/tmp/vmg-metrics-k8s.out 2>&1 || { cat /tmp/vmg-metrics-k8s.out; exit 1; }
+	@for name in model-manager agent-manager cluster-manager; do \
+		awk "/^  name: agent-platform-connectivity-$$name-ingress$$/,/^---/" /tmp/vmg-metrics-k8s.out | grep -q 'port: 9464$$' || { echo "FAIL: kubernetes flavor: $$name does not admit the scrape of its metrics port 9464"; exit 1; }; \
+	done
+	@helm template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set components.cluster-manager.enabled=true --set model-manager.observability.metrics.enabled=false --set agent-manager.observability.metrics.port=9999 >/tmp/vmg-metrics-knobs.out 2>&1 || { cat /tmp/vmg-metrics-knobs.out; exit 1; }
+	@if awk '/^  name: agent-platform-connectivity-model-manager-ingress$$/,/^---/' /tmp/vmg-metrics-knobs.out | grep -q -- '- cluster'; then echo "FAIL: model-manager admits the cluster entity while model-manager.observability.metrics.enabled is false"; exit 1; fi
+	@awk '/^  name: agent-platform-connectivity-agent-manager-ingress$$/,/^---/' /tmp/vmg-metrics-knobs.out | grep -A4 -- '- cluster' | grep -q 'port: "9999"' || { echo "FAIL: agent-manager does not admit agent-manager.observability.metrics.port"; exit 1; }
+	@echo "ok: metrics ports"
+	@echo "--> meta: the managers' ServiceMonitors follow the monitors and carry the tenant label"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.cluster-manager.enabled=true --set global.observability.metrics.serviceMonitor.enabled=true >/tmp/vmg-meta-monitors.out 2>&1 || { cat /tmp/vmg-meta-monitors.out; exit 1; }
+	@for name in model-manager agent-manager cluster-manager; do \
+		awk "/^kind: HelmRelease$$/{k=1} k&&/^  name: $$name$$/{f=1} /^---/{k=0;f=0} f" /tmp/vmg-meta-monitors.out | grep -A6 '^    serviceMonitor:$$' >/tmp/vmg-meta-monitor-$$name.out; \
+		grep -q '^      enabled: true$$' /tmp/vmg-meta-monitor-$$name.out || { echo "FAIL: the $$name release's serviceMonitor.enabled is not true with the monitors on"; cat /tmp/vmg-meta-monitor-$$name.out; exit 1; }; \
+		grep -q '^        observability.giantswarm.io/tenant: giantswarm$$' /tmp/vmg-meta-monitor-$$name.out || { echo "FAIL: the $$name release's ServiceMonitor lacks the tenant label"; cat /tmp/vmg-meta-monitor-$$name.out; exit 1; }; \
+	done
+	@echo "ok: manager monitors"
 	@echo "--> meta: both components render as releases that wait for muster and kagent"
 	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >/tmp/vmg-meta.out 2>&1 || { cat /tmp/vmg-meta.out; exit 1; }
 	@for n in model-manager agent-manager; do \

@@ -165,6 +165,23 @@ VM_MANAGER_MONITOR_HOLD = [
     "--set", "vm-manager.serviceMonitor.interval=60s",
     "--set", "vm-manager.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
 ]
+# giantswarm/giantswarm#36711: the model-manager, agent-manager and
+# cluster-manager charts gain their own ServiceMonitor and this tree resolves
+# its `auto` switch and sets the tenant label, keys GOLDEN_REF's blocks do not
+# carry (open blocks, so they forward them as written), and moves the floors
+# to the releases that open the keys. Written on BOTH sides, after
+# COMPONENT_TRACES_HOLD so its ranges give way, so the forwarded values and
+# the ranges compare equal; dropped once GOLDEN_REF carries them.
+MANAGER_MONITOR_HOLD = [
+    "--set", "components.model-manager.versionRange=>=1.5.0 <2.0.0",
+    "--set", "components.agent-manager.versionRange=>=1.4.0 <2.0.0",
+    "--set", "components.cluster-manager.versionRange=>=0.22.0 <1.0.0",
+    *[flag for name in ("model-manager", "agent-manager", "cluster-manager") for flag in (
+        "--set", f"{name}.serviceMonitor.enabled=false",
+        "--set", f"{name}.serviceMonitor.interval=60s",
+        "--set", f"{name}.serviceMonitor.labels.observability\\.giantswarm\\.io/tenant=giantswarm",
+    )],
+]
 # giantswarm/giantswarm#36711: the managers', the portal's and mcp-kubernetes'
 # OTLP trace keys, which this tree derives from global.observability.traces.otlp
 # and GOLDEN_REF's blocks do not carry (open blocks, so they forward as
@@ -943,6 +960,27 @@ def hold_scrape_ports(here: str, there: str) -> tuple:
     return h, strip(there)
 
 
+MANAGER_METRICS_RULE = re.compile(
+    r"\n    # The metrics port serves no API and is admitted from the cluster entity,\n"
+    r"    # as the platform's other metrics ports are\.\n"
+    r"    - fromEntities:\n        - cluster\n      toPorts:\n        - ports:\n            - port: \"\d+\"\n              protocol: TCP(?=\n)"
+    r"|\n    # The metrics port serves no API and is admitted from anywhere, as the\n"
+    r"    # platform's other metrics ports are\.\n"
+    r"    - ports:\n        - port: \d+\n          protocol: TCP(?=\n)")
+
+
+def hold_manager_metrics_ports(here: str, there: str) -> tuple:
+    """The two connectivity renders without the metrics port opened on the
+    model-manager, agent-manager and cluster-manager ingress policies
+    (giantswarm/giantswarm#36711; GOLDEN_REF admits none). Dropped once
+    GOLDEN_REF carries them."""
+    def strip(render: str) -> str:
+        return MANAGER_METRICS_RULE.sub("", render)
+    if (h := strip(here)) != here or strip(there) != there:
+        print("note: #36711 hold: the managers' metrics ports are left out of the golden comparison")
+    return h, strip(there)
+
+
 DASHBOARDS_KEY = re.compile(r"^(\s+)dashboards:\s*$")
 DASHBOARDS_CONFIGMAP = "# Source: agent-platform-connectivity/templates/dashboards/configmap.yaml"
 
@@ -1022,8 +1060,8 @@ def check_golden(meta: str, connectivity: str) -> None:
         # carries the klaus-gateway no-op key removal (#636) since 4.62.0.
         golden_only = {meta: [], connectivity: []}
         shapes = [
-            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD, *SUBSTRATE_AWSCLI_HOLD]),
-            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD, *SUBSTRATE_AWSCLI_HOLD]),
+            ("meta default", meta, [*hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD, *SUBSTRATE_AWSCLI_HOLD]),
+            ("meta ci + engine off", meta, ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *hold_608, *METRIC_LABELS_HOLD, *hold_iv, *MUSTER_DASHBOARD_HOLD, *AGENTGATEWAY_MONITORING_HOLD, *SUBSTRATE_PODMONITOR_HOLD, *KAGENT_SERVICEMONITOR_HOLD, *MCP_KUBERNETES_MONITORING_HOLD, *VM_MANAGER_MONITOR_HOLD, *COMPONENT_TRACES_HOLD, *MANAGER_MONITOR_HOLD, *KSERVE_MONITOR_HOLD, *KAGENT_CONTROLLER_RESOURCES_HOLD, *KLAUS_GATEWAY_FLOOR_HOLD, *REPIN_1_1_RANGES_HOLD, *CNPG_GSOCI_HOLD, *SUBSTRATE_AWSCLI_HOLD]),
             ("connectivity default", connectivity, [*VM, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity full", connectivity, [*CONN_FULL, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
             ("connectivity backstage", connectivity, [*CONN_BACKSTAGE, *METRIC_LABELS_HOLD, *hold_iv, *AGENTGATEWAY_IMAGES_HOLD, *KAGENT_VPA_CAP_HOLD, *KAGENT_SERVICEMONITOR_HOLD]),
@@ -1065,6 +1103,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_credential_provider_exception(here, there)
                 here, there = hold_credential_provider_netpol(here, there)
                 here, there = hold_scrape_ports(here, there)
+                here, there = hold_manager_metrics_ports(here, there)
             if here != there:
                 import difflib
                 excerpt = list(difflib.unified_diff(there.splitlines(), here.splitlines(), f"{ref}", "head", lineterm="", n=2))[:40]

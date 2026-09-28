@@ -17,7 +17,9 @@
 # CRs from the versions below.
 # The model-manager, agent-manager, vm-manager, cluster-manager, backstage and
 # mcp-kubernetes pins are the floors of their ranges, the first releases that
-# export traces over OTLP (giantswarm/giantswarm#36711). model-manager carries
+# export traces over OTLP (giantswarm/giantswarm#36711); the model-manager,
+# agent-manager and cluster-manager ones also serve the metrics port their
+# ServiceMonitor scrapes. model-manager carries
 # 1.0.8's num_ctx on the Ollama ModelConfigs it wires
 # (giantswarm/model-manager#157); it reads the GPU node pool input from the
 # discovery ConfigMap (spec.gpuPool, giantswarm/agent-platform#315, from 0.23.0)
@@ -71,11 +73,11 @@ components:
   klaus-gateway:                 { versionRange: "3.3.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
-  model-manager:                 { versionRange: "1.3.0" }
-  agent-manager:                 { versionRange: "1.2.0" }
+  model-manager:                 { versionRange: "1.5.0" }
+  agent-manager:                 { versionRange: "1.4.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).
-  cluster-manager:               { versionRange: "0.19.0" }
+  cluster-manager:               { versionRange: "0.22.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08, backstage and mcp-kubernetes at their

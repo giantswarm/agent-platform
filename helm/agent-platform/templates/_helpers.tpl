@@ -1371,6 +1371,9 @@ answers, but only where the leaf is left at `auto`:
                                klausGateway.serviceMonitor.enabled (the chart's
                                own monitor; the chart takes a boolean),
                                vm-manager.serviceMonitor.enabled,
+                               model-manager.serviceMonitor.enabled,
+                               agent-manager.serviceMonitor.enabled,
+                               cluster-manager.serviceMonitor.enabled,
                                kserve-llmisvc-resources.kserve.llmisvc
                                .controller.serviceMonitor.enabled,
                                substrate.metrics.podMonitor.enabled (the six
@@ -1447,6 +1450,9 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kagent" "otel" $signal "enabled") "value" (and $monitors (ne $endpoint ""))) -}}
 {{- end -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "vm-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "model-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "agent-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "cluster-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kserve-llmisvc-resources" "kserve" "llmisvc" "controller" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- /* valkey PodMonitor: the chart's own default is on, so only "off" is written. */ -}}
 {{- if not $monitors -}}
