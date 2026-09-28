@@ -268,6 +268,7 @@ else:
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
+        metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
@@ -492,6 +493,15 @@ else:
             for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-ingress")]:
                 side.pop(key)
         print(f"note: model-manager has no route on this side (#271) and does on {ref}: its ingress policy is left out of the comparison")
+    # model-manager's ingress admits its metrics port on this side
+    # (giantswarm/giantswarm#36711, agent-platform.componentMetricsPort); a
+    # golden from before admits the Service port only, so that policy is left
+    # out of the comparison on both sides. Drop this once GOLDEN_REF carries it.
+    if not metered:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-ingress")]:
+                side.pop(key)
+        print(f"note: model-manager's ingress admits its metrics port on this side (#36711) and not on {ref}: its policy is left out of the comparison")
     # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
     # are new documents of the serving render; a golden from before has neither,
     # so both are left out of the comparison on both sides. Drop this once

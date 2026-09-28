@@ -391,7 +391,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=1.3.0 <2.0.0"` |  |
+| components.model-manager.versionRange | string | `">=1.5.0 <2.0.0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
@@ -399,7 +399,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=1.2.0 <2.0.0"` |  |
+| components.agent-manager.versionRange | string | `">=1.4.0 <2.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
@@ -414,7 +414,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.cluster-manager.chart | string | `"cluster-manager"` |  |
 | components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.cluster-manager.versionRange | string | `">=0.19.0 <1.0.0"` |  |
+| components.cluster-manager.versionRange | string | `">=0.22.0 <1.0.0"` |  |
 | components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
@@ -1127,6 +1127,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | model-manager.networkPolicy.enabled | bool | `false` |  |
+| model-manager.serviceMonitor.enabled | string | `"auto"` |  |
+| model-manager.serviceMonitor.interval | string | `"60s"` |  |
+| model-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | modelManager.kserve.requireApi | bool | `true` |  |
 | modelManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
@@ -1182,6 +1185,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | agent-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | agent-manager.networkPolicy.enabled | bool | `false` |  |
+| agent-manager.serviceMonitor.enabled | string | `"auto"` |  |
+| agent-manager.serviceMonitor.interval | string | `"60s"` |  |
+| agent-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | agentManager.route.enabled | bool | `false` |  |
 | agentManager.route.pathPrefix | string | `"/agent-manager"` |  |
 | agentManager.route.hostname | string | `""` |  |
@@ -1226,6 +1232,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
+| cluster-manager.serviceMonitor.enabled | string | `"auto"` |  |
+| cluster-manager.serviceMonitor.interval | string | `"60s"` |  |
+| cluster-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | clusterManager.flux.requireApi | bool | `false` |  |
 | clusterManager.prewarmPriorityClass.enabled | bool | `true` |  |
 | clusterManager.prewarmPriorityClass.name | string | `"agent-platform-prewarm-placeholder"` |  |

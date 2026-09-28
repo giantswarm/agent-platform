@@ -806,9 +806,11 @@ components:  # @schema additionalProperties: true
     # LLMInferenceServices only (the classic InferenceService kind and its
     # kserve.servingKind / kserve.runtime values are gone), and nothing this
     # chart forwards names either, so the 0.24 → 1.0 move rolls on its own.
-    # The floor is 1.3.0: the chart takes observability.otel, the OTLP trace
-    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=1.3.0 <2.0.0"
+    # The floor is 1.5.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives, and serviceMonitor
+    # with observability.metrics, the metrics port its ServiceMonitor scrapes
+    # (giantswarm/model-manager#203, giantswarm/giantswarm#36711).
+    versionRange: ">=1.5.0 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -832,9 +834,11 @@ components:  # @schema additionalProperties: true
     # composes agents for kagent 0.10 (v1alpha2) and never meets this chart.
     # Until 1.0.0 is published the range resolves nothing (the component is
     # off by default; a lab follows a branch build through semverFilter).
-    # The floor is 1.2.0: the chart takes observability.otel, the OTLP trace
-    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=1.2.0 <2.0.0"
+    # The floor is 1.4.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives, and serviceMonitor
+    # with observability.metrics, the metrics port its ServiceMonitor scrapes
+    # (giantswarm/agent-manager#76, giantswarm/giantswarm#36711).
+    versionRange: ">=1.4.0 <2.0.0"
     valuesFrom: agent-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -890,9 +894,11 @@ components:  # @schema additionalProperties: true
     # that does not exist is refused naming it, get_info reports clusterApi and
     # the real version); the ceiling stays the next major, so minor releases
     # roll on their own.
-    # The floor is 0.19.0: the chart takes observability.otel, the OTLP trace
-    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=0.19.0 <1.0.0"
+    # The floor is 0.22.0: the chart takes observability.otel, the OTLP trace
+    # export global.observability.traces.otlp derives, and serviceMonitor
+    # with observability.metrics, the metrics port its ServiceMonitor scrapes
+    # (giantswarm/cluster-manager#138, giantswarm/giantswarm#36711).
+    versionRange: ">=0.22.0 <1.0.0"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -3959,6 +3965,19 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
           - dex-k8s-authenticator
   networkPolicy:
     enabled: false
+  # `auto` (the default) follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled, like every other
+  # monitor of this platform; `true` / `false` force it. The chart's metrics
+  # port (observability.metrics.port, 9464) serves
+  # mcp_server_operation_duration_seconds and
+  # http_server_request_duration_seconds.
+  serviceMonitor:
+    enabled: auto  # auto | true | false
+    interval: 60s
+    # Routes the scrape to the right Mimir instance in the GS Observability
+    # Platform.
+    labels:
+      observability.giantswarm.io/tenant: giantswarm
 
 # The wiring the connectivity chart renders for the model-manager component
 # (it reads this block, not the chart's). Inert while
@@ -4251,6 +4270,19 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
           - dex-k8s-authenticator
   networkPolicy:
     enabled: false
+  # `auto` (the default) follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled, like every other
+  # monitor of this platform; `true` / `false` force it. The chart's metrics
+  # port (observability.metrics.port, 9464) serves
+  # mcp_server_operation_duration_seconds and
+  # http_server_request_duration_seconds.
+  serviceMonitor:
+    enabled: auto  # auto | true | false
+    interval: 60s
+    # Routes the scrape to the right Mimir instance in the GS Observability
+    # Platform.
+    labels:
+      observability.giantswarm.io/tenant: giantswarm
 
 # The wiring the connectivity chart renders for the agent-manager component
 # (it reads this block, not the chart's). Inert while
@@ -4436,6 +4468,19 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
         forwardToken: true
         requiredAudiences:
           - dex-k8s-authenticator
+  # `auto` (the default) follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled, like every other
+  # monitor of this platform; `true` / `false` force it. The chart's metrics
+  # port (observability.metrics.port, 9464) serves
+  # mcp_server_operation_duration_seconds and
+  # http_server_request_duration_seconds.
+  serviceMonitor:
+    enabled: auto  # auto | true | false
+    interval: 60s
+    # Routes the scrape to the right Mimir instance in the GS Observability
+    # Platform.
+    labels:
+      observability.giantswarm.io/tenant: giantswarm
 
 # The wiring the connectivity chart renders for the cluster-manager component
 # (it reads this block, not the chart's). Inert while

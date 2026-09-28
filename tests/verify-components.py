@@ -101,11 +101,11 @@ LINE = {
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, ">=1.2.0 <2.0.0", ["muster", "kagent"]),
+    "agent-manager": (GSOCI, ">=1.4.0 <2.0.0", ["muster", "kagent"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
-    "model-manager": (GSOCI, ">=1.3.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
+    "model-manager": (GSOCI, ">=1.5.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
     # 0.22.0 carries serviceMonitor.enabled / .labels (giantswarm/vm-manager#73,
     # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
     # from the generated CircleCI pipeline with its guest image artifact
@@ -114,7 +114,7 @@ LINE = {
     # 0.4.2 is the first cluster-manager release with the muster registration and
     # the identity contract the meta chart forwards that also tolerates a cluster
     # without the Cluster API group. muster alone: the MCPServer CR.
-    "cluster-manager": (GSOCI, ">=0.19.0 <1.0.0", ["muster"]),
+    "cluster-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster"]),
     # Swarmgeist on the line: the line speaks A2A v1 over gRPC to the controller
     # GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10 REST client and
     # belongs to the 3.x meta chart. The floor is 2.0.0, the Slack-only line
