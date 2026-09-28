@@ -686,6 +686,26 @@ def hold_inference_extension(here: str, there: str) -> tuple:
     return h, INFERENCE_EXTENSION.sub("", there)
 
 
+# giantswarm/agent-platform#728: with the engine on, the Flux Operator CRD hook
+# (a ConfigMap and a Job from hooks/flux-operator-crds.yaml) runs at
+# pre-install and pre-upgrade, and the hook identity is created at those events
+# too. Both documents and the two added events are left out on both sides;
+# dropped once GOLDEN_REF carries #728.
+FLUX_OPERATOR_CRDS_SOURCE = "# Source: agent-platform/templates/hooks/flux-operator-crds.yaml\n"
+FLUX_OPERATOR_CRDS_EVENTS = re.compile(r"^(    helm\.sh/hook: )pre-install,pre-upgrade,(pre-delete(?:,post-delete)?)$", re.M)
+
+
+def hold_flux_operator_crds(here: str, there: str) -> tuple:
+    """The two meta renders without the Flux Operator CRD hook and the identity events it adds."""
+    def strip(render: str) -> str:
+        kept = [d for d in render.split("\n---\n") if FLUX_OPERATOR_CRDS_SOURCE not in d]
+        return FLUX_OPERATOR_CRDS_EVENTS.sub(r"\1\2", "\n---\n".join(kept))
+    h = strip(here)
+    if FLUX_OPERATOR_CRDS_SOURCE in here and FLUX_OPERATOR_CRDS_SOURCE not in there:
+        print("note: #728 hold — the Flux Operator CRD hook and the hook identity's pre-install,pre-upgrade are left out of the golden comparison")
+    return h, strip(there)
+
+
 # giantswarm/agent-platform#271: modelManager.route is retired, so the meta
 # chart no longer forwards its defaults in the connectivity release's
 # modelManager block. The golden side's forwarded route block (the one whose
@@ -1034,6 +1054,7 @@ def check_golden(meta: str, connectivity: str) -> None:
                 here, there = hold_mm_workload_clusters(here, there)
                 here, there = hold_mm_route(here, there)
                 here, there = hold_inference_extension(here, there)
+                here, there = hold_flux_operator_crds(here, there)
             else:
                 here, there = hold_mm_ingress_comment(here, there)
                 here, there = hold_dataplane_podmonitor(here, there)

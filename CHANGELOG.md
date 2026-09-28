@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The four Flux Operator CRDs upgrade with the chart** (giantswarm/agent-platform#728). The `flux-engine` subchart carries `fluxinstances`, `fluxreports`, `resourcesets` and `resourcesetinputproviders` (`fluxcd.controlplane.io`) in `crds/`, which Helm and helm-controller install once and never upgrade, and the operator does not manage them: every installation kept the CRDs of its first install. With the bundled engine a pre-install/pre-upgrade hook Job `<release>-flux-operator-crds` (weight -9) now server-side applies them from a hook ConfigMap carrying the subchart's file, field manager `agent-platform`. The seven Flux CRDs stay the operator's. UPGRADE.md's manual apply step is gone. `make verify-engine` asserts the hook and that the ConfigMap is the subchart's file.
+
 ### Removed
 
 - **The PolicyException `model-serving-fast-links`** (giantswarm/giantswarm#37941). model-manager 1.4.2 runs a split's leader and workers with the single-node model pod's security context (giantswarm/model-manager#193): no `IPC_LOCK`, `SYS_RAWIO` or `NET_RAW`, and NCCL over the fast link needs none of them. Nothing requests the capabilities any more, so no pod may add them. `make verify-fast-links` fails if the exception renders.

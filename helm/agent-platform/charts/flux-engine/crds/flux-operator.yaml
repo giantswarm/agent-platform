@@ -3,9 +3,10 @@
 # rendered with installCRDs=true, release-specific labels removed). They live in
 # crds/ so Helm installs them before the FluxInstance template is validated.
 # Helm never upgrades or deletes crds/, and the operator does not manage its own
-# CRDs: they stay as the first install applied them (UPGRADE.md, "CRDs on an
-# upgrade") and stay behind on uninstall (the Flux CRDs below do not - the operator
-# removes those with the FluxInstance).
+# CRDs, so the meta chart's pre-install/pre-upgrade hook server-side applies this
+# file on every upgrade (templates/hooks/flux-operator-crds.yaml). They stay
+# behind on uninstall (the Flux CRDs do not - the operator removes those with the
+# FluxInstance).
 #
 # Renovate: bumped together with flux-engine.operator.image.tag in values.yaml.
 ---
