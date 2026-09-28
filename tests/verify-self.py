@@ -200,6 +200,8 @@ def main(chart: str) -> int:
         # ci-values turn kagent on: the kagent namespace hook and the storage-version hooks (verify-engine.py) and the hook identity at their events
         ("ServiceAccount", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10), ("NetworkPolicy", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10), ("ClusterRoleBinding", f"{RELEASE}-hooks"): ("pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete", -10),
         ("Job", f"{RELEASE}-kagent-namespace"): ("pre-install,pre-upgrade", -8),
+        # the Flux Operator CRDs, applied at every install and upgrade with the engine on (verify-engine.py)
+        ("ConfigMap", f"{RELEASE}-flux-operator-crds"): ("pre-install,pre-upgrade", -10), ("Job", f"{RELEASE}-flux-operator-crds"): ("pre-install,pre-upgrade", -9),
         **{("Job", n): ev for n, ev in STORAGE_HOOKS.items()},
         ("Job", f"{RELEASE}-self-stop-resumer"): ("pre-delete", -6), ("Job", f"{RELEASE}-self-suspend"): ("pre-delete", -5),
         ("Job", f"{RELEASE}-self-values"): ("post-install,post-upgrade", 0),
@@ -255,12 +257,12 @@ def main(chart: str) -> int:
         expected_off[("Job", f"{RELEASE}-self-stop-resumer")] = ("pre-upgrade,pre-delete", -6)
         expected_off[("Job", f"{RELEASE}-self-suspend")] = ("pre-upgrade,pre-delete", -5)
         if label != "self off":
-            # the lab values leave kagent off: no kagent namespace hook, no storage-version hooks, the hook identity at the teardown's events only
+            # the lab values leave kagent off: no kagent namespace hook, no storage-version hooks, the hook identity at the engine's own events (the CRD hook, the teardown)
             del expected_off[("Job", f"{RELEASE}-kagent-namespace")]
             for n in STORAGE_HOOKS:
                 del expected_off[("Job", n)]
-            expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-delete,post-delete", -10)
-            expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-delete,post-delete", -10)
+            expected_off[("ServiceAccount", f"{RELEASE}-hooks")] = ("pre-install,pre-upgrade,pre-delete,post-delete", -10)
+            expected_off[("ClusterRoleBinding", f"{RELEASE}-hooks")] = ("pre-install,pre-upgrade,pre-delete,post-delete", -10)
             # and networkPolicy.enabled: false — no policy for the identity (#413)
             del expected_off[("NetworkPolicy", f"{RELEASE}-hooks")]
         if hooks_off != expected_off:

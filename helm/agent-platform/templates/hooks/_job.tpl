@@ -17,6 +17,9 @@ engine. Hook weights in use:
        network policy (netpol.yaml: egress to the apiserver for every pod
        labelled component: hooks, at every event a hook of this chart runs —
        a default-deny cluster admits nothing else, #413)
+   -9  server-side apply the four Flux Operator CRDs of the flux-engine
+       subchart (hooks/flux-operator-crds.yaml; pre-install, pre-upgrade;
+       their ConfigMap at -10)
    -8  create the namespace the kagent component installs into if it is
        missing (hooks/kagent-namespace.yaml; pre-install, pre-upgrade)
    -7  record the objects of the kagent CRDs still stored at v1alpha2 and
@@ -73,6 +76,7 @@ One hook Job. Arguments (a dict):
   script  a shell script (run as `sh -eu -c` in the helm image)
   image   the image, default gitops.hooks.image (pass the helm image for a script)
   serviceAccountName  default the hook ServiceAccount <release>-hooks
+  configMap  a ConfigMap mounted read-only at /manifests (optional)
   about   one line for the humans reading the manifest
 */}}
 {{- define "agent-platform.hooks.job" -}}
@@ -165,7 +169,17 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .configMap }}
+            - name: manifests
+              mountPath: /manifests
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- with .configMap }}
+        - name: manifests
+          configMap:
+            name: {{ . }}
+        {{- end }}
 {{- end -}}
