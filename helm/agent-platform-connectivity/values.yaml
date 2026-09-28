@@ -2983,7 +2983,8 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   # of muster's kubernetes family, the shape every management cluster's
   # mcp-kubernetes has: <managementCluster>-mcp-kubernetes with spec.family
   # {name: kubernetes, instanceArg: management_cluster}, its tools
-  # x_kubernetes_<tool> with management_cluster=<managementCluster>. Empty: the
+  # x_kubernetes_<tool> with management_cluster=<managementCluster>-mcp-kubernetes
+  # (muster offers a family's members by their CR names). Empty: the
   # family-less singleton mcp-kubernetes (x_mcp-kubernetes_<tool>).
   mcpServer:
     enabled: true
