@@ -9,9 +9,9 @@ of the observability platform the monitors write to, and a board over series
 nobody collects is worse than no board.
 
 dashboards/*.json render whenever the gate is open. dashboards/llm-routing/*.json
-render only with llmRouting on: they read the GenAI series the LLM listener
-alone produces, and a board over a listener that does not exist is "No data" on
-every panel.
+render only with llmRouting on, and dashboards/kagent/*.json only with kagent
+on: they read series only that component's own scrape produces, and a board
+over a component that is not installed is "No data" on every panel.
 
 The boards of a component come from that component's own chart (muster ships
 its own, and agentgateway's is upstream's, vendored in the packaging chart).
@@ -43,6 +43,11 @@ data:
 {{- end }}
 {{- if .Values.llmRouting.enabled }}
 {{- range $path, $_ := .Files.Glob "dashboards/llm-routing/*.json" }}
+{{ include "agent-platform.dashboardConfigMap" (list $ $path) }}
+{{- end }}
+{{- end }}
+{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
+{{- range $path, $_ := .Files.Glob "dashboards/kagent/*.json" }}
 {{ include "agent-platform.dashboardConfigMap" (list $ $path) }}
 {{- end }}
 {{- end }}
