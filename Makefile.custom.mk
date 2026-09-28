@@ -1344,6 +1344,11 @@ verify-model-serving-policies: ## Assert the model-serving policies over the LLM
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@python3 tests/verify-model-serving-policies.py $(CONNECTIVITY_DIR) $(CHART_DIR)
 
+.PHONY: verify-dashboards
+verify-dashboards: ## Assert every PromQL expr of the connectivity chart's dashboards carries no escaped quote (giantswarm/agent-platform#732 shipped two: Mimir refuses the matcher and the panel errors instead of showing data).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 tests/verify-dashboards.py $(CONNECTIVITY_DIR)
+
 .PHONY: verify-fast-links
 verify-fast-links: ## Assert the fast-link input of the model serving layer (giantswarm/model-manager#190): modelServing.fastLinks published as the discovery ConfigMap's spec.fastLinks exactly as written (name, nodes, networks, resources, env) for model-manager's split placement; empty (the default) renders no key; both charts default it to [] and the meta chart forwards it with modelServing. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"

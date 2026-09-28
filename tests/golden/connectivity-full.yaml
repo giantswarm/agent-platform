@@ -9200,7 +9200,7 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(kagent_grpc_server_requests_total{job=\"kagent-controller-metrics\", cluster_id=~\"$cluster\", code!=\\\"OK\\\"}[$__rate_interval])) / clamp_min(sum(rate(kagent_grpc_server_requests_total{job=\"kagent-controller-metrics\", cluster_id=~\"$cluster\"}[$__rate_interval])), 1e-9)",
+              "expr": "(sum(rate(kagent_grpc_server_requests_total{job=\"kagent-controller-metrics\", cluster_id=~\"$cluster\", code!=\"OK\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(kagent_grpc_server_requests_total{job=\"kagent-controller-metrics\", cluster_id=~\"$cluster\"}[$__rate_interval])), 1e-9)",
               "instant": false,
               "legendFormat": "",
               "range": true,
@@ -9334,7 +9334,7 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(kagent_grpc_server_requests_total{job=\"kagent-controller-metrics\", cluster_id=~\"$cluster\", rpc_type=\\\"stream\\\"}[$__rate_interval]))",
+              "expr": "sum(rate(kagent_grpc_server_requests_total{job=\"kagent-controller-metrics\", cluster_id=~\"$cluster\", rpc_type=\"stream\"}[$__rate_interval]))",
               "instant": false,
               "legendFormat": "",
               "range": true,
