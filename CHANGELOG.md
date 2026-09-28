@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The kagent controller board's `Error ratio` and `Streams / s` panels** (giantswarm/agent-platform#732). Both exprs carried an escaped quote inside a label matcher (`code!=\"OK\"`, `rpc_type=\"stream\"`), which Mimir refuses, so the two stats showed an error on every installation. `Error ratio` also reads `0` instead of no data while every request answers `OK`. `make verify-dashboards` fails on an escaped quote in any board.
 - **The four Flux Operator CRDs upgrade with the chart** (giantswarm/agent-platform#728). The `flux-engine` subchart carries `fluxinstances`, `fluxreports`, `resourcesets` and `resourcesetinputproviders` (`fluxcd.controlplane.io`) in `crds/`, which Helm and helm-controller install once and never upgrade, and the operator does not manage them: every installation kept the CRDs of its first install. With the bundled engine a pre-install/pre-upgrade hook Job `<release>-flux-operator-crds` (weight -9) now server-side applies them from a hook ConfigMap carrying the subchart's file, field manager `agent-platform`. The seven Flux CRDs stay the operator's. UPGRADE.md's manual apply step is gone. `make verify-engine` asserts the hook and that the ConfigMap is the subchart's file.
 
 ### Removed
