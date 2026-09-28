@@ -442,6 +442,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.mcp-kubernetes.versionRange | string | `">=1.3.0 <2.0.0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
+| components.mcp-kubernetes.omitKeys[1] | string | `"mcpServer"` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
 | components.cloudnative-pg.chart | string | `"cloudnative-pg"` |  |
 | components.cloudnative-pg.repository | string | `"oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts"` |  |
