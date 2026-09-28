@@ -248,15 +248,13 @@ Harness cannot narrow the server to `muster.tools`; it exposes the server and
 may report a warning in `status.harnesses[].warnings` — the toolset header is
 the enforced narrowing, applied by muster per request.
 
-**Why the controller gets no credential of its own.** The obvious alternative
-— a projected ServiceAccount token on the controller, presented through
-`spec.headersFrom`, trusted by muster through a `trustedIssuers` entry for the
-cluster's OIDC issuer — is rejected for the reason above: `headersFrom` is not
-a discovery credential; the runtime applies it on every agent call, so every
-agent would call muster as `system:serviceaccount:kagent:kagent-controller`,
-the per-caller model of this section would be gone, and each rotation would
-roll every agent. The controller's discovery has no identity by design; the
-label makes the status say so instead of failing.
+**Why the controller gets no credential of its own.** muster accepts Dex ID
+tokens only; it does not trust Kubernetes ServiceAccount tokens. A credential
+in `spec.headersFrom` would not help either: it is not a discovery credential,
+the runtime applies it on every agent call, so every agent would call muster
+as one identity and the per-caller model of this section would be gone. The
+controller's discovery has no identity by design; the label makes the status
+say so instead of failing.
 
 ---
 
