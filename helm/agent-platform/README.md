@@ -359,13 +359,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.1.2 <1.2.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.1.3 <1.2.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.1.2 <1.2.0"` |  |
+| components.substrate.versionRange | string | `">=1.1.3 <1.2.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -1341,6 +1341,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.atelet.nodeSelector | object | `{}` |  |
 | substrate.atelet.tolerations | list | `[]` |  |
 | substrate.atelet.affinity | object | `{}` |  |
+| substrate.atelet.priorityClass.preemptionPolicy | string | `"Never"` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
 | substrate.atelet.imageCache.pinnedImages | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
