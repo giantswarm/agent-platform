@@ -1046,7 +1046,7 @@ Empty when none is named. Usage: include "agent-platform.valkeySecretName" .
 {{- define "agent-platform.valkeySecretName" -}}
 {{- $v := .Values.valkey | default dict -}}
 {{- $m := .Values.muster | default dict -}}
-{{- coalesce (dig "valkey" "auth" "usersExistingSecret" "" $v) (dig "muster" "oauth" "server" "storage" "valkey" "existingSecret" "" $m) (dig "muster" "oauth" "server" "existingSecret" "" $m) (dig "identity" "existingSecret" "" (.Values.global | default dict)) "" -}}
+{{- coalesce (dig "valkey" "auth" "usersExistingSecret" "" $v) (dig "muster" "oauth" "server" "storage" "valkey" "existingSecret" "" $m) (dig "muster" "oauth" "server" "existingSecret" "" $m) (dig "identity" "existingSecret" "" (.Values.global | default dict)) | default "" -}}
 {{- end -}}
 
 {{/*
