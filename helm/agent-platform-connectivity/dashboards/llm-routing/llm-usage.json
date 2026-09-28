@@ -2415,7 +2415,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Exact \u2014 the model is priced. Unpriced \u2014 the model is in the catalog with no rate for a token type. Missing \u2014 the model is not in the catalog. NoCatalog \u2014 no catalog is configured at all, and no cost is recorded. Anything but Exact means the cost panels understate spend; fix it in llmRouting.modelCatalog.",
+      "description": "Exact \u2014 the model is priced. Unpriced \u2014 the model is in the catalog with no rate for a token type. Missing \u2014 the model is not in the catalog. NoCatalog \u2014 no catalog is loaded at all, and no cost is recorded. The catalog is the gateway release's built-in one plus the llmRouting.modelCatalog overlay. Anything but Exact means the cost panels understate spend: bump the gateway to a release that prices the model, or add it to the overlay.",
       "fieldConfig": {
         "defaults": {
           "color": {
