@@ -5350,6 +5350,20 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # pool release runs the DaemonSet on the pool's nodes alone. Label values
     # are strings: quote a number.
     nodeSelector: {}
+    # The node label that says the node's GPU is usable. The pods are
+    # scheduled only on a node that carries it (a required node affinity,
+    # operator Exists), beside the selector above (giantswarm/agent-platform
+    # #737). The default, nvidia.com/gpu.count, is set by the GPU operator's
+    # GPU feature discovery once the device plugin runs. Until then the
+    # operator's operand pods (feature discovery, the validator, the device
+    # plugin) pull their images on the critical path to nvidia.com/gpu
+    # allocatable, and the runtime image's unpack (about 15 GB of files) would
+    # slow each of those pulls several-fold on a small node. Nothing needs
+    # the runtime image before the GPU is allocatable, and the model's
+    # weights download only starts after that, so the pull still overlaps the
+    # download. Empty schedules on the selector alone, from the node's first
+    # moment.
+    gpuReadyLabel: nvidia.com/gpu.count
     # Tolerations after the pool's own (gpuPool.taint, rendered first, an
     # equal entry once). The default tolerates every taint — the fleet's
     # DaemonSet convention — so the pull starts under a node's start-up taints
