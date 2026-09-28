@@ -467,7 +467,7 @@ modelServing:
     attestors:
       - keyless:
           issuer: https://oidc.circleci.com
-          subjectRegExp: ^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$
+          subjectRegExp: ^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/([a-f0-9-]+|nil)$
           rekor:
             url: https://rekor.sigstore.dev
       - keyless:

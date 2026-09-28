@@ -1429,7 +1429,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.imageVerification.enabled | bool | `true` |  |
 | modelServing.imageVerification.images[0] | string | `"gsoci.azurecr.io/giantswarm/*"` |  |
 | modelServing.imageVerification.attestors[0].keyless.issuer | string | `"https://oidc.circleci.com"` |  |
-| modelServing.imageVerification.attestors[0].keyless.subjectRegExp | string | `"^https://circleci\\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$"` |  |
+| modelServing.imageVerification.attestors[0].keyless.subjectRegExp | string | `"^https://circleci\\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/([a-f0-9-]+|nil)$"` |  |
 | modelServing.imageVerification.attestors[0].keyless.rekor.url | string | `"https://rekor.sigstore.dev"` |  |
 | modelServing.imageVerification.type | string | `"SigstoreBundle"` |  |
 | modelServing.imageVerification.mutateDigest | bool | `true` |  |

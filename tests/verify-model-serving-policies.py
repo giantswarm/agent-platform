@@ -218,10 +218,20 @@ IV_SUFFIX = "-model-serving-image-verification"
 IV_DEFAULT_IMAGES = ["gsoci.azurecr.io/giantswarm/*"]
 IV_DEFAULT_ATTESTORS = [
     {"keyless": {"issuer": "https://oidc.circleci.com",
-                 "subjectRegExp": r"^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$",
+                 "subjectRegExp": r"^https://circleci\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/([a-f0-9-]+|nil)$",
                  "rekor": {"url": "https://rekor.sigstore.dev"}}},
 ]
 IV_DEFAULT_TYPE = "SigstoreBundle"
+# The signing certificates' subjects the default pattern admits: a pipeline a definition started (the architect orb's builds,
+# a push to retagger) and one a legacy scheduled trigger started, whose definition is `nil` (retagger's nightly mirror runs
+# sign so, the storage-initializer every hf:// preset starts with among them); and what it keeps out.
+IV_SUBJECTS = ["https://circleci.com/api/v2/projects/0a65bbac-fae8-4aca-bc8c-23d51903006b/pipeline-definitions/"
+               "5b8f0c1e-2d7a-4e3b-9f61-8c4d2a7e9b10",
+               "https://circleci.com/api/v2/projects/0a65bbac-fae8-4aca-bc8c-23d51903006b/pipeline-definitions/nil"]
+NOT_IV_SUBJECTS = ["https://circleci.com/api/v2/projects/0a65bbac-fae8-4aca-bc8c-23d51903006b/pipeline-definitions/null",
+                   "https://circleci.com/api/v2/projects/0a65bbac-fae8-4aca-bc8c-23d51903006b/pipeline-definitions/nil/x",
+                   "https://circleci.com/api/v2/projects/nil/pipeline-definitions/nil",
+                   "https://example.com/api/v2/projects/0a65bbac/pipeline-definitions/nil"]
 IV_IMAGES = ["registry.example.com/models/*"]
 IV_ATTESTORS = [
     {"keyless": {"issuer": "https://oidc.circleci.com",
@@ -897,6 +907,12 @@ def check_image_verification(connectivity: str, docs: list[dict]) -> None:
             fail(f"{rule['name']}: the default render must carry the defaults — imageReferences {IV_DEFAULT_IMAGES}, type "
                  f"{IV_DEFAULT_TYPE}, the Giant Swarm CircleCI identity as the one keyless attestor, mutateDigest, required, "
                  f"Enforce; got\n{yaml.safe_dump(v)}")
+    pattern = re.compile(IV_DEFAULT_ATTESTORS[0]["keyless"]["subjectRegExp"])
+    if [x for x in IV_SUBJECTS if not pattern.search(x)] or [x for x in NOT_IV_SUBJECTS if pattern.search(x)]:
+        fail(f"the default subject pattern must admit {IV_SUBJECTS} and keep out {NOT_IV_SUBJECTS}; "
+             f"it admits {[x for x in IV_SUBJECTS + NOT_IV_SUBJECTS if pattern.search(x)]}")
+    ok("the default subject pattern admits a pipeline definition's subject and a scheduled pipeline's (definition nil), "
+       "nothing else")
     ok("the default render verifies every image under the platform's registry namespace against the Giant Swarm CircleCI identity "
        "(issuer https://oidc.circleci.com, subject a pipeline definition) in the Sigstore bundle format — digest pinned, "
        "a signature required, Enforce, one rule per pod shape")
