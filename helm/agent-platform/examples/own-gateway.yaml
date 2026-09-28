@@ -1,0 +1,61 @@
+# A cluster with its own public Gateway: the MCP gateway behind the cluster's
+# HTTPS edge, signed in through the cluster's Dex.
+#
+# The shape of a cluster that already terminates TLS for *.<global.domain> on a
+# Gateway API Gateway (Envoy Gateway, Cilium, Istio, … — any implementation with
+# an HTTPS listener). The platform's routes attach to that Gateway
+# (global.gatewayApi.parentRefs); the chart brings its own Flux engine and
+# manages itself from then on (the defaults: components.flux.enabled,
+# gitops.self.enabled auto). docs/install.md walks through it; the
+# prerequisites are there too: the Gateway API CRDs, the Gateway with its
+# certificate and DNS record, the OIDC client, the platform Secret.
+#
+#   helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platform \
+#     --namespace agent-platform --create-namespace \
+#     -f own-gateway.yaml --wait --timeout 10m
+#
+# What it runs: muster (the MCP gateway, with its OAuth server) on
+# https://muster.<global.domain>/mcp, its session store (the bundled Valkey),
+# the avatar service and the connectivity wiring. Replace platform.example.com,
+# the Gateway's name and namespace and the issuer with your own; every other
+# value follows from them. `make verify-examples` renders this file with the
+# meta chart and every component chart it turns on.
+global:
+  # muster.<domain> and avatars.<domain> derive from it.
+  domain: platform.example.com
+  identity:
+    # The OIDC issuer exactly as it appears in the tokens' iss claim.
+    issuerUrl: https://dex.platform.example.com
+    # The client registered at the provider for the platform; its redirect URI
+    # is https://muster.<domain>/oauth/callback (docs/install.md).
+    clientId: agent-platform
+    # Secret in the release namespace: dex-client-secret, registration-token,
+    # oauth-encryption-key, valkey-password (docs/install.md).
+    existingSecret: agent-platform-idp
+  # The traces' collector: none here (the default is a Giant Swarm cluster's
+  # OTLP gateway). Name yours to export the platform's traces.
+  observability:
+    traces:
+      otlp:
+        endpoint: ""
+  gatewayApi:
+    # The public Gateway every route attaches to. Its HTTPS listener must
+    # admit routes from the release namespace (allowedRoutes).
+    parentRefs:
+      - name: public
+        namespace: gateway-system
+
+# muster's OAuth server: the sign-in flow MCP clients go through. It reads the
+# same inputs as global.identity and must agree with it (the render fails when
+# the two disagree).
+muster:
+  muster:
+    oauth:
+      mcpClient:
+        publicUrl: https://muster.platform.example.com
+      server:
+        baseUrl: https://muster.platform.example.com
+        dex:
+          issuerUrl: https://dex.platform.example.com
+          clientId: agent-platform
+        existingSecret: agent-platform-idp

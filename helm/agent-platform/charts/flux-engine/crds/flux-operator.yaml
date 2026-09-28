@@ -2,8 +2,9 @@
 # upstream chart controlplaneio-fluxcd/flux-operator 0.60.0 (templates/crds.yaml
 # rendered with installCRDs=true, release-specific labels removed). They live in
 # crds/ so Helm installs them before the FluxInstance template is validated.
-# Helm never upgrades or deletes crds/: the operator owns them once running, and
-# they stay behind on uninstall (the Flux CRDs below do not - the operator
+# Helm never upgrades or deletes crds/, and the operator does not manage its own
+# CRDs: they stay as the first install applied them (UPGRADE.md, "CRDs on an
+# upgrade") and stay behind on uninstall (the Flux CRDs below do not - the operator
 # removes those with the FluxInstance).
 #
 # Renovate: bumped together with flux-engine.operator.image.tag in values.yaml.

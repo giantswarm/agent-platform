@@ -1378,6 +1378,12 @@ verify-components-charts: ## Render every component chart with the values the me
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
 
+.PHONY: verify-examples
+verify-examples: ## Render every cluster-shape example of docs/install.md (examples/kind-lab-dex.yaml, own-gateway.yaml, chart-owned-edge.yaml, managed-cloud.yaml) unchanged, as the values of a first install: the meta chart, then every component chart the render turns on with the values its HelmRelease carries, at the chart its range resolves to today (the connectivity chart from the working tree). A file under examples/ that no check covers fails. Network: gsoci.azurecr.io.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-examples.py $(CHART_DIR)
+	@echo "every install example renders through its component charts."
+
 # The two platform services the connectivity chart wires — model-manager and
 # agent-manager (route + JWT policy + network policies + render-time guards). A
 # valid configuration of both on the agentgateway topology, with the identity
@@ -1434,6 +1440,14 @@ verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform
 	@echo "--> an installation's own valkeyConfig replaces the fragment whole"
 	@helm template t $(CHART_DIR) $(VM) -f $(CHART_DIR)/ci/test-valkey-override-values.yaml >/tmp/vv-meta-override.out 2>&1 || { cat /tmp/vv-meta-override.out; exit 1; }
 	@python3 tests/verify-valkey.py --override /tmp/vv-meta-override.out
+	@echo "--> the default user's password: usersExistingSecret and aclUsers.default.passwordKey follow the platform Secret and valkey-password when unset; own values win"
+	@helm template t $(CHART_DIR) --set global.identity.existingSecret=platform-idp >/tmp/vv-auth.out 2>&1 || { cat /tmp/vv-auth.out; exit 1; }
+	@awk "/^  name: valkey$$/,/^---/" /tmp/vv-auth.out | grep -q 'usersExistingSecret: platform-idp' || { echo "FAIL: valkey's usersExistingSecret does not follow global.identity.existingSecret"; exit 1; }
+	@awk "/^  name: valkey$$/,/^---/" /tmp/vv-auth.out | grep -q 'passwordKey: valkey-password' || { echo "FAIL: valkey's aclUsers.default.passwordKey is not derived as valkey-password"; exit 1; }
+	@helm template t $(CHART_DIR) --set global.identity.existingSecret=platform-idp --set valkey.valkey.auth.usersExistingSecret=own --set valkey.valkey.auth.aclUsers.default.passwordKey=pw >/tmp/vv-auth-own.out 2>&1 || { cat /tmp/vv-auth-own.out; exit 1; }
+	@awk "/^  name: valkey$$/,/^---/" /tmp/vv-auth-own.out | grep -q 'usersExistingSecret: own' || { echo "FAIL: an own usersExistingSecret does not win"; exit 1; }
+	@awk "/^  name: valkey$$/,/^---/" /tmp/vv-auth-own.out | grep -q 'passwordKey: pw' || { echo "FAIL: an own passwordKey does not win"; exit 1; }
+	@echo "ok: the default user's password follows the platform Secret"
 	@echo "$@: all passed"
 
 verify-klausgateway-valkey: ## Assert the gateway's Valkey routing-store defaults (giantswarm/klaus-gateway#252): with klausGateway.routing.store: valkey the klaus-gateway release's routing.valkey url, existingSecret and passwordKey are filled from the valkey release (Service name, auth Secret, default user's key); an operator's own value wins; any other store forwards nothing about Valkey.
@@ -2447,6 +2461,12 @@ verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + Sche
 	@awk "/^  name: substrate-ate-api-server$$/,/^---/" /tmp/vp-db-off.out | grep -q 'app: postgres' || { echo "FAIL: without the Cluster, ate-api-server's policy does not open the bundled Postgres"; exit 1; }
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --set substrate.postgres.enabled=false >/tmp/vp-db-g4.out 2>&1; then echo "FAIL: Substrate with no database at all rendered"; exit 1; \
 	elif ! grep -q 'has no database' /tmp/vp-db-g4.out; then echo "FAIL: the no-database guard failed for the wrong reason"; cat /tmp/vp-db-g4.out; exit 1; else echo "ok: no-database guard"; fi
+	@echo "--> an external database by Secret (substrate.postgres.connectionStringSecretRef, examples/managed-cloud.yaml): the meta chart renders, forwards the reference unchanged with the bundled Postgres off; ate-api-server's policy opens :5432 beyond the cluster"
+	@helm template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false --set substrate.postgres.enabled=false --set substrate.postgres.connectionStringSecretRef.name=substrate-postgres >/tmp/vp-db-ext.out 2>&1 || { cat /tmp/vp-db-ext.out; exit 1; }
+	@awk "/^  name: substrate$$/,/^---/" /tmp/vp-db-ext.out | grep -A3 'connectionStringSecretRef:' | grep -q 'name: substrate-postgres' || { echo "FAIL: the meta chart does not forward an external substrate.postgres.connectionStringSecretRef"; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --set substrate.postgres.enabled=false --set substrate.postgres.connectionStringSecretRef.name=substrate-postgres >/tmp/vp-db-ext-c.out 2>&1 || { cat /tmp/vp-db-ext-c.out; exit 1; }
+	@awk "/^  name: substrate-ate-api-server$$/,/^---/" /tmp/vp-db-ext-c.out | grep -q 'An external database' || { echo "FAIL: with an external database by Secret, ate-api-server's policy does not open :5432 beyond the cluster"; exit 1; }
+	@echo "ok: external database by Secret"
 	@echo "ok: $@"
 
 .PHONY: verify-kyverno
