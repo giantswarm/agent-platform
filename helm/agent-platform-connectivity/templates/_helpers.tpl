@@ -2193,6 +2193,20 @@ list item; include with nindent under `egress:`.
 {{- end -}}
 
 {{/*
+The metrics port of a component whose chart block carries observability.metrics
+(the managers): observability.metrics.port, 9464 by default, while
+observability.metrics.enabled, which the charts default to true; empty when
+off. The chart serves it as the container and Service port `metrics`, apart
+from the API port.
+Usage: include "agent-platform.componentMetricsPort" $chart
+*/}}
+{{- define "agent-platform.componentMetricsPort" -}}
+{{- if dig "observability" "metrics" "enabled" true . -}}
+{{- dig "observability" "metrics" "port" 9464 . | int -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The egress rule to the OTLP gateway of a component whose chart block carries
 observability.otel (the managers, backstage): .chart is that block, .who names
 the sender in the rule's comment, .flavor is cilium or kubernetes. The pods of

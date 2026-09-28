@@ -8941,6 +8941,14 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    # The metrics port serves no API and is admitted from the cluster entity,
+    # as the platform's other metrics ports are.
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "9464"
+              protocol: TCP
 ---
 # Source: agent-platform-connectivity/templates/model-manager/netpol.yaml
 # Egress from model-manager: DNS (with Cilium's proxy clause so the FQDN
