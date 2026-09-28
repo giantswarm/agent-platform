@@ -10,7 +10,8 @@ spec:
     checkpoint (~75 GiB of weights); thinking disabled by default (the chat
     template enables it otherwise). Needs a Blackwell-class GPU for NVFP4.
     Tuned on a single-GPU 128 GB unified-memory node
-    (--gpu-memory-utilization=0.72).
+    (--gpu-memory-utilization=0.72), with CUDA graphs: the pool they
+    capture counts inside the 0.72, and the first start compiles them.
   model:
     id: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
     storageUri: hf://nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
@@ -21,7 +22,6 @@ spec:
   args:
     - --gpu-memory-utilization=0.72
     - --max-model-len=8192
-    - --enforce-eager
     - --no-enable-log-requests
     # One argument, the JSON single-quoted inside it: the well-known runtime
     # template re-parses every argument through a shell (eval "… $@"), which
