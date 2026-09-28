@@ -1,0 +1,39 @@
+{{- /*
+The four Flux Operator CRDs (fluxcd.controlplane.io) on an upgrade
+(giantswarm/agent-platform#728). The flux-engine subchart carries them in
+crds/, so Helm installs them before the FluxInstance is validated, but neither
+Helm nor helm-controller ever upgrades crds/, and the operator does not manage
+its own CRDs. This hook server-side applies the subchart's crds/flux-operator.yaml
+— the same file, read through .Subcharts, so there is one copy — at
+pre-install and pre-upgrade, ahead of the FluxInstance: pre-upgrade brings a
+changed CRD with the chart that needs it, pre-install covers a reinstall over the
+CRDs a previous release kept (Helm skips a crds/ object that exists). The seven
+Flux CRDs are not touched: the operator owns them. Field manager
+agent-platform, --force-conflicts takes the fields over from `helm`, the
+manager of the first install. The ConfigMap is a hook object at -10 next to the
+hook identity, the Job at -9; both go once the event succeeded. Rendered only
+with the bundled engine.
+*/ -}}
+{{- if eq (include "agent-platform.engineEnabled" .) "true" }}
+{{- $name := printf "%s-flux-operator-crds" .Release.Name }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  flux-operator.yaml: |
+    {{- (index .Subcharts "flux-engine").Files.Get "crds/flux-operator.yaml" | nindent 4 }}
+---
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "flux-operator-crds" "hook" "pre-install,pre-upgrade" "weight" -9
+      "configMap" $name
+      "about" "server-side apply the four Flux Operator CRDs of this chart, which Helm never upgrades from crds/"
+      "args" (list "apply" "--server-side" "--force-conflicts" "--field-manager=agent-platform" "--filename=/manifests/flux-operator.yaml")) }}
+{{- end }}

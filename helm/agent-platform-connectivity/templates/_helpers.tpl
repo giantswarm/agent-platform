@@ -2004,7 +2004,8 @@ controller, not the subchart (#421). The port is the tools Service's targetPort.
 {{/*
 Where Substrate's control-plane database lives: "bundled" (the substrate chart's
 StatefulSet — substrate.postgres.enabled true, or `auto` while neither of the
-other two applies), "external" (an explicit substrate.postgres.connectionString),
+other two applies), "external" (an explicit substrate.postgres.connectionString,
+or connectionStringSecretRef naming the Secret that holds one),
 "cnpg" (the platform's CNPG Cluster, through postgres.databases.substrate and its
 derived Secret), or "" for none — the meta chart refuses the last and resolves
 `auto` to the boolean the substrate chart takes; this chart's guard says the
@@ -2014,13 +2015,16 @@ same on its own render.
 {{- $sub := .Values.substrate | default dict -}}
 {{- $bundled := dig "postgres" "enabled" "auto" $sub | toString -}}
 {{- $conn := dig "postgres" "connectionString" "" $sub -}}
+{{- $ref := dig "postgres" "connectionStringSecretRef" dict $sub -}}
+{{- $refOn := or (dig "enabled" false $ref) (dig "name" "" $ref) -}}
 {{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
 {{- if not (has $bundled (list "auto" "true" "false")) -}}
 {{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
 {{- end -}}
-{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg)) -}}bundled
+{{- if or (eq $bundled "true") (and (eq $bundled "auto") (not $conn) (not $cnpg) (not $refOn)) -}}bundled
 {{- else if $conn -}}external
 {{- else if $cnpg -}}cnpg
+{{- else if $refOn -}}external
 {{- end -}}
 {{- end -}}
 
@@ -2186,6 +2190,20 @@ list item; include with nindent under `egress:`.
     - ports:
         - port: {{ .target.port | quote }}
           protocol: TCP
+{{- end -}}
+
+{{/*
+The metrics port of a component whose chart block carries observability.metrics
+(the managers): observability.metrics.port, 9464 by default, while
+observability.metrics.enabled, which the charts default to true; empty when
+off. The chart serves it as the container and Service port `metrics`, apart
+from the API port.
+Usage: include "agent-platform.componentMetricsPort" $chart
+*/}}
+{{- define "agent-platform.componentMetricsPort" -}}
+{{- if dig "observability" "metrics" "enabled" true . -}}
+{{- dig "observability" "metrics" "port" 9464 . | int -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

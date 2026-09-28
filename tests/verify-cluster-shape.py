@@ -76,7 +76,13 @@ ON = [
     # neither of which any other case here sets.
     "--set", "components.vm-manager.enabled=true",
     "--set", "vm-manager.oauth.enabled=false",
+    "--set", "components.agent-manager.enabled=true",
+    "--set", "agent-manager.oauth.enabled=false",
+    "--set", "components.cluster-manager.enabled=true",
+    "--set", "cluster-manager.oauth.enabled=false",
 ]
+# The components whose chart's own ServiceMonitor follows the monitors.
+MANAGER_MONITORS = ["vm-manager", "model-manager", "agent-manager", "cluster-manager"]
 KSERVE_MONITOR = ["kserve", "llmisvc", "controller", "serviceMonitor", "enabled"]
 # The fleet's values, written out: what `auto` has to resolve to under FLEET_APIS.
 EXPLICIT_FLEET_KNOBS = [
@@ -99,6 +105,9 @@ EXPLICIT_FLEET_COPIES = [
     "--set", "kagent.oauth2-proxy.metrics.serviceMonitor.enabled=true",
     "--set", "agentgateway.monitoring.enabled=true",
     "--set", "vm-manager.serviceMonitor.enabled=true",
+    "--set", "model-manager.serviceMonitor.enabled=true",
+    "--set", "agent-manager.serviceMonitor.enabled=true",
+    "--set", "cluster-manager.serviceMonitor.enabled=true",
     "--set", "kserve-llmisvc-resources.kserve.llmisvc.controller.serviceMonitor.enabled=true",
 ]
 EXPLICIT_VANILLA_KNOBS = [
@@ -254,8 +263,9 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     got = leaf(hr["dicebear"], ["route", "enabled"])
     expect(got == yes(envoy), f"{where} dicebear route.enabled = {got!r}, want {yes(envoy)!r}")
 
-    got = leaf(hr["vm-manager"], ["serviceMonitor", "enabled"])
-    expect(got == yes(monitors), f"{where} vm-manager values serviceMonitor.enabled = {got!r}, want {yes(monitors)!r}")
+    for component in MANAGER_MONITORS:
+        got = leaf(hr[component], ["serviceMonitor", "enabled"])
+        expect(got == yes(monitors), f"{where} {component} values serviceMonitor.enabled = {got!r}, want {yes(monitors)!r}")
 
     got = leaf(hr["kserve-llmisvc-resources"], KSERVE_MONITOR)
     expect(got == yes(monitors), f"{where} kserve-llmisvc-resources values {'.'.join(KSERVE_MONITOR)} = {got!r}, want {yes(monitors)!r}")
@@ -327,7 +337,7 @@ def main(meta: str, connectivity: str) -> int:
            and OTLP_HEADER not in "\n".join(m["kagent"])
            and leaf(m["agentgateway"], ["monitoring", "enabled"]) == "false"
            and leaf(m["valkey"], ["valkey", "metrics", "podMonitor", "enabled"]) == "false"
-           and leaf(m["vm-manager"], ["serviceMonitor", "enabled"]) == "false"
+           and all(leaf(m[c], ["serviceMonitor", "enabled"]) == "false" for c in MANAGER_MONITORS)
            and leaf(m["kserve-llmisvc-resources"], KSERVE_MONITOR) == "false",
            "global.observability.metrics.serviceMonitor.enabled=false with monitoring served did not reach every copy")
     rendered = render(connectivity, [*PARENT_REF, *ON, *fleet, "--set", "global.observability.metrics.serviceMonitor.enabled=false"])

@@ -266,8 +266,10 @@ else:
         muse = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/muse-glimmer-30b.yaml")
         tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
+        graphs = parsed and "--enforce-eager" not in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
+        metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
@@ -471,6 +473,14 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: two presets carry their family's parsers on this side (#313) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # nemotron-3-super-nvfp4 serves with CUDA graphs on this side (no
+    # --enforce-eager, giantswarm/giantswarm#37941); a golden from before
+    # renders it eager, so its ConfigMap is left out of the comparison. Drop
+    # this once GOLDEN_REF carries the change.
+    elif not graphs:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
+        print(f"note: nemotron-3-super-nvfp4 serves with CUDA graphs on this side and not on {ref}: its ConfigMap is left out of the comparison")
     # model-manager's egress reaches the serving namespace's workload pods on the
     # workload port with the slice on (giantswarm/agent-platform#602: the route
     # list it reads a served model's API interfaces from); a golden from before
@@ -492,6 +502,15 @@ else:
             for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-ingress")]:
                 side.pop(key)
         print(f"note: model-manager has no route on this side (#271) and does on {ref}: its ingress policy is left out of the comparison")
+    # model-manager's ingress admits its metrics port on this side
+    # (giantswarm/giantswarm#36711, agent-platform.componentMetricsPort); a
+    # golden from before admits the Service port only, so that policy is left
+    # out of the comparison on both sides. Drop this once GOLDEN_REF carries it.
+    if not metered:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-ingress")]:
+                side.pop(key)
+        print(f"note: model-manager's ingress admits its metrics port on this side (#36711) and not on {ref}: its policy is left out of the comparison")
     # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
     # are new documents of the serving render; a golden from before has neither,
     # so both are left out of the comparison on both sides. Drop this once

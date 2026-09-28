@@ -2,6 +2,7 @@
 {{- $mm := .Values.modelManager }}
 {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson }}
 {{- $port := include "agent-platform.modelManager.servicePort" . }}
+{{- $metricsPort := include "agent-platform.componentMetricsPort" $chart }}
 {{- /* A kserve backend exists as a static entry of modelManager.backends, or
 is registered at runtime by cluster-manager (its model-backend-kserve
 ConfigMap, invisible to the chart): either way model-manager calls the Hugging
@@ -12,6 +13,9 @@ renders whenever components.cluster-manager is on (#494). */ -}}
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.modelManager.oauthEnabled" . }}
+{{- /* Commit mode (model-manager.github.enabled) calls GitHub's API: GET /user
+for the person's App token and the pull request. */ -}}
+{{- $commitOn := dig "github" "enabled" false $chart }}
 {{- /* Extra same-namespace callers admitted on the Service port
 (modelManager.networkPolicy.ingress.additionalPeers): pod label maps, each
 rendered as one more ingress peer in the flavor's own dialect. */ -}}
@@ -97,6 +101,16 @@ spec:
         - ports:
             - port: {{ $port | quote }}
               protocol: TCP
+    {{- if $metricsPort }}
+    # The metrics port serves no API and is admitted from the cluster entity,
+    # as the platform's other metrics ports are.
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ $metricsPort | quote }}
+              protocol: TCP
+    {{- end }}
 ---
 # Egress from model-manager: DNS (with Cilium's proxy clause so the FQDN
 # selectors below resolve), the Kubernetes API (ModelConfig wiring,
@@ -104,8 +118,8 @@ spec:
 # (model-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
 # Dex issuer by name, or the three Google hosts for the google provider), for
 # every ollama, lemonade and lmstudio backend its host model server's endpoint, for the
-# kserve backend the Hugging Face Hub, and the names and blocks of
-# modelManager.networkPolicy.egress.
+# kserve backend the Hugging Face Hub, with commit mode (model-manager.github)
+# GitHub's API, and the names and blocks of modelManager.networkPolicy.egress.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -182,6 +196,16 @@ spec:
       toPorts:
         - ports:
             - port: {{ $shape.port | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if $commitOn }}
+    # Commit mode (model-manager.github.enabled): GitHub's API, for GET /user
+    # and the pull request opened as the person.
+    - toFQDNs:
+        - matchName: api.github.com
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP
     {{- end }}
     {{- with $egress.fqdns }}
@@ -337,6 +361,13 @@ spec:
       ports:
         - port: {{ $port | int }}
           protocol: TCP
+    {{- if $metricsPort }}
+    # The metrics port serves no API and is admitted from anywhere, as the
+    # platform's other metrics ports are.
+    - ports:
+        - port: {{ $metricsPort | int }}
+          protocol: TCP
+    {{- end }}
 ---
 # Egress from model-manager: DNS, the Kubernetes API, and — vanilla
 # NetworkPolicy has no FQDN selector — every public destination on 443 (the

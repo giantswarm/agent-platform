@@ -2,6 +2,7 @@
 {{- $am := .Values.agentManager }}
 {{- $chart := include "agent-platform.agentManager.chartValues" . | fromJson }}
 {{- $port := include "agent-platform.agentManager.servicePort" . }}
+{{- $metricsPort := include "agent-platform.componentMetricsPort" $chart }}
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.agentManager.oauthEnabled" . }}
@@ -68,6 +69,16 @@ spec:
         - ports:
             - port: {{ $port | quote }}
               protocol: TCP
+    {{- if $metricsPort }}
+    # The metrics port serves no API and is admitted from the cluster entity,
+    # as the platform's other metrics ports are.
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ $metricsPort | quote }}
+              protocol: TCP
+    {{- end }}
 ---
 # Egress from agent-manager: DNS (with Cilium's proxy clause so the FQDN
 # selectors below resolve), the Kubernetes API (HelmReleases, OCIRepositories,
@@ -210,6 +221,13 @@ spec:
       ports:
         - port: {{ $port | int }}
           protocol: TCP
+    {{- if $metricsPort }}
+    # The metrics port serves no API and is admitted from anywhere, as the
+    # platform's other metrics ports are.
+    - ports:
+        - port: {{ $metricsPort | int }}
+          protocol: TCP
+    {{- end }}
 ---
 # Egress from agent-manager: DNS, the Kubernetes API, and — vanilla
 # NetworkPolicy has no FQDN selector — every public destination on 443 for the

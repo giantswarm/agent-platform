@@ -1,0 +1,117 @@
+# A managed cloud cluster (EKS, AKS, GKE, …): agents, the portal and an
+# external Postgres.
+#
+# The full platform behind the cluster's own public Gateway: muster, kagent on
+# Agent Substrate with agent-manager, the portal (Backstage) and the Kubernetes
+# MCP server, signed in through one OIDC provider. kagent and Substrate keep
+# their state in a Postgres the cloud provides (RDS, Azure Database, Cloud SQL,
+# with the pgvector extension available), the agents' snapshots in an object
+# store bucket. docs/install.md lists what the cluster needs first: Kubernetes
+# 1.35 with the Substrate feature gates, the Gateway with its certificate and
+# DNS record, the OIDC clients and their redirect URIs, the three Secrets named
+# below.
+#
+#   helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platform \
+#     --namespace agent-platform --create-namespace \
+#     -f managed-cloud.yaml --wait --timeout 15m
+#
+# Replace platform.example.com, the issuer, the Gateway and the bucket with your
+# own. `make verify-examples` renders this file with the meta chart and every
+# component chart it turns on.
+global:
+  # muster., backstage., kagent. and avatars.<domain> derive from it.
+  domain: platform.example.com
+  identity:
+    issuerUrl: https://dex.platform.example.com
+    clientId: agent-platform
+    # dex-client-secret, registration-token, oauth-encryption-key,
+    # valkey-password and backstage-session-secret.
+    existingSecret: agent-platform-idp
+  # The traces' collector: none here (the default is a Giant Swarm cluster's
+  # OTLP gateway). Name yours to export the platform's traces.
+  observability:
+    traces:
+      otlp:
+        endpoint: ""
+  gatewayApi:
+    parentRefs:
+      - name: public
+        namespace: gateway-system
+
+components:
+  kagent:
+    enabled: true
+  agent-manager:
+    enabled: true
+  backstage:
+    enabled: true
+  mcp-kubernetes:
+    enabled: true
+
+muster:
+  muster:
+    oauth:
+      mcpClient:
+        publicUrl: https://muster.platform.example.com
+      server:
+        baseUrl: https://muster.platform.example.com
+        dex:
+          issuerUrl: https://dex.platform.example.com
+          clientId: agent-platform
+        existingSecret: agent-platform-idp
+
+
+kagent:
+  harness:
+    # Where the agents' snapshots go: a bucket the nodes can write to (IRSA,
+    # Workload Identity, or credentials in substrate.atelet.extraEnv).
+    snapshotLocation: s3://example-agent-snapshots/agents
+  # The external Postgres: the connection URL in Secret kagent-postgres (key
+  # uri) in the kagent namespace, mounted as a file; kagent's bundled Postgres
+  # stays off.
+  database:
+    postgres:
+      urlFile: /etc/kagent-postgres/uri
+      vectorEnabled: true
+      bundled:
+        enabled: false
+  controller:
+    volumes:
+      - name: kagent-postgres
+        secret:
+          secretName: kagent-postgres
+          items:
+            - key: uri
+              path: uri
+    volumeMounts:
+      - name: kagent-postgres
+        mountPath: /etc/kagent-postgres
+        readOnly: true
+  # The kagent UI on https://kagent.<domain>, behind oauth2-proxy: its OIDC
+  # client's redirect URI is https://kagent.<domain>/oauth2/callback, its
+  # credentials in Secret kagent-oauth2-proxy (client-id, client-secret,
+  # cookie-secret) in the kagent namespace.
+  uiRoute:
+    enabled: true
+    hostname: kagent.platform.example.com
+  oauth2-proxy:
+    enabled: true
+    config:
+      existingSecret: kagent-oauth2-proxy
+    extraEnv:
+      - name: OIDC_ISSUER_URL
+        value: https://dex.platform.example.com
+      - name: OIDC_REDIRECT_URL
+        value: https://kagent.platform.example.com/oauth2/callback
+      - name: UPSTREAM_URL
+        value: http://kagent-ui:8080
+
+# Substrate's control plane on the same external Postgres: the connection string
+# in Secret substrate-postgres (key connectionString) in ate-system.
+substrate:
+  postgres:
+    enabled: false
+    connectionStringSecretRef:
+      enabled: true
+      name: substrate-postgres
+      key: connectionString

@@ -2,6 +2,26 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## CRDs on an upgrade, per install path
+
+Every component ships its own CRDs and upgrades them with its release; there is no CRD chart to upgrade first ([README: CRD lifecycle](./README.md#crd-lifecycle)). Who applies a changed CRD, and what is left to the operator:
+
+| Install path | Component CRDs | Flux CRDs | Operator action |
+|---|---|---|---|
+| **The bundled engine, self-managed** (`components.flux.enabled: true`, `gitops.self.enabled: auto`: the Helm CLI is day 0 only) | helm-controller, with each component release: `crds: CreateReplace` on the charts that carry `crds/` (muster, agentgateway, agent-sandbox); the charts that render their CRDs as templates (kagent-crds, substrate-crds, kserve-llmisvc-crd, cloudnative-pg) apply them with every release | the Flux Operator keeps the seven source- and helm-controller CRDs current with Flux inside `2.x`. Its own four `fluxcd.controlplane.io` CRDs, which the operator does not manage and Helm never upgrades from `crds/`, the chart's pre-upgrade hook server-side applies with every upgrade (field manager `agent-platform`) | nothing |
+| **The bundled engine, Helm CLI on day 2** (`gitops.self.enabled: false`, the lab shape) | the same: the component releases are helm-controller's either way | the same | the same |
+| **The cluster's own Flux** (`components.flux.enabled: false`) | the same, through that Flux | the cluster's own, never the chart's | nothing |
+| **Raw Helm, no Flux** (each component chart installed by hand, [README](./README.md#raw-helm-without-the-engine)) | the template CRDs upgrade with their release; a chart's `crds/` (muster, agentgateway, agent-sandbox) Helm installs once and never upgrades | — | on every upgrade of muster, agentgateway or agent-sandbox, apply its CRDs first: `helm show crds <chart> --version <new> \| kubectl apply --server-side -f -` |
+
+A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
+
+## \<current\> → \<next\> (the Flux Operator CRDs upgrade with the chart)
+
+giantswarm/agent-platform#728: with the bundled engine, a pre-install/pre-upgrade hook Job `<release>-flux-operator-crds` (weight -9, the hook identity, `gitops.hooks.image`) server-side applies the four `fluxcd.controlplane.io` CRDs from a hook ConfigMap that carries the subchart's `crds/flux-operator.yaml`. Until now they stayed as the first install applied them.
+
+- **None.** The upgrade to this release runs the hook once: the CRDs move to field manager `agent-platform` (from `helm`) and to the schema of the operator the chart pins; no `FluxInstance`, `FluxReport` or `ResourceSet` changes. The seven Flux CRDs stay the operator's. The manual `helm show crds … \| kubectl apply --server-side` step for a Flux Operator bump is gone.
+- **Recognising it worked**: `kubectl get crd fluxinstances.fluxcd.controlplane.io -o jsonpath='{.metadata.managedFields[*].manager}'` names `agent-platform`, and `kubectl get crd fluxinstances.fluxcd.controlplane.io -o jsonpath='{.metadata.labels.app\.kubernetes\.io/version}'` the operator the chart pins.
+
 ## \<current\> → \<next\> (the serving slice on KServe v0.21.0, predictors roll without a surge pod)
 
 giantswarm/agent-platform#682: the three kserve components move from `0.5.x` / `0.6.x` to `0.7.x`, the charts of KServe v0.21.0, and `kserve.llmisvcConfigs.rolloutStrategy: {maxSurge: 0, maxUnavailable: 1}` makes every predictor roll stop the old pod first. The runtime image stays `llm-d-cuda:v0.8.0`, pinned per preset under `kserve.llmisvcConfigs.images`.
@@ -12,6 +32,16 @@ giantswarm/agent-platform#682: the three kserve components move from `0.5.x` / `
 - **A BOM pin** (`components.kserve-*.versionRange` at `0.5.x` / `0.6.x`): pin `0.7.1` for all three: the `0.6.x` runtime-configs schema refuses `rolloutStrategy`, and `0.7.0`'s controller reports `Ready` with no replica available under it.
 - **An installation that sets `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry`** also sets `kserve.llmisvcConfigs.images.<preset>.main` for the six GPU presets at its own prefix: the pins name gsoci's `llm-d-fast/` and win over the registry rewrite.
 - **Recognising it worked**: `kubectl -n <serving namespace> get deploy -l kserve.io/component=workload -o jsonpath='{range .items[*]}{.metadata.name} {.spec.strategy.rollingUpdate}{"\n"}{end}'` prints `{"maxSurge":0,"maxUnavailable":1}` for every predictor, and its pods still run `llm-d-cuda:v0.8.0`.
+
+## \<current\> → \<next\> (the Substrate line at `1.1.3`: atelet preempts nothing)
+
+giantswarm/agent-platform#731: `components.substrate{,-crds}.versionRange` is `>=1.1.3 <1.2.0` and `substrate.atelet.priorityClass.preemptionPolicy` is `Never`. atelet moves from the PriorityClass `ate-node-critical` to `ate-node-critical-non-preempting`, with the same value and `preemptionPolicy: Never`.
+
+### Operator action
+
+- **None** for an installation on the defaults. The upgrade rolls the atelet DaemonSet once (one node at a time, `maxUnavailable: 1`) onto the new class, and Helm deletes `ate-node-critical`. On a node without room for atelet's requests the new pod waits for capacity instead of evicting a pod. The kagent WorkerPool's worker image follows the floor to `ateom-gvisor:1.1.3`.
+- **An installation that pins `components.substrate{,-crds}.versionRange` below 1.1.3** gets no new class: those releases ignore the key, and atelet keeps preempting.
+- **Recognising it worked**: `kubectl get priorityclass ate-node-critical-non-preempting` shows `PREEMPTIONPOLICY Never`, `kubectl -n ate-system get ds atelet -o jsonpath='{.spec.template.spec.priorityClassName}'` names it, and `kubectl get priorityclass ate-node-critical` answers NotFound.
 
 ## \<current\> → \<next\> (the Substrate line at `1.1.2`: the bucket-init Job's image from gsoci)
 

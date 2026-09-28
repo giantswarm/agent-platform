@@ -359,13 +359,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.1.2 <1.2.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.1.3 <1.2.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.1.2 <1.2.0"` |  |
+| components.substrate.versionRange | string | `">=1.1.3 <1.2.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -391,7 +391,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=1.3.0 <2.0.0"` |  |
+| components.model-manager.versionRange | string | `">=1.5.0 <2.0.0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
@@ -399,7 +399,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=1.2.0 <2.0.0"` |  |
+| components.agent-manager.versionRange | string | `">=1.4.0 <2.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
@@ -414,7 +414,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.cluster-manager.chart | string | `"cluster-manager"` |  |
 | components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.cluster-manager.versionRange | string | `">=0.19.0 <1.0.0"` |  |
+| components.cluster-manager.versionRange | string | `">=0.22.0 <1.0.0"` |  |
 | components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
@@ -442,6 +442,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.mcp-kubernetes.versionRange | string | `">=1.3.0 <2.0.0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
+| components.mcp-kubernetes.omitKeys[1] | string | `"mcpServer"` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
 | components.cloudnative-pg.chart | string | `"cloudnative-pg"` |  |
 | components.cloudnative-pg.repository | string | `"oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts"` |  |
@@ -1126,6 +1127,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | model-manager.networkPolicy.enabled | bool | `false` |  |
+| model-manager.serviceMonitor.enabled | string | `"auto"` |  |
+| model-manager.serviceMonitor.interval | string | `"60s"` |  |
+| model-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | modelManager.kserve.requireApi | bool | `true` |  |
 | modelManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[0].matchName | string | `"huggingface.co"` |  |
@@ -1181,6 +1185,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | agent-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | agent-manager.networkPolicy.enabled | bool | `false` |  |
+| agent-manager.serviceMonitor.enabled | string | `"auto"` |  |
+| agent-manager.serviceMonitor.interval | string | `"60s"` |  |
+| agent-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | agentManager.route.enabled | bool | `false` |  |
 | agentManager.route.pathPrefix | string | `"/agent-manager"` |  |
 | agentManager.route.hostname | string | `""` |  |
@@ -1225,6 +1232,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
+| cluster-manager.serviceMonitor.enabled | string | `"auto"` |  |
+| cluster-manager.serviceMonitor.interval | string | `"60s"` |  |
+| cluster-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | clusterManager.flux.requireApi | bool | `false` |  |
 | clusterManager.prewarmPriorityClass.enabled | bool | `true` |  |
 | clusterManager.prewarmPriorityClass.name | string | `"agent-platform-prewarm-placeholder"` |  |
@@ -1331,6 +1341,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.atelet.nodeSelector | object | `{}` |  |
 | substrate.atelet.tolerations | list | `[]` |  |
 | substrate.atelet.affinity | object | `{}` |  |
+| substrate.atelet.priorityClass.preemptionPolicy | string | `"Never"` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
 | substrate.atelet.imageCache.pinnedImages | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
@@ -1418,7 +1429,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.imageVerification.enabled | bool | `true` |  |
 | modelServing.imageVerification.images[0] | string | `"gsoci.azurecr.io/giantswarm/*"` |  |
 | modelServing.imageVerification.attestors[0].keyless.issuer | string | `"https://oidc.circleci.com"` |  |
-| modelServing.imageVerification.attestors[0].keyless.subjectRegExp | string | `"^https://circleci\\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/[a-f0-9-]+$"` |  |
+| modelServing.imageVerification.attestors[0].keyless.subjectRegExp | string | `"^https://circleci\\.com/api/v2/projects/[a-f0-9-]+/pipeline-definitions/([a-f0-9-]+|nil)$"` |  |
 | modelServing.imageVerification.attestors[0].keyless.rekor.url | string | `"https://rekor.sigstore.dev"` |  |
 | modelServing.imageVerification.type | string | `"SigstoreBundle"` |  |
 | modelServing.imageVerification.mutateDigest | bool | `true` |  |
