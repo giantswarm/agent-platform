@@ -1556,6 +1556,8 @@ spec:
         imageCache:
           pinnedImages: []
         nodeSelector: {}
+        priorityClass:
+          preemptionPolicy: Never
         storageBackend: s3
         tolerations: []
       createNamespace: false

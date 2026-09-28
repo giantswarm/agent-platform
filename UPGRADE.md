@@ -33,6 +33,16 @@ giantswarm/agent-platform#682: the three kserve components move from `0.5.x` / `
 - **An installation that sets `kserve-runtime-configs.kserve.llmisvcConfigs.imageRegistry`** also sets `kserve.llmisvcConfigs.images.<preset>.main` for the six GPU presets at its own prefix: the pins name gsoci's `llm-d-fast/` and win over the registry rewrite.
 - **Recognising it worked**: `kubectl -n <serving namespace> get deploy -l kserve.io/component=workload -o jsonpath='{range .items[*]}{.metadata.name} {.spec.strategy.rollingUpdate}{"\n"}{end}'` prints `{"maxSurge":0,"maxUnavailable":1}` for every predictor, and its pods still run `llm-d-cuda:v0.8.0`.
 
+## \<current\> → \<next\> (the Substrate line at `1.1.3`: atelet preempts nothing)
+
+giantswarm/agent-platform#731: `components.substrate{,-crds}.versionRange` is `>=1.1.3 <1.2.0` and `substrate.atelet.priorityClass.preemptionPolicy` is `Never`. atelet moves from the PriorityClass `ate-node-critical` to `ate-node-critical-non-preempting`, with the same value and `preemptionPolicy: Never`.
+
+### Operator action
+
+- **None** for an installation on the defaults. The upgrade rolls the atelet DaemonSet once (one node at a time, `maxUnavailable: 1`) onto the new class, and Helm deletes `ate-node-critical`. On a node without room for atelet's requests the new pod waits for capacity instead of evicting a pod. The kagent WorkerPool's worker image follows the floor to `ateom-gvisor:1.1.3`.
+- **An installation that pins `components.substrate{,-crds}.versionRange` below 1.1.3** gets no new class: those releases ignore the key, and atelet keeps preempting.
+- **Recognising it worked**: `kubectl get priorityclass ate-node-critical-non-preempting` shows `PREEMPTIONPOLICY Never`, `kubectl -n ate-system get ds atelet -o jsonpath='{.spec.template.spec.priorityClassName}'` names it, and `kubectl get priorityclass ate-node-critical` answers NotFound.
+
 ## \<current\> → \<next\> (the Substrate line at `1.1.2`: the bucket-init Job's image from gsoci)
 
 giantswarm/agent-platform#580: `components.substrate{,-crds}.versionRange` is `>=1.1.2 <1.2.0` and `substrate.images.awsCli` is `gsoci.azurecr.io/giantswarm/aws-cli:2.17.0` (same digest as Docker Hub's `amazon/aws-cli:2.17.0`). From 1.1.2 on, Substrate's `rustfs-bucket-init` Job is a Helm hook (`post-install,post-upgrade`, deleted once it succeeds), so its image can change on an upgrade.
