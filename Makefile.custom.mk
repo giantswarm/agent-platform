@@ -1308,6 +1308,12 @@ verify-cluster-manager: ## Assert the cluster-manager component (giantswarm/agen
 	@python3 tests/verify-cluster-manager.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "cluster-manager component verified."
 
+.PHONY: verify-mcp-kubernetes-registration
+verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registration's three shapes (giantswarm/agent-platform#403): the family-less singleton mcp-kubernetes by default; with mcp-kubernetes.mcpServer.managementCluster a member of muster's kubernetes family as agent-platform-mcps renders one (<name>-mcp-kubernetes, the management-cluster label, spec.family {kubernetes, management_cluster}, url and auth unchanged); none with enabled false or with the component or muster off; a managementCluster that is not a DNS label fails naming the key; the meta chart forwards the block to connectivity and drops it from the mcp-kubernetes release. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-mcp-kubernetes-registration.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "mcp-kubernetes registration shapes verified."
+
 .PHONY: verify-self
 verify-self: ## Assert self-management's shapes: engine off renders nothing of it; engine on renders the self OCIRepository + suspended HelmRelease, the -6/-5/0 hooks, the identity and the admission policy (CLI day-0 only); engine on with self off (lab, hand-back) renders the -6/-5 hooks at pre-upgrade too and nothing else; the guards and knobs. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"

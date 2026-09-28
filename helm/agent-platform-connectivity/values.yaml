@@ -2976,6 +2976,18 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   # The wiring's own key: the meta chart drops it from the values forwarded to
   # the mcp-kubernetes chart (components.mcp-kubernetes.omitKeys).
   kubernetesAudience: dex-k8s-authenticator
+  # How the bundled server is registered with muster (the connectivity chart's
+  # key, dropped from the values forwarded to the mcp-kubernetes chart like
+  # kubernetesAudience). enabled: false leaves the registration to
+  # agent-platform-mcps. managementCluster, a DNS label, makes the CR a member
+  # of muster's kubernetes family, the shape every management cluster's
+  # mcp-kubernetes has: <managementCluster>-mcp-kubernetes with spec.family
+  # {name: kubernetes, instanceArg: management_cluster}, its tools
+  # x_kubernetes_<tool> with management_cluster=<managementCluster>. Empty: the
+  # family-less singleton mcp-kubernetes (x_mcp-kubernetes_<tool>).
+  mcpServer:
+    enabled: true
+    managementCluster: ""
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own

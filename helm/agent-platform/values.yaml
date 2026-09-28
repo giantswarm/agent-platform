@@ -977,11 +977,13 @@ components:  # @schema additionalProperties: true
     # tenant header (giantswarm/giantswarm#36711). The next major is the ceiling.
     versionRange: ">=1.3.0 <2.0.0"
     valuesFrom: mcp-kubernetes
-    # The connectivity chart's key, not the chart's (which validates strictly):
-    # the audience muster requests for the forwarded token, read for the
-    # MCPServer CR (templates/mcp-kubernetes/mcpserver.yaml there).
+    # The connectivity chart's keys, not the chart's (which validates strictly):
+    # the audience muster requests for the forwarded token and the shape of the
+    # registration, read for the MCPServer CR
+    # (templates/mcp-kubernetes/mcpserver.yaml there).
     omitKeys:
       - kubernetesAudience
+      - mcpServer
     enabled: false
   cloudnative-pg:  # @schema additionalProperties: true
     chart: cloudnative-pg

@@ -1669,6 +1669,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
+| mcp-kubernetes.mcpServer.enabled | bool | `true` |  |
+| mcp-kubernetes.mcpServer.managementCluster | string | `""` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |

@@ -21,16 +21,35 @@ next to the platform's own management surface (agent-manager, model-manager:
 agent-platform, stamped by their charts) and the servers an installation
 registers (no label). The portal's MCP servers page, the toolset presets and
 the docs group servers by it.
+
+mcp-kubernetes.mcpServer picks one of three shapes:
+  - enabled: false renders no CR; the registration is agent-platform-mcps'
+    (an mcpServers entry, like every other infrastructure server).
+  - managementCluster set renders a member of muster's kubernetes family,
+    exactly as agent-platform-mcps renders one: named
+    <managementCluster>-mcp-kubernetes, labelled
+    muster.giantswarm.io/management-cluster, with spec.family {name:
+    kubernetes, instanceArg: management_cluster}. Its tools are the fleet's
+    x_kubernetes_<tool>, the argument management_cluster selecting this server.
+  - otherwise the family-less singleton mcp-kubernetes (x_mcp-kubernetes_<tool>).
 */ -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "mcp-kubernetes")) (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
 {{- $mcpk := index .Values "mcp-kubernetes" | default dict }}
+{{- $reg := dig "mcpServer" dict $mcpk }}
+{{- if and (dig "enabled" true $reg) (include "agent-platform.componentEnabled" (dict "root" $ "name" "mcp-kubernetes")) (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
 {{- $oauthOn := dig "mcpKubernetes" "oauth" "enabled" false $mcpk }}
+{{- $cluster := dig "managementCluster" "" $reg }}
+{{- if and $cluster (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $cluster)) }}
+{{- fail (printf "mcp-kubernetes.mcpServer.managementCluster %q: want a DNS label (lower-case alphanumerics and '-')" $cluster) }}
+{{- end }}
 apiVersion: muster.giantswarm.io/v1alpha1
 kind: MCPServer
 metadata:
-  name: mcp-kubernetes
+  name: {{ if $cluster }}{{ $cluster }}-{{ end }}mcp-kubernetes
   namespace: {{ .Release.Namespace }}
   labels:
+    {{- with $cluster }}
+    muster.giantswarm.io/management-cluster: {{ . }}
+    {{- end }}
     muster.giantswarm.io/type: mcp-kubernetes
     agent-platform.giantswarm.io/tool-group: infrastructure
     {{- include "labels.common" . | nindent 4 }}
@@ -46,5 +65,10 @@ spec:
     requiredAudiences:
       - {{ . }}
     {{- end }}
+  {{- end }}
+  {{- if $cluster }}
+  family:
+    name: kubernetes
+    instanceArg: management_cluster
   {{- end }}
 {{- end }}
