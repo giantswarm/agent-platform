@@ -864,8 +864,10 @@ components:  # @schema additionalProperties: true
     # The floor is 1.4.0: the chart takes observability.otel, the OTLP trace
     # export global.observability.traces.otlp derives, and serviceMonitor
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
-    # (giantswarm/agent-manager#76, giantswarm/giantswarm#36711).
-    versionRange: ">=1.4.0 <2.0.0"
+    # (giantswarm/agent-manager#76, giantswarm/giantswarm#36711). 1.7.0 takes
+    # agentChart.semverFilter, which gitops.prereleases sets
+    # (giantswarm/agent-manager#86).
+    versionRange: ">=1.7.0 <2.0.0"
     valuesFrom: agent-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -4422,7 +4424,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.1.7
+      tag: 1.7.0
     dryRun: false
     githubToken:
       secretName: kagent-skills-token
