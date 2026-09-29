@@ -333,8 +333,9 @@ candidates (agent-platform.releaseTagFilter). */ -}}
 {{- end }}
 {{- if not $semver }}{{ $semver = $ownVersion }}{{ end }}
 {{- else if and $semver $g.prereleases (not $c.semverFilter) }}
-{{- $semver = include "agent-platform.admitPrereleases" (dict "range" $semver "key" (printf "components.%s.versionRange" $key)) }}
-{{- $filter = include "agent-platform.releaseTagFilter" $root }}
+{{- $widened := include "agent-platform.admitPrereleases" (dict "range" $semver "key" (printf "components.%s.versionRange" $key)) | fromJson }}
+{{- $semver = $widened.range }}
+{{- if $widened.admits }}{{ $filter = include "agent-platform.releaseTagFilter" $root }}{{ end }}
 {{- end }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1

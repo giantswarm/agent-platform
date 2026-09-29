@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """gitops.prereleases: off (default), every rendered range stays stable-only;
 on, every component range and the self-management range admit pre-releases
-and filter their tags to releases and release candidates, while the exact version of a component released with this chart and a range
-filtered by a semverFilter stay as written, and a range with no version to
-mark fails the render.
+and filter their tags to releases and release candidates. The exact version of
+a component released with this chart, an exact pin (1.2.3, =1.2.3), an
+exclusion (!=1.2.3) and a range filtered by a semverFilter stay as written; a
+range that already carries a pre-release is filtered; a range with no version
+fails the render.
 
 "Admits pre-releases" is checked the way Flux evaluates the range
 (tests/fluxsemver.py): an rc of the range's floor admits, a stable version
@@ -133,6 +135,28 @@ def main() -> None:
     filtered = refs(helm(chart, [*ON, "--set", "components.muster.semverFilter=^.*-rabc$", "--set", "components.muster.versionRange=>=5.0.0-0"]))
     if filtered.get("muster") != (">=5.0.0-0", "^.*-rabc$"):
         fail(f"muster with a semverFilter: {filtered.get('muster')!r}, want the range and the filter as written")
+
+    # An exact pin and an exclusion stay as written: `-0` would turn 1.2.3
+    # into a version that does not exist and stop != from excluding. A range
+    # of those only admits no pre-release, so it gets no filter. A range that
+    # carries a pre-release already admits them and gets the filter.
+    for written, want, filtered in [
+        ("1.2.3", "1.2.3", False),
+        ("=1.2.3", "=1.2.3", False),
+        ("==1.2.3", "==1.2.3", False),
+        ("!=1.2.3", "!=1.2.3", False),
+        (">=5.0.0-0", ">=5.0.0-0", True),
+        (">=5.0.0-rc.1", ">=5.0.0-rc.1", True),
+        ("1.2.3 || >=2.0.0 <3.0.0", "1.2.3 || >=2.0.0-0 <3.0.0-0", True),
+    ]:
+        got = refs(helm(chart, [*ON, "--set-string", f"components.muster.versionRange={written}"])).get("muster")
+        if got is None or got[0] != want or bool(got[1]) != filtered:
+            fail(f"components.muster.versionRange={written!r}: {got!r}, want {want!r} {'with' if filtered else 'without'} a filter")
+        if want == "1.2.3" and not fluxsemver.satisfies("1.2.3", got[0]):
+            fail(f"the exact pin {got[0]!r} does not admit 1.2.3")
+    self_pin = refs(helm(chart, [*ON, "--set-string", "gitops.self.versionRange=1.1.35"])).get(RELEASE)
+    if self_pin != ("1.1.35", ""):
+        fail(f"gitops.self.versionRange=1.1.35: {self_pin!r}, want the pin as written and no filter")
 
     # A range with no version to mark would stay stable-only: refused.
     helm(chart, [*ON, "--set", "components.muster.versionRange=*"], expect_fail="has no version to admit pre-releases for")
