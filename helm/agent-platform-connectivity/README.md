@@ -1114,6 +1114,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.output | string | `"10"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.cacheRead | string | `"0.2"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.cacheWrite | string | `"2.5"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.input | string | `"2"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.output | string | `"10"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.cacheRead | string | `"0.2"` |  |
+| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.cacheWrite | string | `"2.5"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.input | string | `"10"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.output | string | `"50"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.cacheRead | string | `"0.25"` |  |
