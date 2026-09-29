@@ -114,8 +114,11 @@ gitops:
   # of a range that carries no pre-release gets `-0` appended (`>=5.31.4
   # <6.0.0` renders `>=5.31.4-0 <6.0.0-0`, `0.x` renders `0.x-0`), which makes
   # Flux follow a component's release candidates as well as its stable
-  # releases. A component released with this chart keeps its exact version,
-  # and a component or self range with a semverFilter is left as written. For
+  # releases. Each widened range also gets a semverFilter that admits only
+  # X.Y.Z and X.Y.Z-rc.N tags: the branch builds pushed to the same
+  # repositories carry a pre-release as well. A component released with this
+  # chart keeps its exact version, and a component or self range with its own
+  # semverFilter is left as written. For
   # the installations that run release candidates before they are promoted;
   # off (default) follows stable releases only.
   prereleases: false

@@ -314,8 +314,10 @@ that CRD either, so the dependency is moot. */ -}}
 {{- /* The version constraint: the entry's range, or — for a chart released off
 this chart's tag (see releasedWithChart above) — this chart's exact version.
 gitops.prereleases widens a range (never the exact version, nor a dev channel's
-filtered one) to admit pre-releases. */ -}}
+filtered one) to admit pre-releases, and filters the tags to releases and release
+candidates (agent-platform.releaseTagFilter). */ -}}
 {{- $semver := $c.versionRange }}
+{{- $filter := $c.semverFilter }}
 {{- if $c.releasedWithChart }}
 {{- $ownVersion := include "agent-platform.chartVersion" $root }}
 {{- $selfRepo := trimSuffix "/" (($g.self | default dict).repository | default "") }}
@@ -325,6 +327,7 @@ filtered one) to admit pre-releases. */ -}}
 {{- if not $semver }}{{ $semver = $ownVersion }}{{ end }}
 {{- else if and $semver $g.prereleases (not $c.semverFilter) }}
 {{- $semver = include "agent-platform.admitPrereleases" (dict "range" $semver "key" (printf "components.%s.versionRange" $key)) }}
+{{- $filter = include "agent-platform.releaseTagFilter" $root }}
 {{- end }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -343,7 +346,7 @@ spec:
   {{- include "agent-platform.chartLayerSelector" $root | nindent 2 }}
   ref:
     semver: {{ required (printf "components.%s.versionRange is required" $key) $semver | quote }}
-    {{- with $c.semverFilter }}
+    {{- with $filter }}
     semverFilter: {{ . | quote }}
     {{- end }}
 ---

@@ -2296,6 +2296,29 @@ the controller applies. Build metadata (helm-controller renders the chart as
 {{- end -}}
 
 {{/*
+The self-management OCIRepository's tag filter: gitops.self.semverFilter, else
+the release tag filter where gitops.prereleases widens the self range.
+*/}}
+{{- define "agent-platform.self.semverFilter" -}}
+{{- if .Values.gitops.self.semverFilter -}}
+{{- .Values.gitops.self.semverFilter -}}
+{{- else if .Values.gitops.prereleases -}}
+{{- include "agent-platform.releaseTagFilter" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The tags a range widened by gitops.prereleases may select: stable releases and
+release candidates (X.Y.Z, X.Y.Z-rc.N). The branch builds pushed to the same
+repositories (gitsemver's dev shape X.Y.Z-r<hash>t<time>h<sha>, and the older
+X.Y.Z-dev.<branch>...) carry a pre-release too, and a `-0` range alone would
+select them.
+*/}}
+{{- define "agent-platform.releaseTagFilter" -}}
+^v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$
+{{- end -}}
+
+{{/*
 A semver range that also admits pre-release versions (gitops.prereleases):
 every version of the range that carries no pre-release gets `-0`, so
 ">=5.31.4 <6.0.0" is ">=5.31.4-0 <6.0.0-0" and "0.x" is "0.x-0". Flux

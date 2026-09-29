@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gitops.prereleases: off (default), every rendered range stays stable-only;
-on, every component range and the self-management range admit pre-releases,
-while the exact version of a component released with this chart and a range
+on, every component range and the self-management range admit pre-releases
+and filter their tags to releases and release candidates, while the exact version of a component released with this chart and a range
 filtered by a semverFilter stay as written, and a range with no version to
 mark fails the render.
 
@@ -43,17 +43,29 @@ def helm(chart: str, flags: list[str], expect_fail: str | None = None) -> str:
     return r.stdout
 
 
-def ranges(manifest: str) -> dict[str, str]:
-    """OCIRepository name -> spec.ref.semver."""
+def refs(manifest: str) -> dict[str, tuple[str, str]]:
+    """OCIRepository name -> (spec.ref.semver, spec.ref.semverFilter or "")."""
     out = {}
     for d in manifest.split("\n---\n"):
         if not re.search(r"^kind: OCIRepository$", d, re.M):
             continue
         name = re.search(r"^  name: (\S+)$", d, re.M)
         semver = re.search(r'^    semver: "([^"]*)"$', d, re.M)
+        flt = re.search(r'^    semverFilter: "([^"]*)"$', d, re.M)
         if name and semver:
-            out[name.group(1)] = semver.group(1)
+            out[name.group(1)] = (semver.group(1), flt.group(1).replace("\\\\", "\\") if flt else "")
     return out
+
+
+def ranges(manifest: str) -> dict[str, str]:
+    """OCIRepository name -> spec.ref.semver."""
+    return {n: r for n, (r, _) in refs(manifest).items()}
+
+
+# Tags the registry holds next to the releases: a release candidate the filter
+# lets through, and the branch builds of both dev shapes it must keep out.
+TAGS_ADMITTED = ("5.31.4", "5.32.0-rc.1", "v5.32.0-rc.12")
+TAGS_REFUSED = ("5.31.5-r961c88f6t20260929072057hee3d339", "5.9.9-dev.renovate-gi--mcp-go-1-x.2026-09-05.12-05-28.h6e32395")
 
 
 def floor_rc(constraint: str) -> str | None:
@@ -95,14 +107,32 @@ def main() -> None:
         if fluxsemver.satisfies(stable, constraint) and not fluxsemver.satisfies(stable, on[name]):
             fail(f"{name}: on, {on[name]!r} no longer admits the stable {stable}")
 
+    # Every widened range filters its tags to releases and release candidates:
+    # a -0 range alone also selects the branch builds pushed to the same
+    # repository. Off, no filter renders.
+    for name, (constraint, flt) in refs(helm(chart, ON)).items():
+        if name in exact:
+            continue
+        if not flt:
+            fail(f"{name}: {constraint!r} renders no semverFilter; the branch builds of the repository would match it")
+        for tag in TAGS_ADMITTED:
+            if not re.search(flt, tag):
+                fail(f"{name}: semverFilter {flt!r} refuses the release tag {tag}")
+        for tag in TAGS_REFUSED:
+            if re.search(flt, tag):
+                fail(f"{name}: semverFilter {flt!r} admits the branch build {tag}")
+    for name, (_, flt) in refs(helm(chart, [])).items():
+        if flt:
+            fail(f"{name}: semverFilter {flt!r} renders with gitops.prereleases off")
+
     # The self-management range is one of them (ci-values renders the engine).
     if RELEASE not in off:
         fail(f"no self-management OCIRepository {RELEASE} rendered; the test no longer covers its range")
 
     # A semverFilter selects a dev channel with its own range: left as written.
-    filtered = ranges(helm(chart, [*ON, "--set", "components.muster.semverFilter=^.*-rabc$", "--set", "components.muster.versionRange=>=5.0.0-0"]))
-    if filtered.get("muster") != ">=5.0.0-0":
-        fail(f"muster with a semverFilter: {filtered.get('muster')!r}, want the range as written")
+    filtered = refs(helm(chart, [*ON, "--set", "components.muster.semverFilter=^.*-rabc$", "--set", "components.muster.versionRange=>=5.0.0-0"]))
+    if filtered.get("muster") != (">=5.0.0-0", "^.*-rabc$"):
+        fail(f"muster with a semverFilter: {filtered.get('muster')!r}, want the range and the filter as written")
 
     # A range with no version to mark would stay stable-only: refused.
     helm(chart, [*ON, "--set", "components.muster.versionRange=*"], expect_fail="has no version to admit pre-releases for")

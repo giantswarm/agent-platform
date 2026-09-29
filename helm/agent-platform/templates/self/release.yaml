@@ -47,7 +47,7 @@ spec:
   {{- include "agent-platform.chartLayerSelector" . | nindent 2 }}
   ref:
     semver: {{ include "agent-platform.self.versionRange" . | quote }}
-    {{- with .Values.gitops.self.semverFilter }}
+    {{- with include "agent-platform.self.semverFilter" . }}
     semverFilter: {{ . | quote }}
     {{- end }}
 ---
