@@ -23,7 +23,6 @@ spec:
     - group: gateway.networking.k8s.io
       kind: GRPCRoute
       name: kagent-controller-public
-      namespace: {{ .Release.Namespace }}
   timeout:
     http:
       requestTimeout: {{ .Values.ingress.backendTrafficPolicy.timeout | quote }}

@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (`BackendTrafficPolicy` targets without a namespace)
+
+giantswarm/agent-platform#377: the connectivity chart's `BackendTrafficPolicy` objects no longer render `spec.targetRefs[].namespace`, which Envoy Gateway v1.1 and later do not declare. A server-side apply (helm-controller) refused the field and failed the connectivity upgrade.
+
+### Operator action
+
+- **None.** Where the upgrade applied, the API server had pruned the field, and the stored policies stay as they are.
+- **An installation that set `ingress.backendTrafficPolicy.enabled: false` or `kagent.uiRoute.backendTrafficPolicy.enabled: false` to get the upgrade through** turns it back on. Without the policy Envoy's default route timeout cuts A2A streaming turns on `kagent-controller-public`, and the gateway's error pages swallow oauth2-proxy's sign-in redirect on the kagent UI.
+- **Recognising it worked**: `kubectl get backendtrafficpolicies -A -o jsonpath='{range .items[*]}{.metadata.name} {.spec.targetRefs}{"\n"}{end}'` lists the chart's policies, none with a `namespace`, and the connectivity HelmRelease is `Ready`.
+
 ## \<current\> → \<next\> (the Flux Operator CRDs upgrade with the chart)
 
 giantswarm/agent-platform#728: with the bundled engine, a pre-install/pre-upgrade hook Job `<release>-flux-operator-crds` (weight -9, the hook identity, `gitops.hooks.image`) server-side applies the four `fluxcd.controlplane.io` CRDs from a hook ConfigMap that carries the subchart's `crds/flux-operator.yaml`. Until now they stayed as the first install applied them.

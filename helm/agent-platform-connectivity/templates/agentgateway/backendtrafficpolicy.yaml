@@ -20,7 +20,6 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: {{ $fullName }}
-      namespace: {{ .Release.Namespace }}
   timeout:
     http:
       requestTimeout: {{ .Values.ingress.backendTrafficPolicy.timeout | quote }}

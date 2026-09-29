@@ -1872,6 +1872,10 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@if grep -q 'kagent-controller-public' /tmp/vkr-edge.out; then echo "FAIL: the public GRPCRoute or its BackendTrafficPolicy renders with the edge as data plane"; exit 1; fi
 	@grep -A3 '^kind: AgentgatewayPolicy$$' /tmp/vkr-edge.out | grep -q 'name: kagent-controller-jwt' || { echo "FAIL: the JWT policy is missing in edge mode"; exit 1; }
 	@echo "ok: public-hop timeout policy + edge mode"
+	@echo "--> every BackendTrafficPolicy targets its route locally: no targetRefs[].namespace (Envoy Gateway >= 1.1 declares none; a server-side apply refuses it, #377)"
+	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true --set kagent.uiRoute.enabled=true --set kagent.oauth2-proxy.enabled=false >/tmp/vkr-btps.out 2>&1 || { cat /tmp/vkr-btps.out; exit 1; }
+	@python3 -c 'import re, sys; btps=[d for d in open("/tmp/vkr-btps.out").read().split("\n---\n") if "\nkind: BackendTrafficPolicy\n" in d]; bad=[re.search(r"\n  name: (\S+)", d).group(1) for d in btps if re.search(r"\n  targetRefs:\n(?:    .*\n)*?      namespace:", d + "\n")]; sys.exit("FAIL: %d BackendTrafficPolicies rendered, want 4 (agentgateway, muster, kagent-controller-public, the kagent UI)" % len(btps)) if len(btps) != 4 else sys.exit("FAIL: targetRefs[].namespace on " + ", ".join(bad)) if bad else None'
+	@echo "ok: local targetRefs"
 	@echo "--> the off switch: no policy, no JWKS backend, the route stays"
 	@helm template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controllerRoute.jwtAuthentication.enabled=false --set gateway.jwksEgress.enabled=false >/tmp/vkr-off.out 2>&1 || { cat /tmp/vkr-off.out; exit 1; }
 	@if grep -qE 'kagent-controller-jwt|kagent-controller-jwks|name: x-user-id' /tmp/vkr-off.out; then echo "FAIL: JWT objects render with jwtAuthentication.enabled=false"; exit 1; fi
