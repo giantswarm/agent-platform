@@ -2306,6 +2306,26 @@ gitops.prereleases widened it to admit pre-releases, as JSON {"range",
 {{- end -}}
 
 {{/*
+gitops.prereleases on the agent chart line agent-manager composes into every
+agent's OCIRepository (agent-manager.agentChart): its semver admits
+pre-releases and its semverFilter is the release tag filter, as for the
+components' ranges. A block with a semverFilter of its own is left as written.
+agent-manager reads agentChart.semverFilter since giantswarm/agent-manager#86.
+*/}}
+{{- define "agent-platform.prereleases.apply" -}}
+{{- if .root.Values.gitops.prereleases -}}
+{{- $chart := dig "agentChart" nil (index .values "agent-manager" | default dict) -}}
+{{- if and (kindIs "map" $chart) $chart.semver (not $chart.semverFilter) -}}
+{{- $widened := include "agent-platform.admitPrereleases" (dict "range" (toString $chart.semver) "key" "agent-manager.agentChart.semver") | fromJson -}}
+{{- $_ := set $chart "semver" $widened.range -}}
+{{- if $widened.admits -}}
+{{- $_ := set $chart "semverFilter" (include "agent-platform.releaseTagFilter" .root) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The self-management OCIRepository's tag filter: gitops.self.semverFilter, else
 the release tag filter where gitops.prereleases widens the self range.
 */}}

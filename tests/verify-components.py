@@ -101,7 +101,7 @@ LINE = {
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, ">=1.4.0 <2.0.0", ["muster", "kagent"]),
+    "agent-manager": (GSOCI, ">=1.7.0 <2.0.0", ["muster", "kagent"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).

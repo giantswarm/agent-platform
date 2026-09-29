@@ -273,6 +273,10 @@ from muster's OAuth server block, the platform's one login
 (giantswarm/agent-platform#484), on the same copy, so the connectivity release
 guards and wires what the manager releases run with. */ -}}
 {{- include "agent-platform.identity.apply" (dict "values" $shaped) -}}
+{{- /* gitops.prereleases widens the agent chart line agent-manager composes for
+every agent too, on the same copy, so the agent-manager release and the
+connectivity chart's migrate Job read the same range and filter. */ -}}
+{{- include "agent-platform.prereleases.apply" (dict "root" $root "values" $shaped) -}}
 {{- range $key, $c := .Values.components }}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
