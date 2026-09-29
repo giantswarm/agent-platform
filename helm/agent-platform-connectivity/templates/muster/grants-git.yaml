@@ -1,0 +1,176 @@
+{{- /*
+Git grants (muster.grants.<server>.git): the grant of MCPServer <server> also
+serves git at <host>. The claude harness's forwarder sends the sandbox's git
+requests for <host> to /route/<host>/ on the Gateway with the turn caller's
+platform bearer; the backend exchanges it at muster's token broker for the
+person's grant and presents it to <host> as git wants it. Three objects per
+grant plus the broker client's Secret, rendered once.
+*/}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
+{{- $root := . }}
+{{- $clientID := "agentgateway-grants" }}
+{{- $secretName := "muster-broker-agentgateway" }}
+{{- $secretRendered := false }}
+{{- range $server, $grant := (dig "grants" dict (.Values.muster | default dict)) }}
+{{- $git := dig "git" dict $grant }}
+{{- if $git.enabled }}
+{{- $host := required (printf "muster.grants.%s.git.host is required" $server) $git.host }}
+{{- $push := ternary true $git.push (kindIs "invalid" $git.push) }}
+{{- $name := printf "grant-%s-git" $server }}
+{{- if not $secretRendered }}
+{{- $secretRendered = true }}
+{{- /* The broker client's secret: generated once and kept — lookup reads the
+live Secret on upgrade, so a rotation is a deliberate delete. The Gateway
+(clientAuth.secretRef) and muster (brokerClients, set by the meta chart) both
+read it. */}}
+{{- $existing := lookup "v1" "Secret" $root.Release.Namespace $secretName }}
+{{- $secret := "" }}
+{{- if and $existing $existing.data (index $existing.data "client-secret") }}
+{{- $secret = index $existing.data "client-secret" | b64dec }}
+{{- else }}
+{{- $secret = randAlphaNum 48 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $root | nindent 4 }}
+  annotations:
+    # The broker client's credential: kept across an uninstall, so a reinstall
+    # keeps the client muster seeded from it.
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  client-id: {{ $clientID | quote }}
+  client-secret: {{ $secret | quote }}
+{{- end }}
+---
+# The git host as a backend that acts on the person's grant: the platform
+# bearer the harness forwarder attached is the subject token of an RFC 8693
+# exchange at muster (clientAuth: the broker client above), and the token
+# muster answers — the person's own grant at the MCPServer's issuer — becomes
+# the git credential (Basic x-access-token:<token>; github.com accepts nothing
+# else). The exchange cache is off: a person who signs out is refused on the
+# next request, not when a cached token expires.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $root | nindent 4 }}
+spec:
+  policies:
+    auth:
+      oauthTokenExchange:
+        grantType: TokenExchange
+        backendRef:
+          name: {{ include "agent-platform.musterFullname" $root }}
+          port: {{ include "agent-platform.musterServicePort" $root }}
+        path: /oauth/token
+        clientAuth:
+          clientId: {{ $clientID | quote }}
+          method: ClientSecretBasic
+          secretRef:
+            name: {{ $secretName }}
+            key: client-secret
+        subjectToken:
+          source:
+            header:
+              name: Authorization
+              prefix: "Bearer "
+          tokenType: urn:ietf:params:oauth:token-type:id_token
+        audiences:
+          - {{ $server | quote }}
+        requestedTokenType: AccessToken
+        location:
+          header:
+            name: Authorization
+            prefix: "Bearer "
+        cache:
+          inMemory:
+            maxEntries: 0
+    tls:
+      sni: {{ $host | quote }}
+    transformation:
+      request:
+        set:
+          - name: authorization
+            value: "'Basic ' + base64.encode('x-access-token:' + request.headers['authorization'].stripPrefix('Bearer '))"
+  static:
+    host: {{ $host | quote }}
+    port: 443
+---
+# /route/<host>/... on the Gateway's plaintext listener (the in-cluster hop the
+# harness forwarder dials; the path is the forwarder's contract), rewritten to
+# the host. No request timeout: a clone streams for as long as it takes.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $root | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $root.Values.gateway.name }}
+      namespace: {{ $root.Release.Namespace }}
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ printf "/route/%s/" $host | quote }}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: {{ $host | quote }}
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: {{ $name }}
+      timeouts:
+        request: 0s
+---
+# Only git's endpoints pass, so the grant is usable through the route for git
+# and nothing else{{ if not $push }}; git-receive-pack is left out, so the route cannot push{{ end }}.
+# A failed exchange — a person with no grant, who must sign in to the
+# MCPServer with core_auth_login — is the Gateway's own 400; the response
+# transformation turns it into 401 with a WWW-Authenticate realm naming the
+# remedy, which git shows as an authentication failure the agent can act on.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $root | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ $name }}
+  traffic:
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          - {{ ternary "request.path.matches('/(info/refs|git-upload-pack|git-receive-pack)$')" "request.path.matches('/(info/refs|git-upload-pack)$')" $push | quote }}
+    transformation:
+      response:
+        set:
+          - name: ":status"
+            value: "response.code == 400 ? '401' : string(response.code)"
+          - name: www-authenticate
+            value: {{ printf "response.code == 400 ? 'Basic realm=\"sign in first: call core_auth_login with server %s at muster\"' : ''" $server | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
