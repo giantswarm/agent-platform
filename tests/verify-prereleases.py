@@ -70,6 +70,23 @@ TAGS_ADMITTED = ("5.31.4", "5.32.0-rc.1", "v5.32.0-rc.12")
 TAGS_REFUSED = ("5.31.5-r961c88f6t20260929072057hee3d339", "5.9.9-dev.renovate-gi--mcp-go-1-x.2026-09-05.12-05-28.h6e32395")
 
 
+def agent_charts(manifest: str) -> dict[str, tuple[str, str]]:
+    """HelmRelease name -> (agentChart.semver, agentChart.semverFilter or "")
+    for every release whose values carry agent-manager's agentChart block."""
+    out = {}
+    for d in manifest.split("\n---\n"):
+        if not re.search(r"^kind: HelmRelease$", d, re.M):
+            continue
+        name = re.search(r"^  name: (\S+)$", d, re.M)
+        block = re.search(r"^( +)agentChart:\n((?:\1 .*\n)+)", d + "\n", re.M)
+        if not (name and block):
+            continue
+        fields = dict(re.findall(r"^ +(semver|semverFilter): (.*)$", block.group(2), re.M))
+        unquote = lambda v: v[1:-1] if len(v) > 1 and v[0] == v[-1] and v[0] in "'\"" else v
+        out[name.group(1)] = (unquote(fields.get("semver", "")), unquote(fields.get("semverFilter", "")))
+    return out
+
+
 def floor_rc(constraint: str) -> str | None:
     """An rc of the range's first version: `>=5.31.4-0 <6.0.0-0` -> 5.31.4-rc.1,
     `0.x-0` -> 0.0.0-rc.1."""
@@ -136,6 +153,28 @@ def main() -> None:
     if filtered.get("muster") != (">=5.0.0-0", "^.*-rabc$"):
         fail(f"muster with a semverFilter: {filtered.get('muster')!r}, want the range and the filter as written")
 
+    # The agent chart line agent-manager composes for every agent, in the
+    # agent-manager release and in the connectivity release (its migrate Job
+    # reads the same block): widened and filtered on, as written off.
+    on_chart = agent_charts(helm(chart, ON))
+    off_chart = agent_charts(helm(chart, []))
+    if not on_chart or on_chart.keys() != off_chart.keys():
+        fail(f"agent-manager.agentChart renders in {sorted(off_chart)} off and {sorted(on_chart)} on")
+    for release, (semver, flt) in off_chart.items():
+        if flt or "-" in semver:
+            fail(f"{release}: agentChart {semver!r} / {flt!r} with gitops.prereleases off")
+        on_semver, on_flt = on_chart[release]
+        rc = floor_rc(semver)
+        if not fluxsemver.satisfies(rc, on_semver):
+            fail(f"{release}: agentChart.semver {on_semver!r} does not admit {rc}")
+        if not on_flt or any(re.search(on_flt, t) for t in TAGS_REFUSED) or not all(re.search(on_flt, t) for t in TAGS_ADMITTED):
+            fail(f"{release}: agentChart.semverFilter {on_flt!r} is not the release tag filter")
+    own = agent_charts(helm(chart, [*ON, "--set", "agent-manager.agentChart.semver=1.x", "--set", "agent-manager.agentChart.semverFilter=^1[.]x$"]))
+    if set(own.values()) != {("1.x", "^1[.]x$")}:
+        fail(f"an agentChart with its own semverFilter: {own}, want it as written")
+    pinned = agent_charts(helm(chart, [*ON, "--set-string", "agent-manager.agentChart.semver=1.5.0"]))
+    if set(pinned.values()) != {("1.5.0", "")}:
+        fail(f"an agentChart pinned to 1.5.0: {pinned}, want the pin as written and no filter")
     # An exact pin and an exclusion stay as written: `-0` would turn 1.2.3
     # into a version that does not exist and stop != from excluding. A range
     # of those only admits no pre-release, so it gets no filter. A range that

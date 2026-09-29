@@ -3395,6 +3395,9 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if grep -q 'AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' /tmp/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES renders without gitopsNamespaces"; exit 1; fi
 	@grep -A1 'name: AGENT_HARNESS_NAME' /tmp/vmig-job.out | grep -q 'value: kagent' || { echo "FAIL: AGENT_HARNESS_NAME is not the platform Harness"; exit 1; }
 	@grep -A1 'name: AGENT_CHART_OCI_URL' /tmp/vmig-job.out | grep -q 'oci://gsoci.azurecr.io/charts/giantswarm/agent' || { echo "FAIL: AGENT_CHART_OCI_URL does not follow agent-manager.agentChart.ociUrl"; exit 1; }
+	@if grep -q 'AGENT_CHART_SEMVER_FILTER' /tmp/vmig-job.out; then echo "FAIL: AGENT_CHART_SEMVER_FILTER renders without agent-manager.agentChart.semverFilter"; exit 1; fi
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set-string 'agent-manager.agentChart.semverFilter=^[0-9]+[.][0-9]+[.][0-9]+(-rc[.][0-9]+)?$$' >/tmp/vmig-filter.out 2>&1 || { cat /tmp/vmig-filter.out; exit 1; }
+	@grep -A1 'name: AGENT_CHART_SEMVER_FILTER' /tmp/vmig-filter.out | grep -qF 'value: ^[0-9]+[.][0-9]+[.][0-9]+(-rc[.][0-9]+)?$$' || { echo "FAIL: AGENT_CHART_SEMVER_FILTER does not follow agent-manager.agentChart.semverFilter"; grep -A1 AGENT_CHART_SEMVER /tmp/vmig-filter.out; exit 1; }
 	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'name: kagent-skills-token' || { echo "FAIL: GITHUB_TOKEN does not read the default token Secret"; exit 1; }
 	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'key: token' || { echo "FAIL: GITHUB_TOKEN does not read the key token"; exit 1; }
 	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'optional: true' || { echo "FAIL: the token Secret is not optional"; exit 1; }

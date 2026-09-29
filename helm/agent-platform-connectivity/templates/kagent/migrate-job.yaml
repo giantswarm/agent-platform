@@ -71,6 +71,9 @@ release once the last installation is cut over.
 {{- end }}
 {{- $env = append $env (dict "name" "AGENT_CHART_OCI_URL" "value" (dig "agentChart" "ociUrl" "oci://gsoci.azurecr.io/charts/giantswarm/agent" $am)) }}
 {{- $env = append $env (dict "name" "AGENT_CHART_SEMVER" "value" (dig "agentChart" "semver" "1.x" $am | toString)) }}
+{{- with (dig "agentChart" "semverFilter" "" $am) }}
+{{- $env = append $env (dict "name" "AGENT_CHART_SEMVER_FILTER" "value" .) }}
+{{- end }}
 {{- with $m.gitopsNamespaces }}
 {{- /* The namespaces the GitOps-owned releases are read from (the Roles of
 migrate-rbac.yaml grant exactly that read there). */ -}}
