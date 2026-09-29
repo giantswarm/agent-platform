@@ -1295,6 +1295,13 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
 | kagent.controller.vpa.maxAllowed.memory | string | `"1280Mi"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
+| kagent.claudeHarness.create | bool | `false` |  |
+| kagent.claudeHarness.modelConfig.create | bool | `true` |  |
+| kagent.claudeHarness.modelConfig.name | string | `"claude-code"` |  |
+| kagent.claudeHarness.modelConfig.displayName | string | `"Claude Code"` |  |
+| kagent.claudeHarness.modelConfig.model | string | `"claude-sonnet-4-6"` |  |
+| kagent.claudeHarness.modelConfig.apiKeySecret | string | `"kagent-anthropic"` |  |
+| kagent.claudeHarness.modelConfig.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.substrateWorkerPool.podDisruptionBudget.enabled | bool | `true` |  |
 | kagent.substrateWorkerPool.podDisruptionBudget.minAvailable | string | `nil` |  |

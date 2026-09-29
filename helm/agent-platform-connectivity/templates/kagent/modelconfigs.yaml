@@ -1,8 +1,17 @@
-{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.modelConfigs }}
+{{- $entries := .Values.kagent.modelConfigs | default list }}
+{{- /* The Claude Harness's ModelConfig (kagent.claudeHarness.modelConfig) joins the
+catalog while the kagent release renders the Harness (kagent.claudeHarness.create):
+Anthropic, prompt caching off. */}}
+{{- $claude := .Values.kagent.claudeHarness | default dict }}
+{{- if and $claude.create (dig "modelConfig" "create" false $claude) }}
+{{- $mc := $claude.modelConfig }}
+{{- $entries = append $entries (dict "name" $mc.name "displayName" $mc.displayName "provider" "Anthropic" "model" $mc.model "apiKeySecret" $mc.apiKeySecret "apiKeySecretKey" $mc.apiKeySecretKey "promptCaching" false) }}
+{{- end }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) $entries }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $routed := include "agent-platform.llmRouting" $ }}
 {{- $listener := include "agent-platform.llmBaseUrl" $ }}
-{{- range .Values.kagent.modelConfigs }}
+{{- range $entries }}
 {{- $name := required "kagent.modelConfigs[].name is required" .name }}
 {{- /* The CRD's enum, checked at render time: the API server refuses any other
 spelling at admission, after the render has said nothing. */}}
@@ -64,6 +73,8 @@ spec:
   {{- $promptCaching := .promptCaching }}
   {{- if kindIs "invalid" $promptCaching }}{{ $promptCaching = $inherit.promptCaching }}{{ end }}
   {{- $cacheTTL := .cacheTTL | default $inherit.cacheTTL }}
+  {{- /* An entry that turns caching off inherits no TTL. */}}
+  {{- if and (not (kindIs "invalid" $promptCaching)) (not $promptCaching) }}{{ $cacheTTL = .cacheTTL }}{{ end }}
   {{- if and $cacheTTL (not (has (toString $cacheTTL) (list "5m" "1h"))) }}
   {{- fail (printf "kagent.modelConfigs[].cacheTTL %q on %q is not one of the CRD's values 5m, 1h" (toString $cacheTTL) .name) }}
   {{- end }}

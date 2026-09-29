@@ -139,6 +139,9 @@ overwrite would hide a values file that still spells the old key.
     as for klaus-gateway: the valkey block's own values win.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation);
+    claudeHarness.snapshotLocation, while the Claude Harness is on and names
+    none, as the platform Harness's location with the `claude` prefix (a set
+    value stands);
     substrateWorkerPool.workerImage from the Substrate release THIS chart pins
     (agent-platform.substrate.workerImage: the substrate block's image.registry
     and image.repository, ateom-gvisor, the floor of components.substrate.versionRange) — never the
@@ -234,6 +237,14 @@ runtime-registration contract there. */ -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
+{{- end -}}
+{{- if eq .name "kagent" -}}
+{{- $claude := dig "claudeHarness" dict (.root.Values.kagent | default dict) -}}
+{{- /* The platform location is guarded above: components.yaml fails the render
+without one while kagent is on. */ -}}
+{{- if and $claude.create (not $claude.snapshotLocation) -}}
+{{- $_ := set $derived "claudeHarness" (dict "snapshotLocation" (printf "%s/claude" (trimSuffix "/" (include "agent-platform.kagent.snapshotLocation" .root)))) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "kagent" -}}
 {{- /* The worker image follows the chart's Substrate pin, not the kagent build's

@@ -615,6 +615,10 @@ components:  # @schema additionalProperties: true
     # namespaceOverride are upstream keys the connectivity chart also reads, so
     # they are forwarded.
     omitKeys:
+      # The Claude Harness's ModelConfig is the connectivity chart's object
+      # (kagent.claudeHarness.modelConfig); the rest of the block is the kagent
+      # chart's Harness.
+      - claudeHarness.modelConfig
       - controllerRoute
       # The controller's VerticalPodAutoscaler is the connectivity chart's
       # object (kagent.controller.vpa); the rest of the controller block is
@@ -645,6 +649,7 @@ components:  # @schema additionalProperties: true
     omitEmptyKeys:
       - substrateWorkerPool.workerImage
       - harness.image
+      - claudeHarness.image
     enabled: false
   kagent-crds:  # @schema additionalProperties: true
     chart: kagent-crds
@@ -2530,22 +2535,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       ateApiEndpoint: dns:///api.ate-system.svc:443
       atenetRouterURL: http://atenet-router.ate-system.svc:80
-      # INERT on kagent API v2 — not a knob. The kagent chart renders it as the
-      # controller's SUBSTRATE_DEFAULT_WORKERPOOL_NAME / _NAMESPACE env, and
-      # nothing in the line reads them: every ActorTemplate is pinned to the
-      # pool of the Harness that admitted it (the Harness's workerPoolRef,
-      # kagent.harness), which follows substrateWorkerPool.name below. Kept in
-      # step with that name so the env is at least not misleading
-      # (giantswarm/agent-platform#472).
-      defaultWorkerPool:
-        name: kagent-default
     auth:
       # Default on GS clusters. trusted-proxy reads Authorization: Bearer JWT and
       # decodes claims WITHOUT signature verification — it relies on a front proxy
       # having already validated the JWT. That boundary is agentgateway (which
       # validates the JWT) for the controllerRoute path, and the netpols restrict
       # controller ingress to agentgateway + the release/kagent namespaces, so the
-      # controller is never directly reachable. Use "unsecure" only for local dev
+      # controller is never directly reachable. Use "insecure" only for local dev
       # without any front proxy.
       mode: trusted-proxy
       # email, not sub: dex subs are opaque connector-prefixed identifiers
@@ -3046,16 +3042,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # image plus the Substrate policy (the WorkerPool above, a snapshot
   # location). The kagent chart renders ONE platform Harness, `kagent`, in the
   # kagent namespace from this block (harness.create) with its own Go ADK
-  # image at the digest it was published with (controller.agentImage.digest);
-  # the Generic agent chart 1.x labels every AgentTemplate
-  # agent-platform.giantswarm.io/harness: kagent to be admitted by it. Through
-  # 4.7.19 the connectivity chart rendered this object; 4.8.0 handed it to the
-  # kagent release in place (UPGRADE.md). The Harness carries no credential, by
-  # design: a private skill or plugin repository's credential is per source on
-  # the AgentTemplate (skills[].source.git.credentialRef, a Secret next to the
-  # template), so a missing Secret fails only the templates that name it and
-  # the token travels only with their requests (README "Private skill
-  # repositories").
+  # image at the digest it was published with (controller.agentImage.digest).
+  # An Agent names it by spec.harnessRef (the Generic agent chart renders
+  # harnessRef.name: kagent); there is no admission label or selector. The
+  # Harness carries no credential, by design: a private skill or plugin
+  # repository's credential is per source on the AgentTemplate
+  # (skills[].source.git.credentialRef, a Secret next to the template), so a
+  # missing Secret fails only the templates that name it and the token travels
+  # only with their requests (README "Private skill repositories").
   harness:
     create: true
     # An OVERRIDE of the runtime image, BY DIGEST (<repository>@sha256:<64 hex>;
@@ -3231,23 +3225,63 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         value: "true"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: auto
-    # The admission contract: a template is admitted by the ONE label the
-    # Generic agent chart 1.x stamps (the value is the Harness's name). Helm
-    # merges maps on coalesce, so the kagent chart's own default key
-    # (kagent.dev/harness: kagent) would join this one and a template would
-    # need both labels. The empty value removes it: the line's Harness
-    # template drops every selector label whose value is empty.
-    # Not a null — a null deletes the key on coalesce only while it reaches
-    # the chart, and the JSON merge patch that updates a kagent HelmRelease
-    # which pre-existed the cut-over removes a null key instead of storing it,
-    # so the chart default came back and the Harness admitted no template
-    # (giantswarm/agent-platform#418). An empty string survives create and
-    # patch alike. Keep the key: without it the selector requires both labels.
-    allowedAgentTemplates:
-      selector:
-        matchLabels:
-          agent-platform.giantswarm.io/harness: kagent
-          kagent.dev/harness: ""
+
+  # --- The Claude Harness (the kagent chart's claudeHarness.* keys; off by default) ---
+  # A second Harness, `claude`, in the kagent namespace: the `claude` runtime
+  # adapter (Harness.spec.claude) runs Claude Code as the agent, on the
+  # WorkerPool of the platform Harness (the chart defaults workerPoolRef to
+  # substrateWorkerPool.name). The kagent chart renders it from this block
+  # (claudeHarness.create) with its own claude-harness image at the digest it
+  # was published with (runtimeImages.claudeHarness). An Agent names it by
+  # spec.harnessRef.name: claude. The connectivity chart renders its
+  # ModelConfig (modelConfig below) and nothing else of the block.
+  claudeHarness:
+    create: false
+    name: claude
+    # An OVERRIDE of the runtime image, BY DIGEST (<repository>@sha256:<64 hex>;
+    # the Harness CRD accepts no tag). Empty (the default): the chart's own
+    # claude-harness image at the stamped digest; the platform never pins a
+    # digest here. Set by a dev loop that runs the platform on a locally built
+    # image; it travels only when set (components.kagent.omitEmptyKeys).
+    image: ""
+    # Where Substrate keeps the actors' snapshots for this Harness
+    # (Harness.spec.substrate.snapshotPolicy.location). Empty (the default)
+    # derives the platform Harness's location with the `claude` prefix,
+    # <kagent.harness.snapshotLocation>/claude, whether that location is set
+    # by hand or rendered by kagent.harness.snapshotStore. A set value stands.
+    snapshotLocation: ""
+    # Hosts every agent on the Harness may reach besides what its revision
+    # compiles (Harness.spec.substrate.egress): hostnames, or leftmost-label
+    # wildcards such as `*.githubusercontent.com`. A coding agent names its
+    # git hosts and its toolchain's registries here.
+    egress: []
+    # KAGENT_PROPAGATE_TOKEN: the caller's bearer on the agent's MCP calls, so
+    # muster sees the person, not the platform (the platform Harness sets it
+    # through its env).
+    propagateToken: true
+    # KAGENT_CLAUDE_PROJECT_INSTRUCTIONS: Claude reads a workspace's CLAUDE.md
+    # and AGENTS.md (a cloned repository's as soon as it reads a file there);
+    # off, a repository's instructions reach Claude only as files it opens.
+    projectInstructions: true
+    # KAGENT_CLAUDE_CALLER_ROUTES: host to upstream, the upstream acting on the
+    # caller's credential for that host; git reaches the host through the
+    # route with no token in the sandbox. Empty renders no route.
+    callerRoutes: {}
+    # Environment on top of what the keys above render (Harness.spec.env: name
+    # with value or credentialRef).
+    env: []
+    # The ModelConfig the connectivity chart renders with the Harness:
+    # Anthropic, the platform's default model, prompt caching off (Claude Code
+    # sets its own cache breakpoints on every call; the adapter's flag has
+    # nothing to add). Never forwarded to the kagent chart
+    # (components.kagent.omitKeys).
+    modelConfig:
+      create: true
+      name: claude-code
+      displayName: Claude Code
+      model: claude-sonnet-4-6
+      apiKeySecret: kagent-anthropic
+      apiKeySecretKey: ANTHROPIC_API_KEY
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend

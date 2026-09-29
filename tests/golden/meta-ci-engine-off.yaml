@@ -580,6 +580,23 @@ spec:
       mode: agentgateway-muster
       parentRefs: []
     kagent:
+      claudeHarness:
+        callerRoutes: {}
+        create: false
+        egress: []
+        env: []
+        image: ""
+        modelConfig:
+          apiKeySecret: kagent-anthropic
+          apiKeySecretKey: ANTHROPIC_API_KEY
+          create: true
+          displayName: Claude Code
+          model: claude-sonnet-4-6
+          name: claude-code
+        name: claude
+        projectInstructions: true
+        propagateToken: true
+        snapshotLocation: ""
       controller:
         agentImage:
           repository: giantswarm/kagent/golang-adk
@@ -615,8 +632,6 @@ spec:
         substrate:
           ateApiEndpoint: dns:///api.ate-system.svc:443
           atenetRouterURL: http://atenet-router.ate-system.svc:80
-          defaultWorkerPool:
-            name: kagent-default
           enabled: true
         vpa:
           controlledValues: RequestsOnly
@@ -670,11 +685,6 @@ spec:
       grafana-mcp:
         enabled: false
       harness:
-        allowedAgentTemplates:
-          selector:
-            matchLabels:
-              agent-platform.giantswarm.io/harness: kagent
-              kagent.dev/harness: ""
         compaction:
           eventRetentionSize: 4
           tokenThreshold: 600000
@@ -1709,6 +1719,15 @@ spec:
     - name: substrate
     - name: agent-platform-connectivity
   values:
+    claudeHarness:
+      callerRoutes: {}
+      create: false
+      egress: []
+      env: []
+      name: claude
+      projectInstructions: true
+      propagateToken: true
+      snapshotLocation: ""
     controller:
       agentImage:
         repository: giantswarm/kagent/golang-adk
@@ -1744,8 +1763,6 @@ spec:
       substrate:
         ateApiEndpoint: dns:///api.ate-system.svc:443
         atenetRouterURL: http://atenet-router.ate-system.svc:80
-        defaultWorkerPool:
-          name: kagent-default
         enabled: true
     database:
       postgres:
@@ -1781,11 +1798,6 @@ spec:
     grafana-mcp:
       enabled: false
     harness:
-      allowedAgentTemplates:
-        selector:
-          matchLabels:
-            agent-platform.giantswarm.io/harness: kagent
-            kagent.dev/harness: ""
       compaction:
         eventRetentionSize: 4
         tokenThreshold: 600000

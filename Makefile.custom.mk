@@ -2147,6 +2147,12 @@ verify-kagent-harness: ## Assert the platform Harness is the kagent chart's sinc
 	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR) $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-claude-harness
+verify-claude-harness: ## Assert the Claude Harness (kagent.claudeHarness) is the kagent chart's and the meta chart forwards its policy the way it forwards kagent.harness: off by default the block reaches the kagent release with create: false, no image (the chart's stamped runtimeImages.claudeHarness digest applies; an override travels only when set), no derived location and no modelConfig (the connectivity chart's key); on, snapshotLocation derives as the platform Harness's location with the `claude` prefix, from kagent.harness.snapshotLocation or the bucket kagent.harness.snapshotStore renders (a set value stands), and egress, callerRoutes, env, propagateToken and projectInstructions travel verbatim; the connectivity chart renders no Harness, and the claude-code ModelConfig (api.kagent.dev/v1alpha3, Anthropic, prompt caching off, no TTL) with the Harness on, none off or with modelConfig.create false. Needs PyYAML.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@python3 tests/verify-claude-harness.py $(CONNECTIVITY_DIR) $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-workerpool
 verify-workerpool: ## Assert the Substrate WorkerPool reaches the cluster as written and is guarded (giantswarm/agent-platform#457, #472): the meta chart forwards kagent.substrateWorkerPool.template to the kagent release verbatim — the architecture alone by default, an installation's vendor + CPU generation pin as set, every nodeSelector value a string, the karpenter.sh/do-not-disrupt annotation and the karpenter.sh/capacity-type selector as set — and the kagent chart the range resolves to renders it unchanged into the one WorkerPool's spec.template; a nodeSelector value that is not a string, a topologySpreadConstraints / podAntiAffinity value while the pinned Substrate range's floor is below the release that carries the fields (agent-platform.substrate.workerPoolSpreadFloor: 1.0.0) and any other key WorkerPool.spec.template does not have fail the render naming the key; the worker PodDisruptionBudget (kagent.substrateWorkerPool.podDisruptionBudget) renders from the connectivity chart of the working tree in the kagent namespace with the pool's ate.dev/worker-pool selector and maxUnavailable: 1, is gone with enabled: false and never reaches the kagent release. Network: gsoci.azurecr.io; needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR))"

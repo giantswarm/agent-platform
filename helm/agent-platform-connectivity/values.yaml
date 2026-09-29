@@ -1263,7 +1263,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # having already validated the JWT. That boundary is agentgateway (which
       # validates the JWT) for the controllerRoute path, and the netpols restrict
       # controller ingress to agentgateway + the release/kagent namespaces, so the
-      # controller is never directly reachable. Use "unsecure" only for local dev
+      # controller is never directly reachable. Use "insecure" only for local dev
       # without any front proxy.
       mode: trusted-proxy
       # email, not sub: dex subs are opaque connector-prefixed identifiers
@@ -1315,6 +1315,24 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # The platform Harness is the kagent chart's since agent-platform 4.8.0
   # (harness.create); this chart renders none and reads no kagent.harness key.
+
+  # --- The Claude Harness's ModelConfig (kagent.claudeHarness) ---
+  # The Claude Harness itself is the kagent chart's (its claudeHarness.* keys;
+  # the meta chart forwards the block). This chart reads two keys of it: with
+  # create on, the ModelConfig below joins the catalog next to
+  # kagent.modelConfigs, in the kagent namespace.
+  claudeHarness:
+    create: false
+    # The ModelConfig rendered with the Harness: Anthropic, the platform's
+    # default model, prompt caching off (Claude Code sets its own cache
+    # breakpoints on every call; the adapter's flag has nothing to add).
+    modelConfig:
+      create: true
+      name: claude-code
+      displayName: Claude Code
+      model: claude-sonnet-4-6
+      apiKeySecret: kagent-anthropic
+      apiKeySecretKey: ANTHROPIC_API_KEY
 
   # The Substrate WorkerPool the platform Harness runs on. The kagent chart
   # creates it in the kagent namespace (name, replicas, pod template — the
