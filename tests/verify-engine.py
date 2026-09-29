@@ -254,6 +254,11 @@ def main(chart: str) -> int:
     fleet = docs(helm(chart, [*ci, *OFF, "--set", "gitops.namespace=flux-giantswarm", "--set", "gitops.targetNamespace=agent-platform", *FLEET_APIS]))
     if {(k, ns, n) for k, ns, n, _ in fleet if k not in ("OCIRepository", "HelmRelease")} != STORAGE_FAMILY | {hook_policy(cilium=True)} or any(ns != "flux-giantswarm" for k, ns, _, _ in fleet if k in ("OCIRepository", "HelmRelease")):
         fail("fleet shape (engine off, exempt namespace): a non-Flux object beyond the storage-version hooks, or a wrong namespace, rendered")
+    # Flux resolves the substrate release's valuesFrom in the HelmRelease's namespace: the
+    # kagent release's ConfigMap kagent-images must be moved there, or atelet pins nothing.
+    move = "target:\n            kind: ConfigMap\n            name: kagent-images"
+    if move not in one(fleet, "HelmRelease", "kagent") or "value: flux-giantswarm" not in one(fleet, "HelmRelease", "kagent"):
+        fail("fleet shape: the kagent release does not move its ConfigMap kagent-images into gitops.namespace, where the substrate release's valuesFrom reads it")
     print(f"ok: engine off — {len(off) - len(STORAGE_FAMILY)} Flux objects + the storage-version hooks (as {RELEASE}-hooks at {IDENTITY_EVENTS_OFF}; nothing with kagent off), no CRD/operator/FluxInstance/tenant identity/teardown, no serviceAccountName, roster flux: false, fleet shape clean")
 
     # --- engine ON: exactly the engine besides the platform objects

@@ -590,6 +590,17 @@ components:  # @schema additionalProperties: true
     # asserts the set).
     driftDetection:  # @schema additionalProperties: true
       mode: enabled
+    # The chart renders its ConfigMap kagent-images in the release namespace,
+    # and the substrate release reads it through valuesFrom
+    # (components.substrate.valuesFromRefs), which Flux resolves in the
+    # HelmRelease's own namespace. In the fleet shape (gitops.namespace
+    # flux-giantswarm, the workloads in gitops.targetNamespace) the two
+    # differ, the optional reference found nothing and atelet ran without its
+    # pinned runtime images; a postRenderer now moves the ConfigMap next to
+    # the HelmReleases (components.yaml valuesSourceObjects).
+    valuesSourceObjects:
+      - kind: ConfigMap
+        name: kagent-images
     # These keys are the connectivity chart's, not kagent's: it reads them for
     # the wiring it renders around kagent (routes, the ServiceMonitor, the
     # ModelConfig/RemoteMCPServer CRs, the tenant identity), so they stay in

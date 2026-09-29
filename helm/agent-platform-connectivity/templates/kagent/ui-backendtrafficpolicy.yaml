@@ -26,7 +26,6 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: {{ include "name" . }}-ui
-      namespace: {{ $kagentNs }}
   timeout:
     http:
       requestTimeout: {{ $btp.timeout | quote }}
