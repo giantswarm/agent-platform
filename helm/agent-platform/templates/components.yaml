@@ -312,7 +312,9 @@ that CRD either, so the dependency is moot. */ -}}
 {{- end }}
 {{- end }}
 {{- /* The version constraint: the entry's range, or — for a chart released off
-this chart's tag (see releasedWithChart above) — this chart's exact version. */ -}}
+this chart's tag (see releasedWithChart above) — this chart's exact version.
+gitops.prereleases widens a range (never the exact version, nor a dev channel's
+filtered one) to admit pre-releases. */ -}}
 {{- $semver := $c.versionRange }}
 {{- if $c.releasedWithChart }}
 {{- $ownVersion := include "agent-platform.chartVersion" $root }}
@@ -321,6 +323,8 @@ this chart's tag (see releasedWithChart above) — this chart's exact version. *
 {{- fail (printf "components.%s.versionRange=%q pins a chart that is released with this chart: its version is this chart's own (%s), and a pin behind or ahead of it fails the release on every installation (giantswarm/agent-platform#431, #441, #339). Remove the pin. A development build keeps its knobs: a semverFilter selects a dev channel, another repository a chart pushed by hand" $key $semver $ownVersion) }}
 {{- end }}
 {{- if not $semver }}{{ $semver = $ownVersion }}{{ end }}
+{{- else if and $semver $g.prereleases (not $c.semverFilter) }}
+{{- $semver = include "agent-platform.admitPrereleases" (dict "range" $semver "key" (printf "components.%s.versionRange" $key)) }}
 {{- end }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1

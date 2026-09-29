@@ -2288,11 +2288,38 @@ the controller applies. Build metadata (helm-controller renders the chart as
 <version>+<oci digest>) is dropped; a pre-release floor is kept.
 */}}
 {{- define "agent-platform.self.versionRange" -}}
-{{- with .Values.gitops.self.versionRange -}}
-{{- . -}}
-{{- else -}}
-{{- printf ">=%s <%d.0.0" (include "agent-platform.chartVersion" .) (add1 (semver .Chart.Version).Major) -}}
+{{- $range := .Values.gitops.self.versionRange | default (printf ">=%s <%d.0.0" (include "agent-platform.chartVersion" .) (add1 (semver .Chart.Version).Major)) -}}
+{{- if and .Values.gitops.prereleases (not .Values.gitops.self.semverFilter) -}}
+{{- $range = include "agent-platform.admitPrereleases" (dict "range" $range "key" "gitops.self.versionRange") -}}
 {{- end -}}
+{{- $range -}}
+{{- end -}}
+
+{{/*
+A semver range that also admits pre-release versions (gitops.prereleases):
+every version of the range that carries no pre-release gets `-0`, so
+">=5.31.4 <6.0.0" is ">=5.31.4-0 <6.0.0-0" and "0.x" is "0.x-0". Flux
+(Masterminds/semver v3) evaluates pre-releases for a range only when one of
+its comparators carries one. Comparators are split on spaces; `||` passes
+through. A range with no version to mark (`*`) fails the render rather than
+silently staying stable-only.
+*/}}
+{{- define "agent-platform.admitPrereleases" -}}
+{{- $version := "^([<>=~^!]*v?[0-9]+(\\.([0-9]+|[xX*])){0,2})(,?)$" -}}
+{{- $out := list -}}
+{{- $marked := false -}}
+{{- range (splitList " " .range) -}}
+{{- if regexMatch $version . -}}
+{{- $out = append $out (regexReplaceAll $version . "${1}-0${4}") -}}
+{{- $marked = true -}}
+{{- else -}}
+{{- $out = append $out . -}}
+{{- end -}}
+{{- end -}}
+{{- if not $marked -}}
+{{- fail (printf "gitops.prereleases: %s=%q has no version to admit pre-releases for; write the range with explicit bounds (>=A <B)" .key .range) -}}
+{{- end -}}
+{{- join " " $out -}}
 {{- end -}}
 
 {{/*

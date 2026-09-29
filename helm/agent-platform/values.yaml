@@ -109,6 +109,16 @@ gitops:
   # installed within about this long. A poll is one tag list per chart, so it
   # stays short while the HelmReleases keep `interval`.
   sourceInterval: 1m
+  # Admit pre-release versions (vX.Y.Z-rc.N) in every range this chart renders:
+  # each component's versionRange and the self-management range. A version
+  # of a range that carries no pre-release gets `-0` appended (`>=5.31.4
+  # <6.0.0` renders `>=5.31.4-0 <6.0.0-0`, `0.x` renders `0.x-0`), which makes
+  # Flux follow a component's release candidates as well as its stable
+  # releases. A component released with this chart keeps its exact version,
+  # and a component or self range with a semverFilter is left as written. For
+  # the installations that run release candidates before they are promoted;
+  # off (default) follows stable releases only.
+  prereleases: false
   # Namespace the rendered OCIRepository/HelmRelease objects are CREATED in.
   # Empty = the release namespace. Set this to a namespace that is exempt from a
   # multi-tenancy admission policy when one is enforced — on Giant Swarm clusters
