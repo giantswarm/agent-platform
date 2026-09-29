@@ -148,6 +148,13 @@ knowledge:
       bugs without forking — e.g. kagent stamps the chart version into
       app.kubernetes.io/version, which helm-controller corrupts with the OCI
       +digest build-metadata (invalid in a label); a kustomize patch overwrites it.
+  valuesSourceObjects — objects of this release another release reads through
+      its valuesFromRefs ({kind, name} each; the kagent release's ConfigMap
+      kagent-images for the substrate release). Flux resolves valuesFrom in the
+      HelmRelease's namespace only, so when the HelmReleases live in
+      gitops.namespace and this release installs elsewhere (the fleet shape:
+      flux-giantswarm and agent-platform), a kustomize postRenderer moves each
+      object into gitops.namespace; otherwise nothing is rendered.
   installDisableWait — render `install.disableWait: true` on the child
       HelmRelease: the first install is reported successful as soon as the
       manifests are applied, without waiting for the workload to become ready.
@@ -407,7 +414,21 @@ spec:
     - name: {{ include "agent-platform.childName" (dict "root" $root "name" .) }}
     {{- end }}
   {{- end }}
-  {{- with $c.postRenderers }}
+  {{- /* Flux resolves valuesFrom in the HelmRelease's namespace only: with the
+  HelmReleases in gitops.namespace and the workloads in another, the objects a
+  sibling reads through valuesFromRefs are moved next to the HelmReleases
+  (see valuesSourceObjects above). Not on a target: they land on the target
+  cluster, where no HelmRelease reads them. */ -}}
+  {{- $postRenderers := $c.postRenderers | default list }}
+  {{- $releaseNs := $c.targetNamespace | default $targetNs }}
+  {{- if and $c.valuesSourceObjects (ne $releaseNs $ns) (not $target) }}
+  {{- $patches := list }}
+  {{- range $c.valuesSourceObjects }}
+  {{- $patches = append $patches (dict "target" (dict "kind" .kind "name" .name) "patch" (printf "- op: replace\n  path: /metadata/namespace\n  value: %s\n" $ns)) }}
+  {{- end }}
+  {{- $postRenderers = append $postRenderers (dict "kustomize" (dict "patches" $patches)) }}
+  {{- end }}
+  {{- with $postRenderers }}
   postRenderers:
     {{- toYaml . | nindent 4 }}
   {{- end }}

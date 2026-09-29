@@ -1187,49 +1187,13 @@ spec:
         providers:
           anthropic:
             models:
-              claude-fable-5-1:
-                rates:
-                  cacheRead: "0.25"
-                  cacheWrite: "12.5"
-                  input: "10"
-                  output: "50"
-              claude-haiku-4-5:
-                rates:
-                  cacheRead: "0.1"
-                  cacheWrite: "1.25"
-                  input: "1"
-                  output: "5"
-              claude-opus-4-5:
-                rates:
-                  cacheRead: "0.5"
-                  cacheWrite: "6.25"
-                  input: "5"
-                  output: "25"
-              claude-opus-5:
-                rates:
-                  cacheRead: "0.5"
-                  cacheWrite: "6.25"
-                  input: "5"
-                  output: "25"
               claude-opus-5-5:
                 rates:
                   cacheRead: "0.2"
                   cacheWrite: "5"
                   input: "4"
                   output: "20"
-              claude-sonnet-4-5:
-                rates:
-                  cacheRead: "0.3"
-                  cacheWrite: "3.75"
-                  input: "3"
-                  output: "15"
-              claude-sonnet-4-6:
-                rates:
-                  cacheRead: "0.3"
-                  cacheWrite: "3.75"
-                  input: "3"
-                  output: "15"
-              claude-sonnet-5:
+              claude-sonnet-5-5:
                 rates:
                   cacheRead: "0.2"
                   cacheWrite: "2.5"

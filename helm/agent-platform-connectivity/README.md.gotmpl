@@ -80,8 +80,9 @@ On the installation, after the cutover:
 - `agentgateway_gen_ai_client_token_usage` carries `agent` and
   `agent_namespace` labels in the `giantswarm` Mimir tenant.
 - `agentgateway_cost_catalog_lookups_total{status="Exact"}` grows. A
-  `NoCatalog` or `Missing` status means the model has no price in
-  `llmRouting.modelCatalog`.
+  `Missing` status means neither the gateway's built-in price catalog nor the
+  `llmRouting.modelCatalog` overlay prices the model: bump the gateway to a
+  release that does, or add the model to the overlay.
 - The Usage dashboard panels are populated.
 
 ### Notes

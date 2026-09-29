@@ -336,6 +336,8 @@ def check_substrate_pins(docs) -> None:
         fail("the substrate release does not read the kagent release's ConfigMap kagent-images (key substrate-values.yaml, optional) through valuesFrom")
     if "pinnedImages:" in hr:
         fail("the substrate release carries atelet.imageCache.pinnedImages in spec.values by default; it would shadow the ConfigMap's set")
+    if any(l.startswith("  postRenderers:") for l in docs[("HelmRelease", "kagent")]):
+        fail("the kagent release moves an object with a postRenderer although its HelmRelease and its release share a namespace")
     print("ok: the substrate release pins atelet's runtime images from the kagent release's ConfigMap kagent-images, nothing of its own by default")
 
 
