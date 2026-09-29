@@ -1,9 +1,10 @@
-{{- /* Price catalog for the cost counter. The deployed gateway ships no
-built-in catalog: with no source configured every lookup reports NoCatalog and
-no cost sample is emitted at all, so this ConfigMap is not an override but the
-only way to get cost. The Gateway's AgentgatewayParameters references it (see
-agentgateway/agentgatewayparameters.yaml) and the data plane hot-reloads the
-file, so a price change needs no gateway release. */ -}}
+{{- /* Prices over the gateway's built-in catalog for the cost counter: the
+models the pinned release does not price, merged per model and per rate on top
+of the catalog it embeds. The Gateway's AgentgatewayParameters references it
+(see agentgateway/agentgatewayparameters.yaml) and the data plane hot-reloads
+the file, so a price change needs no gateway release. The document carries no
+`metadata`: a source with metadata is taken as a whole base catalog and, when
+newer, replaces the built-in one. */ -}}
 {{- if (include "agent-platform.modelCatalog" .) }}
 apiVersion: v1
 kind: ConfigMap

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One provider of an agentgateway price catalog: model name to rates, context tiers and tags. Mirrors the Provider type of agentgateway-upstream crates/agentgateway/src/llm/catalog/model.rs, which rejects unknown fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "models": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rates": {"$ref": "#/$defs/rates"},
+          "tiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["contextOver", "rates"],
+              "properties": {
+                "contextOver": {"type": "integer", "minimum": 0},
+                "rates": {"$ref": "#/$defs/rates"}
+              }
+            }
+          },
+          "tags": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "money": {
+      "description": "USD per one million tokens (per page for perPage), as a decimal string.",
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$"
+    },
+    "rates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input": {"$ref": "#/$defs/money"},
+        "output": {"$ref": "#/$defs/money"},
+        "cacheRead": {"$ref": "#/$defs/money"},
+        "cacheWrite": {"$ref": "#/$defs/money"},
+        "reasoning": {"$ref": "#/$defs/money"},
+        "inputAudio": {"$ref": "#/$defs/money"},
+        "outputAudio": {"$ref": "#/$defs/money"},
+        "perPage": {"$ref": "#/$defs/money"}
+      }
+    }
+  }
+}

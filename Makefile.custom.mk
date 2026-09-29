@@ -634,10 +634,18 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@$(METRICS_EXPRS) /tmp/vl-on.out | grep -q '^agent_namespace=.* : source.unverifiedWorkload.namespace$$' || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
 	@echo "ok: the labels on the metrics policy"
 	@echo "--> the price ConfigMap renders and the AgentgatewayParameters references it"
-	@grep -q 'name: t-model-catalog' /tmp/vl-on.out || { echo "FAIL: no model-price ConfigMap; every cost lookup would report NoCatalog"; exit 1; }
+	@grep -q 'name: t-model-catalog' /tmp/vl-on.out || { echo "FAIL: no model-price ConfigMap; the overlay's models would go unpriced"; exit 1; }
 	@grep -A4 '^  modelCatalog:' /tmp/vl-on.out | grep -q 'key: catalog.json' || { echo "FAIL: AgentgatewayParameters does not reference the price ConfigMap"; exit 1; }
-	@grep -q '"claude-sonnet-4-6"' /tmp/vl-on.out || { echo "FAIL: the platform's default model is unpriced"; exit 1; }
+	@awk '/^  name: t-model-catalog$$/{f=1} f&&/^---/{exit} f' /tmp/vl-on.out | grep -q '"metadata"' && { echo "FAIL: the price ConfigMap carries metadata; the data plane would take it as a base catalog and drop its built-in one"; exit 1; } || true
 	@echo "ok: price catalog wired"
+	@echo "--> no overlay entries: no price ConfigMap and no catalog source, the built-in catalog alone"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set llmRouting.modelCatalog.providers=null >/tmp/vl-nocat.out 2>&1 || { cat /tmp/vl-nocat.out; exit 1; }
+	@if grep -qE 'model-catalog|^  modelCatalog:' /tmp/vl-nocat.out; then echo "FAIL: an empty overlay still renders the price ConfigMap or its catalog source"; exit 1; fi
+	@echo "ok: empty overlay renders nothing"
+	@echo "--> an installation adds a model to a provider the defaults already name (the schema keeps providers open below the provider)"
+	@helm template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set-json 'llmRouting.modelCatalog.providers.anthropic.models.claude-extra={"rates":{"input":"1","output":"2"}}' >/tmp/vl-extra.out 2>&1 || { cat /tmp/vl-extra.out; echo "FAIL: the schema refuses an extra model under a default provider"; exit 1; }
+	@grep -q '"claude-extra"' /tmp/vl-extra.out || { echo "FAIL: the extra model did not reach the price ConfigMap"; exit 1; }
+	@echo "ok: extra model accepted"
 	@echo "--> the network policies admit the LLM port in both flavors"
 	@grep -A24 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-on.out | grep -q '"8081"' || { echo "FAIL: the cilium data-plane policy does not admit the LLM port"; exit 1; }
 	@grep -A32 'name: agent-platform-connectivity-dataplane$$' /tmp/vl-on.out | grep -q '"15020"' || { echo "FAIL: the cilium data-plane policy does not admit the scrape port"; exit 1; }
@@ -1946,6 +1954,11 @@ verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for m
 	@echo "--> kagent off: no RemoteMCPServer at all, extras included"
 	@if helm template t $(CONNECTIVITY_DIR) $(VM) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp"}]' 2>&1 | grep -q 'kind: RemoteMCPServer'; then echo "FAIL: a RemoteMCPServer renders while kagent is off"; exit 1; else echo "ok: inert while kagent is off"; fi
 	@echo "kagent tool-discovery invariants verified."
+
+.PHONY: verify-model-catalog
+verify-model-catalog: ## Assert llmRouting.modelCatalog is an overlay of what the pinned gateway lacks (giantswarm/giantswarm#37975): no provider/model in it is priced by the built-in catalog of the data plane's release (catalog/model-catalog.json of giantswarm/agentgateway-upstream at v<agentgateway.proxy.image.tag>), the gateway tags of both charts agree, both charts carry the same overlay, and the platform's default model is priced. A gateway bump that starts pricing an overlay model fails here until the entry is dropped. Network: raw.githubusercontent.com (MODEL_CATALOG_FILE for offline). Needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-model-catalog.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
 .PHONY: verify-kagent-crds
 verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), and no render of the chart carries kagent.dev/v1alpha2 (tests/verify-kagent-crds.py; needs PyYAML).

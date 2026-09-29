@@ -967,8 +967,7 @@ Name of the model-price ConfigMap — defaults to <release>-model-catalog.
 {{/*
 Truthy when the model-price ConfigMap is rendered and referenced: LLM routing
 is on, the block is enabled, and it names at least one provider. An empty
-provider map would mount an empty catalog, which reports NoCatalog on every
-lookup — the same state as no ConfigMap at all, but with an object to explain.
+provider map would add a source that changes nothing over the built-in catalog.
 */}}
 {{- define "agent-platform.modelCatalog" -}}
 {{- if and (include "agent-platform.llmRouting" .) .Values.llmRouting.modelCatalog.enabled .Values.llmRouting.modelCatalog.providers -}}true{{- end -}}
