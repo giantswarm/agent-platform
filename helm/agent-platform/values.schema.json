@@ -1440,6 +1440,9 @@
                 "namespace": {
                     "type": "string"
                 },
+                "prereleases": {
+                    "type": "boolean"
+                },
                 "retries": {
                     "type": "integer"
                 },

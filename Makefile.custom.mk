@@ -1337,6 +1337,11 @@ verify-self: ## Assert self-management's shapes: engine off renders nothing of i
 	@python3 tests/verify-self.py $(CHART_DIR)
 	@echo "self-management shapes verified."
 
+.PHONY: verify-prereleases
+verify-prereleases: ## Assert gitops.prereleases: off, every range stays stable-only; on, every component range and the self range admit pre-releases, the exact version of a chart released with this one and a semverFilter's range stay as written, a range with no version fails. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-prereleases.py $(CHART_DIR)
+
 .PHONY: verify-insecure
 verify-insecure: ## Assert components.<name>.insecure renders OCIRepository.spec.insecure for that component only (a lab's plain-HTTP registry), and nothing by default.
 	@echo "====> $@ ($(CHART_DIR))"

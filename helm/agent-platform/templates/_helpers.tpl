@@ -2288,11 +2288,89 @@ the controller applies. Build metadata (helm-controller renders the chart as
 <version>+<oci digest>) is dropped; a pre-release floor is kept.
 */}}
 {{- define "agent-platform.self.versionRange" -}}
-{{- with .Values.gitops.self.versionRange -}}
-{{- . -}}
-{{- else -}}
-{{- printf ">=%s <%d.0.0" (include "agent-platform.chartVersion" .) (add1 (semver .Chart.Version).Major) -}}
+{{- (include "agent-platform.self.ref" . | fromJson).range -}}
 {{- end -}}
+
+{{/*
+The self-management OCIRepository's range as written or derived, and whether
+gitops.prereleases widened it to admit pre-releases, as JSON {"range",
+"admits"}; a range with a semverFilter of its own is left as written.
+*/}}
+{{- define "agent-platform.self.ref" -}}
+{{- $range := .Values.gitops.self.versionRange | default (printf ">=%s <%d.0.0" (include "agent-platform.chartVersion" .) (add1 (semver .Chart.Version).Major)) -}}
+{{- if and .Values.gitops.prereleases (not .Values.gitops.self.semverFilter) -}}
+{{- include "agent-platform.admitPrereleases" (dict "range" $range "key" "gitops.self.versionRange") -}}
+{{- else -}}
+{{- dict "range" $range "admits" false | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The self-management OCIRepository's tag filter: gitops.self.semverFilter, else
+the release tag filter where gitops.prereleases widens the self range.
+*/}}
+{{- define "agent-platform.self.semverFilter" -}}
+{{- if .Values.gitops.self.semverFilter -}}
+{{- .Values.gitops.self.semverFilter -}}
+{{- else if (include "agent-platform.self.ref" . | fromJson).admits -}}
+{{- include "agent-platform.releaseTagFilter" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The tags a range widened by gitops.prereleases may select: stable releases and
+release candidates (X.Y.Z, X.Y.Z-rc.N). The branch builds pushed to the same
+repositories (gitsemver's dev shape X.Y.Z-r<hash>t<time>h<sha>, and the older
+X.Y.Z-dev.<branch>...) carry a pre-release too, and a `-0` range alone would
+select them.
+*/}}
+{{- define "agent-platform.releaseTagFilter" -}}
+^v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$
+{{- end -}}
+
+{{/*
+A semver range that also admits pre-release versions (gitops.prereleases), as
+JSON {"range": ..., "admits": bool}. Flux (Masterminds/semver v3) evaluates
+pre-releases for a range only when one of its comparators carries one, so a
+comparator that carries none gets `-0`: ">=5.31.4 <6.0.0" is
+">=5.31.4-0 <6.0.0-0", "0.x" is "0.x-0". Left as written: an exact version
+(`1.2.3`, `=1.2.3`, `==1.2.3`), which `-0` would turn into a version that does
+not exist, an exclusion (`!=1.2.3`), which `-0` would stop excluding, and a
+comparator that carries a pre-release already. `admits` says the range selects
+pre-releases: false for a range of exact versions and exclusions only, which
+stays as written with no tag filter. Comparators are split on spaces; `||`
+passes through. A range with no version at all (`*`) fails the render rather
+than silently staying stable-only.
+*/}}
+{{- define "agent-platform.admitPrereleases" -}}
+{{- $version := "^([<>=~^!]*)(v?[0-9]+(\\.([0-9]+|[xX*])){0,2})(-[0-9A-Za-z.-]+)?(,?)$" -}}
+{{- $exactCore := "^v?[0-9]+\\.[0-9]+\\.[0-9]+$" -}}
+{{- $out := list -}}
+{{- $versions := false -}}
+{{- $admits := false -}}
+{{- range (splitList " " .range) -}}
+{{- if regexMatch $version . -}}
+{{- $versions = true -}}
+{{- $op := regexReplaceAll $version . "${1}" -}}
+{{- $core := regexReplaceAll $version . "${2}" -}}
+{{- $pre := regexReplaceAll $version . "${5}" -}}
+{{- if $pre -}}
+{{- $out = append $out . -}}
+{{- $admits = true -}}
+{{- else if or (eq $op "!=") (and (has $op (list "" "=" "==")) (regexMatch $exactCore $core)) -}}
+{{- $out = append $out . -}}
+{{- else -}}
+{{- $out = append $out (regexReplaceAll $version . "${1}${2}-0${6}") -}}
+{{- $admits = true -}}
+{{- end -}}
+{{- else -}}
+{{- $out = append $out . -}}
+{{- end -}}
+{{- end -}}
+{{- if not $versions -}}
+{{- fail (printf "gitops.prereleases: %s=%q has no version to admit pre-releases for; write the range with explicit bounds (>=A <B)" .key .range) -}}
+{{- end -}}
+{{- dict "range" (join " " $out) "admits" $admits | toJson -}}
 {{- end -}}
 
 {{/*

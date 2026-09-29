@@ -77,7 +77,9 @@ def _comparators(term: str):
     wild = [p for p in (major, minor, patch) if p is not None and not p.isdigit()]
     if wild or minor is None or patch is None:
         # x-range / partial: 1.x, 0.2.x, 1, 1.2 — a floor and a ceiling on the
-        # next identifier up, both without a prerelease.
+        # next identifier up, both without a prerelease. With one (0.x-0, the
+        # gitops.prereleases form) the floor carries it and the ceiling -0,
+        # which switches prerelease evaluation on as for any other comparator.
         if op not in (None, "=", "=="):
             raise ValueError(f"wildcard with an operator is not supported here: {term!r}")
         if not major.isdigit():
@@ -88,7 +90,8 @@ def _comparators(term: str):
             hi = (lo[0], lo[1] + 1, 0)
         else:
             hi = (lo[0] + 1, 0, 0)
-        return [(">=", Version("%d.%d.%d" % tuple(lo))), ("<", Version("%d.%d.%d" % hi))]
+        lo_pre, hi_pre = (f"-{pre}", "-0") if pre else ("", "")
+        return [(">=", Version("%d.%d.%d" % tuple(lo) + lo_pre)), ("<", Version("%d.%d.%d" % hi + hi_pre))]
     v = Version(f"{major}.{minor}.{patch}" + (f"-{pre}" if pre else ""))
     if op in (None, "=", "=="):
         return [("=", v)]

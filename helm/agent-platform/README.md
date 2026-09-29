@@ -279,6 +279,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gitops.engine | string | `"flux"` |  |
 | gitops.interval | string | `"10m"` |  |
 | gitops.sourceInterval | string | `"1m"` |  |
+| gitops.prereleases | bool | `false` |  |
 | gitops.namespace | string | `""` |  |
 | gitops.targetNamespace | string | `""` |  |
 | gitops.serviceAccountName | string | `""` |  |
