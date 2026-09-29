@@ -339,6 +339,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.dependsOn[2] | string | `"substrate"` |  |
 | components.kagent.dependsOn[3] | string | `"agent-platform-connectivity"` |  |
 | components.kagent.driftDetection.mode | string | `"enabled"` |  |
+| components.kagent.valuesSourceObjects[0].kind | string | `"ConfigMap"` |  |
+| components.kagent.valuesSourceObjects[0].name | string | `"kagent-images"` |  |
 | components.kagent.omitKeys[0] | string | `"controllerRoute"` |  |
 | components.kagent.omitKeys[1] | string | `"controller.vpa"` |  |
 | components.kagent.omitKeys[2] | string | `"fluxServiceAccountName"` |  |
