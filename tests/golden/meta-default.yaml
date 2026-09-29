@@ -1235,6 +1235,12 @@ spec:
                   cacheWrite: "2.5"
                   input: "2"
                   output: "10"
+              claude-sonnet-5-5:
+                rates:
+                  cacheRead: "0.2"
+                  cacheWrite: "2.5"
+                  input: "2"
+                  output: "10"
       modelConfigPolicy:
         enabled: true
       models:
