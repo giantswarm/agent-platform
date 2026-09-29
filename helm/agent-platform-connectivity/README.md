@@ -5,7 +5,7 @@ consumer-side wiring that turns the platform components into a working whole on
 a cluster: the public muster route and the agentgateway data-plane Gateway +
 AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
 the kagent and klaus-gateway routes, the kagent catalog (ModelConfigs and
-RemoteMCPServers at kagent.dev/v1alpha3) and tenant identity, the CloudNativePG
+RemoteMCPServers at api.kagent.dev/v1alpha3) and tenant identity, the CloudNativePG
 Cluster, and — gated on the component toggles — the Backstage app-config and
 route, the mcp-kubernetes MCPServer registration with muster and
 the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO
@@ -1391,9 +1391,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
 | kagent.controllerRoute.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SessionService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService" | list | `[]` |  |
 | kagent.controllerRoute.mcp.enabled | bool | `true` |  |

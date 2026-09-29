@@ -248,7 +248,7 @@ def kagent_controller(kube: Kube, app_deployment: float) -> None:
     """The kagent controller running (its HelmRelease is Ready before the pod is)."""
     started = time.monotonic()
     kube.wait_deployment(KAGENT_NAMESPACE, "kagent-controller", timeout=600)
-    wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
+    wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
     apply_placeholder_provider_secret(kube)
     TIMINGS.record("kagent controller Ready after the install returned", time.monotonic() - started)
 
@@ -453,7 +453,7 @@ def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, su
     the actor's golden snapshot on the WorkerPool — not that a model call
     succeeded."""
     started = time.monotonic()
-    kube.apply({"apiVersion": "kagent.dev/v1alpha3", "kind": "AgentTemplate",
+    kube.apply({"apiVersion": "api.kagent.dev/v1alpha3", "kind": "AgentTemplate",
                 "metadata": {"name": DECLARATIVE_AGENT, "namespace": KAGENT_NAMESPACE, "labels": {HARNESS_LABEL: HARNESS}},
                 "spec": {"description": "ATS smoke agent (lab only)", "modelConfig": {"name": MODEL_CONFIG},
                          "systemPrompt": "You are the ATS smoke agent."}})
@@ -557,19 +557,19 @@ def test_deleted_platform_harness_comes_back_on_the_next_reconcile(kube: Kube, k
     the chart's default) — a plain reconcile, the code path the interval takes,
     which without drift detection logs "release in-sync with desired state" and
     recreates nothing (600 s observed in the lab)."""
-    before = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+    before = kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
     assert before, f"no Harness {HARNESS} in {KAGENT_NAMESPACE} to delete"
     hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", "kagent", namespace=NAMESPACE)
     assert (hr["spec"].get("driftDetection") or {}).get("mode") == "enabled", f"the kagent HelmRelease carries no spec.driftDetection.mode: enabled: {hr['spec'].get('driftDetection')}"
     revision = hr["status"]["history"][0]["version"]
     started = time.monotonic()
-    kube.delete("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
-    assert kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE) is None, "the Harness survived its delete"
+    kube.delete("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+    assert kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE) is None, "the Harness survived its delete"
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     kube.cmd(["-n", NAMESPACE, "annotate", "helmreleases.helm.toolkit.fluxcd.io", "kagent", f"reconcile.fluxcd.io/requestedAt={stamp}", "--overwrite"])
 
     def recreated() -> Any:
-        harness = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+        harness = kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
         return harness if harness and harness["metadata"]["uid"] != before["metadata"]["uid"] else False
 
     try:
@@ -690,8 +690,8 @@ def test_cli_upgrade_is_refused(kube: Kube, helm: Helm, chart_archive: Path, smo
 @pytest.mark.smoke
 def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deployment: float) -> None:
     agent_hrs_before = [hr["metadata"]["name"] for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=KAGENT_NAMESPACE)]
-    templates_before = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.kagent.dev", namespace=KAGENT_NAMESPACE))
-    servers_before = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.kagent.dev", namespace=KAGENT_NAMESPACE))
+    templates_before = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.api.kagent.dev", namespace=KAGENT_NAMESPACE))
+    servers_before = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert MANAGED_AGENT in agent_hrs_before, f"the managed agent's HelmRelease was not there before the uninstall: {agent_hrs_before}"
     assert templates_before == sorted((DECLARATIVE_AGENT, MANAGED_AGENT)), templates_before
     assert servers_before == [MANAGED_AGENT], servers_before
@@ -743,16 +743,16 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # exactly this.
     assert_kept_crds(kube)
     assert kube.get("namespace", KAGENT_NAMESPACE), "the kagent namespace went with the uninstall; it must be kept (the agents live there)"
-    templates = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.kagent.dev", namespace=KAGENT_NAMESPACE))
+    templates = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert templates == templates_before, f"AgentTemplates after the uninstall {templates} != before {templates_before}"
-    servers = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.kagent.dev", namespace=KAGENT_NAMESPACE))
+    servers = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert servers == servers_before, f"RemoteMCPServers after the uninstall {servers} != before {servers_before}"
-    harness = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+    harness = kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
     assert harness, f"the platform Harness {HARNESS} went with the uninstall of the kagent release; it must be kept (helm.sh/resource-policy: keep, giantswarm/agent-platform#406)"
     harness_annotations = harness["metadata"].get("annotations") or {}
     assert harness_annotations.get("helm.sh/resource-policy") == "keep", harness_annotations
     assert harness_annotations.get("meta.helm.sh/release-name") == "kagent", f"the kept Harness is not the kagent release's (components.kagent.chart = the releaseName): {harness_annotations}"
-    assert not kube.items("modelconfigs.kagent.dev", namespace=KAGENT_NAMESPACE), "ModelConfigs survived the uninstall of the kagent release"
+    assert not kube.items("modelconfigs.api.kagent.dev", namespace=KAGENT_NAMESPACE), "ModelConfigs survived the uninstall of the kagent release"
     assert kube.get("sandboxconfigs.ate.dev", SANDBOX_CONFIG) is None, "the substrate release's SandboxConfig survived its uninstall"
     assert not kube.items("workerpools.ate.dev", all_namespaces=True), "a WorkerPool survived the kagent release's uninstall"
     wait_for(f"no workload left in {KAGENT_NAMESPACE} (the controller, the UI, its Postgres, the WorkerPool's workers)",

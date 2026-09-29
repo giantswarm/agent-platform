@@ -7,7 +7,7 @@ description: |
   a cluster: the public muster route and the agentgateway data-plane Gateway +
   AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
   the kagent and klaus-gateway routes, the kagent catalog (ModelConfigs and
-  RemoteMCPServers at kagent.dev/v1alpha3) and tenant identity, the CloudNativePG
+  RemoteMCPServers at api.kagent.dev/v1alpha3) and tenant identity, the CloudNativePG
   Cluster, and — gated on the component toggles — the Backstage app-config and
   route, the mcp-kubernetes MCPServer registration with muster and
   the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO

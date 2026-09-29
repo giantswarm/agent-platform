@@ -907,7 +907,7 @@ under the Gateway's own name.
 
 {{/*
 The spec.provider of a kagent.modelConfigs[] entry, checked against the
-ModelConfig CRD's enum (kagent.dev/v1alpha3). The enum is case-sensitive and
+ModelConfig CRD's enum (api.kagent.dev/v1alpha3). The enum is case-sensitive and
 the API server refuses any other value at admission, after the render has said
 nothing; failing here names the entry and the eleven values instead. Takes the
 entry.

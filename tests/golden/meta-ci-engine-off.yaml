@@ -632,9 +632,10 @@ spec:
         enabled: false
         grpc:
           services:
-            kagent.api.v1alpha1.AgentInstanceService: []
+            kagent.api.v1alpha1.AgentService: []
             kagent.api.v1alpha1.AgentTemplateService: []
             kagent.api.v1alpha1.ModelService: []
+            kagent.api.v1alpha1.SessionService: []
             kagent.api.v1alpha1.SystemService: []
             lf.a2a.v1.A2AService: []
         hostname: ""

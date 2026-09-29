@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Validate every kagent.dev object the connectivity chart renders against the
+"""Validate every api.kagent.dev object the connectivity chart renders against the
 kagent line's CRDs, and assert that no render of the chart carries a
 kagent.dev/v1alpha2 object.
 
 The chart renders the platform's kagent catalog — `kagent.modelConfigs[]` as
 ModelConfigs, `kagent.remoteMcpServers[]` as RemoteMCPServers — at
-kagent.dev/v1alpha3, the only version kagent API v2 serves. `helm template`
+api.kagent.dev/v1alpha3, the only group and version the kagent line serves. `helm template`
 cannot tell a field the CRD prunes from one it keeps, so this test checks the
 rendered objects against the CRDs' openAPIV3Schema the way the API server would
 at admission: every field known, every required field present, enums, types,
@@ -16,7 +16,7 @@ spec.tls on an http:// url). A field the schema does not know is a failure — t
 API server would drop it silently and the object would lose that setting.
 
 The CRDs are the kagent line's at its pinned release: the plain-YAML templates
-`helm/kagent-crds/templates/kagent.dev_*.yaml` of giantswarm/kagent-upstream at
+`helm/kagent-crds/templates/api.kagent.dev_*.yaml` of giantswarm/kagent-upstream at
 KAGENT_LINE_REF, the tag of the floor of the meta chart's
 `components.kagent-crds.versionRange` (the same files that component
 installs), read from helm/agent-platform/values.yaml so a re-pin moves it.
@@ -58,12 +58,12 @@ import yaml
 META_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helm", "agent-platform", "values.yaml")
 CRD_URL = "https://raw.githubusercontent.com/giantswarm/kagent-upstream/{ref}/helm/kagent-crds/templates/{file}"
 CRD_FILES = {
-    "ModelConfig": "kagent.dev_modelconfigs.yaml",
-    "RemoteMCPServer": "kagent.dev_remotemcpservers.yaml",
-    "Harness": "kagent.dev_harnesses.yaml",
-    "AgentTemplate": "kagent.dev_agenttemplates.yaml",
+    "ModelConfig": "api.kagent.dev_modelconfigs.yaml",
+    "RemoteMCPServer": "api.kagent.dev_remotemcpservers.yaml",
+    "Harness": "api.kagent.dev_harnesses.yaml",
+    "AgentTemplate": "api.kagent.dev_agenttemplates.yaml",
 }
-API_VERSION = "kagent.dev/v1alpha3"
+API_VERSION = "api.kagent.dev/v1alpha3"
 # ModelConfigSpec's per-provider blocks: key -> the spec.provider it belongs to
 # (the CRD's `provider.<key> must be nil if the provider is not <Provider>` rules).
 PROVIDER_BLOCKS = {
@@ -354,7 +354,7 @@ def check_artifact_credential(crds: dict[str, dict]) -> None:
 
 
 def kagent_docs(docs: list[dict]) -> list[dict]:
-    return [d for d in docs if str(d.get("apiVersion", "")).startswith("kagent.dev/")]
+    return [d for d in docs if str(d.get("apiVersion", "")).startswith("api.kagent.dev/")]
 
 
 def main(chart: str) -> int:
@@ -370,10 +370,10 @@ def main(chart: str) -> int:
         if errors:
             fail("\n  ".join(["rendered kagent objects the CRDs would refuse or prune:", *errors]))
         kinds = sorted(f"{d['kind']}/{d['metadata']['name']}" for d in docs)
-        print(f"ok: {where}: {len(docs)} kagent.dev object(s) valid against {KAGENT_LINE_REF}" + (f" — {', '.join(kinds)}" if kinds else ""))
+        print(f"ok: {where}: {len(docs)} api.kagent.dev object(s) valid against {KAGENT_LINE_REF}" + (f" — {', '.join(kinds)}" if kinds else ""))
         total += len(docs)
     if total == 0:
-        fail("no shape rendered a kagent.dev object; the catalog shape must")
+        fail("no shape rendered an api.kagent.dev object; the catalog shape must")
 
     catalog = kagent_docs(render(chart, CATALOG_SHAPE))
     by_name = {(d["kind"], d["metadata"]["name"]): d for d in catalog}

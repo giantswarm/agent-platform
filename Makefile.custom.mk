@@ -1967,14 +1967,14 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	$(call kagent_route_doc,GRPCRoute,kagent-controller-public,$(VERIFY_TMP)/vkr.out,$(VERIFY_TMP)/vkr-public.out)
 	@if grep -A3 '^kind: HTTPRoute$$' $(VERIFY_TMP)/vkr.out | grep -q 'name: kagent-controller'; then echo "FAIL: a kagent-controller HTTPRoute still renders (the REST /kagent route was retired)"; exit 1; fi
 	@if grep -qE 'value: /kagent$$|pathPrefix|replacePrefixMatch: /$$' $(VERIFY_TMP)/vkr.out; then echo "FAIL: the render still carries a /kagent path prefix"; grep -nE 'value: /kagent$$|pathPrefix' $(VERIFY_TMP)/vkr.out | head; exit 1; fi
-	@for svc in kagent.api.v1alpha1.AgentInstanceService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService grpc.health.v1.Health; do \
+	@for svc in kagent.api.v1alpha1.AgentService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SessionService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService grpc.health.v1.Health; do \
 		for f in $(VERIFY_TMP)/vkr-inner.out $(VERIFY_TMP)/vkr-public.out; do \
 			grep -B1 "^            service: $$svc$$" $$f | grep -q 'type: Exact' || { echo "FAIL: $$f has no exact match for $$svc"; exit 1; }; \
 		done; \
 	done
 	@for f in $(VERIFY_TMP)/vkr-inner.out $(VERIFY_TMP)/vkr-public.out; do \
-		[ "$$(grep -c '^    - matches:' $$f)" = "6" ] || { echo "FAIL: $$f does not carry one rule per service (the line's five and grpc.health.v1.Health)"; grep -c '^    - matches:' $$f; exit 1; }; \
-		[ "$$(grep -c '^            service: ' $$f)" = "6" ] || { echo "FAIL: $$f does not match exactly the line's five services and grpc.health.v1.Health once each"; grep -c '^            service: ' $$f; exit 1; }; \
+		[ "$$(grep -c '^    - matches:' $$f)" = "7" ] || { echo "FAIL: $$f does not carry one rule per service (the line's six and grpc.health.v1.Health)"; grep -c '^    - matches:' $$f; exit 1; }; \
+		[ "$$(grep -c '^            service: ' $$f)" = "7" ] || { echo "FAIL: $$f does not match exactly the line's six services and grpc.health.v1.Health once each"; grep -c '^            service: ' $$f; exit 1; }; \
 		if grep -q '^            method: ' $$f; then echo "FAIL: $$f lists methods by default — the default is one service-only match per service (agentgateway chart >= 2.1.1 translates it to the path prefix /<service>/)"; exit 1; fi; \
 		grep -q '^            service: lf.a2a.v1.A2AService$$' $$f || { echo "FAIL: $$f does not route lf.a2a.v1.A2AService"; exit 1; }; \
 	done
@@ -2084,7 +2084,7 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"kagent.api.v1alpha1.SystemService":["GetVersion","GetCurrentUser"]}' >$(VERIFY_TMP)/vkr-extra.out 2>&1 || { cat $(VERIFY_TMP)/vkr-extra.out; exit 1; }
 	@[ "$$(grep -c 'method: GetCurrentUser' $(VERIFY_TMP)/vkr-extra.out)" = "2" ] || { echo "FAIL: a listed RPC does not reach both GRPCRoutes"; exit 1; }
 	@[ "$$(grep -c '^            service: kagent.api.v1alpha1.SystemService$$' $(VERIFY_TMP)/vkr-extra.out)" = "4" ] || { echo "FAIL: the listed service does not render one match per RPC on both routes"; grep -c '^            service: kagent.api.v1alpha1.SystemService$$' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
-	@[ "$$(grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out)" = "14" ] || { echo "FAIL: the other services' and the Health service-only matches did not survive a one-service override"; grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out)" = "16" ] || { echo "FAIL: the other services' and the Health service-only matches did not survive a one-service override"; grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
 	@[ "$$(grep -c '^            method: ' $(VERIFY_TMP)/vkr-extra.out)" = "4" ] || { echo "FAIL: methods rendered for a service without a list"; exit 1; }
 	@echo "ok: the RPC list is the per-service fallback (the map merges, a list replaces)"
 	@echo "--> every connectivity CI values file renders"
@@ -2095,17 +2095,17 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@echo "All kagent controller route behaviors verified."
 
 .PHONY: verify-kagent-discovery
-verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for muster (the Generic agent chart 1.x renders one per agent, with the toolset header and the discovery opt-out label), nothing it renders for muster carries a static header, the operator-defined kagent.remoteMcpServers are kagent.dev/v1alpha3 in the kagent namespace (tokenSecret = a Secret-sourced Authorization header, no opt-out label).
+verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for muster (the Generic agent chart 1.x renders one per agent, with the toolset header and the discovery opt-out label), nothing it renders for muster carries a static header, the operator-defined kagent.remoteMcpServers are api.kagent.dev/v1alpha3 in the kagent namespace (tokenSecret = a Secret-sourced Authorization header, no opt-out label).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> kagent + muster on (OAuth on, the default) with operator extras: no RemoteMCPServer for muster; every RemoteMCPServer kagent.dev/v1alpha3 in the kagent namespace"
+	@echo "--> kagent + muster on (OAuth on, the default) with operator extras: no RemoteMCPServer for muster; every RemoteMCPServer api.kagent.dev/v1alpha3 in the kagent namespace"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp"}]' >$(VERIFY_TMP)/vkd-on.out 2>&1 || { cat $(VERIFY_TMP)/vkd-on.out; exit 1; }
 	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/' $(VERIFY_TMP)/vkd-on.out >$(VERIFY_TMP)/vkd-on-rms.out
 	@[ "$$(grep -c '^kind: RemoteMCPServer$$' $(VERIFY_TMP)/vkd-on.out)" = "2" ] || { echo "FAIL: expected the two operator RemoteMCPServers and nothing else, got $$(grep -c '^kind: RemoteMCPServer$$' $(VERIFY_TMP)/vkd-on.out)"; grep -n -A3 '^kind: RemoteMCPServer$$' $(VERIFY_TMP)/vkd-on.out; exit 1; }
 	@if grep -qE '^  name: "?muster"?$$' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: a RemoteMCPServer named muster is back — the Generic agent chart 1.x renders one per agent (docs/authentication.md, tool discovery)"; exit 1; fi
 	@if grep -q 'svc.cluster.local:8090/mcp' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: a RemoteMCPServer of the platform's own targets muster — the per-agent carrier is the agent chart's; a static header here would override the propagated caller token in every agent"; exit 1; fi
-	@if grep -q 'allowedNamespaces' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: allowedNamespaces is back on a RemoteMCPServer (the v1alpha2 cross-namespace grant; an AgentTemplate binds a same-namespace server only)"; exit 1; fi
-	@[ "$$(grep -c '^apiVersion: kagent.dev/v1alpha3$$' $(VERIFY_TMP)/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not kagent.dev/v1alpha3"; grep -n apiVersion $(VERIFY_TMP)/vkd-on-rms.out; exit 1; }
-	@[ "$$(grep -c '^  namespace: kagent$$' $(VERIFY_TMP)/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not in the kagent namespace, where the AgentTemplates that bind it live"; exit 1; }
+	@if grep -q 'allowedNamespaces' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: allowedNamespaces is back on a RemoteMCPServer (the v1alpha2 cross-namespace grant; an Agent binds a same-namespace server only)"; exit 1; fi
+	@[ "$$(grep -c '^apiVersion: api.kagent.dev/v1alpha3$$' $(VERIFY_TMP)/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not api.kagent.dev/v1alpha3"; grep -n apiVersion $(VERIFY_TMP)/vkd-on-rms.out; exit 1; }
+	@[ "$$(grep -c '^  namespace: kagent$$' $(VERIFY_TMP)/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not in the kagent namespace, where the Agents that bind it live"; exit 1; }
 	@if grep -q 'kagent.dev/v1alpha2' $(VERIFY_TMP)/vkd-on.out; then echo "FAIL: a kagent.dev/v1alpha2 object renders"; grep -n 'v1alpha2' $(VERIFY_TMP)/vkd-on.out; exit 1; fi
 	@if grep -q 'kagent.dev/discovery' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: the discovery opt-out label leaked onto an operator-defined RemoteMCPServer (the Generic agent chart sets it on the per-agent carrier)"; exit 1; fi
 	@echo "ok: no muster server, v1alpha3 in the kagent namespace, no allowedNamespaces, no v1alpha2, no opt-out label on the extras"
@@ -2134,7 +2134,7 @@ verify-model-catalog: ## Assert llmRouting.modelCatalog is an overlay of what th
 	@python3 tests/verify-model-catalog.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
 .PHONY: verify-kagent-crds
-verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
+verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — api.kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)

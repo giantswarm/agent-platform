@@ -325,7 +325,7 @@ def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_fl
     started = time.monotonic()
     try:
         kube.wait_deployment(KAGENT_NAMESPACE, "kagent-controller", timeout=600)
-        wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
+        wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
         assert kube.get("serviceaccount", KAGENT_FLUX_SA, namespace=KAGENT_NAMESPACE), f"the connectivity release did not render ServiceAccount {KAGENT_FLUX_SA}"
         apply_placeholder_provider_secret(kube)
         wait_for_substrate(kube)
@@ -372,7 +372,7 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
         assert set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values()), {n: condition(h) for n, h in hrs.items()}
         assert all("serviceAccountName" not in hr["spec"] for hr in hrs.values()), "the failed upgrade changed the platform HelmReleases"
-        assert template_ready(kube.get("agenttemplates.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent's template is no longer Ready on the Harness"
+        assert template_ready(kube.get("agenttemplates.api.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent's template is no longer Ready on the Harness"
         logger.info("guard fired: %s", messages[:300])
         # the way out the message names: the value back to false recovers
         kube.apply(meta_helmrelease(candidate_version, engine=False))

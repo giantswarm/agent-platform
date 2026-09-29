@@ -23,7 +23,7 @@ kubeconfig. Helm 4 and kubectl come with the ATS image. What the smoke leaves on
 the cluster is what the functional scenario expects to find (the lab Dex, the
 registry with the chart, the four operator CRDs, the kept kagent CRDs).
 
-The platform's kagent is the kagent line (kagent API v2, kagent.dev/v1alpha3):
+The platform's kagent is the kagent line (kagent API v2, api.kagent.dev/v1alpha3):
 agents are AgentTemplates a Harness admits and runs as Agent Substrate actors in
 gVisor worker pods. Both scenarios get Substrate from the chart under test and
 assert readiness on the platform Harness (AgentTemplate.status.harnesses[]); the
@@ -102,7 +102,7 @@ PODCERT_SIGNERS = {"servicedns.podcert.ate.dev/identity": "service-dns-ca-pool",
 # leaves the three ate.dev CRDs (the Substrate line's CRD templates carry keep). A
 # consumer's uninstall can therefore always delete its CRs, whatever order a
 # concurrent uninstall finalizes the releases in (giantswarm/agent-platform#385).
-KAGENT_CRDS = {f"{plural}.kagent.dev" for plural in ("agenttemplates", "harnesses", "modelconfigs", "modelproviderconfigs", "remotemcpservers")}
+KAGENT_CRDS = {f"{plural}.api.kagent.dev" for plural in ("agents", "agenttemplates", "harnesses", "modelconfigs", "modelproviderconfigs", "remotemcpservers", "sandboxtemplates")}
 SUBSTRATE_CRDS = {f"{plural}.ate.dev" for plural in ("workerpools", "sandboxconfigs", "csidriverconfigs")}
 KEPT_CRDS = KAGENT_CRDS | SUBSTRATE_CRDS
 # The cluster-scoped SandboxConfig the substrate chart renders — the CR whose
@@ -625,10 +625,10 @@ def wait_for_substrate(kube: Kube, timeout: float = 600) -> Dict[str, Any]:
         return wp if wp and want and wp.get("status", {}).get("readyReplicas", 0) >= want else False
 
     wp = wait_for(f"WorkerPool {KAGENT_NAMESPACE}/{WORKER_POOL} with every worker Ready", workers_ready, timeout)
-    harness = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+    harness = kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
     assert harness, f"the connectivity release rendered no Harness {HARNESS} in {KAGENT_NAMESPACE}"
     assert harness["spec"]["substrate"]["workerPoolRef"]["name"] == WORKER_POOL, harness["spec"]["substrate"]
-    assert harness["spec"]["allowedAgentTemplates"]["selector"]["matchLabels"] == {HARNESS_LABEL: HARNESS}, harness["spec"]["allowedAgentTemplates"]
+    assert "allowedAgentTemplates" not in harness["spec"], harness["spec"]
     TIMINGS.record(f"Substrate ready (ate-system control plane, WorkerPool {WORKER_POOL} {wp['status'].get('readyReplicas')}/{wp['spec']['replicas']} workers, Harness {HARNESS})", time.monotonic() - started)
     logger.info("Substrate ready: WorkerPool %s %s/%s workers on %s, Harness %s on %s",
                 WORKER_POOL, wp["status"].get("readyReplicas"), wp["spec"]["replicas"], wp["spec"].get("workerImage"), HARNESS, harness["spec"]["workload"]["image"])
@@ -639,13 +639,13 @@ def wait_for_template_ready(kube: Kube, name: str, timeout: float = 600) -> Dict
     """The AgentTemplate Ready on the platform Harness; the failure message
     carries the template's state (not admitted, or which condition is off)."""
     def ready() -> Any:
-        template = kube.get("agenttemplates.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        template = kube.get("agenttemplates.api.kagent.dev", name, namespace=KAGENT_NAMESPACE)
         return template if template_ready(template) else False
 
     try:
         return wait_for(f"AgentTemplate {name} Ready on Harness {HARNESS}", ready, timeout)
     except AssertionError as exc:
-        template = kube.get("agenttemplates.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        template = kube.get("agenttemplates.api.kagent.dev", name, namespace=KAGENT_NAMESPACE)
         raise AssertionError(f"{exc}; AgentTemplate {name}: {template_state(template)}") from exc
 
 
@@ -659,7 +659,7 @@ def assert_remote_mcp_server(kube: Kube, name: str, toolset: Optional[List[str]]
     toolset = TOOLSET if toolset is None else toolset
 
     def accepted() -> Any:
-        server = kube.get("remotemcpservers.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        server = kube.get("remotemcpservers.api.kagent.dev", name, namespace=KAGENT_NAMESPACE)
         return server if is_accepted(server) else False
 
     server = wait_for(f"RemoteMCPServer {name} Accepted", accepted, 300)
@@ -744,8 +744,8 @@ def dump_agents(kube: Kube) -> None:
     """The agent path's state when an assertion fails: the kagent API v2 objects,
     Substrate's control plane and the WorkerPool's workers, their logs."""
     kube.dump([
-        f"-n {KAGENT_NAMESPACE} get agenttemplates.kagent.dev,remotemcpservers.kagent.dev,modelconfigs.kagent.dev -o yaml",
-        f"-n {KAGENT_NAMESPACE} get harnesses.kagent.dev,workerpools.ate.dev -o yaml",
+        f"-n {KAGENT_NAMESPACE} get agenttemplates.api.kagent.dev,remotemcpservers.api.kagent.dev,modelconfigs.api.kagent.dev -o yaml",
+        f"-n {KAGENT_NAMESPACE} get harnesses.api.kagent.dev,workerpools.ate.dev -o yaml",
         f"-n {KAGENT_NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io,ocirepositories.source.toolkit.fluxcd.io -o wide",
         f"-n {KAGENT_NAMESPACE} get pods -o wide",
         f"-n {ATE_NAMESPACE} get pods -o wide",

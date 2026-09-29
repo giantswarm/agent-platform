@@ -28,7 +28,7 @@ spec:
   reinvocationPolicy: IfNeeded
   matchConstraints:
     resourceRules:
-      - apiGroups: ["kagent.dev"]
+      - apiGroups: ["api.kagent.dev"]
         apiVersions: ["*"]
         operations: ["CREATE", "UPDATE"]
         resources: ["modelconfigs"]

@@ -1606,8 +1606,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
   # (h2c to the controller) and a GRPCRoute in the release namespace, matched by
   # gRPC service (controllerRoute.grpc.services) —
-  # kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService, ModelService,
-  # SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
+  # kagent.api.v1alpha1.{AgentService, AgentTemplateService, ModelService,
+  # SessionService, SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
   # controller has no REST). Native gRPC over HTTP/2 from the public hostname
   # and from the in-cluster agentgateway Service
   # (grpc://agentgateway.<release namespace>.svc.cluster.local:8080, h2c), and
@@ -1635,9 +1635,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # controller before 2.1.1 translated a service-only match into an exact
       # path no request has). Either shape outranks the MCP catch-all route.
       services:
-        kagent.api.v1alpha1.AgentInstanceService: []
+        kagent.api.v1alpha1.AgentService: []
         kagent.api.v1alpha1.AgentTemplateService: []
         kagent.api.v1alpha1.ModelService: []
+        kagent.api.v1alpha1.SessionService: []
         kagent.api.v1alpha1.SystemService: []
         lf.a2a.v1.A2AService: []
     # kagent's MCP server (the controller's /mcp: list_agent_instances, the
@@ -1733,8 +1734,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # --- Admin-owned kagent CRs (read by connectivity templates, not the subchart) ---
   # Tenant agents — created with the generic agent chart
   # (https://github.com/giantswarm/agent), one release per agent — reference
-  # these by name. Every object here is kagent.dev/v1alpha3 (kagent API v2) in
-  # the kagent namespace, where the AgentTemplates that bind it live: a template
+  # these by name. Every object here is api.kagent.dev/v1alpha3 in
+  # the kagent namespace, where the Agents that bind it live: an Agent
   # binds a RemoteMCPServer of its own namespace only. There is no shared muster
   # RemoteMCPServer: the agent chart 1.x renders one per agent — muster's
   # in-cluster URL (its value muster.url; agent-manager composes it from the
