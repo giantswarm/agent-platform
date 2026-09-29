@@ -89,8 +89,9 @@ On the installation, after the cutover:
 - `agentgateway_gen_ai_client_token_usage` carries `agent` and
   `agent_namespace` labels in the `giantswarm` Mimir tenant.
 - `agentgateway_cost_catalog_lookups_total{status="Exact"}` grows. A
-  `NoCatalog` or `Missing` status means the model has no price in
-  `llmRouting.modelCatalog`.
+  `Missing` status means neither the gateway's built-in price catalog nor the
+  `llmRouting.modelCatalog` overlay prices the model: bump the gateway to a
+  release that does, or add the model to the overlay.
 - The Usage dashboard panels are populated.
 
 ### Notes
@@ -1086,42 +1087,14 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
 | llmRouting.modelCatalog.key | string | `"catalog.json"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-haiku-4-5.rates.input | string | `"1"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-haiku-4-5.rates.output | string | `"5"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-haiku-4-5.rates.cacheRead | string | `"0.1"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-haiku-4-5.rates.cacheWrite | string | `"1.25"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-4-5.rates.input | string | `"5"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-4-5.rates.output | string | `"25"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-4-5.rates.cacheRead | string | `"0.5"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-4-5.rates.cacheWrite | string | `"6.25"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.input | string | `"5"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.output | string | `"25"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.cacheRead | string | `"0.5"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5.rates.cacheWrite | string | `"6.25"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.input | string | `"4"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.output | string | `"20"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.cacheRead | string | `"0.2"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.cacheWrite | string | `"5"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.input | string | `"3"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.output | string | `"15"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.cacheRead | string | `"0.3"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-5.rates.cacheWrite | string | `"3.75"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-6.rates.input | string | `"3"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-6.rates.output | string | `"15"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-6.rates.cacheRead | string | `"0.3"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-4-6.rates.cacheWrite | string | `"3.75"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.input | string | `"2"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.output | string | `"10"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.cacheRead | string | `"0.2"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5.rates.cacheWrite | string | `"2.5"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.input | string | `"2"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.output | string | `"10"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.cacheRead | string | `"0.2"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.cacheWrite | string | `"2.5"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.input | string | `"10"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.output | string | `"50"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.cacheRead | string | `"0.25"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-fable-5-1.rates.cacheWrite | string | `"12.5"` |  |
 | networkPolicy.enabled | bool | `true` |  |
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
