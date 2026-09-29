@@ -430,6 +430,21 @@
                         "valuesFrom": {
                             "type": "string"
                         },
+                        "valuesSourceObjects": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
                         "versionRange": {
                             "type": "string"
                         }
