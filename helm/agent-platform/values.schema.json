@@ -818,6 +818,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "ownedCrds": {
                             "type": "array",
                             "items": {

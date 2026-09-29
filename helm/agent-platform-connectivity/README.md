@@ -1182,6 +1182,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | dashboards.organization | string | `"Shared Org"` |  |
 | dashboards.folder | string | `"Agent Platform"` |  |
 | dicebear | object | `{}` |  |
+| muster.grants | object | `{}` |  |
 | muster.enabled | bool | `true` |  |
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
 | muster.fullnameOverride | string | `"muster"` |  |
