@@ -5198,7 +5198,8 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # schedules to — on a cluster whose control-plane nodes carry the
     # node-role.kubernetes.io/control-plane taint, the worker nodes. Pin it to
     # the node pool the WorkerPool runs on (kagent.substrateWorkerPool.template)
-    # with a nodeSelector; tolerate a dedicated pool's taint here.
+    # with a nodeSelector; tolerate a dedicated pool's taint here. The
+    # re-pinned Substrate line tolerates the ate.dev/sandboxClass taint itself.
     nodeSelector: {}
     tolerations: []
     affinity: {}
