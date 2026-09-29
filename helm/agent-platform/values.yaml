@@ -1732,8 +1732,11 @@ llmRouting:
   # source on top, merged per model and per rate, and hot-reloaded. List only
   # a model the pinned gateway does not price yet: an entry the pinned release
   # already prices would keep overriding it after upstream moves, so
-  # `make verify-model-catalog` refuses it. The block mirrors the catalog JSON (providers -> models -> rates) and
-  # carries no `metadata`: a source with metadata replaces the built-in base.
+  # `make verify-model-catalog` refuses it. The block mirrors the catalog JSON
+  # (providers -> models -> rates) and carries no `metadata`: a source with
+  # metadata replaces the built-in base. Provider names stay open; each
+  # provider is validated against files/model-catalog/providers.schema.json of
+  # the connectivity chart.
   # Lookup is an exact, provider-scoped model-name match on the response model,
   # then the request model.
   modelCatalog:
@@ -1741,7 +1744,7 @@ llmRouting:
     # ConfigMap name; empty derives <release>-model-catalog.
     name: ""
     key: catalog.json
-    providers:  # @schema type: object; additionalProperties: true; skipProperties: true
+    providers:  # @schema type: object; additionalProperties: {"$ref": "../agent-platform-connectivity/files/model-catalog/providers.schema.json"}; skipProperties: true
       anthropic:
         models:
           # Not in the built-in catalog through gateway 2.1.x.
