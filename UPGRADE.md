@@ -15,6 +15,17 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the Substrate line at `1.2.0`: the egress gateway trusts an extra CA bundle)
+
+giantswarm/agentlab#284: `components.substrate{,-crds}.versionRange` is `>=1.2.0 <1.3.0`. 1.2.0 is the line on the same upstream (kagent-dev/substrate v0.2.0-beta5) as 1.1.3, released as a minor; it adds `substrate.atenetEgress.upstreamTrust.caBundle`, empty by default.
+
+### Operator action
+
+- **None** for an installation on the defaults. The upgrade rolls the Substrate workloads onto 1.2.0, and the kagent WorkerPool's worker image follows the floor to `ateom-gvisor:1.2.0`, which replaces the pool's workers once.
+- **An installation whose actors call an endpoint behind a private CA** sets `substrate.atenetEgress.upstreamTrust.caBundle` to that CA's PEM. The egress gateway rolls on a change of the bundle.
+- **An installation that pins `components.substrate{,-crds}.versionRange` below 1.2.0** ignores the key.
+- **Recognising it worked**: `kubectl -n ate-system get hr substrate -o jsonpath='{.status.lastAttemptedRevision}'` prints `1.2.0`, and with a bundle set, `kubectl -n ate-system get cm atenet-egress-upstream-trust` exists.
+
 ## \<current\> → \<next\> (`BackendTrafficPolicy` targets without a namespace)
 
 giantswarm/agent-platform#377: the connectivity chart's `BackendTrafficPolicy` objects no longer render `spec.targetRefs[].namespace`, which Envoy Gateway v1.1 and later do not declare. A server-side apply (helm-controller) refused the field and failed the connectivity upgrade.
