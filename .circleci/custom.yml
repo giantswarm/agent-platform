@@ -172,10 +172,13 @@ workflows:
         requires:
         - build-connectivity-chart
         - execute-chart-tests
+        # Like the generated push-chart: a release branch publishes through the
+        # tag pipeline only, since auto-release tags its merges within seconds.
         filters:
           branches:
             ignore:
             - main
+            - /^release-v?[0-9]+(\.[0-9]+)?\.x$/
 
     - architect/push-to-app-catalog:
         executor: app-build-suite
