@@ -19,7 +19,8 @@ onto the pool and published for model-manager. Each case below pins one property
   discovery ConfigMap;
 - an empty taint key (an untainted pool): no toleration anywhere, no taint in
   the discovery ConfigMap, and the serving render byte-identical to GOLDEN_REF
-  (origin/main; GOLDEN_REF= opts out) but for the discovery block itself --
+  (origin/main; GOLDEN_REF= opts out) but for the discovery block itself and
+  the image references (a dependency bump re-pins those) --
   against a golden that already carries this change the override goes to both
   sides, since a tainted golden could never equal an untainted head;
 - the guards: the effect, the key, string label values (a number must be
@@ -76,6 +77,10 @@ GPU_POOL_BLOCK = re.compile(
 )
 # The model-images block of the discovery ConfigMap (#551), cut out while GOLDEN_REF predates it.
 MODEL_IMAGES_BLOCK = re.compile(r"      # Models as OCI images \(modelServing\.modelImages\).*?(?=      presets:\n)", re.S)
+# An image reference, masked on both sides of the GOLDEN_REF comparison: a
+# dependency bump re-pins it by design (the committed renders of tests/golden/
+# show that move), while the pool's scheduling is what this comparison guards.
+IMAGE_REF = re.compile(r"^( *(?:- )?image: ).+$", re.M)
 
 
 def fail(msg: str) -> None:
@@ -588,9 +593,9 @@ else:
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):
-        if head[key] != golden[key]:
+        if IMAGE_REF.sub(r"\1<image>", head[key]) != IMAGE_REF.sub(r"\1<image>", golden[key]):
             fail(f"untainted render vs {ref}: {key[0]}/{key[1]} differs:\n{head[key]}\n--- {ref}:\n{golden[key]}")
-    ok(f"an empty taint key leaves the serving render (cache claim off on both sides) byte-identical to {ref} but for the discovery block")
+    ok(f"an empty taint key leaves the serving render (cache claim off on both sides) byte-identical to {ref} but for the discovery block and the image references")
 
 # --- the guards --------------------------------------------------------------
 for flags, needle in [
