@@ -30,6 +30,7 @@ workflows:
           branches:
             ignore:
             - main
+            - /^release-v?[0-9]+(\.[0-9]+)?\.x$/
 
     # Branch: run chart tests after build-chart. When branchPublish pushes a dev
     # image, the test also waits on push-to-registries -- run-tests-with-ats
@@ -54,6 +55,7 @@ workflows:
           branches:
             ignore:
             - main
+            - /^release-v?[0-9]+(\.[0-9]+)?\.x$/
 
     # Branch chart push (opt-in): publish the dev chart after tests + the amd64
     # branch image, coupled with push-to-registries above.
