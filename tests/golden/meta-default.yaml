@@ -857,6 +857,10 @@ spec:
               caSecretName: ""
               enabled: false
           mode: Strict
+        mcp:
+          enabled: true
+          pathPrefix: /kagent/mcp
+          timeout: 300
         parentRef:
           name: giantswarm-default
           namespace: envoy-gateway-system
@@ -1345,7 +1349,7 @@ spec:
         toolsetPresets:
           agent-platform:
             description: The platform's own management surface — agent-manager, model-manager,
-              vm-manager, cluster-manager and muster's core tools.
+              vm-manager, cluster-manager, kagent's session tools and muster's core tools.
             include:
             - label: agent-platform.giantswarm.io/tool-group=agent-platform
             - pattern: core_*
@@ -1865,7 +1869,7 @@ spec:
       toolsetPresets:
         agent-platform:
           description: The platform's own management surface — agent-manager, model-manager,
-            vm-manager, cluster-manager and muster's core tools.
+            vm-manager, cluster-manager, kagent's session tools and muster's core tools.
           include:
           - label: agent-platform.giantswarm.io/tool-group=agent-platform
           - pattern: core_*

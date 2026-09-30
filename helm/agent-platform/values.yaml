@@ -2079,7 +2079,7 @@ muster:  # @schema skipProperties: true; additionalProperties: true
         include:
           - label: agent-platform.giantswarm.io/tool-group=infrastructure
       agent-platform:
-        description: The platform's own management surface — agent-manager, model-manager, vm-manager, cluster-manager and muster's core tools.
+        description: The platform's own management surface — agent-manager, model-manager, vm-manager, cluster-manager, kagent's session tools and muster's core tools.
         include:
           - label: agent-platform.giantswarm.io/tool-group=agent-platform
           - pattern: core_*
@@ -3183,6 +3183,25 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         kagent.api.v1alpha1.ModelService: []
         kagent.api.v1alpha1.SystemService: []
         lf.a2a.v1.A2AService: []
+    # kagent's MCP server (the controller's /mcp: list_agent_instances, the
+    # ready sessions the caller may see, invoke_agent_instance, a message to
+    # one of them through the A2A gateway, and the checkpoint and fork tools)
+    # registered with muster as
+    # MCPServer kagent in the agent-platform tool group, so every session with
+    # the agent-platform toolset preset lists and messages the person's other
+    # sessions. muster forwards the session's IdP token; the route is an
+    # HTTPRoute at pathPrefix on the data plane's plaintext listener only
+    # (in-cluster), rewritten to /mcp on the kagent backend above and behind a
+    # twin of the JWT policy below, so every call runs as the person who ran the turn. Needs
+    # controllerRoute.enabled and muster; off renders neither the route nor the CR.
+    mcp:
+      enabled: true
+      pathPrefix: /kagent/mcp
+      # Seconds muster waits for one call (MCPServer spec.timeout, 1-300).
+      # invoke_agent_instance answers when the receiving session's turn ends,
+      # so the default is the CRD's maximum; a longer turn runs through the
+      # MCP Tasks extension.
+      timeout: 300
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for

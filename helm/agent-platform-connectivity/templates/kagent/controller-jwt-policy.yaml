@@ -34,27 +34,37 @@ spec:
   static:
     host: {{ $jwt.jwks.host }}
     port: {{ $jwt.jwks.port }}
+{{- /* One policy per route: the CRD takes one kind of targetRef per policy.
+kagent-mcp-jwt is the same boundary in front of the controller's /mcp
+(mcpserver.yaml), rendered under that template's gates. */}}
+{{- $policies := list (dict "name" "kagent-controller-jwt" "kind" "GRPCRoute" "route" "kagent-controller") }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) (dig "enabled" false ($route.mcp | default dict)) }}
+{{- $policies = append $policies (dict "name" "kagent-mcp-jwt" "kind" "HTTPRoute" "route" "kagent-mcp") }}
+{{- end }}
+{{- range $policies }}
+{{- $policy := . }}
 ---
 # AgentgatewayPolicy — the first of the two authentication layers in front of
 # the kagent controller (docs/authentication.md, "The kagent controller route").
-# On the kagent-controller GRPCRoute it verifies the bearer JWT (signature,
-# issuer, expiry) against the issuer, refuses a token that carries no identity
-# claim, and sets the identity header the controller reads — x-user-id — from
-# that claim, replacing whatever the client sent. The controller re-derives the
-# identity from the same bearer (trusted-proxy authenticator, unverified
-# decode), which is why agentgateway must stay the only path to it.
+# On each route (the kagent-controller GRPCRoute, the kagent-mcp HTTPRoute) it
+# verifies the bearer JWT (signature, issuer, expiry) against the issuer,
+# refuses a token that carries no identity claim, and sets the identity header
+# the controller reads — x-user-id — from that claim, replacing whatever the
+# client sent. The controller re-derives the identity from the same bearer
+# (trusted-proxy authenticator, unverified decode), which is why agentgateway
+# must stay the only path to it.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
-  name: kagent-controller-jwt
-  namespace: {{ .Release.Namespace }}
+  name: {{ $policy.name }}
+  namespace: {{ $.Release.Namespace }}
   labels:
-    {{- include "labels.common" . | nindent 4 }}
+    {{- include "labels.common" $ | nindent 4 }}
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
-      kind: GRPCRoute
-      name: kagent-controller
+      kind: {{ $policy.kind }}
+      name: {{ $policy.route }}
   traffic:
     jwtAuthentication:
       mode: {{ $jwt.mode | default "Strict" }}
@@ -64,7 +74,7 @@ spec:
         an explicit issuer set. */ -}}
         {{- $issuer := $jwt.issuer }}
         {{- if not $issuer }}
-        {{- $issuer = include "agent-platform.issuerUrl" (dict "ctx" . "for" "kagent.controllerRoute.jwtAuthentication") }}
+        {{- $issuer = include "agent-platform.issuerUrl" (dict "ctx" $ "for" "kagent.controllerRoute.jwtAuthentication") }}
         {{- end }}
         - issuer: {{ $issuer | quote }}
           # No audiences: any audience the issuer minted is accepted. dex
@@ -96,4 +106,5 @@ spec:
         set:
           - name: x-user-id
             value: {{ printf "jwt.%s" $claim | quote }}
+{{- end }}
 {{- end }}
