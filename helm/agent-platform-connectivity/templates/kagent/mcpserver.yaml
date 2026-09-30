@@ -1,0 +1,80 @@
+{{- /*
+Registers kagent's MCP server with muster (kagent.controllerRoute.mcp). The
+controller serves it at /mcp on its API port: list_agent_instances (the ready
+sessions the caller may see) and invoke_agent_instance (a message to one of
+them through kagent's A2A gateway, synchronous or through the MCP Tasks
+extension). Registered, every session whose toolset includes the agent-platform
+preset lists and messages the person's other sessions as x_kagent_<tool>, and
+the Dev Portal's MCP servers page lists it in the Agent Platform group.
+
+The path is the data plane's, never the controller's directly: an HTTPRoute at
+pathPrefix, rewritten to /mcp, on the kagent AgentgatewayBackend
+(controller-route.yaml) and behind the kagent-controller-jwt policy
+(controller-jwt-policy.yaml targets it with the GRPCRoute), so the controller
+keeps agentgateway as its only caller and derives the person from the token
+muster forwards (forwardToken: the session's IdP token, no new credential).
+The route is hostname-less, like the GRPCRoute, so muster dials the agentgateway
+Service by its cluster-DNS name; unlike it, it is pinned to the plaintext
+listener (gateway.listeners[0]) by sectionName, so it never serves the edge's
+HTTPS listener: in-cluster only.
+
+Gated on kagent, muster (the MCPServer CRD ships with it) and the controller
+route (the backend and the JWT policy are its objects).
+*/ -}}
+{{- $route := .Values.kagent.controllerRoute }}
+{{- $mcp := $route.mcp | default dict }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) $route.enabled (dig "enabled" false $mcp) }}
+{{- $prefix := $mcp.pathPrefix | default "" }}
+{{- if or (not (regexMatch "^/[a-z0-9][-a-z0-9/]*[a-z0-9]$" $prefix)) (hasPrefix "/mcp" $prefix) }}
+{{- fail (printf "kagent.controllerRoute.mcp.pathPrefix %q: want an absolute path of lower-case alphanumerics, '-' and '/' outside /mcp (muster's MCP surface on the same data plane), e.g. /kagent/mcp" $prefix) }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kagent-mcp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ .Release.Namespace }}
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      sectionName: {{ (first .Values.gateway.listeners).name }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ $prefix }}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /mcp
+      {{- with (include "agent-platform.routeTimeouts" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      backendRefs:
+        - name: kagent
+          kind: AgentgatewayBackend
+          group: agentgateway.dev
+---
+apiVersion: muster.giantswarm.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: kagent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    muster.giantswarm.io/type: kagent
+    agent-platform.giantswarm.io/tool-group: agent-platform
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  autoStart: true
+  type: streamable-http
+  url: http://{{ .Values.gateway.name }}.{{ .Release.Namespace }}.svc.cluster.local:{{ (first .Values.gateway.listeners).port }}{{ $prefix }}
+  auth:
+    type: oauth
+    forwardToken: true
+{{- end }}

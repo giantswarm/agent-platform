@@ -1349,6 +1349,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService" | list | `[]` |  |
+| kagent.controllerRoute.mcp.enabled | bool | `true` |  |
+| kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |

@@ -682,7 +682,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.muster.oauth.server.storage.valkey.secretKeyPassword | string | `"valkey-password"` |  |
 | muster.muster.toolsetPresets.infrastructure.description | string | `"The servers for the infrastructure underneath the platform (Giant Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus."` |  |
 | muster.muster.toolsetPresets.infrastructure.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=infrastructure"` |  |
-| muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, vm-manager, cluster-manager and muster's core tools."` |  |
+| muster.muster.toolsetPresets.agent-platform.description | string | `"The platform's own management surface — agent-manager, model-manager, vm-manager, cluster-manager, kagent's session tools and muster's core tools."` |  |
 | muster.muster.toolsetPresets.agent-platform.include[0].label | string | `"agent-platform.giantswarm.io/tool-group=agent-platform"` |  |
 | muster.muster.toolsetPresets.agent-platform.include[1].pattern | string | `"core_*"` |  |
 | muster.muster.observability.otel.endpoint | string | `"auto"` |  |
@@ -916,6 +916,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService" | list | `[]` |  |
+| kagent.controllerRoute.mcp.enabled | bool | `true` |  |
+| kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |

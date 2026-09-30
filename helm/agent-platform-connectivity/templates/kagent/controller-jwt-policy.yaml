@@ -55,6 +55,13 @@ spec:
     - group: gateway.networking.k8s.io
       kind: GRPCRoute
       name: kagent-controller
+    {{- /* The same boundary in front of the controller's /mcp (mcpserver.yaml);
+    its gates are that template's. */}}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) (dig "enabled" false ($route.mcp | default dict)) }}
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: kagent-mcp
+    {{- end }}
   traffic:
     jwtAuthentication:
       mode: {{ $jwt.mode | default "Strict" }}
