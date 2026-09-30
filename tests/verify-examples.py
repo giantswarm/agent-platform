@@ -36,6 +36,9 @@ EXAMPLES = {
     "own-gateway.yaml": ["--api-versions", "gateway.networking.k8s.io/v1"],
     "chart-owned-edge.yaml": ["--api-versions", "gateway.networking.k8s.io/v1"],
     "managed-cloud.yaml": ["--api-versions", "gateway.networking.k8s.io/v1"],
+    # A workload cluster of the fleet: Kyverno (the Substrate PolicyExceptions)
+    # and Cilium (the network policies of the Substrate hops).
+    "runtime-slice.yaml": ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2"],
 }
 # Examples with a check of their own: the BOM (verify-components-charts) and the
 # serving slice (verify-serving-slice).
