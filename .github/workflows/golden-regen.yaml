@@ -1,0 +1,105 @@
+# Regenerates the committed renders of tests/golden/ on Renovate and Dependabot
+# PR branches and pushes the result back onto the branch.
+#
+# Why: test-ingress-modes (`make verify-target`) compares both charts' renders
+# against tests/golden/. A dependency bump that moves an image tag or a
+# component range in helm/<chart>/values.yaml changes the render, so the check
+# fails until someone runs `make golden-update` and pushes. This does that
+# step, and the PR diff then shows exactly the objects the bump moved.
+#
+# Repo-specific sibling of the generated zz_generated.helm-docs-regen.yaml,
+# with the same safety properties:
+#   * `make golden-update` refuses any helm but the 3.17.x the committed renders
+#     and CircleCI's test-ingress-modes use; the same pin is installed here.
+#   * A clean tree is a no-op. The push re-triggers this workflow on the new
+#     head; that run finds nothing to change and exits, so it never loops.
+#   * Only tests/golden/ is committed: a regen that touches anything else fails
+#     the job and nothing is pushed.
+#   * The push uses the taylorbot PAT, not GITHUB_TOKEN, so the required checks
+#     run on the new commit; renovate.json5 lists its author (dev@giantswarm.io)
+#     in gitIgnoredAuthors, so Renovate keeps rebasing the PR.
+#   * helm-docs-regen may push to the same branch at the same moment: the push
+#     rebases onto the branch and retries (the two touch disjoint files).
+name: golden-regen
+
+on:
+  pull_request:
+    paths:
+      - 'helm/**'
+      - 'tests/verify-target.py'
+
+permissions: {}
+
+concurrency:
+  group: golden-regen-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  regen:
+    name: Regenerate the golden renders and push
+    # Only dependency-bot branches: on a human's PR the author owns the goldens.
+    if: startsWith(github.head_ref, 'renovate/') || startsWith(github.head_ref, 'dependabot/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check the bot token is available
+        id: token
+        env:
+          TAYLORBOT_GITHUB_ACTION: ${{ secrets.TAYLORBOT_GITHUB_ACTION }}
+        run: |
+          if [ -z "$TAYLORBOT_GITHUB_ACTION" ]; then
+            # Fork PRs and Dependabot-triggered runs see no Actions secrets: skip
+            # rather than fail, the PR behaves as before this workflow existed.
+            echo "::warning::TAYLORBOT_GITHUB_ACTION is not available to this run, nothing is regenerated."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the PR branch
+        if: steps.token.outputs.available == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          # The PAT is kept in the checkout so `git push` below uses it.
+          token: ${{ secrets.TAYLORBOT_GITHUB_ACTION }}
+      - name: Install helm
+        if: steps.token.outputs.available == 'true'
+        uses: giantswarm/install-binary-action@5bef88f65012037dd836117c8d344b21bb559854 # v4.1.0
+        with:
+          binary: helm
+          # The pin of .circleci/custom.yml's test-ingress-modes and of
+          # tests/verify-target.py's HELM_PIN.
+          version: "3.17.3"
+          download_url: "https://get.helm.sh/helm-v${version}-linux-amd64.tar.gz"
+          tarball_binary_path: "linux-amd64/helm"
+          smoke_test: "${binary} version --short"
+      - name: Regenerate tests/golden/
+        if: steps.token.outputs.available == 'true'
+        run: make golden-update
+      - name: Commit and push the regenerated renders
+        if: steps.token.outputs.available == 'true'
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "tests/golden/ already in sync, nothing to push"
+            exit 0
+          fi
+          outside="$(git status --porcelain | grep -v ' tests/golden/' || true)"
+          if [ -n "$outside" ]; then
+            echo "::error::make golden-update changed files outside tests/golden/:"
+            echo "$outside"
+            exit 1
+          fi
+          git config --local user.email "dev@giantswarm.io"
+          git config --local user.name "taylorbot"
+          git add tests/golden
+          git commit -m "chore(test): regenerate tests/golden/ for the dependency bump"
+          for attempt in 1 2 3; do
+            git push origin "HEAD:$BRANCH" && exit 0
+            echo "push rejected (attempt $attempt), rebasing onto origin/$BRANCH"
+            git pull --rebase origin "$BRANCH"
+          done
+          exit 1
