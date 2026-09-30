@@ -803,7 +803,8 @@ tests/verify-workerpool.py reads the value from this file.
 {{/*
 The worker pods' required affinity to the atelet pod on their node, as JSON
 ({} while the pinned Substrate release predates
-agent-platform.substrate.workerPoolAffinityFloor). A worker runs sandboxes only
+agent-platform.substrate.workerPoolAffinityFloor; a release candidate of that
+release carries the field too). A worker runs sandboxes only
 through its node's atelet, and atelet's PriorityClass never preempts: when the
 atelet DaemonSet rolls on a node without spare CPU, a worker scheduled in the
 gap takes the CPU the old atelet pod freed, the new atelet pod stays Pending,
@@ -815,7 +816,7 @@ components.substrate.targetNamespace.
 Usage: include "agent-platform.substrate.workerPoolAteletAffinity" $root | fromJson
 */}}
 {{- define "agent-platform.substrate.workerPoolAteletAffinity" -}}
-{{- $pin := include "agent-platform.substrate.pinnedVersion" . -}}
+{{- $pin := regexReplaceAll "-.*$" (include "agent-platform.substrate.pinnedVersion" .) "" -}}
 {{- if lt ((semver $pin).Compare (semver (include "agent-platform.substrate.workerPoolAffinityFloor" .))) 0 -}}
 {{- dict | toJson -}}
 {{- else -}}
@@ -853,7 +854,7 @@ at the render, instead:
 {{- $spread := include "agent-platform.substrate.workerPoolSpreadFloor" . -}}
 {{- $gated := dict "topologySpreadConstraints" $spread "podAntiAffinity" $spread "podAffinity" (include "agent-platform.substrate.workerPoolAffinityFloor" .) -}}
 {{- $range := dig "substrate" "versionRange" "" .Values.components -}}
-{{- $floor := include "agent-platform.semverRangeFloor" $range -}}
+{{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range) "" -}}
 {{- range $key, $value := $template -}}
 {{- if hasKey $gated $key -}}
 {{- $spreadFloor := get $gated $key -}}
