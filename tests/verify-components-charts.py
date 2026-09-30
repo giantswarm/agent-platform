@@ -44,8 +44,17 @@ refuse to render at all, and the point here is a full render, not merely an
 accepted schema. The two lists are apart because
 tests/verify-kagent-tools-namespace.py imports QUICKSTART for renders with a much
 smaller component set, where the all-on ingress mode would trip the connectivity
-chart's guard. The meta renders are the vanilla cluster shape (no
---api-versions): the fleet shape's forwarded values are not rendered here.
+chart's guard.
+
+The meta chart is rendered in every SHAPE an installation can give it: the
+vanilla cluster (no --api-versions, every `auto` knob off) and the Giant Swarm
+fleet (API_VERSIONS: cilium network policies, monitoring objects, the kagent
+OTLP headers), each with the platform's CNPG Cluster (postgres.enabled) and
+with the bundled Postgres a lab or a quick start runs (substrate's
+single-instance StatefulSet). A component's forwarded values differ between
+shapes, and a fleet-only key against a closed schema fails every installation
+while the vanilla render passes (giantswarm/agent-platform#467); every distinct
+block is rendered, the byte-identical ones once.
 
 A range is resolved the way Flux does — the registry's tag list, the highest
 semver the constraint admits (tests/fluxsemver.py: Masterminds semantics, a
@@ -78,6 +87,7 @@ list comes from the registry's anonymous `/v2/<repo>/tags/list`. Every Helm call
 is bounded (TIMEOUT). PyYAML is in the CI image (the job installs python3-yaml).
 """
 
+import hashlib
 import json
 import pathlib
 import re
@@ -155,8 +165,8 @@ QUICKSTART = [
     "--set", "model-manager.ollama.endpoint=http://ollama.example.com:11434",
     # kagent on requires the Harness's snapshot store (the meta chart's guard).
     "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
-    # The platform Cluster on, so the Substrate render exercises the CNPG path
-    # (the derived connection Secret reference) rather than the bundled one.
+    # The platform Cluster on: the Substrate render takes the CNPG path (the
+    # derived connection Secret reference); SHAPES adds the bundled one.
     "--set", "postgres.enabled=true",
 ]
 # The inputs that only matter once EVERY component is turned on, kept out of
@@ -190,6 +200,26 @@ API_VERSIONS = [
     "--api-versions", "gateway.networking.k8s.io/v1",
     "--api-versions", "autoscaling.k8s.io/v1",
 ]
+# The shapes the meta chart is rendered in, name -> the flags on top of
+# QUICKSTART. The first is the reference render the roster check reads.
+SHAPES: dict[str, list[str]] = {
+    "vanilla/CNPG": [],
+    "fleet/CNPG": API_VERSIONS,
+    "vanilla/bundled Postgres": ["--set", "postgres.enabled=false"],
+    "fleet/bundled Postgres": [*API_VERSIONS, "--set", "postgres.enabled=false"],
+}
+
+
+def where(forwarded: dict[str, list[str]]) -> str:
+    """Where one values block is forwarded: axis label -> shapes, as one
+    readable clause; axes with the same shapes are named together."""
+    by_shapes: dict[tuple[str, ...], list[str]] = {}
+    for label, shapes in forwarded.items():
+        by_shapes.setdefault(tuple(shapes), []).append(label)
+    return "; ".join(
+        f"{' = '.join(labels)}, {'every shape' if len(shapes) == len(SHAPES) else ' and '.join(shapes)}"
+        for shapes, labels in by_shapes.items()
+    )
 
 
 def fail(msg: str) -> None:
@@ -391,7 +421,7 @@ def check_harness_selector(manifest: str, what: str) -> None:
 def render_component(name: str, chart_dir: str, values: str, what: str, tmp: str) -> None:
     """One `helm template` of a component chart with one forwarded values block,
     and the per-component assertions on what it rendered."""
-    values_file = f"{tmp}/{name}-{re.sub(r'[^a-z0-9]+', '-', what.lower())}.yaml"
+    values_file = f"{tmp}/{name}-{hashlib.sha256(values.encode()).hexdigest()[:12]}.yaml"
     with open(values_file, "w", encoding="utf-8") as f:
         f.write(values)
     r = run(["helm", "template", name, chart_dir, "-n", "agent-platform", "-f", values_file, *API_VERSIONS])
@@ -417,19 +447,26 @@ def main(meta: str) -> int:
     if pinned_released := sorted(set(pins) & released):
         fail(f"examples/customer-bom.yaml pins components.{', components.'.join(pinned_released)}, a chart released with the meta chart: its version is the meta chart's own, a pin here lags the moment the meta chart moves")
     on = [f"--set=components.{n}.enabled=true" for n in components]
-    wide = docs(render_meta(meta, [*QUICKSTART, *ALL_ON_INPUTS, *on]))
-    pinned = docs(render_meta(meta, ["-f", f"{meta}/examples/customer-bom.yaml", *QUICKSTART, *ALL_ON_INPUTS, *on]))
+    base = [*QUICKSTART, *ALL_ON_INPUTS, *on]
+    bom = ["-f", f"{meta}/examples/customer-bom.yaml"]
+    # shape -> (the defaults' render, the BOM's render)
+    renders = {shape: (docs(render_meta(meta, [*base, *flags])), docs(render_meta(meta, [*bom, *base, *flags])))
+               for shape, flags in SHAPES.items()}
+    wide, pinned = next(iter(renders.values()))
     # The OCIRepository and the HelmRelease are named after the entry's chart.
     charts = {n: c["chart"] for n, c in components.items()}
-    rendered = {n for kind, n in wide if kind == "OCIRepository" and n != RELEASE}
-    if rendered != set(charts.values()):
-        fail(f"the render's OCIRepositories {sorted(rendered)} are not the roster's charts {sorted(charts.values())}")
-    for (kind, _), doc in [*wide.items(), *pinned.items()]:
-        if kind == "OCIRepository":
-            layer_selector(doc)
+    for shape, (w, _) in renders.items():
+        rendered = {n for kind, n in w if kind == "OCIRepository" and n != RELEASE}
+        if rendered != set(charts.values()):
+            fail(f"the {shape} render's OCIRepositories {sorted(rendered)} are not the roster's charts {sorted(charts.values())}")
+    for w, p in renders.values():
+        for (kind, _), doc in [*w.items(), *p.items()]:
+            if kind == "OCIRepository":
+                layer_selector(doc)
     kagent_oci = wide.get(("OCIRepository", charts.get("kagent", "kagent")))
     kagent_tag = source(kagent_oci)[1].split()[0].lstrip(">=") if kagent_oci else ""  # the range's floor = the build the values name
     print(f"--> {len(components)} components (the meta chart's roster): {len(pins)} pinned by the BOM, {len(released)} released with the chart")
+    print(f"--> {len(SHAPES)} shapes ({', '.join(SHAPES)}): each distinct forwarded block rendered once")
     if STRICT:
         print("--> strict (the tag pipeline): every range and every BOM pin must resolve to a published chart; UNRELEASED and RENDER_AGAINST do not apply")
     with tempfile.TemporaryDirectory() as tmp:
@@ -437,19 +474,27 @@ def main(meta: str) -> int:
             chart = charts[name]
             url, rng = source(wide[("OCIRepository", chart)])
             _, pin = source(pinned[("OCIRepository", chart)])
-            values_range = hr_values(wide[("HelmRelease", chart)])
-            values_pin = hr_values(pinned[("HelmRelease", chart)])
+            for shape, (w, p) in renders.items():
+                if (source(w[("OCIRepository", chart)])[1], source(p[("OCIRepository", chart)])[1]) != (rng, pin):
+                    fail(f"{name}: the {shape} render gives another range or pin than the {next(iter(SHAPES))} render — a shape must not move a version")
+            # (axis, values) -> the shapes that forward them, in SHAPES order.
+            blocks: dict[tuple[str, str], list[str]] = {}
+            for shape, (w, p) in renders.items():
+                blocks.setdefault(("range", hr_values(w[("HelmRelease", chart)])), []).append(shape)
+                blocks.setdefault(("BOM pin", hr_values(p[("HelmRelease", chart)])), []).append(shape)
             if name in released:
-                # One version matters, the working tree's: rendered once, with the
-                # forwarded values of both renders when they differ.
+                # One version matters, the working tree's: every distinct block of
+                # both renders against it, once.
                 chart_dir = REPO_ROOT / "helm" / chart
                 if not (chart_dir / "Chart.yaml").is_file():
                     fail(f"{name}: no chart at {chart_dir} — releasedWithChart names a chart this repository does not have")
                 if rng != pin:
                     fail(f"{name}: the BOM render gives the chart released with the meta chart another version ({pin!r}) than the defaults ({rng!r})")
-                render_component(name, str(chart_dir), values_range, f"{name} working tree (released with the chart, {rng})", tmp)
-                if values_pin != values_range:
-                    render_component(name, str(chart_dir), values_pin, f"{name} working tree (released with the chart, the BOM's values)", tmp)
+                seen: dict[str, dict[str, list[str]]] = {}
+                for (axis, values), shapes in blocks.items():
+                    seen.setdefault(values, {})[f"the {axis}"] = shapes
+                for values, forwarded in seen.items():
+                    render_component(name, str(chart_dir), values, f"{name} working tree (released with the chart, {rng}; {where(forwarded)})", tmp)
                 continue
             if pin != pins[name]:
                 fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
@@ -461,14 +506,19 @@ def main(meta: str) -> int:
             if not version_pin:
                 fail(f"{name}: the BOM pins {pin!r}, which {url} does not publish — no installation on this BOM can install it"
                      + (f"; {waits_for(name, url, pin, tags)}" if STRICT else ""))
-            axes = [("range", rng, version_range, values_range), ("BOM pin", pin, version_pin, values_pin)]
-            if version_range == version_pin and values_range == values_pin:
-                axes = [("range = BOM pin", f"{rng} = {pin}", version_range, values_range)]
-            for label, constraint, version, values in axes:
-                flux_layer(name, url, version, wide[("OCIRepository", chart)])
+            axes = {"range": (rng, version_range), "BOM pin": (pin, version_pin)}
+            # (version, values) -> where it is forwarded; a version is checked and pulled once.
+            jobs: dict[tuple[str, str], dict[str, list[str]]] = {}
+            for (axis, values), shapes in blocks.items():
+                constraint, version = axes[axis]
+                jobs.setdefault((version, values), {})[f"the {axis} {constraint!r}"] = shapes
+            pulled: dict[str, str] = {}
+            for (version, values), forwarded in jobs.items():
                 chart_dir = f"{tmp}/{name}/{version}"
-                resolved = pull(url, version, chart_dir)
-                render_component(name, f"{chart_dir}/{chart}", values, f"{name} {resolved} (the {label} {constraint!r})", tmp)
+                if version not in pulled:
+                    flux_layer(name, url, version, wide[("OCIRepository", chart)])
+                    pulled[version] = pull(url, version, chart_dir)
+                render_component(name, f"{chart_dir}/{chart}", values, f"{name} {pulled[version]} ({where(forwarded)})", tmp)
     return 0
 
 
