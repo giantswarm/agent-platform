@@ -39,6 +39,23 @@
   // image tag: without the manager below every operator bump fails CI until a
   // hand commit moves it (agent-platform#392). The manager names the same
   // dependency as the helm-values update, so both land on one Renovate branch.
+  // The agentgateway line's controller and data plane run one release: the
+  // helm-values manager finds agentgateway.controller.image and
+  // agentgateway.proxy.image in both charts (each block names its registry),
+  // and this rule puts all four on one branch, so a release of the line
+  // arrives as one PR and never moves one image alone
+  // (verify-model-catalog holds the four tags equal).
+  packageRules: [
+    {
+      description: 'The agentgateway line: controller and data plane move together',
+      matchDatasources: ['docker'],
+      matchPackageNames: [
+        'gsoci.azurecr.io/giantswarm/agentgateway-upstream/controller',
+        'gsoci.azurecr.io/giantswarm/agentgateway-upstream/agentgateway',
+      ],
+      groupName: 'agentgateway line',
+    },
+  ],
   customManagers: [
     {
       customType: 'regex',

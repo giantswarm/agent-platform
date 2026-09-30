@@ -1779,9 +1779,6 @@ llmRouting:
     providers:  # @schema type: object; additionalProperties: {"$ref": "../agent-platform-connectivity/files/model-catalog/providers.schema.json"}; skipProperties: true
       anthropic:
         models:
-          # Not in the built-in catalog through gateway 2.1.x.
-          claude-opus-5-5:
-            rates: {input: "4", output: "20", cacheRead: "0.2", cacheWrite: "5"}
           # Not in the built-in catalog of any gateway release yet.
           claude-sonnet-5-5:
             rates: {input: "2", output: "10", cacheRead: "0.2", cacheWrite: "2.5"}
@@ -3792,8 +3789,9 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
   # xDS: they follow components.substrate.versionRange, not this tag.
   controller:
     image:
+      registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.1.2"
+      tag: "2.2.1"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -3827,7 +3825,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.1.2"
+      tag: "2.2.1"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:

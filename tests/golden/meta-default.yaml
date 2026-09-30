@@ -458,8 +458,9 @@ spec:
     agentgateway:
       controller:
         image:
+          registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.1.2
+          tag: 2.2.1
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -490,7 +491,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.1.2
+          tag: 2.2.1
       resources:
         limits:
           cpu: 500m
@@ -1191,12 +1192,6 @@ spec:
         providers:
           anthropic:
             models:
-              claude-opus-5-5:
-                rates:
-                  cacheRead: "0.2"
-                  cacheWrite: "5"
-                  input: "4"
-                  output: "20"
               claude-sonnet-5-5:
                 rates:
                   cacheRead: "0.2"

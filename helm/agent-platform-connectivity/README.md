@@ -1087,10 +1087,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
 | llmRouting.modelCatalog.key | string | `"catalog.json"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.input | string | `"4"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.output | string | `"20"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.cacheRead | string | `"0.2"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-opus-5-5.rates.cacheWrite | string | `"5"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.input | string | `"2"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.output | string | `"10"` |  |
 | llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.cacheRead | string | `"0.2"` |  |
@@ -1479,11 +1475,12 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | klausGateway.agentgatewayRoute.hostname | string | `""` |  |
 | agentgateway.fullnameOverride | string | `"agentgateway-controller"` |  |
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
+| agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.1.2"` |  |
+| agentgateway.controller.image.tag | string | `"2.2.1"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.1.2"` |  |
+| agentgateway.proxy.image.tag | string | `"2.2.1"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |

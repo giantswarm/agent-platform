@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The agentgateway line at 2.2.1 for the controller and the data planes, in both charts** (giantswarm/agent-platform#645). 2.2.0 re-pins the line onto upstream `main` @ `3528a428` with the carried patches replayed; 2.2.1 adds the Substrate resume refusal. The four tags (`agentgateway.controller.image.tag` and `agentgateway.proxy.image.tag` of the meta and the connectivity chart) move as one: `agentgateway.controller.image` names its `registry`, so Renovate's helm-values manager finds the controller as it finds the data plane, `renovate-custom.json5` groups both images into one `agentgateway line` PR, and `verify-model-catalog` holds all four tags equal. The built-in model catalog of 2.2.1 prices Claude Opus 5.5, so the `llmRouting.modelCatalog` overlay drops its entry; Claude Sonnet 5.5 stays.
+
 ### Added
 
 - **`examples/runtime-slice.yaml`: the runtime slice for workload clusters that run agents managed from the installation** (giantswarm/agent-platform#317). The profile renders kagent-crds, substrate-crds, substrate, kagent, agentgateway and the connectivity release, and nothing else of the platform's control plane. With `gitops.target.kubeConfig.secretRef` it installs onto a workload cluster through the installation's Flux. `make verify-runtime-slice` asserts the component set, the snapshot location, the target knob and the forwarded connectivity render. `verify-examples` renders the component charts with the profile's values. The README section "The runtime slice on workload clusters" names the identity, egress and Substrate preconditions.
