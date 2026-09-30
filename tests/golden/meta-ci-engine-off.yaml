@@ -648,6 +648,7 @@ spec:
         mcp:
           enabled: true
           pathPrefix: /kagent/mcp
+          timeout: 300
         parentRef:
           name: giantswarm-default
           namespace: envoy-gateway-system

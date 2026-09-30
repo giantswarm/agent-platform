@@ -1,16 +1,17 @@
 {{- /*
 Registers kagent's MCP server with muster (kagent.controllerRoute.mcp). The
 controller serves it at /mcp on its API port: list_agent_instances (the ready
-sessions the caller may see) and invoke_agent_instance (a message to one of
-them through kagent's A2A gateway, synchronous or through the MCP Tasks
-extension). Registered, every session whose toolset includes the agent-platform
+sessions the caller may see), invoke_agent_instance (a message to one of them
+through kagent's A2A gateway, synchronous or through the MCP Tasks extension;
+hence mcp.timeout, the seconds muster waits, at the CRD's maximum by default)
+and the checkpoint and fork tools. Registered, every session whose toolset includes the agent-platform
 preset lists and messages the person's other sessions as x_kagent_<tool>, and
 the Dev Portal's MCP servers page lists it in the Agent Platform group.
 
 The path is the data plane's, never the controller's directly: an HTTPRoute at
 pathPrefix, rewritten to /mcp, on the kagent AgentgatewayBackend
-(controller-route.yaml) and behind the kagent-controller-jwt policy
-(controller-jwt-policy.yaml targets it with the GRPCRoute), so the controller
+(controller-route.yaml) and behind the policy kagent-mcp-jwt, the
+kagent-controller-jwt policy's twin (controller-jwt-policy.yaml), so the controller
 keeps agentgateway as its only caller and derives the person from the token
 muster forwards (forwardToken: the session's IdP token, no new credential).
 The route is hostname-less, like the GRPCRoute, so muster dials the agentgateway
@@ -25,6 +26,10 @@ route (the backend and the JWT policy are its objects).
 {{- $mcp := $route.mcp | default dict }}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) $route.enabled (dig "enabled" false $mcp) }}
 {{- $prefix := $mcp.pathPrefix | default "" }}
+{{- $timeout := $mcp.timeout | default 300 | int }}
+{{- if or (lt $timeout 1) (gt $timeout 300) }}
+{{- fail (printf "kagent.controllerRoute.mcp.timeout %v: want seconds from 1 to 300 (the MCPServer CRD's range)" $mcp.timeout) }}
+{{- end }}
 {{- if or (not (regexMatch "^/[a-z0-9][-a-z0-9/]*[a-z0-9]$" $prefix)) (hasPrefix "/mcp" $prefix) }}
 {{- fail (printf "kagent.controllerRoute.mcp.pathPrefix %q: want an absolute path of lower-case alphanumerics, '-' and '/' outside /mcp (muster's MCP surface on the same data plane), e.g. /kagent/mcp" $prefix) }}
 {{- end }}
@@ -73,6 +78,7 @@ metadata:
 spec:
   autoStart: true
   type: streamable-http
+  timeout: {{ $timeout }}
   url: http://{{ .Values.gateway.name }}.{{ .Release.Namespace }}.svc.cluster.local:{{ (first .Values.gateway.listeners).port }}{{ $prefix }}
   auth:
     type: oauth

@@ -36,7 +36,7 @@ muster:
 | Preset | Resolves to | Label stamped by |
 |---|---|---|
 | `infrastructure` | The mcp-kubernetes, mcp-capi and mcp-prometheus families — every management cluster's servers, one selector. | agent-platform-mcps ≥ 0.9.0 (`muster.families.<group>.toolGroup`, default `infrastructure`; per-entry `toolGroup` override) |
-| `agent-platform` | agent-manager, model-manager, vm-manager, cluster-manager, kagent's session tools (`x_kagent_list_agent_instances`, `x_kagent_invoke_agent_instance`: the person's other ready sessions, and a message to one) and muster's `core_*` tools — the meta agent's preset. | agent-manager ≥ 0.3.0, model-manager ≥ 0.18.0 (fixed `agent-platform`; `muster.mcpServer.labels` can override); the connectivity chart's `MCPServer kagent` (`kagent.controllerRoute.mcp`) |
+| `agent-platform` | agent-manager, model-manager, vm-manager, cluster-manager, kagent's session tools (`x_kagent_list_agent_instances`, `x_kagent_invoke_agent_instance`, the checkpoint and fork tools: the person's other ready sessions, a message to one, a checkpoint or a fork of one) and muster's `core_*` tools — the meta agent's preset. | agent-manager ≥ 0.3.0, model-manager ≥ 0.18.0 (fixed `agent-platform`; `muster.mcpServer.labels` can override); the connectivity chart's `MCPServer kagent` (`kagent.controllerRoute.mcp`) |
 
 `core_*` is what makes `agent-platform` the meta agent's preset. No other shipped preset reaches muster's core tools; an agent that needs one names it explicitly (`tool:core_workflow_list`) or uses `preset:full`.
 
