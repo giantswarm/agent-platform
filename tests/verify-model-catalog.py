@@ -10,8 +10,8 @@ pull request that bumps the gateway to a release pricing the model has to drop
 the entry.
 
 Checked, in both charts' values.yaml:
-- the data plane's tag (agentgateway.proxy.image.tag), the meta chart's
-  controller and data-plane tags agree, since the catalog is the data plane's;
+- the controller and data-plane tags of both charts agree: the catalog is the
+  data plane's, and the controller and its data planes run one release;
 - no overlay provider/model is in the pinned release's built-in catalog;
 - the platform's default model (kagent.providers.anthropic.model) is priced by
   the built-in catalog or the overlay;
@@ -51,6 +51,7 @@ def main(meta_dir: str, connectivity_dir: str) -> None:
         "connectivity agentgateway.proxy.image.tag": tag,
         "meta agentgateway.proxy.image.tag": str(meta["agentgateway"]["proxy"]["image"]["tag"]),
         "meta agentgateway.controller.image.tag": str(meta["agentgateway"]["controller"]["image"]["tag"]),
+        "connectivity agentgateway.controller.image.tag": str(conn["agentgateway"]["controller"]["image"]["tag"]),
     }
     if len(set(tags.values())) != 1:
         fail(f"the gateway tags disagree, so the built-in catalog is ambiguous: {tags}")
