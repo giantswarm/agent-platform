@@ -152,10 +152,19 @@ jobs:
           TAG: ${{ steps.decide.outputs.tag }}
         run: |
           set -euo pipefail
+          flags=()
+          # GitHub marks a stable release as "Latest" by default. A release of
+          # a maintenance branch (release-v3.x) is an older line's: it must not
+          # take the marker from the release branch's newest stable, which
+          # `gh release view`, releases/latest and install scripts resolve to.
+          if [ "$GITHUB_REF_NAME" != 'main' ]; then
+            flags+=(--latest=false)
+          fi
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file release-notes.md \
-            --target "$GITHUB_SHA"
+            --target "$GITHUB_SHA" \
+            "${flags[@]}"
 
       # A tag that never reaches CircleCI is a silent failure: the GitHub
       # Release above exists and looks finished, but nothing gets built or
