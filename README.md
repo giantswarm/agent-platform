@@ -490,6 +490,29 @@ make verify-serving-slice   # the profile's component set, the derived kserveGat
 
 The live half — a served `LLMInferenceService` answering 200 with a person's id_token and 401 without, no bearer in the model server's log — runs on a GPU cluster. Its first check needs no GPU: `make live-serving-slice NAMESPACE=<the slice's>` (`tests/verify-serving-slice-live.py`) reads the `models-jwt` policy's `Accepted` condition and the controller's `jwks-store` entry for the backend's URL, and fails naming the URL when the controller could not fetch the key set (`reason: PartiallyValid`) — the state behind every `401 token uses the unknown key` (giantswarm/agent-platform#505).
 
+### The runtime slice on workload clusters
+
+A CPU workload cluster runs agents managed from the installation and never becomes a second installation (giantswarm/giantswarm#37611, Phase 3; giantswarm/agent-platform#317): the **runtime slice**, the values profile [`examples/runtime-slice.yaml`](helm/agent-platform/examples/runtime-slice.yaml). It renders exactly the runtime component set, `kagent-crds`, `substrate-crds`, `substrate`, `kagent` (the controller, its bundled database and the platform `Harness` with its `WorkerPool`), `agentgateway` (the controller and data plane in front of the kagent controller) and the connectivity release with the policies of the Substrate hops, and nothing of the platform's control plane: no muster, dicebear, Valkey, Backstage, model-manager, agent-manager or MCP server, the engine off. The agents' tools come from the installation's muster. The slice is one `<cluster>-agent-platform` release per target cluster ([One release per target cluster](helm/agent-platform/README.md#one-release-per-target-cluster)); a GPU cluster that also serves models switches the serving toggles on in the same release.
+
+**The engine.** The installation's Flux reconciles everything, and the workload cluster runs no Flux of its own. The release is a `HelmRelease` of this chart in the cluster's organization namespace on the installation, with `gitops.target.kubeConfig.secretRef` naming the cluster's `<cluster>-kubeconfig`. The installation's helm-controller installs every component into the workload cluster from the `OCIRepository`s beside the release. The bundled engine is refused with the knob, and no hook of this chart renders (the kagent storage-version backup pair included), since a hook Job runs where the chart is installed. The profile turns `components.agentgateway` on, because the workload cluster runs no agentgateway controller of its own. The slice never runs beside the platform's release: that release runs kagent, and `components.kagent-crds.ownedCrds` refuses a second owner of kagent's CRDs on one cluster.
+
+**Preconditions on the workload cluster.**
+
+- **Identity.** `global.identity` is the installation's identity provider (its Dex issuer). The workload cluster's agentgateway verifies the installation's tokens against it, and the kagent controller trusts the identity agentgateway forwards. The workload cluster's apiserver trusts the same issuer (the cluster chart's OIDC values, set at creation), so the installation's components act on it as the caller.
+- **Egress.** Actors leave through Substrate's egress gateway, which admits `world` on 443. The installation's muster host (`muster.<installation domain>`) and the model endpoints the agents' `ModelConfig`s name must be reachable from the workload cluster on 443, and the controller's egress admits the same.
+- **Substrate.** Kubernetes 1.35 with the three feature gates, Cilium's `socketLB.hostNamespaceOnly`, and a snapshot store: `kagent.harness.snapshotLocation` is required, with its own prefix per cluster ([Agent Substrate](#agent-substrate)).
+- **Kyverno.** On a fleet workload cluster, the Substrate `PolicyException`s render with the connectivity release.
+
+The workload cluster's resources (the controller's database, the WorkerPool's worker pods) come from the kagent and substrate charts' defaults. Size them with the same values as on an installation.
+
+```bash
+helm template r helm/agent-platform -f helm/agent-platform/examples/runtime-slice.yaml \
+  --set global.domain=wc01.example.com --set global.identity.issuerUrl=https://dex.mc.example.com
+make verify-runtime-slice   # the profile's component set, the snapshot location, the target knob, the forwarded connectivity render
+```
+
+`make verify-examples` also renders every component chart the profile turns on, at the version its range resolves to, with the values its `HelmRelease` carries. The live half is an agent that agent-manager places on the workload cluster becoming Ready. It needs agent-manager's target cluster (giantswarm/agent-manager#22).
+
 ### Turning on the standalone's extras
 
 What the [agent-platform-standalone](https://github.com/giantswarm/agent-platform-standalone) umbrella wired by hand is connectivity-chart wiring here, gated on the component toggles the meta chart forwards. With every toggle off (the fleet) none of it renders and the connectivity objects are byte-identical to before; a cluster that turns the toggles on gets the standalone's behaviour from the same chart. Prerequisites on every path: the Gateway API CRDs and a public Gateway (`global.gatewayApi.parentRefs`, or `gatewayApi.gateway.create: true` for the chart-owned edge), the identity provider (`global.identity`: `issuerUrl`, `clientId`, `existingSecret` — the platform credentials Secret with `dex-client-secret`, and `backstage-session-secret` for the portal; `global.identity.ca.secretName` for a provider with a private CA) and `global.domain`, from which every hostname derives.
