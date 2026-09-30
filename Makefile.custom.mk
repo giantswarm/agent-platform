@@ -1283,6 +1283,12 @@ verify-serving-slice: ## Assert the serving slice (giantswarm/agent-platform#326
 	@python3 tests/verify-serving-slice.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "serving slice verified."
 
+.PHONY: verify-runtime-slice
+verify-runtime-slice: ## Assert the runtime slice (giantswarm/agent-platform#317): examples/runtime-slice.yaml renders exactly kagent-crds, substrate-crds, substrate, kagent and connectivity (no muster, dicebear, valkey, Backstage, agent-manager, model-manager, MCP server, agentgateway; the engine off); the kagent release carries the profile's snapshot location and the profile without one fails naming it; the target knob adds agentgateway, stamps every kubeConfig and renders no hook Job; the connectivity chart with the forwarded values renders nothing of muster, no HTTPRoute, the Substrate hops' policies, and the agentgateway controller's policy only on a workload cluster. The live half (an agent placed there by agent-manager becomes Ready, giantswarm/agent-manager#22): README "The runtime slice on workload clusters". HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@HELM="$(HELM)" python3 tests/verify-runtime-slice.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "runtime slice verified."
+
 .PHONY: verify-serving-teardown
 verify-serving-teardown: ## Assert the serving slice's ordered teardown (giantswarm/agent-platform#527): the <release>-serving-teardown hook Job renders at pre-delete (weight -2, the helm image, as <release>-hooks with that identity and its apiserver egress policy rendered for it, the engine off too; before the engine's teardown waves with it on) while kserve-llmisvc-resources and kserve-runtime-configs are on, and not with either off offline (the pre-upgrade case needs the live HelmRelease a lookup finds) or with gitops.target.kubeConfig. Its script, against a stub kubectl: the controller's release deleted and waited for, its Deployment and the llmisvc webhook configuration waited for, then the configs of kserve-runtime-configs (no other release's) deleted and freed of serving.kserve.io/llmisvcconfig-finalizer through the CRD's storage version (other finalizers kept), then the configs' release; a re-run with everything gone touches no config. The live half (the slice switched off in place and uninstalled with no release UninstallFailed and no config terminating) runs in agentlab. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"

@@ -1,0 +1,69 @@
+# The runtime slice (giantswarm/agent-platform#317; giantswarm/giantswarm#37611,
+# Phase 3): the values profile of ONE `<cluster>-agent-platform` release that
+# runs agents on a workload cluster managed from the installation and nothing
+# else of the platform's control plane — the kagent line (kagent-crds, the
+# controller and its bundled database), Agent Substrate (substrate-crds, the
+# control plane in ate-system, atelet on the nodes) and the connectivity release
+# with the platform Harness, its WorkerPool and the policies of those hops. The
+# workload cluster never becomes a second installation: no muster, Backstage,
+# model-manager, agent-manager or MCP server of its own.
+#
+# Delivered by the installation's Flux like every workload-cluster app (README
+# "One release per target cluster"): a HelmRelease of this chart in the
+# cluster's organization namespace on the installation, with
+# gitops.target.kubeConfig.secretRef naming the target's `<cluster>-kubeconfig`
+# (#328). The installation's helm-controller installs every component into the
+# target from the OCIRepositories beside it; the target runs no Flux, and the
+# bundled engine is refused with the knob. agentgateway is on for a workload
+# cluster (the target runs no controller of its own) and off when the slice
+# runs beside the platform's release, which owns the controller and its CRDs.
+# One release per target cluster: a GPU cluster that serves models too switches
+# the serving toggles of examples/serving-slice.yaml on in the same release.
+#
+# Layer this file over the installation's platform inputs (global.domain,
+# global.identity — the installation's Dex, whose tokens the target's
+# agentgateway verifies and the kagent controller trusts) and a BOM
+# (examples/customer-bom.yaml). The target's preconditions — Kubernetes 1.35
+# with the three Substrate feature gates, a snapshot store, egress on 443 to the
+# installation's muster and model hosts — are in README "The runtime slice on
+# workload clusters".
+components:
+  # The engine is never this release's: the installation's Flux delivers it.
+  flux:
+    enabled: false
+  # The installation's muster serves every agent (each agent's RemoteMCPServer
+  # names it); the avatars are the portal's; Valkey is muster's.
+  muster:
+    enabled: false
+  dicebear:
+    enabled: false
+  valkey:
+    enabled: false
+  # The platform's own managers run on the installation: model-manager is on by
+  # default (#329) and manages the slices' backends from there.
+  model-manager:
+    enabled: false
+  # The runtime component set. kagent-crds, substrate-crds and substrate follow
+  # components.kagent (they carry no enabled of their own).
+  kagent:
+    enabled: true
+  # Off beside the platform's release; on for a workload cluster, together with
+  # gitops.target.kubeConfig.secretRef.
+  agentgateway:
+    enabled: false
+
+# gitops:
+#   target:
+#     kubeConfig:
+#       secretRef:
+#         name: <cluster>-kubeconfig
+
+kagent:
+  harness:
+    # REQUIRED with kagent on: the object store Substrate keeps this cluster's
+    # actor snapshots in — the Harness's snapshotPolicy.location. Its own prefix
+    # per cluster keeps one bucket's Harnesses apart. On CAPA an S3 bucket
+    # reached through atelet's and ate-api-server's AWS credential chain; an
+    # S3-compatible store elsewhere with its endpoint and credentials in
+    # substrate.atelet.extraEnv (README "Agent Substrate", "The snapshot store").
+    snapshotLocation: s3://<bucket>/<cluster>
