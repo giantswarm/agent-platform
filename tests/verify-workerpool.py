@@ -35,6 +35,14 @@ The one pool is also the platform's failure domain (#472):
     keys unconditionally), and forwards them verbatim from it on;
   - any other key WorkerPool.spec.template does not have is refused too (a typo
     would be pruned in silence);
+
+Workers only where atelet runs (#756): from the Substrate release that carries
+WorkerPool.spec.template.podAffinity (agent-platform.substrate.workerPoolAffinityFloor
+in _helpers.tpl, read from that file here) the template carries the required
+affinity to the atelet pod on the worker's node, derived by the meta chart and
+rendered by the resolved kagent chart; below that release the derived term is
+absent and an installation's own podAffinity is refused; from it on an
+installation's own podAffinity stands verbatim instead of the derived term.
   - the worker PodDisruptionBudget (kagent.substrateWorkerPool.podDisruptionBudget,
     on by default) renders from the connectivity chart OF THE WORKING TREE with
     the values the meta chart forwards to that release — named after the pool, in
@@ -88,7 +96,17 @@ SPREAD = {
 # the guard names them.
 TEMPLATE_FIELDS = "labels, annotations, nodeSelector, tolerations, priorityClassName, nodeAffinity, resources"
 WORKER_LABEL = "ate.dev/worker-pool"
-SPREAD_FLOOR_RE = re.compile(r'^\{\{- define "agent-platform\.substrate\.workerPoolSpreadFloor" -\}\}(\S*?)\{\{- end -\}\}$', re.M)
+FLOOR_RE = r'^\{\{- define "agent-platform\.substrate\.%s" -\}\}(\S*?)\{\{- end -\}\}$'
+# The worker pods' required affinity to the atelet on their node (#756), as the
+# meta chart derives it: atelet's pods carry app: atelet in ate-system
+# (components.substrate.targetNamespace).
+ATELET_AFFINITY = {"requiredDuringSchedulingIgnoredDuringExecution": [
+    {"topologyKey": "kubernetes.io/hostname", "namespaces": ["ate-system"],
+     "labelSelector": {"matchLabels": {"app": "atelet"}}}]}
+# An installation's own podAffinity: the atelet term plus a preference of its own.
+OWN_AFFINITY = {**ATELET_AFFINITY, "preferredDuringSchedulingIgnoredDuringExecution": [
+    {"weight": 10, "podAffinityTerm": {"topologyKey": "topology.kubernetes.io/zone",
+                                       "labelSelector": {"matchLabels": {"ate.dev/worker-pool": "kagent-default"}}}}]}
 # A range below any release that could carry the spread fields (a synthetic older
 # minor in the stable shape), and one at the floor, for the guard's two branches
 # once the floor is set.
@@ -146,14 +164,49 @@ def next_minor(version: str) -> str:
     return f"{x}.{int(y) + 1}.0"
 
 
-def spread_floor(meta: str) -> str:
-    """The Substrate release agent-platform.substrate.workerPoolSpreadFloor names — the
-    one line of _helpers.tpl this check and the guard share."""
+def helper_floor(meta: str, name: str) -> str:
+    """The Substrate release agent-platform.substrate.<name> names — the one line of
+    _helpers.tpl this check and the guard share."""
     helpers = open(os.path.join(meta, "templates", "_helpers.tpl"), encoding="utf-8").read()
-    m = SPREAD_FLOOR_RE.search(helpers)
+    m = re.search(FLOOR_RE % re.escape(name), helpers, re.M)
     if not m:
-        cc.fail("templates/_helpers.tpl has no one-line define agent-platform.substrate.workerPoolSpreadFloor; the guard and this check read the Substrate floor from it")
+        cc.fail(f"templates/_helpers.tpl has no one-line define agent-platform.substrate.{name}; the guard and this check read the Substrate floor from it")
     return m.group(1)
+
+
+def spread_floor(meta: str) -> str:
+    return helper_floor(meta, "workerPoolSpreadFloor")
+
+
+def at_least(version: str, floor: str) -> bool:
+    return tuple(map(int, version.split("-", 1)[0].split("."))) >= tuple(map(int, floor.split(".")))
+
+
+def default_substrate_floor(meta: str) -> str:
+    values = yaml.safe_load(open(os.path.join(meta, "values.yaml"), encoding="utf-8"))
+    rng = values["components"]["substrate"]["versionRange"]
+    return rng.split()[0].lstrip(">=")
+
+
+def check_atelet_affinity(meta: str, tmp: str) -> None:
+    """#756: the derived affinity to the atelet, gated on the Substrate release."""
+    floor = helper_floor(meta, "workerPoolAffinityFloor")
+    below = f">={spread_floor(meta)} <{next_minor(spread_floor(meta))}"
+    at = f">={floor} <{next_minor(floor)}"
+    values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={below}"])
+    if "podAffinity" in template_of(values):
+        cc.fail(f"the Substrate range {below!r} predates podAffinity ({floor}) and the kagent release still carries {template_of(values)['podAffinity']!r}: the apiserver would prune it")
+    render_fails(meta, ["-f", values_file(tmp, "own-affinity", {"nodeSelector": ARCH, "podAffinity": OWN_AFFINITY}), "--set", f"components.substrate.versionRange={below}"],
+                 f"kagent.substrateWorkerPool.template.podAffinity needs the Substrate line at {floor} or later",
+                 f"an own template.podAffinity with components.substrate.versionRange below {floor}")
+    print(f"ok: below the Substrate release {floor} the kagent release carries no podAffinity, and an own template.podAffinity fails the render naming the floor")
+    values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={at}"])
+    if template_of(values).get("podAffinity") != ATELET_AFFINITY:
+        cc.fail(f"with the Substrate range {at!r} the kagent release carries podAffinity {template_of(values).get('podAffinity')!r}; expected the atelet term {ATELET_AFFINITY!r}")
+    values, _, _ = kagent_release(meta, ["-f", values_file(tmp, "own-affinity", {"nodeSelector": ARCH, "podAffinity": OWN_AFFINITY}), "--set", f"components.substrate.versionRange={at}"])
+    if template_of(values).get("podAffinity") != OWN_AFFINITY:
+        cc.fail(f"an installation's own podAffinity does not reach the kagent release verbatim with the Substrate range at {floor}: {template_of(values).get('podAffinity')!r}")
+    print(f"ok: from the Substrate release {floor} on the kagent release carries the required affinity to the atelet on the worker's node, and an own template.podAffinity stands verbatim instead")
 
 
 def worker_pdbs(manifest: str, pool: str) -> list[dict]:
@@ -218,9 +271,12 @@ def main(meta: str) -> int:
         template = template_of(values)
         if node_selector(values) != ARCH:
             cc.fail(f"the default forwards nodeSelector {node_selector(values)!r} to the kagent release; expected the architecture alone {ARCH!r}")
-        if stray := sorted(set(template) - {"nodeSelector", "resources"}):
-            cc.fail(f"the default forwards {stray!r} in kagent.substrateWorkerPool.template; the default template is the architecture pin and the resources, nothing else (the disruption knobs are an installation's)")
-        print(f"ok: the default forwards the architecture alone ({ARCH}) — no annotation, no spread, no capacity type")
+        derived = {"podAffinity"} if at_least(default_substrate_floor(meta), helper_floor(meta, "workerPoolAffinityFloor")) else set()
+        if stray := sorted(set(template) - {"nodeSelector", "resources", *derived}):
+            cc.fail(f"the default forwards {stray!r} in kagent.substrateWorkerPool.template; the default template is the architecture pin, the resources and the derived atelet affinity, nothing else (the disruption knobs are an installation's)")
+        if derived and template.get("podAffinity") != ATELET_AFFINITY:
+            cc.fail(f"the default forwards podAffinity {template.get('podAffinity')!r}; expected the required affinity to the atelet {ATELET_AFFINITY!r}")
+        print(f"ok: the default forwards the architecture alone ({ARCH}){' and the atelet affinity' if derived else ''} — no annotation, no spread, no capacity type")
 
         values, forwarded, source = kagent_release(meta, ["-f", values_file(tmp, "pin", {"nodeSelector": PIN})])
         got = node_selector(values)
@@ -271,6 +327,9 @@ def main(meta: str) -> int:
                 cc.fail(f"template.{key} does not reach the kagent release verbatim with the Substrate range at {floor}: {template_of(at_floor).get(key)!r}")
             print(f"ok: template.{key} fails the render below the Substrate floor {floor} (naming the key, the floor and the range) and reaches the kagent release verbatim from it on")
 
+        # --- #756: workers only where atelet runs ---
+        check_atelet_affinity(meta, tmp)
+
         # --- #472: the worker budget, from the connectivity chart of the working tree ---
         check_pdb(meta, tmp)
 
@@ -282,7 +341,8 @@ def main(meta: str) -> int:
             cc.fail(f"no published kagent chart satisfies {rng!r} at {url}")
         chart_dir = os.path.join(tmp, "kagent")
         resolved = cc.pull(url, version, chart_dir)
-        for what, text, expected_template in (("the pin", forwarded, {"nodeSelector": PIN}), ("the disruption knobs", knobs_forwarded, KNOBS)):
+        derived_affinity = {"podAffinity": template["podAffinity"]} if "podAffinity" in template else {}
+        for what, text, expected_template in (("the pin", forwarded, {"nodeSelector": PIN, **derived_affinity}), ("the disruption knobs", knobs_forwarded, {**KNOBS, **derived_affinity})):
             forwarded_file = os.path.join(tmp, f"forwarded-{what.split()[-1]}.yaml")
             with open(forwarded_file, "w", encoding="utf-8") as f:
                 f.write(text)

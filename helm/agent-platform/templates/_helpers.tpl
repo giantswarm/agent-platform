@@ -141,7 +141,12 @@ overwrite would hide a values file that still spells the old key.
     worker the kagent build was published against, so the worker and the
     atelet are one Substrate release whatever kagent build the range admits
     (giantswarm/agent-platform#466). An installation's own workerImage stands
-    only while its tag is that release (a mirror by another path).
+    only while its tag is that release (a mirror by another path). And
+    substrateWorkerPool.template.podAffinity, the worker pods' required
+    affinity to the atelet on their node, from the Substrate release that
+    carries the field on (agent-platform.substrate.workerPoolAteletAffinity,
+    giantswarm/agent-platform#756); an installation's own podAffinity stands
+    instead.
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -242,6 +247,14 @@ value stands only while its tag is the pinned release. */ -}}
 {{- end -}}
 {{- else -}}
 {{- $_ := set $derived "substrateWorkerPool" (dict "workerImage" $image) -}}
+{{- end -}}
+{{- /* Workers only where atelet runs (giantswarm/agent-platform#756); an
+installation's own podAffinity stands instead. */ -}}
+{{- $affinity := include "agent-platform.substrate.workerPoolAteletAffinity" .root | fromJson -}}
+{{- if and $affinity (not (dig "substrateWorkerPool" "template" "podAffinity" nil (.root.Values.kagent | default dict))) -}}
+{{- $pool := get $derived "substrateWorkerPool" | default dict -}}
+{{- $_ := set $pool "template" (dict "podAffinity" $affinity) -}}
+{{- $_ := set $derived "substrateWorkerPool" $pool -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
@@ -776,6 +789,43 @@ tests/verify-workerpool.py reads the value from this file.
 {{- define "agent-platform.substrate.workerPoolSpreadFloor" -}}1.0.0{{- end -}}
 
 {{/*
+The first release of the Substrate line whose WorkerPool CRD carries
+spec.template.podAffinity (giantswarm/substrate#98). From it on the chart
+derives the worker pods' required affinity to the atelet on their node
+(agent-platform.substrate.workerPoolAteletAffinity) and forwards an
+installation's own podAffinity; below it agent-platform.validateWorkerPool
+refuses the key, which every earlier release prunes silently
+(giantswarm/agent-platform#756). One line, no comment inside the define:
+tests/verify-workerpool.py reads the value from this file.
+*/}}
+{{- define "agent-platform.substrate.workerPoolAffinityFloor" -}}1.3.0{{- end -}}
+
+{{/*
+The worker pods' required affinity to the atelet pod on their node, as JSON
+({} while the pinned Substrate release predates
+agent-platform.substrate.workerPoolAffinityFloor; a release candidate of that
+release carries the field too). A worker runs sandboxes only
+through its node's atelet, and atelet's PriorityClass never preempts: when the
+atelet DaemonSet rolls on a node without spare CPU, a worker scheduled in the
+gap takes the CPU the old atelet pod freed, the new atelet pod stays Pending,
+the rollout stops at that node and the substrate release's upgrade times out
+(giantswarm/agent-platform#756). The term keeps a worker off every node where no
+atelet pod is bound — during a roll and on a fresh node alike; a running worker
+is never evicted by it. atelet's pods carry app: atelet in
+components.substrate.targetNamespace.
+Usage: include "agent-platform.substrate.workerPoolAteletAffinity" $root | fromJson
+*/}}
+{{- define "agent-platform.substrate.workerPoolAteletAffinity" -}}
+{{- $pin := regexReplaceAll "-.*$" (include "agent-platform.substrate.pinnedVersion" .) "" -}}
+{{- if lt ((semver $pin).Compare (semver (include "agent-platform.substrate.workerPoolAffinityFloor" .))) 0 -}}
+{{- dict | toJson -}}
+{{- else -}}
+{{- $term := dict "topologyKey" "kubernetes.io/hostname" "namespaces" (list (dig "substrate" "targetNamespace" "ate-system" .Values.components)) "labelSelector" (dict "matchLabels" (dict "app" "atelet")) -}}
+{{- dict "requiredDuringSchedulingIgnoredDuringExecution" (list $term) | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fail the render when kagent.substrateWorkerPool.template would not reach the
 cluster as written (giantswarm/agent-platform#457, #472). The kagent chart
 forwards the template verbatim into WorkerPool.spec.template (toYaml), and the
@@ -789,8 +839,10 @@ at the render, instead:
     map[string]string);
   - `topologySpreadConstraints` and `podAntiAffinity`, which the Substrate line
     carries only from the release agent-platform.substrate.workerPoolSpreadFloor
-    names (1.0.0): refused while components.substrate.versionRange's floor
-    is below it, forwarded verbatim from it on;
+    names (1.0.0), and `podAffinity`, only from
+    agent-platform.substrate.workerPoolAffinityFloor (1.3.0): refused while
+    components.substrate.versionRange's floor is below the key's release,
+    forwarded verbatim from it on;
   - any other key WorkerPool.spec.template does not have (labels, annotations,
     nodeSelector, tolerations, priorityClassName, nodeAffinity, resources are
     the fields of the pinned line; a typo such as `nodeSelectors` would be
@@ -799,12 +851,13 @@ at the render, instead:
 {{- define "agent-platform.validateWorkerPool" -}}
 {{- $template := dig "substrateWorkerPool" "template" (dict) .Values.kagent -}}
 {{- $known := list "labels" "annotations" "nodeSelector" "tolerations" "priorityClassName" "nodeAffinity" "resources" -}}
-{{- $gated := list "topologySpreadConstraints" "podAntiAffinity" -}}
-{{- $spreadFloor := include "agent-platform.substrate.workerPoolSpreadFloor" . -}}
+{{- $spread := include "agent-platform.substrate.workerPoolSpreadFloor" . -}}
+{{- $gated := dict "topologySpreadConstraints" $spread "podAntiAffinity" $spread "podAffinity" (include "agent-platform.substrate.workerPoolAffinityFloor" .) -}}
 {{- $range := dig "substrate" "versionRange" "" .Values.components -}}
-{{- $floor := include "agent-platform.semverRangeFloor" $range -}}
+{{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range) "" -}}
 {{- range $key, $value := $template -}}
-{{- if has $key $gated -}}
+{{- if hasKey $gated $key -}}
+{{- $spreadFloor := get $gated $key -}}
 {{- if not $spreadFloor -}}
 {{- fail (printf "kagent.substrateWorkerPool.template.%s is set, but no release of the Substrate line (components.substrate.versionRange %q, giantswarm/substrate) carries WorkerPool.spec.template.%s yet: the apiserver prunes the value silently (the CRD is a structural schema), so the render refuses it until the release that carries the field is out (giantswarm/agent-platform#472, giantswarm/giantswarm#37797); remove the key" $key $range $key) -}}
 {{- else if not $floor -}}

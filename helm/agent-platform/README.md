@@ -228,6 +228,19 @@ A spread is a template change and rolls the pool's Deployment once (above).
 kagent release and the `WorkerPool` verbatim, the spread refused below the floor
 and forwarded at it, still exactly one `WorkerPool`.
 
+**Atelet affinity.** A worker runs sandboxes only through the atelet on its node,
+and atelet's PriorityClass never preempts. While the atelet DaemonSet rolls on a
+node without spare CPU, a worker scheduled in the gap takes the CPU the old atelet
+pod freed: the new atelet pod stays Pending, the rollout stops at that node and
+the `substrate` release's upgrade times out (giantswarm/agent-platform#756). From
+the Substrate line's `1.3.0` on (`agent-platform.substrate.workerPoolAffinityFloor`)
+the chart derives `template.podAffinity`: a required term on the atelet pods
+(`app: atelet` in `components.substrate.targetNamespace`) with `topologyKey:
+kubernetes.io/hostname`, so a worker schedules only on a node where an atelet pod
+is bound, during a roll and on a fresh node alike. A running worker is never
+evicted by it. An installation's own `podAffinity` stands instead of the derived
+one (keep the atelet term in it); below `1.3.0` the key is refused.
+
 ## Voluntary disruption
 
 The platform's core runs as single replicas — the agentgateway data plane, muster, the kagent controller, klaus-gateway, agent-manager — and each carries long-lived streams (MCP sessions, A2A and portal SSE turns, the LLM listener). A voluntary eviction (Karpenter consolidation, a node drain) cuts them mid-turn (giantswarm/agent-platform#431). Two guards, both on by default:
@@ -362,13 +375,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.2.0 <1.3.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.3.0 <1.4.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.2.0 <1.3.0"` |  |
+| components.substrate.versionRange | string | `">=1.3.0 <1.4.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
