@@ -72,6 +72,7 @@ workflows:
           branches:
             ignore:
             - main
+            - /^release-v?[0-9]+(\.[0-9]+)?\.x$/
 
     # Tag: push the chart after build-chart (+ the gsoci image). The chart
     # tests ran on the branch (execute-chart-tests) and the tag is cut from the
