@@ -123,7 +123,7 @@ LINE = {
     # with no operatorMCPURL and does not start. 3.3.0 names a turn's failure
     # class in the thread, the turn record and the turn metric
     # (giantswarm/klaus-gateway#329).
-    "klaus-gateway": (GSOCI, ">=3.3.0 <4.0.0", []),
+    "klaus-gateway": (GSOCI, ">=3.3.0 <5.0.0", []),
 }
 
 # The kagent.dev API version the 4.x line serves, pinned into both managers'
