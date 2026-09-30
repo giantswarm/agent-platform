@@ -69,9 +69,10 @@ WORKER = "ateom-gvisor"
 OLDER_RANGE = ">=0.9.0 <0.10.0"
 FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # Substrate minors released on the upstream pin of an earlier minor: a minor of
-# the line is a re-pin except these. 1.2 is the line on kagent-dev/substrate
-# v0.2.0-beta5, 1.1's upstream (giantswarm/agentlab#284); the next re-pin is 1.3.
-SAME_UPSTREAM = {(1, 2): (1, 1)}
+# the line is a re-pin except these. 1.2 and 1.3 are the line on
+# kagent-dev/substrate v0.2.0-beta5, 1.1's upstream (giantswarm/agentlab#284,
+# giantswarm/agent-platform#756); the next re-pin is 1.4.
+SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}}
 
 
 def tuple_of(version: str) -> str:
@@ -208,7 +209,7 @@ def main(meta: str) -> int:
             cc.fail(f"the kagent chart {resolved} names no substrate dependency in Chart.yaml; the line stamps the Substrate it was published against there")
         print(f"ok: the kagent chart {resolved} (the range {kagent_rng!r}) renders the one WorkerPool with workerImage {derived} — its own stamp {stamp or '(none)'} overridden; published against Substrate {built_against}")
         built, pinned = ints_of(built_against), ints_of(floor)
-        line = {pinned[:2], SAME_UPSTREAM.get(pinned[:2])}
+        line = {pinned[:2], *SAME_UPSTREAM.get(pinned[:2], set())}
         if built[:2] not in line or built > pinned:
             cc.fail(f"the kagent build the range {kagent_rng!r} admits ({resolved}) was published against Substrate {built_against}, not the release the chart pins ({floor}) or an older patch of its minor: the derived worker keeps the runtime coherent, but the kagent controller and the chart's Substrate are meant to be one line — move components.substrate.versionRange (and its floor) with the kagent line, or hold the kagent range below that build")
         if built == pinned:

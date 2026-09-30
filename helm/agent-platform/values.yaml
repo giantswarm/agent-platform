@@ -711,7 +711,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.2.0 <1.3.0"
+    versionRange: ">=1.3.0 <1.4.0"
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -733,7 +733,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.2.0 <1.3.0"
+    versionRange: ">=1.3.0 <1.4.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system

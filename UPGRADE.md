@@ -15,6 +15,17 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the Substrate line at `1.3.0`: workers schedule only where atelet runs)
+
+giantswarm/agent-platform#756: `components.substrate{,-crds}.versionRange` is `>=1.3.0 <1.4.0`. 1.3.0 is the line on the same upstream (kagent-dev/substrate v0.2.0-beta5) as 1.2.0, released as a minor; its WorkerPool CRD takes `spec.template.podAffinity` (giantswarm/substrate#98). The chart derives `kagent.substrateWorkerPool.template.podAffinity`: a required term on the atelet pods of the worker's node, so a worker never takes the CPU a rolling atelet pod freed.
+
+### Operator action
+
+- **None** for an installation on the defaults. The upgrade rolls the Substrate workloads onto 1.3.0; the kagent WorkerPool's worker image follows the floor to `ateom-gvisor:1.3.0` and its template gains the affinity, which replaces the pool's workers once.
+- **An installation that sets its own `kagent.substrateWorkerPool.template.podAffinity`** keeps it instead of the derived term: add the atelet term to it (README "Atelet affinity").
+- **An installation that pins `components.substrate{,-crds}.versionRange` below 1.3.0** gets no affinity, and an own `podAffinity` fails the render.
+- **Recognising it worked**: `kubectl -n <kagent namespace> get workerpool kagent-default -o jsonpath='{.spec.template.podAffinity}'` prints the atelet term, and `kubectl -n ate-system rollout status ds/atelet` completes on every upgrade.
+
 ## \<current\> → \<next\> (the Substrate line at `1.2.0`: the egress gateway trusts an extra CA bundle)
 
 giantswarm/agentlab#284: `components.substrate{,-crds}.versionRange` is `>=1.2.0 <1.3.0`. 1.2.0 is the line on the same upstream (kagent-dev/substrate v0.2.0-beta5) as 1.1.3, released as a minor; it adds `substrate.atenetEgress.upstreamTrust.caBundle`, empty by default.
