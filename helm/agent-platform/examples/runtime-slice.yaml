@@ -14,9 +14,9 @@
 # gitops.target.kubeConfig.secretRef naming the target's `<cluster>-kubeconfig`
 # (#328). The installation's helm-controller installs every component into the
 # target from the OCIRepositories beside it; the target runs no Flux, and the
-# bundled engine is refused with the knob. agentgateway is on for a workload
-# cluster (the target runs no controller of its own) and off when the slice
-# runs beside the platform's release, which owns the controller and its CRDs.
+# bundled engine is refused with the knob. The slice never runs beside the
+# platform's release: that release runs kagent, and kagent's CRDs have exactly
+# one owner per cluster (components.kagent-crds.ownedCrds refuses a second).
 # One release per target cluster: a GPU cluster that serves models too switches
 # the serving toggles of examples/serving-slice.yaml on in the same release.
 #
@@ -47,10 +47,11 @@ components:
   # components.kagent (they carry no enabled of their own).
   kagent:
     enabled: true
-  # Off beside the platform's release; on for a workload cluster, together with
-  # gitops.target.kubeConfig.secretRef.
+  # The workload cluster runs no agentgateway controller of its own: the slice
+  # brings it, and the target's agentgateway verifies the installation's tokens
+  # in front of the kagent controller.
   agentgateway:
-    enabled: false
+    enabled: true
 
 # gitops:
 #   target:

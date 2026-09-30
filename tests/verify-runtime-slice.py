@@ -6,20 +6,18 @@ release that runs agents on a workload cluster managed from the installation.
 Each case pins one property the slice relies on:
 
 - the profile renders exactly the runtime component set — kagent-crds,
-  substrate-crds, substrate, kagent and the connectivity release; no muster,
-  dicebear, valkey, Backstage, agent-manager, model-manager, MCP server or
-  agentgateway (the platform's release owns the controller beside it), the
-  engine off;
+  substrate-crds, substrate, kagent, agentgateway (the workload cluster runs no
+  controller of its own) and the connectivity release; no muster, dicebear,
+  valkey, Backstage, agent-manager, model-manager or MCP server, the engine off;
 - the kagent release carries the profile's snapshot location (the platform
   Harness's snapshotPolicy.location) and the profile without it fails naming
   kagent.harness.snapshotLocation;
-- with the target knob (ci/test-target-values.yaml, agentgateway on) the set
-  gains agentgateway, every HelmRelease carries the kubeConfig and no hook Job
-  renders (a hook runs where the chart is installed, not on the target);
+- with the target knob (ci/test-target-values.yaml) the same set, every
+  HelmRelease carrying the kubeConfig, and no hook Job renders (a hook runs
+  where the chart is installed, not on the target);
 - the connectivity chart, rendered with the values the profile forwards, renders
-  nothing of muster (no HTTPRoute, no policy selecting its pods) and the
-  Substrate hops' policies, and on a workload cluster the agentgateway
-  controller's policy too.
+  nothing of muster (no HTTPRoute, no policy selecting its pods), the
+  Substrate hops' policies and the agentgateway controller's policy.
 
 The live half (an agent placed on the workload cluster by agent-manager becomes
 Ready) needs giantswarm/agent-manager#22: README "The runtime slice on workload
@@ -37,7 +35,7 @@ FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2
               "--api-versions", "gateway.networking.k8s.io/v1"]
 # The installation's platform inputs the profile is layered over.
 INSTALLATION = ["--namespace", "org-acme", "--set", "global.domain=wc01.example.com", "--set", "global.identity.issuerUrl=https://dex.mc.example.com"]
-RUNTIME = {"kagent-crds", "substrate-crds", "substrate", "kagent", "agent-platform-connectivity"}
+RUNTIME = {"kagent-crds", "substrate-crds", "substrate", "kagent", "agentgateway", "agent-platform-connectivity"}
 KUBECONFIG = "wc01-kubeconfig"
 SNAPSHOTS = "s3://<bucket>/<cluster>"
 
@@ -102,7 +100,7 @@ def check_profile(meta: str, profile: str) -> dict[str, str]:
 def check_target(meta: str, profile: str) -> None:
     docs = documents(helm(meta, ["-f", profile, "-f", f"{meta}/ci/test-target-values.yaml", *FLEET_APIS, *INSTALLATION]))
     hrs = releases(docs)
-    expected = {f"t-{name}" for name in RUNTIME | {"agentgateway"}}
+    expected = {f"t-{name}" for name in RUNTIME}
     if set(hrs) != expected:
         sys.exit(f"FAIL: the targeted profile renders {sorted(hrs)}, expected exactly {sorted(expected)}")
     for name, doc in sorted(hrs.items()):
@@ -110,28 +108,23 @@ def check_target(meta: str, profile: str) -> None:
             sys.exit(f"FAIL: {name} does not carry spec.kubeConfig.secretRef {KUBECONFIG}:\n{doc}")
     if jobs := sorted(name for kind, name in docs if kind == "Job"):
         sys.exit(f"FAIL: the targeted profile renders hook Jobs {jobs}; a hook runs where the chart is installed, not on the target")
-    ok(f"with the target knob: the runtime set plus agentgateway ({len(hrs)} releases), every one targeting {KUBECONFIG}, no hook Job")
+    ok(f"with the target knob: the runtime set ({len(hrs)} releases), every one targeting {KUBECONFIG}, no hook Job")
 
 
 def check_connectivity(meta: str, connectivity: str, profile: str) -> None:
-    for label, extra in (("beside the platform's release", []), ("on a workload cluster", ["-f", f"{meta}/ci/test-target-values.yaml"])):
-        hrs = releases(documents(helm(meta, ["-f", profile, *extra, *FLEET_APIS, *INSTALLATION])))
-        conn = next(doc for name, doc in hrs.items() if name.endswith("agent-platform-connectivity"))
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", encoding="utf-8") as values:
-            values.write(values_block(conn))
-            values.flush()
-            docs = documents(helm(connectivity, ["-f", values.name, *FLEET_APIS, "--namespace", "org-acme"]))
-        if muster := sorted(f"{kind}/{name}" for kind, name in docs if "muster" in name):
-            sys.exit(f"FAIL: the connectivity release {label} renders muster's wiring {muster}; the installation's muster serves the slice")
-        if routes := sorted(name for kind, name in docs if kind == "HTTPRoute"):
-            sys.exit(f"FAIL: the connectivity release {label} renders HTTPRoutes {routes}; the slice has no public route of its own")
-        for policy in ("substrate-workers", "substrate-atenet-egress", "agent-platform-connectivity-kagent-controller-egress"):
-            if ("CiliumNetworkPolicy", policy) not in docs:
-                sys.exit(f"FAIL: the connectivity release {label} lacks the CiliumNetworkPolicy {policy}")
-        controller = ("CiliumNetworkPolicy", "agent-platform-connectivity-controller") in docs
-        if controller != bool(extra):
-            sys.exit(f"FAIL: the agentgateway controller's policy is {'rendered' if controller else 'missing'} {label}; it follows components.agentgateway")
-        ok(f"connectivity {label}: nothing of muster, no HTTPRoute, the Substrate hops' policies{', the agentgateway controller policy' if extra else ''}")
+    hrs = releases(documents(helm(meta, ["-f", profile, "-f", f"{meta}/ci/test-target-values.yaml", *FLEET_APIS, *INSTALLATION])))
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", encoding="utf-8") as values:
+        values.write(values_block(hrs["t-agent-platform-connectivity"]))
+        values.flush()
+        docs = documents(helm(connectivity, ["-f", values.name, *FLEET_APIS, "--namespace", "org-acme"]))
+    if muster := sorted(f"{kind}/{name}" for kind, name in docs if "muster" in name):
+        sys.exit(f"FAIL: the connectivity release renders muster's wiring {muster}; the installation's muster serves the slice")
+    if routes := sorted(name for kind, name in docs if kind == "HTTPRoute"):
+        sys.exit(f"FAIL: the connectivity release renders HTTPRoutes {routes}; the slice has no public route of its own")
+    for policy in ("substrate-workers", "substrate-atenet-egress", "agent-platform-connectivity-kagent-controller-egress", "agent-platform-connectivity-controller"):
+        if ("CiliumNetworkPolicy", policy) not in docs:
+            sys.exit(f"FAIL: the connectivity release lacks the CiliumNetworkPolicy {policy}")
+    ok("connectivity with the forwarded values: nothing of muster, no HTTPRoute, the Substrate hops' and the agentgateway controller's policies")
 
 
 def main() -> None:
