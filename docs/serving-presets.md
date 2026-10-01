@@ -12,6 +12,7 @@ One `ServingPreset` per file, the file named after `metadata.name`. The schema i
 - **`spec.model`**: `id` is the Hugging Face repository, `storageUri` the signed model image (`oci://gsoci.azurecr.io/giantswarm/models/…`) or `hf://` for the Hub path; `capabilities` are informational tags (`chat`, `tools`, `reasoning`, `vision`, …); `tools` and `reasoning` are checked against the arguments' parsers.
 - **`spec.args`** are complete and literal. The runtime template re-parses every argument through a shell, so a JSON value is single-quoted inside one argument (`"--default-chat-template-kwargs='{\"enable_thinking\": false}'"`). `--tensor-parallel-size` equals `spec.resources.gpus`.
 - **`spec.requirements`**: `weightsGiB` is the checkpoint's size on the Hub, rounded up (at most 15 % above it); `overheadGiB` the KV cache, activations and runtime overhead at the preset's context and concurrency.
+- **`spec.split.env`** is environment for a split placement only (one model tensor parallel across the nodes of a fast link): model-manager adds it to the leader and the workers after `modelServing.fastLinks[].env`, never to a single-node pod. It carries what was measured on a split alone, such as an all-reduce setting; environment for every placement goes in `spec.env`.
 - **The model family.** Tool-call and reasoning parsers are facts of the model's architecture. A preset of a family [`model-families.yaml`](../helm/agent-platform-connectivity/files/model-serving/model-families.yaml) lacks needs its row first.
 
 ## The render checks

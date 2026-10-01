@@ -272,6 +272,7 @@ else:
         tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         graphs = parsed and "--enforce-eager" not in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
+        splitenv = graphs and "VLLM_ENABLE_ROCE_ALLREDUCE" in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
         metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
@@ -487,6 +488,14 @@ else:
         head.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
         golden.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
         print(f"note: nemotron-3-super-nvfp4 serves with CUDA graphs on this side and not on {ref}: its ConfigMap is left out of the comparison")
+    # nemotron-3-super-nvfp4 carries the RoCE all-reduce for a split on this
+    # side (spec.split.env, giantswarm/agent-platform#743); a golden from
+    # before renders it without, so its ConfigMap is left out of the
+    # comparison. Drop this once GOLDEN_REF carries the change.
+    elif not splitenv:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
+        print(f"note: nemotron-3-super-nvfp4 carries a split environment on this side and not on {ref}: its ConfigMap is left out of the comparison")
     # model-manager's egress reaches the serving namespace's workload pods on the
     # workload port with the slice on (giantswarm/agent-platform#602: the route
     # list it reads a served model's API interfaces from); a golden from before

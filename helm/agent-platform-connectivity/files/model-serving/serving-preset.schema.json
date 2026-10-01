@@ -102,6 +102,25 @@
             "scheduler": {"type": "boolean"}
           }
         },
+        "split": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What a split placement of this preset adds (model-manager, placement split: one model tensor parallel across the nodes of a fast link). env reaches the runtime container of the leader and of the workers, after modelServing.fastLinks[].env, and never a single-node pod: environment measured for the split alone, such as an in-graph all-reduce over the link.",
+          "properties": {
+            "env": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "value"],
+                "properties": {
+                  "name": {"type": "string", "minLength": 1},
+                  "value": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
         "scheduling": {
           "type": "object",
           "additionalProperties": false,
