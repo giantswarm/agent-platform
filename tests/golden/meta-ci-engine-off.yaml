@@ -732,6 +732,7 @@ spec:
                 cpu: 250m
                 ephemeral-storage: 256Mi
                 memory: 1Gi
+      harnesses: []
       kagent-tools:
         enabled: false
         namespaceOverride: kagent
@@ -1794,6 +1795,7 @@ spec:
       - name: KAGENT_PROPAGATE_TOKEN
         value: "true"
       snapshotLocation: s3://ci-agent-snapshots/agents
+    harnesses: []
     kagent-tools:
       enabled: false
       namespaceOverride: kagent
