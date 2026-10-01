@@ -71,8 +71,11 @@ def connectivity(path):
     gitlab = objs[("AgentgatewayPolicy", "grant-gitlab-git")]["spec"]["traffic"]
     if "git-receive-pack" in gitlab["authorization"]["policy"]["matchExpressions"][0]:
         fail("push: false left git-receive-pack in")
-    headers = {h["name"]: h["value"] for h in github["transformation"]["response"]["set"]}
-    if headers[":status"] != "response.code == 400 ? 401 : response.code" or "core_auth_login with server github" not in headers["www-authenticate"] or not headers["www-authenticate"].endswith(": null"):
+    sets = github["transformation"]["response"]["set"]
+    headers = {h["name"]: h["value"] for h in sets}
+    if [h["name"] for h in sets] != ["www-authenticate", ":status"]:
+        fail(f"the realm must be set before the status rewrites the code: {[h['name'] for h in sets]}")
+    if headers[":status"] != "response.code == 400 ? 401 : response.code" or "core_auth_login with server github" not in headers["www-authenticate"] or not headers["www-authenticate"].endswith(": response.headers['www-authenticate']"):
         fail(f"401 answer: {headers}")
     print("ok: grant objects rendered as declared")
 
