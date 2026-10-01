@@ -2583,7 +2583,8 @@ the installation's own: the broker client the Gateway exchanges with (seeded
 from the Secret the connectivity chart generates), its audiences (one per
 granted server), a grant target per server (grantIssuer), and a trustedIssuers
 entry for the platform Dex, whose ID tokens are the exchange's subject tokens
-(acceptedTypHeaders [""]: Dex sets no typ). An own client, target or issuer
+(acceptedTypHeaders [""]: Dex sets no typ; allowPrivateIPJWKS follows
+dex.allowPrivateIPOIDC, the same Dex). An own client, target or issuer
 entry of the same name is kept as it is. Empty JSON when no grant is on.
 Usage: include "agent-platform.grants.musterServer" . | fromJson
 */}}
@@ -2620,6 +2621,7 @@ Usage: include "agent-platform.grants.musterServer" . | fromJson
 {{- if not $known -}}
 {{- $entry := dict "issuer" $issuer "jwksUrl" (printf "%s/keys" (trimSuffix "/" $issuer)) "acceptedTypHeaders" (list "") -}}
 {{- if $clientId }}{{ $_ := set $entry "allowedAudiences" (list $clientId) }}{{ end -}}
+{{- if dig "dex" "allowPrivateIPOIDC" false $server }}{{ $_ := set $entry "allowPrivateIPJWKS" true }}{{ end -}}
 {{- $issuers = append $issuers $entry -}}
 {{- end -}}
 {{- $_ := set $out "trustedIssuers" $issuers -}}
