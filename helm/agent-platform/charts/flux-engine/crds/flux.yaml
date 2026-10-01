@@ -1,12 +1,17 @@
 # The seven CustomResourceDefinitions of Flux's source-controller and
 # helm-controller, from `flux install --export
-# --components=source-controller,helm-controller --version=v2.9.5`. They live in
+# --components=source-controller,helm-controller --version=v2.9.5` (the
+# label app.kubernetes.io/instance removed). They live in
 # crds/ so Helm installs them before the meta chart's HelmRelease templates are
 # validated against the API server (Helm validates template kinds before any
 # hook runs, so a hook cannot bring them). The Flux Operator adopts them as soon
 # as the FluxInstance reconciles and upgrades them with Flux inside
 # flux-engine.instance.distribution.version; it also removes them when the
 # FluxInstance is deleted (the ordered teardown of the meta chart).
+#
+# Generated, do not edit: `make sync-flux-crds FLUX_VERSION=<v>` writes this
+# file (without FLUX_VERSION for the version named above), and
+# `make verify-flux-crds` fails on any other content.
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
