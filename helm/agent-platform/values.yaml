@@ -4459,9 +4459,6 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       repository: giantswarm/agent-manager
       tag: 1.7.0
     dryRun: false
-    githubToken:
-      secretName: kagent-skills-token
-      key: token
     gitopsNamespaces: []
 
 # === Cluster manager (cluster-manager) ===

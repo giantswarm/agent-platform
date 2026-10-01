@@ -400,9 +400,6 @@ spec:
       migration:
         dryRun: false
         enabled: true
-        githubToken:
-          key: token
-          secretName: kagent-skills-token
         gitopsNamespaces: []
         image:
           registry: gsoci.azurecr.io

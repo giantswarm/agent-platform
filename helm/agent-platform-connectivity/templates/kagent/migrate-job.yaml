@@ -46,9 +46,10 @@ in-Job waiting).
 The Job takes its inputs the way `agent-manager serve` does, as environment:
 the kagent namespace, the further managed namespaces, the agent chart's OCI URL
 and range (1.x on the 4.0 meta chart), the GitOps namespaces the GitOps-owned
-releases are read from, the platform Harness name, and GITHUB_TOKEN from the
-read token Secret the private-skill agents use (optional: without it public
-repositories resolve and private refs are reported as pending). The Job, its
+releases are read from, and the platform Harness name. It reads no GitHub
+token: public skill repositories resolve, private refs are reported as
+pending (agents read private skills through agent-manager's minted
+agent-manager-skills-token, whose Basic form `migrate` cannot use). The Job, its
 migration-only bindings (migrate-rbac.yaml) and this note retire in a later 4.x
 release once the last installation is cut over.
 */ -}}
@@ -84,9 +85,6 @@ name is fixed by the kagent API v2 contract (the Harness `kagent`, admission
 label agent-platform.giantswarm.io/harness: kagent), so it is written here,
 not read from kagent.harness. */ -}}
 {{- $env = append $env (dict "name" "AGENT_HARNESS_NAME" "value" "kagent") }}
-{{- if $m.githubToken.secretName }}
-{{- $env = append $env (dict "name" "GITHUB_TOKEN" "valueFrom" (dict "secretKeyRef" (dict "name" $m.githubToken.secretName "key" $m.githubToken.key "optional" true))) }}
-{{- end }}
 {{- /* The chart's schema and the skill resolver cache under $HOME; the root
 filesystem is read-only. */ -}}
 {{- $env = append $env (dict "name" "HOME" "value" "/tmp") }}

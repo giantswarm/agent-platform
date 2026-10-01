@@ -3396,7 +3396,7 @@ verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the c
 	@echo "ok: $@"
 
 .PHONY: verify-migration
-verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; a PLAIN Job named with the hash of its pod template — image, args, environment, identity, labels; a changed template renders a new Job, an unchanged one is re-applied as is (no hook: a migrate failure never fails the release, and the meta chart stops the connectivity HelmRelease from waiting on Jobs), the template byte-identical across chart versions while the Job's own labels follow them (Job.spec.template is immutable, #399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), GITHUB_TOKEN optional from the value-named Secret, its inputs as environment; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
+verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; a PLAIN Job named with the hash of its pod template — image, args, environment, identity, labels; a changed template renders a new Job, an unchanged one is re-applied as is (no hook: a migrate failure never fails the release, and the meta chart stops the connectivity HelmRelease from waiting on Jobs), the template byte-identical across chart versions while the Job's own labels follow them (Job.spec.template is immutable, #399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), its inputs as environment and no GitHub token; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — its kagent is fresh, there is no 0.10 agent to migrate (agentlab#143 rehearses the migration)"
 	@helm template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >/tmp/vmig-off.out 2>&1 || { cat /tmp/vmig-off.out; exit 1; }
@@ -3421,7 +3421,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -q 'restartPolicy: Never' /tmp/vmig-job.out || { echo "FAIL: restartPolicy"; exit 1; }
 	@grep -q 'runAsNonRoot: true' /tmp/vmig-job.out || { echo "FAIL: the Job is not restricted (runAsNonRoot)"; exit 1; }
 	@grep -q 'readOnlyRootFilesystem: true' /tmp/vmig-job.out || { echo "FAIL: the Job is not restricted (readOnlyRootFilesystem)"; exit 1; }
-	@for env in 'KUBERNETES_IN_CLUSTER' 'KAGENT_NAMESPACE' 'AGENT_CHART_OCI_URL' 'AGENT_CHART_SEMVER' 'AGENT_HARNESS_NAME' 'GITHUB_TOKEN' 'HOME'; do grep -q "name: $$env$$" /tmp/vmig-job.out || { echo "FAIL: env $$env missing"; exit 1; }; done
+	@for env in 'KUBERNETES_IN_CLUSTER' 'KAGENT_NAMESPACE' 'AGENT_CHART_OCI_URL' 'AGENT_CHART_SEMVER' 'AGENT_HARNESS_NAME' 'HOME'; do grep -q "name: $$env$$" /tmp/vmig-job.out || { echo "FAIL: env $$env missing"; exit 1; }; done
 	@grep -A1 'name: KAGENT_NAMESPACE' /tmp/vmig-job.out | grep -q 'value: kagent' || { echo "FAIL: KAGENT_NAMESPACE is not the kagent namespace"; exit 1; }
 	@if grep -q 'AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' /tmp/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES renders without gitopsNamespaces"; exit 1; fi
 	@grep -A1 'name: AGENT_HARNESS_NAME' /tmp/vmig-job.out | grep -q 'value: kagent' || { echo "FAIL: AGENT_HARNESS_NAME is not the platform Harness"; exit 1; }
@@ -3429,9 +3429,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if grep -q 'AGENT_CHART_SEMVER_FILTER' /tmp/vmig-job.out; then echo "FAIL: AGENT_CHART_SEMVER_FILTER renders without agent-manager.agentChart.semverFilter"; exit 1; fi
 	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set-string 'agent-manager.agentChart.semverFilter=^[0-9]+[.][0-9]+[.][0-9]+(-rc[.][0-9]+)?$$' >/tmp/vmig-filter.out 2>&1 || { cat /tmp/vmig-filter.out; exit 1; }
 	@grep -A1 'name: AGENT_CHART_SEMVER_FILTER' /tmp/vmig-filter.out | grep -qF 'value: ^[0-9]+[.][0-9]+[.][0-9]+(-rc[.][0-9]+)?$$' || { echo "FAIL: AGENT_CHART_SEMVER_FILTER does not follow agent-manager.agentChart.semverFilter"; grep -A1 AGENT_CHART_SEMVER /tmp/vmig-filter.out; exit 1; }
-	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'name: kagent-skills-token' || { echo "FAIL: GITHUB_TOKEN does not read the default token Secret"; exit 1; }
-	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'key: token' || { echo "FAIL: GITHUB_TOKEN does not read the key token"; exit 1; }
-	@grep -A5 'name: GITHUB_TOKEN' /tmp/vmig-job.out | grep -q 'optional: true' || { echo "FAIL: the token Secret is not optional"; exit 1; }
+	@if grep -q 'GITHUB_TOKEN\|kagent-skills-token' /tmp/vmig-job.out; then echo "FAIL: the Job reads a GitHub token"; exit 1; fi
 	@if grep -q 'AGENT_MANAGER_MANAGED_NAMESPACES' /tmp/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MANAGED_NAMESPACES renders without additional namespaces"; exit 1; fi
 	@echo "ok: the Job"
 	@echo "--> stable across chart releases (#399): the chart packaged at two versions renders the same-named Job with a byte-identical spec.template — the chart version (helm.sh/chart, app.kubernetes.io/version) stays on the Job's own labels, never on the pod's; the pod keeps the selector labels, the component label the network policy selects on, the team label"
@@ -3453,11 +3451,11 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if cmp -s /tmp/vmig-pkg/meta-4.0.0.out /tmp/vmig-pkg/meta-4.0.1.out; then echo "FAIL: the Job's own labels do not follow the chart version"; exit 1; fi
 	@echo "ok: stable pod template"
 	@echo "--> the values: the tag follows agentManager.migration.image.tag, dryRun renders --dry-run, an empty secretName drops the token, additional namespaces reach the Job, a renamed identity follows"
-	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=1.2.3 --set agentManager.migration.dryRun=true --set agentManager.migration.githubToken.secretName= --set 'agent-manager.kagent.additionalNamespaces[0]=team-a' --set 'agent-manager.kagent.additionalNamespaces[1]=team-b' --set kagent.fluxServiceAccountName=tenant-x >/tmp/vmig-vals.out 2>&1 || { cat /tmp/vmig-vals.out; exit 1; }
+	@helm template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=1.2.3 --set agentManager.migration.dryRun=true --set agentManager.migration.githubToken.secretName=kagent-skills-token --set 'agent-manager.kagent.additionalNamespaces[0]=team-a' --set 'agent-manager.kagent.additionalNamespaces[1]=team-b' --set kagent.fluxServiceAccountName=tenant-x >/tmp/vmig-vals.out 2>&1 || { cat /tmp/vmig-vals.out; exit 1; }
 	@$(PICK) /tmp/vmig-vals.out Job '$(MIGRATION_JOB)-*' kagent >/tmp/vmig-vals-job.out || { echo "FAIL: no Job with the values set"; exit 1; }
 	@grep -q 'agent-manager:1.2.3"' /tmp/vmig-vals-job.out || { echo "FAIL: the image tag does not follow the value"; exit 1; }
 	@grep -q -- '- --dry-run' /tmp/vmig-vals-job.out || { echo "FAIL: dryRun does not render --dry-run"; exit 1; }
-	@if grep -q 'GITHUB_TOKEN' /tmp/vmig-vals-job.out; then echo "FAIL: an empty secretName still renders GITHUB_TOKEN"; exit 1; fi
+	@if grep -q 'GITHUB_TOKEN' /tmp/vmig-vals-job.out; then echo "FAIL: a left-over githubToken value still renders GITHUB_TOKEN"; exit 1; fi
 	@grep -A1 'name: AGENT_MANAGER_MANAGED_NAMESPACES' /tmp/vmig-vals-job.out | grep -q 'value: team-a,team-b' || { echo "FAIL: the additional namespaces do not reach the Job"; exit 1; }
 	@grep -q 'serviceAccountName: tenant-x' /tmp/vmig-vals-job.out || { echo "FAIL: the Job's ServiceAccount did not follow the renamed identity"; exit 1; }
 	@echo "ok: values"
