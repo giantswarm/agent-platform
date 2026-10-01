@@ -1274,6 +1274,24 @@ verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure 
 	@python3 tests/verify-engine.py $(CHART_DIR)
 	@echo "flux engine shapes verified."
 
+FLUX_ENGINE_DIR := $(CHART_DIR)/charts/flux-engine
+.PHONY: verify-flux-crds
+verify-flux-crds: ## Assert the flux-engine subchart's crds/ are byte for byte the pinned releases' CRDs (giantswarm/agent-platform#454): crds/flux-operator.yaml the upstream flux-operator chart at Chart.yaml's appVersion, crds/flux.yaml `flux install --export` of the two controllers at the Flux version its header names, each with the labels its header lists removed and its header naming the release; a deliberately stale copy fails naming the file and the release. Renders upstream over the network; `make sync-flux-crds` refreshes both. HELM selects the binary.
+	@echo "====> $@ ($(FLUX_ENGINE_DIR))"
+	@HELM="$(HELM)" python3 tests/verify-flux-crds.py $(FLUX_ENGINE_DIR)
+	@echo "--> a deliberately stale CRD in each file fails naming the file and the release"
+	@stale="$(VERIFY_TMP)/verify-flux-crds-stale"; rm -rf "$$stale" && cp -r $(FLUX_ENGINE_DIR) "$$stale" && \
+	sed -i '0,/served: true/s//served: false/' "$$stale/crds/flux-operator.yaml" "$$stale/crds/flux.yaml" && \
+	if HELM="$(HELM)" python3 tests/verify-flux-crds.py "$$stale" >"$$stale.out" 2>&1; then cat "$$stale.out"; echo "FAIL: a stale CRD passed"; exit 1; fi; \
+	grep -q "FAIL: $$stale/crds/flux-operator.yaml is not the CRDs of the Flux Operator v" "$$stale.out" && \
+	grep -q "FAIL: $$stale/crds/flux.yaml is not the CRDs of Flux v" "$$stale.out" && \
+	grep -q "make sync-flux-crds" "$$stale.out" || { cat "$$stale.out"; echo "FAIL: the drift report does not name both files, their releases and the fix"; exit 1; }
+	@echo "flux engine CRDs verified."
+
+.PHONY: sync-flux-crds
+sync-flux-crds: ## Write the flux-engine subchart's crds/ from the pinned releases: the Flux Operator at Chart.yaml's appVersion, Flux at FLUX_VERSION (default: the version crds/flux.yaml names). Run it after a Flux Operator bump, then `make golden-update` (the CRD hook carries crds/flux-operator.yaml); golden-regen does both on Renovate branches. HELM selects the binary.
+	@HELM="$(HELM)" python3 tests/verify-flux-crds.py --write $(if $(FLUX_VERSION),--flux-version $(FLUX_VERSION)) $(FLUX_ENGINE_DIR)
+
 .PHONY: pinned-helm
 pinned-helm: ## Download the helm version CI pins (HELM_PINNED_VERSION) into .bin/, once, and print the HELM= that golden-update and the verify targets take.
 	@plat=$$(uname -s | tr A-Z a-z)-$$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'); \
