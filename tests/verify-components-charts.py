@@ -85,15 +85,24 @@ Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
 chart (three attempts each); the tag
 list comes from the registry's anonymous `/v2/<repo>/tags/list`. Every Helm call
 is bounded (TIMEOUT). PyYAML is in the CI image (the job installs python3-yaml).
+
+The components are independent, and the work is registry round trips and Helm
+subprocesses: the meta renders and the components run on WORKERS threads. Each
+component's lines are held back and printed in roster order once it is done
+(Lines, held()), so the output reads as a sequential run's; the first component
+in roster order that fails ends the run with its FAIL, as before.
 """
 
+import concurrent.futures
 import hashlib
+import io
 import json
 import pathlib
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -109,6 +118,9 @@ RELEASE = "t"
 # Bound on every helm call: a stalled registry connection ends in a FAIL line
 # naming the call, not in CircleCI's no-output kill of the whole job.
 TIMEOUT = 300
+# Threads for the meta renders and the components: the work waits on the
+# registry and on Helm, not on Python.
+WORKERS = 8
 MANAGERS = ["model-manager", "agent-manager"]
 # The kagent.dev API version the meta chart pins into both managers
 # (`kagent.apiVersion`, giantswarm/agent-platform#401); their charts must render
@@ -224,6 +236,35 @@ def where(forwarded: dict[str, list[str]]) -> str:
 
 def fail(msg: str) -> None:
     sys.exit(f"FAIL: {msg}")
+
+
+class Lines:
+    """sys.stdout while the components run in parallel: what a worker thread
+    prints goes to its own buffer (held()), the main thread's straight through."""
+
+    def __init__(self, out):
+        self.out, self.local = out, threading.local()
+
+    def write(self, text: str) -> int:
+        buf = getattr(self.local, "buf", None)
+        return (self.out if buf is None else buf).write(text)
+
+    def flush(self) -> None:
+        self.out.flush()
+
+
+def held(check, *args) -> tuple[str, BaseException | None]:
+    """Run check(*args) in a worker with its output held back: the lines it
+    printed, and the exception it ended in (fail() raises SystemExit) or None."""
+    lines = sys.stdout
+    lines.local.buf = io.StringIO()
+    try:
+        check(*args)
+        return lines.local.buf.getvalue(), None
+    except BaseException as e:  # handed to the main thread, which raises it in roster order
+        return lines.local.buf.getvalue(), e
+    finally:
+        lines.local.buf = None
 
 
 def run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -450,8 +491,10 @@ def main(meta: str) -> int:
     base = [*QUICKSTART, *ALL_ON_INPUTS, *on]
     bom = ["-f", f"{meta}/examples/customer-bom.yaml"]
     # shape -> (the defaults' render, the BOM's render)
-    renders = {shape: (docs(render_meta(meta, [*base, *flags])), docs(render_meta(meta, [*bom, *base, *flags])))
-               for shape, flags in SHAPES.items()}
+    with concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
+        meta_renders = [pool.submit(render_meta, meta, [*values, *base, *flags]) for flags in SHAPES.values() for values in ([], bom)]
+        manifests = iter([docs(f.result()) for f in meta_renders])
+    renders = {shape: (next(manifests), next(manifests)) for shape in SHAPES}
     wide, pinned = next(iter(renders.values()))
     # The OCIRepository and the HelmRelease are named after the entry's chart.
     charts = {n: c["chart"] for n, c in components.items()}
@@ -469,56 +512,70 @@ def main(meta: str) -> int:
     print(f"--> {len(SHAPES)} shapes ({', '.join(SHAPES)}): each distinct forwarded block rendered once")
     if STRICT:
         print("--> strict (the tag pipeline): every range and every BOM pin must resolve to a published chart; UNRELEASED and RENDER_AGAINST do not apply")
-    with tempfile.TemporaryDirectory() as tmp:
-        for name in sorted(components):
-            chart = charts[name]
-            url, rng = source(wide[("OCIRepository", chart)])
-            _, pin = source(pinned[("OCIRepository", chart)])
-            for shape, (w, p) in renders.items():
-                if (source(w[("OCIRepository", chart)])[1], source(p[("OCIRepository", chart)])[1]) != (rng, pin):
-                    fail(f"{name}: the {shape} render gives another range or pin than the {next(iter(SHAPES))} render — a shape must not move a version")
-            # (axis, values) -> the shapes that forward them, in SHAPES order.
-            blocks: dict[tuple[str, str], list[str]] = {}
-            for shape, (w, p) in renders.items():
-                blocks.setdefault(("range", hr_values(w[("HelmRelease", chart)])), []).append(shape)
-                blocks.setdefault(("BOM pin", hr_values(p[("HelmRelease", chart)])), []).append(shape)
-            if name in released:
-                # One version matters, the working tree's: every distinct block of
-                # both renders against it, once.
-                chart_dir = REPO_ROOT / "helm" / chart
-                if not (chart_dir / "Chart.yaml").is_file():
-                    fail(f"{name}: no chart at {chart_dir} — releasedWithChart names a chart this repository does not have")
-                if rng != pin:
-                    fail(f"{name}: the BOM render gives the chart released with the meta chart another version ({pin!r}) than the defaults ({rng!r})")
-                seen: dict[str, dict[str, list[str]]] = {}
-                for (axis, values), shapes in blocks.items():
-                    seen.setdefault(values, {})[f"the {axis}"] = shapes
-                for values, forwarded in seen.items():
-                    render_component(name, str(chart_dir), values, f"{name} working tree (released with the chart, {rng}; {where(forwarded)})", tmp)
-                continue
-            if pin != pins[name]:
-                fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
-            tags = registry_tags(url)
-            version_range = fluxsemver.resolve(tags, rng) or fallback(name, url, rng, tags, kagent_tag)
-            version_pin = fluxsemver.resolve(tags, pin)
-            if not version_pin and pin == UNRELEASED.get(name) and not STRICT:
-                version_pin = fallback(name, url, pin, tags, kagent_tag)
-            if not version_pin:
-                fail(f"{name}: the BOM pins {pin!r}, which {url} does not publish — no installation on this BOM can install it"
-                     + (f"; {waits_for(name, url, pin, tags)}" if STRICT else ""))
-            axes = {"range": (rng, version_range), "BOM pin": (pin, version_pin)}
-            # (version, values) -> where it is forwarded; a version is checked and pulled once.
-            jobs: dict[tuple[str, str], dict[str, list[str]]] = {}
+    def check(name: str, tmp: str) -> None:
+        """One component: its range and its BOM pin resolved, pulled and
+        rendered with every distinct block the meta chart forwards to it."""
+        chart = charts[name]
+        url, rng = source(wide[("OCIRepository", chart)])
+        _, pin = source(pinned[("OCIRepository", chart)])
+        for shape, (w, p) in renders.items():
+            if (source(w[("OCIRepository", chart)])[1], source(p[("OCIRepository", chart)])[1]) != (rng, pin):
+                fail(f"{name}: the {shape} render gives another range or pin than the {next(iter(SHAPES))} render — a shape must not move a version")
+        # (axis, values) -> the shapes that forward them, in SHAPES order.
+        blocks: dict[tuple[str, str], list[str]] = {}
+        for shape, (w, p) in renders.items():
+            blocks.setdefault(("range", hr_values(w[("HelmRelease", chart)])), []).append(shape)
+            blocks.setdefault(("BOM pin", hr_values(p[("HelmRelease", chart)])), []).append(shape)
+        if name in released:
+            # One version matters, the working tree's: every distinct block of
+            # both renders against it, once.
+            chart_dir = REPO_ROOT / "helm" / chart
+            if not (chart_dir / "Chart.yaml").is_file():
+                fail(f"{name}: no chart at {chart_dir} — releasedWithChart names a chart this repository does not have")
+            if rng != pin:
+                fail(f"{name}: the BOM render gives the chart released with the meta chart another version ({pin!r}) than the defaults ({rng!r})")
+            seen: dict[str, dict[str, list[str]]] = {}
             for (axis, values), shapes in blocks.items():
-                constraint, version = axes[axis]
-                jobs.setdefault((version, values), {})[f"the {axis} {constraint!r}"] = shapes
-            pulled: dict[str, str] = {}
-            for (version, values), forwarded in jobs.items():
-                chart_dir = f"{tmp}/{name}/{version}"
-                if version not in pulled:
-                    flux_layer(name, url, version, wide[("OCIRepository", chart)])
-                    pulled[version] = pull(url, version, chart_dir)
-                render_component(name, f"{chart_dir}/{chart}", values, f"{name} {pulled[version]} ({where(forwarded)})", tmp)
+                seen.setdefault(values, {})[f"the {axis}"] = shapes
+            for values, forwarded in seen.items():
+                render_component(name, str(chart_dir), values, f"{name} working tree (released with the chart, {rng}; {where(forwarded)})", tmp)
+            return
+        if pin != pins[name]:
+            fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
+        tags = registry_tags(url)
+        version_range = fluxsemver.resolve(tags, rng) or fallback(name, url, rng, tags, kagent_tag)
+        version_pin = fluxsemver.resolve(tags, pin)
+        if not version_pin and pin == UNRELEASED.get(name) and not STRICT:
+            version_pin = fallback(name, url, pin, tags, kagent_tag)
+        if not version_pin:
+            fail(f"{name}: the BOM pins {pin!r}, which {url} does not publish — no installation on this BOM can install it"
+                 + (f"; {waits_for(name, url, pin, tags)}" if STRICT else ""))
+        axes = {"range": (rng, version_range), "BOM pin": (pin, version_pin)}
+        # (version, values) -> where it is forwarded; a version is checked and pulled once.
+        jobs: dict[tuple[str, str], dict[str, list[str]]] = {}
+        for (axis, values), shapes in blocks.items():
+            constraint, version = axes[axis]
+            jobs.setdefault((version, values), {})[f"the {axis} {constraint!r}"] = shapes
+        pulled: dict[str, str] = {}
+        for (version, values), forwarded in jobs.items():
+            chart_dir = f"{tmp}/{name}/{version}"
+            if version not in pulled:
+                flux_layer(name, url, version, wide[("OCIRepository", chart)])
+                pulled[version] = pull(url, version, chart_dir)
+            render_component(name, f"{chart_dir}/{chart}", values, f"{name} {pulled[version]} ({where(forwarded)})", tmp)
+
+    sys.stdout = Lines(sys.stdout)
+    try:
+        with tempfile.TemporaryDirectory() as tmp, concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
+            checks = [pool.submit(held, check, name, tmp) for name in sorted(components)]
+            for c in checks:
+                out, err = c.result()
+                sys.stdout.write(out)
+                if err:
+                    pool.shutdown(cancel_futures=True)
+                    raise err
+    finally:
+        sys.stdout = sys.stdout.out
     return 0
 
 

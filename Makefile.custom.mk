@@ -4098,9 +4098,11 @@ VERIFY_RELEASE_ONLY := verify-release-floors
 VERIFY_TARGETS := $(filter-out verify-all $(VERIFY_CHAINED) $(VERIFY_RELEASE_ONLY),$(VERIFY_ALL_DEFINED))
 
 .PHONY: verify-all
-verify-all: ## Run every verify-* target of this file, the set CI runs. Some resolve a component chart over the network.
+verify-all: ## Run every verify-* target of this file, the set CI runs, each with its wall-clock. Some resolve a component chart over the network.
 	@echo "====> $@ ($(words $(VERIFY_TARGETS)) targets)"
 	@for target in $(VERIFY_TARGETS); do \
+		start=$$(date +%s%N); \
 		$(MAKE) --no-print-directory $$target || { echo "FAIL: $$target"; exit 1; }; \
+		echo "<==== $$target: $$(( ($$(date +%s%N) - start) / 1000000 )) ms"; \
 	done
 	@echo "all $(words $(VERIFY_TARGETS)) verify targets passed."
