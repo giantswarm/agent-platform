@@ -41,3 +41,13 @@ spec:
   requirements:
     weightsGiB: 75
     overheadGiB: 30
+  # A split across a fast link only: the B12X runtime's in-graph RoCE
+  # all-reduce for messages up to 2 MB, NCCL above. Measured on two 128 GB
+  # unified-memory Blackwell nodes with CUDA graphs: 16.3 → 26.3 tok/s single
+  # stream; a single-node pod has no all-reduce and never carries it.
+  split:
+    env:
+      - name: VLLM_ENABLE_ROCE_ALLREDUCE
+        value: "1"
+      - name: VLLM_ROCE_ALLREDUCE_MAX_SIZE
+        value: 2MB

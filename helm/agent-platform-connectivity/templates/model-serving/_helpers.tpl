@@ -369,6 +369,40 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- /* spec.split.env is the environment model-manager adds to a split's
+       leader and workers only; nothing else goes under split, and each entry
+       is a literal name and value. */ -}}
+{{- if hasKey $spec "split" -}}
+{{- $split := get $spec "split" -}}
+{{- if not (kindIs "map" $split) -}}
+{{- fail (printf "%s: spec.split must be a mapping" $where) -}}
+{{- end -}}
+{{- range $key, $_ := $split -}}
+{{- if ne $key "env" -}}
+{{- fail (printf "%s: spec.split.%s is not a preset field; spec.split carries env only" $where $key) -}}
+{{- end -}}
+{{- end -}}
+{{- $splitEnv := get $split "env" | default list -}}
+{{- if not (kindIs "slice" $splitEnv) -}}
+{{- fail (printf "%s: spec.split.env must be a list of {name, value}" $where) -}}
+{{- end -}}
+{{- range $j, $e := $splitEnv -}}
+{{- if not (kindIs "map" $e) -}}
+{{- fail (printf "%s: spec.split.env[%d] must be a {name, value} mapping" $where $j) -}}
+{{- end -}}
+{{- range $key, $_ := $e -}}
+{{- if not (has $key (list "name" "value")) -}}
+{{- fail (printf "%s: spec.split.env[%d].%s is not allowed; a split's environment is a literal name and value" $where $j $key) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (and (kindIs "string" (get $e "name")) (get $e "name")) -}}
+{{- fail (printf "%s: spec.split.env[%d].name must be a non-empty string" $where $j) -}}
+{{- end -}}
+{{- if not (kindIs "string" (get $e "value")) -}}
+{{- fail (printf "%s: spec.split.env[%d].value must be a string (quote a number: \"1\")" $where $j) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if not (get $spec "displayName") -}}
 {{- fail (printf "%s: spec.displayName is required" $where) -}}
 {{- end -}}

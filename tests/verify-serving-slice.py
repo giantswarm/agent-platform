@@ -745,6 +745,25 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
         doc["spec"]["router"] = router
         err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure=message)
         need(err, 'serving preset "picked" (values)', f"the router guard's message for {what}")
+    # spec.split.env is published unchanged; a malformed one fails the render naming the preset.
+    split_env = [{"name": "VLLM_ENABLE_ROCE_ALLREDUCE", "value": "1"}]
+    doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "pair"},
+           "spec": {"displayName": "Pair", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "split": {"env": split_env}}}
+    cm = documents(helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])]))[("ConfigMap", "agent-platform-serving-preset-pair")]
+    published = yaml.safe_load(yaml.safe_load(cm)["data"]["preset.yaml"])
+    if published["spec"].get("split") != {"env": split_env}:
+        sys.exit(f"FAIL: the values preset's spec.split is published as {published['spec'].get('split')!r}, not {{'env': {split_env!r}}}")
+    for what, split, message in (("an unknown key", {"env": split_env, "args": []}, "spec.split.args is not a preset field"),
+                                 ("a list", [split_env], "spec.split must be a mapping"),
+                                 ("env as a mapping", {"env": {"A": "1"}}, "spec.split.env must be a list"),
+                                 ("an entry without a name", {"env": [{"value": "1"}]}, "spec.split.env[0].name must be a non-empty string"),
+                                 ("a number value", {"env": [{"name": "A", "value": 1}]}, "spec.split.env[0].value must be a string"),
+                                 ("valueFrom", {"env": [{"name": "A", "valueFrom": {}}]}, "spec.split.env[0].valueFrom is not allowed")):
+        doc["spec"]["split"] = split
+        err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure=message)
+        need(err, 'serving preset "pair" (values)', f"the split guard's message for {what}")
+    if set(json.load(open(f"{connectivity}/files/model-serving/serving-preset.schema.json"))["properties"]["spec"]["properties"]["split"]["properties"]) != {"env"}:
+        sys.exit("FAIL: the preset schema's spec.split does not carry exactly env")
     bad = {"bare JSON in two arguments": ["--default-chat-template-kwargs", '{"enable_thinking": false}'],
            "a space": ["--x=a b"], "a stray single quote": ["--x=it's"], "a double quote": ['--x="a"'],
            "a brace expansion": ["--x={a,b}"], "a variable": ["--x=$HOME"], "a glob": ["--x=*"]}
@@ -758,6 +777,7 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
        f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
        f"none carries --disable-fastapi-docs and a values preset with it fails the render naming the flag (the route list model-manager reads the interfaces from); "
        f"a values preset's spec.router.scheduler is published unchanged and any other router key or a non-boolean fails the render; "
+       f"a values preset's spec.split.env is published unchanged and a malformed split block fails the render naming the preset; "
        f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
 
 
