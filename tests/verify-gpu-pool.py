@@ -278,6 +278,7 @@ else:
         metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
         gated = "gpuReadyLabel" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
+        hookpolicy = os.path.exists(f"{tree}/{CONN}/templates/substrate/hooks-netpol.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -585,6 +586,13 @@ else:
             for key in [k for k in side if k[0] in ("PodDisruptionBudget", "Cluster")]:
                 side.pop(key)
         print(f"note: the single-replica budgets are drainable on this side (#697) and not on {ref}: the budgets and the Postgres Cluster are left out of the comparison")
+    # The hook identity's network policy renders on this side
+    # (giantswarm/agent-platform#367) and not on a golden from before, so it is
+    # left out of the head. Drop this once GOLDEN_REF carries #367.
+    if not hookpolicy:
+        for kind in ("NetworkPolicy", "CiliumNetworkPolicy"):
+            head.pop((kind, "t-hooks"), None)
+        print(f"note: the hook Jobs' network policy renders on this side (#367) and not on {ref}: it is left out of the comparison")
     # A preset added to or retired from the shipped line-up renders its preset
     # ConfigMap on one side only: a line-up change, not the pool's scheduling,
     # so it is left out of the comparison (the presets both sides ship are
