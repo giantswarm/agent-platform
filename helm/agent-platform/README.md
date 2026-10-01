@@ -1207,8 +1207,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
 | agentManager.migration.image.tag | string | `"1.7.0"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
-| agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
-| agentManager.migration.githubToken.key | string | `"token"` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.observability.otel.endpoint | string | `"auto"` |  |

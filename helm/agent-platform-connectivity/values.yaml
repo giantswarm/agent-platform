@@ -2676,15 +2676,6 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
-    # The read token the skills phase resolves private repositories with
-    # (GITHUB_TOKEN), a Secret in the kagent namespace; optional — without it
-    # public repositories resolve and private refs are reported as pending.
-    # The default is the Secret the private-skill agents use today (the agent
-    # chart 0.x skills.gitAuthSecretRef, key `token`). Empty secretName: no
-    # token.
-    githubToken:
-      secretName: kagent-skills-token
-      key: token
     # Namespaces the GitOps-owned agents' HelmReleases and OCIRepositories live
     # in (a HelmRelease with targetNamespace: kagent applied from elsewhere —
     # the fleet's flux-giantswarm): the Job reads them there (get, list; a Role

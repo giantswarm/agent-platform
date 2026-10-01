@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The connectivity chart's `agent-manager-migrate` Job reads no GitHub token** (giantswarm/agent-platform#775). The Job's optional `GITHUB_TOKEN` reference to the Secret `kagent-skills-token` and `agentManager.migration.githubToken` in both charts are gone: the personal read token is retired, and agent-manager's minted `agent-manager-skills-token` holds a git Basic credential `migrate` does not take. Public skill repositories resolve, private refs are reported as pending. `make verify-migration` asserts the Job renders no token, also with a left-over `githubToken` value.
 - **The agentgateway line at 2.2.1 for the controller and the data planes, in both charts** (giantswarm/agent-platform#645). 2.2.0 re-pins the line onto upstream `main` @ `3528a428` with the carried patches replayed; 2.2.1 adds the Substrate resume refusal. The four tags (`agentgateway.controller.image.tag` and `agentgateway.proxy.image.tag` of the meta and the connectivity chart) move as one: `agentgateway.controller.image` names its `registry`, so Renovate's helm-values manager finds the controller as it finds the data plane, `renovate-custom.json5` groups both images into one `agentgateway line` PR, and `verify-model-catalog` holds all four tags equal. The built-in model catalog of 2.2.1 prices Claude Opus 5.5, so the `llmRouting.modelCatalog` overlay drops its entry; Claude Sonnet 5.5 stays.
 
 ### Added
