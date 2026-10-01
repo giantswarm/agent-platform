@@ -546,7 +546,7 @@ spec:
         image:
           name: giantswarm/kubectl
           registry: gsoci.azurecr.io
-          version: v1.37.0
+          version: v1.37.1
       disabledExtensions:
       - page:gs/clusters
       - nav-item:gs/clusters
@@ -4350,7 +4350,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
           args:
             - "apply"
             - "--server-side"
@@ -4448,7 +4448,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
           args:
             - "delete"
             - "jobs.batch"
@@ -4941,7 +4941,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
           args:
             - "delete"
             - "fluxinstances.fluxcd.controlplane.io"
@@ -5036,7 +5036,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
           args:
             - "delete"
             - "--namespace"

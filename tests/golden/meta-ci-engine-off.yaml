@@ -334,7 +334,7 @@ spec:
         image:
           name: giantswarm/kubectl
           registry: gsoci.azurecr.io
-          version: v1.37.0
+          version: v1.37.1
       disabledExtensions:
       - page:gs/clusters
       - nav-item:gs/clusters
