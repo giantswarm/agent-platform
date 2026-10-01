@@ -72,7 +72,7 @@ def connectivity(path):
     if "git-receive-pack" in gitlab["authorization"]["policy"]["matchExpressions"][0]:
         fail("push: false left git-receive-pack in")
     headers = {h["name"]: h["value"] for h in github["transformation"]["response"]["set"]}
-    if "'401'" not in headers[":status"] or "core_auth_login with server github" not in headers["www-authenticate"]:
+    if headers[":status"] != "response.code == 400 ? 401 : response.code" or "core_auth_login with server github" not in headers["www-authenticate"] or not headers["www-authenticate"].endswith(": null"):
         fail(f"401 answer: {headers}")
     print("ok: grant objects rendered as declared")
 
