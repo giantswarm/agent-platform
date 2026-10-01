@@ -253,9 +253,8 @@ def require_pinned_helm(what: str) -> None:
             f"were produced with; this is {version or 'not a helm binary'}. helm 3 and helm 4 disagree "
             "on whether a null-valued key survives into a forwarded values tree, so the bytes would "
             f"differ for that reason alone. Point HELM at a {HELM_PIN}.x binary:\n"
-            f"    plat=$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')\n"
-            f"    curl -fsSL https://get.helm.sh/helm-{HELM_PIN}.3-$plat.tar.gz | tar xz -C /tmp\n"
-            '    make verify-target HELM="/tmp/$plat/helm"'
+            "    make pinned-helm    # downloads it into .bin/ once and prints the HELM= to pass\n"
+            '    make verify-target HELM=<the path it printed>'
         )
 
 
