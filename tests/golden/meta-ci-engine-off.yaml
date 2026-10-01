@@ -1080,6 +1080,7 @@ spec:
       fullnameOverride: muster
       gatewayAPI:
         enabled: false
+      grants: {}
       image:
         registry: gsoci.azurecr.io
       muster:
