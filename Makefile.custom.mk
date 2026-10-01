@@ -3131,6 +3131,9 @@ MIGRATION_ON := $(MANAGERS_MIN) --set components.agent-manager.enabled=true
 MIGRATION_PIN = python3 -c "import yaml; print(yaml.safe_load(open('$(CHART_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
 MIGRATION_PIN_CONNECTIVITY = python3 -c "import yaml; print(yaml.safe_load(open('$(CONNECTIVITY_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
 MIGRATION_JOB := agent-platform-connectivity-agent-manager-migrate
+# The run the start hook creates from the CronJob: its name carries the 8-hex
+# hash of the pod template.
+MIGRATION_RUN := create job $(MIGRATION_JOB)-[0-9a-f]{8} --from=cronjob/$(MIGRATION_JOB)
 # The destinations an egress policy names, normalized for a diff between two
 # policies: cilium — FQDN selectors and CIDR blocks; kubernetes — ipBlock CIDRs;
 # quotes dropped, sorted (verify-migration, #433).
@@ -3414,27 +3417,27 @@ verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the c
 	@echo "ok: $@"
 
 .PHONY: verify-migration
-verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; a PLAIN Job named with the hash of its pod template — image, args, environment, identity, labels; a changed template renders a new Job, an unchanged one is re-applied as is (no hook: a migrate failure never fails the release, and the meta chart stops the connectivity HelmRelease from waiting on Jobs), the template byte-identical across chart versions while the Job's own labels follow them (Job.spec.template is immutable, #399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), its inputs as environment and no GitHub token; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
+verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; no Job of the release (#378: a Failed one stalls the upgrade) but a suspended CronJob, whose run a post-install/post-upgrade hook starts as the tenant identity once the run's network policy is applied — both flavors —, the run named with the hash of its pod template — image, args, environment, identity, labels; a changed template starts a new run, an unchanged one finds its run started, the template byte-identical across chart versions while the CronJob's own labels follow them (#399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), its inputs as environment and no GitHub token; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — its kagent is fresh, there is no 0.10 agent to migrate (agentlab#143 rehearses the migration)"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >$(VERIFY_TMP)/vmig-off.out 2>&1 || { cat $(VERIFY_TMP)/vmig-off.out; exit 1; }
 	@if grep -q 'agent-manager-migrate' $(VERIFY_TMP)/vmig-off.out; then echo "FAIL: the migration renders with agent-manager off"; exit 1; else echo "ok: inert without agent-manager"; fi
-	@echo "--> on: a PLAIN Job (no hook) in the kagent namespace, named with an 8-hex hash of its pod template (a changed image or identity renders a new name; identical renders the same), as the tenant identity, agent-manager's image, migrate, its inputs as environment, the optional token"
+	@echo "--> on: a suspended CronJob (no hook) in the kagent namespace, its run named with an 8-hex hash of its pod template (a changed image or identity renders a new name; identical renders the same), as the tenant identity, agent-manager's image, migrate, its inputs as environment, the optional token"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vmig-on.out 2>&1 || { cat $(VERIFY_TMP)/vmig-on.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vmig-on.out Job '$(MIGRATION_JOB)-*' kagent >$(VERIFY_TMP)/vmig-job.out || { echo "FAIL: no Job $(MIGRATION_JOB)-<hash> in the kagent namespace"; exit 1; }
-	@grep -qE '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the Job's name does not carry the 8-hex spec hash"; grep '^  name:' $(VERIFY_TMP)/vmig-job.out; exit 1; }
-	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-job.out; then echo "FAIL: the Job is a Helm hook; a migrate failure would fail the connectivity upgrade that renders the Harness"; exit 1; fi
+	@$(PICK) $(VERIFY_TMP)/vmig-on.out CronJob $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-job.out || { echo "FAIL: no CronJob $(MIGRATION_JOB) in the kagent namespace"; exit 1; }
+	@grep -qE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-on.out || { echo "FAIL: the start hook does not create the run $(MIGRATION_JOB)-<8-hex spec hash> from the CronJob"; exit 1; }
+	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-job.out; then echo "FAIL: the CronJob is a Helm hook; a migrate failure would fail the connectivity upgrade that renders the Harness"; exit 1; fi
 	@grep -q 'ttlSecondsAfterFinished: 86400' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the finished Job is not kept a day"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=9.9.9 >$(VERIFY_TMP)/vmig-hash.out 2>&1 || { cat $(VERIFY_TMP)/vmig-hash.out; exit 1; }
-	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-hash.out)" != "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: a changed image did not change the Job's name (Job.spec.template is immutable)"; exit 1; }
+	@[ "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-hash.out)" != "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: a changed image did not change the Job's name (Job.spec.template is immutable)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x >$(VERIFY_TMP)/vmig-hash-sa.out 2>&1 || { cat $(VERIFY_TMP)/vmig-hash-sa.out; exit 1; }
-	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-hash-sa.out)" != "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: a changed identity did not change the Job's name (the name hashes the whole pod template)"; exit 1; }
+	@[ "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-hash-sa.out)" != "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: a changed identity did not change the Job's name (the name hashes the whole pod template)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vmig-again.out 2>&1 || { cat $(VERIFY_TMP)/vmig-again.out; exit 1; }
-	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-again.out)" = "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: the Job's name is not stable across identical renders"; exit 1; }
+	@[ "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-again.out)" = "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: the Job's name is not stable across identical renders"; exit 1; }
 	@grep -q 'serviceAccountName: kagent-flux' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the Job does not run as the tenant identity"; exit 1; }
-	@if grep -q 'kagent-flux' $(CONNECTIVITY_DIR)/templates/kagent/migrate-job.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-rbac.yaml $(CONNECTIVITY_DIR)/templates/kagent/_migrate.tpl; then echo "FAIL: a migration template carries the literal kagent-flux; the identity comes from the helper"; exit 1; fi
+	@if grep -q 'kagent-flux' $(CONNECTIVITY_DIR)/templates/kagent/migrate-cronjob.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-rbac.yaml $(CONNECTIVITY_DIR)/templates/kagent/_migrate.tpl; then echo "FAIL: a migration template carries the literal kagent-flux; the identity comes from the helper"; exit 1; fi
 	@pin=$$($(MIGRATION_PIN)); grep -q "image: \"gsoci.azurecr.io/giantswarm/agent-manager:$$pin\"" $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the image is not agent-manager at the BOM pin $$pin (agentManager.migration.image.tag)"; grep image: $(VERIFY_TMP)/vmig-job.out; exit 1; }
-	@grep -q '^            - migrate$$' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the Job does not run \`migrate\`"; exit 1; }
+	@grep -q '^                - migrate$$' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the Job does not run \`migrate\`"; exit 1; }
 	@if grep -q -- '--dry-run' $(VERIFY_TMP)/vmig-job.out; then echo "FAIL: --dry-run renders by default"; exit 1; fi
 	@grep -q 'restartPolicy: Never' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: restartPolicy"; exit 1; }
 	@grep -q 'runAsNonRoot: true' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the Job is not restricted (runAsNonRoot)"; exit 1; }
@@ -3450,27 +3453,45 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if grep -q 'GITHUB_TOKEN\|kagent-skills-token' $(VERIFY_TMP)/vmig-job.out; then echo "FAIL: the Job reads a GitHub token"; exit 1; fi
 	@if grep -q 'AGENT_MANAGER_MANAGED_NAMESPACES' $(VERIFY_TMP)/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MANAGED_NAMESPACES renders without additional namespaces"; exit 1; fi
 	@echo "ok: the Job"
-	@echo "--> stable across chart releases (#399): the chart packaged at two versions renders the same-named Job with a byte-identical spec.template — the chart version (helm.sh/chart, app.kubernetes.io/version) stays on the Job's own labels, never on the pod's; the pod keeps the selector labels, the component label the network policy selects on, the team label"
+	@echo "--> #378, both flavors: no Job of the release (Helm's readiness check reads a Failed Job Failed with or without disableWaitForJobs and stalls the upgrade), a suspended CronJob, its run started by a post-install/post-upgrade hook — after the release's manifests, the run's regular network policy among them, are applied — as the tenant identity in the kagent namespace under the migration's component label, so under the run's own policy"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmig-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vmig-k8s.out; exit 1; }
+	@for f in cilium:CiliumNetworkPolicy:on kubernetes:NetworkPolicy:k8s; do \
+		flavor=$${f%%:*}; rest=$${f#*:}; kind=$${rest%%:*}; out=$(VERIFY_TMP)/vmig-$${rest#*:}.out; \
+		if $(PICK) $$out Job '$(MIGRATION_JOB)-*' >/dev/null; then echo "FAIL ($$flavor): the migrate run is a Job of the release; a Failed run stalls the connectivity upgrade, and it starts before a CRD-backed policy is applied (#378)"; exit 1; fi; \
+		$(PICK) $$out CronJob $(MIGRATION_JOB) kagent | grep -q '^  suspend: true$$' || { echo "FAIL ($$flavor): no suspended CronJob $(MIGRATION_JOB) — the run's template, never scheduled"; exit 1; }; \
+		$(PICK) $$out Job t-agent-manager-migrate-start kagent >$(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): no start hook t-agent-manager-migrate-start in the kagent namespace"; exit 1; }; \
+		grep -q 'helm.sh/hook: post-install,post-upgrade$$' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not run after the release's manifests are applied (post-install,post-upgrade)"; exit 1; }; \
+		grep -q 'serviceAccountName: kagent-flux$$' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not run as the tenant identity"; exit 1; }; \
+		[ "$$(grep -c 'app.kubernetes.io/component: agent-manager-migrate$$' $(VERIFY_TMP)/vmig-start.out)" = "2" ] || { echo "FAIL ($$flavor): the start hook's pod is not under the run's policy (component agent-manager-migrate)"; exit 1; }; \
+		grep -qE 'kubectl -n kagent $(MIGRATION_RUN)$$' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not create the run from the CronJob"; exit 1; }; \
+		grep -qE 'existing=.*kubectl -n kagent get job $(MIGRATION_JOB)-[0-9a-f]{8} --ignore-not-found' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not skip a started run"; exit 1; }; \
+		$(PICK) $$out $$kind $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-runpol.out || { echo "FAIL ($$flavor): no $$kind for the run"; exit 1; }; \
+		if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-runpol.out; then echo "FAIL ($$flavor): the run's policy is a hook object; it must be a manifest applied before the post hooks"; exit 1; fi; \
+		if grep -q 'kind: ServiceAccount' $$out && $(PICK) $$out ServiceAccount t-hooks >/dev/null; then echo "FAIL ($$flavor): the migration alone renders the hook identity; the start runs as the tenant identity"; exit 1; fi; \
+	done
+	@echo "ok: #378 no Job of the release; the run starts after its policy"
+	@echo "--> stable across chart releases (#399): the chart packaged at two versions renders the same-named run with a byte-identical pod template — the chart version (helm.sh/chart, app.kubernetes.io/version) stays on the CronJob's own labels, never on the pod's; the pod keeps the selector labels, the component label the network policy selects on, the team label"
 	@rm -rf $(VERIFY_TMP)/vmig-pkg && mkdir -p $(VERIFY_TMP)/vmig-pkg
 	@for v in 4.0.0 4.0.1; do \
 		$(HELM) package $(CONNECTIVITY_DIR) --version $$v --app-version $$v -d $(VERIFY_TMP)/vmig-pkg >$(VERIFY_TMP)/vmig-pkg/package-$$v.log 2>&1 || { cat $(VERIFY_TMP)/vmig-pkg/package-$$v.log; exit 1; }; \
 		$(HELM) template t $(VERIFY_TMP)/vmig-pkg/agent-platform-connectivity-$$v.tgz $(MIGRATION_ON) >$(VERIFY_TMP)/vmig-pkg/render-$$v.out 2>&1 || { cat $(VERIFY_TMP)/vmig-pkg/render-$$v.out; exit 1; }; \
-		$(PICK) $(VERIFY_TMP)/vmig-pkg/render-$$v.out Job '$(MIGRATION_JOB)-*' kagent >$(VERIFY_TMP)/vmig-pkg/job-$$v.out || { echo "FAIL: no Job at chart version $$v"; exit 1; }; \
-		sed -n '/^  template:$$/,$$p' $(VERIFY_TMP)/vmig-pkg/job-$$v.out >$(VERIFY_TMP)/vmig-pkg/template-$$v.out; \
+		$(PICK) $(VERIFY_TMP)/vmig-pkg/render-$$v.out CronJob $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-pkg/job-$$v.out || { echo "FAIL: no CronJob at chart version $$v"; exit 1; }; \
+		grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-pkg/render-$$v.out >$(VERIFY_TMP)/vmig-pkg/run-$$v.out; \
+		sed -n '/^      template:$$/,$$p' $(VERIFY_TMP)/vmig-pkg/job-$$v.out >$(VERIFY_TMP)/vmig-pkg/template-$$v.out; \
 		sed -n '/^metadata:$$/,/^spec:$$/p' $(VERIFY_TMP)/vmig-pkg/job-$$v.out >$(VERIFY_TMP)/vmig-pkg/meta-$$v.out; \
 	done
-	@[ -s $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out ] || { echo "FAIL: no spec.template picked from the Job"; exit 1; }
-	@[ "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-pkg/job-4.0.0.out)" = "$$(grep -E '^  name: $(MIGRATION_JOB)-[0-9a-f]{8}$$' $(VERIFY_TMP)/vmig-pkg/job-4.0.1.out)" ] || { echo "FAIL: the Job's name changed with the chart version alone (it hashes the pod template, which must not carry the chart version)"; exit 1; }
-	@cmp -s $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out $(VERIFY_TMP)/vmig-pkg/template-4.0.1.out || { echo "FAIL: the Job's spec.template differs between chart versions 4.0.0 and 4.0.1 — a chart release re-applies the same-named Job with a changed immutable template and the connectivity upgrade stalls (#399)"; diff $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out $(VERIFY_TMP)/vmig-pkg/template-4.0.1.out; exit 1; }
+	@[ -s $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out ] || { echo "FAIL: no jobTemplate.spec.template picked from the CronJob"; exit 1; }
+	@[ -s $(VERIFY_TMP)/vmig-pkg/run-4.0.0.out ] && cmp -s $(VERIFY_TMP)/vmig-pkg/run-4.0.0.out $(VERIFY_TMP)/vmig-pkg/run-4.0.1.out || { echo "FAIL: the run's name changed with the chart version alone (it hashes the pod template, which must not carry the chart version)"; exit 1; }
+	@cmp -s $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out $(VERIFY_TMP)/vmig-pkg/template-4.0.1.out || { echo "FAIL: the run's pod template differs between chart versions 4.0.0 and 4.0.1 — a chart release alone would start a new run (#399)"; diff $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out $(VERIFY_TMP)/vmig-pkg/template-4.0.1.out; exit 1; }
 	@if grep -qE 'helm.sh/chart|app.kubernetes.io/version' $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out; then echo "FAIL: the pod template carries a chart-version label"; grep -E 'helm.sh/chart|app.kubernetes.io/version' $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out; exit 1; fi
 	@for l in 'app.kubernetes.io/name: "agent-platform-connectivity"' 'app.kubernetes.io/instance: "t"' 'app.kubernetes.io/component: agent-manager-migrate' 'application.giantswarm.io/team: "'; do grep -qF "$$l" $(VERIFY_TMP)/vmig-pkg/template-4.0.0.out || { echo "FAIL: the pod template lacks the stable label $$l"; exit 1; }; done
-	@grep -q 'helm.sh/chart: "agent-platform-connectivity-4.0.0"' $(VERIFY_TMP)/vmig-pkg/meta-4.0.0.out || { echo "FAIL: the Job's own labels lost helm.sh/chart"; grep 'helm.sh/chart' $(VERIFY_TMP)/vmig-pkg/meta-4.0.0.out; exit 1; }
-	@grep -q 'app.kubernetes.io/version: "4.0.0"' $(VERIFY_TMP)/vmig-pkg/meta-4.0.0.out || { echo "FAIL: the Job's own labels lost app.kubernetes.io/version"; exit 1; }
-	@if cmp -s $(VERIFY_TMP)/vmig-pkg/meta-4.0.0.out $(VERIFY_TMP)/vmig-pkg/meta-4.0.1.out; then echo "FAIL: the Job's own labels do not follow the chart version"; exit 1; fi
+	@grep -q 'helm.sh/chart: "agent-platform-connectivity-4.0.0"' $(VERIFY_TMP)/vmig-pkg/meta-4.0.0.out || { echo "FAIL: the CronJob's own labels lost helm.sh/chart"; grep 'helm.sh/chart' $(VERIFY_TMP)/vmig-pkg/meta-4.0.0.out; exit 1; }
+	@grep -q 'app.kubernetes.io/version: "4.0.0"' $(VERIFY_TMP)/vmig-pkg/meta-4.0.0.out || { echo "FAIL: the CronJob's own labels lost app.kubernetes.io/version"; exit 1; }
+	@if cmp -s $(VERIFY_TMP)/vmig-pkg/meta-4.0.0.out $(VERIFY_TMP)/vmig-pkg/meta-4.0.1.out; then echo "FAIL: the CronJob's own labels do not follow the chart version"; exit 1; fi
 	@echo "ok: stable pod template"
 	@echo "--> the values: the tag follows agentManager.migration.image.tag, dryRun renders --dry-run, an empty secretName drops the token, additional namespaces reach the Job, a renamed identity follows"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=1.2.3 --set agentManager.migration.dryRun=true --set agentManager.migration.githubToken.secretName=kagent-skills-token --set 'agent-manager.kagent.additionalNamespaces[0]=team-a' --set 'agent-manager.kagent.additionalNamespaces[1]=team-b' --set kagent.fluxServiceAccountName=tenant-x >$(VERIFY_TMP)/vmig-vals.out 2>&1 || { cat $(VERIFY_TMP)/vmig-vals.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vmig-vals.out Job '$(MIGRATION_JOB)-*' kagent >$(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: no Job with the values set"; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vmig-vals.out CronJob $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: no Job with the values set"; exit 1; }
 	@grep -q 'agent-manager:1.2.3"' $(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: the image tag does not follow the value"; exit 1; }
 	@grep -q -- '- --dry-run' $(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: dryRun does not render --dry-run"; exit 1; }
 	@if grep -q 'GITHUB_TOKEN' $(VERIFY_TMP)/vmig-vals-job.out; then echo "FAIL: a left-over githubToken value still renders GITHUB_TOKEN"; exit 1; fi
@@ -3488,7 +3509,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding in $$ns does not bind the tenant identity"; exit 1; }; \
 	done
 	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out)" = "1" ] || { echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out Job '$(MIGRATION_JOB)-*' kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out CronJob $(MIGRATION_JOB) kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
 	@echo "ok: RBAC"
 	@echo "--> network policy: cilium (DNS with the proxy clause, kube-apiserver, api.github.com, the agent chart registry and its blob-storage front by name on 443) and kubernetes (DNS, the API server CIDR, world on 443), selecting the Job's pods; none with networkPolicy off"
@@ -3500,7 +3521,6 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -q -- '- kube-apiserver' $(VERIFY_TMP)/vmig-cnp.out || { echo "FAIL: the cilium policy has no API server egress"; exit 1; }
 	@grep -B2 -A2 'matchPattern: "\*"' $(VERIFY_TMP)/vmig-cnp.out | grep -q 'dns:' || { echo "FAIL: the cilium policy has no DNS proxy clause for the FQDN selectors"; exit 1; }
 	@if grep -q 'ingress:' $(VERIFY_TMP)/vmig-cnp.out; then echo "FAIL: the Job serves nothing; no ingress rule expected"; exit 1; fi
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmig-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vmig-k8s.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vmig-k8s.out NetworkPolicy $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-np.out || { echo "FAIL: no NetworkPolicy for the Job in the kubernetes flavor"; exit 1; }
 	@grep -q 'app.kubernetes.io/component: agent-manager-migrate' $(VERIFY_TMP)/vmig-np.out || { echo "FAIL: the kubernetes policy does not select the Job's pods"; exit 1; }
 	@grep -q 'policyTypes: \[Egress\]' $(VERIFY_TMP)/vmig-np.out || { echo "FAIL: the kubernetes policy is not egress-only"; exit 1; }
@@ -3509,7 +3529,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if $(PICK) $(VERIFY_TMP)/vmig-k8s.out CiliumNetworkPolicy $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a cilium policy renders in the kubernetes flavor"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.enabled=false >$(VERIFY_TMP)/vmig-nonp.out 2>&1 || { cat $(VERIFY_TMP)/vmig-nonp.out; exit 1; }
 	@if grep -qE 'kind: (CiliumNetworkPolicy|NetworkPolicy)' $(VERIFY_TMP)/vmig-nonp.out; then echo "FAIL: a network policy renders with networkPolicy off"; exit 1; fi
-	@$(PICK) $(VERIFY_TMP)/vmig-nonp.out Job '$(MIGRATION_JOB)-*' kagent >/dev/null || { echo "FAIL: the Job is gone with networkPolicy off"; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vmig-nonp.out CronJob $(MIGRATION_JOB) kagent >/dev/null || { echo "FAIL: the CronJob is gone with networkPolicy off"; exit 1; }
 	@echo "ok: network policy"
 	@echo "--> the Job's egress is agent-manager's chart egress (#433): with agent-manager's oauth off (its IdP rule aside) and every knob set — agentManager.networkPolicy.egress.fqdns/.cidrs, networkPolicy.additionalEgressFQDNs/.additionalEgressCIDRs — the Job's policy and agent-manager's egress name exactly the same FQDN selectors and CIDR blocks (cilium) and ipBlocks (kubernetes, where .cidrs narrows the Job's world egress the way it narrows agent-manager's); neither template names a destination of its own"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agent-manager.oauth.enabled=false --set 'agentManager.networkPolicy.egress.fqdns[0].matchPattern=*.mirror.example.internal' --set 'agentManager.networkPolicy.egress.fqdns[1].matchName=api.github.com' --set 'agentManager.networkPolicy.egress.cidrs[0]=198.51.100.0/24' --set 'networkPolicy.additionalEgressFQDNs[0].matchName=extra.example.internal' --set 'networkPolicy.additionalEgressCIDRs[0]=203.0.113.0/24' >$(VERIFY_TMP)/vmig-par.out 2>&1 || { cat $(VERIFY_TMP)/vmig-par.out; exit 1; }

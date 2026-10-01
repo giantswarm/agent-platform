@@ -1223,12 +1223,12 @@ components:  # @schema additionalProperties: true
     releasedWithChart: true
     versionRange: ""
     forwardAllValues: true
-    # The release carries the agent-manager migrate Job (agentManager.migration,
-    # the kagent API v2 cut-over of an installation's agents) as a plain Job
-    # next to the platform's wiring: helm-controller must not wait for it, so a
-    # migrate failure (the command's non-zero exits) never fails the upgrade
-    # that renders the Harness. Hooks (the database Secret derivation) still
-    # complete before the release is reported.
+    # helm-controller does not wait for a Job of this release to complete.
+    # The agent-manager migrate run (agentManager.migration) is no Job of the
+    # release: a post-upgrade hook creates it from a suspended CronJob, so its
+    # failure never fails the upgrade that renders the Harness (#378). Hooks
+    # (the database Secret derivation, the migrate start) still complete before
+    # the release is reported.
     disableWaitForJobs: true
     # The seven values blocks of the standalone chart's extras are no longer
     # held back from this release: every top-level block the connectivity chart
@@ -4446,10 +4446,10 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       cidrs: []
   # The per-installation cut-over Job the connectivity chart renders when
   # kagent and agent-manager are on: `agent-manager migrate` as the tenant
-  # identity kagent.fluxServiceAccountName, a plain Job in the kagent
-  # namespace (not a hook — its failure never fails the release, and
-  # components.agent-platform-connectivity.disableWaitForJobs stops the
-  # release from waiting on it), idempotent (giantswarm/agent-platform#346). The
+  # identity kagent.fluxServiceAccountName, a run in the kagent namespace that
+  # a post-install/post-upgrade hook creates from a suspended CronJob (no Job
+  # of the release — its failure never fails the release, #378), idempotent
+  # (giantswarm/agent-platform#346). The
   # image tag is this chart's BOM pin for the agent-manager component and
   # moves with it; the connectivity chart's values.yaml documents the rest.
   migration:

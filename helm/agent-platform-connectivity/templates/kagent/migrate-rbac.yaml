@@ -1,5 +1,5 @@
 {{- /*
-The migration-only rights of the cut-over Job (migrate-job.yaml), on top of the
+The migration-only rights of the cut-over Job (migrate-cronjob.yaml), on top of the
 namespace admin the tenant identity already holds in the kagent namespace
 (flux-service-account.yaml: HelmReleases, OCIRepositories, kagent CRs, the
 report ConfigMap). Plain objects of the release, like the Job (a hook's

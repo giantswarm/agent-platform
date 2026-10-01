@@ -164,11 +164,12 @@ knowledge:
       kagent for its CRDs — so that the pair can bootstrap instead of deadlocking.
   disableWaitForJobs — render `disableWaitForJobs: true` on the child
       HelmRelease's install and upgrade: helm-controller then does not wait for
-      the release's plain Jobs to complete (hooks are unaffected). For a release
-      that carries a Job whose failure must not fail the release — the
-      connectivity chart's agent-manager migrate Job, the per-installation
-      cut-over of the agents next to the platform Harness the same release
-      renders.
+      the release's plain Jobs to complete (hooks are unaffected). It does not
+      keep a Failed Job from failing the release: Helm's readiness check reads
+      a Failed Job as Failed either way, so a run whose failure must not fail
+      the release is no Job of the release (the connectivity chart's
+      agent-manager migrate run is created by a hook from a suspended CronJob,
+      giantswarm/agent-platform#378).
   driftDetection — optional Flux drift detection for the child HelmRelease
       (HelmRelease v2 spec.driftDetection, passed through verbatim: mode
       enabled|warn|disabled, ignore rules). Enabled, helm-controller compares

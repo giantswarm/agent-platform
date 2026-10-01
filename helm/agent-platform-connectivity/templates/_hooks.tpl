@@ -27,7 +27,9 @@ into the namespaces of postgres.databases.*.secretNamespaces, none of which
 exist when a pre-install hook's Roles would have to — created for each hook
 event the rendered Jobs use (agent-platform.hooks.events: the install and
 upgrade events for the first three, pre-delete for the cleanup) and removed with
-it (hook-succeeded).
+it (hook-succeeded). One more hook Job comes from this include with an
+identity of its own (identity below): the start of the agent-manager migrate
+run (templates/kagent/migrate-cronjob.yaml, post-install + post-upgrade).
 
 Weights: -5 the identity, 0 the Jobs. before-hook-creation clears a previous
 run's Job (a failed one is left for inspection until the next attempt),
@@ -49,6 +51,12 @@ Usage of the Job include (a dict):
             template (the bootstrap: 256Mi). Every request stays 10m/32Mi, and
             the init container keeps 128Mi.
   timeout   optional activeDeadlineSeconds (default 600)
+  identity  optional: a dict {namespace, serviceAccountName, component} — a
+            hook that acts with an identity of the release instead of the
+            hook identity, in that identity's namespace, under the network
+            policy that selects that component label (the agent-manager
+            migrate start: the tenant identity in the kagent namespace,
+            templates/kagent/migrate-cronjob.yaml)
 */}}
 
 {{- define "agent-platform.hooks.serviceAccountName" -}}
@@ -89,14 +97,15 @@ Whether this release renders any hook Job — and with it the hook identity.
 {{- $root := .root -}}
 {{- $timeout := .timeout | default 600 -}}
 {{- $memory := .memory | default "128Mi" -}}
+{{- $identity := .identity | default (dict "namespace" $root.Release.Namespace "serviceAccountName" (include "agent-platform.hooks.serviceAccountName" $root) "component" "hooks") -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ printf "%s-%s" $root.Release.Name .name }}
-  namespace: {{ $root.Release.Namespace }}
+  namespace: {{ $identity.namespace }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
-    app.kubernetes.io/component: hooks
+    app.kubernetes.io/component: {{ $identity.component }}
   annotations:
     helm.sh/hook: {{ .hook }}
     helm.sh/hook-weight: "0"
@@ -112,9 +121,9 @@ spec:
     metadata:
       labels:
         {{- include "labels.common" $root | nindent 8 }}
-        app.kubernetes.io/component: hooks
+        app.kubernetes.io/component: {{ $identity.component }}
     spec:
-      serviceAccountName: {{ include "agent-platform.hooks.serviceAccountName" $root }}
+      serviceAccountName: {{ $identity.serviceAccountName }}
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
