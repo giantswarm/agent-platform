@@ -24,7 +24,8 @@ rendered with the values the meta chart hands its release (the Flux path):
 - an empty endpoint exports nothing: kagent's exporters resolve off, Substrate's
   signals are off (its chart would fall back to localhost:4317), the other
   endpoints are empty, the data plane loses its endpoint entry and its tracing
-  policy, no OTLP egress rule renders;
+  policy, no OTLP egress rule renders; examples/kind-lab-dex.yaml, the kind
+  lab shape with no OTLP gateway, renders the same;
 - an empty tenant sends no X-Scope-OrgID and sets no tenant label;
 - an X-Scope-OrgID header that differs from the tenant fails the render;
 - http/protobuf fails while a gRPC-only exporter (klaus-gateway, Substrate)
@@ -378,26 +379,40 @@ def case_explicit(meta: str, conn_chart: str, tmp: str) -> None:
 
 
 def case_empty_endpoint(meta: str, conn_chart: str, tmp: str) -> None:
-    values, conn, k8s = meta_and_conn(meta, conn_chart, ["--set", f"{OTLP}.endpoint="], tmp, "empty")
+    check_exports_nothing(meta, conn_chart, ["--set", f"{OTLP}.endpoint="], tmp, "empty")
+    print("ok: empty endpoint: nothing exports, no tracing policy, no OTLP egress rule")
+
+
+def case_kind_lab(meta: str, conn_chart: str, tmp: str) -> None:
+    """The kind lab example has no OTLP gateway: it empties the endpoint, so a
+    lab's exporters (Substrate's included) log no export error. The network
+    policies the example leaves off are turned on, so no OTLP rule is proven."""
+    lab = ["-f", os.path.join(meta, "examples", "kind-lab-dex.yaml"), "--set", "networkPolicy.enabled=true",
+           "--set", "muster.networkPolicy.enabled=true"]
+    check_exports_nothing(meta, conn_chart, lab, tmp, "kind lab")
+    print("ok: examples/kind-lab-dex.yaml: nothing exports, no tracing policy, no OTLP egress rule")
+
+
+def check_exports_nothing(meta: str, conn_chart: str, flags: list, tmp: str, what: str) -> None:
+    values, conn, k8s = meta_and_conn(meta, conn_chart, flags, tmp, what.replace(" ", "-"))
     got = exporters(values)
-    expect("empty: exporters", {k: v for k, v in got.items() if k != "data plane"},
+    expect(f"{what}: exporters", {k: v for k, v in got.items() if k != "data plane"},
            {"kagent": '""', "muster": '""', "klaus-gateway": '""', "substrate": '""',
             **{c: '""' for c in COMPONENTS}})
-    expect("empty: mcp-kubernetes exporter", mcp_kubernetes(values)["tracingExporter"], "none")
-    check_components(conn, k8s, None, "empty")
-    expect("empty: data-plane endpoint entry", got["data plane"], None)
+    expect(f"{what}: mcp-kubernetes exporter", mcp_kubernetes(values)["tracingExporter"], "none")
+    check_components(conn, k8s, None, what)
+    expect(f"{what}: data-plane endpoint entry", got["data plane"], None)
     kagent = values["kagent"]
-    expect("empty: kagent traces enabled", get(kagent, ["otel", "traces", "enabled"]), "false")
-    expect("empty: kagent logs enabled", get(kagent, ["otel", "logs", "enabled"]), "false")
-    expect("empty: kagent controller header", env(kagent, ["controller", "env"], "OTEL_EXPORTER_OTLP_HEADERS"), None)
+    expect(f"{what}: kagent traces enabled", get(kagent, ["otel", "traces", "enabled"]), "false")
+    expect(f"{what}: kagent logs enabled", get(kagent, ["otel", "logs", "enabled"]), "false")
+    expect(f"{what}: kagent controller header", env(kagent, ["controller", "env"], "OTEL_EXPORTER_OTLP_HEADERS"), None)
     for signal in ("traces", "metrics", "logs"):
-        expect(f"empty: substrate {signal} enabled (else localhost:4317)", get(values["substrate"], ["otel", signal, "enabled"]), "false")
+        expect(f"{what}: substrate {signal} enabled (else localhost:4317)", get(values["substrate"], ["otel", signal, "enabled"]), "false")
     for kind, name in (("AgentgatewayPolicy", TRACING_POLICY), ("CiliumNetworkPolicy", DATAPLANE_POLICY),
                        ("CiliumNetworkPolicy", MUSTER_POLICY), ("CiliumNetworkPolicy", KLAUS_POLICY)):
         if (kind, name) in conn:
-            fail(f"empty: {kind} {name} renders with no endpoint")
-    check_egress(conn, k8s, {p: None for p in [*KAGENT_POLICIES, *SUBSTRATE_POLICIES]}, "empty")
-    print("ok: empty endpoint: nothing exports, no tracing policy, no OTLP egress rule")
+            fail(f"{what}: {kind} {name} renders with no endpoint")
+    check_egress(conn, k8s, {p: None for p in [*KAGENT_POLICIES, *SUBSTRATE_POLICIES]}, what)
 
 
 def case_empty_tenant(meta: str, conn_chart: str, tmp: str) -> None:
@@ -460,6 +475,7 @@ def main(meta: str, conn_chart: str) -> int:
         case_tls(meta, conn_chart, tmp)
         case_explicit(meta, conn_chart, tmp)
         case_empty_endpoint(meta, conn_chart, tmp)
+        case_kind_lab(meta, conn_chart, tmp)
         case_empty_tenant(meta, conn_chart, tmp)
         case_header_conflict(meta)
         case_http(meta, conn_chart, tmp)
