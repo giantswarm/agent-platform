@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -28,7 +28,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 automountServiceAccountToken: false
@@ -59,7 +59,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -83,7 +83,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 roleRef:
@@ -159,7 +159,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 spec:
@@ -183,7 +183,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -204,7 +204,7 @@ spec:
         app.kubernetes.io/instance: "t"
         app.kubernetes.io/managed-by: "Helm"
         app.kubernetes.io/part-of: agent-platform
-        app.kubernetes.io/version: "v0.60.0"
+        app.kubernetes.io/version: "v0.61.0"
         application.giantswarm.io/team: "bumblebee"
         helm.sh/chart: "flux-engine-0.1.0"
     spec:
@@ -215,7 +215,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "gsoci.azurecr.io/giantswarm/flux-operator:v0.60.0"
+          image: "gsoci.azurecr.io/giantswarm/flux-operator:v0.61.0"
           imagePullPolicy: IfNotPresent
           args:
             - --log-level=info
@@ -291,7 +291,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -2329,7 +2329,7 @@ metadata:
 data:
   flux-operator.yaml: |
     # The four CustomResourceDefinitions of the Flux Operator, rendered from the
-    # upstream chart controlplaneio-fluxcd/flux-operator 0.60.0 (templates/crds.yaml
+    # upstream chart controlplaneio-fluxcd/flux-operator 0.61.0 (templates/crds.yaml
     # with installCRDs=true, the labels app.kubernetes.io/instance,
     # app.kubernetes.io/managed-by and helm.sh/chart removed). They live in
     # crds/ so Helm installs them before the FluxInstance template is validated.
@@ -2351,7 +2351,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.60.0'
+        app.kubernetes.io/version: 'v0.61.0'
       name: fluxinstances.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -2984,7 +2984,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.60.0'
+        app.kubernetes.io/version: 'v0.61.0'
       name: fluxreports.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -3286,7 +3286,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.60.0'
+        app.kubernetes.io/version: 'v0.61.0'
       name: resourcesetinputproviders.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -3783,7 +3783,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.60.0'
+        app.kubernetes.io/version: 'v0.61.0'
       name: resourcesets.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io

@@ -1,5 +1,5 @@
 # The four CustomResourceDefinitions of the Flux Operator, rendered from the
-# upstream chart controlplaneio-fluxcd/flux-operator 0.60.0 (templates/crds.yaml
+# upstream chart controlplaneio-fluxcd/flux-operator 0.61.0 (templates/crds.yaml
 # with installCRDs=true, the labels app.kubernetes.io/instance,
 # app.kubernetes.io/managed-by and helm.sh/chart removed). They live in
 # crds/ so Helm installs them before the FluxInstance template is validated.
@@ -21,7 +21,7 @@ metadata:
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/name: 'flux-operator'
-    app.kubernetes.io/version: 'v0.60.0'
+    app.kubernetes.io/version: 'v0.61.0'
   name: fluxinstances.fluxcd.controlplane.io
 spec:
   group: fluxcd.controlplane.io
@@ -654,7 +654,7 @@ metadata:
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/name: 'flux-operator'
-    app.kubernetes.io/version: 'v0.60.0'
+    app.kubernetes.io/version: 'v0.61.0'
   name: fluxreports.fluxcd.controlplane.io
 spec:
   group: fluxcd.controlplane.io
@@ -956,7 +956,7 @@ metadata:
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/name: 'flux-operator'
-    app.kubernetes.io/version: 'v0.60.0'
+    app.kubernetes.io/version: 'v0.61.0'
   name: resourcesetinputproviders.fluxcd.controlplane.io
 spec:
   group: fluxcd.controlplane.io
@@ -1453,7 +1453,7 @@ metadata:
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/name: 'flux-operator'
-    app.kubernetes.io/version: 'v0.60.0'
+    app.kubernetes.io/version: 'v0.61.0'
   name: resourcesets.fluxcd.controlplane.io
 spec:
   group: fluxcd.controlplane.io
