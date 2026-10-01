@@ -166,11 +166,13 @@ spec:
           - {{ ternary "request.path.matches('/(info/refs|git-upload-pack|git-receive-pack)$')" "request.path.matches('/(info/refs|git-upload-pack)$')" $push | quote }}
     transformation:
       response:
+        # The status is a number to agentgateway (a quoted one is dropped);
+        # the realm is set on the 400 only, null leaves other answers alone.
         set:
           - name: ":status"
-            value: "response.code == 400 ? '401' : string(response.code)"
+            value: "response.code == 400 ? 401 : response.code"
           - name: www-authenticate
-            value: {{ printf "response.code == 400 ? 'Basic realm=\"sign in first: call core_auth_login with server %s at muster\"' : ''" $server | quote }}
+            value: {{ printf "response.code == 400 ? 'Basic realm=\"sign in first: call core_auth_login with server %s at muster\"' : null" $server | quote }}
 {{- end }}
 {{- end }}
 {{- end }}
