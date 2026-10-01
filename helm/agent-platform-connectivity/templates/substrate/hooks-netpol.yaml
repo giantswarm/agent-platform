@@ -1,0 +1,71 @@
+{{- /*
+The network policy of the hook identity (templates/_hooks.tpl, hooks-rbac.yaml).
+Every hook Job of this release — the Substrate bootstrap, the derived Postgres
+Secrets, the model-serving cache claim, the pre-pull cleanup — runs `kubectl`
+from the release namespace under the pod labels app.kubernetes.io/instance:
+<release> + app.kubernetes.io/component: hooks, and nothing else: in-cluster
+kubectl dials KUBERNETES_SERVICE_HOST by IP, no DNS. On a cluster whose network
+policy is default-deny for every endpoint (Cilium policyEnforcementMode: always,
+a hardened installation) a pod no policy selects reaches nothing, the bootstrap
+times out against the apiserver and every install and upgrade of this release
+fails on its first hook.
+
+Rendered as a HOOK object, not a chart object: a pre-install / pre-upgrade hook
+runs before the release's manifests are applied, so a regular object could never
+cover the first run. Weight -5 and the delete policy of the identity, at the
+events the identity is created for (agent-platform.hooks.events): it exists
+whenever a hook Job runs and goes away with the identity. Gated like every
+policy of this chart on networkPolicy.enabled, in the flavour
+networkPolicy.flavor resolves to (agent-platform.networkPolicyFlavor). Egress to
+the apiserver only: the kube-apiserver entity in the cilium flavour,
+networkPolicy.kubernetes.apiServerCIDR in the kubernetes one (vanilla
+NetworkPolicy has no entity selectors); no ingress — the hooks serve nothing.
+*/ -}}
+{{- if and (include "agent-platform.hooks.enabled" .) .Values.networkPolicy.enabled }}
+{{- $name := include "agent-platform.hooks.serviceAccountName" . }}
+{{- $events := include "agent-platform.hooks.events" . }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $events }}
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+      app.kubernetes.io/component: hooks
+  egress:
+    - toEntities: ["kube-apiserver"]
+{{- else }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $events }}
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+      app.kubernetes.io/component: hooks
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+{{- end }}
+{{- end }}
