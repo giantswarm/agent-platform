@@ -2,7 +2,7 @@
 #
 #    devctl
 #
-#    https://github.com/giantswarm/devctl/blob/6bd76e24b11b67d6d99715b8f484f454e05abbd9/pkg/gen/input/workflows/internal/file/auto_release.yaml.template
+#    https://github.com/giantswarm/devctl/blob/1f2883b45c892fbd86aaa467503e3539e91e47a8/pkg/gen/input/workflows/internal/file/auto_release.yaml.template
 #
 # yamllint disable rule:truthy
 # Push-based release tagger + release-page publisher.
@@ -109,7 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           # The same baseline as the decide step below.
-          last=$(git describe --tags --abbrev=0 --match='v*.*.*' --exclude='*-*' --exclude='*+*' 2>/dev/null || echo "")
+          last=${LINE_TAG:-$(git describe --tags --abbrev=0 --match='v*.*.*' --exclude='*-*' --exclude='*+*' 2>/dev/null || echo "")}
           # `--merged HEAD` keeps a candidate cut on another branch out;
           # `--no-merged` drops the candidates the last stable release already
           # contains. `sort -V` orders rc.10 after rc.9 and a moved target
@@ -214,7 +214,7 @@ jobs:
           # splits `last` from `NEXT`, the `NEXT = last` comparison below can
           # never be true again, and the job tags on every push even when
           # there is nothing to release.
-          last=$(git describe --tags --abbrev=0 --match='v*.*.*' --exclude='*-*' --exclude='*+*' 2>/dev/null || echo "")
+          last=${LINE_TAG:-$(git describe --tags --abbrev=0 --match='v*.*.*' --exclude='*-*' --exclude='*+*' 2>/dev/null || echo "")}
           echo "branch: ${GITHUB_REF_NAME}"
           echo "last reachable stable tag: ${last:-<none>}"
 
@@ -356,6 +356,13 @@ jobs:
           flags=()
           if [ "$PRERELEASE" = "true" ]; then
             flags+=(--prerelease)
+          fi
+          # GitHub marks a stable release as "Latest" by default. A release of
+          # a maintenance branch (release-v3.x) is an older line's: it must not
+          # take the marker from the release branch's newest stable, which
+          # `gh release view`, releases/latest and install scripts resolve to.
+          if [ "$GITHUB_REF_NAME" != 'main' ]; then
+            flags+=(--latest=false)
           fi
           gh release create "$TAG" \
             --title "$TAG" \
