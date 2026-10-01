@@ -13433,3 +13433,30 @@ spec:
         - name: work
           emptyDir:
             medium: Memory
+---
+# Source: agent-platform-connectivity/templates/substrate/hooks-netpol.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: t-hooks
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: "t"
+      app.kubernetes.io/component: hooks
+  egress:
+    - toEntities: ["kube-apiserver"]

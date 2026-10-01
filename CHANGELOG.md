@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The connectivity chart's hook Jobs have a network policy** (giantswarm/agent-platform#367). The Substrate bootstrap, the derived Postgres Secrets, the model-serving cache claim and the pre-pull cleanup run `kubectl` as `<release>-hooks`, and no policy selected them: on a default-deny cluster (Cilium `policyEnforcementMode: always`) the `pre-upgrade` bootstrap could not reach the apiserver and every install and upgrade of the connectivity release failed on its first hook. With `networkPolicy.enabled` the chart renders `<release>-hooks` as a hook object next to the identity (weight -5, its events and delete policy, so it exists before the first `pre-install` Job): a `CiliumNetworkPolicy` with egress to the `kube-apiserver` entity, or in the kubernetes flavour a `NetworkPolicy` to `networkPolicy.kubernetes.apiServerCIDR`, selecting `app.kubernetes.io/instance: <release>` + `app.kubernetes.io/component: hooks`. `make verify-connectivity-hooks-netpol` asserts both flavours, the hook annotations, that every hook Job is selected, and no policy with `networkPolicy.enabled: false` or without a hook Job.
+
 ### Changed
 
 - **The connectivity chart's `agent-manager-migrate` Job reads no GitHub token** (giantswarm/agent-platform#775). The Job's optional `GITHUB_TOKEN` reference to the Secret `kagent-skills-token` and `agentManager.migration.githubToken` in both charts are gone: the personal read token is retired, and agent-manager's minted `agent-manager-skills-token` holds a git Basic credential `migrate` does not take. Public skill repositories resolve, private refs are reported as pending. `make verify-migration` asserts the Job renders no token, also with a left-over `githubToken` value.

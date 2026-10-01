@@ -3602,6 +3602,39 @@ verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every 
 	@python3 -c 'import sys,yaml; R={"cpu":"10m","memory":"32Mi"}; lim=lambda m: (R, {"memory": m}); want={"t-substrate-bootstrap": {"openssl": lim("128Mi"), "sh": lim("256Mi")}, "t-postgres-databases": {"sh": lim("128Mi")}, "t-model-serving-cache": {"sh": lim("128Mi")}, "t-model-serving-prepull-cleanup": {"sh": lim("128Mi")}}; jobs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; got={j["metadata"]["name"]: {c["name"]: (c["resources"]["requests"], c["resources"]["limits"]) for c in j["spec"]["template"]["spec"].get("initContainers",[])+j["spec"]["template"]["spec"]["containers"]} for j in jobs}; sys.exit("FAIL: hook containers (requests, limits) are %s, want %s" % (got, want)) if got!=want else print("ok: four hook Jobs, 10m/32Mi requests; t-substrate-bootstrap sh limited to 256Mi, every other hook container to 128Mi")' $(VERIFY_TMP)/vhm.out
 	@echo "ok: $@"
 
+.PHONY: verify-connectivity-hooks-netpol
+verify-connectivity-hooks-netpol: ## Assert the connectivity hook identity's network policy (#367): with networkPolicy on and a hook Job rendered, ONE policy <release>-hooks selecting app.kubernetes.io/instance=<release> + component=hooks with egress to the apiserver only — a CiliumNetworkPolicy (kube-apiserver entity) in the cilium flavour, a NetworkPolicy (networkPolicy.kubernetes.apiServerCIDR, Egress only) in the kubernetes one — as a hook object at the identity's weight -5, delete policy and events (pre-delete joins with the pre-pull cleanup); every hook Job's pod carries the selected labels; none with networkPolicy off, none when no hook Job renders. Needs PyYAML.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@echo "--> Substrate on, cilium: a CiliumNetworkPolicy hook at -5, the identity's four events"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) $(SUBSTRATE_ON) >$(VERIFY_TMP)/vchn-cil.out 2>&1 || { cat $(VERIFY_TMP)/vchn-cil.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vchn-cil.out CiliumNetworkPolicy t-hooks >$(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: no CiliumNetworkPolicy t-hooks: the hook Jobs reach nothing under default-deny"; exit 1; }
+	@if $(PICK) $(VERIFY_TMP)/vchn-cil.out NetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the kubernetes-flavour policy renders next to the cilium one"; exit 1; fi
+	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade$$' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the policy is not at the identity's events"; grep helm.sh/hook $(VERIFY_TMP)/vchn-cnp.out; exit 1; }
+	@grep -q 'helm.sh/hook-weight: "-5"' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the policy is not at weight -5 (with the identity, ahead of the hook Jobs)"; exit 1; }
+	@grep -q 'helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the policy does not carry the hook identity's delete policy"; exit 1; }
+	@grep -q 'app.kubernetes.io/instance: "t"' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the policy does not select the release's instance label"; exit 1; }
+	@grep -q 'toEntities: \["kube-apiserver"\]' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the cilium policy does not admit egress to the kube-apiserver entity"; exit 1; }
+	@if grep -q 'ingress:\|toFQDNs\|toCIDR\|toEndpoints\|world' $(VERIFY_TMP)/vchn-cnp.out; then echo "FAIL: the cilium policy admits more than apiserver egress"; exit 1; fi
+	@echo "--> all four hook Jobs: pre-delete joins the events, every hook Job's pod carries the selected labels"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vchn-all.out 2>&1 || { cat $(VERIFY_TMP)/vchn-all.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vchn-all.out CiliumNetworkPolicy t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' || { echo "FAIL: with the pre-pull cleanup the policy is not at pre-delete too"; exit 1; }
+	@python3 -c 'import sys,yaml; docs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; sel={"app.kubernetes.io/instance":"t","app.kubernetes.io/component":"hooks"}; bad=[d["metadata"]["name"] for d in docs if any(d["spec"]["template"]["metadata"]["labels"].get(k)!=v for k,v in sel.items())]; sys.exit("FAIL: hook Jobs the policy does not select: %s" % bad) if bad or len(docs)!=4 else print("ok: 4 hook Jobs selected: %s" % sorted(d["metadata"]["name"] for d in docs))' $(VERIFY_TMP)/vchn-all.out
+	@echo "--> kubernetes flavour: a NetworkPolicy hook, Egress only, to networkPolicy.kubernetes.apiServerCIDR"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) $(SUBSTRATE_ON) --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >$(VERIFY_TMP)/vchn-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vchn-k8s.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vchn-k8s.out NetworkPolicy t-hooks >$(VERIFY_TMP)/vchn-np.out || { echo "FAIL: no NetworkPolicy t-hooks in the kubernetes flavour"; exit 1; }
+	@if $(PICK) $(VERIFY_TMP)/vchn-k8s.out CiliumNetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the cilium policy renders in the kubernetes flavour"; exit 1; fi
+	@grep -q 'helm.sh/hook-weight: "-5"' $(VERIFY_TMP)/vchn-np.out || { echo "FAIL: kubernetes flavour: the policy is not at weight -5"; exit 1; }
+	@grep -q 'policyTypes: \[Egress\]' $(VERIFY_TMP)/vchn-np.out || { echo "FAIL: the NetworkPolicy is not Egress only"; exit 1; }
+	@grep -q 'cidr: "10.9.0.1/32"' $(VERIFY_TMP)/vchn-np.out || { echo "FAIL: the NetworkPolicy does not use networkPolicy.kubernetes.apiServerCIDR"; grep cidr $(VERIFY_TMP)/vchn-np.out; exit 1; }
+	@echo "--> networkPolicy off: none; no hook Job: none"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) $(SUBSTRATE_ON) --set networkPolicy.enabled=false >$(VERIFY_TMP)/vchn-off.out 2>&1 || { cat $(VERIFY_TMP)/vchn-off.out; exit 1; }
+	@if $(PICK) $(VERIFY_TMP)/vchn-off.out CiliumNetworkPolicy t-hooks >/dev/null 2>&1 || $(PICK) $(VERIFY_TMP)/vchn-off.out NetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the hook policy renders with networkPolicy.enabled=false"; exit 1; fi
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) >$(VERIFY_TMP)/vchn-none.out 2>&1 || { cat $(VERIFY_TMP)/vchn-none.out; exit 1; }
+	@if $(PICK) $(VERIFY_TMP)/vchn-none.out ServiceAccount t-hooks >/dev/null 2>&1; then echo "FAIL: precondition: the default render carries the hook identity"; exit 1; fi
+	@if grep -q 'name: t-hooks' $(VERIFY_TMP)/vchn-none.out; then echo "FAIL: the hook policy renders with no hook Job to police"; exit 1; fi
+	@echo "ok: $@"
+
 # klaus-gateway on with the two egress policies that select its pod (a2a, OBO) in
 # an agentgateway-* mode; the store knobs are the klaus-gateway chart's, forwarded
 # by the meta chart, so the connectivity chart reads them at their defaults here.
