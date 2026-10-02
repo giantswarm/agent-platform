@@ -19,7 +19,9 @@
 # mcp-kubernetes pins are the floors of their ranges, the first releases that
 # export traces over OTLP (giantswarm/giantswarm#36711); the model-manager,
 # agent-manager and cluster-manager ones also serve the metrics port their
-# ServiceMonitor scrapes. model-manager carries
+# ServiceMonitor scrapes. model-manager's pin is 1.9.1, the floor of its
+# range: it deletes only the ModelConfigs it created
+# (giantswarm/model-manager#230). It carries
 # 1.0.8's num_ctx on the Ollama ModelConfigs it wires
 # (giantswarm/model-manager#157); it reads the GPU node pool input from the
 # discovery ConfigMap (spec.gpuPool, giantswarm/agent-platform#315, from 0.23.0)
@@ -73,7 +75,7 @@ components:
   klaus-gateway:                 { versionRange: "3.3.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
-  model-manager:                 { versionRange: "1.5.0" }
+  model-manager:                 { versionRange: "1.9.1" }
   agent-manager:                 { versionRange: "1.4.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).

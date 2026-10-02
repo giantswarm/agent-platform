@@ -839,8 +839,12 @@ components:  # @schema additionalProperties: true
     # The floor is 1.5.0: the chart takes observability.otel, the OTLP trace
     # export global.observability.traces.otlp derives, and serviceMonitor
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
-    # (giantswarm/model-manager#203, giantswarm/giantswarm#36711).
-    versionRange: ">=1.5.0 <2.0.0"
+    # (giantswarm/model-manager#203, giantswarm/giantswarm#36711). 1.9.1 is
+    # the floor: a model-manager deletes only the ModelConfigs it created,
+    # recorded by its chart's --instance, so a second model-manager on the
+    # kagent namespace or a copied manifest no longer loses agents their
+    # model configuration on an unload (giantswarm/model-manager#230).
+    versionRange: ">=1.9.1 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
