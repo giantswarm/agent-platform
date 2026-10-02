@@ -735,7 +735,16 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
     # spec.router.scheduler is published unchanged; nothing else goes under router.
     doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "picked"},
            "spec": {"displayName": "Picked", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "router": {"scheduler": True}}}
-    cm = documents(helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])]))[("ConfigMap", "agent-platform-serving-preset-picked")]
+    rendered = documents(helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])]))
+    cm = rendered[("ConfigMap", "agent-platform-serving-preset-picked")]
+    # Every preset ConfigMap, shipped and values, names the chart version that
+    # published it: model-manager reports it as the preset's chartVersion.
+    chart_version = yaml.safe_load(open(f"{connectivity}/Chart.yaml"))["version"]
+    for (kind, name), text in rendered.items():
+        if kind == "ConfigMap" and name.startswith("agent-platform-serving-preset-"):
+            annotations = yaml.safe_load(text)["metadata"].get("annotations") or {}
+            if annotations.get("agent-platform.giantswarm.io/chart-version") != chart_version:
+                sys.exit(f"FAIL: ConfigMap {name} carries agent-platform.giantswarm.io/chart-version {annotations.get('agent-platform.giantswarm.io/chart-version')!r}, not the chart's version {chart_version!r}")
     published = yaml.safe_load(yaml.safe_load(cm)["data"]["preset.yaml"])
     if published["spec"].get("router") != {"scheduler": True}:
         sys.exit(f"FAIL: the values preset's spec.router is published as {published['spec'].get('router')!r}, not {{'scheduler': True}}")
