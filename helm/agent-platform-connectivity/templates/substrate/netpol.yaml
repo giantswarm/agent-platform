@@ -37,6 +37,10 @@ what (the substrate chart's arguments and Service definitions):
   ate-controller, dns, podcertificate-controller, k8s-credential-provider ──▶
         the apiserver (and ate-controller ──▶ ate-api :443); dns answers the
         actors' lookups; the credential provider reads the agents' Secrets.
+  the bundled stores, while they run (substrate.postgres resolving to the
+        bundled StatefulSet, substrate.rustfs.enabled): Postgres `app: postgres`
+        :5432 ◀── ate-api-server; rustfs `app: rustfs` :9000 ◀── ate-api-server,
+        atelet and the rustfs-bucket-init Job; neither dials out.
   ate-api-server, ate-controller, atelet, atenet-router ──▶ the OTLP gateway
         substrate.otel names (agent-platform.substrate.otlpEgress); atenet-egress
         exports nothing.
@@ -642,6 +646,87 @@ spec:
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
     - toEntities:
         - kube-apiserver
+{{- if eq $pgMode "bundled" }}
+---
+# The bundled Postgres StatefulSet: ate-api-server is its only client (mTLS on
+# 5432); its probes and the TLS reloader use the local socket. It dials out to
+# nothing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-postgres
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: postgres
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: ate-api-server
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+{{- end }}
+{{- if $rustfs }}
+---
+# The bundled rustfs snapshot store: ate-api-server and atelet read and write
+# snapshots on its S3 API (9000), the bucket-init Job creates the bucket there;
+# the console (9001) is reached by nothing. It dials out to nothing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-rustfs
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: rustfs
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: ate-api-server
+        - matchLabels:
+            app: atelet
+        - matchLabels:
+            job-name: rustfs-bucket-init
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+---
+# The rustfs-bucket-init Job (a hook; its pods carry the Job controller's
+# job-name label): it resolves the rustfs Service and creates the bucket.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-rustfs-bucket-init
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      job-name: rustfs-bucket-init
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEndpoints:
+        - matchLabels:
+            app: rustfs
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+{{- end }}
 ---
 # The worker pods of every WorkerPool in the kagent namespace: a turn comes in
 # from atenet-router on the tunnel (443) and the mTLS CONNECT listener (8443);
@@ -880,6 +965,59 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+{{- if eq $pgMode "bundled" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-postgres-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [ate-api-server]
+      ports:
+        - port: 5432
+          protocol: TCP
+{{- end }}
+{{- if $rustfs }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-rustfs-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: rustfs
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [ate-api-server, atelet]
+        - podSelector:
+            matchLabels:
+              job-name: rustfs-bucket-init
+      ports:
+        - port: 9000
+          protocol: TCP
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

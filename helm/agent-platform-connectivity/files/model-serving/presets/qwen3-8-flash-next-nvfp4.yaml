@@ -146,9 +146,9 @@ spec:
       cpu: "8"
       memory: 118Gi
   requirements:
-    # The Hub's safetensors index sizes the checkpoint at 98.6 GiB
+    # The Hub's safetensors shards size the checkpoint at 99.03 GiB
     # (make verify-preset-weights). 20 GiB of overhead: the n-gram table is
     # read from disk, so ~74 GiB are resident and the rest of the 0.80
     # budget of a 128 GB node is the fp8 KV cache, CUDA graphs and the runtime.
-    weightsGiB: 99
+    weightsGiB: 100
     overheadGiB: 20

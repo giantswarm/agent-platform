@@ -672,7 +672,13 @@ platform needs:
   egress policy shares through `agent-platform.kagent.otlpEgress`; without
   it every turn ended 3 s late on the Go ADK's pre-response trace flush,
   giantswarm/agent-platform#456); the worker pods reach only the egress
-  gateway, the dns and the cluster DNS. The kubernetes flavour renders the
+  gateway, the dns and the cluster DNS. The bundled stores, while they run:
+  Postgres (`substrate-postgres`, while `substrate.postgres` resolves to the
+  bundled StatefulSet) admits ate-api-server on 5432; rustfs
+  (`substrate-rustfs`, with `substrate.rustfs.enabled`) admits ate-api-server,
+  atelet and the `rustfs-bucket-init` Job on 9000, which
+  `substrate-rustfs-bucket-init` lets out; neither store dials out beyond DNS.
+  The kubernetes flavour renders the
   ingress policies. `make verify-kagent-netpol` asserts the render,
   `make verify-actor-telemetry-egress` the OTLP rules.
 - **Guards** (`templates/substrate/validate.yaml`): a Substrate with no

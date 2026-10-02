@@ -1715,7 +1715,7 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@echo "ok: meta-layer overrides reach the object, siblings keep their defaults"
 	@echo "$@: all passed"
 
-verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: gsoci.azurecr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); that the egress gateway opens every host model server model-manager fronts, at its agentHost, with the DNS proxy on where one is named by hostname; the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only; and the cluster entity reaches the kagent controller's metrics port (kagent.controller.metrics.bindAddress, only while enabled, never the API port) and atenet-egress's ext-proc 9090, in both flavours.
+verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: gsoci.azurecr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list; the controller reaches ate-api and the router; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); that the egress gateway opens every host model server model-manager fronts, at its agentHost, with the DNS proxy on where one is named by hostname; the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only; and the cluster entity reaches the kagent controller's metrics port (kagent.controller.metrics.bindAddress, only while enabled, never the API port) and atenet-egress's ext-proc 9090, in both flavours; Substrate's bundled Postgres and rustfs reachable from their consumers only while they run, in both flavours, and no policy for them otherwise.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> Agent Substrate on, cilium: the worker pods' egress is the egress gateway, the dns and the cluster DNS — nothing else"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >$(VERIFY_TMP)/vkn-sub.out 2>&1 || { cat $(VERIFY_TMP)/vkn-sub.out; exit 1; }
@@ -1846,6 +1846,15 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	else echo "ok: oauth2-proxy ingress peers"; fi
 	@echo "--> oauth2-proxy off: no oauth2-proxy policy, peers ignored"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.oauth2ProxyIngress.additionalPeers=[{"app":"teleport-kube-agent"}]' 2>&1 | grep -q 'teleport-kube-agent'; then echo "FAIL: oauth2-proxy peers render while oauth2-proxy is off"; exit 1; else echo "ok: inert while oauth2-proxy is off"; fi
+	@echo "--> Substrate's bundled stores (#381): the bundled Postgres and rustfs reachable from their consumers only, in both flavours; none of it with the CNPG Cluster and an S3 store"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set substrate.rustfs.enabled=true >$(VERIFY_TMP)/vkn-stores.out 2>&1 || { cat $(VERIFY_TMP)/vkn-stores.out; exit 1; }
+	@python3 tests/verify-substrate-store-netpol.py --cilium $(VERIFY_TMP)/vkn-stores.out
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set substrate.rustfs.enabled=true --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vkn-stores-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vkn-stores-k8s.out; exit 1; }
+	@python3 tests/verify-substrate-store-netpol.py --kubernetes $(VERIFY_TMP)/vkn-stores-k8s.out
+	@for flavor in cilium kubernetes; do \
+		$(HELM) template t $(CONNECTIVITY_DIR) $(VM) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml --set networkPolicy.flavor=$$flavor >$(VERIFY_TMP)/vkn-stores-off.out 2>&1 || { cat $(VERIFY_TMP)/vkn-stores-off.out; exit 1; }; \
+		python3 tests/verify-substrate-store-netpol.py --off $(VERIFY_TMP)/vkn-stores-off.out || exit 1; \
+	done
 
 # The kagent controller route in its fleet shape: agentgateway-muster with the
 # agentgateway and kagent components on, the route on its default hostname, the
