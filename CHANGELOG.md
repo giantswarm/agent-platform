@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **model-manager deletes only the ModelConfigs it created: `components.model-manager.versionRange` is `>=1.9.1 <2.0.0`** (giantswarm/model-manager#230). Before 1.9.1, any model-manager took every ModelConfig labelled `app.kubernetes.io/managed-by: model-manager` for its own. So an unload by a second model-manager writing into the same kagent namespace, or of a model whose ModelConfig was a copied manifest, deleted ModelConfigs that AgentTemplates reference. From 1.9.1 a ModelConfig records the instance that created it (`model-manager.giantswarm.io/instance`, which the model-manager chart sets to `<release namespace>-<release name>`), and only that instance deletes it; any other is left in place and named in the unload's answer (`modelConfigLeft`). The customer BOM pins 1.9.1.
+
 - **`make verify-kagent-crds` validates against the CRDs the platform installs, and `kagent.modelConfigs[]` takes the `Mistral` provider** (giantswarm/agent-platform#369). The verify read the kagent line's CRDs at a hard-coded `v1.0.0` while `components.kagent-crds` installs `>=1.2.0`, so the re-pin onto 1.2 never met its sweep of the provider enum, and the 1.2 ModelConfig's eleventh provider was refused by the render naming ten. The verify now reads its release from the floor of `components.kagent-crds.versionRange`; the chart accepts `Mistral` and renders its `baseUrl` under `spec.mistral`.
 
 - **Preset `qwen3-8-flash-next-nvfp4` declares 100 GiB of weights (was 99)**. The Hub's checkpoint grew to 99.03 GiB, and `make verify-preset-weights` refuses a preset that understates it, because cluster-manager sizes the node pool from the declared size.
