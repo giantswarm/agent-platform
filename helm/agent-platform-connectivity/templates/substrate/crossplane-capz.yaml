@@ -66,33 +66,11 @@ spec:
   providerConfigRef:
     name: {{ $xp.providerConfigRef }}
 ---
-# Snapshots are deleted lifecycleDays after their last modification: an actor
-# whose snapshot is gone boots cold from the golden image again, nothing is
-# lost but one start.
-apiVersion: storage.azure.upbound.io/v1beta2
-kind: ManagementPolicy
-metadata:
-  name: {{ $account }}
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-    app.kubernetes.io/component: storage
-spec:
-  managementPolicies:
-    {{- include "agent-platform.crossplane.managementPolicies" (dict "xp" $xp) | nindent 4 }}
-  forProvider:
-    rule:
-      - name: DeleteOldBlobs
-        enabled: true
-        filters:
-          blobTypes:
-            - blockBlob
-        actions:
-          baseBlob:
-            deleteAfterDaysSinceModificationGreaterThan: {{ $capz.lifecycleDays | int }}
-    storageAccountIdRef:
-      name: {{ $account }}
-  providerConfigRef:
-    name: {{ $xp.providerConfigRef }}
+# No lifecycle ManagementPolicy: Substrate deletes the snapshot a suspend
+# replaces and an actor's whole prefix with the actor, so every blob left is
+# live (a template revision's golden snapshot, an actor's newest one) and none
+# comes back once gone. Blocks of an upload s3proxy never committed are
+# collected by Azure Storage itself after seven days.
 ---
 # The identity the s3proxy pods run as (Workload Identity): fully managed,
 # Delete included — an access resource that holds no data and is recreated

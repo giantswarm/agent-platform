@@ -1656,6 +1656,11 @@ for the substrate release's two ServiceAccounts from them.
 {{- define "agent-platform.substrateStore.crossplane" -}}
 {{- $xp := dig "harness" "snapshotStore" "crossplane" dict (.Values.kagent | default dict) -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) $xp.enabled -}}
+{{- range $p := list "aws" "capz" -}}
+{{- if hasKey (index $xp $p | default dict) "lifecycleDays" -}}
+{{- fail (printf "kagent.harness.snapshotStore.crossplane.%s.lifecycleDays is gone: the store expires nothing, Substrate deletes what it replaces and every object left is a live snapshot (UPGRADE.md). Remove the key." $p) -}}
+{{- end -}}
+{{- end -}}
 {{- $xp.provider -}}
 {{- end -}}
 {{- end -}}

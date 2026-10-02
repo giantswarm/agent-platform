@@ -1207,13 +1207,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.harness.snapshotStore.crossplane.aws.accountId | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.aws.oidcProvider | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.aws.roleName | string | `""` |  |
-| kagent.harness.snapshotStore.crossplane.aws.lifecycleDays | int | `30` |  |
 | kagent.harness.snapshotStore.crossplane.capz.storageAccountName | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.containerName | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.resourceGroup | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.subscriptionId | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.replicationType | string | `"LRS"` |  |
-| kagent.harness.snapshotStore.crossplane.capz.lifecycleDays | int | `30` |  |
 | kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.identityName | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef | string | `""` |  |

@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the Substrate snapshot store expires nothing)
+
+giantswarm/agent-platform#792: the snapshot store `kagent.harness.snapshotStore.crossplane` provisions no longer deletes objects by age. Substrate already deletes the snapshot a suspend replaces and an actor's prefix with the actor, so the 30-day rule only ever removed live snapshots: a template revision's golden snapshot, and the only snapshot of an actor suspended that long, neither of which comes back. On CAPA the `BucketLifecycleConfiguration` now carries only an abort of incomplete multipart uploads after a day; on CAPZ the chart renders no `ManagementPolicy`, and Helm removes it, which removes the account's lifecycle rule.
+
+### Operator action
+
+- **Remove `kagent.harness.snapshotStore.crossplane.aws.lifecycleDays` and `….capz.lifecycleDays`** from the installation's values if they are set: the render fails naming the key while one is left.
+- Nothing else. Flux updates the bucket's lifecycle in place and deletes the container's policy; no snapshot is touched.
+
 ## \<current\> → \<next\> (the migrate run is started by a hook from a suspended CronJob)
 
 giantswarm/agent-platform#378: the connectivity chart no longer renders `agent-platform-connectivity-agent-manager-migrate-<hash>` as a Job of the release. A Job of the release raced its own `CiliumNetworkPolicy` (Helm applies that CRD-backed kind after the Job, so on a cluster with Cilium `policyEnforcementMode: always` the pod reached nothing and failed), and a Failed Job stalled every connectivity upgrade (`failed early due to stalled resources`): Helm's readiness check reads a Failed Job as Failed whether or not it waits for Jobs. The release now carries the suspended CronJob `agent-platform-connectivity-agent-manager-migrate` (never scheduled; Current to the readiness check) and the `post-install,post-upgrade` hook `agent-platform-connectivity-agent-manager-migrate-start`, which runs as the tenant identity in the kagent namespace once the release's manifests, the migration's network policy among them, are applied, and creates the run `agent-platform-connectivity-agent-manager-migrate-<hash>` from the CronJob unless a Job of that name exists. The run is owned by the CronJob, not by the release: its failure shows in its Job status, its log and the `agent-manager-migrate-report` ConfigMap, never in the HelmRelease.

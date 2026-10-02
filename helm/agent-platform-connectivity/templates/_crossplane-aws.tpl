@@ -7,11 +7,13 @@ and access statements; only the role's subjects, description and lifecycle
 default differ.
 
 agent-platform.crossplane.aws.bucket — the Bucket (never deleted by Crossplane,
-kept by Helm: the data outlives the release), its lifecycle expiration, the
-public-access block and the TLS-only policy.
+kept by Helm: the data outlives the release), its lifecycle rules (an
+expiration after `lifecycleDays`, an abort of incomplete multipart uploads
+after `abortIncompleteDays`; each only when given), the public-access block
+and the TLS-only policy.
 `bucketComment` and `lifecycleComment` are lists of comment lines, so each
 caller says what its store holds.
-Usage: include "agent-platform.crossplane.aws.bucket" (dict "root" $ "xp" $xp "bucket" $bucket "lifecycleDays" 45 "tags" $tags "bucketComment" (list "…") "lifecycleComment" (list "…"))
+Usage: include "agent-platform.crossplane.aws.bucket" (dict "root" $ "xp" $xp "bucket" $bucket "lifecycleDays" 45 "abortIncompleteDays" 1 "tags" $tags "bucketComment" (list "…") "lifecycleComment" (list "…"))
 */}}
 {{- define "agent-platform.crossplane.aws.bucket" -}}
 {{- $xp := .xp }}
@@ -63,10 +65,18 @@ spec:
       name: {{ $bucket }}
     region: {{ $xp.region }}
     rule:
+      {{- if .lifecycleDays }}
       - id: Expiration
         status: Enabled
         expiration:
           - days: {{ .lifecycleDays | int }}
+      {{- end }}
+      {{- if .abortIncompleteDays }}
+      - id: AbortIncompleteMultipartUpload
+        status: Enabled
+        abortIncompleteMultipartUpload:
+          - daysAfterInitiation: {{ .abortIncompleteDays | int }}
+      {{- end }}
   providerConfigRef:
     name: {{ $xp.providerConfigRef }}
 ---
