@@ -434,6 +434,12 @@ spec:
         parentRefs: []
     extraObjects: []
     gateway:
+      accessLog:
+        attributes:
+          agent_instance_id:
+            enabled: true
+            expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"]
+              : ""'
       gatewayClassName: agentgateway
       http:
         maxBufferSize: 8Mi

@@ -473,6 +473,26 @@ gateway:
     api_key:
       enabled: true
       expression: apiKey.name
+  # === Access log attributes ===
+  # Fields added to every access log line of the data plane, from one
+  # Gateway-scoped AgentgatewayPolicy, <release>-access-log
+  # (templates/agentgateway/access-log-policy.yaml); none renders while every
+  # entry is off. A map keyed by field name (Helm merges maps); each entry is
+  # {expression: <one-line CEL>, enabled: <bool, absent = true>}, the expression
+  # through tpl. A field for what is per request and would explode a metric's
+  # cardinality. README "Access log attributes".
+  accessLog:
+    attributes:  # @schema additionalProperties: {"type": "object", "additionalProperties": false, "properties": {"expression": {"type": "string"}, "enabled": {"type": "boolean"}}}
+      # The session of an agent's model call: the AgentInstance (a Dev Portal
+      # conversation, a Slack thread) the kagent runtime names in
+      # x-kagent-agent-instance-id, so the cost of one conversation can be
+      # summed from the log. Read behind the same predicate as the agent
+      # labels (agent-platform.substrate.egressCall): a caller that is not the
+      # Substrate egress logs no session, header or not. Accounting, never
+      # authorization.
+      agent_instance_id:
+        enabled: true
+        expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"] : ""'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
