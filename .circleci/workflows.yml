@@ -96,7 +96,7 @@ workflows:
         # The repo-owned release gate (custom.yml): a check that refuses the
         # release before the chart is pushed. Red there = no chart published;
         # rerun the tag's workflow from failed once it passes, no new tag.
-        - verify-release-floors
+        - push-connectivity-chart-release
         filters:
           tags:
             only: /^v.*/
