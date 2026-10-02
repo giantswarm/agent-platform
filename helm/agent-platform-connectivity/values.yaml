@@ -751,7 +751,7 @@ hooks:
   kubectlImage:
     registry: gsoci.azurecr.io
     repository: giantswarm/alpine-k8s
-    tag: 1.37.0
+    tag: 1.37.1
   opensslImage:
     registry: gsoci.azurecr.io
     repository: giantswarm/alpine-openssl
