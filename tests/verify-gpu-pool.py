@@ -266,6 +266,7 @@ else:
         imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
         flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
         flashsized = flashnext and "memory: 118Gi" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
+        flashweighed = flashnext and "weightsGiB: 100" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
         lineup24 = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml")
         lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml")
         fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
@@ -331,6 +332,14 @@ else:
         head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
         golden.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
         print(f"note: the Flash-Next preset's memory limit is 118Gi on this side (#567) and not on {ref}: its ConfigMap is left out of the comparison")
+    # The Flash-Next checkpoint grew to 99.03 GiB on the Hub, so its preset
+    # declares weightsGiB 100 on this side (make verify-preset-weights); a
+    # golden from before declares 99, so that preset document is left out of
+    # the comparison on both sides. Drop this once GOLDEN_REF carries it.
+    if flashnext and not flashweighed:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
+        print(f"note: the Flash-Next preset declares 100 GiB of weights on this side and not on {ref}: its ConfigMap is left out of the comparison")
     # The two four-GPU presets ship on this side (giantswarm/agent-platform#591)
     # and not on a golden from before: their ConfigMaps and discovery entries are
     # left out of the head. Drop this once GOLDEN_REF carries #591.
