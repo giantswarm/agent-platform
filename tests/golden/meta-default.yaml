@@ -941,6 +941,7 @@ spec:
                 cpu: 250m
                 ephemeral-storage: 256Mi
                 memory: 1Gi
+      harnesses: []
       kagent-tools:
         enabled: false
         namespaceOverride: kagent
