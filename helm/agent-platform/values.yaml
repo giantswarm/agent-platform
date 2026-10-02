@@ -712,6 +712,13 @@ components:  # @schema additionalProperties: true
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
     versionRange: ">=1.3.0 <1.4.0"
+    # Stable releases only, also where gitops.prereleases admits the
+    # platform's release candidates: the worker image above follows the
+    # floor, and a candidate's atelet next to the floor's worker fails every
+    # gVisor actor at its pause container (giantswarm/giantswarm#38124). The
+    # line's ate-controller runs the gVisor workers on its own release from
+    # 1.4.0 on (giantswarm/substrate#114).
+    prereleases: false
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -734,6 +741,8 @@ components:  # @schema additionalProperties: true
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
     versionRange: ">=1.3.0 <1.4.0"
+    # Stable releases only, the range of substrate-crds above.
+    prereleases: false
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system

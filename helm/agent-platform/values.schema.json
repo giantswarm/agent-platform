@@ -859,6 +859,9 @@
                         },
                         "versionRange": {
                             "type": "string"
+                        },
+                        "prereleases": {
+                            "type": "boolean"
                         }
                     }
                 },
@@ -883,6 +886,9 @@
                         },
                         "versionRange": {
                             "type": "string"
+                        },
+                        "prereleases": {
+                            "type": "boolean"
                         }
                     }
                 },

@@ -3,7 +3,9 @@
 on, every component range and the self-management range admit pre-releases
 and filter their tags to releases and release candidates. The exact version of
 a component released with this chart, an exact pin (1.2.3, =1.2.3), an
-exclusion (!=1.2.3) and a range filtered by a semverFilter stay as written; a
+exclusion (!=1.2.3), a range filtered by a semverFilter and a component with
+prereleases: false (Substrate: its worker image follows the floor) stay as
+written; a
 range that already carries a pre-release is filtered; a range with no version
 fails the render.
 
@@ -25,6 +27,10 @@ HELM = os.environ.get("HELM", "helm")
 RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
 ON = ["--set", "gitops.prereleases=true"]
+# Components the chart keeps on stable releases (components.<name>.prereleases:
+# false): the WorkerPool's worker image follows Substrate's floor, and a
+# candidate's atelet next to it fails every gVisor actor.
+STABLE_ONLY = {"substrate", "substrate-crds"}
 
 
 def fail(msg: str) -> None:
@@ -105,12 +111,21 @@ def main() -> None:
     if not off or off.keys() != on.keys():
         fail(f"the switch changes which OCIRepositories render: off {sorted(off)} on {sorted(on)}")
 
+    missing = STABLE_ONLY - off.keys()
+    if missing:
+        fail(f"no OCIRepository {sorted(missing)} rendered; the test no longer covers prereleases: false")
+    for name in STABLE_ONLY:
+        if on[name] != off[name]:
+            fail(f"{name}: prereleases: false, yet {off[name]!r} became {on[name]!r}")
+
     exact = [n for n, c in off.items() if fluxsemver.parse(c) is not None]
     if not exact:
         fail("no component released with this chart renders an exact version; the test no longer covers it")
     for name, constraint in off.items():
         if "-" in constraint:
             fail(f"{name}: {constraint!r} carries a pre-release with gitops.prereleases off")
+        if name in STABLE_ONLY:
+            continue
         if name in exact:
             if on[name] != constraint:
                 fail(f"{name}: the exact version {constraint!r} became {on[name]!r}")
@@ -130,6 +145,10 @@ def main() -> None:
     # a -0 range alone also selects the branch builds pushed to the same
     # repository. Off, no filter renders.
     for name, (constraint, flt) in refs(helm(chart, ON)).items():
+        if name in STABLE_ONLY:
+            if flt:
+                fail(f"{name}: prereleases: false, yet semverFilter {flt!r} renders")
+            continue
         if name in exact:
             continue
         if not flt:
@@ -152,6 +171,14 @@ def main() -> None:
     filtered = refs(helm(chart, [*ON, "--set", "components.muster.semverFilter=^.*-rabc$", "--set", "components.muster.versionRange=>=5.0.0-0"]))
     if filtered.get("muster") != (">=5.0.0-0", "^.*-rabc$"):
         fail(f"muster with a semverFilter: {filtered.get('muster')!r}, want the range and the filter as written")
+
+    # prereleases: false on any component keeps its range; true follows the switch.
+    kept = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=false"])).get("muster")
+    if kept != (off["muster"], ""):
+        fail(f"muster with prereleases: false: {kept!r}, want {off['muster']!r} without a filter")
+    widened = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=true"])).get("muster")
+    if widened != (on["muster"], refs(helm(chart, ON))["muster"][1]):
+        fail(f"muster with prereleases: true: {widened!r}, want the switch's range {on['muster']!r}")
 
     # The agent chart line agent-manager composes for every agent, in the
     # agent-manager release and in the connectivity release (its migrate Job
