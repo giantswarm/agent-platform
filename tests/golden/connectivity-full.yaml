@@ -12642,6 +12642,57 @@ spec:
         - kube-apiserver
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
+# The bundled Postgres StatefulSet: ate-api-server is its only client (mTLS on
+# 5432); its probes and the TLS reloader use the local socket. It dials out to
+# nothing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-postgres
+  namespace: ate-system
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    matchLabels:
+      app: postgres
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: ate-api-server
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: coredns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: k8s-dns-node-cache
+      toPorts:
+        - ports:
+            - port: "1053"
+              protocol: UDP
+            - port: "1053"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+# Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # The worker pods of every WorkerPool in the kagent namespace: a turn comes in
 # from atenet-router on the tunnel (443) and the mTLS CONNECT listener (8443);
 # the actors' outbound traffic leaves
