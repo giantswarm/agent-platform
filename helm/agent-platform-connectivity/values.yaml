@@ -809,6 +809,36 @@ dashboards:
 dicebear: {}  # @schema skipProperties: true; additionalProperties: true
 
 muster:  # @schema skipProperties: true; additionalProperties: true
+  # --- Grants: what else a person's grant may serve (giantswarm/giantswarm#38004) ---
+  # muster keeps, per person and per MCPServer that pins an authorization
+  # server (grantScope: subject), the token the person's sign-in produced:
+  # the grant. Tool calls to that server run on it. `grants` declares what
+  # else a grant may serve, keyed by the MCPServer's name. `git`: the grant
+  # of `<server>` also serves git at `host`, so a coding agent clones, fetches
+  # and pushes private repositories as the person with nothing in its sandbox
+  # (bumblebee-plans#60, D9 phase 2). The claude harness's forwarder sends the
+  # sandbox's git requests for `host` to the agentgateway Gateway with the
+  # turn caller's platform bearer; the Gateway exchanges it at muster's token
+  # broker (RFC 8693) for the person's grant and presents it to `host` as git
+  # wants it (Basic x-access-token:<token>, what github.com accepts). The
+  # token exists in muster and, for one request, in the Gateway. The exchange
+  # cache is off (a sign-out counts at once); a person without a grant gets
+  # 401 with a WWW-Authenticate realm naming the MCPServer to sign in to
+  # (core_auth_login). Only git's endpoints pass; push: false leaves
+  # git-receive-pack out. The meta chart derives muster's side (the broker
+  # client, its audience, the grant target, the platform Dex as a trusted
+  # issuer with acceptedTypHeaders [""]) and the claude Harnesses' route
+  # environment; the connectivity chart renders the Gateway objects and
+  # generates the broker client's Secret (kept across upgrades, never typed).
+  # grantIssuer is the MCPServer's pinned issuer; read from the mcpServers
+  # entry of that name when it is one, else set it here.
+  grants: {}
+  # github:
+  #   git:
+  #     enabled: true
+  #     host: github.com
+  #     push: true
+  #     grantIssuer: https://github.com/login/oauth   # when MCPServer github is not in mcpServers
   enabled: true
   image:
     registry: gsoci.azurecr.io
