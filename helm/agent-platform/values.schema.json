@@ -827,6 +827,9 @@
                                 "type": "string"
                             }
                         },
+                        "prereleases": {
+                            "type": "boolean"
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -859,9 +862,6 @@
                         },
                         "versionRange": {
                             "type": "string"
-                        },
-                        "prereleases": {
-                            "type": "boolean"
                         }
                     }
                 },
@@ -875,6 +875,9 @@
                         "injectGlobal": {
                             "type": "boolean"
                         },
+                        "prereleases": {
+                            "type": "boolean"
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -886,9 +889,6 @@
                         },
                         "versionRange": {
                             "type": "string"
-                        },
-                        "prereleases": {
-                            "type": "boolean"
                         }
                     }
                 },
