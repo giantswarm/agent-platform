@@ -2944,7 +2944,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # the Generic agent chart 1.x labels every AgentTemplate
   # agent-platform.giantswarm.io/harness: kagent to be admitted by it. Through
   # 4.7.19 the connectivity chart rendered this object; 4.8.0 handed it to the
-  # kagent release in place (UPGRADE.md).
+  # kagent release in place (UPGRADE.md). The Harness carries no credential, by
+  # design: a private skill or plugin repository's credential is per source on
+  # the AgentTemplate (skills[].source.git.credentialRef, a Secret next to the
+  # template), so a missing Secret fails only the templates that name it and
+  # the token travels only with their requests (README "Private skill
+  # repositories").
   harness:
     create: true
     # An OVERRIDE of the runtime image, BY DIGEST (<repository>@sha256:<64 hex>;

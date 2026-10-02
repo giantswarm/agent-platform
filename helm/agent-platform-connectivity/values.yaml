@@ -1699,7 +1699,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   displayName: Anthropic Sonnet 4.6
   #   # One of the ModelConfig CRD's providers, in its spelling: Anthropic,
   #   # OpenAI, AzureOpenAI, Ollama, Gemini, GeminiVertexAI, AnthropicVertexAI,
-  #   # Bedrock, SAPAICore, Foundry. Any other value fails the render.
+  #   # Bedrock, SAPAICore, Foundry, Mistral. Any other value fails the render.
   #   provider: Anthropic
   #   model: claude-sonnet-4-6
   #   apiKeySecret: kagent-anthropic
@@ -1710,8 +1710,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # provider's own URL is how a model stays on the direct, unmetered path.
   #   # An entry whose provider differs from the first llmRouting.models entry's stays
   #   # direct either way: the listener forwards to one provider. Only the
-  #   # Anthropic, OpenAI and SAPAICore providers carry a baseUrl in
-  #   # ModelConfigSpec, under the CRD's block key (anthropic, openAI,
+  #   # Anthropic, Mistral, OpenAI and SAPAICore providers carry a baseUrl in
+  #   # ModelConfigSpec, under the CRD's block key (anthropic, mistral, openAI,
   #   # sapAICore); the render fails for a baseUrl on any other provider.
   #   baseUrl: http://agentgateway.<release namespace>.svc:8081
   #   # Optional (Anthropic and Bedrock). An
