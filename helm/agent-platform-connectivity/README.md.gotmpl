@@ -320,7 +320,8 @@ call. The kagent runtime names the `AgentInstance` a turn runs in (a Dev
 Portal conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
 model call of that turn, and the field reads it behind the same Substrate
 egress predicate as the agent labels (`agent-platform.substrate.egressCall`),
-so a pod that is not the egress logs an empty session, header or not. Summed
+so a pod that is not the egress logs no session (the empty value drops the
+field), header or not. Summed
 per `agent_instance_id`, the `llm` listener's lines give the cost of one
 conversation. Accounting, never authorization.
 
