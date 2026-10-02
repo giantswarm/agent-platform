@@ -304,7 +304,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gitops.hooks.image.tag | string | `"v1.37.1"` |  |
 | gitops.hooks.helmImage.registry | string | `"gsoci.azurecr.io"` |  |
 | gitops.hooks.helmImage.repository | string | `"giantswarm/alpine-k8s"` |  |
-| gitops.hooks.helmImage.tag | string | `"1.37.0"` |  |
+| gitops.hooks.helmImage.tag | string | `"1.37.1"` |  |
 | gitops.self.enabled | string | `"auto"` |  |
 | gitops.self.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | gitops.self.insecure | bool | `false` |  |
@@ -1337,7 +1337,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate-crds | object | `{}` |  |
 | hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
-| hooks.kubectlImage.tag | string | `"1.37.0"` |  |
+| hooks.kubectlImage.tag | string | `"1.37.1"` |  |
 | hooks.opensslImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.opensslImage.repository | string | `"giantswarm/alpine-openssl"` |  |
 | hooks.opensslImage.tag | string | `"3.5.8"` |  |

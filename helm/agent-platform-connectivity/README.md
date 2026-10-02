@@ -1125,7 +1125,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
 | hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
-| hooks.kubectlImage.tag | string | `"1.37.0"` |  |
+| hooks.kubectlImage.tag | string | `"1.37.1"` |  |
 | hooks.opensslImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.opensslImage.repository | string | `"giantswarm/alpine-openssl"` |  |
 | hooks.opensslImage.tag | string | `"3.5.8"` |  |
