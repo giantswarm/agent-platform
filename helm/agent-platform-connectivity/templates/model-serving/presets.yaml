@@ -18,6 +18,9 @@ metadata:
     agent-platform.giantswarm.io/serving-preset: "true"
     agent-platform.giantswarm.io/preset: {{ $name | quote }}
     agent-platform.giantswarm.io/preset-source: {{ $entry.source | quote }}
+  annotations:
+    {{- /* The chart version that published the preset, verbatim (a label value cannot carry Helm's `+` build metadata): model-manager reports it as the preset's chartVersion. */}}
+    agent-platform.giantswarm.io/chart-version: {{ $.Chart.Version | quote }}
 data:
   preset.yaml: |
     {{- toYaml $resolved.preset | nindent 4 }}
