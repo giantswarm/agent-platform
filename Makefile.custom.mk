@@ -1196,6 +1196,32 @@ verify-dataplane-buffer: ## Assert the data plane's buffer (giantswarm/agent-pla
 	@$(PICK) $(VERIFY_TMP)/vdb-meta.out HelmRelease agent-platform-connectivity | grep -A1 '^      http:$$' | grep -q '^        maxBufferSize: 8Mi$$' || { echo "FAIL: the meta chart does not forward gateway.http.maxBufferSize 8Mi to the connectivity release"; exit 1; }
 	@echo "ok: $@"
 
+DAL_POLICY := agent-platform-connectivity-access-log
+# The -access-log policy's fields as name=expression lines.
+ACCESS_LOG_ATTRS := python3 -c 'import sys,yaml; [print(a["name"]+"="+a["expression"]) for a in next(d for d in yaml.safe_load_all(open(sys.argv[1])) if d)["spec"]["frontend"]["accessLog"]["attributes"]["add"]]'
+
+.PHONY: verify-access-log
+verify-access-log: ## Assert the data plane's access log fields (giantswarm/giantswarm#38023): with a data plane the connectivity chart renders the Gateway-scoped -access-log AgentgatewayPolicy whose frontend.accessLog.attributes add agent_instance_id, x-kagent-agent-instance-id read behind the Substrate egress predicate (any other caller logs an empty session); an installation's own field joins it; every entry off or muster-direct renders none; an entry without an expression fails the render naming it; the meta chart forwards the same default to the connectivity release.
+	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) >$(VERIFY_TMP)/val-on.out 2>&1 || { cat $(VERIFY_TMP)/val-on.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/val-on.out AgentgatewayPolicy $(DAL_POLICY) >$(VERIFY_TMP)/val-pol.out || { echo "FAIL: no AgentgatewayPolicy $(DAL_POLICY) with the data plane on"; exit 1; }
+	@grep -q '^      kind: Gateway$$' $(VERIFY_TMP)/val-pol.out && grep -q '^      name: agentgateway$$' $(VERIFY_TMP)/val-pol.out || { echo "FAIL: the -access-log policy does not target the data-plane Gateway"; cat $(VERIFY_TMP)/val-pol.out; exit 1; }
+	@[ "$$($(ACCESS_LOG_ATTRS) $(VERIFY_TMP)/val-pol.out)" = 'agent_instance_id=(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""' ] || { echo "FAIL: agent_instance_id does not read x-kagent-agent-instance-id behind the Substrate egress predicate"; cat $(VERIFY_TMP)/val-pol.out; exit 1; }
+	@echo "ok: defaults"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.model.expression=llm.requestModel >$(VERIFY_TMP)/val-add.out 2>&1 || { cat $(VERIFY_TMP)/val-add.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/val-add.out AgentgatewayPolicy $(DAL_POLICY) >$(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: agent_instance_id$$' $(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: model$$' $(VERIFY_TMP)/val-add-pol.out || { echo "FAIL: an installation's own field does not join agent_instance_id"; exit 1; }
+	@echo "ok: an installation's own field"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.agent_instance_id.enabled=false >$(VERIFY_TMP)/val-off.out 2>&1 || { cat $(VERIFY_TMP)/val-off.out; exit 1; }
+	@if grep -q 'name: $(DAL_POLICY)$$' $(VERIFY_TMP)/val-off.out; then echo "FAIL: the -access-log policy renders with every entry off"; exit 1; fi
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) >$(VERIFY_TMP)/val-direct.out 2>&1 || { cat $(VERIFY_TMP)/val-direct.out; exit 1; }
+	@if grep -q 'name: $(DAL_POLICY)$$' $(VERIFY_TMP)/val-direct.out; then echo "FAIL: the -access-log policy renders in muster-direct, with no data plane to target"; exit 1; fi
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.broken.enabled=true >$(VERIFY_TMP)/val-bad.out 2>&1; then echo "FAIL: an entry without an expression rendered"; exit 1; \
+	elif ! grep -q "gateway.accessLog.attributes.broken has no expression" $(VERIFY_TMP)/val-bad.out; then echo "FAIL: an entry without an expression failed for the wrong reason"; cat $(VERIFY_TMP)/val-bad.out; exit 1; fi
+	@echo "ok: guards"
+	@$(HELM) template t $(CHART_DIR) $(VM) >$(VERIFY_TMP)/val-meta.out 2>&1 || { cat $(VERIFY_TMP)/val-meta.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/val-meta.out HelmRelease agent-platform-connectivity | grep -A2 '^      accessLog:$$' | grep -q '^          agent_instance_id:$$' || { echo "FAIL: the meta chart does not forward gateway.accessLog.attributes.agent_instance_id to the connectivity release"; exit 1; }
+	@echo "ok: $@"
+
 # Anthropic prompt caching (giantswarm/giantswarm#37788; the kagent line's carried patch kagent-dev/kagent#2788).
 .PHONY: verify-prompt-caching
 verify-prompt-caching: ## Assert Anthropic prompt caching: the meta chart forwards kagent.providers.anthropic.config.promptCaching: true + cacheTTL to the kagent release (the default ModelConfig) and to the connectivity release; the connectivity chart's Anthropic catalog entries inherit both in the one provider block next to the listener baseUrl, an entry's own keys win (false included), an OpenAI entry gets nothing, a Bedrock entry takes its own keys under spec.bedrock, the chart alone renders nothing; a cacheTTL outside the CRD's enum and the keys on a provider without them fail the render naming the entry.
