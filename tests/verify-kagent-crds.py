@@ -17,22 +17,28 @@ API server would drop it silently and the object would lose that setting.
 
 The CRDs are the kagent line's at its pinned release: the plain-YAML templates
 `helm/kagent-crds/templates/kagent.dev_*.yaml` of giantswarm/kagent-upstream at
-KAGENT_LINE_REF (the same files the meta chart's `components.kagent-crds`
-installs). Fetched into a temp dir by default; KAGENT_CRDS_DIR points at a
-directory holding them for an offline run.
+KAGENT_LINE_REF, the tag of the floor of the meta chart's
+`components.kagent-crds.versionRange` (the same files that component
+installs), read from helm/agent-platform/values.yaml so a re-pin moves it.
+Fetched into a temp dir by default; KAGENT_CRDS_DIR points at a directory
+holding them for an offline run.
 
 Shapes rendered: every helm/agent-platform-connectivity/ci/*.yaml as-is, and a
 catalog shape with kagent on, one ModelConfig routed through the LLM listener
 and two operator RemoteMCPServers (one with tokenSecret). Then one ModelConfig
 per provider of the CRD's `spec.provider` enum, with and without a baseUrl: the
 chart must accept every provider, a baseUrl must land under the block the CRD
-gives one to (`anthropic`, `openAI`, `sapAICore` — camel-cased, not the
+gives one to (`anthropic`, `mistral`, `openAI`, `sapAICore` — camel-cased, not the
 lower-cased provider), the render must refuse a baseUrl where the CRD's block
 has none, and a provider outside the enum must fail the render naming the enum.
 All of it is read from the CRD at KAGENT_LINE_REF, so a re-pin that moves the
 enum or a block's fields fails here, naming the helper to move with it. The
-last section is a self-test: a deliberately wrong ModelConfig and
-RemoteMCPServer must fail, so a validator that accepts everything cannot pass.
+pinned AgentTemplate CRD must serve `spec.skills[].source.git.credentialRef`
+and `spec.plugins[].source.git.credentialRef`, the per-source credential of a
+private repository (README "Private skill repositories"), as a Secret key
+selector with the CRD's https-only rule. The last section is a self-test: a
+deliberately wrong ModelConfig and RemoteMCPServer must fail, so a validator
+that accepts everything cannot pass.
 
 Usage: verify-kagent-crds.py <connectivity chart dir>
 """
@@ -47,14 +53,15 @@ import urllib.request
 
 import yaml
 
-# The kagent line's release the platform pins (meta chart: the floor of the
-# components.kagent / components.kagent-crds range). Move it with the pin.
-KAGENT_LINE_REF = "v1.0.0"
+# The meta chart's values: the floor of components.kagent-crds.versionRange is
+# the kagent line's release the platform pins, so a re-pin moves this test too.
+META_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helm", "agent-platform", "values.yaml")
 CRD_URL = "https://raw.githubusercontent.com/giantswarm/kagent-upstream/{ref}/helm/kagent-crds/templates/{file}"
 CRD_FILES = {
     "ModelConfig": "kagent.dev_modelconfigs.yaml",
     "RemoteMCPServer": "kagent.dev_remotemcpservers.yaml",
     "Harness": "kagent.dev_harnesses.yaml",
+    "AgentTemplate": "kagent.dev_agenttemplates.yaml",
 }
 API_VERSION = "kagent.dev/v1alpha3"
 # ModelConfigSpec's per-provider blocks: key -> the spec.provider it belongs to
@@ -62,7 +69,7 @@ API_VERSION = "kagent.dev/v1alpha3"
 PROVIDER_BLOCKS = {
     "anthropic": "Anthropic", "openAI": "OpenAI", "azureOpenAI": "AzureOpenAI", "ollama": "Ollama",
     "gemini": "Gemini", "geminiVertexAI": "GeminiVertexAI", "anthropicVertexAI": "AnthropicVertexAI",
-    "bedrock": "Bedrock", "sapAICore": "SAPAICore", "foundry": "Foundry",
+    "bedrock": "Bedrock", "sapAICore": "SAPAICore", "foundry": "Foundry", "mistral": "Mistral",
 }
 
 CATALOG_SHAPE = [
@@ -93,6 +100,18 @@ def re2_pattern(pattern: str) -> str:
 
 def fail(msg: str) -> None:
     sys.exit(f"FAIL: {msg}")
+
+
+def pinned_ref() -> str:
+    """The tag of the floor of the meta chart's components.kagent-crds range."""
+    rng = yaml.safe_load(open(META_VALUES))["components"]["kagent-crds"]["versionRange"]
+    m = re.match(r">=\s*(\d+\.\d+\.\d+)\s", rng)
+    if not m:
+        fail(f"components.kagent-crds.versionRange {rng!r} has no >=X.Y.Z floor to read the pinned release from")
+    return "v" + m.group(1)
+
+
+KAGENT_LINE_REF = pinned_ref()
 
 
 def template(chart: str, args: list[str]) -> subprocess.CompletedProcess:
@@ -305,6 +324,35 @@ def check_providers(chart: str, crds: dict[str, dict]) -> None:
     print("ok: a provider outside the enum (a lower-cased spelling included) fails the render naming the entry and the enum")
 
 
+def check_artifact_credential(crds: dict[str, dict]) -> None:
+    """A private skill or plugin repository's credential is the AgentTemplate's
+    per-source credentialRef (README "Private skill repositories"; the Harness
+    carries none). The agent chart renders it on every private git source; a
+    pin whose CRD does not serve the field would prune it at admission and the
+    golden boot's git fetch would fail with the forge's 403 in silence."""
+    spec = crds["AgentTemplate"]["properties"]["spec"]["properties"]
+    for field in ("skills", "plugins"):
+        path = f"spec.{field}[].source.git.credentialRef"
+        try:
+            git = spec[field]["items"]["properties"]["source"]["properties"]["git"]
+            ref = git["properties"]["credentialRef"]
+        except KeyError:
+            fail(f"the AgentTemplate CRD at {KAGENT_LINE_REF} does not serve {path}: a private repository's credential would be pruned at admission")
+        if not {"name", "key"} <= set(ref.get("properties", {})):
+            fail(f"{path} at {KAGENT_LINE_REF} is not a Secret key selector (name, key): {sorted(ref.get('properties', {}))}")
+        if not any("https://" in r.get("rule", "") and "credentialRef" in r.get("rule", "") for r in git.get("x-kubernetes-validations", [])):
+            fail(f"{path} at {KAGENT_LINE_REF} lost the CRD's rule that a credential needs an https URL")
+        errors: list[str] = []
+        source = {"url": "https://github.com/example/private-skills", "commit": "0" * 40}
+        check(git, {**source, "credentialRef": {"name": "kagent-skills-token", "key": "token"}}, f"spec.{field}[].source.git", errors)
+        if errors:
+            fail("\n  ".join([f"a private git source the CRD at {KAGENT_LINE_REF} would refuse or prune:", *errors]))
+        check(git, {**source, "credentialRefs": {"name": "kagent-skills-token", "key": "token"}}, f"spec.{field}[].source.git", errors)
+        if not errors:
+            fail(f"self-test: a misspelt credentialRef under {path} passed")
+    print(f"ok: the AgentTemplate CRD at {KAGENT_LINE_REF} serves spec.skills[] and spec.plugins[] .source.git.credentialRef (a Secret key selector, https only)")
+
+
 def kagent_docs(docs: list[dict]) -> list[dict]:
     return [d for d in docs if str(d.get("apiVersion", "")).startswith("kagent.dev/")]
 
@@ -341,6 +389,7 @@ def main(chart: str) -> int:
     print("ok: catalog objects in the kagent namespace, no muster RemoteMCPServer, tokenSecret → headersFrom valueFrom Secret")
 
     check_providers(chart, crds)
+    check_artifact_credential(crds)
 
     # Self-test: the validator must bite.
     bad_mc = {"apiVersion": API_VERSION, "kind": "ModelConfig", "metadata": {"name": "bad", "namespace": "kagent"},

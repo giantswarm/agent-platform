@@ -2041,7 +2041,7 @@ verify-model-catalog: ## Assert llmRouting.modelCatalog is an overlay of what th
 	@python3 tests/verify-model-catalog.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
 .PHONY: verify-kagent-crds
-verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), and no render of the chart carries kagent.dev/v1alpha2 (tests/verify-kagent-crds.py; needs PyYAML).
+verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)

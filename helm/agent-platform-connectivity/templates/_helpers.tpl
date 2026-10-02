@@ -904,11 +904,11 @@ under the Gateway's own name.
 The spec.provider of a kagent.modelConfigs[] entry, checked against the
 ModelConfig CRD's enum (kagent.dev/v1alpha3). The enum is case-sensitive and
 the API server refuses any other value at admission, after the render has said
-nothing; failing here names the entry and the ten values instead. Takes the
+nothing; failing here names the entry and the eleven values instead. Takes the
 entry.
 */}}
 {{- define "agent-platform.modelConfigProvider" -}}
-{{- $enum := list "Anthropic" "OpenAI" "AzureOpenAI" "Ollama" "Gemini" "GeminiVertexAI" "AnthropicVertexAI" "Bedrock" "SAPAICore" "Foundry" -}}
+{{- $enum := list "Anthropic" "OpenAI" "AzureOpenAI" "Ollama" "Gemini" "GeminiVertexAI" "AnthropicVertexAI" "Bedrock" "SAPAICore" "Foundry" "Mistral" -}}
 {{- $provider := required "kagent.modelConfigs[].provider is required" .provider -}}
 {{- if not (has $provider $enum) -}}
 {{- fail (printf "kagent.modelConfigs[].provider %q on %q is not a ModelConfig provider; the CRD's enum is %s (case-sensitive)" $provider .name (join ", " $enum)) -}}
@@ -920,14 +920,14 @@ entry.
 Key of the ModelConfigSpec provider block that carries baseUrl, for a
 spec.provider value in any case (the CRD's spelling from a catalog entry, the
 lower-cased provider of agent-platform.llmRouting.provider). The key is not
-the lower-cased provider name (openAI, sapAICore), and only three of the ten
+the lower-cased provider name (openAI, sapAICore), and only four of the eleven
 providers have a baseUrl at all — Ollama names its host, AzureOpenAI and Foundry
 an endpoint, the rest a region or a project: a block the CRD does not know is
 pruned at admission and the model would keep the direct path in silence.
 Emits nothing for every other provider (empty string = falsy).
 */}}
 {{- define "agent-platform.modelConfigBaseUrlKey" -}}
-{{- $keys := dict "anthropic" "anthropic" "openai" "openAI" "sapaicore" "sapAICore" -}}
+{{- $keys := dict "anthropic" "anthropic" "mistral" "mistral" "openai" "openAI" "sapaicore" "sapAICore" -}}
 {{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
 {{- end -}}
 

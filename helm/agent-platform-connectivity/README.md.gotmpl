@@ -187,7 +187,7 @@ On the installation, after the cutover:
   own `baseUrl` or names a provider other than the first `llmRouting.models`
   entry's.
   The `baseUrl` lands under the CRD's block for the entry's provider —
-  `anthropic`, `openAI`, `sapAICore`, the three `ModelConfigSpec` gives one —
+  `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —
   never the lower-cased provider name, which the API server would prune; the
   render refuses a `baseUrl` on any other provider and a `provider` outside the
   CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
