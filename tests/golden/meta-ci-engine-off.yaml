@@ -682,12 +682,10 @@ spec:
             aws:
               accountId: ""
               bucketName: ""
-              lifecycleDays: 30
               oidcProvider: ""
               roleName: ""
             capz:
               containerName: ""
-              lifecycleDays: 30
               replicationType: LRS
               resourceGroup: ""
               storageAccountName: ""
