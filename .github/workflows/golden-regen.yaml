@@ -45,7 +45,7 @@ jobs:
     name: Regenerate the golden renders and push
     # Only dependency-bot branches: on a human's PR the author owns the goldens.
     if: startsWith(github.head_ref, 'renovate/') || startsWith(github.head_ref, 'dependabot/')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
