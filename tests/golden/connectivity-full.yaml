@@ -13311,7 +13311,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: openssl
-          image: "gsoci.azurecr.io/giantswarm/alpine-openssl:3.5.8"
+          image: "gsoci.azurecr.io/giantswarm/alpine-openssl:3.5.9"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |
