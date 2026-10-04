@@ -1155,7 +1155,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | hooks.kubectlImage.tag | string | `"1.37.1"` |  |
 | hooks.opensslImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.opensslImage.repository | string | `"giantswarm/alpine-openssl"` |  |
-| hooks.opensslImage.tag | string | `"3.5.8"` |  |
+| hooks.opensslImage.tag | string | `"3.5.9"` |  |
 | extraObjects | list | `[]` |  |
 | dashboards.enabled | bool | `true` |  |
 | dashboards.namespace | string | `""` |  |

@@ -1350,7 +1350,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | hooks.kubectlImage.tag | string | `"1.37.1"` |  |
 | hooks.opensslImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.opensslImage.repository | string | `"giantswarm/alpine-openssl"` |  |
-| hooks.opensslImage.tag | string | `"3.5.8"` |  |
+| hooks.opensslImage.tag | string | `"3.5.9"` |  |
 | kserve-llmisvc-crd | object | `{}` |  |
 | kserve-llmisvc-resources.kserve.createSharedResources | bool | `true` |  |
 | kserve-llmisvc-resources.kserve.controller.deploymentMode | string | `"Standard"` |  |
