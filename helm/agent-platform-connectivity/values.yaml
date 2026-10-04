@@ -775,7 +775,7 @@ hooks:
   opensslImage:
     registry: gsoci.azurecr.io
     repository: giantswarm/alpine-openssl
-    tag: 3.5.8
+    tag: 3.5.9
 
 # Arbitrary manifests rendered through `tpl` alongside the chart. Useful for
 # shipping the muster OAuth Secret in the same Helm release. Example:

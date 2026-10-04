@@ -5109,7 +5109,7 @@ hooks:
   opensslImage:
     registry: gsoci.azurecr.io
     repository: giantswarm/alpine-openssl
-    tag: 3.5.8
+    tag: 3.5.9
 
 # === KServe (kserve-llmisvc-crd, kserve-llmisvc-resources) ===
 # Values forwarded verbatim to the two llm-d component releases
