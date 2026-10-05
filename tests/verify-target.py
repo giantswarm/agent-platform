@@ -28,8 +28,7 @@ property that shape relies on:
   of a component's CRDs, components.<name>.ownedCrds) need a live cluster and are
   asserted there (README, "One release per target cluster");
 - no hook Job renders with the knob (a hook runs where the chart is installed, not
-  on the target), while the same toggles without the knob render the kagent
-  storage-version pair as before;
+  on the target);
 - the slices: the serving- and runtime-shaped toggle sets (ci/test-slice-*-values.yaml)
   render alone and combined, the combined release is the union, and every
   OCIRepository / HelmRelease of the first slice is byte-identical in the combined
@@ -60,10 +59,9 @@ FLEET_APIS = [
 VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", *FLEET_APIS]
 ENGINE_OFF = ["--set", "components.flux.enabled=false"]
 FLUX_KINDS = {"OCIRepository", "HelmRelease"}
-# The kagent storage-version hooks and their identity (hooks/*.yaml), the only
-# objects of the engine-off render that are not Flux documents.
-HOOK_OBJECTS = {("Job", "t-kagent-storage-version-backup"), ("Job", "t-kagent-storage-version-restore"),
-                ("ServiceAccount", "t-hooks"), ("ClusterRole", "t-hooks"), ("ClusterRoleBinding", "t-hooks"),
+# The hook identity and its policy (hooks/*.yaml), the only objects an engine-off
+# render may carry besides Flux documents (the serving teardown's, with the slice on).
+HOOK_OBJECTS = {("ServiceAccount", "t-hooks"), ("ClusterRole", "t-hooks"), ("ClusterRoleBinding", "t-hooks"),
                 ("Role", "t-hooks"), ("RoleBinding", "t-hooks"), ("NetworkPolicy", "t-hooks"), ("CiliumNetworkPolicy", "t-hooks")}
 KNOB = ["--set", "gitops.target.kubeConfig.secretRef.name=wc01-kubeconfig"]
 KNOB_KEY = ["--set", "gitops.target.kubeConfig.secretRef.key=value"]
@@ -160,8 +158,7 @@ def check_knob(meta: str) -> None:
         # The Flux documents minus the kubeConfig lines are the default's placed on
         # a target (targeted: the names prefixed, the workloads and their Helm
         # storage in agent-platform); what else leaves the render is the hook
-        # family (ci-values turn kagent on, and the storage-version hooks run where
-        # the chart is installed — check_hooks).
+        # family (a hook runs where the chart is installed — check_hooks).
         stripped = {k: "\n".join(line for line in d.split("\n") if line not in lines) for k, d in docs.items() if k[0] in FLUX_KINDS}
         expected = {(k[0], f"t-{k[1]}"): targeted(d) for k, d in documents(plain).items() if k[0] in FLUX_KINDS}
         if stripped != expected:
@@ -359,12 +356,12 @@ def check_guards(meta: str) -> None:
 def check_hooks(meta: str) -> None:
     runtime = ["-f", f"{meta}/ci/test-slice-runtime-values.yaml"]
     jobs = lambda m: sum(1 for kind, _ in documents(m) if kind == "Job")
-    if jobs(helm(meta, runtime)) == 0:
-        sys.exit("FAIL: the runtime shape without the knob renders no hook Job (the kagent storage-version pair is expected)")
+    if jobs(helm(meta, runtime)):
+        sys.exit("FAIL: the runtime shape (engine off) renders a hook Job; a cluster's own Flux gets no hook of the kagent line")
     with_knob = helm(meta, [*runtime, "-f", f"{meta}/ci/test-target-values.yaml"])
     if jobs(with_knob) or "kind: ServiceAccount" in with_knob:
         sys.exit("FAIL: a hook Job or its identity renders with the target knob; hooks run on the installation, not on the target")
-    ok("no hook Job renders with the target knob; the storage-version pair still renders without it")
+    ok("no hook Job renders with the target knob, none without it on the runtime shape")
 
 
 def check_slices(meta: str) -> None:
@@ -381,8 +378,7 @@ def check_slices(meta: str) -> None:
         if kind_name[1] == "agent-platform-connectivity":
             continue
         # A hook object is no installed object: Helm creates it for its events and removes it again, so the hook
-        # identity's event list growing with the second slice's hooks (the serving teardown's pre-delete joined by the
-        # kagent storage-version pair's) changes nothing an in-place upgrade keeps.
+        # identity's event list growing with the second slice's hooks changes nothing an in-place upgrade keeps.
         if "\n    helm.sh/hook: " in doc:
             continue
         if documents(both).get(kind_name) != doc:

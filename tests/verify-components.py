@@ -433,7 +433,7 @@ def main(meta: str, connectivity: str) -> int:
 
     # --- all on ---------------------------------------------------------------
     on_manifest = render(meta, [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]])
-    # the release objects only: the kagent CRDs' storage-version hooks (#396, verify-engine.py) are Helm hooks and render with the engine off too
+    # the release objects only: a Helm hook (the serving teardown's, with the slice on) is no release object
     kinds = {m.group(1) for d in on_manifest.split("\n---\n") if "helm.sh/hook:" not in d for m in [re.search(r"^kind: (\S+)$", d, re.M)] if m}
     if kinds - {"OCIRepository", "HelmRelease"}:
         fail(f"the extras-on render is not a pure app-of-apps render: {sorted(kinds)}")

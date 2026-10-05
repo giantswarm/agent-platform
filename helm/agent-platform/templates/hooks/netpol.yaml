@@ -1,7 +1,7 @@
 {{- /*
 The network policy of the hook identity (giantswarm/agent-platform#413). Every
-hook Job of this chart — the kagent namespace hook, the two storage-version
-hooks, the self hooks, the ordered teardown — runs `kubectl` (and `helm`,
+hook Job of this chart — the kagent namespace hook, the self hooks, the
+ordered teardown, the serving teardown — runs `kubectl` (and `helm`,
 which is the same apiserver traffic) from the release namespace under the pod
 labels app.kubernetes.io/instance: <release> + app.kubernetes.io/component:
 hooks, and nothing else: in-cluster kubectl dials KUBERNETES_SERVICE_HOST by IP,
@@ -20,8 +20,8 @@ it with the identity once every hook of the event succeeded, before-hook-creatio
 brings it back for the next event — at every event a hook Job of this chart
 runs: with the bundled engine all six (the self hooks run at pre-upgrade or
 post-install/post-upgrade depending on the self shape, the teardown at
-pre-delete and post-delete), without it the events of the storage-version hooks and the
-serving teardown (agent-platform.hooks.serviceAccountEvents). The self-management resumer Job is
+pre-delete and post-delete), without it the serving teardown's event
+(agent-platform.hooks.serviceAccountEvents). The self-management resumer Job is
 not a hook and carries app.kubernetes.io/component: self-management — it is
 not this policy's. Gated like the identity (rbac.yaml) and, like every policy
 the platform renders, on networkPolicy.enabled, in the flavour
@@ -31,7 +31,7 @@ networkPolicy.kubernetes.apiServerCIDR in the kubernetes one (vanilla
 NetworkPolicy has no entity selectors); no ingress — the hook serves nothing.
 */ -}}
 {{- $engine := eq (include "agent-platform.engineEnabled" .) "true" }}
-{{- if and .Values.networkPolicy.enabled (or $engine (include "agent-platform.kagent.storageVersionHooks" .) (include "agent-platform.serving.teardownEvent" .)) }}
+{{- if and .Values.networkPolicy.enabled (or $engine (include "agent-platform.serving.teardownEvent" .)) }}
 {{- $events := ternary "pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete" (include "agent-platform.hooks.serviceAccountEvents" .) $engine }}
 {{- if eq (include "agent-platform.shape.networkPolicyFlavor" .) "cilium" }}
 apiVersion: cilium.io/v2
