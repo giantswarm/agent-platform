@@ -660,19 +660,18 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@$(METRICS_EXPRS) $(VERIFY_TMP)/vl-on.out | grep -q '^agent=.* : source.unverifiedWorkload.serviceAccount$$' || { echo "FAIL: no agent attribution label (the source ServiceAccount behind the Substrate egress predicate; verify-metric-labels holds the expression)"; exit 1; }
 	@$(METRICS_EXPRS) $(VERIFY_TMP)/vl-on.out | grep -q '^agent_namespace=.* : source.unverifiedWorkload.namespace$$' || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
 	@echo "ok: the labels on the metrics policy"
-	@echo "--> the price ConfigMap renders and the AgentgatewayParameters references it"
-	@grep -q 'name: t-model-catalog' $(VERIFY_TMP)/vl-on.out || { echo "FAIL: no model-price ConfigMap; the overlay's models would go unpriced"; exit 1; }
-	@grep -A4 '^  modelCatalog:' $(VERIFY_TMP)/vl-on.out | grep -q 'key: catalog.json' || { echo "FAIL: AgentgatewayParameters does not reference the price ConfigMap"; exit 1; }
-	@awk '/^  name: t-model-catalog$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-on.out | grep -q '"metadata"' && { echo "FAIL: the price ConfigMap carries metadata; the data plane would take it as a base catalog and drop its built-in one"; exit 1; } || true
-	@echo "ok: price catalog wired"
-	@echo "--> no overlay entries: no price ConfigMap and no catalog source, the built-in catalog alone"
+	@echo "--> the defaults carry no overlay entries (the pinned gateway prices every default model): no price ConfigMap and no catalog source, the built-in catalog alone"
+	@if grep -qE 'model-catalog|^  modelCatalog:' $(VERIFY_TMP)/vl-on.out; then echo "FAIL: the default empty overlay renders the price ConfigMap or its catalog source"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set llmRouting.modelCatalog.providers=null >$(VERIFY_TMP)/vl-nocat.out 2>&1 || { cat $(VERIFY_TMP)/vl-nocat.out; exit 1; }
-	@if grep -qE 'model-catalog|^  modelCatalog:' $(VERIFY_TMP)/vl-nocat.out; then echo "FAIL: an empty overlay still renders the price ConfigMap or its catalog source"; exit 1; fi
+	@if grep -qE 'model-catalog|^  modelCatalog:' $(VERIFY_TMP)/vl-nocat.out; then echo "FAIL: a null overlay renders the price ConfigMap or its catalog source"; exit 1; fi
 	@echo "ok: empty overlay renders nothing"
-	@echo "--> an installation adds a model to a provider the defaults already name (the schema keeps providers open below the provider)"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set-json 'llmRouting.modelCatalog.providers.anthropic.models.claude-extra={"rates":{"input":"1","output":"2"}}' >$(VERIFY_TMP)/vl-extra.out 2>&1 || { cat $(VERIFY_TMP)/vl-extra.out; echo "FAIL: the schema refuses an extra model under a default provider"; exit 1; }
-	@grep -q '"claude-extra"' $(VERIFY_TMP)/vl-extra.out || { echo "FAIL: the extra model did not reach the price ConfigMap"; exit 1; }
-	@echo "ok: extra model accepted"
+	@echo "--> an installation that prices a model renders the price ConfigMap, the AgentgatewayParameters references it, and the schema keeps providers open below the provider"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set-json 'llmRouting.modelCatalog.providers.anthropic.models.claude-extra={"rates":{"input":"1","output":"2"}}' >$(VERIFY_TMP)/vl-extra.out 2>&1 || { cat $(VERIFY_TMP)/vl-extra.out; echo "FAIL: the schema refuses a model under a provider"; exit 1; }
+	@grep -q 'name: t-model-catalog' $(VERIFY_TMP)/vl-extra.out || { echo "FAIL: no model-price ConfigMap; the overlay's models would go unpriced"; exit 1; }
+	@grep -q '"claude-extra"' $(VERIFY_TMP)/vl-extra.out || { echo "FAIL: the overlay model did not reach the price ConfigMap"; exit 1; }
+	@grep -A4 '^  modelCatalog:' $(VERIFY_TMP)/vl-extra.out | grep -q 'key: catalog.json' || { echo "FAIL: AgentgatewayParameters does not reference the price ConfigMap"; exit 1; }
+	@awk '/^  name: t-model-catalog$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-extra.out | grep -q '"metadata"' && { echo "FAIL: the price ConfigMap carries metadata; the data plane would take it as a base catalog and drop its built-in one"; exit 1; } || true
+	@echo "ok: price catalog wired"
 	@echo "--> the network policies admit the LLM port in both flavors"
 	@grep -A24 'name: agent-platform-connectivity-dataplane$$' $(VERIFY_TMP)/vl-on.out | grep -q '"8081"' || { echo "FAIL: the cilium data-plane policy does not admit the LLM port"; exit 1; }
 	@grep -A32 'name: agent-platform-connectivity-dataplane$$' $(VERIFY_TMP)/vl-on.out | grep -q '"15020"' || { echo "FAIL: the cilium data-plane policy does not admit the scrape port"; exit 1; }
