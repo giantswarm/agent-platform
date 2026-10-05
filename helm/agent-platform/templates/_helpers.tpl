@@ -142,7 +142,7 @@ overwrite would hide a values file that still spells the old key.
     atelet are one Substrate release whatever kagent build the range admits
     (giantswarm/agent-platform#466). An installation's own workerImage stands
     only while its tag is that release (a mirror by another path). And
-    substrateWorkerPool.template.podAffinity, the worker pods' required
+    substrateWorkerPool.template.podAffinity, the worker pods' preferred
     affinity to the atelet on their node, from the Substrate release that
     carries the field on (agent-platform.substrate.workerPoolAteletAffinity,
     giantswarm/agent-platform#756); an installation's own podAffinity stands
@@ -791,7 +791,7 @@ tests/verify-workerpool.py reads the value from this file.
 {{/*
 The first release of the Substrate line whose WorkerPool CRD carries
 spec.template.podAffinity (giantswarm/substrate#98). From it on the chart
-derives the worker pods' required affinity to the atelet on their node
+derives the worker pods' preferred affinity to the atelet on their node
 (agent-platform.substrate.workerPoolAteletAffinity) and forwards an
 installation's own podAffinity; below it agent-platform.validateWorkerPool
 refuses the key, which every earlier release prunes silently
@@ -801,7 +801,7 @@ tests/verify-workerpool.py reads the value from this file.
 {{- define "agent-platform.substrate.workerPoolAffinityFloor" -}}1.3.0{{- end -}}
 
 {{/*
-The worker pods' required affinity to the atelet pod on their node, as JSON
+The worker pods' preferred affinity to the atelet pod on their node, as JSON
 ({} while the pinned Substrate release predates
 agent-platform.substrate.workerPoolAffinityFloor; a release candidate of that
 release carries the field too). A worker runs sandboxes only
@@ -809,9 +809,13 @@ through its node's atelet, and atelet's PriorityClass never preempts: when the
 atelet DaemonSet rolls on a node without spare CPU, a worker scheduled in the
 gap takes the CPU the old atelet pod freed, the new atelet pod stays Pending,
 the rollout stops at that node and the substrate release's upgrade times out
-(giantswarm/agent-platform#756). The term keeps a worker off every node where no
-atelet pod is bound — during a roll and on a fresh node alike; a running worker
-is never evicted by it. atelet's pods carry app: atelet in
+(giantswarm/agent-platform#756). The term, weight 100, steers a worker to a node
+where an atelet pod is bound whenever one has room; a running worker is never
+evicted by it. It is preferred, not required: Karpenter cannot see a
+DaemonSet's pods on a node it has not launched, so a required term is
+unsatisfiable on new capacity and a worker that fits no existing node would
+stay Pending for good (giantswarm/agent-platform#798). Karpenter relaxes a
+preferred term and launches the node. atelet's pods carry app: atelet in
 components.substrate.targetNamespace.
 Usage: include "agent-platform.substrate.workerPoolAteletAffinity" $root | fromJson
 */}}
@@ -821,7 +825,7 @@ Usage: include "agent-platform.substrate.workerPoolAteletAffinity" $root | fromJ
 {{- dict | toJson -}}
 {{- else -}}
 {{- $term := dict "topologyKey" "kubernetes.io/hostname" "namespaces" (list (dig "substrate" "targetNamespace" "ate-system" .Values.components)) "labelSelector" (dict "matchLabels" (dict "app" "atelet")) -}}
-{{- dict "requiredDuringSchedulingIgnoredDuringExecution" (list $term) | toJson -}}
+{{- dict "preferredDuringSchedulingIgnoredDuringExecution" (list (dict "weight" 100 "podAffinityTerm" $term)) | toJson -}}
 {{- end -}}
 {{- end -}}
 

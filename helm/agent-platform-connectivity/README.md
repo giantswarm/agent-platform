@@ -196,7 +196,7 @@ On the installation, after the cutover:
   own `baseUrl` or names a provider other than the first `llmRouting.models`
   entry's.
   The `baseUrl` lands under the CRD's block for the entry's provider —
-  `anthropic`, `openAI`, `sapAICore`, the three `ModelConfigSpec` gives one —
+  `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —
   never the lower-cased provider name, which the API server would prune; the
   render refuses a `baseUrl` on any other provider and a `provider` outside the
   CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
@@ -313,6 +313,31 @@ wherever it is read as CEL — the controller route's identity header, the
 compile takes the whole policy down. `make verify-metric-labels` asserts all
 of it, and that no other policy of the chart carries a `frontend.metrics`
 section.
+
+## Access log attributes
+
+`gateway.accessLog.attributes` adds fields to every access log line the data
+plane writes, from one Gateway-scoped `AgentgatewayPolicy`,
+`<release>-access-log` (`frontend.accessLog.attributes.add`). It is a map keyed
+by field name, each entry `{expression: <one-line CEL>, enabled: <bool>}`, the
+expression through `tpl`; Helm merges maps, so an installation adds or drops
+one field without restating the rest. A field is the place for what is per
+request: as a metric label it would make one series per value.
+
+The chart's one field is `agent_instance_id`, the session of an agent's model
+call. The kagent runtime names the `AgentInstance` a turn runs in (a Dev
+Portal conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
+model call of that turn, and the field reads it behind the same Substrate
+egress predicate as the agent labels (`agent-platform.substrate.egressCall`),
+so a pod that is not the egress logs no session (the empty value drops the
+field), header or not. Summed
+per `agent_instance_id`, the `llm` listener's lines give the cost of one
+conversation. Accounting, never authorization.
+
+**Guards.** The schema holds every entry to `{expression, enabled}`; the render
+fails, naming the entry, on a missing, empty or multi-line expression. No
+policy renders in `muster-direct` or with every entry off. `make
+verify-access-log` asserts it.
 
 ## The data plane's buffer
 
@@ -672,7 +697,13 @@ platform needs:
   egress policy shares through `agent-platform.kagent.otlpEgress`; without
   it every turn ended 3 s late on the Go ADK's pre-response trace flush,
   giantswarm/agent-platform#456); the worker pods reach only the egress
-  gateway, the dns and the cluster DNS. The kubernetes flavour renders the
+  gateway, the dns and the cluster DNS. The bundled stores, while they run:
+  Postgres (`substrate-postgres`, while `substrate.postgres` resolves to the
+  bundled StatefulSet) admits ate-api-server on 5432; rustfs
+  (`substrate-rustfs`, with `substrate.rustfs.enabled`) admits ate-api-server,
+  atelet and the `rustfs-bucket-init` Job on 9000, which
+  `substrate-rustfs-bucket-init` lets out; neither store dials out beyond DNS.
+  The kubernetes flavour renders the
   ingress policies. `make verify-kagent-netpol` asserts the render,
   `make verify-actor-telemetry-egress` the OTLP rules.
 - **Guards** (`templates/substrate/validate.yaml`): a Substrate with no
@@ -1066,6 +1097,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.metricLabels.user.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-user\"] : jwt.{{ include \"agent-platform.kagent.userIdClaim\" . }}"` |  |
 | gateway.metricLabels.api_key.enabled | bool | `true` |  |
 | gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
+| gateway.accessLog.attributes.agent_instance_id.enabled | bool | `true` |  |
+| gateway.accessLog.attributes.agent_instance_id.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-instance-id\"] : \"\""` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -1119,10 +1152,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
 | hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
-| hooks.kubectlImage.tag | string | `"1.37.0"` |  |
+| hooks.kubectlImage.tag | string | `"1.37.1"` |  |
 | hooks.opensslImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.opensslImage.repository | string | `"giantswarm/alpine-openssl"` |  |
-| hooks.opensslImage.tag | string | `"3.5.8"` |  |
+| hooks.opensslImage.tag | string | `"3.5.9"` |  |
 | extraObjects | list | `[]` |  |
 | dashboards.enabled | bool | `true` |  |
 | dashboards.namespace | string | `""` |  |
@@ -1201,13 +1234,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.harness.snapshotStore.crossplane.aws.accountId | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.aws.oidcProvider | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.aws.roleName | string | `""` |  |
-| kagent.harness.snapshotStore.crossplane.aws.lifecycleDays | int | `30` |  |
 | kagent.harness.snapshotStore.crossplane.capz.storageAccountName | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.containerName | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.resourceGroup | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.subscriptionId | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.replicationType | string | `"LRS"` |  |
-| kagent.harness.snapshotStore.crossplane.capz.lifecycleDays | int | `30` |  |
 | kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.oidcIssuerUrl | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.identityName | string | `""` |  |
 | kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.providerConfigRef | string | `""` |  |
@@ -1477,10 +1508,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.2.1"` |  |
+| agentgateway.controller.image.tag | string | `"2.2.2"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.2.1"` |  |
+| agentgateway.proxy.image.tag | string | `"2.2.2"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1592,8 +1623,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
 | agentManager.migration.image.tag | string | `"1.7.0"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
-| agentManager.migration.githubToken.secretName | string | `"kagent-skills-token"` |  |
-| agentManager.migration.githubToken.key | string | `"token"` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.installation.name | string | `""` |  |
@@ -1642,7 +1671,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
-| backstage.configReload.image.version | string | `"v1.37.0"` |  |
+| backstage.configReload.image.version | string | `"v1.37.1"` |  |
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
@@ -1686,7 +1715,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |
 | modelServing.prepull.pauseImage.registry | string | `"gsoci.azurecr.io"` |  |
 | modelServing.prepull.pauseImage.repository | string | `"giantswarm/pause"` |  |
-| modelServing.prepull.pauseImage.tag | string | `"3.10.1"` |  |
+| modelServing.prepull.pauseImage.tag | string | `"3.10.2"` |  |
 | modelServing.prepull.resources.requests.cpu | string | `"5m"` |  |
 | modelServing.prepull.resources.requests.memory | string | `"8Mi"` |  |
 | modelServing.prepull.resources.limits.memory | string | `"32Mi"` |  |

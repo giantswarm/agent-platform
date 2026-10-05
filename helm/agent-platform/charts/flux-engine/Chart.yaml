@@ -18,9 +18,10 @@ sources:
   - https://github.com/giantswarm/agent-platform
   - https://github.com/controlplaneio-fluxcd/flux-operator
   - https://github.com/fluxcd/flux2
-# appVersion is the Flux Operator this subchart runs; keep it equal to
-# operator.image.tag in values.yaml (Renovate moves the tag; move this with it).
-appVersion: "v0.60.0"
+# appVersion is the Flux Operator this subchart runs, equal to
+# operator.image.tag in values.yaml (Renovate moves both); crds/flux-operator.yaml
+# is that release's CRDs (`make sync-flux-crds`, held by verify-flux-crds).
+appVersion: "v0.61.0"
 # The meta chart's Chart.yaml names this version in its dependencies entry, and
 # Helm refuses a mismatch. A change to this subchart is released with the meta
 # chart (one tag, one OCI artifact); bump this only together with that entry.

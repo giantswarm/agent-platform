@@ -81,6 +81,10 @@ MODEL_IMAGES_BLOCK = re.compile(r"      # Models as OCI images \(modelServing\.m
 # dependency bump re-pins it by design (the committed renders of tests/golden/
 # show that move), while the pool's scheduling is what this comparison guards.
 IMAGE_REF = re.compile(r"^( *(?:- )?image: ).+$", re.M)
+# A preset ConfigMap's chart-version annotation, cut out of both sides of the
+# GOLDEN_REF comparison: it names the chart's version, which moves every
+# release, and a golden from before it carries none.
+CHART_VERSION = re.compile(r'^  annotations:\n    agent-platform\.giantswarm\.io/chart-version: ".*"\n', re.M)
 
 
 def fail(msg: str) -> None:
@@ -262,6 +266,7 @@ else:
         imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
         flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
         flashsized = flashnext and "memory: 118Gi" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
+        flashweighed = flashnext and "weightsGiB: 100" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
         lineup24 = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml")
         lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml")
         fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
@@ -278,6 +283,7 @@ else:
         metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
         gated = "gpuReadyLabel" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
+        hookpolicy = os.path.exists(f"{tree}/{CONN}/templates/substrate/hooks-netpol.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -326,6 +332,14 @@ else:
         head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
         golden.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
         print(f"note: the Flash-Next preset's memory limit is 118Gi on this side (#567) and not on {ref}: its ConfigMap is left out of the comparison")
+    # The Flash-Next checkpoint grew to 99.03 GiB on the Hub, so its preset
+    # declares weightsGiB 100 on this side (make verify-preset-weights); a
+    # golden from before declares 99, so that preset document is left out of
+    # the comparison on both sides. Drop this once GOLDEN_REF carries it.
+    if flashnext and not flashweighed:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
+        print(f"note: the Flash-Next preset declares 100 GiB of weights on this side and not on {ref}: its ConfigMap is left out of the comparison")
     # The two four-GPU presets ship on this side (giantswarm/agent-platform#591)
     # and not on a golden from before: their ConfigMaps and discovery entries are
     # left out of the head. Drop this once GOLDEN_REF carries #591.
@@ -585,6 +599,13 @@ else:
             for key in [k for k in side if k[0] in ("PodDisruptionBudget", "Cluster")]:
                 side.pop(key)
         print(f"note: the single-replica budgets are drainable on this side (#697) and not on {ref}: the budgets and the Postgres Cluster are left out of the comparison")
+    # The hook identity's network policy renders on this side
+    # (giantswarm/agent-platform#367) and not on a golden from before, so it is
+    # left out of the head. Drop this once GOLDEN_REF carries #367.
+    if not hookpolicy:
+        for kind in ("NetworkPolicy", "CiliumNetworkPolicy"):
+            head.pop((kind, "t-hooks"), None)
+        print(f"note: the hook Jobs' network policy renders on this side (#367) and not on {ref}: it is left out of the comparison")
     # A preset added to or retired from the shipped line-up renders its preset
     # ConfigMap on one side only: a line-up change, not the pool's scheduling,
     # so it is left out of the comparison (the presets both sides ship are
@@ -602,9 +623,9 @@ else:
     if set(head) != set(golden):
         fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
     for key in sorted(head):
-        if IMAGE_REF.sub(r"\1<image>", head[key]) != IMAGE_REF.sub(r"\1<image>", golden[key]):
+        if IMAGE_REF.sub(r"\1<image>", CHART_VERSION.sub("", head[key])) != IMAGE_REF.sub(r"\1<image>", CHART_VERSION.sub("", golden[key])):
             fail(f"untainted render vs {ref}: {key[0]}/{key[1]} differs:\n{head[key]}\n--- {ref}:\n{golden[key]}")
-    ok(f"an empty taint key leaves the serving render (cache claim off on both sides) byte-identical to {ref} but for the discovery block and the image references")
+    ok(f"an empty taint key leaves the serving render (cache claim off on both sides) byte-identical to {ref} but for the discovery block, the image references and the presets' chart version")
 
 # --- the guards --------------------------------------------------------------
 for flags, needle in [

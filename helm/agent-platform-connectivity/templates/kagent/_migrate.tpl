@@ -49,10 +49,10 @@ application.giantswarm.io/team: {{ index .Chart.Annotations "io.giantswarm.appli
 {{- end -}}
 
 {{/*
-The Job's pod template, rendered once: migrate-job.yaml hashes it into the
-Job's name (the name follows everything Job.spec.template makes immutable, so
-a changed template renders a new Job and an unchanged one is re-applied as is)
-and emits it under spec.template. Takes a dict: root (the chart context),
+The run's pod template, rendered once: migrate-cronjob.yaml hashes it into
+the name of the run the start hook creates (a changed template starts a new
+run, an unchanged one finds its run started) and emits it under the CronJob's
+jobTemplate. Takes a dict: root (the chart context),
 serviceAccountName (the tenant identity), image, args (list), env (list).
 */}}
 {{- define "agent-platform.kagent.migration.podTemplate" -}}
@@ -107,4 +107,20 @@ meta chart's BOM pin for the agent-manager component).
 {{- define "agent-platform.kagent.migration.image" -}}
 {{- $i := .Values.agentManager.migration.image -}}
 {{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
+{{- end -}}
+
+{{/*
+The start hook's script (migrate-cronjob.yaml): create the run <job> from the
+CronJob <cronJob> in <namespace> unless a Job of that name exists — finished,
+running or failed, the run of this pod template has been started. Takes a
+dict: namespace, cronJob, job.
+*/}}
+{{- define "agent-platform.kagent.migration.startScript" -}}
+existing=$(kubectl -n {{ .namespace }} get job {{ .job }} --ignore-not-found -o name)
+if [ -n "$existing" ]; then
+  echo "{{ .job }} exists: this migration was started; nothing to start"
+  exit 0
+fi
+kubectl -n {{ .namespace }} create job {{ .job }} --from=cronjob/{{ .cronJob }}
+echo "{{ .job }} started; its outcome: kubectl -n {{ .namespace }} get job {{ .job }}, the ConfigMap agent-manager-migrate-report"
 {{- end -}}

@@ -9,7 +9,7 @@ operator:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/flux-operator
-    tag: v0.60.0
+    tag: v0.61.0
     pullPolicy: IfNotPresent
   # -- Pull secrets for the operator image, in the release namespace
   # (`global.imagePullSecrets` of the meta chart apply as well).

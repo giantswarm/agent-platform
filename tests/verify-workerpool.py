@@ -97,14 +97,17 @@ SPREAD = {
 TEMPLATE_FIELDS = "labels, annotations, nodeSelector, tolerations, priorityClassName, nodeAffinity, resources"
 WORKER_LABEL = "ate.dev/worker-pool"
 FLOOR_RE = r'^\{\{- define "agent-platform\.substrate\.%s" -\}\}(\S*?)\{\{- end -\}\}$'
-# The worker pods' required affinity to the atelet on their node (#756), as the
+# The worker pods' preferred affinity to the atelet on their node (#756), as the
 # meta chart derives it: atelet's pods carry app: atelet in ate-system
-# (components.substrate.targetNamespace).
-ATELET_AFFINITY = {"requiredDuringSchedulingIgnoredDuringExecution": [
-    {"topologyKey": "kubernetes.io/hostname", "namespaces": ["ate-system"],
-     "labelSelector": {"matchLabels": {"app": "atelet"}}}]}
+# (components.substrate.targetNamespace). Preferred, never required: Karpenter
+# cannot satisfy a required term on a DaemonSet's pods on new capacity (#798).
+ATELET_TERM = {"weight": 100, "podAffinityTerm": {
+    "topologyKey": "kubernetes.io/hostname", "namespaces": ["ate-system"],
+    "labelSelector": {"matchLabels": {"app": "atelet"}}}}
+ATELET_AFFINITY = {"preferredDuringSchedulingIgnoredDuringExecution": [ATELET_TERM]}
 # An installation's own podAffinity: the atelet term plus a preference of its own.
-OWN_AFFINITY = {**ATELET_AFFINITY, "preferredDuringSchedulingIgnoredDuringExecution": [
+OWN_AFFINITY = {"preferredDuringSchedulingIgnoredDuringExecution": [
+    ATELET_TERM,
     {"weight": 10, "podAffinityTerm": {"topologyKey": "topology.kubernetes.io/zone",
                                        "labelSelector": {"matchLabels": {"ate.dev/worker-pool": "kagent-default"}}}}]}
 # A range below any release that could carry the spread fields (a synthetic older
@@ -206,7 +209,7 @@ def check_atelet_affinity(meta: str, tmp: str) -> None:
     values, _, _ = kagent_release(meta, ["-f", values_file(tmp, "own-affinity", {"nodeSelector": ARCH, "podAffinity": OWN_AFFINITY}), "--set", f"components.substrate.versionRange={at}"])
     if template_of(values).get("podAffinity") != OWN_AFFINITY:
         cc.fail(f"an installation's own podAffinity does not reach the kagent release verbatim with the Substrate range at {floor}: {template_of(values).get('podAffinity')!r}")
-    print(f"ok: from the Substrate release {floor} on the kagent release carries the required affinity to the atelet on the worker's node, and an own template.podAffinity stands verbatim instead")
+    print(f"ok: from the Substrate release {floor} on the kagent release carries the preferred affinity to the atelet on the worker's node, and an own template.podAffinity stands verbatim instead")
 
 
 def worker_pdbs(manifest: str, pool: str) -> list[dict]:
@@ -275,7 +278,7 @@ def main(meta: str) -> int:
         if stray := sorted(set(template) - {"nodeSelector", "resources", *derived}):
             cc.fail(f"the default forwards {stray!r} in kagent.substrateWorkerPool.template; the default template is the architecture pin, the resources and the derived atelet affinity, nothing else (the disruption knobs are an installation's)")
         if derived and template.get("podAffinity") != ATELET_AFFINITY:
-            cc.fail(f"the default forwards podAffinity {template.get('podAffinity')!r}; expected the required affinity to the atelet {ATELET_AFFINITY!r}")
+            cc.fail(f"the default forwards podAffinity {template.get('podAffinity')!r}; expected the preferred affinity to the atelet {ATELET_AFFINITY!r}")
         print(f"ok: the default forwards the architecture alone ({ARCH}){' and the atelet affinity' if derived else ''} — no annotation, no spread, no capacity type")
 
         values, forwarded, source = kagent_release(meta, ["-f", values_file(tmp, "pin", {"nodeSelector": PIN})])

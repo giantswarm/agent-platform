@@ -827,6 +827,9 @@
                                 "type": "string"
                             }
                         },
+                        "prereleases": {
+                            "type": "boolean"
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -870,6 +873,9 @@
                             "type": "string"
                         },
                         "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "prereleases": {
                             "type": "boolean"
                         },
                         "repository": {
@@ -981,6 +987,41 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "accessLog": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "attributes": {
+                            "type": "object",
+                            "properties": {
+                                "agent_instance_id": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "enabled": {
+                                            "type": "boolean"
+                                        },
+                                        "expression": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            },
+                            "additionalProperties": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "enabled": {
+                                        "type": "boolean"
+                                    },
+                                    "expression": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "gatewayClassName": {
                     "type": "string"
                 },

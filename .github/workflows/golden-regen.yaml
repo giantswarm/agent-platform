@@ -1,11 +1,16 @@
-# Regenerates the committed renders of tests/golden/ on Renovate and Dependabot
-# PR branches and pushes the result back onto the branch.
+# Regenerates the flux-engine subchart's crds/ and the committed renders of
+# tests/golden/ on Renovate and Dependabot PR branches and pushes the result
+# back onto the branch.
 #
 # Why: test-ingress-modes (`make verify-target`) compares both charts' renders
 # against tests/golden/. A dependency bump that moves an image tag or a
 # component range in helm/<chart>/values.yaml changes the render, so the check
 # fails until someone runs `make golden-update` and pushes. This does that
-# step, and the PR diff then shows exactly the objects the bump moved.
+# step, and the PR diff then shows exactly the objects the bump moved. A Flux
+# Operator bump moves the operator tag and the subchart's appVersion, and
+# `make verify-flux-crds` fails until crds/ are that release's CRDs: `make
+# sync-flux-crds` writes them first (the CRD hook's ConfigMap in the goldens
+# carries crds/flux-operator.yaml).
 #
 # Repo-specific sibling of the generated zz_generated.helm-docs-regen.yaml,
 # with the same safety properties:
@@ -13,8 +18,8 @@
 #     and CircleCI's test-ingress-modes use; the same pin is installed here.
 #   * A clean tree is a no-op. The push re-triggers this workflow on the new
 #     head; that run finds nothing to change and exits, so it never loops.
-#   * Only tests/golden/ is committed: a regen that touches anything else fails
-#     the job and nothing is pushed.
+#   * Only tests/golden/ and the subchart's crds/ are committed: a regen that
+#     touches anything else fails the job and nothing is pushed.
 #   * The push uses the taylorbot PAT, not GITHUB_TOKEN, so the required checks
 #     run on the new commit; renovate.json5 lists its author (dev@giantswarm.io)
 #     in gitIgnoredAuthors, so Renovate keeps rebasing the PR.
@@ -27,6 +32,7 @@ on:
     paths:
       - 'helm/**'
       - 'tests/verify-target.py'
+      - 'tests/verify-flux-crds.py'
 
 permissions: {}
 
@@ -74,9 +80,11 @@ jobs:
           download_url: "https://get.helm.sh/helm-v${version}-linux-amd64.tar.gz"
           tarball_binary_path: "linux-amd64/helm"
           smoke_test: "${binary} version --short"
-      - name: Regenerate tests/golden/
+      - name: Regenerate the flux-engine CRDs and tests/golden/
         if: steps.token.outputs.available == 'true'
-        run: make golden-update
+        run: |
+          make sync-flux-crds
+          make golden-update
       - name: Commit and push the regenerated renders
         if: steps.token.outputs.available == 'true'
         env:
@@ -84,19 +92,19 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$(git status --porcelain)" ]; then
-            echo "tests/golden/ already in sync, nothing to push"
+            echo "crds/ and tests/golden/ already in sync, nothing to push"
             exit 0
           fi
-          outside="$(git status --porcelain | grep -v ' tests/golden/' || true)"
+          outside="$(git status --porcelain | grep -v -e ' tests/golden/' -e ' helm/agent-platform/charts/flux-engine/crds/' || true)"
           if [ -n "$outside" ]; then
-            echo "::error::make golden-update changed files outside tests/golden/:"
+            echo "::error::the regen changed files outside tests/golden/ and the flux-engine crds/:"
             echo "$outside"
             exit 1
           fi
           git config --local user.email "dev@giantswarm.io"
           git config --local user.name "taylorbot"
-          git add tests/golden
-          git commit -m "chore(test): regenerate tests/golden/ for the dependency bump"
+          git add tests/golden helm/agent-platform/charts/flux-engine/crds
+          git commit -m "chore(test): regenerate crds/ and tests/golden/ for the bump"
           for attempt in 1 2 3; do
             git push origin "HEAD:$BRANCH" && exit 0
             echo "push rejected (attempt $attempt), rebasing onto origin/$BRANCH"

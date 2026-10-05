@@ -187,7 +187,7 @@ On the installation, after the cutover:
   own `baseUrl` or names a provider other than the first `llmRouting.models`
   entry's.
   The `baseUrl` lands under the CRD's block for the entry's provider —
-  `anthropic`, `openAI`, `sapAICore`, the three `ModelConfigSpec` gives one —
+  `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —
   never the lower-cased provider name, which the API server would prune; the
   render refuses a `baseUrl` on any other provider and a `provider` outside the
   CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
@@ -304,6 +304,31 @@ wherever it is read as CEL — the controller route's identity header, the
 compile takes the whole policy down. `make verify-metric-labels` asserts all
 of it, and that no other policy of the chart carries a `frontend.metrics`
 section.
+
+## Access log attributes
+
+`gateway.accessLog.attributes` adds fields to every access log line the data
+plane writes, from one Gateway-scoped `AgentgatewayPolicy`,
+`<release>-access-log` (`frontend.accessLog.attributes.add`). It is a map keyed
+by field name, each entry `{expression: <one-line CEL>, enabled: <bool>}`, the
+expression through `tpl`; Helm merges maps, so an installation adds or drops
+one field without restating the rest. A field is the place for what is per
+request: as a metric label it would make one series per value.
+
+The chart's one field is `agent_instance_id`, the session of an agent's model
+call. The kagent runtime names the `AgentInstance` a turn runs in (a Dev
+Portal conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
+model call of that turn, and the field reads it behind the same Substrate
+egress predicate as the agent labels (`agent-platform.substrate.egressCall`),
+so a pod that is not the egress logs no session (the empty value drops the
+field), header or not. Summed
+per `agent_instance_id`, the `llm` listener's lines give the cost of one
+conversation. Accounting, never authorization.
+
+**Guards.** The schema holds every entry to `{expression, enabled}`; the render
+fails, naming the entry, on a missing, empty or multi-line expression. No
+policy renders in `muster-direct` or with every entry off. `make
+verify-access-log` asserts it.
 
 ## The data plane's buffer
 
@@ -663,7 +688,13 @@ platform needs:
   egress policy shares through `agent-platform.kagent.otlpEgress`; without
   it every turn ended 3 s late on the Go ADK's pre-response trace flush,
   giantswarm/agent-platform#456); the worker pods reach only the egress
-  gateway, the dns and the cluster DNS. The kubernetes flavour renders the
+  gateway, the dns and the cluster DNS. The bundled stores, while they run:
+  Postgres (`substrate-postgres`, while `substrate.postgres` resolves to the
+  bundled StatefulSet) admits ate-api-server on 5432; rustfs
+  (`substrate-rustfs`, with `substrate.rustfs.enabled`) admits ate-api-server,
+  atelet and the `rustfs-bucket-init` Job on 9000, which
+  `substrate-rustfs-bucket-init` lets out; neither store dials out beyond DNS.
+  The kubernetes flavour renders the
   ingress policies. `make verify-kagent-netpol` asserts the render,
   `make verify-actor-telemetry-egress` the OTLP rules.
 - **Guards** (`templates/substrate/validate.yaml`): a Substrate with no

@@ -193,11 +193,11 @@ gitops:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/kubectl
-      tag: v1.37.0
+      tag: v1.37.1
     helmImage:
       registry: gsoci.azurecr.io
       repository: giantswarm/alpine-k8s
-      tag: 1.37.0
+      tag: 1.37.1
   # === Self-management (the chart holds its own release) ===
   # Where the chart brings the engine, the engine also holds the chart: the
   # release renders its own OCIRepository + HelmRelease (both named after the
@@ -712,6 +712,13 @@ components:  # @schema additionalProperties: true
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
     versionRange: ">=1.3.0 <1.4.0"
+    # Stable releases only, also where gitops.prereleases admits the
+    # platform's release candidates: the worker image above follows the
+    # floor, and a candidate's atelet next to the floor's worker fails every
+    # gVisor actor at its pause container (giantswarm/giantswarm#38124). The
+    # line's ate-controller runs the gVisor workers on its own release from
+    # 1.4.0 on (giantswarm/substrate#114).
+    prereleases: false
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -734,6 +741,8 @@ components:  # @schema additionalProperties: true
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
     versionRange: ">=1.3.0 <1.4.0"
+    # Stable releases only, the range of substrate-crds above.
+    prereleases: false
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -839,8 +848,12 @@ components:  # @schema additionalProperties: true
     # The floor is 1.5.0: the chart takes observability.otel, the OTLP trace
     # export global.observability.traces.otlp derives, and serviceMonitor
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
-    # (giantswarm/model-manager#203, giantswarm/giantswarm#36711).
-    versionRange: ">=1.5.0 <2.0.0"
+    # (giantswarm/model-manager#203, giantswarm/giantswarm#36711). 1.9.1 is
+    # the floor: a model-manager deletes only the ModelConfigs it created,
+    # recorded by its chart's --instance, so a second model-manager on the
+    # kagent namespace or a copied manifest no longer loses agents their
+    # model configuration on an unload (giantswarm/model-manager#230).
+    versionRange: ">=1.9.1 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -1223,12 +1236,12 @@ components:  # @schema additionalProperties: true
     releasedWithChart: true
     versionRange: ""
     forwardAllValues: true
-    # The release carries the agent-manager migrate Job (agentManager.migration,
-    # the kagent API v2 cut-over of an installation's agents) as a plain Job
-    # next to the platform's wiring: helm-controller must not wait for it, so a
-    # migrate failure (the command's non-zero exits) never fails the upgrade
-    # that renders the Harness. Hooks (the database Secret derivation) still
-    # complete before the release is reported.
+    # helm-controller does not wait for a Job of this release to complete.
+    # The agent-manager migrate run (agentManager.migration) is no Job of the
+    # release: a post-upgrade hook creates it from a suspended CronJob, so its
+    # failure never fails the upgrade that renders the Harness (#378). Hooks
+    # (the database Secret derivation, the migrate start) still complete before
+    # the release is reported.
     disableWaitForJobs: true
     # The seven values blocks of the standalone chart's extras are no longer
     # held back from this release: every top-level block the connectivity chart
@@ -1636,6 +1649,26 @@ gateway:
     api_key:
       enabled: true
       expression: apiKey.name
+  # === Access log attributes ===
+  # Fields added to every access log line of the data plane, from one
+  # Gateway-scoped AgentgatewayPolicy, <release>-access-log
+  # (templates/agentgateway/access-log-policy.yaml); none renders while every
+  # entry is off. A map keyed by field name (Helm merges maps); each entry is
+  # {expression: <one-line CEL>, enabled: <bool, absent = true>}, the expression
+  # through tpl. A field for what is per request and would explode a metric's
+  # cardinality. README "Access log attributes".
+  accessLog:
+    attributes:  # @schema additionalProperties: {"type": "object", "additionalProperties": false, "properties": {"expression": {"type": "string"}, "enabled": {"type": "boolean"}}}
+      # The session of an agent's model call: the AgentInstance (a Dev Portal
+      # conversation, a Slack thread) the kagent runtime names in
+      # x-kagent-agent-instance-id, so the cost of one conversation can be
+      # summed from the log. Read behind the same predicate as the agent
+      # labels (agent-platform.substrate.egressCall): a caller that is not the
+      # Substrate egress logs no session, header or not. Accounting, never
+      # authorization.
+      agent_instance_id:
+        enabled: true
+        expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"] : ""'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -2695,11 +2728,15 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # CPU the old atelet pod freed and the rollout stops there. From the
     # Substrate line's 1.3.0 on (agent-platform.substrate
     # .workerPoolAffinityFloor) the chart DERIVES template.podAffinity, a
-    # required term on the atelet pods (app: atelet in
+    # preferred term (weight 100) on the atelet pods (app: atelet in
     # components.substrate.targetNamespace) with topologyKey
-    # kubernetes.io/hostname: a worker schedules only where an atelet pod is
-    # bound. An installation's own podAffinity stands instead of the derived
-    # one (keep the atelet term in it); below 1.3.0 the key is refused.
+    # kubernetes.io/hostname: a worker goes where an atelet pod is bound
+    # whenever such a node has room. Not required: Karpenter cannot see a
+    # DaemonSet's pods on a node it has not launched, so a required term
+    # leaves a worker that fits no existing node Pending for good
+    # (giantswarm/agent-platform#798). An installation's own podAffinity
+    # stands instead of the derived one (keep the atelet term in it, never
+    # required); below 1.3.0 the key is refused.
     podDisruptionBudget:
       enabled: true
       minAvailable: null
@@ -2944,7 +2981,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # the Generic agent chart 1.x labels every AgentTemplate
   # agent-platform.giantswarm.io/harness: kagent to be admitted by it. Through
   # 4.7.19 the connectivity chart rendered this object; 4.8.0 handed it to the
-  # kagent release in place (UPGRADE.md).
+  # kagent release in place (UPGRADE.md). The Harness carries no credential, by
+  # design: a private skill or plugin repository's credential is per source on
+  # the AgentTemplate (skills[].source.git.credentialRef, a Secret next to the
+  # template), so a missing Secret fails only the templates that name it and
+  # the token travels only with their requests (README "Private skill
+  # repositories").
   harness:
     create: true
     # An OVERRIDE of the runtime image, BY DIGEST (<repository>@sha256:<64 hex>;
@@ -3022,10 +3064,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           oidcProvider: ""
           # IAM role name. Defaults to bucketName.
           roleName: ""
-          # Snapshots expire after this many days: an actor whose snapshot is
-          # gone boots cold from the golden image again — one slower start,
-          # nothing lost. 30 days keeps a month of idle actors warm.
-          lifecycleDays: 30
         capz:
           # 3 to 24 lowercase letters and digits, globally unique: the storage
           # account the snapshots live in (https://<name>.blob.core.windows.net).
@@ -3039,9 +3077,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           # scope (the container's resource id) is spelled from it.
           subscriptionId: ""
           replicationType: LRS
-          # Blobs are deleted this many days after their last modification: an
-          # actor whose snapshot is gone boots cold from the golden image again.
-          lifecycleDays: 30
           # The UserAssignedIdentity s3proxy runs as: federated against the
           # cluster's OIDC issuer for the s3proxy ServiceAccount, assigned
           # Storage Blob Data Contributor on the container.
@@ -3830,7 +3865,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.2.1"
+      tag: "2.2.2"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -3864,7 +3899,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.2.1"
+      tag: "2.2.2"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -4485,10 +4520,10 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       cidrs: []
   # The per-installation cut-over Job the connectivity chart renders when
   # kagent and agent-manager are on: `agent-manager migrate` as the tenant
-  # identity kagent.fluxServiceAccountName, a plain Job in the kagent
-  # namespace (not a hook — its failure never fails the release, and
-  # components.agent-platform-connectivity.disableWaitForJobs stops the
-  # release from waiting on it), idempotent (giantswarm/agent-platform#346). The
+  # identity kagent.fluxServiceAccountName, a run in the kagent namespace that
+  # a post-install/post-upgrade hook creates from a suspended CronJob (no Job
+  # of the release — its failure never fails the release, #378), idempotent
+  # (giantswarm/agent-platform#346). The
   # image tag is this chart's BOM pin for the agent-manager component and
   # moves with it; the connectivity chart's values.yaml documents the rest.
   migration:
@@ -4498,9 +4533,6 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       repository: giantswarm/agent-manager
       tag: 1.7.0
     dryRun: false
-    githubToken:
-      secretName: kagent-skills-token
-      key: token
     gitopsNamespaces: []
 
 # === Cluster manager (cluster-manager) ===
@@ -4777,7 +4809,7 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
       registry: gsoci.azurecr.io
       name: giantswarm/kubectl
       # registry: gsoci.azurecr.io/giantswarm/kubectl
-      version: "v1.37.0"
+      version: "v1.37.1"
   # --- The backstage chart's own values (forwarded verbatim) ---
   ingress:
     enabled: false
@@ -5116,11 +5148,11 @@ hooks:
   kubectlImage:
     registry: gsoci.azurecr.io
     repository: giantswarm/alpine-k8s
-    tag: 1.37.0
+    tag: 1.37.1
   opensslImage:
     registry: gsoci.azurecr.io
     repository: giantswarm/alpine-openssl
-    tag: 3.5.8
+    tag: 3.5.9
 
 # === KServe (kserve-llmisvc-crd, kserve-llmisvc-resources) ===
 # Values forwarded verbatim to the two llm-d component releases
@@ -5472,7 +5504,7 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     pauseImage:
       registry: gsoci.azurecr.io
       repository: giantswarm/pause
-      tag: "3.10.1"
+      tag: "3.10.2"
     # Requests and limits of every container of the pod: the init containers
     # exit at once, the pause container idles. Never a GPU.
     resources:

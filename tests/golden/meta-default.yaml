@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -28,7 +28,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 automountServiceAccountToken: false
@@ -59,7 +59,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -83,7 +83,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 roleRef:
@@ -159,7 +159,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 spec:
@@ -183,7 +183,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -204,7 +204,7 @@ spec:
         app.kubernetes.io/instance: "t"
         app.kubernetes.io/managed-by: "Helm"
         app.kubernetes.io/part-of: agent-platform
-        app.kubernetes.io/version: "v0.60.0"
+        app.kubernetes.io/version: "v0.61.0"
         application.giantswarm.io/team: "bumblebee"
         helm.sh/chart: "flux-engine-0.1.0"
     spec:
@@ -215,7 +215,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "gsoci.azurecr.io/giantswarm/flux-operator:v0.60.0"
+          image: "gsoci.azurecr.io/giantswarm/flux-operator:v0.61.0"
           imagePullPolicy: IfNotPresent
           args:
             - --log-level=info
@@ -291,7 +291,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.60.0"
+    app.kubernetes.io/version: "v0.61.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -400,9 +400,6 @@ spec:
       migration:
         dryRun: false
         enabled: true
-        githubToken:
-          key: token
-          secretName: kagent-skills-token
         gitopsNamespaces: []
         image:
           registry: gsoci.azurecr.io
@@ -460,7 +457,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.2.1
+          tag: 2.2.2
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -491,7 +488,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.2.1
+          tag: 2.2.2
       resources:
         limits:
           cpu: 500m
@@ -549,7 +546,7 @@ spec:
         image:
           name: giantswarm/kubectl
           registry: gsoci.azurecr.io
-          version: v1.37.0
+          version: v1.37.1
       disabledExtensions:
       - page:gs/clusters
       - nav-item:gs/clusters
@@ -649,6 +646,12 @@ spec:
         parentRefs: []
     extraObjects: []
     gateway:
+      accessLog:
+        attributes:
+          agent_instance_id:
+            enabled: true
+            expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"]
+              : ""'
       gatewayClassName: agentgateway
       http:
         maxBufferSize: 8Mi
@@ -764,11 +767,11 @@ spec:
       kubectlImage:
         registry: gsoci.azurecr.io
         repository: giantswarm/alpine-k8s
-        tag: 1.37.0
+        tag: 1.37.1
       opensslImage:
         registry: gsoci.azurecr.io
         repository: giantswarm/alpine-openssl
-        tag: 3.5.8
+        tag: 3.5.9
     ingress:
       backendTrafficPolicy:
         annotations: {}
@@ -897,12 +900,10 @@ spec:
             aws:
               accountId: ""
               bucketName: ""
-              lifecycleDays: 30
               oidcProvider: ""
               roleName: ""
             capz:
               containerName: ""
-              lifecycleDays: 30
               replicationType: LRS
               resourceGroup: ""
               storageAccountName: ""
@@ -2124,7 +2125,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.5.0 <2.0.0"
+    semver: ">=1.9.1 <2.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2332,9 +2333,10 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 data:
   flux-operator.yaml: |
-    # The four CustomResourceDefinitions of the Flux Operator, lifted from the
-    # upstream chart controlplaneio-fluxcd/flux-operator 0.60.0 (templates/crds.yaml
-    # rendered with installCRDs=true, release-specific labels removed). They live in
+    # The four CustomResourceDefinitions of the Flux Operator, rendered from the
+    # upstream chart controlplaneio-fluxcd/flux-operator 0.61.0 (templates/crds.yaml
+    # with installCRDs=true, the labels app.kubernetes.io/instance,
+    # app.kubernetes.io/managed-by and helm.sh/chart removed). They live in
     # crds/ so Helm installs them before the FluxInstance template is validated.
     # Helm never upgrades or deletes crds/, and the operator does not manage its own
     # CRDs, so the meta chart's pre-install/pre-upgrade hook server-side applies this
@@ -2342,7 +2344,9 @@ data:
     # behind on uninstall (the Flux CRDs do not - the operator removes those with the
     # FluxInstance).
     #
-    # Renovate: bumped together with flux-engine.operator.image.tag in values.yaml.
+    # Generated, do not edit: `make sync-flux-crds` writes this file for Chart.yaml's
+    # appVersion (Renovate moves it with operator.image.tag in values.yaml), and
+    # `make verify-flux-crds` fails on any other content.
     ---
     apiVersion: apiextensions.k8s.io/v1
     kind: CustomResourceDefinition
@@ -2352,7 +2356,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.59.0'
+        app.kubernetes.io/version: 'v0.61.0'
       name: fluxinstances.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -2985,7 +2989,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.59.0'
+        app.kubernetes.io/version: 'v0.61.0'
       name: fluxreports.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -3287,7 +3291,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.59.0'
+        app.kubernetes.io/version: 'v0.61.0'
       name: resourcesetinputproviders.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -3784,7 +3788,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.59.0'
+        app.kubernetes.io/version: 'v0.61.0'
       name: resourcesets.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -4354,7 +4358,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
           args:
             - "apply"
             - "--server-side"
@@ -4452,7 +4456,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
           args:
             - "delete"
             - "jobs.batch"
@@ -4545,7 +4549,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |
@@ -4644,7 +4648,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |
@@ -4707,7 +4711,7 @@ spec:
                         type: RuntimeDefault
                     containers:
                       - name: sh
-                        image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+                        image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
                         command: ["/bin/sh", "-eu", "-c"]
                         args:
                           - |
@@ -4849,7 +4853,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |
@@ -4945,7 +4949,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
           args:
             - "delete"
             - "fluxinstances.fluxcd.controlplane.io"
@@ -5040,7 +5044,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
           args:
             - "delete"
             - "--namespace"

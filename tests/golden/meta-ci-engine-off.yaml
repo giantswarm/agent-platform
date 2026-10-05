@@ -188,9 +188,6 @@ spec:
       migration:
         dryRun: false
         enabled: true
-        githubToken:
-          key: token
-          secretName: kagent-skills-token
         gitopsNamespaces: []
         image:
           registry: gsoci.azurecr.io
@@ -248,7 +245,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.2.1
+          tag: 2.2.2
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -279,7 +276,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.2.1
+          tag: 2.2.2
       resources:
         limits:
           cpu: 500m
@@ -337,7 +334,7 @@ spec:
         image:
           name: giantswarm/kubectl
           registry: gsoci.azurecr.io
-          version: v1.37.0
+          version: v1.37.1
       disabledExtensions:
       - page:gs/clusters
       - nav-item:gs/clusters
@@ -437,6 +434,12 @@ spec:
         parentRefs: []
     extraObjects: []
     gateway:
+      accessLog:
+        attributes:
+          agent_instance_id:
+            enabled: true
+            expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"]
+              : ""'
       gatewayClassName: agentgateway
       http:
         maxBufferSize: 8Mi
@@ -552,11 +555,11 @@ spec:
       kubectlImage:
         registry: gsoci.azurecr.io
         repository: giantswarm/alpine-k8s
-        tag: 1.37.0
+        tag: 1.37.1
       opensslImage:
         registry: gsoci.azurecr.io
         repository: giantswarm/alpine-openssl
-        tag: 3.5.8
+        tag: 3.5.9
     ingress:
       backendTrafficPolicy:
         annotations: {}
@@ -685,12 +688,10 @@ spec:
             aws:
               accountId: ""
               bucketName: ""
-              lifecycleDays: 30
               oidcProvider: ""
               roleName: ""
             capz:
               containerName: ""
-              lifecycleDays: 30
               replicationType: LRS
               resourceGroup: ""
               storageAccountName: ""
@@ -1567,7 +1568,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.2.1
+        tag: 2.2.2
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1620,7 +1621,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.2.1
+        tag: 2.2.2
     resources:
       limits:
         cpu: 500m
@@ -1901,13 +1902,15 @@ spec:
         nodeSelector:
           kubernetes.io/arch: amd64
         podAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchLabels:
-                app: atelet
-            namespaces:
-            - ate-system
-            topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: atelet
+              namespaces:
+              - ate-system
+              topologyKey: kubernetes.io/hostname
+            weight: 100
         resources:
           limits:
             cpu: "2"
@@ -2838,7 +2841,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.5.0 <2.0.0"
+    semver: ">=1.9.1 <2.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3084,7 +3087,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |
@@ -3271,7 +3274,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.0"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |

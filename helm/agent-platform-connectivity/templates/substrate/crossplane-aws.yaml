@@ -5,9 +5,9 @@
 {{- $bucket := $aws.bucketName }}
 {{- $roleName := include "agent-platform.substrateStore.awsRoleName" . }}
 {{- $tags := include "agent-platform.crossplane.tags" (dict "xp" $xp "app" "agent-platform-substrate" "name" $bucket) | fromYaml }}
-{{- include "agent-platform.crossplane.aws.bucket" (dict "root" . "xp" $xp "bucket" $bucket "lifecycleDays" $aws.lifecycleDays "tags" $tags
+{{- include "agent-platform.crossplane.aws.bucket" (dict "root" . "xp" $xp "bucket" $bucket "abortIncompleteDays" 1 "tags" $tags
       "bucketComment" (list "The S3 bucket Agent Substrate keeps the actors' snapshots in — the platform" "Harness's snapshotPolicy.location (kagent.harness.snapshotLocation is derived" "from it). Never deleted by Crossplane (no Delete management policy) and kept by" "Helm: the snapshots outlive the release.")
-      "lifecycleComment" (list "Snapshots expire after lifecycleDays: an actor whose snapshot is gone boots" "cold from the golden image again, nothing is lost but one start.")) }}
+      "lifecycleComment" (list "No expiration: Substrate deletes the snapshot a suspend replaces and an" "actor's whole prefix with the actor, so every object left is live (a template" "revision's golden snapshot, an actor's newest one) and none comes back once" "gone. The one rule aborts a multipart upload (atelet's) left after a day.")) }}
 ---
 # The IAM role Substrate's snapshot clients assume through IRSA: atelet (the
 # node agent that writes and restores the actors' snapshots) and ate-api-server

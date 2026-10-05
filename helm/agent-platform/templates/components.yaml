@@ -37,6 +37,11 @@ knowledge:
       gitsemver 3's dev shape; `gitsemver branch-hash <branch>` prints the hash)
       together with a prerelease-admitting range; the stable tags never act as
       fallback while a filter is set. Unset = every tag of the range.
+  prereleases   — false keeps the component on stable releases where
+      gitops.prereleases admits the platform's release candidates (unset: it
+      follows gitops.prereleases). For a component whose version another value
+      derives from its range's floor, where a candidate and the floor would run
+      side by side (substrate: the WorkerPool's worker image).
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
@@ -164,11 +169,12 @@ knowledge:
       kagent for its CRDs — so that the pair can bootstrap instead of deadlocking.
   disableWaitForJobs — render `disableWaitForJobs: true` on the child
       HelmRelease's install and upgrade: helm-controller then does not wait for
-      the release's plain Jobs to complete (hooks are unaffected). For a release
-      that carries a Job whose failure must not fail the release — the
-      connectivity chart's agent-manager migrate Job, the per-installation
-      cut-over of the agents next to the platform Harness the same release
-      renders.
+      the release's plain Jobs to complete (hooks are unaffected). It does not
+      keep a Failed Job from failing the release: Helm's readiness check reads
+      a Failed Job as Failed either way, so a run whose failure must not fail
+      the release is no Job of the release (the connectivity chart's
+      agent-manager migrate run is created by a hook from a suspended CronJob,
+      giantswarm/agent-platform#378).
   driftDetection — optional Flux drift detection for the child HelmRelease
       (HelmRelease v2 spec.driftDetection, passed through verbatim: mode
       enabled|warn|disabled, ignore rules). Enabled, helm-controller compares
@@ -324,8 +330,8 @@ that CRD either, so the dependency is moot. */ -}}
 {{- end }}
 {{- /* The version constraint: the entry's range, or — for a chart released off
 this chart's tag (see releasedWithChart above) — this chart's exact version.
-gitops.prereleases widens a range (never the exact version, nor a dev channel's
-filtered one) to admit pre-releases, and filters the tags to releases and release
+gitops.prereleases widens a range (never the exact version, a dev channel's
+filtered one, nor a component with prereleases: false) to admit pre-releases, and filters the tags to releases and release
 candidates (agent-platform.releaseTagFilter). */ -}}
 {{- $semver := $c.versionRange }}
 {{- $filter := $c.semverFilter }}
@@ -336,7 +342,7 @@ candidates (agent-platform.releaseTagFilter). */ -}}
 {{- fail (printf "components.%s.versionRange=%q pins a chart that is released with this chart: its version is this chart's own (%s), and a pin behind or ahead of it fails the release on every installation (giantswarm/agent-platform#431, #441, #339). Remove the pin. A development build keeps its knobs: a semverFilter selects a dev channel, another repository a chart pushed by hand" $key $semver $ownVersion) }}
 {{- end }}
 {{- if not $semver }}{{ $semver = $ownVersion }}{{ end }}
-{{- else if and $semver $g.prereleases (not $c.semverFilter) }}
+{{- else if and $semver $g.prereleases (not $c.semverFilter) (ne (toString $c.prereleases) "false") }}
 {{- $widened := include "agent-platform.admitPrereleases" (dict "range" $semver "key" (printf "components.%s.versionRange" $key)) | fromJson }}
 {{- $semver = $widened.range }}
 {{- if $widened.admits }}{{ $filter = include "agent-platform.releaseTagFilter" $root }}{{ end }}
