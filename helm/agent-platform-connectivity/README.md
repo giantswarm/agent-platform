@@ -1015,7 +1015,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | global.observability.traces.otlp.headers | object | `{}` | More OTLP headers, appended to the data-plane env. |
 | components.muster.enabled | bool | `true` |  |
 | components.dicebear.enabled | bool | `true` |  |
-| components.agentgateway.enabled | bool | `false` |  |
+| components.agentgateway.enabled | bool | `true` |  |
 | components.agent-platform-mcps.enabled | bool | `false` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
@@ -1030,7 +1030,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.kserve-llmisvc-crd.enabled | bool | `false` |  |
 | components.kserve-llmisvc-resources.enabled | bool | `false` |  |
 | components.modelServing.enabled | bool | `false` |  |
-| ingress.mode | string | `"muster-direct"` |  |
+| ingress.mode | string | `"agentgateway-muster"` |  |
 | ingress.parentRefs | list | `[]` |  |
 | ingress.hostnames | list | `[]` |  |
 | ingress.httpRoute.annotations | object | `{}` |  |
@@ -1218,7 +1218,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | valkey.valkey.metrics.exporter.securityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.metrics.exporter.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | agent-platform-mcps.agentgateway.enabled | bool | `true` |  |
-| agent-platform-mcps.agentgateway.viaMuster | bool | `false` |  |
+| agent-platform-mcps.agentgateway.viaMuster | bool | `true` |  |
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |

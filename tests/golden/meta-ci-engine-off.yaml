@@ -180,7 +180,7 @@ spec:
       agentgateway:
         enabled: true
         musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
-        viaMuster: false
+        viaMuster: true
       mcpServers: []
     agentManager:
       flux:
@@ -575,7 +575,7 @@ spec:
           annotations: {}
           labels: {}
         timeouts: {}
-      mode: muster-direct
+      mode: agentgateway-muster
       parentRefs: []
     kagent:
       controller:
@@ -1491,7 +1491,7 @@ spec:
     agentgateway:
       enabled: true
       musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
-      viaMuster: false
+      viaMuster: true
     mcpServers: []
 ---
 # Source: agent-platform/templates/components.yaml

@@ -94,7 +94,7 @@ components:  # @schema additionalProperties: true
   dicebear:  # @schema additionalProperties: true
     enabled: true
   agentgateway:  # @schema additionalProperties: true
-    enabled: false
+    enabled: true
   agent-platform-mcps:  # @schema additionalProperties: true
     enabled: false
   kagent:  # @schema additionalProperties: true
@@ -137,17 +137,23 @@ components:  # @schema additionalProperties: true
 
 # === Ingress topology ===
 # mode selects the whole request topology. What each mode renders/consumes:
+#   agentgateway-muster  (default) client -> agentgateway /mcp -> muster. Adds the
+#                        agentgateway controller (components.agentgateway.enabled), the
+#                        data-plane Gateway (gateway.*), the /mcp route and the optional
+#                        ingress.backendTrafficPolicy. Requires
+#                        agent-platform-mcps.agentgateway.viaMuster: true (the default).
 #   muster-direct        client -> muster. Only ingress.parentRefs/hostnames used.
-#   agentgateway-muster  client -> agentgateway /mcp -> muster. Adds agentgateway
-#                        controller (components.agentgateway.enabled), data-plane Gateway
-#                        (gateway.*), /mcp route, optional ingress.backendTrafficPolicy.
-#                        Requires agent-platform-mcps.agentgateway.viaMuster: true.
+#                        Opting out of agentgateway takes all three keys:
+#                        ingress.mode: muster-direct, components.agentgateway.enabled:
+#                        false and agent-platform-mcps.agentgateway.viaMuster: false.
+#                        Deprecated: agentgateway-muster becomes the only topology
+#                        (giantswarm/agent-platform#252).
 #   agentgateway-direct  client -> agentgateway /mcp -> servers. As above plus
 #                        optional gateway.jwksEgress; viaMuster: false.
 #                        NOT YET SUPPORTED — install blocked (needs DCR-capable
 #                        IdP, RFC 7591/8707).
 ingress:
-  mode: muster-direct          # muster-direct | agentgateway-muster | agentgateway-direct
+  mode: agentgateway-muster    # agentgateway-muster | muster-direct | agentgateway-direct
   parentRefs: []               # ALL modes: public Gateway, shared by both rendered routes
   hostnames: []                # ALL modes: muster public hostname(s)
   httpRoute:                   # shared base, applied to both rendered HTTPRoutes
@@ -1035,7 +1041,7 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
     # direct topology (false) needs a DCR-capable IdP, which is not yet
     # available; when Zitadel or similar ships RFC 7591 + RFC 8707, muster's
     # aggregator role can be retired.
-    viaMuster: false           # must match ingress.mode (guard-enforced): agentgateway-muster=>true, agentgateway-direct=>false
+    viaMuster: true            # must match ingress.mode (guard-enforced): agentgateway-muster=>true, agentgateway-direct=>false
     # musterUrl — in-cluster address of the muster Service. Stable because
     # muster.fullnameOverride pins the Service name to `muster` regardless
     # of the umbrella release name. Override only if the namespace differs.

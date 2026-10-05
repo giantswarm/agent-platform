@@ -275,7 +275,7 @@ helm install agent-platform-connectivity \
 | Key | Default | Purpose |
 |---|---|---|
 | `global.registry` | `gsoci.azurecr.io` | Default container image registry. |
-| `ingress.mode` | `muster-direct` | Request topology selector. `muster-direct` (client → muster, no agentgateway data plane), `agentgateway-muster` (client → agentgateway `/mcp` → muster), or `agentgateway-direct` (client → agentgateway `/mcp` → servers; **not yet supported**). See [Ingress topology](#ingress-topology). |
+| `ingress.mode` | `agentgateway-muster` | Request topology selector. `agentgateway-muster` (client → agentgateway `/mcp` → muster), `muster-direct` (client → muster, no agentgateway data plane; deprecated), or `agentgateway-direct` (client → agentgateway `/mcp` → servers; **not yet supported**). See [Ingress topology](#ingress-topology). |
 | `ingress.parentRefs` | `[]` | **All modes (required).** The public `Gateway`(s) both rendered routes attach to (typically `envoy-gateway-system/giantswarm-default`). Render fails if empty — the muster `/` route always attaches to it. |
 | `ingress.hostnames` | `[]` | **All modes.** muster's public hostname(s); must match the OAuth callback URL. |
 | `ingress.backendTrafficPolicy.enabled` | `false` | Render route-scoped `BackendTrafficPolicy` objects (preserve `WWW-Authenticate`, set `requestTimeout: 0s`): one over muster's `/` route in **all** modes, plus one over the agentgateway `/mcp` route in `agentgateway-*` modes. |
@@ -759,17 +759,19 @@ The request topology is selected by a single declared selector, `ingress.mode`, 
 
 | `ingress.mode` | Path | Renders |
 |---|---|---|
-| `muster-direct` (default) | client → muster `/` | muster public `/` route only — **no** agentgateway controller, **no** data-plane `Gateway`, **no** data-plane NetworkPolicies. |
-| `agentgateway-muster` | client → agentgateway `/mcp` → muster; everything else → muster | the above **+** agentgateway controller dependency, data-plane `Gateway`, `AgentgatewayParameters`, data-plane NetworkPolicies, `/mcp` `HTTPRoute`, and the optional route-scoped `BackendTrafficPolicy`. |
+| `muster-direct` (deprecated) | client → muster `/` | muster public `/` route only — **no** agentgateway controller, **no** data-plane `Gateway`, **no** data-plane NetworkPolicies. |
+| `agentgateway-muster` (default) | client → agentgateway `/mcp` → muster; everything else → muster | the above **+** agentgateway controller dependency, data-plane `Gateway`, `AgentgatewayParameters`, data-plane NetworkPolicies, `/mcp` `HTTPRoute`, and the optional route-scoped `BackendTrafficPolicy`. |
 | `agentgateway-direct` | client → agentgateway `/mcp` → servers | same as `agentgateway-muster`, plus the optional `gateway.jwksEgress` rule. **Not yet supported — install is blocked** (needs a DCR-capable IdP, RFC 7591/8707). |
 
 The mechanism is Gateway-API path-specificity. The umbrella **always** renders muster's public `/` catch-all route (`templates/ingress/muster-httproute.yaml`). In the `agentgateway-*` modes it additionally renders a more-specific `/mcp` route that steals MCP traffic into agentgateway, while OAuth / `.well-known` / DCR stay on muster's `/` route.
 
 Both rendered routes attach to the public Gateway and use the muster hostname(s). `parentRefs` and `hostnames` are now set **once** under `ingress.*` and shared by both routes — they must match the OAuth callback URL from `muster.oauth.mcpClient.publicUrl`. The umbrella's `ingress.parentRefs` guard rejects install in **every** mode (including `muster-direct`) until it is set — the muster `/` route always needs a Gateway to attach to. In `muster-direct` mode neither the agentgateway controller nor any data-plane object is installed.
 
+`agentgateway-muster` is the default, with `components.agentgateway.enabled: true` and `agent-platform-mcps.agentgateway.viaMuster: true`; opting out to `muster-direct` sets all three keys the other way. `muster-direct` and `agentgateway-direct` are deprecated: agentgateway in front of muster becomes the only topology ([giantswarm/agent-platform#252](https://github.com/giantswarm/agent-platform/issues/252)).
+
 ```yaml
 ingress:
-  mode: muster-direct          # muster-direct | agentgateway-muster | agentgateway-direct
+  mode: agentgateway-muster    # agentgateway-muster | muster-direct | agentgateway-direct
   parentRefs: []               # ALL modes (required): the public Gateway both rendered routes attach to
   hostnames: []                # ALL modes: muster public hostname(s)
   httpRoute:                   # shared base, applied to both routes

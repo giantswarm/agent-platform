@@ -346,6 +346,7 @@ spec:
       retries: 5
   dependsOn:
     - name: muster
+    - name: agentgateway
   values:
     agent-manager:
       agentChart:
@@ -392,7 +393,7 @@ spec:
       agentgateway:
         enabled: true
         musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
-        viaMuster: false
+        viaMuster: true
       mcpServers: []
     agentManager:
       flux:
@@ -591,7 +592,7 @@ spec:
       agent-sandbox:
         enabled: false
       agentgateway:
-        enabled: false
+        enabled: true
       backstage:
         enabled: false
       cloudnative-pg:
@@ -787,7 +788,7 @@ spec:
           annotations: {}
           labels: {}
         timeouts: {}
-      mode: muster-direct
+      mode: agentgateway-muster
       parentRefs: []
     kagent:
       controller:
@@ -1628,6 +1629,114 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
+  name: agentgateway
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: agentgateway
+  targetNamespace: default
+  serviceAccountName: agent-platform-flux
+  chartRef:
+    kind: OCIRepository
+    name: agentgateway
+    namespace: default
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  values:
+    controller:
+      image:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/agentgateway-upstream/controller
+        tag: 2.2.2
+      replicaCount: 2
+    fullnameOverride: agentgateway-controller
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: ""
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            headers: {}
+            protocol: grpc
+            tenant: giantswarm
+      registry: gsoci.azurecr.io
+    image:
+      registry: gsoci.azurecr.io
+    inferenceExtension:
+      enabled: true
+    monitoring:
+      enabled: false
+      grafanaDashboard:
+        annotations:
+          observability.giantswarm.io/folder: Agent Platform
+          observability.giantswarm.io/organization: Shared Org
+        enabled: true
+        labels:
+          app.giantswarm.io/kind: dashboard
+      serviceMonitor:
+        enabled: true
+        extraLabels:
+          observability.giantswarm.io/tenant: giantswarm
+        interval: 60s
+    podAnnotations:
+      application.giantswarm.io/team: bumblebee
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    proxy:
+      image:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/agentgateway-upstream/agentgateway
+        tag: 2.2.2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 50m
+        memory: 128Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
   name: dicebear
   namespace: default
   labels:
@@ -2078,6 +2187,29 @@ spec:
     operation: copy
   ref:
     semver: "1.1.35"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agentgateway
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agentgateway
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: ">=2.4.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -4860,8 +4992,8 @@ spec:
               # helm-controller to uninstall a wave before the next one starts.
               echo "wave 1: agent-platform-connectivity dicebear model-manager valkey"
               kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agent-platform-connectivity dicebear model-manager valkey
-              echo "wave 2: muster"
-              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m muster
+              echo "wave 2: agentgateway muster"
+              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agentgateway muster
           env:
             # kubectl keeps its discovery cache and helm its cache and config
             # under $HOME; the root filesystem is read-only.

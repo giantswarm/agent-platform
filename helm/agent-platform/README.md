@@ -339,7 +339,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agentgateway.versionRange | string | `">=2.4.0 <3.0.0"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
-| components.agentgateway.enabled | bool | `false` |  |
+| components.agentgateway.enabled | bool | `true` |  |
 | components.agentgateway.ownedCrds[0] | string | `"agentgatewaypolicies.agentgateway.dev"` |  |
 | components.agentgateway.crds | string | `"CreateReplace"` |  |
 | components.valkey.chart | string | `"valkey"` |  |
@@ -535,7 +535,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | dicebear.route.enabled | string | `"auto"` |  |
 | dicebear.route.parentRefs | list | `[]` |  |
 | dicebear.route.hostnames | list | `[]` |  |
-| ingress.mode | string | `"muster-direct"` |  |
+| ingress.mode | string | `"agentgateway-muster"` |  |
 | ingress.parentRefs | list | `[]` |  |
 | ingress.hostnames | list | `[]` |  |
 | ingress.httpRoute.annotations | object | `{}` |  |
@@ -746,7 +746,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.valkey.metrics.exporter.securityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.metrics.exporter.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | agent-platform-mcps.agentgateway.enabled | bool | `true` |  |
-| agent-platform-mcps.agentgateway.viaMuster | bool | `false` |  |
+| agent-platform-mcps.agentgateway.viaMuster | bool | `true` |  |
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |

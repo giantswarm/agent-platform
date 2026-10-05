@@ -8901,6 +8901,444 @@ data:
       "weekStart": ""
     }
 ---
+# Source: agent-platform-connectivity/templates/agentgateway/clusterrole-listenerset.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agentgateway-listenerset-t
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - listenersets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - listenersets/status
+  verbs:
+  - patch
+  - update
+---
+# Source: agent-platform-connectivity/templates/agentgateway/clusterrole-listenerset.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agentgateway-listenerset-t
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agentgateway-listenerset-t
+subjects:
+- kind: ServiceAccount
+  name: agentgateway-controller
+  namespace: default
+---
+# Source: agent-platform-connectivity/templates/agentgateway/agentgatewayparameters.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: t
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  image:
+    registry: gsoci.azurecr.io
+    repository: giantswarm/agentgateway-upstream/agentgateway
+    tag: 2.2.2
+  service:
+    spec:
+      type: ClusterIP
+  podDisruptionBudget:
+    spec:
+      maxUnavailable: 1
+  deployment:
+    spec:
+      replicas: 2
+      template:
+        spec:
+          automountServiceAccountToken: true
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  gateway.networking.k8s.io/gateway-name: agentgateway
+              matchLabelKeys:
+                - pod-template-hash
+          containers:
+            - name: agentgateway
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                limits:
+                  cpu: 2000m
+                  ephemeral-storage: 512Mi
+                  memory: 512Mi
+                requests:
+                  cpu: 100m
+                  ephemeral-storage: 50Mi
+                  memory: 128Mi
+              env:
+                - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                  value: http://otlp-gateway.kube-system.svc:4317
+                - name: OTEL_EXPORTER_OTLP_PROTOCOL
+                  value: grpc
+---
+# Source: agent-platform-connectivity/templates/agentgateway/access-log-policy.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: agent-platform-connectivity-access-log
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway
+  frontend:
+    accessLog:
+      attributes:
+        add:
+          - name: agent_instance_id
+            expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""'
+---
+# Source: agent-platform-connectivity/templates/agentgateway/http-policy.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: agent-platform-connectivity-http
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway
+  frontend:
+    http:
+      maxBufferSize: 8Mi
+---
+# Source: agent-platform-connectivity/templates/agentgateway/metrics-policy.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: agent-platform-connectivity-metrics
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway
+  frontend:
+    metrics:
+      attributes:
+        add:
+          - name: agent
+            expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount
+  == "atenet-egress") ? request.headers["x-kagent-agent"] : source.unverifiedWorkload.serviceAccount'
+          - name: agent_namespace
+            expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount
+  == "atenet-egress") ? request.headers["x-kagent-agent-namespace"] : source.unverifiedWorkload.namespace'
+---
+# Source: agent-platform-connectivity/templates/agentgateway/tracing.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: agent-platform-connectivity-tracing
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway
+  frontend:
+    tracing:
+      url: "http://otlp-gateway.kube-system.svc:4317"
+      protocol: GRPC
+      randomSampling: "0.1"
+---
+# Source: agent-platform-connectivity/templates/agentgateway/networkpolicy-controller-cilium.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-platform-connectivity-controller
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    # agentgateway runs as its own release; `agentgateway: agentgateway` is
+    # unique to the controller, so do not scope by the connectivity release name.
+    matchLabels:
+      agentgateway: agentgateway
+      app.kubernetes.io/name: agentgateway
+  ingress:
+    # xDS from data-plane pods spawned by this controller. The provisioned
+    # data-plane pods carry `gateway.networking.k8s.io/gateway-name`; only the
+    # controller itself carries `agentgateway: agentgateway`, so the source
+    # selector here must use the gateway-name label to match the data plane.
+    - fromEndpoints:
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-name: agentgateway
+        # Every other data plane this controller provisions — a Gateway of the
+        # platform's class in any namespace, such as the serving slice's models
+        # Gateway in the cluster's org namespace (#495). A namespaced policy
+        # matches its own namespace only unless the namespace label is named.
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-class-name: agentgateway
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "9978"
+              protocol: TCP
+    # Prometheus / health scrape from cluster monitoring.
+    - fromEntities: ["cluster"]
+      toPorts:
+        - ports:
+            - port: "9092"
+              protocol: TCP
+            - port: "9093"
+              protocol: TCP
+  egress:
+    - toEntities: ["kube-apiserver"]
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+      toPorts:
+        - ports:
+            - port: "8090"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: coredns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: k8s-dns-node-cache
+      toPorts:
+        - ports:
+            - port: "1053"
+              protocol: UDP
+            - port: "1053"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+# Source: agent-platform-connectivity/templates/agentgateway/networkpolicy-dataplane-cilium.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-platform-connectivity-dataplane
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: agentgateway
+  ingress:
+    - fromEntities: ["cluster"]
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - fromEntities: ["cluster"]
+      toPorts:
+        - ports:
+            - port: "15020"
+              protocol: TCP
+  egress:
+    - toEntities: ["kube-apiserver"]
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: coredns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: k8s-dns-node-cache
+      toPorts:
+        - ports:
+            - port: "1053"
+              protocol: UDP
+            - port: "1053"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities: ["world"]
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEntities: ["cluster"]
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+      toPorts:
+        - ports:
+            - port: "8090"
+              protocol: TCP
+    # xDS to the agentgateway controller. agentgateway runs as its own release
+    # (separate from this connectivity release), so match on the controller-only
+    # `agentgateway: agentgateway` label rather than a release-scoped instance.
+    - toEndpoints:
+        - matchLabels:
+            agentgateway: agentgateway
+            app.kubernetes.io/name: agentgateway
+      toPorts:
+        - ports:
+            - port: "9978"
+              protocol: TCP
+---
+# Source: agent-platform-connectivity/templates/agentgateway/tracing.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-platform-connectivity-dataplane-otlp-egress
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: agentgateway
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: coredns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: k8s-dns-node-cache
+      toPorts:
+        - ports:
+            - port: "1053"
+              protocol: UDP
+            - port: "1053"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The OTLP gateway the data plane's traces go to (http://otlp-gateway.kube-system.svc:4317).
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
+---
 # Source: agent-platform-connectivity/templates/model-manager/netpol.yaml
 # Ingress to model-manager: muster (the MCP endpoint, the one platform caller)
 # and additionalPeers, in the release namespace, on the Service port only —
@@ -9078,6 +9516,61 @@ spec:
               protocol: TCP
             - port: "8443"
               protocol: TCP
+---
+# Source: agent-platform-connectivity/templates/agentgateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - allowedRoutes:
+        namespaces:
+          from: Same
+      name: http
+      port: 8080
+      protocol: HTTP
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: t
+---
+# Source: agent-platform-connectivity/templates/agentgateway/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: agentgateway
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  parentRefs:
+    - name: x
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp
+      backendRefs:
+        - name: agentgateway
+          port: 8080
 ---
 # Source: agent-platform-connectivity/templates/ingress/muster-httproute.yaml
 apiVersion: gateway.networking.k8s.io/v1

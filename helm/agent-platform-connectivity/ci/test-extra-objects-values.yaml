@@ -18,3 +18,8 @@ extraObjects:
     data:
       example-key: example-value
       release: "{{ .Release.Name }}"
+
+components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false

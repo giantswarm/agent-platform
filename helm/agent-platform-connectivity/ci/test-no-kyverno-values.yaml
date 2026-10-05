@@ -12,6 +12,9 @@
 # nothing else, and templates/agent-sandbox/validate.yaml fails the render when
 # the two disagree. That guard is what this case pins.
 components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false
   agent-sandbox:
     enabled: true
   kagent:

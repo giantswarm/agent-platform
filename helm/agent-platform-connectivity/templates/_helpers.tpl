@@ -347,7 +347,7 @@ agent-platform-mcps component. */ -}}
 agree with: the serving slice on a workload cluster runs agentgateway (the
 target has no controller of its own) in the default mode. */ -}}
 {{- if and (eq $mode "muster-direct") $agentgatewayEnabled $musterEnabled -}}
-{{- fail "components.agentgateway.enabled must be false in muster-direct mode; the controller dependency condition must match ingress.mode" -}}
+{{- fail "components.agentgateway.enabled must be false in muster-direct mode (it defaults to true, with ingress.mode agentgateway-muster); the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
 {{- /* muster-direct runs without the agentgateway component, so its CRDs are
 not on the cluster: anything that renders an agentgateway.dev object or attaches

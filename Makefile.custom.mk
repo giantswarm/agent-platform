@@ -35,7 +35,13 @@ FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-ver
 # agent-platform.validateSubstrate); set on every render so a target can turn
 # kagent on without repeating it. The connectivity chart (and GOLDEN_REF's)
 # accepts the key in its open kagent block.
-VM := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents $(FLEET_APIS)
+# MUSTER_DIRECT is the topology without agentgateway, which every key of it
+# opts out of since agentgateway-muster is the default (#252). VM carries it, so
+# a target's base render keeps the muster-direct shape its assertions were
+# written against; a target that wants the data plane sets the agentgateway
+# keys after it (a later --set wins), and verify-modes asserts the default.
+MUSTER_DIRECT := --set ingress.mode=muster-direct --set components.agentgateway.enabled=false --set agent-platform-mcps.agentgateway.viaMuster=false
+VM := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents $(MUSTER_DIRECT) $(FLEET_APIS)
 # Agent Substrate on, as the meta chart forwards it (the two Substrate entries
 # follow components.kagent there; the connectivity chart reads the roster).
 SUBSTRATE_ON := --set components.substrate.enabled=true --set components.substrate-crds.enabled=true
@@ -137,7 +143,7 @@ PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns the wiring + guards).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> muster-direct with no Gateway named anywhere must fail"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) --set ingress.mode=muster-direct >$(VERIFY_TMP)/vm-parents.out 2>&1; then \
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(MUSTER_DIRECT) >$(VERIFY_TMP)/vm-parents.out 2>&1; then \
 		echo "FAIL: empty-parentRefs guard did not fire (render succeeded)"; cat $(VERIFY_TMP)/vm-parents.out; exit 1; \
 	elif ! grep -q "no public Gateway for ingress.parentRefs" $(VERIFY_TMP)/vm-parents.out; then \
 		echo "FAIL: empty-parentRefs check failed for the wrong reason"; cat $(VERIFY_TMP)/vm-parents.out; exit 1; \
@@ -170,6 +176,18 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.agent-platform-mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
+	@echo "--> the default is agentgateway-muster (#252): data-plane Gateway and /mcp route, agentgateway HelmRelease"
+	@$(HELM) template t $(CONNECTIVITY_DIR) --set ingress.parentRefs[0].name=x --set components.agent-platform-mcps.enabled=true $(FLEET_APIS) >$(VERIFY_TMP)/vm-default.out 2>&1 || { echo "FAIL: the connectivity chart's defaults do not render"; cat $(VERIFY_TMP)/vm-default.out; exit 1; }
+	@grep -q '^kind: Gateway$$' $(VERIFY_TMP)/vm-default.out && grep -q 'value: /mcp$$' $(VERIFY_TMP)/vm-default.out || { echo "FAIL: the default renders no data-plane Gateway or /mcp route"; exit 1; }
+	@$(HELM) template t $(CHART_DIR) --set components.flux.enabled=false --set ingress.parentRefs[0].name=x >$(VERIFY_TMP)/vm-default-meta.out 2>&1 || { echo "FAIL: the meta chart's defaults do not render"; cat $(VERIFY_TMP)/vm-default-meta.out; exit 1; }
+	@python3 -c 'import sys,yaml; d=[x for x in yaml.safe_load_all(open(sys.argv[1])) if x]; sys.exit(0 if any(x.get("kind")=="HelmRelease" and x["metadata"]["name"]=="agentgateway" for x in d) else 1)' $(VERIFY_TMP)/vm-default-meta.out || { echo "FAIL: the meta chart's default renders no agentgateway HelmRelease"; exit 1; }
+	@echo "ok: default agentgateway-muster"
+	@echo "--> muster-direct by the mode alone must fail, naming components.agentgateway.enabled"
+	@if $(HELM) template t $(CONNECTIVITY_DIR) --set ingress.parentRefs[0].name=x --set ingress.mode=muster-direct >$(VERIFY_TMP)/vm-md-alone.out 2>&1; then \
+		echo "FAIL: muster-direct with the agentgateway component on rendered"; exit 1; \
+	elif ! grep -q "components.agentgateway.enabled must be false in muster-direct mode" $(VERIFY_TMP)/vm-md-alone.out; then \
+		echo "FAIL: muster-direct alone failed for the wrong reason"; cat $(VERIFY_TMP)/vm-md-alone.out; exit 1; \
+	else echo "ok: muster-direct opt-out names the switch"; fi
 	@echo "--> agentSandbox.podSecurity.enabled with no kyverno policies must fail"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set kyvernoPolicies.enabled=false --set agentSandbox.podSecurity.enabled=true >$(VERIFY_TMP)/vm-pe-guard.out 2>&1; then \
 		echo "FAIL: the sandbox lost its only securityContext source and the render succeeded"; exit 1; \
@@ -340,7 +358,7 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	elif ! grep -q "gatewayApi.gateway.tls.secretName is empty" $(VERIFY_TMP)/vg-tls.out; then \
 		echo "FAIL: tls guard failed for the wrong reason"; cat $(VERIFY_TMP)/vg-tls.out; exit 1; \
 	else echo "ok: tls guard"; fi
-	@if $(HELM) template t $(CONNECTIVITY_DIR) --set global.domain=ci.example.com --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls >$(VERIFY_TMP)/vg-mode.out 2>&1; then \
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(MUSTER_DIRECT) --set global.domain=ci.example.com --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls >$(VERIFY_TMP)/vg-mode.out 2>&1; then \
 		echo "FAIL: gateway.create in muster-direct mode accepted"; exit 1; \
 	elif ! grep -q "ingress.mode is muster-direct" $(VERIFY_TMP)/vg-mode.out; then \
 		echo "FAIL: edge mode guard failed for the wrong reason"; cat $(VERIFY_TMP)/vg-mode.out; exit 1; \
