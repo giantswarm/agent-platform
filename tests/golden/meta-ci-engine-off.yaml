@@ -1900,13 +1900,15 @@ spec:
         nodeSelector:
           kubernetes.io/arch: amd64
         podAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchLabels:
-                app: atelet
-            namespaces:
-            - ate-system
-            topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: atelet
+              namespaces:
+              - ate-system
+              topologyKey: kubernetes.io/hostname
+            weight: 100
         resources:
           limits:
             cpu: "2"
