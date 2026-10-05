@@ -242,12 +242,16 @@ node without spare CPU, a worker scheduled in the gap takes the CPU the old atel
 pod freed: the new atelet pod stays Pending, the rollout stops at that node and
 the `substrate` release's upgrade times out (giantswarm/agent-platform#756). From
 the Substrate line's `1.3.0` on (`agent-platform.substrate.workerPoolAffinityFloor`)
-the chart derives `template.podAffinity`: a required term on the atelet pods
-(`app: atelet` in `components.substrate.targetNamespace`) with `topologyKey:
-kubernetes.io/hostname`, so a worker schedules only on a node where an atelet pod
-is bound, during a roll and on a fresh node alike. A running worker is never
-evicted by it. An installation's own `podAffinity` stands instead of the derived
-one (keep the atelet term in it); below `1.3.0` the key is refused.
+the chart derives `template.podAffinity`: a preferred term (weight 100) on the
+atelet pods (`app: atelet` in `components.substrate.targetNamespace`) with
+`topologyKey: kubernetes.io/hostname`, so a worker goes to a node where an atelet
+pod is bound whenever such a node has room. A running worker is never evicted by
+it. The term is not required: Karpenter cannot see a DaemonSet's pods on a node it
+has not launched, so a required term is unsatisfiable on new capacity and a worker
+that fits no existing node stays Pending for good (giantswarm/agent-platform#798);
+Karpenter relaxes a preferred term and launches the node. An installation's own
+`podAffinity` stands instead of the derived one (keep the atelet term in it, never
+required); below `1.3.0` the key is refused.
 
 ## Voluntary disruption
 

@@ -2728,11 +2728,15 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # CPU the old atelet pod freed and the rollout stops there. From the
     # Substrate line's 1.3.0 on (agent-platform.substrate
     # .workerPoolAffinityFloor) the chart DERIVES template.podAffinity, a
-    # required term on the atelet pods (app: atelet in
+    # preferred term (weight 100) on the atelet pods (app: atelet in
     # components.substrate.targetNamespace) with topologyKey
-    # kubernetes.io/hostname: a worker schedules only where an atelet pod is
-    # bound. An installation's own podAffinity stands instead of the derived
-    # one (keep the atelet term in it); below 1.3.0 the key is refused.
+    # kubernetes.io/hostname: a worker goes where an atelet pod is bound
+    # whenever such a node has room. Not required: Karpenter cannot see a
+    # DaemonSet's pods on a node it has not launched, so a required term
+    # leaves a worker that fits no existing node Pending for good
+    # (giantswarm/agent-platform#798). An installation's own podAffinity
+    # stands instead of the derived one (keep the atelet term in it, never
+    # required); below 1.3.0 the key is refused.
     podDisruptionBudget:
       enabled: true
       minAvailable: null
