@@ -11,7 +11,7 @@ A checklist for one installation at a time. Nothing here runs by itself; every s
 
 ## Before you start
 
-- [ ] Fill in the versions below once the tags exist. `<KAGENT_VERSION>` is the first release of giantswarm/kagent-upstream on upstream `bf8afa56`; `<SUBSTRATE_VERSION>` is the Substrate release it was built against (the kagent WorkerPool's worker image is `ateom-gvisor:<SUBSTRATE_VERSION>`); `<META_VERSION>` is the agent-platform release whose `components.kagent.versionRange`, `components.kagent-crds.versionRange`, `components.substrate.versionRange` and `components.substrate-crds.versionRange` select them.
+- [ ] Fill in the versions below once the tags exist. `1.3.0` is the first release of giantswarm/kagent-upstream on upstream `bf8afa56`; `1.4.0` is the Substrate release it was built against (the kagent WorkerPool's worker image is `ateom-gvisor:1.4.0`); `<META_VERSION>` is the agent-platform release whose `components.kagent.versionRange`, `components.kagent-crds.versionRange`, `components.substrate.versionRange` and `components.substrate-crds.versionRange` select them.
 - [ ] Producers released and pinned in the meta chart: agent-manager (renders `Agent`, reads `Session`), the Generic agent chart (renders one `Agent` per release), Backstage (Agent and Session shapes), klaus-gateway (`SessionService`, the session id in `x-kagent-agent-instance-id`), agentlab.
 - [ ] Per installation, record the current versions for the rollback table at the end:
 
@@ -68,7 +68,7 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get actortemplat
 
 ### 3. Apply the CRD chart (and the meta chart release that selects the line)
 
-- [ ] Move the installation to `<META_VERSION>` (the meta chart's own `versionRange`, or the installation's pin of it in its gitops repository). That release raises `components.kagent-crds.versionRange` to `<KAGENT_VERSION>` and retires the storage-version hooks.
+- [ ] Move the installation to `<META_VERSION>` (the meta chart's own `versionRange`, or the installation's pin of it in its gitops repository). That release raises `components.kagent-crds.versionRange` to `1.3.0` and retires the storage-version hooks.
 - [ ] Wait for the kagent-crds release and check the CRDs: the seven `api.kagent.dev` CRDs established, the five `kagent.dev` CRDs gone.
 
 ```sh
@@ -103,7 +103,7 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get modelconfigs
 ### 5. kagent controller on a fresh database, with the new Substrate worker image
 
 - [ ] Add the fresh database to the connectivity chart's values for the installation (the agent-platform#346 pattern: a new CNPG `Database` in `postgres.databases`, a new name such as `kagent_v2`, and the kagent release's `KAGENT_POSTGRES_DATABASE_URL` pointing at it). Keep the old database in place for the retention period.
-- [ ] Wait for the substrate and kagent releases; the WorkerPool's worker image is `ateom-gvisor:<SUBSTRATE_VERSION>` and the controller logs its migrations on the empty database instead of refusing a 1.x schema:
+- [ ] Wait for the substrate and kagent releases; the WorkerPool's worker image is `ateom-gvisor:1.4.0` and the controller logs its migrations on the empty database instead of refusing a 1.x schema:
 
 ```sh
 kubectl --kubeconfig <kubeconfig> --context <context> -n agent-platform wait helmrelease/substrate helmrelease/kagent --for=condition=Ready --timeout=15m

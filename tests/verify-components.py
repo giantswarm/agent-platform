@@ -83,7 +83,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.2.0 <1.3.0"
+KAGENT_RANGE = ">=1.3.0 <1.4.0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
 # both landing in ate-system, both following components.kagent. The pin is the
@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.2.0 <1.3.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.3.1 <1.4.0"
-SUBSTRATE_PIN = "1.3.1"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.2.0-beta5 (giantswarm/giantswarm#37705, the 2026-09-24 re-pin), whose atenet data plane is the agentgateway line's 2.1.2; the 1.0 line stays on release-1.0
+SUBSTRATE_RANGE = ">=1.4.0 <1.5.0"
+SUBSTRATE_PIN = "1.4.0"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.3.0-alpha3 (giantswarm/giantswarm#37705, the 2026-09-24 re-pin), whose atenet data plane is the agentgateway line's 2.1.2; the 1.0 line stays on release-1.0
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
