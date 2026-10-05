@@ -15,7 +15,7 @@ management cluster) on the ATS kind cluster, after the smoke's uninstall.
      exactly what `flux install` left (`flux` and the apiserver);
   4. an agent deploys through the cluster's Flux: an OCIRepository + HelmRelease
      of the agent chart 1.x in the kagent namespace, run as the kagent-flux
-     identity the connectivity release rendered, reach Ready; the AgentTemplate
+     identity the connectivity release rendered, reach Ready; the Agent
      reaches Ready on the platform Harness — Agent Substrate, from the chart
      through that Flux, runs it — and the agent's RemoteMCPServer is Accepted;
   5. the render guard: flipping the value to true makes the HelmRelease FAIL
@@ -58,7 +58,6 @@ from conftest import (
     ATE_NAMESPACE,
     Abort,
     HARNESS,
-    HARNESS_LABEL,
     INSTALL_TIMEOUT,
     KAGENT_FLUX_SA,
     KAGENT_NAMESPACE,
@@ -83,12 +82,12 @@ from conftest import (
     dump_agents,
     is_ready,
     load_values,
-    template_ready,
-    template_state,
+    agent_ready,
+    agent_state,
     wait_for,
     wait_for_namespaces_settled,
     wait_for_substrate,
-    wait_for_template_ready,
+    wait_for_agent_ready,
 )
 
 logger = logging.getLogger(__name__)
@@ -318,8 +317,8 @@ def test_platform_installs_through_the_clusters_flux(kube: Kube, platform_throug
 
 @pytest.mark.functional
 def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_flux: None) -> None:
-    """The agent chart 1.x through the cluster's Flux as the tenant identity:
-    the AgentTemplate it renders reaches Ready on the platform Harness (Agent
+    """The Generic agent chart through the cluster's Flux as the tenant
+    identity: the Agent it renders reaches Ready on the platform Harness (Agent
     Substrate from the chart, through that Flux, runs it) and the agent's
     RemoteMCPServer is Accepted."""
     started = time.monotonic()
@@ -346,14 +345,13 @@ def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_fl
                                  "modelConfig": {"name": MODEL_CONFIG}, "toolset": TOOLSET}}},
         ])
         wait_for(f"HelmRelease {AGENT} Ready", lambda: is_ready(kube.get("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE)), 600)
-        template = wait_for_template_ready(kube, AGENT)
-        assert (template["metadata"].get("labels") or {}).get(HARNESS_LABEL) == HARNESS, template["metadata"].get("labels")
+        agent = wait_for_agent_ready(kube, AGENT)
         assert_remote_mcp_server(kube, AGENT)
     except AssertionError:
         dump(kube)
         raise
-    TIMINGS.record(f"agent through the cluster's Flux: HelmRelease Ready, AgentTemplate Ready on Harness {HARNESS}, RemoteMCPServer Accepted", time.monotonic() - started)
-    logger.info("AgentTemplate %s on Harness %s: %s", AGENT, HARNESS, template_state(template))
+    TIMINGS.record(f"agent through the cluster's Flux: HelmRelease Ready, Agent Ready on Harness {HARNESS}, RemoteMCPServer Accepted", time.monotonic() - started)
+    logger.info("Agent %s on Harness %s: %s", AGENT, HARNESS, agent_state(agent))
 
 
 @pytest.mark.functional
@@ -372,7 +370,7 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
         assert set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values()), {n: condition(h) for n, h in hrs.items()}
         assert all("serviceAccountName" not in hr["spec"] for hr in hrs.values()), "the failed upgrade changed the platform HelmReleases"
-        assert template_ready(kube.get("agenttemplates.api.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent's template is no longer Ready on the Harness"
+        assert agent_ready(kube.get("agents.api.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent is no longer Ready on the Harness"
         logger.info("guard fired: %s", messages[:300])
         # the way out the message names: the value back to false recovers
         kube.apply(meta_helmrelease(candidate_version, engine=False))

@@ -23,18 +23,17 @@ markers `smoke`, `functional`, `upgrade` are the ATS scenarios.
 Both scenarios share the cluster; what the smoke leaves behind is what the
 functional scenario expects to find.
 
-**kagent on this line.** The platform's kagent is the kagent line (kagent API
-v2, `kagent.dev/v1alpha3`): an agent is an `AgentTemplate` that a `Harness`
-admits and runs as an Agent Substrate actor in a gVisor worker pod. Both
-scenarios get Substrate from the chart under test (`components.substrate` and
-`substrate-crds` follow `components.kagent`; `values-kagent.yaml` sizes it for
-the executor) on a kind cluster that carries the feature gates Substrate needs,
-and every agent assertion is readiness **on the platform Harness**:
-`AgentTemplate.status.harnesses[]` keyed by `harness`, the `Ready` condition of
-the `kagent` entry — a template no Harness admits has an empty list (the label
-`agent-platform.giantswarm.io/harness: kagent` is the whole admission
-contract). The agent's toolset rides on its own `RemoteMCPServer` (the
-`X-Muster-Toolset` header on muster's in-cluster URL), asserted `Accepted`.
+**kagent on this line.** The platform's kagent is the kagent line
+(`api.kagent.dev/v1alpha3`): an agent is an `Agent` that names the `Harness`
+it runs on (`spec.harnessRef`) and carries its template inline or by
+`templateRef`; the Harness runs it as an Agent Substrate actor in a gVisor
+worker pod. Both scenarios get Substrate from the chart under test
+(`components.substrate` and `substrate-crds` follow `components.kagent`;
+`values-kagent.yaml` sizes it for the executor) on a kind cluster that carries
+the feature gates Substrate needs, and every agent assertion is the `Agent`'s
+`Ready` condition **on the platform Harness** (the Agent must name `kagent`).
+The agent's toolset rides on its own `RemoteMCPServer` (the `X-Muster-Toolset`
+header on muster's in-cluster URL), asserted `Accepted`.
 
 | Scenario | Module | What it proves |
 |---|---|---|
@@ -134,8 +133,8 @@ of PR #380; each test logs `TIMING <phase>`):
 | kind create (the job) | 36 |
 | `helm install --wait` (engine, muster + OAuth, dicebear, connectivity, kagent + CRDs, Substrate + CRDs, agent-manager, self on) | 220 |
 | Substrate ready after the install returned (ate-system, the WorkerPool's worker, the Harness) | 0 |
-| declarative `AgentTemplate` Ready on the Harness | 20 |
-| agent-manager `create_agent` → HelmRelease Ready → `AgentTemplate` Ready + `RemoteMCPServer` Accepted | 16 |
+| declarative `Agent` Ready on the Harness | 20 |
+| agent-manager `create_agent` → HelmRelease Ready → `Agent` Ready + `RemoteMCPServer` Accepted | 16 |
 | `helm uninstall --wait` (the ordered teardown; budget `UNINSTALL_BUDGET_S` = 120 s) | 31 |
 | own-Flux: platform HelmReleases Ready through the cluster's Flux | 289 |
 | own-Flux: agent through the cluster's Flux (HelmRelease, template Ready, server Accepted) | 36 |
@@ -279,8 +278,8 @@ roadmap#4348) carried the platform's two product tests in its
 | `test_unauthenticated_mcp_gets_401_with_discovery_chain` — 401, `WWW-Authenticate` with `resource_metadata` and `invalid_token`, PRM → AS metadata with the three endpoints | `test_unauthenticated_mcp_gets_401_with_discovery_chain`, same chain (`unauthenticated_mcp_challenge`); the probe is a well-formed `initialize` without a token — muster validates the content type before the bearer |
 | `test_static_user_login_reaches_mcp` — DCR with the registration token, code + PKCE, the Dex login form, token exchange, `initialize` 200 with `Mcp-Session-Id` | `test_static_user_login_through_muster_reaches_mcp` (`login_through_muster`, the same flow) plus `tools/list`; and, new, `test_dex_user_reaches_mcp_with_a_password_grant` — the trusted-audience path with the cross-client audience agent-manager requires |
 | `_dump_auth_logs` on a failed login | `dump_auth` (muster, lab-dex, agent-manager logs) |
-| `test_kagent_agent_reaches_ready` — placeholder `kagent-anthropic` Secret, a declarative `Agent` against `default-model-config`, Ready within 600 s | `test_declarative_agent_reaches_ready` — the same Secret and ModelConfig, the same timeout, on kagent API v2: an `AgentTemplate` labelled for the platform Harness, Ready on that Harness (`status.harnesses[]`); preceded by `test_substrate_runs_a_worker_for_the_platform_harness` (the runtime the standalone's kind cluster never had) |
-| — | new: `test_agent_manager_create_agent_reaches_a_ready_helmrelease` — the Flux write path the standalone's kind cluster never had; the chart `1.x` HelmRelease, the `AgentTemplate` Ready on the Harness, the agent's `RemoteMCPServer` Accepted |
+| `test_kagent_agent_reaches_ready` — placeholder `kagent-anthropic` Secret, a declarative `Agent` against `default-model-config`, Ready within 600 s | `test_declarative_agent_reaches_ready` — the same Secret and ModelConfig, the same timeout, on the kagent line: an `Agent` naming the platform Harness with its template inline, Ready; preceded by `test_substrate_runs_a_worker_for_the_platform_harness` (the runtime the standalone's kind cluster never had) |
+| — | new: `test_agent_manager_create_agent_reaches_a_ready_helmrelease` — the Flux write path the standalone's kind cluster never had; the Generic agent chart's HelmRelease, the `Agent` Ready on the Harness, the agent's `RemoteMCPServer` Accepted |
 | `@pytest.mark.flaky(reruns=2, reruns_delay=30)` on the auth tests | the same marker on the three auth tests (`reruns_delay=20`) |
 | `test_upgrade` — the stable chart from the OCI catalog, `upgrade-hook.sh` re-applies the candidate's CRDs, `helm upgrade` to the candidate, readiness + auth re-asserted; `post-hook.sh` uninstalls the smoke's release first | no longer applies: this chart's day 2 is self-management (the fixpoint and the refused CLI are asserted), Helm never upgrades `crds/` and the Flux Operator owns the Flux CRDs; the component CRDs are `CreateReplace` on their HelmReleases. The upgrade scenario stays skipped (`.ats/main.yaml`) |
 | the heartbeat log line every minute (CircleCI's no-output timeout) | `log_heartbeat`, module-scoped, autouse |

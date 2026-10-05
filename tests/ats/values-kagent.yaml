@@ -1,6 +1,6 @@
 # The kagent runtime of the ATS agent round trips, layered over the scenario's
-# base values file (tests/ats/scenarios.py): the smoke's declarative
-# AgentTemplate and agent-manager's create_agent need the kagent controller, and
+# base values file (tests/ats/scenarios.py): the smoke's declarative Agent and
+# agent-manager's create_agent need the kagent controller, and
 # on this line the controller needs Agent Substrate — every agent is a Substrate
 # actor in a gVisor worker pod. The own-Flux scenario deploys an agent through
 # the cluster's own Flux with the same file. Substrate comes from the chart under
@@ -13,7 +13,7 @@
 #
 # Sized for the CI executor (the `large` class, one 4-vCPU / 15 GB node): one
 # gVisor worker with modest requests — one worker hosts one actor at a time and
-# the smoke's templates boot in turn — under the Substrate control plane the
+# the smoke's Agents boot in turn — under the Substrate control plane the
 # chart renders (single replicas, ate-api-server two), its bundled Postgres at a
 # fraction of the chart's 1-CPU request, the bundled RustFS as the snapshot
 # store (a lab's shape; an installation names its own bucket), the kagent UI at
