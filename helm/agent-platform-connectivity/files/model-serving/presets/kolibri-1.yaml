@@ -1,0 +1,101 @@
+# Kolibri-1, Aleph Alpha's German/English mixture of experts (78B, 3.5B active
+# per token), FP8 block-quantized, split across two 128 GB unified-memory
+# Blackwell nodes (GB10) on a fast link, served from an OCI model image on
+# vLLM 0.29 with Aleph Alpha's vLLM plugin: the model's architecture and its
+# parsers ship only in that plugin.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: kolibri-1
+spec:
+  displayName: Kolibri-1 (FP8 MoE, two 128 GB GB10 nodes)
+  description: |
+    Aleph Alpha's mixture of experts for German and English: 78B
+    parameters, 3.5B active per token, tool calling and a reasoning mode
+    (on at effort high unless a request passes reasoning_effort low, medium
+    or none in chat_template_kwargs), served as Aleph Alpha's own FP8
+    checkpoint (73.4 GiB of weights, 128x128 blocks, an FP8 KV cache).
+    Sized for a split across two 128 GB unified-memory Blackwell nodes
+    (GB10) on a fast link, tensor parallel 2: each node holds 36.7 GiB of
+    weights at --gpu-memory-utilization=0.60, which leaves the KV cache of
+    many 256k contexts (40 of its 50 layers are sliding-window). On one such
+    node the weights alone exceed the 0.60 share, so the fit check places it
+    split only. The model's own window is 1M tokens; the preset serves 256k,
+    Aleph Alpha's recommendation for serving efficiency. Tools are parsed
+    with the plugin's kolibri1 parser (Hermes-style tool_call tags),
+    reasoning with its kolibri1 reasoning parser, under the checkpoint's own
+    chat template. Runtime: giantswarm/vllm-aleph-alpha, vLLM's own server
+    image v0.29.0 with the aleph-alpha-inference plugin, the one vLLM minor
+    the plugin supports; this preset names its image for that reason only.
+    Weights: an OCI model image, giantswarm/models/kolibri-1 at the
+    checkpoint revision, pulled onto each node by containerd (KServe's
+    modelcar path: no download, no cache claim); the runtime runs as a
+    non-root uid on the read-only image, so HOME, HF_HOME and
+    VLLM_CACHE_ROOT live under /tmp.
+  model:
+    id: Aleph-Alpha/Kolibri-1
+    # The tag is the first 12 characters of the checkpoint revision
+    # e52eb4627d11516b0c01de49210ab5a4e4061444 (32 safetensors shards under
+    # /models). modelServing.modelImages.registry swaps the host at render;
+    # the path, giantswarm/models/kolibri-1:e52eb4627d11, stays.
+    storageUri: oci://gsoci.azurecr.io/giantswarm/models/kolibri-1:e52eb4627d11
+    format: vLLM
+    contextLength: 262144
+    capabilities: [chat, tools, reasoning, coding]
+    license: apache-2.0
+  env:
+    # The modelcar path runs the runtime as the platform KServe's modelcar uid
+    # on a read-only model image: the home, the Hub cache and vLLM's compile
+    # cache go under /tmp (the cache claim's compile cache is not mounted).
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf
+    - name: VLLM_CACHE_ROOT
+      value: /tmp/vllm-cache
+    # The predictor runs as the modelcar uid (1010), which the runtime image's
+    # passwd does not know: torch's inductor cache-dir lookup asks getpass for
+    # a user name and dies on getpwuid(1010) at `import vllm` unless the name
+    # comes from the environment, so the name and the cache dir are set here.
+    - name: USER
+      value: vllm
+    - name: LOGNAME
+      value: vllm
+    - name: TORCHINDUCTOR_CACHE_DIR
+      value: /tmp/torchinductor
+  args:
+    - --gpu-memory-utilization=0.60
+    - --max-model-len=262144
+    - --max-num-seqs=8
+    - --kv-cache-dtype=fp8
+    - --enable-chunked-prefill
+    - --enable-prefix-caching
+    - --no-enable-log-requests
+    - --reasoning-parser=kolibri1
+    - --enable-auto-tool-choice
+    - --tool-call-parser=kolibri1
+  # The runtime image: vLLM's own server at v0.29.0 with Aleph Alpha's plugin
+  # (see description) — the well-known template's command runs it unchanged
+  # (bash, `vllm serve /mnt/models`, the version-gated flags read from
+  # `vllm --version`).
+  template:
+    containers:
+      - name: main
+        image: gsoci.azurecr.io/giantswarm/vllm-aleph-alpha:0.5.0
+  resources:
+    gpus: 1
+    requests:
+      cpu: "4"
+      memory: 32Gi
+    limits:
+      cpu: "8"
+      memory: 64Gi
+  requirements:
+    # The Hub's safetensors shards size the weights at 73.43 GiB
+    # (make verify-preset-weights). 34 GiB of overhead is the FP8 KV cache,
+    # activations, CUDA graphs and the runtime: a split node needs half the
+    # weights plus the overhead, 71 GiB, within the 0.60 share of a GB10's
+    # 121.7 GiB (73 GiB); a single node's 108 GiB exceed what a GB10 leaves
+    # beside its host headroom, so the fit check refuses it there.
+    weightsGiB: 74
+    overheadGiB: 34
