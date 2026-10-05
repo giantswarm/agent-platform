@@ -16,11 +16,11 @@ spec:
     or none in chat_template_kwargs), served as Aleph Alpha's own FP8
     checkpoint (73.4 GiB of weights, 128x128 blocks, an FP8 KV cache).
     Sized for a split across two 128 GB unified-memory Blackwell nodes
-    (GB10) on a fast link, tensor parallel 2: each node holds 36.7 GiB of
-    weights at --gpu-memory-utilization=0.60, which leaves the KV cache of
-    many 256k contexts (40 of its 50 layers are sliding-window). On one such
-    node the weights alone exceed the 0.60 share, so the fit check places it
-    split only. The model's own window is 1M tokens; the preset serves 256k,
+    (GB10) on a fast link, tensor parallel 2: each node holds 36.9 GiB of
+    weights at --gpu-memory-utilization=0.60 and a 34.8 GiB FP8 KV cache of
+    6.8M tokens, about 26 full 256k contexts (40 of its 50 layers are
+    sliding-window). Serve it split: on one such node the weights alone
+    exceed the 0.60 share. The model's own window is 1M tokens; the preset serves 256k,
     Aleph Alpha's recommendation for serving efficiency. Tools are parsed
     with the plugin's kolibri1 parser (Hermes-style tool_call tags),
     reasoning with its kolibri1 reasoning parser, under the checkpoint's own
@@ -95,7 +95,7 @@ spec:
     # (make verify-preset-weights). 34 GiB of overhead is the FP8 KV cache,
     # activations, CUDA graphs and the runtime: a split node needs half the
     # weights plus the overhead, 71 GiB, within the 0.60 share of a GB10's
-    # 121.7 GiB (73 GiB); a single node's 108 GiB exceed what a GB10 leaves
-    # beside its host headroom, so the fit check refuses it there.
+    # 121.7 GiB (73 GiB). Measured split on two GB10s: 36.85 GiB of weights
+    # and a 34.8 GiB KV cache per node.
     weightsGiB: 74
     overheadGiB: 34

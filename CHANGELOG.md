@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Preset `kolibri-1`: Aleph Alpha's Kolibri-1 split across two 128 GB GB10 nodes** (giantswarm/agent-platform#804). Kolibri-1 is a German/English mixture of experts (78B, 3.5B active, Apache 2.0) with tool calling and a reasoning mode. It is served as its FP8 checkpoint (73.4 GiB) from the model image `giantswarm/models/kolibri-1:e52eb4627d11`, on `giantswarm/vllm-aleph-alpha` (vLLM 0.29 with Aleph Alpha's plugin, which registers the architecture and the `kolibri1` parsers), with a 256k context, an FP8 KV cache and `--gpu-memory-utilization=0.60`. The declared 74 + 34 GiB keep it off a single GB10, so it is placed split, half the weights per node. `model-families.yaml` gains the Kolibri row.
+- **Preset `kolibri-1`: Aleph Alpha's Kolibri-1 split across two 128 GB GB10 nodes** (giantswarm/agent-platform#804). Kolibri-1 is a German/English mixture of experts (78B, 3.5B active, Apache 2.0) with tool calling and a reasoning mode. It is served as its FP8 checkpoint (73.4 GiB) from the model image `giantswarm/models/kolibri-1:e52eb4627d11`, on `giantswarm/vllm-aleph-alpha` (vLLM 0.29 with Aleph Alpha's plugin, which registers the architecture and the `kolibri1` parsers), with a 256k context, an FP8 KV cache and `--gpu-memory-utilization=0.60`. One GB10 cannot hold the weights at that share, so it is served split, half the weights per node; measured on two GB10s: 36.85 GiB of weights and a 34.8 GiB KV cache (6.8M tokens) per node, a parsed tool call, about 65 tokens/s for one stream. `model-families.yaml` gains the Kolibri row.
 
 ### Changed
 
