@@ -54,8 +54,9 @@ agent-platform.modelServing.podShape); this check holds what that buys:
   * The Deployments' progress-deadline rule applies to the workload's Deployments.
   * The pre-pull DaemonSet (modelServing.prepull, #545) renders in the serving
     namespace by default: one init container per image of
-    modelServing.prepull.images — the first the llm-d runtime image the
-    well-known LLMInferenceServiceConfig names — running /bin/true, a pause
+    modelServing.prepull.images — the storage-initializer KServe injects
+    first (#807), then the llm-d runtime image the well-known
+    LLMInferenceServiceConfig names — running /bin/true, a pause
     main container, the pool's taint tolerated first and every taint after it,
     the manufacturer label selected with the pool's own label merged under it,
     no GPU resource, no runtimeClassName, no ServiceAccount token. It is a
@@ -600,8 +601,8 @@ def check_prepull(connectivity: str, k8s: list[dict], cilium: list[dict], pods_p
     if not selects(ds["spec"]["selector"], pod["metadata"]["labels"]) or not selects({"matchLabels": PREPULL_LABEL}, pod["metadata"]["labels"]):
         fail(f"the pre-pull DaemonSet's selector {ds['spec']['selector']} does not select its own pod, or the pod lacks {PREPULL_LABEL}")
     images = [c["image"] for c in spec.get("initContainers") or []]
-    if images != prepull["images"] or not images or "/llm-d-cuda:" not in images[0]:
-        fail(f"the pre-pull init containers pull {images}; expected modelServing.prepull.images {prepull['images']}, the llm-d runtime image first")
+    if images != prepull["images"] or len(images) < 2 or "/storage-initializer:" not in images[0] or "/llm-d-cuda:" not in images[1]:
+        fail(f"the pre-pull init containers pull {images}; expected modelServing.prepull.images {prepull['images']}, the storage-initializer first and the llm-d runtime image second")
     if any(c.get("command") != ["/bin/true"] for c in spec["initContainers"]):
         fail(f"every pre-pull init container runs /bin/true; got {[c.get('command') for c in spec['initContainers']]}")
     if [c["name"] for c in spec["containers"]] != ["pause"] or not spec["containers"][0]["image"].endswith("/giantswarm/pause:" + prepull["pauseImage"]["tag"]):
@@ -619,7 +620,7 @@ def check_prepull(connectivity: str, k8s: list[dict], cilium: list[dict], pods_p
         fail(f"the pre-pull pod tolerates {tolerations}; expected the pool's taint first and every taint after it")
     if spec.get("nodeSelector") != GPU_NODE:
         fail(f"the pre-pull pod's default node selector is {spec.get('nodeSelector')}; expected Karpenter's GPU label {GPU_NODE}")
-    ok("the pre-pull DaemonSet: one /bin/true init container per image (the llm-d runtime image first), the pause main container, "
+    ok("the pre-pull DaemonSet: one /bin/true init container per image (the storage-initializer first, the llm-d runtime image second), the pause main container, "
        "no GPU, no runtimeClass, no token; the pool's taint tolerated first and every taint after it; Karpenter's GPU label selected")
 
     # A hook object, not a release resource (#563): the release's wait counts a DaemonSet ready by its pods, and a pod

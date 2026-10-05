@@ -12,7 +12,8 @@ property the slice relies on:
 - components.kserve-runtime-configs: dependsOn kserve-llmisvc-crd, targetNamespace
   kserve (release history there too), llmisvcConfigs on and servingruntime off,
   the llm-d-fast/ prefix as imageRegistry — the same prefix the pre-pull's
-  llm-d-cuda reference carries (#568) — the block held back from the
+  llm-d-cuda reference carries (#568), second after the storage-initializer
+  the kserve line renders (#807) — the block held back from the
   connectivity release; spec.driftDetection.mode: enabled by default, so a
   well-known config that went missing is re-created on the release's next
   reconcile (#508), with the configs' /spec ignored (KServe defaults fields
@@ -105,6 +106,11 @@ SERVING = {"kserve-llmisvc-crd", "kserve-llmisvc-resources", "kserve-runtime-con
 # The prefix the slice passes to the well-known configs as imageRegistry (#568): the
 # re-layered llm-d-fast/ set. The pre-pull's runtime image carries the same prefix.
 FAST_PREFIX = "gsoci.azurecr.io/giantswarm/llm-d-fast/"
+# The storage-initializer image the kserve-llmisvc-resources chart renders for the
+# ClusterStorageContainer (kserve.storage.image at kserve.version), per line of
+# components.kserve-llmisvc-resources: the pre-pull's first image (#807).
+STORAGE_INITIALIZER = "gsoci.azurecr.io/giantswarm/storage-initializer"
+KSERVE_LINES = {"0.7.x": "v0.21.0"}
 # The 24 GB presets of the September 2026 line-up (giantswarm/agent-platform#591),
 # each served from a signed model image.
 PRESETS = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b")
@@ -1034,20 +1040,29 @@ def check_tracing(meta: str, connectivity: str) -> None:
     ok(f"an http/protobuf global fails naming {PRESET_ENDPOINT} (an explicit gRPC preset endpoint passes) and, in the connectivity chart alone, modelServing.networkPolicy.otlpEndpoint; no endpoint, no preset endpoint (upstream's) and no egress policy")
 
 def check_prepull_prefix(meta: str, connectivity: str) -> None:
-    """The pre-pull's runtime image is the well-known config's llm-d-cuda at the prefix the slice passes (#568)."""
+    """The pre-pull's runtime image is the well-known config's llm-d-cuda at the prefix the slice passes (#568),
+    after the storage-initializer KServe's line renders (#807)."""
     with open(f"{meta}/values.yaml", encoding="utf-8") as f:
-        registry = yaml.safe_load(f)["kserve-runtime-configs"]["kserve"]["llmisvcConfigs"]["imageRegistry"]
+        meta_values = yaml.safe_load(f)
+    registry = meta_values["kserve-runtime-configs"]["kserve"]["llmisvcConfigs"]["imageRegistry"]
     with open(f"{connectivity}/values.yaml", encoding="utf-8") as f:
         images = yaml.safe_load(f)["modelServing"]["prepull"]["images"]
     if registry != FAST_PREFIX:
         sys.exit(f"FAIL: the kserve-runtime-configs block passes imageRegistry {registry!r}, expected the llm-d-fast/ prefix {FAST_PREFIX!r}")
-    if not images or not images[0].startswith(f"{registry}llm-d-cuda:"):
-        sys.exit(f"FAIL: modelServing.prepull.images {images} does not start with the well-known config's llm-d-cuda at the slice's imageRegistry {registry!r}: the pre-pull would warm an image no predictor runs")
-    pins = yaml.safe_load(open(f"{meta}/values.yaml", encoding="utf-8"))["kserve-runtime-configs"]["kserve"]["llmisvcConfigs"].get("images") or {}
+    line = meta_values["components"]["kserve-llmisvc-resources"]["versionRange"]
+    if line not in KSERVE_LINES:
+        sys.exit(f"FAIL: components.kserve-llmisvc-resources is on {line!r}, a line KSERVE_LINES does not map to its KServe version: add it, and move the pre-pull's storage-initializer reference with it")
+    initializer = f"{STORAGE_INITIALIZER}:{KSERVE_LINES[line]}"
+    if not images or images[0] != initializer:
+        sys.exit(f"FAIL: modelServing.prepull.images {images} does not start with {initializer}, the storage-initializer the {line} line renders: the predictor's weights would wait on a pull beside the runtime image")
+    runtime = [image for image in images if image.startswith(f"{registry}llm-d-cuda:")]
+    if len(images) < 2 or runtime != [images[1]]:
+        sys.exit(f"FAIL: modelServing.prepull.images {images} does not carry the well-known config's llm-d-cuda at the slice's imageRegistry {registry!r} second, and once: the pre-pull would warm an image no predictor runs")
+    pins = meta_values["kserve-runtime-configs"]["kserve"]["llmisvcConfigs"].get("images") or {}
     mains = {preset: containers.get("main") for preset, containers in pins.items()}
-    if not mains or set(mains.values()) != {images[0]}:
-        sys.exit(f"FAIL: the well-known presets' main images {mains} are not the pre-pulled {images[0]}: the runtime pin (#682) and the pre-pull move together")
-    ok(f"the pre-pull's runtime image {images[0]} is the well-known config's llm-d-cuda at the prefix the slice passes as imageRegistry ({registry}), the main image of all {len(mains)} pinned presets")
+    if not mains or set(mains.values()) != {images[1]}:
+        sys.exit(f"FAIL: the well-known presets' main images {mains} are not the pre-pulled {images[1]}: the runtime pin (#682) and the pre-pull move together")
+    ok(f"the pre-pull's storage-initializer {images[0]} is the one the {line} line renders, ahead of the runtime image {images[1]}, the well-known config's llm-d-cuda at the prefix the slice passes as imageRegistry ({registry}) and the main image of all {len(mains)} pinned presets")
 
 
 def check_rollout(meta: str) -> None:

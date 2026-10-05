@@ -285,6 +285,7 @@ else:
         metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
         gated = "gpuReadyLabel" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
+        initialized = "giantswarm/storage-initializer:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         hookpolicy = os.path.exists(f"{tree}/{CONN}/templates/substrate/hooks-netpol.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
@@ -609,6 +610,15 @@ else:
             for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
                 side.pop(key)
         print(f"note: the pre-pull pods wait for the GPU feature discovery label on this side (#737) and not on {ref}: the DaemonSet is left out of the comparison")
+    # The pre-pull pulls the storage-initializer ahead of the runtime image on
+    # this side (giantswarm/agent-platform#807); a golden from before pulls the
+    # runtime image alone, so the DaemonSet is left out of the comparison on
+    # both sides. Drop this once GOLDEN_REF carries #807.
+    if prepulled and not initialized:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
+                side.pop(key)
+        print(f"note: the pre-pull pulls the storage-initializer first on this side (#807) and not on {ref}: the DaemonSet is left out of the comparison")
     # The single-replica budgets are maxUnavailable: 1 and a lone Postgres
     # instance renders enablePDB: false on this side (giantswarm/agent-platform#697);
     # a golden from before renders minAvailable: 1 and the operator's budgets,
