@@ -2935,16 +2935,6 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # Skill repositories offered when an agent is created.
   skillsRepositories:
     - https://github.com/giantswarm/agent-skills
-  # Release of giantswarm/backstage-catalogs whose hidden agent-deployment
-  # scaffolder template the app-config registers as a catalog location. The
-  # agent create flow's deploy step runs that template; without the location
-  # the step fails with "Template template:default/agent-deployment not
-  # found". Backstage fetches it from github.com at catalog processing time,
-  # so the backend needs egress there; set version "" to skip the location
-  # (agent creation then stops at the deploy step).
-  catalogs:
-    # repo: giantswarm/backstage-catalogs
-    version: v0.6.0
   # Roll the Backstage pod when this chart's app-config ConfigMap changes.
   # The backstage chart's own checksum annotations cover only its own
   # templates, so an app-config change (templates/backstage/app-config.yaml)

@@ -92,14 +92,11 @@ spec:
             - port: "5432"
               protocol: TCP
     {{- end }}
-    {{- with (dig "catalogs" "version" "" $backstage) }}
-    # The scaffolder catalog location (backstage.catalogs.version): the URL is on
-    # github.com and the reader dials the API or the raw host, by integration.
-    # Without this leg the agent create flow answers 404.
+    {{- if $backstage.skillsRepositories }}
+    # Skill discovery (backstage.skillsRepositories): the backend lists each
+    # repository's SKILL.md files through the GitHub API.
     - toFQDNs:
-        - matchName: github.com
         - matchName: api.github.com
-        - matchName: raw.githubusercontent.com
       toPorts:
         - ports:
             - port: "443"

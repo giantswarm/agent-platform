@@ -582,7 +582,7 @@ its container and its probes.
 | The edge | the `cluster` entity leg the identity-provider include renders, on 443 and 10443 | the Envoy pods of the Gateways the muster and kagent-controller routes attach to, on 443 and 10443, plus the agentgateway data plane on 443 for each of those routes that attaches to it |
 | muster | its pods in this namespace, on the muster Service port | the same, as a `podSelector` |
 | The portal's database | its CNPG pods by `cnpg.io/cluster`, on 5432, while `backstage.database.engine` is `postgresql` | the same, as a `podSelector` |
-| The scaffolder catalog | `github.com`, `api.github.com` and `raw.githubusercontent.com` on 443, while `backstage.catalogs.version` is set | the world rule above |
+| Skill discovery | `api.github.com` on 443, while `backstage.skillsRepositories` is set | the world rule above |
 
 The app-config addresses muster and the kagent controller by their public
 hostnames, so those calls leave through the edge rather than through muster's
@@ -1667,7 +1667,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
 | backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
-| backstage.catalogs.version | string | `"v0.6.0"` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |

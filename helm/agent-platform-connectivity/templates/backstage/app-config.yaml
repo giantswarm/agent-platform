@@ -90,17 +90,6 @@ data:
           user: ${POSTGRES_USER}
           password: ${POSTGRES_PASSWORD}
       {{- end }}
-    {{- with (dig "catalogs" "version" "" $backstage) }}
-    {{- /* The agent create flow's deploy step runs the hidden agent-deployment
-    scaffolder template; without this location the scaffolder answers 404
-    ("Template template:default/agent-deployment not found"). The image's base
-    app-config already allows kind Template in catalog.rules, so the location
-    entry is all this overlay needs. */}}
-    catalog:
-      locations:
-        - type: url
-          target: https://github.com/giantswarm/backstage-catalogs/blob/{{ . }}/templates/agent-deployment/template.yaml
-    {{- end }}
     auth:
       environment: production
       session:

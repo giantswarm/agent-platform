@@ -67,7 +67,8 @@ spec:
 # edge (the public addresses the app-config holds resolve to it), the portal's
 # own database, and — vanilla NetworkPolicy selects addresses, never
 # names — every public destination on 443 for the identity provider's discovery,
-# JWKS, userinfo and token endpoints, and for the scaffolder catalog location.
+# JWKS, userinfo and token endpoints, and for the GitHub API the skill
+# discovery reads.
 # networkPolicy.kubernetes.worldExcludedCIDRs is subtracted; a private identity
 # provider needs its address in networkPolicy.additionalEgressCIDRs.
 apiVersion: networking.k8s.io/v1

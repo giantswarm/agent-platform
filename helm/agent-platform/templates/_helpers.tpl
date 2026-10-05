@@ -916,6 +916,15 @@ where the operator asked for a controller. */ -}}
 {{- end -}}
 {{- end -}}
 
+{{- define "agent-platform.validateRemovedBackstageKeys" -}}
+{{- /* The backstage block takes any key (its schema skips properties), and a key
+outside components.backstage.omitKeys reaches the backstage chart, whose schema
+rejects it only when its HelmRelease installs; refused here instead. */ -}}
+{{- if hasKey ($.Values.backstage | default dict) "catalogs" -}}
+{{- fail "backstage.catalogs is removed (giantswarm/backstage-catalogs#705): the portal creates agents through agent-manager's MCP tools and registers no agent-deployment scaffolder template. Remove backstage.catalogs from the values." -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agent-platform.validateLegacyToggles" -}}
 {{- $moved := list
       (list "agentgateway" "components.agentgateway.enabled")
