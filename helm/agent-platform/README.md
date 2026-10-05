@@ -947,6 +947,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
 | kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
+| kagent.harnesses | list | `[]` |  |
 | dashboards.enabled | bool | `true` |  |
 | dashboards.namespace | string | `""` |  |
 | dashboards.organization | string | `"Shared Org"` |  |

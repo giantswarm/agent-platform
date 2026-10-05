@@ -1753,6 +1753,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   tokenSecret: ""   # optional: pre-existing Secret with key "token"
   #   description: "external MCP server"
 
+  # kagent.harnesses (the kagent chart's further Harnesses, the coding agents'
+  # claude Harness among them) is forwarded to the kagent release by the meta
+  # chart and not read here.
+
 # Platform Postgres — CloudNativePG Cluster for kagent (and future Klaus sessions).
 # The CNPG operator and its CRDs are a cluster-level prerequisite (like Gateway
 # API CRDs): they must be installed before enabling this. Flip `enabled: false`
