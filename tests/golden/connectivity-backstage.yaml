@@ -80,10 +80,6 @@ data:
           - "data:"
           - https://s.giantswarm.io
           - https://avatars.ci.example.com
-    catalog:
-      locations:
-        - type: url
-          target: https://github.com/giantswarm/backstage-catalogs/blob/v0.6.0/templates/agent-deployment/template.yaml
     auth:
       environment: production
       session:
@@ -9099,13 +9095,10 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
-    # The scaffolder catalog location (backstage.catalogs.version): the URL is on
-    # github.com and the reader dials the API or the raw host, by integration.
-    # Without this leg the agent create flow answers 404.
+    # Skill discovery (backstage.skillsRepositories): the backend lists each
+    # repository's SKILL.md files through the GitHub API.
     - toFQDNs:
-        - matchName: github.com
         - matchName: api.github.com
-        - matchName: raw.githubusercontent.com
       toPorts:
         - ports:
             - port: "443"
@@ -9526,7 +9519,7 @@ spec:
             - --namespace=agent-platform
             - --selector=app=backstage
             - --overwrite
-            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=e8358f67b60e23d349f67c38095995445729fedf5f3cc4183eb965dd2f14f8e6
+            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=ef632ed5c3ea94aafc7b3382a3c301f8e17ae990a68ef6632fb0b036eb1193d9
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root
             # filesystem is read-only.

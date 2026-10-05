@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the portal registers no agent-deployment template)
+
+giantswarm/backstage-catalogs#705: the Dev Portal creates agents through agent-manager's MCP tools, so the connectivity chart's app-config no longer registers giantswarm/backstage-catalogs' `templates/agent-deployment/template.yaml` as a catalog location, and `backstage.catalogs` is gone from both charts. The cilium Backstage policy opens only `api.github.com` on 443, for skill discovery, while `backstage.skillsRepositories` is set.
+
+### Operator action
+
+- **Remove `backstage.catalogs`** from the installation's values if it is set: the meta chart's render fails naming the key while it is left.
+- Nothing else. The app-config changes, so the config-reload hook rolls the Backstage pod once.
+
 ## \<current\> → \<next\> (the Substrate snapshot store expires nothing)
 
 giantswarm/agent-platform#792: the snapshot store `kagent.harness.snapshotStore.crossplane` provisions no longer deletes objects by age. Substrate already deletes the snapshot a suspend replaces and an actor's prefix with the actor, so the 30-day rule only ever removed live snapshots: a template revision's golden snapshot, and the only snapshot of an actor suspended that long, neither of which comes back. On CAPA the `BucketLifecycleConfiguration` now carries only an abort of incomplete multipart uploads after a day; on CAPZ the chart renders no `ManagementPolicy`, and Helm removes it, which removes the account's lifecycle rule.

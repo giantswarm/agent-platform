@@ -2746,7 +2746,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) >$(VERIFY_TMP)/vw-bs.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' $(VERIFY_TMP)/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >$(VERIFY_TMP)/vw-bs-cm.out
 	@[ -s $(VERIFY_TMP)/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:' 'rootRedirect: /agent-platform'; do \
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' $(VERIFY_TMP)/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
@@ -2874,6 +2874,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	elif ! grep -q "its keys are refused: components.kserve-crd" $(VERIFY_TMP)/vw-meta-classic.out; then \
 		echo "FAIL: the meta chart's classic-component guard failed for the wrong reason"; cat $(VERIFY_TMP)/vw-meta-classic.out; exit 1; \
 	else echo "ok: the meta chart refuses components.kserve-crd naming it"; fi
+	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set backstage.catalogs.version=v0.6.0 >$(VERIFY_TMP)/vw-meta-catalogs.out 2>&1; then \
+		echo "FAIL: the meta chart accepted backstage.catalogs, which would reach the backstage chart's schema"; exit 1; \
+	elif ! grep -q "backstage.catalogs is removed" $(VERIFY_TMP)/vw-meta-catalogs.out; then \
+		echo "FAIL: the meta chart's backstage.catalogs guard failed for the wrong reason"; cat $(VERIFY_TMP)/vw-meta-catalogs.out; exit 1; \
+	else echo "ok: the meta chart refuses backstage.catalogs naming it"; fi
 	@if grep -qE '^  name: modelServing$$' $(VERIFY_TMP)/vw-meta.out; then echo "FAIL: components.modelServing rendered a release; it is a feature switch"; exit 1; fi
 	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vw-meta.out >$(VERIFY_TMP)/vw-meta-conn.out
 	@grep -A1 '^      modelServing:$$' $(VERIFY_TMP)/vw-meta-conn.out | grep -q 'enabled: true' || { echo "FAIL: the roster forwarded to connectivity does not carry modelServing: enabled: true"; exit 1; }
@@ -2886,7 +2891,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if grep -q 'enabled: auto' $(VERIFY_TMP)/vw-meta-conn.out; then echo "FAIL: an unresolved auto reached the connectivity release"; exit 1; fi
 	@grep -A6 '^  dependsOn:' $(VERIFY_TMP)/vw-meta-conn.out | grep -q 'name: muster' || { echo "FAIL: connectivity does not dependsOn muster (its MCPServer needs the CRD)"; exit 1; }
 	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: backstage$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vw-meta.out >$(VERIFY_TMP)/vw-meta-bs.out
-	@for key in hostname parentRefs installationName extraScopes startUrlSearchParams enabledExtensions disabledExtensions skillsRepositories catalogs configReload; do \
+	@for key in hostname parentRefs installationName extraScopes startUrlSearchParams enabledExtensions disabledExtensions skillsRepositories configReload; do \
 		if grep -qE "^    $$key:" $(VERIFY_TMP)/vw-meta-bs.out; then echo "FAIL: the wiring key $$key reached the backstage chart, whose schema rejects it"; exit 1; fi; \
 	done
 	@grep -A3 '^  dependsOn:' $(VERIFY_TMP)/vw-meta-bs.out | grep -q 'name: agent-platform-connectivity' || { echo "FAIL: backstage does not dependsOn connectivity (its pod mounts the app-config rendered there)"; exit 1; }
@@ -2950,12 +2955,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' $(VERIFY_TMP)/vw-bsnp-pin-$$flavor.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' && { echo "FAIL: the $$flavor Backstage policy still admits the data plane while the route is pinned elsewhere"; exit 1; }; \
 		true; \
 	done
-	@echo "--> the scaffolder catalog's egress follows backstage.catalogs.version; the portal's database gets a leg on the postgresql engine"
-	@for pattern in 'matchName: github.com' 'matchName: raw.githubusercontent.com'; do \
-		grep -q -- "$$pattern" $(VERIFY_TMP)/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks $$pattern, so the catalog location it fetches is denied"; cat $(VERIFY_TMP)/vw-bsnp-cilium.out; exit 1; }; \
-	done
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.catalogs.version= --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-nocat.out
-	@if grep -q 'github' $(VERIFY_TMP)/vw-bsnp-nocat.out; then echo "FAIL: the cilium Backstage policy renders the catalog egress with backstage.catalogs.version empty"; exit 1; fi
+	@echo "--> skill discovery's egress follows backstage.skillsRepositories; the portal's database gets a leg on the postgresql engine"
+	@grep -q -- 'matchName: api.github.com' $(VERIFY_TMP)/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks api.github.com, so skill discovery is denied"; cat $(VERIFY_TMP)/vw-bsnp-cilium.out; exit 1; }
+	@if grep -qE 'matchName: (github.com|raw.githubusercontent.com)$$' $(VERIFY_TMP)/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy opens github.com or raw.githubusercontent.com, which no portal call reaches"; exit 1; fi
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.skillsRepositories=null --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-noskills.out
+	@if grep -q 'github' $(VERIFY_TMP)/vw-bsnp-noskills.out; then echo "FAIL: the cilium Backstage policy renders the GitHub egress with backstage.skillsRepositories empty"; exit 1; fi
 	@if grep -q '5432' $(VERIFY_TMP)/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy renders 5432 on the sqlite engine"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_FULL) --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-full.out
 	@for pattern in 'backstage-cnpg' 'backstage-cnpg-restore' 'port: "5432"'; do \

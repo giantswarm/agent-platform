@@ -539,8 +539,6 @@ spec:
             optional: true
             secretName: '{{ dig "identity" "ca" "secretName" "" .Values.global | default
               "agent-platform-idp-ca" }}'
-      catalogs:
-        version: v0.6.0
       configReload:
         enabled: true
         image:

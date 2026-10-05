@@ -1008,7 +1008,6 @@ components:  # @schema additionalProperties: true
       - enabledExtensions
       - disabledExtensions
       - skillsRepositories
-      - catalogs
       - configReload
     enabled: false
     # Renders a CNPG Cluster for its database when backstage.database.engine is
@@ -4745,9 +4744,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # renders (templates/backstage/ there) and which are dropped from the values
 # forwarded to the backstage chart (components.backstage.omitKeys): hostname,
 # parentRefs, installationName, extraScopes, startUrlSearchParams,
-# enabledExtensions, disabledExtensions, skillsRepositories, catalogs,
-# configReload. Their meaning is documented in the connectivity chart's
-# values.yaml; the defaults are the standalone's.
+# enabledExtensions, disabledExtensions, skillsRepositories, configReload. Their
+# meaning is documented in the connectivity chart's values.yaml; the defaults
+# are the standalone's.
 backstage:  # @schema skipProperties: true; additionalProperties: true
   # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
   # protocol, the tenant as X-Scope-OrgID next to headers).
@@ -4797,12 +4796,6 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # Skill repositories offered when an agent is created.
   skillsRepositories:
     - https://github.com/giantswarm/agent-skills
-  # Release of giantswarm/backstage-catalogs whose hidden agent-deployment
-  # scaffolder template the app-config registers as a catalog location (the
-  # agent create flow's deploy step runs it); version "" skips the location.
-  catalogs:
-    # repo: giantswarm/backstage-catalogs
-    version: v0.6.0
   # Roll the Backstage pod when the app-config ConfigMap changes: a
   # post-install/post-upgrade hook Job of the connectivity release stamps the
   # rendered app-config's checksum into the Deployment's pod template (no-op
