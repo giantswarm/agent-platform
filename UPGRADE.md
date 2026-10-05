@@ -23,6 +23,7 @@ giantswarm/agent-platform#252: both charts default to `ingress.mode: agentgatewa
 
 - **Nothing**, where the installation already sets the agentgateway-muster keys (Giant Swarm's fleet does, from the shared configuration) or is fine moving to agentgateway.
 - **To stay on muster-direct** for now, set all three keys: `ingress.mode: muster-direct`, `components.agentgateway.enabled: false`, `agent-platform-mcps.agentgateway.viaMuster: false`. Setting the mode alone fails the render, naming `components.agentgateway.enabled`. `muster-direct` is deprecated and goes away in a later major release.
+- **A slice release beside the platform's release** (`components.muster.enabled: false` on the installation's own cluster) sets `components.agentgateway.enabled: false`, as `examples/serving-slice.yaml` does: the platform's release owns the agentgateway controller and its CRDs there, and the slice would otherwise render a second agentgateway release. A release without muster renders no data plane whatever `ingress.mode` says.
 
 ## \<current\> → \<next\> (the portal registers no agent-deployment template)
 

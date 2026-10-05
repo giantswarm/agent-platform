@@ -70,8 +70,9 @@ components.kagent. Emits "true" when on, empty string otherwise.
 Used to drop a dependsOn reference to a component that is toggled off, so a
 consumer does not wait forever on a HelmRelease that was never rendered. With
 app-owned CRDs a CR consumer dependsOn the component that ships the CRD (e.g.
-connectivity dependsOn agentgateway + kagent), but those components are opt-in —
-in the muster-direct topology agentgateway is off and render no HelmRelease, so
+connectivity dependsOn agentgateway + kagent), but those components can be off —
+kagent by default, agentgateway in muster-direct and beside a slice — and then
+render no HelmRelease, so
 an unfiltered dependsOn would block the always-on consumer indefinitely. An
 unknown name (not in components) is kept rather than silently dropped.
 Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agentgateway")
