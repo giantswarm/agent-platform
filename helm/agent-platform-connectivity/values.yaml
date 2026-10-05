@@ -650,12 +650,7 @@ llmRouting:
     # ConfigMap name; empty derives <release>-model-catalog.
     name: ""
     key: catalog.json
-    providers:  # @schema type: object; additionalProperties: {"$ref": "files/model-catalog/providers.schema.json"}; skipProperties: true
-      anthropic:
-        models:
-          # Not in the built-in catalog of any gateway release yet.
-          claude-sonnet-5-5:
-            rates: {input: "2", output: "10", cacheRead: "0.2", cacheWrite: "2.5"}
+    providers: {}  # @schema type: object; additionalProperties: {"$ref": "files/model-catalog/providers.schema.json"}; skipProperties: true
 
 networkPolicy:
   enabled: true

@@ -625,10 +625,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.modelCatalog.enabled | bool | `true` |  |
 | llmRouting.modelCatalog.name | string | `""` |  |
 | llmRouting.modelCatalog.key | string | `"catalog.json"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.input | string | `"2"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.output | string | `"10"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.cacheRead | string | `"0.2"` |  |
-| llmRouting.modelCatalog.providers.anthropic.models.claude-sonnet-5-5.rates.cacheWrite | string | `"2.5"` |  |
+| llmRouting.modelCatalog.providers | object | `{}` |  |
 | networkPolicy.enabled | bool | `true` |  |
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
