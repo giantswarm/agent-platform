@@ -277,6 +277,7 @@ else:
         tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         graphs = parsed and "--enforce-eager" not in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
+        l40sfit = "--gpu-memory-utilization=0.90" in open(f"{tree}/{CONN}/files/model-serving/presets/devstral-small-2.yaml", encoding="utf-8").read()
         splitenv = graphs and "VLLM_ENABLE_ROCE_ALLREDUCE" in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
         mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
@@ -502,6 +503,15 @@ else:
         head.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
         golden.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
         print(f"note: nemotron-3-super-nvfp4 serves with CUDA graphs on this side and not on {ref}: its ConfigMap is left out of the comparison")
+    # devstral-small-2 is sized for one 48 GB L40S on this side
+    # (giantswarm/agent-platform#718: --gpu-memory-utilization=0.90,
+    # overheadGiB 16); a golden from before renders 0.50 and 30, so its
+    # ConfigMap is left out of the comparison. Drop this once GOLDEN_REF
+    # carries #718.
+    if not l40sfit:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-devstral-small-2"), None)
+        golden.pop(("ConfigMap", "agent-platform-serving-preset-devstral-small-2"), None)
+        print(f"note: devstral-small-2 is sized for one L40S on this side (#718) and not on {ref}: its ConfigMap is left out of the comparison")
     # nemotron-3-super-nvfp4 carries the RoCE all-reduce for a split on this
     # side (spec.split.env, giantswarm/agent-platform#743); a golden from
     # before renders it without, so its ConfigMap is left out of the
