@@ -11,6 +11,10 @@ components:
     enabled: false
   muster:
     enabled: false
+  # Beside the platform's release, whose controller owns the agentgateway.dev
+  # CRDs of this cluster (on by default since #252).
+  agentgateway:
+    enabled: false
   dicebear:
     enabled: false
   valkey:

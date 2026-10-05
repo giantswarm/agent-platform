@@ -22,3 +22,8 @@ agentgateway:
   proxy:
     image:
       registry: localhost:5000
+
+components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false

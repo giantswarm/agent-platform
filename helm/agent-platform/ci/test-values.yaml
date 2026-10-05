@@ -10,3 +10,8 @@ ingress:
       kind: Gateway
   hostnames:
     - muster.ci.example.com
+
+components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false

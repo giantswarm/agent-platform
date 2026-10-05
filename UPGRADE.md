@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agentgateway in front of muster by default)
+
+giantswarm/agent-platform#252: both charts default to `ingress.mode: agentgateway-muster` with `components.agentgateway.enabled: true` and `agent-platform-mcps.agentgateway.viaMuster: true`. An installation that left the three keys at their defaults moves from `muster-direct` to agentgateway: the agentgateway component and its CRDs install, the data-plane `Gateway`, `AgentgatewayParameters` and data-plane NetworkPolicies render, and `/mcp` on the muster hostname routes through agentgateway to muster. Clients keep their URL; OAuth discovery stays on muster's `/` route.
+
+### Operator action
+
+- **Nothing**, where the installation already sets the agentgateway-muster keys (Giant Swarm's fleet does, from the shared configuration) or is fine moving to agentgateway.
+- **To stay on muster-direct** for now, set all three keys: `ingress.mode: muster-direct`, `components.agentgateway.enabled: false`, `agent-platform-mcps.agentgateway.viaMuster: false`. Setting the mode alone fails the render, naming `components.agentgateway.enabled`. `muster-direct` is deprecated and goes away in a later major release.
+- **A slice release beside the platform's release** (`components.muster.enabled: false` on the installation's own cluster) sets `components.agentgateway.enabled: false`, as `examples/serving-slice.yaml` does: the platform's release owns the agentgateway controller and its CRDs there, and the slice would otherwise render a second agentgateway release. A release without muster renders no data plane whatever `ingress.mode` says.
+
 ## \<current\> → \<next\> (the portal registers no agent-deployment template)
 
 giantswarm/backstage-catalogs#705: the Dev Portal creates agents through agent-manager's MCP tools, so the connectivity chart's app-config no longer registers giantswarm/backstage-catalogs' `templates/agent-deployment/template.yaml` as a catalog location, and `backstage.catalogs` is gone from both charts. The cilium Backstage policy opens only `api.github.com` on 443, for skill discovery, while `backstage.skillsRepositories` is set.

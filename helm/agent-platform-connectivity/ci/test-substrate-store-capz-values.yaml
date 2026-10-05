@@ -8,6 +8,9 @@
 # s3://giantswarm-ci-substrate/kagent and hands the substrate release the
 # façade's S3 environment; this chart renders the cloud objects and the façade.
 components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false
   kagent:
     enabled: true
   substrate:

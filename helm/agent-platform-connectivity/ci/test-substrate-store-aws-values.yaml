@@ -6,6 +6,9 @@
 # (s3://giantswarm-ci-substrate/kagent) and forwards the role annotation to the
 # substrate release; this chart renders the cloud objects.
 components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false
   kagent:
     enabled: true
   substrate:

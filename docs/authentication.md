@@ -8,11 +8,11 @@ networking/NetworkPolicy model are described elsewhere (`README.md` →
 The request topology is selected by `ingress.mode` (see `README.md` →
 *Ingress topology*):
 
-- **`muster-direct`** (default) — client → muster directly. There is **one** hop:
-  the public Gateway → muster. No agentgateway data plane exists.
-- **`agentgateway-muster`** / **`agentgateway-direct`** — client → agentgateway
+- **`agentgateway-muster`** (default) / **`agentgateway-direct`** — client → agentgateway
   `/mcp` → muster (or, in `agentgateway-direct`, the servers). Here a second
   Gateway API hop (agentgateway) sits in front of muster.
+- **`muster-direct`** (deprecated) — client → muster directly. There is **one** hop:
+  the public Gateway → muster. No agentgateway data plane exists.
 
 This document narrates the **`agentgateway-*`** topology, where agentgateway is
 present. In `muster-direct` mode, drop the agentgateway hop: the client reaches

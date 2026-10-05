@@ -5,6 +5,9 @@
 # components.kagent there) and resolves substrate.postgres.enabled: auto to
 # false with the Cluster on; a render of this chart on its own does the same.
 components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false
   kagent:
     enabled: true
   substrate:
