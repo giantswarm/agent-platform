@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Preset `kolibri-1`: Aleph Alpha's Kolibri-1 split across two 128 GB GB10 nodes** (giantswarm/agent-platform#804). Kolibri-1 is a German/English mixture of experts (78B, 3.5B active, Apache 2.0) with tool calling and a reasoning mode. It is served as its FP8 checkpoint (73.4 GiB) from the model image `giantswarm/models/kolibri-1:e52eb4627d11`, on `giantswarm/vllm-aleph-alpha` (vLLM 0.29 with Aleph Alpha's plugin, which registers the architecture and the `kolibri1` parsers), with a 256k context, an FP8 KV cache and `--gpu-memory-utilization=0.60`. One GB10 cannot hold the weights at that share, so it is served split, half the weights per node; measured on two GB10s: 36.85 GiB of weights and a 34.8 GiB KV cache (6.8M tokens) per node, a parsed tool call, about 65 tokens/s for one stream. `model-families.yaml` gains the Kolibri row.
+
 ### Changed
 
 - **`devstral-small-2` is sized for one 48 GB GPU: `--gpu-memory-utilization=0.90` (was 0.50) and `overheadGiB: 16` (was 30); `components.model-manager.versionRange` is `>=1.10.2 <2.0.0`** (giantswarm/agent-platform#718). The preset was the only one downloading from `hf://` and serving `--enforce-eager` that is small enough for one L40S, but its 0.50 left about 22 GiB of a 48 GB card, less than its 25 GiB of weights, and its 25 + 30 GiB claim made cluster-manager refuse a pool of one 48 GB GPU. Measured on one L40S (g6e.2xlarge) from `hf://`: the weights take 23.3 GiB on the GPU and the KV cache 15.8 GiB at 0.90 (103,632 tokens, 12.6 concurrent 8k contexts), 41.5 of 46 GB used, and the chat and tool-call round trip answers. On a unified-memory node model-manager 1.10.2 composes the utilization from the weights plus overhead instead of the preset's 0.90 (giantswarm/model-manager#223), so the preset serves on a DGX Spark unchanged; the model-manager floor moves to that release and the customer BOM pins it.
