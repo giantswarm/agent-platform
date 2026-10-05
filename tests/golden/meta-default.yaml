@@ -793,23 +793,6 @@ spec:
       mode: agentgateway-muster
       parentRefs: []
     kagent:
-      claudeHarness:
-        callerRoutes: {}
-        create: false
-        egress: []
-        env: []
-        image: ""
-        modelConfig:
-          apiKeySecret: kagent-anthropic
-          apiKeySecretKey: ANTHROPIC_API_KEY
-          create: true
-          displayName: Claude Code
-          model: claude-sonnet-4-6
-          name: claude-code
-        name: claude
-        projectInstructions: true
-        propagateToken: true
-        snapshotLocation: ""
       controller:
         agentImage:
           repository: giantswarm/kagent/golang-adk
@@ -4519,9 +4502,7 @@ spec:
           # The requests stay small: a hook is a burst of kubectl runs. The limit
           # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
           # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-          # and nothing a hook does scales with the cluster (the storage-version
-          # backup reads the release Secrets one at a time and parses only a
-          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
           # 128Mi three seconds into its first kubectl calls on a busy node
           # (giantswarm/agent-platform#593); 512Mi is four times that pod's
           # whole budget and is never approached in a normal run.
@@ -4618,9 +4599,7 @@ spec:
           # The requests stay small: a hook is a burst of kubectl runs. The limit
           # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
           # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-          # and nothing a hook does scales with the cluster (the storage-version
-          # backup reads the release Secrets one at a time and parses only a
-          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
           # 128Mi three seconds into its first kubectl calls on a busy node
           # (giantswarm/agent-platform#593); 512Mi is four times that pod's
           # whole budget and is never approached in a normal run.
@@ -4717,9 +4696,7 @@ spec:
           # The requests stay small: a hook is a burst of kubectl runs. The limit
           # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
           # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-          # and nothing a hook does scales with the cluster (the storage-version
-          # backup reads the release Secrets one at a time and parses only a
-          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
           # 128Mi three seconds into its first kubectl calls on a busy node
           # (giantswarm/agent-platform#593); 512Mi is four times that pod's
           # whole budget and is never approached in a normal run.
@@ -4885,9 +4862,7 @@ spec:
                         # The requests stay small: a hook is a burst of kubectl runs. The limit
                         # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
                         # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-                        # and nothing a hook does scales with the cluster (the storage-version
-                        # backup reads the release Secrets one at a time and parses only a
-                        # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+                        # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
                         # 128Mi three seconds into its first kubectl calls on a busy node
                         # (giantswarm/agent-platform#593); 512Mi is four times that pod's
                         # whole budget and is never approached in a normal run.
@@ -4922,9 +4897,7 @@ spec:
           # The requests stay small: a hook is a burst of kubectl runs. The limit
           # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
           # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-          # and nothing a hook does scales with the cluster (the storage-version
-          # backup reads the release Secrets one at a time and parses only a
-          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
           # 128Mi three seconds into its first kubectl calls on a busy node
           # (giantswarm/agent-platform#593); 512Mi is four times that pod's
           # whole budget and is never approached in a normal run.
@@ -5018,9 +4991,7 @@ spec:
           # The requests stay small: a hook is a burst of kubectl runs. The limit
           # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
           # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-          # and nothing a hook does scales with the cluster (the storage-version
-          # backup reads the release Secrets one at a time and parses only a
-          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
           # 128Mi three seconds into its first kubectl calls on a busy node
           # (giantswarm/agent-platform#593); 512Mi is four times that pod's
           # whole budget and is never approached in a normal run.
@@ -5113,9 +5084,7 @@ spec:
           # The requests stay small: a hook is a burst of kubectl runs. The limit
           # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
           # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-          # and nothing a hook does scales with the cluster (the storage-version
-          # backup reads the release Secrets one at a time and parses only a
-          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
           # 128Mi three seconds into its first kubectl calls on a busy node
           # (giantswarm/agent-platform#593); 512Mi is four times that pod's
           # whole budget and is never approached in a normal run.
@@ -5209,9 +5178,7 @@ spec:
           # The requests stay small: a hook is a burst of kubectl runs. The limit
           # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
           # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-          # and nothing a hook does scales with the cluster (the storage-version
-          # backup reads the release Secrets one at a time and parses only a
-          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
           # 128Mi three seconds into its first kubectl calls on a busy node
           # (giantswarm/agent-platform#593); 512Mi is four times that pod's
           # whole budget and is never approached in a normal run.
