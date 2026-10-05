@@ -853,7 +853,11 @@ components:  # @schema additionalProperties: true
     # recorded by its chart's --instance, so a second model-manager on the
     # kagent namespace or a copied manifest no longer loses agents their
     # model configuration on an unload (giantswarm/model-manager#230).
-    versionRange: ">=1.9.1 <2.0.0"
+    # 1.10.2 is the floor: it derives a preset's serving shape from the node
+    # and, on a unified-memory node, composes --gpu-memory-utilization from
+    # the weights plus overhead, so devstral-small-2's 0.90 (sized for one
+    # 48 GB L40S) serves on a Spark too (giantswarm/model-manager#223).
+    versionRange: ">=1.10.2 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)

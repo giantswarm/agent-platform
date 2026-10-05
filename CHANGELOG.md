@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`devstral-small-2` is sized for one 48 GB GPU: `--gpu-memory-utilization=0.90` (was 0.50) and `overheadGiB: 16` (was 30); `components.model-manager.versionRange` is `>=1.10.2 <2.0.0`** (giantswarm/agent-platform#718). The preset was the only one downloading from `hf://` and serving `--enforce-eager` that is small enough for one L40S, but its 0.50 left about 22 GiB of a 48 GB card, less than its 25 GiB of weights, and its 25 + 30 GiB claim made cluster-manager refuse a pool of one 48 GB GPU. Measured on one L40S (g6e.2xlarge) from `hf://`: the weights take 23.3 GiB on the GPU and the KV cache 15.8 GiB at 0.90 (103,632 tokens, 12.6 concurrent 8k contexts), 41.5 of 46 GB used, and the chat and tool-call round trip answers. On a unified-memory node model-manager 1.10.2 composes the utilization from the weights plus overhead instead of the preset's 0.90 (giantswarm/model-manager#223), so the preset serves on a DGX Spark unchanged; the model-manager floor moves to that release and the customer BOM pins it.
+
 ### Fixed
 
 - **Karpenter scales the Substrate worker pool again** (giantswarm/agent-platform#798). The meta chart derived the workers' affinity to the atelet on their node as a required term; Karpenter cannot see a DaemonSet's pods on a node it has not launched, so a worker that fit no existing node stayed `Pending` for good (`unsatisfiable topology constraint for pod affinity`), the pool stayed below its desired size and the pool's nodes were never consolidated. The derived term is now preferred (weight 100): a worker still goes where an atelet is bound whenever such a node has room, and Karpenter launches a node when none has.

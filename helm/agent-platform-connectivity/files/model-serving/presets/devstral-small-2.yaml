@@ -10,8 +10,11 @@ spec:
     Dense 24B agentic coding model (SWE-bench Verified 68.0%) served from
     the repository's FP8 checkpoint (fp8_e4m3 weights, BF16 vision tower
     and lm_head; ~24 GiB of weights by its safetensors index, the
-    consolidated-* files are a second copy), language-only. Tuned on a
-    single-GPU 128 GB unified-memory node (--gpu-memory-utilization=0.50).
+    consolidated-* files are a second copy), language-only. Sized for one
+    48 GB GPU (L40S, g6e.2xlarge): at --gpu-memory-utilization=0.90 the
+    weights take 23.3 GiB and the KV cache 15.8 GiB (103k tokens, 12
+    concurrent 8k contexts), 41.5 of 46 GB used. On a unified-memory node
+    model-manager composes the utilization from weights plus overhead.
   model:
     id: mistralai/Devstral-Small-2-24B-Instruct-2512
     storageUri: hf://mistralai/Devstral-Small-2-24B-Instruct-2512
@@ -20,7 +23,7 @@ spec:
     capabilities: [chat, tools, coding]
     license: apache-2.0
   args:
-    - --gpu-memory-utilization=0.50
+    - --gpu-memory-utilization=0.90
     - --max-model-len=8192
     - --enforce-eager
     - --no-enable-log-requests
@@ -37,4 +40,4 @@ spec:
       memory: 64Gi
   requirements:
     weightsGiB: 25
-    overheadGiB: 30
+    overheadGiB: 16
