@@ -615,10 +615,6 @@ components:  # @schema additionalProperties: true
     # namespaceOverride are upstream keys the connectivity chart also reads, so
     # they are forwarded.
     omitKeys:
-      # The Claude Harness's ModelConfig is the connectivity chart's object
-      # (kagent.claudeHarness.modelConfig); the rest of the block is the kagent
-      # chart's Harness.
-      - claudeHarness.modelConfig
       - controllerRoute
       # The controller's VerticalPodAutoscaler is the connectivity chart's
       # object (kagent.controller.vpa); the rest of the controller block is
@@ -649,7 +645,6 @@ components:  # @schema additionalProperties: true
     omitEmptyKeys:
       - substrateWorkerPool.workerImage
       - harness.image
-      - claudeHarness.image
     enabled: false
   kagent-crds:  # @schema additionalProperties: true
     chart: kagent-crds
@@ -2549,6 +2544,19 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # stable human identity and matches muster's trusted-issuer subjectClaim,
       # so UI (oauth2-proxy) and A2A sessions key identically.
       userIdClaim: email
+    # The line's session lifecycle knobs travel as written (the block is the
+    # kagent chart's; the chart renders each as its KAGENT_* env): sessionIdleTTL
+    # (KAGENT_SESSION_IDLE_TTL, 168h: an idle session is deleted; running tasks
+    # and turns waiting for input do not expire), sessionShareMaxTTL
+    # (KAGENT_SESSION_SHARE_MAX_TTL, 0: the longest lifetime a session share may
+    # request, and the lifetime a share created without one receives; 0 leaves a
+    # share valid until revoked or the session is deleted), stalledTurnTimeout
+    # (KAGENT_STALLED_TURN_TIMEOUT, 1h: a turn whose runtime recorded no event
+    # for that long is failed so the session takes its next message) and
+    # pausedRuntimeTTL (KAGENT_PAUSED_RUNTIME_TTL, 2m: a runtime paused for input
+    # is suspended to a durable snapshot once its pause is older than this). The
+    # platform sets none; an installation that bounds its shares sets
+    # sessionShareMaxTTL here (klaus-gateway's thread shares renew within it).
     # Voluntary disruption (giantswarm/agent-platform#431): the controller pod
     # holds every streaming turn (A2A SendStreamingMessage, the portal's SSE)
     # and the actor sessions behind them; an eviction mid-turn leaves the task
@@ -3226,63 +3234,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: auto
 
-  # --- The Claude Harness (the kagent chart's claudeHarness.* keys; off by default) ---
-  # A second Harness, `claude`, in the kagent namespace: the `claude` runtime
-  # adapter (Harness.spec.claude) runs Claude Code as the agent, on the
-  # WorkerPool of the platform Harness (the chart defaults workerPoolRef to
-  # substrateWorkerPool.name). The kagent chart renders it from this block
-  # (claudeHarness.create) with its own claude-harness image at the digest it
-  # was published with (runtimeImages.claudeHarness). An Agent names it by
-  # spec.harnessRef.name: claude. The connectivity chart renders its
-  # ModelConfig (modelConfig below) and nothing else of the block.
-  claudeHarness:
-    create: false
-    name: claude
-    # An OVERRIDE of the runtime image, BY DIGEST (<repository>@sha256:<64 hex>;
-    # the Harness CRD accepts no tag). Empty (the default): the chart's own
-    # claude-harness image at the stamped digest; the platform never pins a
-    # digest here. Set by a dev loop that runs the platform on a locally built
-    # image; it travels only when set (components.kagent.omitEmptyKeys).
-    image: ""
-    # Where Substrate keeps the actors' snapshots for this Harness
-    # (Harness.spec.substrate.snapshotPolicy.location). Empty (the default)
-    # derives the platform Harness's location with the `claude` prefix,
-    # <kagent.harness.snapshotLocation>/claude, whether that location is set
-    # by hand or rendered by kagent.harness.snapshotStore. A set value stands.
-    snapshotLocation: ""
-    # Hosts every agent on the Harness may reach besides what its revision
-    # compiles (Harness.spec.substrate.egress): hostnames, or leftmost-label
-    # wildcards such as `*.githubusercontent.com`. A coding agent names its
-    # git hosts and its toolchain's registries here.
-    egress: []
-    # KAGENT_PROPAGATE_TOKEN: the caller's bearer on the agent's MCP calls, so
-    # muster sees the person, not the platform (the platform Harness sets it
-    # through its env).
-    propagateToken: true
-    # KAGENT_CLAUDE_PROJECT_INSTRUCTIONS: Claude reads a workspace's CLAUDE.md
-    # and AGENTS.md (a cloned repository's as soon as it reads a file there);
-    # off, a repository's instructions reach Claude only as files it opens.
-    projectInstructions: true
-    # KAGENT_CLAUDE_CALLER_ROUTES: host to upstream, the upstream acting on the
-    # caller's credential for that host; git reaches the host through the
-    # route with no token in the sandbox. Empty renders no route.
-    callerRoutes: {}
-    # Environment on top of what the keys above render (Harness.spec.env: name
-    # with value or credentialRef).
-    env: []
-    # The ModelConfig the connectivity chart renders with the Harness:
-    # Anthropic, the platform's default model, prompt caching off (Claude Code
-    # sets its own cache breakpoints on every call; the adapter's flag has
-    # nothing to add). Never forwarded to the kagent chart
-    # (components.kagent.omitKeys).
-    modelConfig:
-      create: true
-      name: claude-code
-      displayName: Claude Code
-      model: claude-sonnet-4-6
-      apiKeySecret: kagent-anthropic
-      apiKeySecretKey: ANTHROPIC_API_KEY
-
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
   # (h2c to the controller) and a GRPCRoute in the release namespace, matched by
@@ -3322,8 +3273,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         kagent.api.v1alpha1.SessionService: []
         kagent.api.v1alpha1.SystemService: []
         lf.a2a.v1.A2AService: []
-    # kagent's MCP server (the controller's /mcp: list_agent_instances, the
-    # ready sessions the caller may see, invoke_agent_instance, a message to
+    # kagent's MCP server (the controller's /mcp: list_sessions, the
+    # ready sessions the caller may see, invoke_session, a message to
     # one of them through the A2A gateway, and the checkpoint and fork tools)
     # registered with muster as
     # MCPServer kagent in the agent-platform tool group, so every session with
@@ -3337,7 +3288,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       pathPrefix: /kagent/mcp
       # Seconds muster waits for one call (MCPServer spec.timeout, 1-300).
-      # invoke_agent_instance answers when the receiving session's turn ends,
+      # invoke_session answers when the receiving session's turn ends,
       # so the default is the CRD's maximum; a longer turn runs through the
       # MCP Tasks extension.
       timeout: 300

@@ -245,7 +245,7 @@ kagent line's controller honours the label — `Accepted=True`, reason
 `DiscoveryDisabled`, an empty inventory — an opt-out the line carries as a
 patch until upstream merges kagent-dev/kagent#2752. With discovery off a
 Harness cannot narrow the server to `muster.tools`; it exposes the server and
-may report a warning in `status.harnesses[].warnings` — the toolset header is
+may report a warning in the `Agent`'s `status.warnings` — the toolset header is
 the enforced narrowing, applied by muster per request.
 
 **Why the controller gets no credential of its own.** muster accepts Dex ID

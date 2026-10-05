@@ -1,17 +1,8 @@
-{{- $entries := .Values.kagent.modelConfigs | default list }}
-{{- /* The Claude Harness's ModelConfig (kagent.claudeHarness.modelConfig) joins the
-catalog while the kagent release renders the Harness (kagent.claudeHarness.create):
-Anthropic, prompt caching off. */}}
-{{- $claude := .Values.kagent.claudeHarness | default dict }}
-{{- if and $claude.create (dig "modelConfig" "create" false $claude) }}
-{{- $mc := $claude.modelConfig }}
-{{- $entries = append $entries (dict "name" $mc.name "displayName" $mc.displayName "provider" "Anthropic" "model" $mc.model "apiKeySecret" $mc.apiKeySecret "apiKeySecretKey" $mc.apiKeySecretKey "promptCaching" false) }}
-{{- end }}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) $entries }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.modelConfigs }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $routed := include "agent-platform.llmRouting" $ }}
 {{- $listener := include "agent-platform.llmBaseUrl" $ }}
-{{- range $entries }}
+{{- range .Values.kagent.modelConfigs }}
 {{- $name := required "kagent.modelConfigs[].name is required" .name }}
 {{- /* The CRD's enum, checked at render time: the API server refuses any other
 spelling at admission, after the render has said nothing. */}}

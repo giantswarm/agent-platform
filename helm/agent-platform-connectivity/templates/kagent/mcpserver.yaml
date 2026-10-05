@@ -1,7 +1,7 @@
 {{- /*
 Registers kagent's MCP server with muster (kagent.controllerRoute.mcp). The
-controller serves it at /mcp on its API port: list_agent_instances (the ready
-sessions the caller may see), invoke_agent_instance (a message to one of them
+controller serves it at /mcp on its API port: list_sessions (the ready
+sessions the caller may see), invoke_session (a message to one of them
 through kagent's A2A gateway, synchronous or through the MCP Tasks extension;
 hence mcp.timeout, the seconds muster waits, at the CRD's maximum by default)
 and the checkpoint and fork tools. Registered, every session whose toolset includes the agent-platform

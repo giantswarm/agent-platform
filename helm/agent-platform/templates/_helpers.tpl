@@ -139,9 +139,6 @@ overwrite would hide a values file that still spells the old key.
     as for klaus-gateway: the valkey block's own values win.
   kagent: harness.snapshotLocation from kagent.harness.snapshotStore while the
     store block renders the bucket (agent-platform.kagent.snapshotLocation);
-    claudeHarness.snapshotLocation, while the Claude Harness is on and names
-    none, as the platform Harness's location with the `claude` prefix (a set
-    value stands);
     substrateWorkerPool.workerImage from the Substrate release THIS chart pins
     (agent-platform.substrate.workerImage: the substrate block's image.registry
     and image.repository, ateom-gvisor, the floor of components.substrate.versionRange) — never the
@@ -237,14 +234,6 @@ runtime-registration contract there. */ -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
-{{- end -}}
-{{- if eq .name "kagent" -}}
-{{- $claude := dig "claudeHarness" dict (.root.Values.kagent | default dict) -}}
-{{- /* The platform location is guarded above: components.yaml fails the render
-without one while kagent is on. */ -}}
-{{- if and $claude.create (not $claude.snapshotLocation) -}}
-{{- $_ := set $derived "claudeHarness" (dict "snapshotLocation" (printf "%s/claude" (trimSuffix "/" (include "agent-platform.kagent.snapshotLocation" .root)))) -}}
-{{- end -}}
 {{- end -}}
 {{- if eq .name "kagent" -}}
 {{- /* The worker image follows the chart's Substrate pin, not the kagent build's
@@ -1944,8 +1933,7 @@ Usage: include "agent-platform.kagent.hookNamespace" .
 {{/*
 The namespace the kagent component's objects live in: kagent.namespaceOverride,
 else the namespace the platform HelmReleases target (gitops.targetNamespace,
-else the release namespace). The storage-version hooks keep their record there
-(hooks/kagent-crds-storage-version.yaml).
+else the release namespace).
 Usage: include "agent-platform.kagent.namespace" .
 */}}
 {{- define "agent-platform.kagent.namespace" -}}
@@ -1953,36 +1941,20 @@ Usage: include "agent-platform.kagent.namespace" .
 {{- end -}}
 
 {{/*
-Whether the kagent CRDs' storage-version hooks render
-(hooks/kagent-crds-storage-version.yaml, giantswarm/agent-platform#396): whenever
-the kagent line's CRD component is on — with or without the bundled engine. A
-cluster's own Flux runs this chart's hooks too, and every installation that ran
-kagent 0.10 needs the step; the other hooks stay the engine's. Never with
-gitops.target set: a hook Job runs where the chart is installed, and there the
-kagent CRDs are another release's (the platform's own) — the target cluster
-starts on the kagent API v2 line and has no cut-over to run. Emits "true" or "".
-*/}}
-{{- define "agent-platform.kagent.storageVersionHooks" -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) (not (include "agent-platform.targetSecretName" .)) }}true{{ end -}}
-{{- end -}}
-
-{{/*
 The Helm hook events the hook ServiceAccount + ClusterRoleBinding (hooks/rbac.yaml)
 are created for, in Helm's order: pre-install,pre-upgrade while the kagent
-namespace hook or the storage-version backup hook renders (they run as that
-account — creating a namespace or deleting a CRD is cluster-scoped, the
-namespaced <release>-self identity cannot), post-install,post-upgrade while the
-storage-version restore hook renders; with the bundled engine pre-install,
-pre-upgrade for the Flux Operator CRD hook and pre-delete and post-delete for
-the ordered teardown; and the serving teardown's event while it renders
+namespace hook renders (it runs as that account — creating a namespace is
+cluster-scoped, the namespaced <release>-self identity cannot); with the
+bundled engine pre-install, pre-upgrade for the Flux Operator CRD hook and
+pre-delete and post-delete for the ordered teardown; and the serving
+teardown's event while it renders
 (agent-platform.serving.teardownEvent: pre-delete, or pre-upgrade when the
 slice is switched off in place). Empty when none of them renders — rbac.yaml
 renders nothing then.
 */}}
 {{- define "agent-platform.hooks.serviceAccountEvents" -}}
 {{- $events := list -}}
-{{- if or (include "agent-platform.kagent.hookNamespace" .) (include "agent-platform.kagent.storageVersionHooks" .) }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
-{{- if include "agent-platform.kagent.storageVersionHooks" . }}{{ $events = concat $events (list "post-install" "post-upgrade") }}{{ end -}}
+{{- if include "agent-platform.kagent.hookNamespace" . }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
 {{- if eq (include "agent-platform.engineEnabled" .) "true" }}{{ $events = concat $events (list "pre-install" "pre-upgrade" "pre-delete" "post-delete") }}{{ end -}}
 {{- with include "agent-platform.serving.teardownEvent" . }}{{ $events = append $events . }}{{ end -}}
 {{- join "," (uniq $events) -}}

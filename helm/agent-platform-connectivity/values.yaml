@@ -1316,24 +1316,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # The platform Harness is the kagent chart's since agent-platform 4.8.0
   # (harness.create); this chart renders none and reads no kagent.harness key.
 
-  # --- The Claude Harness's ModelConfig (kagent.claudeHarness) ---
-  # The Claude Harness itself is the kagent chart's (its claudeHarness.* keys;
-  # the meta chart forwards the block). This chart reads two keys of it: with
-  # create on, the ModelConfig below joins the catalog next to
-  # kagent.modelConfigs, in the kagent namespace.
-  claudeHarness:
-    create: false
-    # The ModelConfig rendered with the Harness: Anthropic, the platform's
-    # default model, prompt caching off (Claude Code sets its own cache
-    # breakpoints on every call; the adapter's flag has nothing to add).
-    modelConfig:
-      create: true
-      name: claude-code
-      displayName: Claude Code
-      model: claude-sonnet-4-6
-      apiKeySecret: kagent-anthropic
-      apiKeySecretKey: ANTHROPIC_API_KEY
-
   # The Substrate WorkerPool the platform Harness runs on. The kagent chart
   # creates it in the kagent namespace (name, replicas, pod template — the
   # meta chart forwards them); this chart reads .name for the Harness's
@@ -1659,8 +1641,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         kagent.api.v1alpha1.SessionService: []
         kagent.api.v1alpha1.SystemService: []
         lf.a2a.v1.A2AService: []
-    # kagent's MCP server (the controller's /mcp: list_agent_instances, the
-    # ready sessions the caller may see, invoke_agent_instance, a message to
+    # kagent's MCP server (the controller's /mcp: list_sessions, the
+    # ready sessions the caller may see, invoke_session, a message to
     # one of them through the A2A gateway, and the checkpoint and fork tools)
     # registered with muster as
     # MCPServer kagent in the agent-platform tool group, so every session with
@@ -1674,7 +1656,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       pathPrefix: /kagent/mcp
       # Seconds muster waits for one call (MCPServer spec.timeout, 1-300).
-      # invoke_agent_instance answers when the receiving session's turn ends,
+      # invoke_session answers when the receiving session's turn ends,
       # so the default is the CRD's maximum; a longer turn runs through the
       # MCP Tasks extension.
       timeout: 300

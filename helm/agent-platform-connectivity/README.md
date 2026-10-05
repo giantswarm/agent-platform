@@ -325,8 +325,8 @@ one field without restating the rest. A field is the place for what is per
 request: as a metric label it would make one series per value.
 
 The chart's one field is `agent_instance_id`, the session of an agent's model
-call. The kagent runtime names the `AgentInstance` a turn runs in (a Dev
-Portal conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
+call. The kagent runtime names the `Session` a turn runs in (a Dev Portal
+conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
 model call of that turn, and the field reads it behind the same Substrate
 egress predicate as the agent labels (`agent-platform.substrate.egressCall`),
 so a pod that is not the egress logs no session (the empty value drops the
@@ -1295,13 +1295,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controller.vpa.maxAllowed.cpu | string | `"1900m"` |  |
 | kagent.controller.vpa.maxAllowed.memory | string | `"1280Mi"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
-| kagent.claudeHarness.create | bool | `false` |  |
-| kagent.claudeHarness.modelConfig.create | bool | `true` |  |
-| kagent.claudeHarness.modelConfig.name | string | `"claude-code"` |  |
-| kagent.claudeHarness.modelConfig.displayName | string | `"Claude Code"` |  |
-| kagent.claudeHarness.modelConfig.model | string | `"claude-sonnet-4-6"` |  |
-| kagent.claudeHarness.modelConfig.apiKeySecret | string | `"kagent-anthropic"` |  |
-| kagent.claudeHarness.modelConfig.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
 | kagent.substrateWorkerPool.podDisruptionBudget.enabled | bool | `true` |  |
 | kagent.substrateWorkerPool.podDisruptionBudget.minAvailable | string | `nil` |  |

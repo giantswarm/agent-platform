@@ -81,9 +81,6 @@ CATALOG_SHAPE = [
 ]
 
 
-# The Claude Harness on (kagent.claudeHarness.create): the Harness is the kagent
-# chart's; this chart adds the claude-code ModelConfig to the catalog.
-CLAUDE_SHAPE = [*CATALOG_SHAPE, "--set", "kagent.claudeHarness.create=true"]
 # Kubernetes CRD patterns are RE2 (Go), which supports POSIX character classes;
 # Python's re does not read [:space:] & co. inside a class, so translate the ones
 # the CRDs use to their Python equivalents before matching (a no-op on a pattern
@@ -366,7 +363,6 @@ def main(chart: str) -> int:
 
     shapes: list[tuple[str, list[str]]] = [(f"ci/{os.path.basename(f)}", ["-f", f]) for f in sorted(glob.glob(f"{chart}/ci/*.yaml"))]
     shapes.append(("catalog (kagent on, one ModelConfig, two operator RemoteMCPServers)", CATALOG_SHAPE))
-    shapes.append(("the Claude Harness on (kagent.claudeHarness: its claude-code ModelConfig)", CLAUDE_SHAPE))
     total = 0
     for where, args in shapes:
         docs = kagent_docs(render(chart, args))

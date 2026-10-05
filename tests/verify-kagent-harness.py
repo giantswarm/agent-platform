@@ -21,8 +21,6 @@ by spec.harnessRef; the Harness has no admission selector. This test asserts:
     (giantswarm/agent-platform#456);
   - the kagent release's values carry no null anywhere (a null is removed, not
     stored, by the merge patch of a HelmRelease that already exists, #418);
-  - kagent.claudeHarness, the chart's second Harness, reaches the tree off by
-    default (create: false; verify-claude-harness holds its shape);
   - an override kagent.harness.image (a dev loop's locally built image, by
     digest) reaches the kagent release's harness.image verbatim;
   - kagent.substrateWorkerPool.name follows an override (the Harness's
@@ -124,10 +122,6 @@ def main(connectivity: str, meta: str) -> int:
              "OTel exporters resolved off the env is KAGENT_PROPAGATE_TOKEN alone)")
     print("ok: the meta chart forwards the platform Harness policy — create, the snapshot location, KAGENT_PROPAGATE_TOKEN "
           "(exporters off), the compaction; no image, no workerPoolRef, no selector")
-    claude = values.get("claudeHarness")
-    if not claude or claude.get("create") is not False:
-        fail(f"kagent.claudeHarness is not forwarded off by default (create: false): {claude}")
-    print("ok: kagent.claudeHarness reaches the tree with create: false")
 
     # The actors' tenant header follows the exporters; the signals reach the
     # kagent chart resolved, in its SDK-spec shape.

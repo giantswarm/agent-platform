@@ -76,7 +76,7 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 # chart's exporter configuration (the controller ConfigMap); the connectivity chart
 # reads the same endpoints for the OTLP egress of the controller and of the actors'
 # egress gateway (agent-platform.kagent.otlpTargets, giantswarm/agent-platform#456).
-UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness", "claudeHarness", "otel"}
+UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness", "harnesses", "otel"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
 LINE_REPOSITORY = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
@@ -256,13 +256,6 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
             fail(f"kagent.harness forwarded without {what}: the meta chart owns the GS policy of the platform Harness\n{harness}")
     if "allowedAgentTemplates" in harness:
         fail("kagent.harness.allowedAgentTemplates forwarded; the line's Harness has no admission selector (an Agent names its Harness by spec.harnessRef)")
-    claude = "\n".join(values.get("claudeHarness", []))
-    if not re.search(r"^create: false$", claude, re.M):
-        fail("kagent.claudeHarness.create is not false by default; the Claude Harness is opt-in")
-    if re.search(r"^image:", claude, re.M):
-        fail("kagent.claudeHarness.image forwarded by default; the chart's own claude-harness digest is the Harness image, an override travels only when set")
-    if "modelConfig" in claude:
-        fail("kagent.claudeHarness.modelConfig forwarded; the ModelConfig is the connectivity chart's (components.kagent.omitKeys)")
     pool = scalar(values.get("substrateWorkerPool", []), "name")
     if not pool:
         fail("kagent.substrateWorkerPool.name is empty; the Harness's workerPoolRef defaults to it")
@@ -270,7 +263,7 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
         fail("kagent.controller.substrate.defaultWorkerPool forwarded; the line's chart has no such key (every ActorTemplate is pinned to its Harness's pool)")
     if "enabled: true" not in controller or "ateApiEndpoint:" not in "\n".join(controller):
         fail("kagent.controller.substrate is not on with its ate-api endpoint; the line has no runtime without Substrate")
-    print(f"ok: one build of the line, named by the chart — no tag, no workerImage, no Harness digest forwarded; the Harness policies forwarded (the Claude Harness off); WorkerPool {pool}")
+    print(f"ok: one build of the line, named by the chart — no tag, no workerImage, no Harness digest forwarded; the Harness policy forwarded; WorkerPool {pool}")
 
 
 def check_sources(docs, kagent_range: str) -> None:
