@@ -5467,7 +5467,18 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # managers read registry/repository/tag blocks, and a bump ahead of the
     # runtime configs would pre-pull the wrong image. Empty with enabled: true
     # fails the render.
+    #
+    # The storage-initializer comes first (giantswarm/agent-platform#807): the
+    # init containers run in order, and the predictor's storage-initializer,
+    # which downloads the weights, is on the critical path. Pulled beside the
+    # runtime image its 96 MB took 46–86 s on a cold node, alone 5–12 s; the
+    # kubelet de-duplicates the predictor's concurrent pull of the same
+    # reference, and the runtime image still lands while the weights
+    # download. The reference is the one the kserve-llmisvc-resources line of
+    # components: renders for the ClusterStorageContainer (kserve.storage.image
+    # at kserve.version: 0.7.x is KServe v0.21.0), and moves with that line.
     images:
+      - gsoci.azurecr.io/giantswarm/storage-initializer:v0.21.0
       - gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0
     # The nodes. Empty (the default): Karpenter's label on every node of a GPU
     # instance type, karpenter.k8s.aws/instance-gpu-manufacturer: nvidia (a

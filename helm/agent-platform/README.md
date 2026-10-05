@@ -1396,7 +1396,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
 | modelServing.fastLinks | list | `[]` |  |
 | modelServing.prepull.enabled | bool | `true` |  |
-| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
+| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/storage-initializer:v0.21.0"` |  |
+| modelServing.prepull.images[1] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
 | modelServing.prepull.nodeSelector | object | `{}` |  |
 | modelServing.prepull.gpuReadyLabel | string | `"nvidia.com/gpu.count"` |  |
 | modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |
