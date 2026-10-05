@@ -582,7 +582,7 @@ its container and its probes.
 | The edge | the `cluster` entity leg the identity-provider include renders, on 443 and 10443 | the Envoy pods of the Gateways the muster and kagent-controller routes attach to, on 443 and 10443, plus the agentgateway data plane on 443 for each of those routes that attaches to it |
 | muster | its pods in this namespace, on the muster Service port | the same, as a `podSelector` |
 | The portal's database | its CNPG pods by `cnpg.io/cluster`, on 5432, while `backstage.database.engine` is `postgresql` | the same, as a `podSelector` |
-| The scaffolder catalog | `github.com`, `api.github.com` and `raw.githubusercontent.com` on 443, while `backstage.catalogs.version` is set | the world rule above |
+| Skill discovery | `api.github.com` on 443, while `backstage.skillsRepositories` is set | the world rule above |
 
 The app-config addresses muster and the kagent controller by their public
 hostnames, so those calls leave through the edge rather than through muster's
@@ -900,7 +900,7 @@ A change to a served model's `LLMInferenceService` rolls its predictor Deploymen
 
 A predictor pulls its runtime image only when its main container starts — after the storage-initializer has finished the weights — so on a pool scaling from zero the two longest steps of a cold start run one after the other (measured on a fresh node: weights 116 s, then 115 s for the 8.8 GB `llm-d-cuda` image; with prewarm the node is Ready about two minutes before the model is even requested). The image is the same for every served model of an installation, and a node knows it is a GPU node the moment it joins. So `modelServing.prepull` (on by default; giantswarm/agent-platform#545) renders **a DaemonSet in the serving namespace** (`<release>-model-serving-prepull`; `templates/model-serving/prepull.yaml`) with one init container per image of `prepull.images` running `/bin/true` and a pause main container (`prepull.pauseImage`, the cluster's sandbox image mirrored; `prepull.resources` on every container, never a GPU): the kubelet pulls the images the moment the node joins, in parallel with the storage-initializer, and containerd keeps them for the predictor, whose `Pulled` event then reads "already present on machine".
 
-Where it runs: `prepull.nodeSelector` — **an installation's map renders alone**; empty (the default in both charts) renders Karpenter's `karpenter.k8s.aws/instance-gpu-manufacturer: nvidia`, which every GPU instance type carries, fractional-GPU types such as g6f included. The default is the template's (`agent-platform.modelServing.prepull.nodeSelector` in `_helpers.tpl`), not a values default, because Helm merges maps: a default key in `values.yaml` would be kept next to whatever an installation sets — a DaemonSet no node matches — and a `null` for it is coalesced away when the meta chart forwards its values (giantswarm/agent-platform#562). So a GPU node not launched by Karpenter — labelled `nvidia.com/gpu.present: "true"` by the GPU operator's feature discovery, say — is selected by its own labels alone; a label value that is not a string fails the render naming the key. The pool's own label (`gpuPool.nodeSelector`) is merged under either, so a pool release runs the DaemonSet on the pool's nodes alone; the pool's taint is tolerated first and `prepull.tolerations` after it (default `operator: Exists` — every taint, the fleet's DaemonSet convention, so the pull starts under a node's start-up taints and not once they are lifted; an empty list tolerates the pool's taint alone). The default image list is the runtime image of the well-known `LLMInferenceServiceConfig` every served model composes from — named by the `kserve-runtime-configs` chart (giantswarm/kserve), mirrored to gsoci by its `imageRegistry` — pinned here because this chart has no other value for it: a re-pin of that chart's line moves it here, never ahead, and the list is plain references on purpose so no image manager bumps it ahead of the runtime configs (a newer tag pre-pulled is a tag no predictor runs). An empty list with the switch on fails the render naming the key.
+Where it runs: `prepull.nodeSelector` — **an installation's map renders alone**; empty (the default in both charts) renders Karpenter's `karpenter.k8s.aws/instance-gpu-manufacturer: nvidia`, which every GPU instance type carries, fractional-GPU types such as g6f included. The default is the template's (`agent-platform.modelServing.prepull.nodeSelector` in `_helpers.tpl`), not a values default, because Helm merges maps: a default key in `values.yaml` would be kept next to whatever an installation sets — a DaemonSet no node matches — and a `null` for it is coalesced away when the meta chart forwards its values (giantswarm/agent-platform#562). So a GPU node not launched by Karpenter — labelled `nvidia.com/gpu.present: "true"` by the GPU operator's feature discovery, say — is selected by its own labels alone; a label value that is not a string fails the render naming the key. The pool's own label (`gpuPool.nodeSelector`) is merged under either, so a pool release runs the DaemonSet on the pool's nodes alone; the pool's taint is tolerated first and `prepull.tolerations` after it (default `operator: Exists` — every taint, the fleet's DaemonSet convention, so the pull starts under a node's start-up taints and not once they are lifted; an empty list tolerates the pool's taint alone). The default image list is the runtime image of the well-known `LLMInferenceServiceConfig` every served model composes from — named by the `kserve-runtime-configs` chart (giantswarm/kserve), mirrored to gsoci by its `imageRegistry` — pinned here because this chart has no other value for it: a re-pin of that chart's line moves it here, never ahead, and the list is plain references on purpose so no image manager bumps it ahead of the runtime configs (a newer tag pre-pulled is a tag no predictor runs). The storage-initializer comes first in that list (`gsoci.azurecr.io/giantswarm/storage-initializer`, at the KServe version the `kserve-llmisvc-resources` line of `components:` renders for the `ClusterStorageContainer`; giantswarm/agent-platform#807): the init containers run in order, and the predictor's storage-initializer, which downloads the weights, is on the critical path. Pulled beside the 6.6 GB runtime image its 96 MB took 46–86 s on a cold node, alone 5–12 s. The kubelet de-duplicates the predictor's concurrent pull of the same reference, and the runtime image still lands while the weights download. `make verify-serving-slice` holds that reference to the line, and the runtime image second. An empty list with the switch on fails the render naming the key.
 
 **The DaemonSet is a hook object, not a release resource** (`helm.sh/hook: post-install,post-upgrade,post-rollback`, weight 0, `before-hook-creation`; giantswarm/agent-platform#563). A release's wait counts a DaemonSet ready by its pods — helm-controller from 1.6 waits with the kstatus poller, which needs every pod of a DaemonSet Ready; Helm 3's legacy waiter, still on helm-controller 1.4, takes the DaemonSet's `maxUnavailable: 100%` as ready once the pods are scheduled; the fleet runs both — and a pod whose image cannot be pulled is never Ready. As a release resource, one listed image not yet pullable (a runtime image or a `prepull.modelPresets` image still being built, a registry outage) held the pods in `ImagePullBackOff`, timed the wait out and failed the whole connectivity upgrade with every other object applied. A hook object is outside every waiter's set — a hook's `WatchUntilReady` watches Jobs and Pods only, in Helm 3, Helm 4 and helm-controller alike — so the DaemonSet is created after the release's objects are applied and waited for, and nothing waits for its pods: a missing image leaves them retrying on the kubelet's backoff and the release Ready; each event replaces the DaemonSet, and the pods come back on images already present (`helm get hooks` lists it, `helm get manifest` does not). A hook object is not Helm's to delete on uninstall, so a `pre-delete` hook Job (`<release>-model-serving-prepull-cleanup`; the hook include `agent-platform.hooks.job`, the identity `<release>-hooks` created for that event too with `delete` on exactly that DaemonSet — [Agent Substrate](#agent-substrate)) removes it, unlike the cache claim and the serving namespace, which are kept on purpose. The deny-all policy below stays a release resource; nothing waits for a policy.
 
@@ -1015,7 +1015,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | global.observability.traces.otlp.headers | object | `{}` | More OTLP headers, appended to the data-plane env. |
 | components.muster.enabled | bool | `true` |  |
 | components.dicebear.enabled | bool | `true` |  |
-| components.agentgateway.enabled | bool | `false` |  |
+| components.agentgateway.enabled | bool | `true` |  |
 | components.agent-platform-mcps.enabled | bool | `false` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
@@ -1030,7 +1030,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.kserve-llmisvc-crd.enabled | bool | `false` |  |
 | components.kserve-llmisvc-resources.enabled | bool | `false` |  |
 | components.modelServing.enabled | bool | `false` |  |
-| ingress.mode | string | `"muster-direct"` |  |
+| ingress.mode | string | `"agentgateway-muster"` |  |
 | ingress.parentRefs | list | `[]` |  |
 | ingress.hostnames | list | `[]` |  |
 | ingress.httpRoute.annotations | object | `{}` |  |
@@ -1218,7 +1218,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | valkey.valkey.metrics.exporter.securityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.metrics.exporter.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | agent-platform-mcps.agentgateway.enabled | bool | `true` |  |
-| agent-platform-mcps.agentgateway.viaMuster | bool | `false` |  |
+| agent-platform-mcps.agentgateway.viaMuster | bool | `true` |  |
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
@@ -1667,7 +1667,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
 | backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
-| backstage.catalogs.version | string | `"v0.6.0"` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
@@ -1709,7 +1708,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
 | modelServing.fastLinks | list | `[]` |  |
 | modelServing.prepull.enabled | bool | `true` |  |
-| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
+| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/storage-initializer:v0.21.0"` |  |
+| modelServing.prepull.images[1] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
 | modelServing.prepull.nodeSelector | object | `{}` |  |
 | modelServing.prepull.gpuReadyLabel | string | `"nvidia.com/gpu.count"` |  |
 | modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |

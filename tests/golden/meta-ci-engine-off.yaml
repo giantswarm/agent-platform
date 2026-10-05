@@ -180,7 +180,7 @@ spec:
       agentgateway:
         enabled: true
         musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
-        viaMuster: false
+        viaMuster: true
       mcpServers: []
     agentManager:
       flux:
@@ -327,8 +327,6 @@ spec:
             optional: true
             secretName: '{{ dig "identity" "ca" "secretName" "" .Values.global | default
               "agent-platform-idp-ca" }}'
-      catalogs:
-        version: v0.6.0
       configReload:
         enabled: true
         image:
@@ -577,7 +575,7 @@ spec:
           annotations: {}
           labels: {}
         timeouts: {}
-      mode: muster-direct
+      mode: agentgateway-muster
       parentRefs: []
     kagent:
       controller:
@@ -1493,7 +1491,7 @@ spec:
     agentgateway:
       enabled: true
       musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
-      viaMuster: false
+      viaMuster: true
     mcpServers: []
 ---
 # Source: agent-platform/templates/components.yaml

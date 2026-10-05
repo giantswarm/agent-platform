@@ -35,7 +35,13 @@ FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-ver
 # agent-platform.validateSubstrate); set on every render so a target can turn
 # kagent on without repeating it. The connectivity chart (and GOLDEN_REF's)
 # accepts the key in its open kagent block.
-VM := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents $(FLEET_APIS)
+# MUSTER_DIRECT is the topology without agentgateway, which every key of it
+# opts out of since agentgateway-muster is the default (#252). VM carries it, so
+# a target's base render keeps the muster-direct shape its assertions were
+# written against; a target that wants the data plane sets the agentgateway
+# keys after it (a later --set wins), and verify-modes asserts the default.
+MUSTER_DIRECT := --set ingress.mode=muster-direct --set components.agentgateway.enabled=false --set agent-platform-mcps.agentgateway.viaMuster=false
+VM := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents $(MUSTER_DIRECT) $(FLEET_APIS)
 # Agent Substrate on, as the meta chart forwards it (the two Substrate entries
 # follow components.kagent there; the connectivity chart reads the roster).
 SUBSTRATE_ON := --set components.substrate.enabled=true --set components.substrate-crds.enabled=true
@@ -137,7 +143,7 @@ PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns the wiring + guards).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> muster-direct with no Gateway named anywhere must fail"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) --set ingress.mode=muster-direct >$(VERIFY_TMP)/vm-parents.out 2>&1; then \
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(MUSTER_DIRECT) >$(VERIFY_TMP)/vm-parents.out 2>&1; then \
 		echo "FAIL: empty-parentRefs guard did not fire (render succeeded)"; cat $(VERIFY_TMP)/vm-parents.out; exit 1; \
 	elif ! grep -q "no public Gateway for ingress.parentRefs" $(VERIFY_TMP)/vm-parents.out; then \
 		echo "FAIL: empty-parentRefs check failed for the wrong reason"; cat $(VERIFY_TMP)/vm-parents.out; exit 1; \
@@ -170,6 +176,18 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.agent-platform-mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=true >/dev/null 2>&1; then \
 		echo "ok: valid config renders"; \
 	else echo "FAIL: a valid agentgateway-muster config was rejected"; exit 1; fi
+	@echo "--> the default is agentgateway-muster (#252): data-plane Gateway and /mcp route, agentgateway HelmRelease"
+	@$(HELM) template t $(CONNECTIVITY_DIR) --set ingress.parentRefs[0].name=x --set components.agent-platform-mcps.enabled=true $(FLEET_APIS) >$(VERIFY_TMP)/vm-default.out 2>&1 || { echo "FAIL: the connectivity chart's defaults do not render"; cat $(VERIFY_TMP)/vm-default.out; exit 1; }
+	@grep -q '^kind: Gateway$$' $(VERIFY_TMP)/vm-default.out && grep -q 'value: /mcp$$' $(VERIFY_TMP)/vm-default.out || { echo "FAIL: the default renders no data-plane Gateway or /mcp route"; exit 1; }
+	@$(HELM) template t $(CHART_DIR) --set components.flux.enabled=false --set ingress.parentRefs[0].name=x >$(VERIFY_TMP)/vm-default-meta.out 2>&1 || { echo "FAIL: the meta chart's defaults do not render"; cat $(VERIFY_TMP)/vm-default-meta.out; exit 1; }
+	@python3 -c 'import sys,yaml; d=[x for x in yaml.safe_load_all(open(sys.argv[1])) if x]; sys.exit(0 if any(x.get("kind")=="HelmRelease" and x["metadata"]["name"]=="agentgateway" for x in d) else 1)' $(VERIFY_TMP)/vm-default-meta.out || { echo "FAIL: the meta chart's default renders no agentgateway HelmRelease"; exit 1; }
+	@echo "ok: default agentgateway-muster"
+	@echo "--> muster-direct by the mode alone must fail, naming components.agentgateway.enabled"
+	@if $(HELM) template t $(CONNECTIVITY_DIR) --set ingress.parentRefs[0].name=x --set ingress.mode=muster-direct >$(VERIFY_TMP)/vm-md-alone.out 2>&1; then \
+		echo "FAIL: muster-direct with the agentgateway component on rendered"; exit 1; \
+	elif ! grep -q "components.agentgateway.enabled must be false in muster-direct mode" $(VERIFY_TMP)/vm-md-alone.out; then \
+		echo "FAIL: muster-direct alone failed for the wrong reason"; cat $(VERIFY_TMP)/vm-md-alone.out; exit 1; \
+	else echo "ok: muster-direct opt-out names the switch"; fi
 	@echo "--> agentSandbox.podSecurity.enabled with no kyverno policies must fail"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set kyvernoPolicies.enabled=false --set agentSandbox.podSecurity.enabled=true >$(VERIFY_TMP)/vm-pe-guard.out 2>&1; then \
 		echo "FAIL: the sandbox lost its only securityContext source and the render succeeded"; exit 1; \
@@ -340,7 +358,7 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	elif ! grep -q "gatewayApi.gateway.tls.secretName is empty" $(VERIFY_TMP)/vg-tls.out; then \
 		echo "FAIL: tls guard failed for the wrong reason"; cat $(VERIFY_TMP)/vg-tls.out; exit 1; \
 	else echo "ok: tls guard"; fi
-	@if $(HELM) template t $(CONNECTIVITY_DIR) --set global.domain=ci.example.com --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls >$(VERIFY_TMP)/vg-mode.out 2>&1; then \
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(MUSTER_DIRECT) --set global.domain=ci.example.com --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls >$(VERIFY_TMP)/vg-mode.out 2>&1; then \
 		echo "FAIL: gateway.create in muster-direct mode accepted"; exit 1; \
 	elif ! grep -q "ingress.mode is muster-direct" $(VERIFY_TMP)/vg-mode.out; then \
 		echo "FAIL: edge mode guard failed for the wrong reason"; cat $(VERIFY_TMP)/vg-mode.out; exit 1; \
@@ -2746,7 +2764,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) >$(VERIFY_TMP)/vw-bs.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' $(VERIFY_TMP)/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >$(VERIFY_TMP)/vw-bs-cm.out
 	@[ -s $(VERIFY_TMP)/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:' 'templates/agent-deployment/template.yaml' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:' 'rootRedirect: /agent-platform'; do \
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' $(VERIFY_TMP)/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
@@ -2831,7 +2849,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		grep -q -e "$$pattern" $(VERIFY_TMP)/vw-ms.out || { echo "FAIL: the model serving render lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -qE 'serving\.kserve\.io|ClusterServingRuntime|kind: InferenceService|kserve-controller-manager|spec\.runtime|^      runtimes?:' $(VERIFY_TMP)/vw-ms.out; then echo "FAIL: the serving render carries a classic serving object or key"; grep -nE 'serving\.kserve\.io|ClusterServingRuntime|InferenceService|kserve-controller-manager|runtimes?:' $(VERIFY_TMP)/vw-ms.out | head; exit 1; fi
-	@[ "$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' $(VERIFY_TMP)/vw-ms.out)" = "15" ] || { echo "FAIL: expected the 15 shipped presets, got $$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' $(VERIFY_TMP)/vw-ms.out)"; exit 1; }
+	@want=$$(ls $(CONNECTIVITY_DIR)/files/model-serving/presets/*.yaml | wc -l); got=$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' $(VERIFY_TMP)/vw-ms.out); [ "$$got" = "$$want" ] || { echo "FAIL: expected the $$want shipped presets (one per file), got $$got"; exit 1; }
 	@if grep -q 'kind: NetworkPolicy' $(VERIFY_TMP)/vw-ms.out; then echo "FAIL: a kubernetes NetworkPolicy rendered under the cilium flavor"; exit 1; fi
 	@if grep -q '^kind: PersistentVolumeClaim' $(VERIFY_TMP)/vw-ms.out; then echo "FAIL: the cache claim rendered as a release resource (Helm's wait would wait for a Bind only the first predictor brings: #483)"; exit 1; fi
 	@echo "ok: model serving fleet shape"
@@ -2874,6 +2892,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	elif ! grep -q "its keys are refused: components.kserve-crd" $(VERIFY_TMP)/vw-meta-classic.out; then \
 		echo "FAIL: the meta chart's classic-component guard failed for the wrong reason"; cat $(VERIFY_TMP)/vw-meta-classic.out; exit 1; \
 	else echo "ok: the meta chart refuses components.kserve-crd naming it"; fi
+	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set backstage.catalogs.version=v0.6.0 >$(VERIFY_TMP)/vw-meta-catalogs.out 2>&1; then \
+		echo "FAIL: the meta chart accepted backstage.catalogs, which would reach the backstage chart's schema"; exit 1; \
+	elif ! grep -q "backstage.catalogs is removed" $(VERIFY_TMP)/vw-meta-catalogs.out; then \
+		echo "FAIL: the meta chart's backstage.catalogs guard failed for the wrong reason"; cat $(VERIFY_TMP)/vw-meta-catalogs.out; exit 1; \
+	else echo "ok: the meta chart refuses backstage.catalogs naming it"; fi
 	@if grep -qE '^  name: modelServing$$' $(VERIFY_TMP)/vw-meta.out; then echo "FAIL: components.modelServing rendered a release; it is a feature switch"; exit 1; fi
 	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vw-meta.out >$(VERIFY_TMP)/vw-meta-conn.out
 	@grep -A1 '^      modelServing:$$' $(VERIFY_TMP)/vw-meta-conn.out | grep -q 'enabled: true' || { echo "FAIL: the roster forwarded to connectivity does not carry modelServing: enabled: true"; exit 1; }
@@ -2886,7 +2909,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if grep -q 'enabled: auto' $(VERIFY_TMP)/vw-meta-conn.out; then echo "FAIL: an unresolved auto reached the connectivity release"; exit 1; fi
 	@grep -A6 '^  dependsOn:' $(VERIFY_TMP)/vw-meta-conn.out | grep -q 'name: muster' || { echo "FAIL: connectivity does not dependsOn muster (its MCPServer needs the CRD)"; exit 1; }
 	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: backstage$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vw-meta.out >$(VERIFY_TMP)/vw-meta-bs.out
-	@for key in hostname parentRefs installationName extraScopes startUrlSearchParams enabledExtensions disabledExtensions skillsRepositories catalogs configReload; do \
+	@for key in hostname parentRefs installationName extraScopes startUrlSearchParams enabledExtensions disabledExtensions skillsRepositories configReload; do \
 		if grep -qE "^    $$key:" $(VERIFY_TMP)/vw-meta-bs.out; then echo "FAIL: the wiring key $$key reached the backstage chart, whose schema rejects it"; exit 1; fi; \
 	done
 	@grep -A3 '^  dependsOn:' $(VERIFY_TMP)/vw-meta-bs.out | grep -q 'name: agent-platform-connectivity' || { echo "FAIL: backstage does not dependsOn connectivity (its pod mounts the app-config rendered there)"; exit 1; }
@@ -2950,12 +2973,11 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' $(VERIFY_TMP)/vw-bsnp-pin-$$flavor.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' && { echo "FAIL: the $$flavor Backstage policy still admits the data plane while the route is pinned elsewhere"; exit 1; }; \
 		true; \
 	done
-	@echo "--> the scaffolder catalog's egress follows backstage.catalogs.version; the portal's database gets a leg on the postgresql engine"
-	@for pattern in 'matchName: github.com' 'matchName: raw.githubusercontent.com'; do \
-		grep -q -- "$$pattern" $(VERIFY_TMP)/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks $$pattern, so the catalog location it fetches is denied"; cat $(VERIFY_TMP)/vw-bsnp-cilium.out; exit 1; }; \
-	done
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.catalogs.version= --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-nocat.out
-	@if grep -q 'github' $(VERIFY_TMP)/vw-bsnp-nocat.out; then echo "FAIL: the cilium Backstage policy renders the catalog egress with backstage.catalogs.version empty"; exit 1; fi
+	@echo "--> skill discovery's egress follows backstage.skillsRepositories; the portal's database gets a leg on the postgresql engine"
+	@grep -q -- 'matchName: api.github.com' $(VERIFY_TMP)/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks api.github.com, so skill discovery is denied"; cat $(VERIFY_TMP)/vw-bsnp-cilium.out; exit 1; }
+	@if grep -qE 'matchName: (github.com|raw.githubusercontent.com)$$' $(VERIFY_TMP)/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy opens github.com or raw.githubusercontent.com, which no portal call reaches"; exit 1; fi
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.skillsRepositories=null --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-noskills.out
+	@if grep -q 'github' $(VERIFY_TMP)/vw-bsnp-noskills.out; then echo "FAIL: the cilium Backstage policy renders the GitHub egress with backstage.skillsRepositories empty"; exit 1; fi
 	@if grep -q '5432' $(VERIFY_TMP)/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy renders 5432 on the sqlite engine"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_FULL) --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-full.out
 	@for pattern in 'backstage-cnpg' 'backstage-cnpg-restore' 'port: "5432"'; do \

@@ -49,6 +49,10 @@ SERVING = [
     "--set", "components.kserve-llmisvc-crd.enabled=true",
     "--set", "components.kserve-llmisvc-resources.enabled=true",
     "--set", "components.modelServing.enabled=true",
+    # The serving layer without the agentgateway data plane, which became the
+    # default (#252) and is not what this compares; origin/main renders the same.
+    "--set", "ingress.mode=muster-direct",
+    "--set", "components.agentgateway.enabled=false",
 ]
 UNTAINTED = ["--set", "modelServing.gpuPool.taint.key="]
 # The cache claim is applied by a hook Job since #483 (a chart from before
@@ -70,7 +74,7 @@ LINEUP_24GB = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b")
 RETIRED_24GB = ("qwen3-4b-instruct", "qwen3-8b-fp8", "qwen3-14b")
 # The two four-GPU presets (giantswarm/agent-platform#591): tensor parallel across four L40S.
 FOUR_GPU = ("mistral-small-4", "gpt-oss-120b")
-OCI_PRESETS = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b", "gemma-4-31b", "qwen3-6-35b-a3b", "qwen3-8-27b-l40s", "mistral-small-4", "gpt-oss-120b", "qwen3-8-flash-next-nvfp4", "muse-glimmer-30b")
+OCI_PRESETS = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b", "gemma-4-31b", "qwen3-6-35b-a3b", "qwen3-8-27b-l40s", "mistral-small-4", "gpt-oss-120b", "qwen3-8-flash-next-nvfp4", "muse-glimmer-30b", "kolibri-1")
 # The discovery block this change adds, cut out for the byte-identity check.
 GPU_POOL_BLOCK = re.compile(
     r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
@@ -274,6 +278,7 @@ else:
         ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
         fp8kv = lineup and "--kv-cache-dtype=fp8" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
         muse = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/muse-glimmer-30b.yaml")
+        kolibri = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/kolibri-1.yaml")
         tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
         parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
         graphs = parsed and "--enforce-eager" not in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
@@ -284,6 +289,7 @@ else:
         metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
         drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
         gated = "gpuReadyLabel" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
+        initialized = "giantswarm/storage-initializer:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         hookpolicy = os.path.exists(f"{tree}/{CONN}/templates/substrate/hooks-netpol.yaml")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
@@ -455,6 +461,15 @@ else:
             head[DISCOVERY], ncuts = re.subn(r"^ +- muse-glimmer-30b\n", "", head[DISCOVERY], flags=re.M)
             expect("the new preset muse-glimmer-30b cut out of the discovery list once", ncuts, 1)
         print(f"note: muse-glimmer-30b ships on this side (#597) and not on {ref}: its ConfigMaps and discovery name are left out of the comparison")
+    # kolibri-1 ships on this side (giantswarm/agent-platform#804) and not on
+    # a golden from before, so its ConfigMap and discovery name are left out
+    # of the head. Drop this once GOLDEN_REF carries #804.
+    if not kolibri:
+        head.pop(("ConfigMap", "agent-platform-serving-preset-kolibri-1"), None)
+        if DISCOVERY in head:
+            head[DISCOVERY], ncuts = re.subn(r"^ +- kolibri-1\n", "", head[DISCOVERY], flags=re.M)
+            expect("the new preset kolibri-1 cut out of the discovery list once", ncuts, 1)
+        print(f"note: kolibri-1 ships on this side (#804) and not on {ref}: its ConfigMap and discovery name are left out of the comparison")
     # The gpt-oss presets serve the model images that carry the tiktoken
     # encodings and name them in TIKTOKEN_ENCODINGS_BASE on this side
     # (giantswarm/agent-platform#606); a golden from before renders the older
@@ -599,6 +614,15 @@ else:
             for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
                 side.pop(key)
         print(f"note: the pre-pull pods wait for the GPU feature discovery label on this side (#737) and not on {ref}: the DaemonSet is left out of the comparison")
+    # The pre-pull pulls the storage-initializer ahead of the runtime image on
+    # this side (giantswarm/agent-platform#807); a golden from before pulls the
+    # runtime image alone, so the DaemonSet is left out of the comparison on
+    # both sides. Drop this once GOLDEN_REF carries #807.
+    if prepulled and not initialized:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
+                side.pop(key)
+        print(f"note: the pre-pull pulls the storage-initializer first on this side (#807) and not on {ref}: the DaemonSet is left out of the comparison")
     # The single-replica budgets are maxUnavailable: 1 and a lone Postgres
     # instance renders enablePDB: false on this side (giantswarm/agent-platform#697);
     # a golden from before renders minAvailable: 1 and the operator's budgets,

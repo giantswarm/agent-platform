@@ -160,7 +160,7 @@ FOLLOW_KAGENT = ["kagent-crds", "substrate", "substrate-crds"]
 WIRING_KEYS = {
     "backstage": [
         "hostname", "parentRefs", "installationName", "extraScopes", "startUrlSearchParams",
-        "enabledExtensions", "disabledExtensions", "skillsRepositories", "catalogs", "configReload",
+        "enabledExtensions", "disabledExtensions", "skillsRepositories", "configReload",
     ],
     "mcp-kubernetes": ["kubernetesAudience"],
 }

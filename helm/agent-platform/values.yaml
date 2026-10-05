@@ -470,7 +470,7 @@ components:  # @schema additionalProperties: true
     # moves with the release, and the values below only work above it.
     versionRange: ">=2.4.0 <3.0.0"
     valuesFrom: agentgateway
-    enabled: false
+    enabled: true
     # The slice profiles set this per target: on for a workload cluster, off
     # beside the platform's release on the installation's own cluster, which
     # owns the controller and its CRDs (see ownedCrds).
@@ -1008,7 +1008,6 @@ components:  # @schema additionalProperties: true
       - enabledExtensions
       - disabledExtensions
       - skillsRepositories
-      - catalogs
       - configReload
     enabled: false
     # Renders a CNPG Cluster for its database when backstage.database.engine is
@@ -1329,17 +1328,23 @@ dicebear:  # @schema skipProperties: true; additionalProperties: true
 
 # === Ingress topology ===
 # mode selects the whole request topology. What each mode renders/consumes:
+#   agentgateway-muster  (default) client -> agentgateway /mcp -> muster. Adds the
+#                        agentgateway controller (components.agentgateway.enabled), the
+#                        data-plane Gateway (gateway.*), the /mcp route and the optional
+#                        ingress.backendTrafficPolicy. Requires
+#                        agent-platform-mcps.agentgateway.viaMuster: true (the default).
 #   muster-direct        client -> muster. Only ingress.parentRefs/hostnames used.
-#   agentgateway-muster  client -> agentgateway /mcp -> muster. Adds agentgateway
-#                        controller (components.agentgateway.enabled), data-plane Gateway
-#                        (gateway.*), /mcp route, optional ingress.backendTrafficPolicy.
-#                        Requires agent-platform-mcps.agentgateway.viaMuster: true.
+#                        Opting out of agentgateway takes all three keys:
+#                        ingress.mode: muster-direct, components.agentgateway.enabled:
+#                        false and agent-platform-mcps.agentgateway.viaMuster: false.
+#                        Deprecated: agentgateway-muster becomes the only topology
+#                        (giantswarm/agent-platform#252).
 #   agentgateway-direct  client -> agentgateway /mcp -> servers. As above plus
 #                        optional gateway.jwksEgress; viaMuster: false.
 #                        NOT YET SUPPORTED — install blocked (needs DCR-capable
 #                        IdP, RFC 7591/8707).
 ingress:
-  mode: muster-direct          # muster-direct | agentgateway-muster | agentgateway-direct
+  mode: agentgateway-muster    # agentgateway-muster | muster-direct | agentgateway-direct
   parentRefs: []               # ALL modes: public Gateway, shared by both rendered routes
   hostnames: []                # ALL modes: muster public hostname(s)
   httpRoute:                   # shared base, applied to both rendered HTTPRoutes
@@ -2380,7 +2385,7 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
     # direct topology (false) needs a DCR-capable IdP, which is not yet
     # available; when Zitadel or similar ships RFC 7591 + RFC 8707, muster's
     # aggregator role can be retired.
-    viaMuster: false           # must match ingress.mode (guard-enforced): agentgateway-muster=>true, agentgateway-direct=>false
+    viaMuster: true            # must match ingress.mode (guard-enforced): agentgateway-muster=>true, agentgateway-direct=>false
     # musterUrl — in-cluster address of the muster Service. Stable because
     # muster.fullnameOverride pins the Service name to `muster` regardless
     # of the umbrella release name. Override only if the namespace differs.
@@ -4745,9 +4750,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # renders (templates/backstage/ there) and which are dropped from the values
 # forwarded to the backstage chart (components.backstage.omitKeys): hostname,
 # parentRefs, installationName, extraScopes, startUrlSearchParams,
-# enabledExtensions, disabledExtensions, skillsRepositories, catalogs,
-# configReload. Their meaning is documented in the connectivity chart's
-# values.yaml; the defaults are the standalone's.
+# enabledExtensions, disabledExtensions, skillsRepositories, configReload. Their
+# meaning is documented in the connectivity chart's values.yaml; the defaults
+# are the standalone's.
 backstage:  # @schema skipProperties: true; additionalProperties: true
   # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
   # protocol, the tenant as X-Scope-OrgID next to headers).
@@ -4797,12 +4802,6 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # Skill repositories offered when an agent is created.
   skillsRepositories:
     - https://github.com/giantswarm/agent-skills
-  # Release of giantswarm/backstage-catalogs whose hidden agent-deployment
-  # scaffolder template the app-config registers as a catalog location (the
-  # agent create flow's deploy step runs it); version "" skips the location.
-  catalogs:
-    # repo: giantswarm/backstage-catalogs
-    version: v0.6.0
   # Roll the Backstage pod when the app-config ConfigMap changes: a
   # post-install/post-upgrade hook Job of the connectivity release stamps the
   # rendered app-config's checksum into the Deployment's pod template (no-op
@@ -5468,7 +5467,18 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # managers read registry/repository/tag blocks, and a bump ahead of the
     # runtime configs would pre-pull the wrong image. Empty with enabled: true
     # fails the render.
+    #
+    # The storage-initializer comes first (giantswarm/agent-platform#807): the
+    # init containers run in order, and the predictor's storage-initializer,
+    # which downloads the weights, is on the critical path. Pulled beside the
+    # runtime image its 96 MB took 46–86 s on a cold node, alone 5–12 s; the
+    # kubelet de-duplicates the predictor's concurrent pull of the same
+    # reference, and the runtime image still lands while the weights
+    # download. The reference is the one the kserve-llmisvc-resources line of
+    # components: renders for the ClusterStorageContainer (kserve.storage.image
+    # at kserve.version: 0.7.x is KServe v0.21.0), and moves with that line.
     images:
+      - gsoci.azurecr.io/giantswarm/storage-initializer:v0.21.0
       - gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0
     # The nodes. Empty (the default): Karpenter's label on every node of a GPU
     # instance type, karpenter.k8s.aws/instance-gpu-manufacturer: nvidia (a

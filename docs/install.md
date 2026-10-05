@@ -8,7 +8,7 @@ Each shape has a values file under [`helm/agent-platform/examples/`](../helm/age
 
 | Example | Cluster | Public edge | What runs |
 |---|---|---|---|
-| [`kind-lab-dex.yaml`](../helm/agent-platform/examples/kind-lab-dex.yaml) | kind on a laptop, with the lab Dex | none (port-forward) | muster, the avatar service, the connectivity wiring. What the chart's kind smoke installs. |
+| [`kind-lab-dex.yaml`](../helm/agent-platform/examples/kind-lab-dex.yaml) | kind on a laptop, with the lab Dex | none (port-forward) | muster (without sign-in until you add the lab Dex overlay in [4. Install](#4-install)), model-manager, the avatar service, the connectivity wiring. What the chart's kind smoke installs. |
 | [`own-gateway.yaml`](../helm/agent-platform/examples/own-gateway.yaml) | any cluster with its own public Gateway | your Gateway (`global.gatewayApi.parentRefs`) | muster with its OAuth server and session store, behind `https://muster.<domain>/mcp` |
 | [`chart-owned-edge.yaml`](../helm/agent-platform/examples/chart-owned-edge.yaml) | a cluster with a LoadBalancer but no Gateway | the chart's agentgateway data plane (`gatewayApi.gateway.create: true`) | the above, with MCP traffic through agentgateway and the bundled MCP servers |
 | [`managed-cloud.yaml`](../helm/agent-platform/examples/managed-cloud.yaml) | EKS, AKS, GKE, … with an external Postgres | your Gateway | the full platform: kagent on Agent Substrate, agent-manager, the portal (Backstage), the Kubernetes MCP server, the kagent UI |
@@ -126,7 +126,7 @@ The kube-apiserver has to trust the same issuer (`--oidc-issuer-url`, `--oidc-cl
 The platform Secret, `global.identity.existingSecret`, in the release namespace:
 
 ```bash
-kubectl create namespace agent-platform
+kubectl create namespace agent-platform --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n agent-platform create secret generic agent-platform-idp \
   --from-literal=dex-client-secret='<the agent-platform client secret>' \
   --from-literal=registration-token="$(openssl rand -hex 32)" \
@@ -157,7 +157,7 @@ The meta chart injects `global` into every component release; these keys are the
 | `global.identity.issuerUrl` | `""` | The OIDC issuer exactly as it appears in the tokens' `iss` claim. |
 | `global.identity.clientId` | `""` | The platform's OAuth client at the provider. |
 | `global.identity.existingSecret` | `""` | The platform Secret in the release namespace (keys above). |
-| `global.identity.ca.secretName`, `.key` | unset, `ca.crt` | The CA of a provider with a private certificate, a Secret in the release namespace. |
+| `global.identity.ca.secretName`, `.key` | unset, `ca.crt` | The CA of a provider with a private certificate, a Secret in the release namespace. muster's OAuth server, the managers and the portal verify the issuer against it; without it muster's OIDC discovery fails and muster never turns Ready. |
 | `global.gatewayApi.parentRefs` | `[]` | The public Gateway every route attaches to, unless a route names its own or `gatewayApi.gateway.create` makes the chart's data plane the edge. |
 | `global.registry` | `gsoci.azurecr.io` | The registry every component pulls from; a mirror goes here ([README: Private registry overrides](../README.md#private-registry-overrides)). |
 | `global.imagePullSecrets` | `[]` | Pull secrets for every component. |
@@ -189,15 +189,60 @@ helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platf
 kubectl -n agent-platform port-forward svc/muster 8090:8090   # muster on http://localhost:8090/mcp
 ```
 
+That muster takes every caller: the example leaves its OAuth server off, so the lab Dex is not used yet, and the install prints no next steps (it has no `global.domain`). To sign in through the lab Dex, as the chart's smoke does, add an overlay with the lab's values and upgrade:
+
+```yaml
+# kind-sign-in.yaml: the lab Dex's issuer, client, Secret and CA (tests/ats/lab-dex.yaml)
+global:
+  domain: 127.0.0.1.nip.io
+  identity:
+    issuerUrl: https://dex.127.0.0.1.nip.io:5554
+    clientId: agent-platform
+    existingSecret: agent-platform-idp
+    ca:
+      secretName: agent-platform-idp-ca
+muster:
+  muster:
+    oauth:
+      mcpClient:
+        publicUrl: http://localhost:8090
+      server:
+        enabled: true
+        baseUrl: http://localhost:8090   # the port-forward; muster allows plain HTTP for loopback only
+        dex:
+          issuerUrl: https://dex.127.0.0.1.nip.io:5554
+          clientId: agent-platform
+          allowPrivateIPOIDC: true       # the issuer resolves to a ClusterIP inside the cluster
+        existingSecret: agent-platform-idp
+        storage:
+          type: memory                   # no bundled Valkey in the kind example
+```
+
+```bash
+helm upgrade agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platform \
+  --namespace agent-platform -f helm/agent-platform/examples/kind-lab-dex.yaml -f kind-sign-in.yaml --wait --timeout 10m
+kubectl -n agent-platform port-forward svc/muster 8090:8090 &
+kubectl -n agent-platform port-forward svc/lab-dex 5554:5554 &   # the issuer, for your browser
+```
+
+`/mcp` now answers `401` with the sign-in metadata, and the sign-in goes to the lab Dex (user `admin@example.com`, password `password`), whose client `agent-platform` already lists `http://localhost:8090/oauth/callback`. Your browser does not trust the lab's self-signed certificate: accept it once on `https://dex.127.0.0.1.nip.io:5554`.
+
 ## 5. After the install
 
-The install prints its next steps: the URLs, and the redirect URIs to register for exactly the components it turned on. `helm get notes agent-platform -n agent-platform` prints them again. Then:
+The install prints its next steps: the URLs, and the redirect URIs to register for exactly the components it turned on (only with `global.domain` set; the bare kind example prints none). `helm get notes agent-platform -n agent-platform` prints them again. Then:
 
 ```bash
 kubectl -n agent-platform get helmreleases            # every component Ready
-curl -s https://muster.platform.example.com/.well-known/oauth-protected-resource   # names your issuer
+curl -s https://muster.platform.example.com/.well-known/oauth-protected-resource   # names muster as the authorization server
+curl -s https://muster.platform.example.com/.well-known/oauth-authorization-server | jq .registration_endpoint
 ```
 
-Point an MCP client at `https://muster.<domain>/mcp`; it registers itself and sends you through the sign-in.
+Point an MCP client at `https://muster.<domain>/mcp`. It registers itself at muster's registration endpoint and sends you through the sign-in at your provider, but muster admits a registration only by one of these (`muster.muster.oauth.server.*`), none of them on by default:
+
+- `registration-token` of the platform Secret, presented as a bearer by a client that can be configured with one (a CI runner, an operator);
+- `trustedPublicRegistrationSchemes`: the custom URI schemes of desktop clients (`["cursor", "vscode"]`);
+- `trustedPublicRegistrationRedirectURIs`: the exact HTTPS callbacks of hosted clients (`https://claude.ai/api/mcp/auth_callback`).
+
+A client that meets none of them gets `invalid_token: Registration requires authentication`.
 
 Upgrades, and what an operator does when a release changes CRDs: [UPGRADE.md](../UPGRADE.md). Removing the platform: [README: Uninstalling](../README.md#uninstalling).

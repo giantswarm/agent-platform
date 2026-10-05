@@ -70,8 +70,9 @@ components.kagent. Emits "true" when on, empty string otherwise.
 Used to drop a dependsOn reference to a component that is toggled off, so a
 consumer does not wait forever on a HelmRelease that was never rendered. With
 app-owned CRDs a CR consumer dependsOn the component that ships the CRD (e.g.
-connectivity dependsOn agentgateway + kagent), but those components are opt-in —
-in the default muster-direct topology they are off and render no HelmRelease, so
+connectivity dependsOn agentgateway + kagent), but those components can be off —
+kagent by default, agentgateway in muster-direct and beside a slice — and then
+render no HelmRelease, so
 an unfiltered dependsOn would block the always-on consumer indefinitely. An
 unknown name (not in components) is kept rather than silently dropped.
 Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agentgateway")
@@ -118,6 +119,9 @@ value drives every consumer. Emits a JSON object; {} for a component with
 nothing derived. A value the component's own block sets must agree with the
 derived one, otherwise the render fails naming the single key to set — a silent
 overwrite would hide a values file that still spells the old key.
+  muster: muster.extraCaFile.secret from global.identity.ca (secretName, key
+    default ca.crt) while muster names no CA Secret of its own — the issuer's
+    private CA its OAuth server verifies the provider against.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  muster.url from the muster Service (agent-platform.musterMcpUrl).
   klaus-gateway: with klausGateway.routing.store: valkey, the platform's own
@@ -255,6 +259,16 @@ installation's own podAffinity stands instead. */ -}}
 {{- $pool := get $derived "substrateWorkerPool" | default dict -}}
 {{- $_ := set $pool "template" (dict "podAffinity" $affinity) -}}
 {{- $_ := set $derived "substrateWorkerPool" $pool -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .name "muster" -}}
+{{- /* The identity provider's private CA (global.identity.ca) is what muster's
+OAuth server trusts for its issuer: muster.extraCaFile.secret, unless the
+installation names its own. Without it a lab Dex fails muster's OIDC discovery
+and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
+{{- $ca := dig "identity" "ca" dict (.root.Values.global | default dict) -}}
+{{- if and $ca.secretName (not (dig "muster" "extraCaFile" "secret" "name" "" (.root.Values.muster | default dict))) -}}
+{{- $_ := set $derived "muster" (dict "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt")))) -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
@@ -916,6 +930,15 @@ where the operator asked for a controller. */ -}}
 {{- end -}}
 {{- end -}}
 
+{{- define "agent-platform.validateRemovedBackstageKeys" -}}
+{{- /* The backstage block takes any key (its schema skips properties), and a key
+outside components.backstage.omitKeys reaches the backstage chart, whose schema
+rejects it only when its HelmRelease installs; refused here instead. */ -}}
+{{- if hasKey ($.Values.backstage | default dict) "catalogs" -}}
+{{- fail "backstage.catalogs is removed (giantswarm/backstage-catalogs#705): the portal creates agents through agent-manager's MCP tools and registers no agent-deployment scaffolder template. Remove backstage.catalogs from the values." -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agent-platform.validateLegacyToggles" -}}
 {{- $moved := list
       (list "agentgateway" "components.agentgateway.enabled")
@@ -1211,7 +1234,7 @@ agent-platform-mcps component. */ -}}
 {{- fail "components.agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
 {{- if and (eq $mode "muster-direct") $agentgatewayEnabled -}}
-{{- fail "components.agentgateway.enabled must be false in muster-direct mode; the controller dependency condition must match ingress.mode" -}}
+{{- fail "components.agentgateway.enabled must be false in muster-direct mode (it defaults to true, with ingress.mode agentgateway-muster); the controller dependency condition must match ingress.mode" -}}
 {{- end -}}
 {{- end -}}
 

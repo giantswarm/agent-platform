@@ -27,7 +27,7 @@
   //   gitops.hooks.helmImage: the gsoci copy of alpine/k8s, whose tags follow
   //   the kubectl minor).
   // - The `# registry:` hint regexes of the giantswarm preset read the plain
-  //   `version:` keys (vllm-openai, backstage-catalogs, agentgateway).
+  //   `version:` keys (vllm-openai, agentgateway).
   //
   // Do not add a regex manager for the three-line image block: helm-values
   // already produces those updates, so a second manager opens a duplicate PR

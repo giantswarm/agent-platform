@@ -64,6 +64,9 @@ agentManager:
     enabled: false
 
 components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false
   valkey:
     enabled: false
 

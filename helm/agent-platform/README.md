@@ -339,7 +339,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agentgateway.versionRange | string | `">=2.4.0 <3.0.0"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
-| components.agentgateway.enabled | bool | `false` |  |
+| components.agentgateway.enabled | bool | `true` |  |
 | components.agentgateway.ownedCrds[0] | string | `"agentgatewaypolicies.agentgateway.dev"` |  |
 | components.agentgateway.crds | string | `"CreateReplace"` |  |
 | components.valkey.chart | string | `"valkey"` |  |
@@ -462,8 +462,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.omitKeys[5] | string | `"enabledExtensions"` |  |
 | components.backstage.omitKeys[6] | string | `"disabledExtensions"` |  |
 | components.backstage.omitKeys[7] | string | `"skillsRepositories"` |  |
-| components.backstage.omitKeys[8] | string | `"catalogs"` |  |
-| components.backstage.omitKeys[9] | string | `"configReload"` |  |
+| components.backstage.omitKeys[8] | string | `"configReload"` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.backstage.dependsOn[0] | string | `"cloudnative-pg"` |  |
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -536,7 +535,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | dicebear.route.enabled | string | `"auto"` |  |
 | dicebear.route.parentRefs | list | `[]` |  |
 | dicebear.route.hostnames | list | `[]` |  |
-| ingress.mode | string | `"muster-direct"` |  |
+| ingress.mode | string | `"agentgateway-muster"` |  |
 | ingress.parentRefs | list | `[]` |  |
 | ingress.hostnames | list | `[]` |  |
 | ingress.httpRoute.annotations | object | `{}` |  |
@@ -747,7 +746,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.valkey.metrics.exporter.securityContext.runAsUser | int | `1000` |  |
 | valkey.valkey.metrics.exporter.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | agent-platform-mcps.agentgateway.enabled | bool | `true` |  |
-| agent-platform-mcps.agentgateway.viaMuster | bool | `false` |  |
+| agent-platform-mcps.agentgateway.viaMuster | bool | `true` |  |
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
@@ -1275,7 +1274,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
 | backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
-| backstage.catalogs.version | string | `"v0.6.0"` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
@@ -1398,7 +1396,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelServing.gpuPool.nodeSelector | object | `{}` |  |
 | modelServing.fastLinks | list | `[]` |  |
 | modelServing.prepull.enabled | bool | `true` |  |
-| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
+| modelServing.prepull.images[0] | string | `"gsoci.azurecr.io/giantswarm/storage-initializer:v0.21.0"` |  |
+| modelServing.prepull.images[1] | string | `"gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda:v0.8.0"` |  |
 | modelServing.prepull.nodeSelector | object | `{}` |  |
 | modelServing.prepull.gpuReadyLabel | string | `"nvidia.com/gpu.count"` |  |
 | modelServing.prepull.tolerations[0].operator | string | `"Exists"` |  |

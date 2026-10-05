@@ -79,3 +79,10 @@ families:
     chatTemplate: required
     source: vLLM v0.30.0 examples/tool_chat_template_muse_glimmer.jinja and its muse_glimmer tool-call and reasoning parsers (vllm-project/vllm#51655, first in v0.28.0)
     runtimeImage: gsoci.azurecr.io/giantswarm/vllm-openai:v0.30.0
+  - name: Kolibri
+    match: ^Aleph-Alpha/Kolibri-
+    toolCallParsers: [kolibri1]
+    reasoningParser: kolibri1
+    chatTemplate: optional
+    source: Aleph-Alpha/Kolibri-1 model card (vllm serve --reasoning-parser kolibri1 --tool-call-parser kolibri1 --enable-auto-tool-choice), parsers registered by the aleph-alpha-inference plugin 1.0.0 (vLLM 0.29)
+    runtimeImage: gsoci.azurecr.io/giantswarm/vllm-aleph-alpha:0.5.0

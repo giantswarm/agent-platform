@@ -5,6 +5,9 @@
 #
 # Mode is muster-direct (no agentgateway), OAuth/valkey off — the simplest stack.
 components:
+  # muster-direct runs without the agentgateway component (on by default).
+  agentgateway:
+    enabled: false
   agent-sandbox:
     enabled: true
 
