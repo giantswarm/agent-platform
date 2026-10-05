@@ -19,7 +19,8 @@ global:
     clientId: agent-platform
     existingSecret: agent-platform-idp
     # The lab CA: agent-manager validates the forwarded tokens against Dex's
-    # JWKS over TLS (--dex-ca-file), muster through extraCaFile below.
+    # JWKS over TLS (--dex-ca-file), muster through the extraCaFile the meta
+    # chart derives from it.
     ca:
       secretName: agent-platform-idp-ca
 
@@ -56,10 +57,6 @@ muster:
         trustedAudiences:
           - agent-platform
           - dex-k8s-authenticator
-    extraCaFile:
-      secret:
-        name: agent-platform-idp-ca
-        key: ca.crt
 
 agent-manager:
   oauth:
