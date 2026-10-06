@@ -291,6 +291,7 @@ else:
         gated = "gpuReadyLabel" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
         initialized = "giantswarm/storage-initializer:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         hookpolicy = os.path.exists(f"{tree}/{CONN}/templates/substrate/hooks-netpol.yaml")
+        resident = "residentWeightsGiB" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -535,6 +536,16 @@ else:
         head.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
         golden.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
         print(f"note: nemotron-3-super-nvfp4 carries a split environment on this side and not on {ref}: its ConfigMap is left out of the comparison")
+    # The unified-memory fit check holds a claim to the resident weights plus
+    # the overhead (giantswarm/model-manager#240): on this side Flash-Next
+    # declares residentWeightsGiB 74 and nemotron-3-super-nvfp4 an overheadGiB
+    # of 12; a golden from before renders neither, so both ConfigMaps are left
+    # out of the comparison. Drop this once GOLDEN_REF carries the change.
+    if not resident:
+        for name in ("qwen3-8-flash-next-nvfp4", "nemotron-3-super-nvfp4"):
+            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
+        print(f"note: the GB10 presets declare their unified-memory need on this side (model-manager#240) and not on {ref}: their ConfigMaps are left out of the comparison")
     # model-manager's egress reaches the serving namespace's workload pods on the
     # workload port with the slice on (giantswarm/agent-platform#602: the route
     # list it reads a served model's API interfaces from); a golden from before

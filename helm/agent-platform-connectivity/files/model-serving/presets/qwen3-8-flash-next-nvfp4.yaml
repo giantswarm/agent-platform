@@ -44,7 +44,7 @@ spec:
     Memory: 99 GiB on disk (the Hub's size), of which the 25 GiB n-gram
     table stays on disk, so about 74 GiB of weights are resident and
     --gpu-memory-utilization=0.80 of the 128 GB leaves the rest to the fp8 KV
-    cache — 20 GiB of overhead on top of the 99. Eight concurrent requests at
+    cache — 20 GiB of overhead on top of the 74 resident. Eight concurrent requests at
     4096 batched tokens; tools on with the qwen3_xml parser, reasoning with
     the qwen3 parser. No size of the curated AWS accelerator families hosts
     it. Licence: the Qwen community licence (license other).
@@ -147,8 +147,10 @@ spec:
       memory: 118Gi
   requirements:
     # The Hub's safetensors shards size the checkpoint at 99.03 GiB
-    # (make verify-preset-weights). 20 GiB of overhead: the n-gram table is
-    # read from disk, so ~74 GiB are resident and the rest of the 0.80
-    # budget of a 128 GB node is the fp8 KV cache, CUDA graphs and the runtime.
+    # (make verify-preset-weights). The n-gram table is read from disk, so
+    # 74 GiB are resident: the unified-memory claim holds 74 + 20 GiB of
+    # overhead (the fp8 KV cache, CUDA graphs and the runtime) within the
+    # 0.80 of a 128 GB node.
     weightsGiB: 100
+    residentWeightsGiB: 74
     overheadGiB: 20

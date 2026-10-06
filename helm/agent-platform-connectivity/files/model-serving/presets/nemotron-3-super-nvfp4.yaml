@@ -39,8 +39,11 @@ spec:
       cpu: "8"
       memory: 64Gi
   requirements:
+    # 12 GiB of overhead: the KV cache at 8k context, activations and the
+    # CUDA-graph pool, which counts inside the 0.72 claim of a 128 GB node
+    # (75 + 12 GiB within its 87.6 GiB).
     weightsGiB: 75
-    overheadGiB: 30
+    overheadGiB: 12
   # A split across a fast link only: the B12X runtime's in-graph RoCE
   # all-reduce for messages up to 2 MB, NCCL above. Measured on two 128 GB
   # unified-memory Blackwell nodes with CUDA graphs: 16.3 → 26.3 tok/s single

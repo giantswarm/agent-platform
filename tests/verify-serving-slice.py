@@ -791,13 +791,23 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
                "spec": {"displayName": "Bad", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 1}, "args": bad_args}}
         err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="outside single quotes")
         need(err, 'serving preset "bad" (values): spec.args', f"the guard's message for {what}")
+    # spec.requirements.residentWeightsGiB is published unchanged; above weightsGiB it fails the render.
+    doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "resident"},
+           "spec": {"displayName": "Resident", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 10, "residentWeightsGiB": 7.5}}}
+    cm = documents(helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])]))[("ConfigMap", "agent-platform-serving-preset-resident")]
+    if yaml.safe_load(yaml.safe_load(cm)["data"]["preset.yaml"])["spec"]["requirements"].get("residentWeightsGiB") != 7.5:
+        sys.exit("FAIL: the values preset's spec.requirements.residentWeightsGiB is not published as 7.5")
+    doc["spec"]["requirements"]["residentWeightsGiB"] = 11
+    err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="residentWeightsGiB (11) exceeds weightsGiB (10)")
+    need(err, 'serving preset "resident" (values)', "the resident-weights guard's message")
     ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval ({checked} JSON values parse), none carries a classic field, "
        f"each one's resources.gpus equals its tensor-parallel size, "
        f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
        f"none carries --disable-fastapi-docs and a values preset with it fails the render naming the flag (the route list model-manager reads the interfaces from); "
        f"a values preset's spec.router.scheduler is published unchanged and any other router key or a non-boolean fails the render; "
        f"a values preset's spec.split.env is published unchanged and a malformed split block fails the render naming the preset; "
-       f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard")
+       f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard; "
+       f"a values preset's requirements.residentWeightsGiB is published unchanged and one above weightsGiB fails the render")
 
 
 def check_presets(connectivity: str) -> None:
