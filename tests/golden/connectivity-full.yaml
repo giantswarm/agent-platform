@@ -11406,6 +11406,30 @@ spec:
           - name: agent_instance_id
             expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""'
 ---
+# Source: agent-platform-connectivity/templates/agentgateway/healthz.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: agent-platform-connectivity-healthz
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: agent-platform-connectivity-healthz
+  traffic:
+    directResponse:
+      status: 200
+      body: ok
+---
 # Source: agent-platform-connectivity/templates/agentgateway/http-policy.yaml
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
@@ -12866,6 +12890,34 @@ spec:
       group: agentgateway.dev
       kind: AgentgatewayParameters
       name: t
+---
+# Source: agent-platform-connectivity/templates/agentgateway/healthz.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: agent-platform-connectivity-healthz
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  parentRefs:
+    - name: agentgateway
+      namespace: default
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /healthz
+          method: GET
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/httproute.yaml
 apiVersion: gateway.networking.k8s.io/v1

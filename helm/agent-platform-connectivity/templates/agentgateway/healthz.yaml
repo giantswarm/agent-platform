@@ -1,0 +1,47 @@
+{{- /* A health path on the data plane's in-cluster listener: GET /healthz
+answers 200 from the gateway itself, through a directResponse policy on a
+backendless route. Every other path of that listener falls to the hostless
+agent-platform-mcps catch-all, whose MCP backend refuses a plain GET with 406
+"client must accept text/event-stream" and the gateway logs it as an error.
+Something that only needs to know the listener answers — a tunnelport
+RemoteApp's upstream probe (spec.probe.path: /healthz) — asks here instead.
+An Exact match outranks the catch-all's PathPrefix /. */ -}}
+{{- if (include "agent-platform.ingress.agentgateway" .) }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "name" . }}-healthz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ .Release.Namespace }}
+      group: gateway.networking.k8s.io
+      kind: Gateway
+      sectionName: {{ (first .Values.gateway.listeners).name }}
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /healthz
+          method: GET
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" . }}-healthz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ include "name" . }}-healthz
+  traffic:
+    directResponse:
+      status: 200
+      body: ok
+{{- end }}
