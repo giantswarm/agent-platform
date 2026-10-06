@@ -30,6 +30,14 @@ components:
     # lists ModelConfigs at kagent.dev, which this line's kagent no longer serves.
     versionRange: "1.9.3-r7fb489f8t20261006083455h6e36fcb"
 
+agent-manager:
+  agentChart:
+    # The Generic agent chart 2.x exists as a release candidate until its
+    # 2.0.0 final is cut after the installations' test window: the smoke
+    # composes on the candidate (the release tag filter keeps dev builds out).
+    semver: ">=2.0.0-0 <3.0.0-0"
+    semverFilter: '^v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
+
 kagent:
   controller:
     resources:
