@@ -148,6 +148,10 @@ COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "ka
 CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager", "model-manager")
 DECLARATIVE_AGENT = "ats-smoke-agent"
 MANAGED_AGENT = "ats-managed-agent"
+# The kagent release's own RemoteMCPServer: the controller's API as MCP tools
+# (Sessions, checkpoints, sandboxes), rendered unconditionally by the kagent
+# chart of this line and owned by that release, so it goes with the uninstall.
+KAGENT_API_SERVER = f"{HARNESS}-api"
 MANAGED_AGENT_DISPLAY_NAME = "ATS managed agent"
 AGENT_CHART_REPOSITORY = "agent"  # the shared per-namespace OCIRepository agent-manager writes
 POLICY_MESSAGE = f"release {RELEASE} manages itself through its bundled Flux"
@@ -698,7 +702,7 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # smoke's declarative Agent): no AgentTemplate object exists.
     assert agents_before == sorted((DECLARATIVE_AGENT, MANAGED_AGENT)), agents_before
     assert not kube.items("agenttemplates.api.kagent.dev", namespace=KAGENT_NAMESPACE), "an AgentTemplate exists although every agent of the smoke carries its template inline"
-    assert servers_before == [MANAGED_AGENT], servers_before
+    assert servers_before == sorted((MANAGED_AGENT, KAGENT_API_SERVER)), servers_before
     try:
         elapsed = helm.uninstall()
     except AssertionError:
@@ -750,7 +754,7 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     agents = sorted(a["metadata"]["name"] for a in kube.items("agents.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert agents == agents_before, f"Agents after the uninstall {agents} != before {agents_before}"
     servers = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.api.kagent.dev", namespace=KAGENT_NAMESPACE))
-    assert servers == servers_before, f"RemoteMCPServers after the uninstall {servers} != before {servers_before}"
+    assert servers == [MANAGED_AGENT], f"RemoteMCPServers after the uninstall {servers}: the agent's survives (keep policy), the kagent release's {KAGENT_API_SERVER} goes with the release"
     harness = kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
     assert harness, f"the platform Harness {HARNESS} went with the uninstall of the kagent release; it must be kept (helm.sh/resource-policy: keep, giantswarm/agent-platform#406)"
     harness_annotations = harness["metadata"].get("annotations") or {}
