@@ -711,7 +711,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.3.0 <1.4.0"
+    versionRange: ">=1.3.1 <1.4.0"
     # Stable releases only, also where gitops.prereleases admits the
     # platform's release candidates: the worker image above follows the
     # floor, and a candidate's atelet next to the floor's worker fails every
@@ -740,7 +740,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.3.0 <1.4.0"
+    versionRange: ">=1.3.1 <1.4.0"
     # Stable releases only, the range of substrate-crds above.
     prereleases: false
     valuesFrom: substrate

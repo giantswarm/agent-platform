@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the Substrate floor is `1.3.1`: worker and atelet move together)
+
+giantswarm/substrate#105: `components.substrate{,-crds}.versionRange` is `>=1.3.1 <1.4.0`. 1.3.1 bounds the golden actor's crash restarts during a pool roll (a template's golden is re-snapshotted instead of lost) and reaps the `runsc` children a worker leaves behind. The kagent WorkerPool's worker image follows the floor, so a `1.3.1` atelet resolved by the old range ran beside a `1.3.0` worker until this release.
+
+### Operator action
+
+- **None** for an installation on the defaults. The upgrade rolls the kagent WorkerPool once onto `ateom-gvisor:1.3.1`, one worker at a time under the budget; a turn in flight on a replaced worker is lost.
+- **Recognising it worked**: `kubectl -n <kagent namespace> get workerpool kagent-default -o jsonpath='{.spec.workerImage}'` ends in `ateom-gvisor:1.3.1`.
+
 ## \<current\> → \<next\> (agentgateway in front of muster by default)
 
 giantswarm/agent-platform#252: both charts default to `ingress.mode: agentgateway-muster` with `components.agentgateway.enabled: true` and `agent-platform-mcps.agentgateway.viaMuster: true`. An installation that left the three keys at their defaults moves from `muster-direct` to agentgateway: the agentgateway component and its CRDs install, the data-plane `Gateway`, `AgentgatewayParameters` and data-plane NetworkPolicies render, and `/mcp` on the muster hostname routes through agentgateway to muster. Clients keep their URL; OAuth discovery stays on muster's `/` route.

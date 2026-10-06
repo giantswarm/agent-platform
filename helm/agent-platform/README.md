@@ -165,9 +165,10 @@ What follows from it:
 - **Substrate follows stable releases only**, also where `gitops.prereleases`
   admits the platform's release candidates (`components.substrate.prereleases:
   false`, and on substrate-crds): a candidate of the pinned minor would reach the
-  atelet while the worker stays on the floor. The line's `1.3.1` candidates
-  honor an image's `USER`, and the `1.3.0` worker beside them fails every gVisor
-  actor at its pause container (`failed to load /pause: permission denied`).
+  atelet while the worker stays on the floor. From `1.3.1` on, the atelet honors
+  an image's `USER`, and a `1.3.0` worker beside it fails every gVisor actor at
+  its pause container (`failed to load /pause: permission denied`): the floor is
+  `1.3.1`, so worker and atelet move onto it together.
   From `1.4.0` on, ate-controller runs the gVisor workers on its own release
   (giantswarm/substrate#114).
 - **A Substrate re-pin is one values change**, `components.substrate.versionRange`
@@ -387,14 +388,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.3.0 <1.4.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.3.1 <1.4.0"` |  |
 | components.substrate-crds.prereleases | bool | `false` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.3.0 <1.4.0"` |  |
+| components.substrate.versionRange | string | `">=1.3.1 <1.4.0"` |  |
 | components.substrate.prereleases | bool | `false` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
