@@ -16,6 +16,12 @@ rendered as one more ingress peer in the flavor's own dialect. */ -}}
 {{- end }}
 {{- end }}
 {{- $egress := $am.networkPolicy.egress }}
+{{- /* The session tools call the kagent controller through the agentgateway
+data plane (agent-manager's kagent.controllerTarget), as the caller: only with
+OAuth on and the controller route rendered. */ -}}
+{{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
+{{- $sessionsOn := and $kagentOn $oauthOn (include "agent-platform.ingress.agentgateway" .) (dig "controllerRoute" "enabled" false (.Values.kagent | default dict)) }}
+{{- $dataplanePort := (index .Values.gateway.listeners 0).port }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
@@ -107,6 +113,18 @@ spec:
     {{- end }}
     - toEntities:
         - kube-apiserver
+    {{- if $sessionsOn }}
+    # The kagent controller through the agentgateway data plane (the session
+    # tools: SessionService and the A2A service, as the caller).
+    - toEndpoints:
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $dataplanePort | quote }}
+              protocol: TCP
+    {{- end }}
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.agentManager.oauthProvider" .) "issuerUrl" (include "agent-platform.agentManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
@@ -277,6 +295,17 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
+    {{- if $sessionsOn }}
+    # The kagent controller through the agentgateway data plane (the session
+    # tools: SessionService and the A2A service, as the caller).
+    - to:
+        - podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+      ports:
+        - port: {{ $dataplanePort | int }}
+          protocol: TCP
+    {{- end }}
     {{- include "agent-platform.agentManager.chartSourcesEgress.kubernetes" . | nindent 4 }}
     {{- if and $oauthOn $egress.cidrs }}
     # The identity provider: a narrowed chart egress still leaves the public
