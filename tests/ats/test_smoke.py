@@ -49,7 +49,7 @@ module top to bottom; each one builds on the state the previous left):
   9. `helm uninstall --wait`: the ordered teardown returns clean within budget,
      no Flux CRD left, the four operator CRDs remaining, no controller, no hook
      Job, no release in any state; the kagent-crds release is uninstalled and
-     the kagent CRDs survive it, with the Agents, their templates and
+     the kagent CRDs survive it, with the Agents and
      RemoteMCPServer (the line's keep policy), the substrate-crds release is
      uninstalled and the three ate.dev CRDs survive it (the Substrate line's
      keep policy), the platform Harness (the kagent release's keep policy) —
@@ -592,7 +592,7 @@ def test_deleted_platform_harness_comes_back_on_the_next_reconcile(kube: Kube, k
     hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", "kagent", namespace=NAMESPACE)
     assert is_ready(hr), f"the kagent HelmRelease is not Ready after the correction: {condition(hr)}"
     assert hr["status"]["history"][0]["version"] == revision, f"the correction wrote a Helm revision ({revision} -> {hr['status']['history'][0]['version']}); a drift correction is a server-side apply, not an upgrade"
-    logger.info("Harness %s deleted and back (uid %s -> %s) on a plain reconcile of the kagent release, Helm revision %s unchanged; templates %s Ready again",
+    logger.info("Harness %s deleted and back (uid %s -> %s) on a plain reconcile of the kagent release, Helm revision %s unchanged; Agents %s Ready again",
                 HARNESS, before["metadata"]["uid"], harness["metadata"]["uid"], revision, (DECLARATIVE_AGENT, MANAGED_AGENT))
 
 
@@ -692,10 +692,12 @@ def test_cli_upgrade_is_refused(kube: Kube, helm: Helm, chart_archive: Path, smo
 def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deployment: float) -> None:
     agent_hrs_before = [hr["metadata"]["name"] for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=KAGENT_NAMESPACE)]
     agents_before = sorted(a["metadata"]["name"] for a in kube.items("agents.api.kagent.dev", namespace=KAGENT_NAMESPACE))
-    templates_before = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     servers_before = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert MANAGED_AGENT in agent_hrs_before, f"the managed agent's HelmRelease was not there before the uninstall: {agent_hrs_before}"
-    assert templates_before == sorted((DECLARATIVE_AGENT, MANAGED_AGENT)), templates_before
+    # Both agents carry their template inline (the Generic chart 2.x and the
+    # smoke's declarative Agent): no AgentTemplate object exists.
+    assert agents_before == sorted((DECLARATIVE_AGENT, MANAGED_AGENT)), agents_before
+    assert not kube.items("agenttemplates.api.kagent.dev", namespace=KAGENT_NAMESPACE), "an AgentTemplate exists although every agent of the smoke carries its template inline"
     assert servers_before == [MANAGED_AGENT], servers_before
     try:
         elapsed = helm.uninstall()
@@ -719,8 +721,8 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
              lambda: kube.get("validatingadmissionpolicies.admissionregistration.k8s.io", SELF_POLICY) is None, 60, interval=2)
     # The keep policy of the kagent line: the ordered teardown uninstalled the
     # kagent-crds release with the others, and its CRDs — templates carrying
-    # helm.sh/resource-policy: keep — survived it, so every Agent, AgentTemplate
-    # and RemoteMCPServer is still there in the kept kagent namespace (the
+    # helm.sh/resource-policy: keep — survived it, so every Agent and
+    # RemoteMCPServer is still there in the kept kagent namespace (the
     # agents' HelmRelease objects went with the Flux CRDs; the declarative Agent
     # was never Helm's). The platform Harness stays too — since 4.8.0 the kagent
     # release renders it (harness.create) with helm.sh/resource-policy: keep,
@@ -747,8 +749,6 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     assert kube.get("namespace", KAGENT_NAMESPACE), "the kagent namespace went with the uninstall; it must be kept (the agents live there)"
     agents = sorted(a["metadata"]["name"] for a in kube.items("agents.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert agents == agents_before, f"Agents after the uninstall {agents} != before {agents_before}"
-    templates = sorted(t["metadata"]["name"] for t in kube.items("agenttemplates.api.kagent.dev", namespace=KAGENT_NAMESPACE))
-    assert templates == templates_before, f"AgentTemplates after the uninstall {templates} != before {templates_before}"
     servers = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert servers == servers_before, f"RemoteMCPServers after the uninstall {servers} != before {servers_before}"
     harness = kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
@@ -773,11 +773,11 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     bundles = substrate_trust_bundles(kube)
     assert bundles == sorted(s.replace("/", ":") + ":primary-bundle" for s in PODCERT_SIGNERS), f"the podcert signers' ClusterTrustBundles after the uninstall: {bundles}"
     assert_substrate_trust_chain(kube)
-    logger.info("kept after the uninstall: CRDs %s; in %s Agents %s, AgentTemplates %s, RemoteMCPServers %s (their HelmReleases %s are gone with the Flux CRDs), the Harness %s (keep policy, the %s release's); of Substrate: %s with its pools, %s with its two CA pools (keep policy), the ClusterTrustBundles %s carrying the pools' roots",
-                sorted(KEPT_CRDS), KAGENT_NAMESPACE, agents, templates, servers, agent_hrs_before, HARNESS, CONNECTIVITY, ATE_NAMESPACE, PODCERT_NAMESPACE, bundles)
+    logger.info("kept after the uninstall: CRDs %s; in %s Agents %s, RemoteMCPServers %s (their HelmReleases %s are gone with the Flux CRDs), the Harness %s (keep policy, the %s release's); of Substrate: %s with its pools, %s with its two CA pools (keep policy), the ClusterTrustBundles %s carrying the pools' roots",
+                sorted(KEPT_CRDS), KAGENT_NAMESPACE, agents, servers, agent_hrs_before, HARNESS, CONNECTIVITY, ATE_NAMESPACE, PODCERT_NAMESPACE, bundles)
     assert elapsed < UNINSTALL_BUDGET_S, f"helm uninstall --wait took {elapsed:.0f}s (budget {UNINSTALL_BUDGET_S}s)"
     logger.info("uninstall clean in %.0f s: no Flux CRD, operator CRDs kept, no controller, no Job, no release", elapsed)
-    # Leave the next scenario a cluster without the kept Agents, templates and Harness
+    # Leave the next scenario a cluster without the kept Agents and Harness
     # (its own kagent runs there; the kept CRDs it adopts); the namespace's termination
     # completes in the background. Substrate's leftovers stay: the own-Flux
     # scenario is the reinstall onto them (giantswarm/agent-platform#384).
