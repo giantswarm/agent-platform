@@ -3400,43 +3400,30 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   description: "external MCP server"
 
   # --- Coding agents: further Harnesses (the kagent chart's harnesses[]) ---
-  # A coding agent is an AgentTemplate admitted by a claude Harness: Claude
-  # Code run headless by the kagent line's claude-harness image in a Substrate
-  # actor, calling muster as the person who sent the turn
+  # A coding agent is an Agent whose spec.harnessRef names a claude Harness:
+  # Claude Code run headless by the kagent line's claude-harness image in a
+  # Substrate actor, calling muster as the person who sent the turn
   # (giantswarm/giantswarm#37625; bumblebee-plans#60). This list is forwarded
-  # to the kagent chart as it is: one entry per further Harness — the
-  # claude-harness image, a toolchain image built from it, or another Go ADK
-  # Harness — with the policy shape of harness.* above plus runtime: claude
-  # (the default) or kagent. A claude entry takes the chart's claude-harness
-  # image at its published digest; its snapshotLocation is its own (a snapshot
-  # is the actor's whole memory and filesystem, and each store has its own
-  # retention); egress lists the git hosts and toolchain registries its agents
-  # may reach besides what their revision compiles. On the kagent 1.x line a
-  # template names its Harness by the label the agent chart stamps
-  # (agent-platform.giantswarm.io/harness: <name>; agent-manager's `harness`
-  # argument), so the selector pairs them; upstream's later Agent object names
-  # the Harness directly and the selectors go then. Empty (the default) renders
-  # no further Harness. Needs the kagent line release that carries harnesses[]
-  # (giantswarm/kagent-upstream#134); an earlier chart ignores the key.
+  # to the kagent chart as it is: one entry per further Harness, with the
+  # policy shape of harness.* above plus runtime: claude (the default) or
+  # kagent. A claude entry takes the chart's claude-harness image at its
+  # published digest; its snapshotLocation is its own (a snapshot is the
+  # actor's whole memory and filesystem, and each store has its own
+  # retention); limits (claude entries only, Harness.spec.claude.limits:
+  # budgetUSD as a decimal string, maxTurns) bound every turn of every agent
+  # on it. An Agent declares its own egress (spec.egress, the agent chart's
+  # agent.egress); a Harness carries none. Empty (the default) renders no
+  # further Harness.
   harnesses: []
   # - name: claude
   #   runtime: claude
   #   snapshotLocation: s3://<bucket>/claude
-  #   egress:
-  #     - github.com
-  #     - "*.githubusercontent.com"
-  #     - proxy.golang.org
-  #     - sum.golang.org
-  #     - registry.npmjs.org
   #   env:
   #     - name: KAGENT_PROPAGATE_TOKEN          # tool calls to muster as the person
   #       value: "true"
-  #     - name: KAGENT_CLAUDE_PROJECT_INSTRUCTIONS  # a cloned repository's CLAUDE.md, its hooks off
-  #       value: "true"
-  #   allowedAgentTemplates:
-  #     selector:
-  #       matchLabels:
-  #         agent-platform.giantswarm.io/harness: claude
+  #   limits:
+  #     budgetUSD: "2.00"
+  #     maxTurns: 40
 
 # === The platform's own Grafana boards ===
 # Forwarded to the connectivity chart, which renders one ConfigMap per board
