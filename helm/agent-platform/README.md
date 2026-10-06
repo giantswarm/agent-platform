@@ -431,7 +431,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=1.10.0 <2.0.0"` |  |
+| components.agent-manager.versionRange | string | `">=1.11.0 <2.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |

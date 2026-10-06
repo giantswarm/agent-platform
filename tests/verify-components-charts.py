@@ -143,7 +143,7 @@ KAGENT = ["kagent-crds", "kagent"]
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
 UNRELEASED: dict[str, str] = {
-    "agent-manager": "agent-manager 1.10.0 (api.kagent.dev Agent, migrate 1.x -> 2.x, giantswarm/agent-manager#100)",
+    "agent-manager": "agent-manager 1.11.0 (kagent.controllerTarget for the session tools, giantswarm/agent-manager#101)",
 }
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
