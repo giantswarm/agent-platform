@@ -34,7 +34,7 @@ spec:
   values:
     agentChart:
       ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-      semver: '>=1.5.0 <2.0.0'
+      semver: '>=2.0.0 <3.0.0'
     flux:
       helmReleaseServiceAccount: kagent-flux
     fullnameOverride: agent-manager
@@ -138,7 +138,7 @@ spec:
     agent-manager:
       agentChart:
         ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-        semver: '>=1.5.0 <2.0.0'
+        semver: '>=2.0.0 <3.0.0'
       fullnameOverride: agent-manager
       kagent:
         apiVersion: v1alpha3

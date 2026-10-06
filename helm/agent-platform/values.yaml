@@ -4421,15 +4421,13 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
   agentChart:
     ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
     # The Generic agent chart line agent-manager composes into every agent's
-    # OCIRepository: 1.x (giantswarm/agent 1.0.0 and up) renders
-    # kagent.dev/v1alpha3 AgentTemplates for this release's kagent, 0.x the
-    # v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases of
-    # the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart. From 1.5.0 the chart renders no
-    # spec.context.compaction on the AgentTemplate: the kagent line from 1.1.0
-    # refuses the field and the platform Harness carries the compaction
-    # (kagent.harness.compaction). The floor moves with components.kagent.
-    semver: ">=1.5.0 <2.0.0"
+    # OCIRepository: 2.x renders one api.kagent.dev/v1alpha3 Agent (the
+    # template inline, the Harness by name) for this release's kagent line;
+    # 1.x rendered the kagent.dev AgentTemplate of the 1.x kagent line, 0.x
+    # the v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases
+    # of the line reach the agents on their own; the major is the API boundary
+    # and moves only with this chart. The floor moves with components.kagent.
+    semver: ">=2.0.0 <3.0.0"
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:

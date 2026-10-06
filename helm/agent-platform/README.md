@@ -1186,7 +1186,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
-| agent-manager.agentChart.semver | string | `">=1.5.0 <2.0.0"` |  |
+| agent-manager.agentChart.semver | string | `">=2.0.0 <3.0.0"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
