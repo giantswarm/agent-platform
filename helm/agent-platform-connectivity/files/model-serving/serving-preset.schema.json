@@ -91,6 +91,7 @@
           "description": "Memory the recipe needs on the serving node: weights plus the KV cache, activations and runtime overhead. The portal's fit check compares weightsGiB + overheadGiB with the node's GPU (or unified) memory.",
           "properties": {
             "weightsGiB": {"type": "number", "exclusiveMinimum": 0, "description": "Size of the weights as served (after quantization)."},
+            "residentWeightsGiB": {"type": "number", "exclusiveMinimum": 0, "description": "Weights held in GPU (or unified) memory once loaded, when the runtime keeps part of the checkpoint on disk (an n-gram table read from disk); at most weightsGiB. Defaults to weightsGiB. The fit check sizes a unified-memory claim from residentWeightsGiB + overheadGiB."},
             "overheadGiB": {"type": "number", "minimum": 0, "default": 30, "description": "Headroom for KV cache, activations, CUDA graphs and the runtime."}
           }
         },

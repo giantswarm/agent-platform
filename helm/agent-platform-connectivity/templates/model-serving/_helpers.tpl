@@ -444,6 +444,9 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- if not (hasKey $requirements "overheadGiB") -}}
 {{- $_ := set $requirements "overheadGiB" 30 -}}
 {{- end -}}
+{{- if and (hasKey $requirements "residentWeightsGiB") (gt (float64 (get $requirements "residentWeightsGiB")) (float64 (get $requirements "weightsGiB"))) -}}
+{{- fail (printf "%s: spec.requirements.residentWeightsGiB (%v) exceeds weightsGiB (%v); the resident weights are the part of the checkpoint held in memory" $where (get $requirements "residentWeightsGiB") (get $requirements "weightsGiB")) -}}
+{{- end -}}
 {{- $_ := set $spec "requirements" $requirements -}}
 {{- $args := get $spec "args" | default list -}}
 {{- /* Every argument reaches vLLM through the well-known runtime template's
