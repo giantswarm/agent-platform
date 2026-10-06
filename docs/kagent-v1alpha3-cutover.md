@@ -92,6 +92,16 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get agents.api.k
 
 Every agent HelmRelease of the Generic agent chart must be on the chart line that renders an `Agent` (the `OCIRepository agent` semver range agent-manager composes); a release still on the old range renders an `AgentTemplate` the controller does not run.
 
+- [ ] The connectivity release started the `agent-manager migrate` run (agent-manager 1.10.0 or later; an older image reads the 2.x range as the 0.x to 1.x path and rewrites nothing). It validates every Generic-chart release against the chart 2.x schema, rewrites the writable ones, moves the namespace's `OCIRepository agent` to the 2.x range, and reports a diff for each GitOps-owned release and source (apply those in their repository). Read the report:
+
+```sh
+kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get jobs -l app.kubernetes.io/component=agent-manager-migrate
+kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get configmap agent-manager-migrate-report -o jsonpath='{.data.phase}{"\n"}{.data.summary}{"\n"}'
+kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get configmap agent-manager-migrate-report -o jsonpath='{.data.report\.yaml}'
+```
+
+Expected: `run.path: 1.x -> 2.x`, no release `failed`, phase `wait` until Flux upgrades the releases and the Agents are Ready, then `complete`. A run that ended in `wait` is re-run once the Agents are Ready, which deletes the leftover `kagent.dev` AgentTemplates no release renders: `kubectl -n kagent create job --from=cronjob/agent-platform-connectivity-agent-manager-migrate agent-manager-migrate-rerun-1`. A release's `warnings` name a sub-agent `templateRef` with no `api.kagent.dev` AgentTemplate in the namespace; the parent Agent stays `ResolvedRefs=False` until one exists.
+
 - [ ] The connectivity release re-rendered the catalog at `api.kagent.dev` (ModelConfigs, RemoteMCPServers) and the kagent release its Harness:
 
 ```sh

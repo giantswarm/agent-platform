@@ -3517,27 +3517,16 @@ verify-postgres-kagent-v2: ## Assert the kagent_v2 database entry (#346): the CN
 
 .PHONY: verify-identity-migration
 verify-identity: verify-identity-migration
-verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the chart's only cluster-scoped binding (#346): exactly one when the migration is on — named, bound to the CRD ClusterRole (get, delete on the five removed CRDs, nothing more) and to the tenant ServiceAccount, following a renamed identity — and none when the migration or agent-manager is off.
+verify-identity-migration: ## Assert the migration holds no cluster-scoped right: the 1.x -> 2.x run deletes no CRD, so no ClusterRole or ClusterRoleBinding renders with the migration on, off, or with agent-manager off; the per-GitOps-namespace Roles follow a renamed identity.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> migration on: exactly one ClusterRoleBinding and one ClusterRole, the CRD pair"
+	@echo "--> migration on: no ClusterRole, no ClusterRoleBinding"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
-	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vim-on.out)" = "1" ] || { echo "FAIL: expected exactly one ClusterRoleBinding with the migration on"; grep -n -A3 '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vim-on.out; exit 1; }
-	@[ "$$(grep -c '^kind: ClusterRole$$' $(VERIFY_TMP)/vim-on.out)" = "1" ] || { echo "FAIL: expected exactly one ClusterRole with the migration on"; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vim-on.out ClusterRoleBinding $(MIGRATION_JOB)-crds >$(VERIFY_TMP)/vim-crb.out || { echo "FAIL: the ClusterRoleBinding is not $(MIGRATION_JOB)-crds"; exit 1; }
-	@grep -A3 '^roleRef:' $(VERIFY_TMP)/vim-crb.out | grep -q 'kind: ClusterRole' || { echo "FAIL: the roleRef is not a ClusterRole"; exit 1; }
-	@grep -A3 '^roleRef:' $(VERIFY_TMP)/vim-crb.out | grep -q 'name: $(MIGRATION_JOB)-crds' || { echo "FAIL: the roleRef does not name the CRD ClusterRole"; exit 1; }
-	@grep -A3 '^subjects:' $(VERIFY_TMP)/vim-crb.out | grep -q 'name: kagent-flux' || { echo "FAIL: the subject is not the tenant ServiceAccount"; exit 1; }
-	@grep -A3 '^subjects:' $(VERIFY_TMP)/vim-crb.out | grep -q 'namespace: kagent' || { echo "FAIL: the subject is not in the kagent namespace"; exit 1; }
-	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vim-crb.out; then echo "FAIL: the binding is a hook resource; the migration's Job is plain and re-runs, its rights must outlive one hook event"; exit 1; fi
-	@$(PICK) $(VERIFY_TMP)/vim-on.out ClusterRole $(MIGRATION_JOB)-crds >$(VERIFY_TMP)/vim-cr.out || { echo "FAIL: no CRD ClusterRole"; exit 1; }
-	@for crd in agents.kagent.dev sandboxagents.kagent.dev agentharnesses.kagent.dev memories.kagent.dev toolservers.kagent.dev; do grep -q "^      - $$crd$$" $(VERIFY_TMP)/vim-cr.out || { echo "FAIL: the ClusterRole does not name $$crd"; exit 1; }; done
-	@[ "$$(grep -c '^      - .*\.kagent\.dev$$' $(VERIFY_TMP)/vim-cr.out)" = "5" ] || { echo "FAIL: the ClusterRole names more or fewer than the five removed CRDs"; exit 1; }
-	@grep -q 'verbs: \["get", "delete"\]' $(VERIFY_TMP)/vim-cr.out || { echo "FAIL: the ClusterRole's verbs are not exactly get, delete"; grep verbs $(VERIFY_TMP)/vim-cr.out; exit 1; }
-	@grep -q 'resources: \["customresourcedefinitions"\]' $(VERIFY_TMP)/vim-cr.out || { echo "FAIL: the ClusterRole is not confined to customresourcedefinitions"; exit 1; }
-	@echo "ok: the one ClusterRoleBinding"
-	@echo "--> a renamed identity: the subject follows kagent.fluxServiceAccountName"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x >$(VERIFY_TMP)/vim-x.out 2>&1 || { cat $(VERIFY_TMP)/vim-x.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vim-x.out ClusterRoleBinding $(MIGRATION_JOB)-crds | grep -A3 '^subjects:' | grep -q 'name: tenant-x' || { echo "FAIL: the subject did not follow the renamed identity"; exit 1; }
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
+	@if grep -q 'customresourcedefinitions' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: the migration is granted rights on customresourcedefinitions"; exit 1; fi
+	@echo "ok: nothing cluster-scoped"
+	@echo "--> a renamed identity: the GitOps-namespace RoleBinding follows kagent.fluxServiceAccountName"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' >$(VERIFY_TMP)/vim-x.out 2>&1 || { cat $(VERIFY_TMP)/vim-x.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vim-x.out RoleBinding $(MIGRATION_JOB) flux-giantswarm | grep -A3 '^subjects:' | grep -q 'name: tenant-x' || { echo "FAIL: the subject did not follow the renamed identity"; exit 1; }
 	@if grep -q 'kagent-flux' $(VERIFY_TMP)/vim-x.out; then echo "FAIL: the old name survives with a renamed identity"; grep -n kagent-flux $(VERIFY_TMP)/vim-x.out; exit 1; fi
 	@echo "ok: renamed identity"
 	@echo "--> off: no ClusterRoleBinding with the migration off, with agent-manager off (verify-identity's own kagent-only case), with kagent off"
@@ -3549,7 +3538,7 @@ verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the c
 	@echo "ok: $@"
 
 .PHONY: verify-migration
-verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; no Job of the release (#378: a Failed one stalls the upgrade) but a suspended CronJob, whose run a post-install/post-upgrade hook starts as the tenant identity once the run's network policy is applied — both flavors —, the run named with the hash of its pod template — image, args, environment, identity, labels; a changed template starts a new run, an unchanged one finds its run started, the template byte-identical across chart versions while the CronJob's own labels follow them (#399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), its inputs as environment and no GitHub token; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
+verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; no Job of the release (#378: a Failed one stalls the upgrade) but a suspended CronJob, whose run a post-install/post-upgrade hook starts as the tenant identity once the run's network policy is applied — both flavors —, the run named with the hash of its pod template — image, args, environment, identity, labels; a changed template starts a new run, an unchanged one finds its run started, the template byte-identical across chart versions while the CronJob's own labels follow them (#399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), its inputs as environment and no GitHub token; the RBAC set (the per-namespace reads, nothing cluster-scoped); the network policy in both flavors; the guards; the meta chart's forwarding.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — its kagent is fresh, there is no 0.10 agent to migrate (agentlab#143 rehearses the migration)"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >$(VERIFY_TMP)/vmig-off.out 2>&1 || { cat $(VERIFY_TMP)/vmig-off.out; exit 1; }
@@ -3630,7 +3619,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -A1 'name: AGENT_MANAGER_MANAGED_NAMESPACES' $(VERIFY_TMP)/vmig-vals-job.out | grep -q 'value: team-a,team-b' || { echo "FAIL: the additional namespaces do not reach the Job"; exit 1; }
 	@grep -q 'serviceAccountName: tenant-x' $(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: the Job's ServiceAccount did not follow the renamed identity"; exit 1; }
 	@echo "ok: values"
-	@echo "--> RBAC: the CRD pair (verify-identity-migration asserts its shape) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
+	@echo "--> RBAC: nothing cluster-scoped (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
 	@if $(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' --set 'agentManager.migration.gitopsNamespaces[1]=flux-team' >$(VERIFY_TMP)/vmig-gitops.out 2>&1 || { cat $(VERIFY_TMP)/vmig-gitops.out; exit 1; }
 	@for ns in flux-giantswarm flux-team; do \
@@ -3640,7 +3629,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		[ "$$(grep -c 'verbs: \["get", "list"\]' $(VERIFY_TMP)/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding in $$ns does not bind the tenant identity"; exit 1; }; \
 	done
-	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out)" = "1" ] || { echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; }
+	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out; then echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; fi
 	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out CronJob $(MIGRATION_JOB) kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
 	@echo "ok: RBAC"

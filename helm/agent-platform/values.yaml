@@ -889,8 +889,10 @@ components:  # @schema additionalProperties: true
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
     # (giantswarm/agent-manager#76, giantswarm/giantswarm#36711). 1.7.0 takes
     # agentChart.semverFilter, which gitops.prereleases sets
-    # (giantswarm/agent-manager#86).
-    versionRange: ">=1.7.0 <2.0.0"
+    # (giantswarm/agent-manager#86). 1.10.0 reads and composes the
+    # api.kagent.dev Agent of this kagent line and migrates Generic chart 1.x
+    # releases to 2.x (giantswarm/agent-manager#100).
+    versionRange: ">=1.10.0 <2.0.0"
     valuesFrom: agent-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -4571,7 +4573,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.7.0
+      tag: 1.10.0
     dryRun: false
     gitopsNamespaces: []
 
