@@ -4255,3 +4255,8 @@ verify-all: ## Run every verify-* target of this file, the set CI runs, each wit
 		echo "<==== $$target: $$(( ($$(date +%s%N) - start) / 1000000 )) ms"; \
 	done
 	@echo "all $(words $(VERIFY_TARGETS)) verify targets passed."
+
+.PHONY: verify-postgres-restore
+verify-postgres: verify-postgres-restore
+verify-postgres-restore: ## Assert the ImageVolume exception covers the source and its exact restore name.
+	@HELM="$(HELM)" python3 tests/verify-postgres-restore.py $(CONNECTIVITY_DIR)

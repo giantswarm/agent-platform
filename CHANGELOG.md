@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The PostgreSQL ImageVolume policy exception now includes the `<clusterName>-restore` recovery Pods and Jobs alongside the source Cluster.
+
 ### Added
+
+- An opt-in PostgreSQL backup verification runbook and suspended cnpg-drill values example for the kagent API v2 database.
 
 - **Preset field `requirements.residentWeightsGiB`: the weights a runtime holds in memory when it keeps part of the checkpoint on disk** (giantswarm/model-manager#240). It is optional, at most `weightsGiB` (the render fails above it) and defaults to `weightsGiB`. On a unified-memory node, model-manager's fit check needs the `--gpu-memory-utilization` claim to hold the resident weights plus `overheadGiB`. `qwen3-8-flash-next-nvfp4` declares 74 GiB resident (the n-gram table is read from disk), so 74 + 20 GiB fit within its 0.80 claim. `nemotron-3-super-nvfp4` declares 12 GiB of overhead instead of 30, so 75 + 12 GiB fit within its 0.72 claim: the CUDA-graph pool already counts inside the claim.
 - **`docs/model-serving-image-pulls.md`: the runtime's download at boot and where a cold node's time goes** (giantswarm/agent-platform#812). A GPU pool node created by cluster-manager (0.26.0) on gpu-node-pool 0.8.0 fetches the pre-pull's images (`modelServing.prepull.images`) into containerd while it joins, so the pre-pull, gated on the GPU, only unpacks. On a cold g6.xlarge node Ready → predictor Ready went from 471–482 s to 419–437 s. The page records the variants measured: unpacking at boot as well slows the GPU operator's and the node's DaemonSet pulls and is slower overall. What remains is the unpack of the 15 GB runtime.

@@ -1,0 +1,31 @@
+# Optional cnpg-drill chart 0.1.6 values, not agent-platform chart values.
+# See ../postgres-backup-verification.md before running.
+cluster: kagent-pg
+drillClusterName: kagent-pg-restore
+recoveryObjectStore: kagent-pg-recovery-readonly
+suspended: true
+retainOnFailure: false
+timeoutSeconds: 1800
+maxBackupAgeSeconds: 90000
+# Supply a separate read-only role here only when the recovery ObjectStore
+# uses workload identity. Do not copy the source's writer role.
+recoveryServiceAccountAnnotations: {}
+checks:
+  # These checks target the kagent API v2 database, not the retained 0.10 DB.
+  # Update database/schema names if the installation overrides them.
+  - name: core-migrations
+    database: kagent_v2
+    query: SELECT count(*) > 0 FROM public.schema_migrations WHERE version_id > 0 AND is_applied
+    expected: "t"
+  - name: vector-migrations
+    database: kagent_v2
+    query: SELECT count(*) > 0 FROM public.vector_schema_migrations WHERE version_id > 0 AND is_applied
+    expected: "t"
+  - name: saved-conversation-context
+    database: kagent_v2
+    query: SELECT count(*) > 0 FROM public.a2a_context
+    expected: "t"
+  - name: vector-library
+    database: kagent_v2
+    query: SELECT '[1,0,0]'::public.vector <-> '[1,0,0]'::public.vector
+    expected: "0"
