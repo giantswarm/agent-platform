@@ -668,7 +668,7 @@ components:  # @schema additionalProperties: true
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
     ownedCrds:
-      - modelconfigs.kagent.dev
+      - modelconfigs.api.kagent.dev
   substrate-crds:  # @schema additionalProperties: true
     chart: substrate-crds
     # Agent Substrate — kagent API v2's actor runtime: every agent runs as a

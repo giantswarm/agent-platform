@@ -386,7 +386,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.versionRange | string | `">=1.3.0 <1.4.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
-| components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.kagent.dev"` |  |
+| components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
 | components.substrate-crds.versionRange | string | `">=1.4.0 <1.5.0"` |  |
