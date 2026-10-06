@@ -6,6 +6,20 @@ A predictor runs the `llm-d-cuda` runtime (vLLM and its CUDA stack): 6.6 GB comp
 
 - **A fast-to-pull variant.** The well-known `LLMInferenceServiceConfig`s run `gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda`. It is the upstream image re-layered by [giantswarm/llm-d](https://github.com/giantswarm/llm-d) into zstd layers of at most 1.2 GB, so containerd pulls on several streams and decompresses faster than gzip.
 - **A pre-pull gated on the GPU.** `modelServing.prepull` renders a DaemonSet that pulls the runtime on every pool node once GPU feature discovery has labelled it. The GPU operator's own pulls therefore finish first, and the runtime pull overlaps the weight download ([#545](https://github.com/giantswarm/agent-platform/issues/545), [#737](https://github.com/giantswarm/agent-platform/issues/737)).
+- **The download at boot.** A pool node created by cluster-manager fetches the pre-pull's images while it joins: gpu-node-pool's `pool.prefetchImages`, set by `create_node_pool` from `modelServing.prepull.images`. A boot unit runs `ctr content fetch` into containerd's `prefetch` namespace once kubeadm has joined the node, without unpacking. The pre-pull's pull then finds every blob present and only unpacks. On a g6.xlarge the fetch of both images takes about 45 s and ends before node Ready, so the runtime is no longer downloaded after the GPU is usable ([#812](https://github.com/giantswarm/agent-platform/issues/812)).
+
+## Where the time goes on a cold node
+
+Seconds from node Ready on a cold g6.xlarge, serving `qwen3-5-4b-hf` from `hf://` without a cache claim:
+
+| variant | GPU allocatable | runtime pull | predictor's main container starts | node Ready → predictor Ready |
+|---|---|---|---|---|
+| pre-pull alone (two runs) | 52–55 | 155–160 | 208–211 | 471–482 |
+| download at boot (two runs) | 47–49 | 116–117, unpack only | 164–165 | **419–437** |
+| download and unpack at boot | 142 | before the GPU | 7 s after the weights | 462 |
+| the GPU operator's images, then download and unpack at boot | 56 | before the GPU | 9 s after the weights | 441 |
+
+Unpacking at boot slows every other image pull on the node, the GPU operator's (#737) and the node's DaemonSets alike, and costs more than it saves. With the download at boot, the unpack is what remains: the 15 GB unpacked runtime takes 80 s on four vCPUs alone and 117 s beside the weight download. The main container therefore starts about 47 s after the weights are on disk. A smaller runtime image is the lever left.
 
 ## Lazy pulling: evaluated, not adopted
 
