@@ -2,6 +2,8 @@
 {{- $route := .Values.kagent.controllerRoute }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $kagentFullname := include "agent-platform.kagent.fullname" . }}
+{{- $innerRefs := "- name: kagent\n  kind: AgentgatewayBackend\n  group: agentgateway.dev" }}
+{{- $publicRefs := printf "- name: %s\n  port: 8080" .Values.gateway.name }}
 # AgentgatewayBackend — registers the kagent controller as a backend that
 # agentgateway proxies to after JWT validation (controller-jwt-policy.yaml).
 ---
@@ -44,6 +46,12 @@ spec:
 # agentgateway.<ns>.svc.cluster.local:8080, which no public hostname matches. The
 # matches are exact service/method paths, so a hostname-less route captures
 # nothing else and outranks the MCP catch-all's PathPrefix.
+#
+# Both routes also carry grpc.health.v1.Health, which the controller's gRPC
+# server registers: the kagent CLI checks reachability with it before every
+# command (--api-url https://agentgateway.<domain>:8443), and without the match
+# the call falls into the MCP catch-all. It is protocol, not API selection, so it
+# is fixed here rather than listed in kagent.controllerRoute.grpc.services.
 apiVersion: gateway.networking.k8s.io/v1
 kind: GRPCRoute
 metadata:
@@ -58,7 +66,8 @@ spec:
       group: gateway.networking.k8s.io
       kind: Gateway
   rules:
-    {{- include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" "- name: kagent\n  kind: AgentgatewayBackend\n  group: agentgateway.dev") | trim | nindent 4 }}
+    {{- include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" $innerRefs) | trim | nindent 4 }}
+    {{- include "agent-platform.kagent.healthRule" $innerRefs | nindent 4 }}
 {{- if not (include "agent-platform.edgeIsDataPlane" .) }}
 ---
 # GRPCRoute — the same services on the outer public Gateway (TLS-terminating),
@@ -84,6 +93,15 @@ spec:
   hostnames:
     - {{ include "agent-platform.kagent.controllerHostname" . | quote }}
   rules:
-    {{- include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" (printf "- name: %s\n  port: 8080" .Values.gateway.name)) | trim | nindent 4 }}
+    {{- include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" $publicRefs) | trim | nindent 4 }}
+    {{- include "agent-platform.kagent.healthRule" $publicRefs | nindent 4 }}
 {{- end }}
 {{- end }}
+{{- define "agent-platform.kagent.healthRule" -}}
+- matches:
+    - method:
+        type: Exact
+        service: grpc.health.v1.Health
+  backendRefs:
+{{ . | indent 4 }}
+{{- end -}}

@@ -1949,14 +1949,14 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	$(call kagent_route_doc,GRPCRoute,kagent-controller-public,$(VERIFY_TMP)/vkr.out,$(VERIFY_TMP)/vkr-public.out)
 	@if grep -A3 '^kind: HTTPRoute$$' $(VERIFY_TMP)/vkr.out | grep -q 'name: kagent-controller'; then echo "FAIL: a kagent-controller HTTPRoute still renders (the REST /kagent route was retired)"; exit 1; fi
 	@if grep -qE 'value: /kagent$$|pathPrefix|replacePrefixMatch: /$$' $(VERIFY_TMP)/vkr.out; then echo "FAIL: the render still carries a /kagent path prefix"; grep -nE 'value: /kagent$$|pathPrefix' $(VERIFY_TMP)/vkr.out | head; exit 1; fi
-	@for svc in kagent.api.v1alpha1.AgentInstanceService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService; do \
+	@for svc in kagent.api.v1alpha1.AgentInstanceService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService grpc.health.v1.Health; do \
 		for f in $(VERIFY_TMP)/vkr-inner.out $(VERIFY_TMP)/vkr-public.out; do \
 			grep -B1 "^            service: $$svc$$" $$f | grep -q 'type: Exact' || { echo "FAIL: $$f has no exact match for $$svc"; exit 1; }; \
 		done; \
 	done
 	@for f in $(VERIFY_TMP)/vkr-inner.out $(VERIFY_TMP)/vkr-public.out; do \
-		[ "$$(grep -c '^    - matches:' $$f)" = "5" ] || { echo "FAIL: $$f does not carry one rule per service (5)"; grep -c '^    - matches:' $$f; exit 1; }; \
-		[ "$$(grep -c '^            service: ' $$f)" = "5" ] || { echo "FAIL: $$f does not match exactly the line's five services once each"; grep -c '^            service: ' $$f; exit 1; }; \
+		[ "$$(grep -c '^    - matches:' $$f)" = "6" ] || { echo "FAIL: $$f does not carry one rule per service (the line's five and grpc.health.v1.Health)"; grep -c '^    - matches:' $$f; exit 1; }; \
+		[ "$$(grep -c '^            service: ' $$f)" = "6" ] || { echo "FAIL: $$f does not match exactly the line's five services and grpc.health.v1.Health once each"; grep -c '^            service: ' $$f; exit 1; }; \
 		if grep -q '^            method: ' $$f; then echo "FAIL: $$f lists methods by default — the default is one service-only match per service (agentgateway chart >= 2.1.1 translates it to the path prefix /<service>/)"; exit 1; fi; \
 		grep -q '^            service: lf.a2a.v1.A2AService$$' $$f || { echo "FAIL: $$f does not route lf.a2a.v1.A2AService"; exit 1; }; \
 	done
@@ -2066,7 +2066,7 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"kagent.api.v1alpha1.SystemService":["GetVersion","GetCurrentUser"]}' >$(VERIFY_TMP)/vkr-extra.out 2>&1 || { cat $(VERIFY_TMP)/vkr-extra.out; exit 1; }
 	@[ "$$(grep -c 'method: GetCurrentUser' $(VERIFY_TMP)/vkr-extra.out)" = "2" ] || { echo "FAIL: a listed RPC does not reach both GRPCRoutes"; exit 1; }
 	@[ "$$(grep -c '^            service: kagent.api.v1alpha1.SystemService$$' $(VERIFY_TMP)/vkr-extra.out)" = "4" ] || { echo "FAIL: the listed service does not render one match per RPC on both routes"; grep -c '^            service: kagent.api.v1alpha1.SystemService$$' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
-	@[ "$$(grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out)" = "12" ] || { echo "FAIL: the other services' service-only matches did not survive a one-service override"; grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out)" = "14" ] || { echo "FAIL: the other services' and the Health service-only matches did not survive a one-service override"; grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
 	@[ "$$(grep -c '^            method: ' $(VERIFY_TMP)/vkr-extra.out)" = "4" ] || { echo "FAIL: methods rendered for a service without a list"; exit 1; }
 	@echo "ok: the RPC list is the per-service fallback (the map merges, a list replaces)"
 	@echo "--> every connectivity CI values file renders"
