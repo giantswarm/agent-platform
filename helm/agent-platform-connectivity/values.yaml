@@ -693,10 +693,10 @@ networkPolicy:
   # muster: the person's sign-in, the audit trail and the toolset scoping. Each
   # entry renders an ingress policy in the backend's namespace that admits
   # muster (from this release's namespace) on `ports`, the namespace's own pods
-  # (a backend's store or UI), the kubelet's probes, mcpBackendScrapers on
-  # `ports` when `metrics: true` (a backend serving /metrics on its MCP port),
-  # and `additionalPeers` on `ports` (e.g. the gateway in front of a backend
-  # with a public route). Keyed by a name the policy carries:
+  # (a backend's store or UI), the kubelet's probes on every port,
+  # mcpBackendScrapers on `ports` when `metrics: true` (a backend serving
+  # /metrics on its MCP port), and `additionalPeers` on `ports` (e.g. the
+  # gateway in front of a backend with a public route). Keyed by a name the policy carries:
   # <chart name>-mcp-backend-<key>. Example:
   #   mcpBackends:
   #     pagerduty:

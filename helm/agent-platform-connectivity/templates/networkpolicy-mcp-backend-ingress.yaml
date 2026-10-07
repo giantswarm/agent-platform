@@ -7,8 +7,8 @@ namespace, selecting its pods (podSelector) or every pod there, admitting:
 
   - muster from this release's namespace, on the entry's ports;
   - the namespace's own pods, on every port (a backend's store, UI or sidecar);
-  - the kubelet's probes (cilium: the host entities; vanilla NetworkPolicy
-    leaves node traffic to the CNI);
+  - the kubelet's probes on every port (cilium: the host entity; vanilla
+    NetworkPolicy leaves node traffic to the CNI);
   - networkPolicy.mcpBackendScrapers on the entry's ports when `metrics: true`;
   - the entry's additionalPeers on its ports.
 
@@ -60,16 +60,10 @@ spec:
     - fromEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: {{ $b.namespace }}
-    # The kubelet's liveness and readiness probes arrive from the host entity.
+    # The kubelet's liveness and readiness probes arrive from the host entity,
+    # on whatever port the backend probes (often not its MCP port).
     - fromEntities:
         - host
-        - remote-node
-      toPorts:
-        - ports:
-            {{- range $b.ports }}
-            - port: {{ . | quote }}
-              protocol: TCP
-            {{- end }}
 {{- else }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -6,8 +6,8 @@ tests/fixtures/mcp-backends-values.yaml renders one policy in the backend's
 namespace, named agent-platform-connectivity-mcp-backend-<key>, that admits on
 the entry's ports exactly muster from the release namespace, plus the scrapers
 (metrics: true) and the entry's additionalPeers; the namespace's own pods on
-every port; in the cilium flavour the kubelet's probes (host, remote-node) on
-the entry's ports. Nothing renders without entries or with
+every port; in the cilium flavour the kubelet's probes (the host entity) on
+every port, since a backend may probe on another port than it serves. Nothing renders without entries or with
 networkPolicy.enabled off.
 
 Usage: verify-mcp-backend-netpol.py {--cilium|--kubernetes|--off} RENDER
@@ -61,14 +61,13 @@ def check_cilium(name, pol, ns, selector, ports, callers):
     got = [cilium_peer(e) for e in callers_rule["fromEndpoints"]]
     if got != callers:
         fail(f"{name} admits {got} on its ports, want {callers}")
-    for rule, what in ((callers_rule, "callers"), (probe_rule, "probes")):
-        got_ports = [p["port"] for tp in rule["toPorts"] for p in tp["ports"]]
-        if got_ports != ports:
-            fail(f"{name}: the {what} rule opens {got_ports}, want {ports}")
+    got_ports = [p["port"] for tp in callers_rule["toPorts"] for p in tp["ports"]]
+    if got_ports != ports:
+        fail(f"{name}: the callers rule opens {got_ports}, want {ports}")
     if own_rule != {"fromEndpoints": [{"matchLabels": {"io.kubernetes.pod.namespace": ns}}]}:
         fail(f"{name}: the namespace rule is {own_rule}, want the namespace's own pods on every port")
-    if sorted(probe_rule.get("fromEntities", [])) != ["host", "remote-node"]:
-        fail(f"{name}: the probe rule admits {probe_rule.get('fromEntities')}, want host and remote-node")
+    if probe_rule != {"fromEntities": ["host"]}:
+        fail(f"{name}: the probe rule is {probe_rule}, want the host entity on every port")
 
 
 def check_kubernetes(name, pol, ns, selector, ports, callers):
