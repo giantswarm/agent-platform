@@ -257,6 +257,35 @@ def check_semver_filters(meta: str, ci: list[str]) -> None:
     print(f"ok: semverFilter — the dev-channel defaults {sorted(DEV_CHANNEL) or 'none'} and no other component; a component given one renders it verbatim; no filterTags")
 
 
+def check_gateway_api_crds(meta: str, ci: list[str]) -> None:
+    """components.gateway-api-crds: the Gateway API CRDs for a cluster without
+    them (cluster-manager turns it on in a workload cluster's slice). Off by
+    default with nothing waiting on it; on, the fleet's chart into kube-system
+    without the platform's global, and connectivity (the models Gateway and its
+    routes) and agentgateway (it watches the kinds) ordered after it."""
+    name = "gateway-api-crds"
+    off = docs(render(meta, ci))
+    if ("HelmRelease", name) in off:
+        fail(f"components.{name} is not off by default: its HelmRelease rendered with the CI values")
+    waiting = [n for (k, n), d in off.items() if k == "HelmRelease" and name in depends_on(d)]
+    if waiting:
+        fail(f"{waiting} dependsOn {name} while it is off (would block forever)")
+    on = docs(render(meta, [*ci, f"--set=components.{name}.enabled=true"]))
+    src, hr = on.get(("OCIRepository", name)), on.get(("HelmRelease", name))
+    if not src or not hr:
+        fail(f"components.{name} on rendered no OCIRepository and HelmRelease")
+    if f"url: {GSOCI}/{name}\n" not in src or 'semver: ">=1.9.1 <2.0.0"' not in src:
+        fail(f"the {name} OCIRepository is not the fleet's chart at >=1.9.1 <2.0.0 (1.9.1 is Gateway API v1.6.1)")
+    if "\n  targetNamespace: kube-system\n" not in hr:
+        fail(f"the {name} release does not install into kube-system, where the app runs its installer Job")
+    if "global" in (yaml.safe_load(hr_values(hr)) or {}):
+        fail(f"the {name} release carries the platform's global; the chart reads none of it")
+    for consumer in ("agent-platform-connectivity", "agentgateway"):
+        if name not in depends_on(on[("HelmRelease", consumer)]):
+            fail(f"{consumer} does not dependsOn {name}: the Gateway API kinds would be missing when it installs")
+    print(f"ok: components.{name} off by default with nothing waiting on it; on, the fleet's chart into kube-system before connectivity and agentgateway")
+
+
 def main(meta: str, connectivity: str) -> int:
     ci = ["-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF]
 
@@ -479,6 +508,7 @@ def main(meta: str, connectivity: str) -> int:
 
     # --- the dev channel: semverFilter ----------------------------------------------
     check_semver_filters(meta, ci)
+    check_gateway_api_crds(meta, ci)
 
     # --- the s3proxy façade's image (kagent.harness.snapshotStore.s3proxy) --------
     # An image, not a chart: the gsoci mirror of gaul/s3proxy, the same default in

@@ -603,6 +603,8 @@ spec:
         enabled: true
       flux:
         enabled: true
+      gateway-api-crds:
+        enabled: false
       gpu-operator:
         enabled: false
       kagent:

@@ -292,6 +292,12 @@
                         "crds": {
                             "type": "string"
                         },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "enabled": {
                             "type": "boolean"
                         },
@@ -430,6 +436,30 @@
                     "properties": {
                         "enabled": {
                             "type": "boolean"
+                        }
+                    }
+                },
+                "gateway-api-crds": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
                         }
                     }
                 },
