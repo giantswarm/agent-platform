@@ -44,6 +44,9 @@ spec:
     # (75 + 12 GiB within its 87.6 GiB).
     weightsGiB: 75
     overheadGiB: 12
+    # NVFP4 natively on a Blackwell-class GPU (10.0), the hardware this recipe is tuned on
+    # (giantswarm/agent-platform#832).
+    minComputeCapability: "10.0"
   # A split across a fast link only: the B12X runtime's in-graph RoCE
   # all-reduce for messages up to 2 MB, NCCL above. Measured on two 128 GB
   # unified-memory Blackwell nodes with CUDA graphs: 16.3 → 26.3 tok/s single

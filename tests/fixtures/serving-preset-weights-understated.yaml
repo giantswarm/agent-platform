@@ -13,3 +13,4 @@ spec:
   requirements:
     weightsGiB: 4
     overheadGiB: 12
+    minComputeCapability: "8.0"

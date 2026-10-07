@@ -154,3 +154,5 @@ spec:
     weightsGiB: 100
     residentWeightsGiB: 74
     overheadGiB: 20
+    # A Blackwell recipe (10.0): NVFP4 natively and the CUTE_DSL_ARCH pin (giantswarm/agent-platform#832).
+    minComputeCapability: "10.0"

@@ -88,11 +88,12 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["weightsGiB"],
-          "description": "Memory the recipe needs on the serving node: weights plus the KV cache, activations and runtime overhead. The portal's fit check compares weightsGiB + overheadGiB with the node's GPU (or unified) memory.",
+          "description": "What the recipe needs of the serving node: memory (weights plus the KV cache, activations and runtime overhead) and the GPU generation. The portal's fit check compares weightsGiB + overheadGiB with the node's GPU (or unified) memory and minComputeCapability with the accelerator's compute capability.",
           "properties": {
             "weightsGiB": {"type": "number", "exclusiveMinimum": 0, "description": "Size of the weights as served (after quantization)."},
             "residentWeightsGiB": {"type": "number", "exclusiveMinimum": 0, "description": "Weights held in GPU (or unified) memory once loaded, when the runtime keeps part of the checkpoint on disk (an n-gram table read from disk); at most weightsGiB. Defaults to weightsGiB. The fit check sizes a unified-memory claim from residentWeightsGiB + overheadGiB."},
-            "overheadGiB": {"type": "number", "minimum": 0, "default": 30, "description": "Headroom for KV cache, activations, CUDA graphs and the runtime."}
+            "overheadGiB": {"type": "number", "minimum": 0, "default": 30, "description": "Headroom for KV cache, activations, CUDA graphs and the runtime."},
+            "minComputeCapability": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "The lowest GPU generation the recipe runs natively on, as a CUDA compute capability (major.minor: \"8.0\" Ampere, \"8.9\" Ada, \"9.0\" Hopper, \"10.0\" Blackwell). The form refuses a pool whose accelerator is below it; the serve step judges the same from the checkpoint and names a difference. At least what the weights need: FP8 or NVFP4 weights 8.9 (below it vLLM's weight-only Marlin fallback goes Ready and answers wrong), bf16 activations 8.0; a recipe pinned to Blackwell kernels 10.0. Every shipped preset declares it (make verify-preset-weights holds it against the checkpoint's quantization and dtype); a values preset without it is judged on memory alone."}
           }
         },
         "router": {

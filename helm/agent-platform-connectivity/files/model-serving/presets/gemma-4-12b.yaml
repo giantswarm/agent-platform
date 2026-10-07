@@ -101,3 +101,6 @@ spec:
     # the vision path, CUDA graphs and the runtime within 0.90 of a 24 GB card.
     weightsGiB: 10
     overheadGiB: 8
+    # bf16 activations, the W4A16 weights dequantized by the Marlin kernel: any GPU of compute
+    # capability 8.0 or above, L4 and A10G alike; a T4 predates bf16 (giantswarm/agent-platform#832).
+    minComputeCapability: "8.0"

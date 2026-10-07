@@ -104,3 +104,6 @@ spec:
     # takes what is left, about 12 GiB.
     weightsGiB: 9
     overheadGiB: 6
+    # bf16 weights: any GPU of compute capability 8.0 or above, L4 and A10G alike; a T4 predates
+    # bf16 (giantswarm/agent-platform#832).
+    minComputeCapability: "8.0"

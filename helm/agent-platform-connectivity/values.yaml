@@ -3313,6 +3313,10 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
   #           gpus: 1
   #         requirements:
   #           weightsGiB: 16
+  #           # The lowest GPU generation the recipe runs natively on (a compute
+  #           # capability): the form refuses a pool below it. FP8 or NVFP4
+  #           # weights 8.9, bf16 activations 8.0, Blackwell kernels 10.0.
+  #           minComputeCapability: "8.9"
   presets: []
   # The presets shipped with the chart (files/model-serving/presets/).
   # enabled: false drops the whole set; exclude drops single ones by name.

@@ -292,6 +292,7 @@ else:
         initialized = "giantswarm/storage-initializer:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         hookpolicy = os.path.exists(f"{tree}/{CONN}/templates/substrate/hooks-netpol.yaml")
         resident = "residentWeightsGiB" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
+        floored = "minComputeCapability" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -546,6 +547,16 @@ else:
             head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
             golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
         print(f"note: the GB10 presets declare their unified-memory need on this side (model-manager#240) and not on {ref}: their ConfigMaps are left out of the comparison")
+    # Every shipped preset declares the GPU generation it runs natively on,
+    # requirements.minComputeCapability (giantswarm/agent-platform#832); a
+    # golden from before declares none, so every preset ConfigMap is left out
+    # of the comparison on both sides (the presets' pool scheduling is asserted
+    # above without the golden). Drop this once GOLDEN_REF carries #832.
+    if not floored:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] == "ConfigMap" and PRESET.match(k[1])]:
+                side.pop(key)
+        print(f"note: every shipped preset declares its GPU generation on this side (#832) and not on {ref}: the preset ConfigMaps are left out of the comparison")
     # model-manager's egress reaches the serving namespace's workload pods on the
     # workload port with the slice on (giantswarm/agent-platform#602: the route
     # list it reads a served model's API interfaces from); a golden from before

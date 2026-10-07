@@ -1375,12 +1375,13 @@ verify-serving-teardown: ## Assert the serving slice's ordered teardown (giantsw
 	@echo "serving teardown verified."
 
 .PHONY: verify-preset-weights
-verify-preset-weights: ## Assert every shipped serving preset's requirements.weightsGiB matches the Hub (giantswarm/agent-platform#535): each preset's spec.model.id is sized the way model-manager sizes a fit — model.safetensors.index.json's metadata.total_size when it agrees with the shards it maps (a stale index is overruled by their sum), else the sum of the *.safetensors files — and passes at >= the Hub's size and <= 15 % above it; a preset the Hub cannot size fails. The two fixtures (tests/fixtures/serving-preset-weights-*.yaml) are the negative controls and must verify as understated and overstated. Network: the Hub API.
+verify-preset-weights: ## Assert every shipped serving preset's requirements match the Hub: weightsGiB its checkpoint's size (giantswarm/agent-platform#535), minComputeCapability the GPU generation its weights need (giantswarm/agent-platform#832). Each preset's spec.model.id is sized the way model-manager sizes a fit — model.safetensors.index.json's metadata.total_size when it agrees with the shards it maps (a stale index is overruled by their sum), else the sum of the *.safetensors files — and passes at >= the Hub's size and <= 15 % above it; a preset the Hub cannot size fails. Its declared minComputeCapability is at or above what the checkpoint's quantization and dtype need, read the way model-manager's serve-time fit reads them (config.json, params.json for the mistral format, hf_quant_config.json for a ModelOpt mixed-precision checkpoint): FP8 or NVFP4 weights 8.9 (below it vLLM's weight-only Marlin fallback goes Ready and answers wrong), bf16 activations 8.0 (int4 and MXFP4 weights are dequantized to them), a CUTE_DSL_ARCH pin to Blackwell 10.0; a preset declaring none, or one the Hub cannot judge, fails. The three fixtures (tests/fixtures/serving-preset-*.yaml) are the negative controls and must verify as understated, overstated and floor-understated. Network: the Hub API.
 	@echo "====> $@ ($(CONNECTIVITY_DIR)/files/model-serving/presets)"
 	@python3 tests/verify-preset-weights.py $(CONNECTIVITY_DIR)/files/model-serving/presets
 	@python3 tests/verify-preset-weights.py --expect understated tests/fixtures/serving-preset-weights-understated.yaml
 	@python3 tests/verify-preset-weights.py --expect overstated tests/fixtures/serving-preset-weights-overstated.yaml
-	@echo "preset weights verified against the Hub."
+	@python3 tests/verify-preset-weights.py --expect floor-understated tests/fixtures/serving-preset-floor-understated.yaml
+	@echo "preset weights and GPU generations verified against the Hub."
 
 # The live half of verify-serving-slice that needs no GPU (giantswarm/agent-platform#505). Not a
 # verify-* target: it reads a cluster, so verify-all must not collect it.
