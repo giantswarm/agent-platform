@@ -1176,6 +1176,11 @@ spec:
         - 172.16.0.0/12
         - 192.168.0.0/16
         - 169.254.0.0/16
+      mcpBackendScrapers:
+      - matchLabels:
+          app.kubernetes.io/instance: alloy-metrics
+        namespace: kube-system
+      mcpBackends: {}
       musterInClusterMcpPorts:
       - 8080
       - 8443

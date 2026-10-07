@@ -1560,6 +1560,19 @@ KAGENT_MM := $(KAGENT_NETPOL) --set components.model-manager.enabled=true --set 
 # The two files of the v1alpha2 agent templates giantswarm/agent-platform#299
 # deletes; until then they are the only place `app: kagent` may still appear.
 KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
+MCP_BACKENDS := $(VM) --namespace agent-platform -f tests/fixtures/mcp-backends-values.yaml
+.PHONY: verify-mcp-backend-netpol
+verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (networkPolicy.mcpBackends): one policy per entry in the backend's namespace admitting muster from the release namespace, the scrapers (metrics: true) and additionalPeers on the entry's ports, the namespace's own pods, and the kubelet's probes, in both flavours; none without entries or with networkPolicy.enabled off.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@for flavor in cilium kubernetes; do \
+		$(HELM) template t $(CONNECTIVITY_DIR) $(MCP_BACKENDS) --set networkPolicy.flavor=$$flavor >$(VERIFY_TMP)/vmbn-$$flavor.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-$$flavor.out; exit 1; }; \
+		python3 tests/verify-mcp-backend-netpol.py --$$flavor $(VERIFY_TMP)/vmbn-$$flavor.out || exit 1; \
+	done
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MCP_BACKENDS) --set networkPolicy.enabled=false >$(VERIFY_TMP)/vmbn-off.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-off.out; exit 1; }
+	@python3 tests/verify-mcp-backend-netpol.py --off $(VERIFY_TMP)/vmbn-off.out
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --namespace agent-platform --set networkPolicy.flavor=cilium >$(VERIFY_TMP)/vmbn-none.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-none.out; exit 1; }
+	@python3 tests/verify-mcp-backend-netpol.py --off $(VERIFY_TMP)/vmbn-none.out
+
 .PHONY: verify-kagent-netpol
 verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim.
 	@echo "====> $@ ($(CHART_DIR))"

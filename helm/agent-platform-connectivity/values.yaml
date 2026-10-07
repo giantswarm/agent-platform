@@ -687,6 +687,41 @@ networkPolicy:
   musterInClusterMcpPorts:
     - 8080
     - 8443
+  # In-cluster MCP backends an installation registers with muster (its own
+  # MCPServer entries, e.g. through agent-platform-mcps). A ClusterIP Service
+  # without a policy admits every pod on the cluster, and a direct call skips
+  # muster: the person's sign-in, the audit trail and the toolset scoping. Each
+  # entry renders an ingress policy in the backend's namespace that admits
+  # muster (from this release's namespace) on `ports`, the namespace's own pods
+  # (a backend's store or UI), the kubelet's probes, mcpBackendScrapers on
+  # `ports` when `metrics: true` (a backend serving /metrics on its MCP port),
+  # and `additionalPeers` on `ports` (e.g. the gateway in front of a backend
+  # with a public route). Keyed by a name the policy carries:
+  # <chart name>-mcp-backend-<key>. Example:
+  #   mcpBackends:
+  #     pagerduty:
+  #       namespace: mcp-pagerduty
+  #       ports: [8080]
+  #     runbooks:
+  #       namespace: mcp-runbooks
+  #       ports: [8080]
+  #       metrics: true
+  #     pro:
+  #       namespace: mcp-pro
+  #       ports: [8080]
+  #       additionalPeers:
+  #         - namespace: envoy-gateway-system
+  #           matchLabels:
+  #             app.kubernetes.io/name: envoy
+  # podSelector (a matchLabels map) narrows the policy to the backend's pods;
+  # without it the policy selects every pod in the namespace.
+  mcpBackends: {}  # @schema type: object; additionalProperties: {"type": "object", "required": ["namespace", "ports"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "ports": {"type": "array", "minItems": 1, "items": {"type": "integer"}}, "podSelector": {"type": "object", "additionalProperties": {"type": "string"}}, "metrics": {"type": "boolean"}, "additionalPeers": {"type": "array", "items": {"type": "object", "required": ["namespace", "matchLabels"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "matchLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}}}}}; skipProperties: true
+  # The metrics collectors an mcpBackends entry with `metrics: true` admits on
+  # its ports: the observability platform's alloy-metrics by default.
+  mcpBackendScrapers:  # @schema item: object; itemRequired: [namespace, matchLabels]; itemProperties: {"namespace": {"type": "string", "minLength": 1}, "matchLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}
+    - namespace: kube-system
+      matchLabels:
+        app.kubernetes.io/instance: alloy-metrics
   # CIDR replacements for the kubernetes flavor. Vanilla NetworkPolicy has no
   # entity selectors.
   kubernetes:

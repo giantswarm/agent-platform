@@ -1,0 +1,21 @@
+# Three in-cluster MCP backends, one of each shape tests/verify-mcp-backend-netpol.py
+# asserts: the whole namespace, a pod selector with its metrics scraped on the
+# MCP port, and a backend behind a gateway (additionalPeers).
+networkPolicy:
+  mcpBackends:
+    pagerduty:
+      namespace: mcp-pagerduty
+      ports: [8080]
+    runbooks:
+      namespace: mcp-runbooks
+      ports: [8080]
+      metrics: true
+      podSelector:
+        app.kubernetes.io/name: mcp-runbooks
+    pro:
+      namespace: mcp-pro
+      ports: [8080, 9090]
+      additionalPeers:
+        - namespace: envoy-gateway-system
+          matchLabels:
+            app.kubernetes.io/name: envoy

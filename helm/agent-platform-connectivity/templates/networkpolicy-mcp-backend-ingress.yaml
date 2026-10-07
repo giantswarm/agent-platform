@@ -1,0 +1,115 @@
+{{- /*
+Ingress to the in-cluster MCP backends an installation registers with muster
+(networkPolicy.mcpBackends). Without a policy a backend's ClusterIP admits every
+pod on the cluster, and a direct call skips muster: the person's sign-in, the
+audit trail and the toolset scoping. One policy per entry, in the backend's
+namespace, selecting its pods (podSelector) or every pod there, admitting:
+
+  - muster from this release's namespace, on the entry's ports;
+  - the namespace's own pods, on every port (a backend's store, UI or sidecar);
+  - the kubelet's probes (cilium: the host entities; vanilla NetworkPolicy
+    leaves node traffic to the CNI);
+  - networkPolicy.mcpBackendScrapers on the entry's ports when `metrics: true`;
+  - the entry's additionalPeers on its ports.
+
+The ingress side of networkPolicy.musterInClusterMcpPorts, which opens muster's
+egress to these backends. Gated like every policy of this chart on
+networkPolicy.enabled, in the flavour networkPolicy.flavor resolves to.
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $flavor := include "agent-platform.networkPolicyFlavor" . }}
+{{- range $key, $b := .Values.networkPolicy.mcpBackends }}
+{{- $peers := list }}
+{{- if $b.metrics }}
+{{- $peers = concat $peers $.Values.networkPolicy.mcpBackendScrapers }}
+{{- end }}
+{{- $peers = concat $peers ($b.additionalPeers | default list) }}
+---
+{{- if eq $flavor "cilium" }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" $ }}-mcp-backend-{{ $key }}
+  namespace: {{ $b.namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  endpointSelector:
+    {{- if $b.podSelector }}
+    matchLabels:
+      {{- toYaml $b.podSelector | nindent 6 }}
+    {{- else }}
+    {}
+    {{- end }}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ $.Release.Namespace }}
+        {{- range $peers }}
+        - matchLabels:
+            {{- toYaml .matchLabels | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .namespace }}
+        {{- end }}
+      toPorts:
+        - ports:
+            {{- range $b.ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ $b.namespace }}
+    # The kubelet's liveness and readiness probes arrive from the host entity.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            {{- range $b.ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+{{- else }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" $ }}-mcp-backend-{{ $key }}
+  namespace: {{ $b.namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  podSelector:
+    {{- if $b.podSelector }}
+    matchLabels:
+      {{- toYaml $b.podSelector | nindent 6 }}
+    {{- else }}
+    {}
+    {{- end }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+        {{- range $peers }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .matchLabels | nindent 14 }}
+        {{- end }}
+      ports:
+        {{- range $b.ports }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
+    - from:
+        - podSelector: {}
+{{- end }}
+{{- end }}
+{{- end }}
