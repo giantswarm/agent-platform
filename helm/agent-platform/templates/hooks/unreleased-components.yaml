@@ -1,0 +1,46 @@
+{{- /*
+A development build that waits for a component release refuses its install at
+once (giantswarm/agent-platform#823). On a branch, tests/verify-components-charts.py
+renders a component whose versionRange admits no published chart against a
+fallback while UNRELEASED names it, and the branch's CI still pushes a dev build
+of this chart; Flux would find no tag in that range minutes into the install,
+after the components ahead of it are up. The check records every such range in
+Chart.yaml's annotation agent-platform.giantswarm.io/unreleased — JSON,
+component -> {versionRange, waitsFor}, waitsFor the range's floor — and this
+pre-install,pre-upgrade hook fails ahead of every other hook (weight -11) and of
+every HelmRelease, as a Job named after the component and the version
+(<release>-waits-for-<component>-<version>, the name Helm's error carries) whose
+log names every one.
+
+A component counts while it is enabled and its versionRange is still the
+recorded one with no semverFilter: an installation that points the component
+elsewhere (a published range, a dev channel) has chosen what to install. Only a
+development build carries the hook: a release (X.Y.Z, X.Y.Z-rc.N) passed the
+tag pipeline's verify-release-floors, so every range it names is published, and
+an annotation a release carries is stale. Rendered only with the bundled engine;
+an installer without it reads the annotation itself.
+
+The Job needs neither the API nor the network: a shell script in the helm image
+as the namespace's default ServiceAccount, no retry (backoffLimit 0).
+*/ -}}
+{{- $unreleased := index (.Chart.Annotations | default dict) "agent-platform.giantswarm.io/unreleased" | default "{}" | fromJson }}
+{{- $v := semver .Chart.Version }}
+{{- $dev := and $v.Prerelease (not (regexMatch "^rc\\.[0-9]+$" $v.Prerelease)) }}
+{{- $waits := list }}{{- $names := list }}
+{{- range $name := keys $unreleased | sortAlpha }}
+{{- $u := index $unreleased $name }}
+{{- $c := index $.Values.components $name | default dict }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $name)) (eq ($c.versionRange | default "") $u.versionRange) (not $c.semverFilter) }}
+{{- $names = append $names $name }}
+{{- $waits = append $waits (printf "%s %s (components.%s.versionRange %q admits no published chart)" $name $u.waitsFor $name $u.versionRange) }}
+{{- end }}
+{{- end }}
+{{- if and $dev $waits (eq (include "agent-platform.engineEnabled" .) "true") }}
+{{- $name := printf "waits-for-%s-%s" (first $names) (index $unreleased (first $names)).waitsFor | trunc (int (sub 62 (len .Release.Name))) | trimSuffix "-" | trimSuffix "." }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" $name "hook" "pre-install,pre-upgrade" "weight" -11
+      "image" (include "agent-platform.hooks.helmImage" $)
+      "serviceAccountName" "default"
+      "backoffLimit" 0
+      "about" (printf "refuse the install: this development build waits for %s" (join ", " $waits))
+      "script" (printf "cat >&2 <<'EOF'\nagent-platform %s is a development build that waits for a component release:\n  %s\nNothing it installs can come up until that chart is published. Install a build whose ranges are published, or point the component at a published range or a dev channel (components.<name>.versionRange / semverFilter).\nEOF\nexit 1" .Chart.Version (join "\n  " $waits))) }}
+{{- end }}

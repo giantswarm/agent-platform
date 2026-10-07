@@ -81,6 +81,17 @@ tagging (klaus-gateway 1.20.0) leaves neither chart nor image. A release refused
 this way is recovered by rerunning the tag's workflow from failed once the chart
 is out; the branch pipeline keeps rendering against the fallbacks.
 
+A branch whose range waits that way still pushes a dev build of the meta chart,
+and nothing installs it (giantswarm/agent-platform#823). The branch run records
+every range rendered against a fallback in Chart.yaml's annotation
+agent-platform.giantswarm.io/unreleased (UNRELEASED_ANNOTATION: JSON, component
+-> {versionRange, waitsFor}, waitsFor the range's floor) and FAILS when the
+annotation says anything else; `--write` (`make sync-unreleased`) writes it. The
+dev build carries it: the meta chart's pre-install hook refuses the install at
+once naming the component and the version
+(templates/hooks/unreleased-components.yaml), and an installer reads it before it
+applies anything. A release ignores it: --strict passed, so it waits for nothing.
+
 Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
 chart (three attempts each); the tag
 list comes from the registry's anonymous `/v2/<repo>/tags/list`. Every Helm call
@@ -149,6 +160,11 @@ EXACT_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # --strict: the tag pipeline's run — no fallback, a release that names an
 # unpublished chart fails (main() sets it from the command line).
 STRICT = False
+# The Chart.yaml annotation a dev build names the component releases it waits for
+# in (see above), what the branch run found to put there, and --write.
+UNRELEASED_ANNOTATION = "agent-platform.giantswarm.io/unreleased"
+WAITS: dict[str, dict[str, str]] = {}
+WRITE = False
 
 
 def floor(constraint: str) -> str:
@@ -167,6 +183,43 @@ def waits_for(name: str, url: str, constraint: str, tags: list[str]) -> str:
         f"(the newest published chart is {newest or 'none'}). A GitHub release or a tag of the component is not its chart: "
         f"once `devctl release wait` on it exits 0, rerun this tag's workflow from failed — no new tag"
     )
+
+
+def recorded_waits(meta: str) -> dict[str, dict[str, str]]:
+    """What Chart.yaml's UNRELEASED_ANNOTATION says the chart waits for."""
+    with open(f"{meta}/Chart.yaml", encoding="utf-8") as f:
+        raw = (yaml.safe_load(f).get("annotations") or {}).get(UNRELEASED_ANNOTATION)
+    return json.loads(raw) if raw else {}
+
+
+def write_waits(meta: str, waits: dict[str, dict[str, str]]) -> None:
+    """Write `waits` as Chart.yaml's UNRELEASED_ANNOTATION, the last line of its
+    annotations, or drop the line when nothing waits; the rest of the file as it is."""
+    path = f"{meta}/Chart.yaml"
+    with open(path, encoding="utf-8") as f:
+        text = re.sub(rf"^  {re.escape(UNRELEASED_ANNOTATION)}: .*\n", "", f.read(), flags=re.M)
+    if waits:
+        end = re.search(r"^annotations:\n(?:  .*\n)*", text, re.M).end()
+        text = f"{text[:end]}  {UNRELEASED_ANNOTATION}: '{json.dumps(waits, sort_keys=True, separators=(',', ':'))}'\n{text[end:]}"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def check_waits(meta: str, waits: dict[str, dict[str, str]]) -> None:
+    """The branch run's verdict on the annotation: it names exactly what the
+    ranges wait for (written first under --write), and the output says what a
+    dev build of this branch waits for."""
+    if WRITE:
+        write_waits(meta, waits)
+    if (recorded := recorded_waits(meta)) != waits:
+        fail(f"{meta}/Chart.yaml annotation {UNRELEASED_ANNOTATION} is {recorded or 'absent'}, the ranges wait for {waits or 'nothing'}: "
+             "a dev build must name the component releases it waits for, and a published one must not refuse its install — run `make sync-unreleased`")
+    if waits:
+        named = ", ".join(f"{n} {w['waitsFor']} ({w['versionRange']!r})" for n, w in sorted(waits.items()))
+        print(f"NOTE: a dev build of this branch waits for a component release: {named}. Its install fails at the meta chart's pre-install hook, "
+              f"and the tag pipeline refuses the release, until that chart is published ({UNRELEASED_ANNOTATION} in Chart.yaml)")
+    else:
+        print(f"ok: every range is published; Chart.yaml carries no {UNRELEASED_ANNOTATION}")
 QUICKSTART = [
     "--set", "global.domain=example.com",
     "--set", "global.identity.issuerUrl=https://dex.example.com",
@@ -543,7 +596,11 @@ def main(meta: str) -> int:
         if pin != pins[name]:
             fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
         tags = registry_tags(url)
-        version_range = fluxsemver.resolve(tags, rng) or fallback(name, url, rng, tags, kagent_tag)
+        version_range = fluxsemver.resolve(tags, rng)
+        if not version_range:
+            version_range = fallback(name, url, rng, tags, kagent_tag)
+            own = components[name]["versionRange"]
+            WAITS[name] = {"versionRange": own, "waitsFor": floor(own)}
         version_pin = fluxsemver.resolve(tags, pin)
         if not version_pin and pin == UNRELEASED.get(name) and not STRICT:
             version_pin = fallback(name, url, pin, tags, kagent_tag)
@@ -576,12 +633,14 @@ def main(meta: str) -> int:
                     raise err
     finally:
         sys.stdout = sys.stdout.out
+    if not STRICT:
+        check_waits(meta, WAITS)
     return 0
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--strict"]
-    STRICT = len(args) != len(sys.argv) - 1
-    if len(args) != 1:
-        sys.exit(f"usage: {sys.argv[0]} <meta chart dir> [--strict]")
+    args = [a for a in sys.argv[1:] if a not in ("--strict", "--write")]
+    STRICT, WRITE = "--strict" in sys.argv, "--write" in sys.argv
+    if len(args) != 1 or (STRICT and WRITE):
+        sys.exit(f"usage: {sys.argv[0]} <meta chart dir> [--strict | --write]")
     sys.exit(main(args[0]))
