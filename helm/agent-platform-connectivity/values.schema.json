@@ -1319,6 +1319,87 @@
                         }
                     }
                 },
+                "mcpBackendScrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "namespace",
+                            "matchLabels"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "matchLabels": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                },
+                                "minProperties": 1
+                            },
+                            "namespace": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        }
+                    }
+                },
+                "mcpBackends": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "required": [
+                            "namespace",
+                            "ports"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "additionalPeers": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": [
+                                        "namespace",
+                                        "matchLabels"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "matchLabels": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            },
+                                            "minProperties": 1
+                                        },
+                                        "namespace": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        }
+                                    }
+                                }
+                            },
+                            "metrics": {
+                                "type": "boolean"
+                            },
+                            "namespace": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "podSelector": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                }
+                            },
+                            "ports": {
+                                "type": "array",
+                                "items": {
+                                    "type": "integer"
+                                },
+                                "minItems": 1
+                            }
+                        }
+                    }
+                },
                 "musterInClusterMcpPorts": {
                     "type": "array",
                     "items": {

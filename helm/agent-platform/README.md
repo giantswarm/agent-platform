@@ -641,6 +641,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
+| networkPolicy.mcpBackends | object | `{}` |  |
+| networkPolicy.mcpBackendScrapers[0].namespace | string | `"kube-system"` |  |
+| networkPolicy.mcpBackendScrapers[0].matchLabels."app.kubernetes.io/instance" | string | `"alloy-metrics"` |  |
 | networkPolicy.kubernetes.apiServerCIDR | string | `"0.0.0.0/0"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[0] | string | `"10.0.0.0/8"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[1] | string | `"172.16.0.0/12"` |  |
