@@ -343,6 +343,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agentgateway.enabled | bool | `true` |  |
 | components.agentgateway.ownedCrds[0] | string | `"agentgatewaypolicies.agentgateway.dev"` |  |
 | components.agentgateway.crds | string | `"CreateReplace"` |  |
+| components.agentgateway.dependsOn[0] | string | `"gateway-api-crds"` |  |
 | components.valkey.chart | string | `"valkey"` |  |
 | components.valkey.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.valkey.versionRange | string | `"0.x"` |  |
@@ -511,6 +512,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.gpu-operator.targetNamespace | string | `"kube-system"` |  |
 | components.gpu-operator.crds | string | `"CreateReplace"` |  |
 | components.gpu-operator.ownedCrds[0] | string | `"clusterpolicies.nvidia.com"` |  |
+| components.gateway-api-crds.chart | string | `"gateway-api-crds"` |  |
+| components.gateway-api-crds.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.gateway-api-crds.versionRange | string | `">=1.9.1 <2.0.0"` |  |
+| components.gateway-api-crds.injectGlobal | bool | `false` |  |
+| components.gateway-api-crds.enabled | bool | `false` |  |
+| components.gateway-api-crds.targetNamespace | string | `"kube-system"` |  |
 | components.dicebear.chart | string | `"dicebear"` |  |
 | components.dicebear.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.dicebear.versionRange | string | `"0.x"` |  |
@@ -532,6 +539,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
 | components.agent-platform-connectivity.dependsOn[3] | string | `"kagent-crds"` |  |
 | components.agent-platform-connectivity.dependsOn[4] | string | `"cloudnative-pg"` |  |
+| components.agent-platform-connectivity.dependsOn[5] | string | `"gateway-api-crds"` |  |
 | flux-engine | object | `{}` |  |
 | dicebear.route.enabled | string | `"auto"` |  |
 | dicebear.route.parentRefs | list | `[]` |  |

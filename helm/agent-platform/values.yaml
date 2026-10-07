@@ -479,10 +479,13 @@ components:  # @schema additionalProperties: true
     # App-owned CRDs: the wrapper chart ships the agentgateway.dev CRDs (with
     # helm.sh/resource-policy: keep) in its own crds/ dir; CreateReplace upgrades
     # them atomically with the app on every release. It owns their version, so it
-    # does NOT dependsOn anything for CRDs; its CR consumers (agent-platform-mcps
-    # for AgentgatewayBackend/Policy, agent-platform-connectivity for
-    # AgentgatewayParameters) dependsOn this component instead.
+    # does NOT dependsOn anything for its own CRDs; its CR consumers
+    # (agent-platform-mcps for AgentgatewayBackend/Policy,
+    # agent-platform-connectivity for AgentgatewayParameters) dependsOn this
+    # component instead. The controller watches the Gateway API kinds, so it
+    # follows components.gateway-api-crds where that is on.
     crds: CreateReplace
+    dependsOn: [gateway-api-crds]
   valkey:  # @schema additionalProperties: true
     chart: valkey
     # Pull from gsoci (the primary GS registry every other component uses); the
@@ -1205,6 +1208,27 @@ components:  # @schema additionalProperties: true
     # of the operator.
     ownedCrds:
       - clusterpolicies.nvidia.com
+  # The Gateway API CRDs (standard channel) for a cluster that has none: the
+  # connectivity release renders the models Gateway and its routes
+  # (gateway.networking.k8s.io/v1), and agentgateway serves them. A management
+  # cluster runs them as its own app (gateway-api-crds, with the envoy-gateway
+  # edge), so this is off by default; cluster-manager turns it on in a slice for
+  # a workload cluster whose API serves no Gateway kind. The chart is the one
+  # the fleet's gateway-api-crds app installs (1.9.x is Gateway API v1.6.1): a
+  # pre-install/pre-upgrade hook Job server-side applies the CRDs, so they are
+  # no object of the release, an uninstall leaves them, and no ownedCrds guard
+  # applies. Connectivity dependsOn it.
+  gateway-api-crds:  # @schema additionalProperties: true
+    chart: gateway-api-crds
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: ">=1.9.1 <2.0.0"
+    # The chart's own defaults are the fleet's (the standard channel, the
+    # safe-upgrades admission policy); it reads nothing of the platform's.
+    injectGlobal: false
+    enabled: false
+    # The installer Job, its identity and its CiliumNetworkPolicy live where the
+    # app installs them.
+    targetNamespace: kube-system
   dicebear:  # @schema additionalProperties: true
     chart: dicebear
     # Self-hosted DiceBear avatar API + the public avatar HTTPRoute. Lives in its
@@ -1295,7 +1319,11 @@ components:  # @schema additionalProperties: true
     # and a dependency the other way would deadlock every install and the 3.x →
     # 4.0 upgrade (the v2 controller waits for the derived DSN Secret this
     # release's hook writes).
-    dependsOn: [muster, agentgateway, substrate-crds, kagent-crds, cloudnative-pg]
+    # The models Gateway and the routes are gateway.networking.k8s.io/v1
+    # objects: with components.gateway-api-crds on (a cluster without the
+    # Gateway API) the CRDs come first; off, the reference is dropped and the
+    # cluster provides them.
+    dependsOn: [muster, agentgateway, substrate-crds, kagent-crds, cloudnative-pg, gateway-api-crds]
 
 # === The Flux engine (flux-engine subchart) ===
 # Values of charts/flux-engine, handed to the subchart under this key when
