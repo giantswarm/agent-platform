@@ -1,0 +1,18 @@
+# Negative control for tests/verify-preset-weights.py (giantswarm/agent-platform#832):
+# a preset declaring a GPU generation below what its weights need. RedHatAI/Qwen3.5-9B-FP8-dynamic
+# is compressed-tensors FP8 (weights and activations), which runs natively from compute
+# capability 8.9 and answers wrong through the Marlin fallback below it; 8.0 understates it.
+# The weights are the shipped qwen3-5-9b-fp8's, so only the floor fails. Not a shipped preset.
+apiVersion: agent-platform.giantswarm.io/v1alpha1
+kind: ServingPreset
+metadata:
+  name: floor-understated
+spec:
+  displayName: GPU generation understated (negative control)
+  model:
+    id: RedHatAI/Qwen3.5-9B-FP8-dynamic
+    storageUri: hf://RedHatAI/Qwen3.5-9B-FP8-dynamic
+  requirements:
+    weightsGiB: 14
+    overheadGiB: 9
+    minComputeCapability: "8.0"

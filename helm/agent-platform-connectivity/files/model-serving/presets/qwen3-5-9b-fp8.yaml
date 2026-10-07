@@ -105,3 +105,7 @@ spec:
     # path, CUDA graphs and the runtime within 0.90 of a 24 GB card.
     weightsGiB: 14
     overheadGiB: 9
+    # FP8 weights and activations run natively from compute capability 8.9 (L4, L40S, Hopper,
+    # Blackwell); on an A10G (Ampere, 8.6) vLLM's weight-only FP8 Marlin fallback goes Ready and
+    # answers wrong (giantswarm/agent-platform#832).
+    minComputeCapability: "8.9"

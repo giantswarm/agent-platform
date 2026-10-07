@@ -800,6 +800,23 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
     doc["spec"]["requirements"]["residentWeightsGiB"] = 11
     err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="residentWeightsGiB (11) exceeds weightsGiB (10)")
     need(err, 'serving preset "resident" (values)', "the resident-weights guard's message")
+    # spec.requirements.minComputeCapability (giantswarm/agent-platform#832) is published as the
+    # quoted major.minor string the form compares; a number or another shape fails the render.
+    doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "floor"},
+           "spec": {"displayName": "Floor", "model": {"id": "o/M", "storageUri": "hf://o/M"}, "requirements": {"weightsGiB": 10, "minComputeCapability": "8.9"}}}
+    cm = documents(helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])]))[("ConfigMap", "agent-platform-serving-preset-floor")]
+    if yaml.safe_load(yaml.safe_load(cm)["data"]["preset.yaml"])["spec"]["requirements"].get("minComputeCapability") != "8.9":
+        sys.exit('FAIL: the values preset\'s spec.requirements.minComputeCapability is not published as the string "8.9"')
+    for floor in (8.9, "8", "ada"):
+        doc["spec"]["requirements"]["minComputeCapability"] = floor
+        err = helm(connectivity, [*base, "--set-json", "modelServing.presets=" + json.dumps([doc])], expect_failure="minComputeCapability")
+        need(err, 'serving preset "floor" (values)', f"the GPU generation guard's message for {floor!r}")
+        need(err, "of the form major.minor", f"the GPU generation guard's way out for {floor!r}")
+    for name in files:
+        floor = yaml.safe_load(open(name))["spec"]["requirements"].get("minComputeCapability")
+        if not isinstance(floor, str) or not re.fullmatch(r"[0-9]+\.[0-9]+", floor):
+            sys.exit(f"FAIL: shipped preset {os.path.basename(name)} declares no quoted major.minor requirements.minComputeCapability ({floor!r}); "
+                     "every shipped preset names the GPU generation it runs natively on (giantswarm/agent-platform#832)")
     ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval ({checked} JSON values parse), none carries a classic field, "
        f"each one's resources.gpus equals its tensor-parallel size, "
        f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
@@ -807,7 +824,9 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
        f"a values preset's spec.router.scheduler is published unchanged and any other router key or a non-boolean fails the render; "
        f"a values preset's spec.split.env is published unchanged and a malformed split block fails the render naming the preset; "
        f"{len(bad)} argument shapes the shell would re-split, expand or choke on fail the render naming the guard; "
-       f"a values preset's requirements.residentWeightsGiB is published unchanged and one above weightsGiB fails the render")
+       f"a values preset's requirements.residentWeightsGiB is published unchanged and one above weightsGiB fails the render; "
+       f"every shipped preset declares requirements.minComputeCapability as a quoted major.minor, a values preset's is published unchanged "
+       f"and a number or another shape fails the render naming the form")
 
 
 def check_presets(connectivity: str) -> None:

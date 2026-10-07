@@ -447,6 +447,15 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- if and (hasKey $requirements "residentWeightsGiB") (gt (float64 (get $requirements "residentWeightsGiB")) (float64 (get $requirements "weightsGiB"))) -}}
 {{- fail (printf "%s: spec.requirements.residentWeightsGiB (%v) exceeds weightsGiB (%v); the resident weights are the part of the checkpoint held in memory" $where (get $requirements "residentWeightsGiB") (get $requirements "weightsGiB")) -}}
 {{- end -}}
+{{- /* The GPU generation floor is a compute capability the form compares as
+       major.minor; a number (8.9, or 10.0 read as 10) would publish a value the
+       consumers cannot parse, so it is a quoted string of that form. */ -}}
+{{- if hasKey $requirements "minComputeCapability" -}}
+{{- $floor := get $requirements "minComputeCapability" -}}
+{{- if or (not (kindIs "string" $floor)) (not (regexMatch "^[0-9]+\\.[0-9]+$" $floor)) -}}
+{{- fail (printf "%s: spec.requirements.minComputeCapability (%v) is not a quoted compute capability of the form major.minor (\"8.9\")" $where $floor) -}}
+{{- end -}}
+{{- end -}}
 {{- $_ := set $spec "requirements" $requirements -}}
 {{- $args := get $spec "args" | default list -}}
 {{- /* Every argument reaches vLLM through the well-known runtime template's

@@ -112,3 +112,6 @@ spec:
     # 15.2 GiB of weights.
     weightsGiB: 61
     overheadGiB: 40
+    # bf16 activations, the MXFP4 experts dequantized by the Marlin kernel: any GPU of compute
+    # capability 8.0 or above; a T4 predates bf16 (giantswarm/agent-platform#832).
+    minComputeCapability: "8.0"

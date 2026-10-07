@@ -115,3 +115,6 @@ spec:
     # next to 16.5 GiB of weights.
     weightsGiB: 66
     overheadGiB: 60
+    # NVFP4 through vLLM's Marlin weight-only FP4 path: proven on the L40S (8.9), nothing below it
+    # is (giantswarm/agent-platform#832).
+    minComputeCapability: "8.9"
