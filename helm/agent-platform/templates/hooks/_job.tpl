@@ -77,6 +77,7 @@ One hook Job. Arguments (a dict):
   image   the image, default gitops.hooks.image (pass the helm image for a script)
   serviceAccountName  default the hook ServiceAccount <release>-hooks
   configMap  a ConfigMap mounted read-only at /manifests (optional)
+  backoffLimit  the Job's retries, default 2 (0 for a hook that refuses on purpose)
   about   one line for the humans reading the manifest
 */}}
 {{- define "agent-platform.hooks.job" -}}
@@ -102,7 +103,7 @@ spec:
   # transient API error; a hook that still fails aborts the operation before
   # Helm deletes anything (a failed pre-delete hook leaves the release
   # `uninstalling` and the platform untouched).
-  backoffLimit: 2
+  backoffLimit: {{ ternary .backoffLimit 2 (hasKey . "backoffLimit") }}
   activeDeadlineSeconds: 600
   # hook-succeeded removes a finished Job; a failed one is kept for an hour.
   ttlSecondsAfterFinished: 3600

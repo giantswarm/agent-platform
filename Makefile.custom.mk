@@ -1491,10 +1491,20 @@ verify-release-floors: ## Assert, on a release tag, that every component range a
 	@echo "every component floor and BOM pin is published; the release is installable."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, in every shape (vanilla and fleet --api-versions, the CNPG Cluster and the bundled Postgres), resolved the way Flux does (the tag and the layer the OCIRepository selects); a chart released with the meta chart (releasedWithChart) from the working tree. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. Network: gsoci.azurecr.io (ghcr.io for the CloudNativePG chart).
+verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, in every shape (vanilla and fleet --api-versions, the CNPG Cluster and the bundled Postgres), resolved the way Flux does (the tag and the layer the OCIRepository selects); a chart released with the meta chart (releasedWithChart) from the working tree. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. A range rendered against a fallback (UNRELEASED) must be named in Chart.yaml's agent-platform.giantswarm.io/unreleased, and nothing else (`make sync-unreleased`): a dev build of the branch says what it waits for and refuses its install. Network: gsoci.azurecr.io (ghcr.io for the CloudNativePG chart).
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
+
+.PHONY: sync-unreleased
+sync-unreleased: ## Write Chart.yaml's agent-platform.giantswarm.io/unreleased from the registries: every component whose range admits no published chart (UNRELEASED), with the version it waits for; drop it when nothing waits. The rest of verify-components-charts runs with it. Network: gsoci.azurecr.io.
+	@python3 tests/verify-components-charts.py $(CHART_DIR) --write
+
+.PHONY: verify-unreleased
+verify-unreleased: ## Assert that a dev build whose Chart.yaml names a component release it waits for (agent-platform.giantswarm.io/unreleased) is refused at once by the pre-install,pre-upgrade hook <release>-waits-for-<component>-<version> (weight -11, no retry; its script, run here, names the component, the version and the range), and that nothing is refused without the annotation, on a release or release candidate, with the engine off, the component off, another range or a dev channel. Offline. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@HELM="$(HELM)" python3 tests/verify-unreleased.py $(CHART_DIR)
+	@echo "a dev build waiting for a component release refuses its install."
 
 .PHONY: verify-examples
 verify-examples: ## Render every cluster-shape example of docs/install.md (examples/kind-lab-dex.yaml, own-gateway.yaml, chart-owned-edge.yaml, managed-cloud.yaml) unchanged, as the values of a first install: the meta chart, then every component chart the render turns on with the values its HelmRelease carries, at the chart its range resolves to today (the connectivity chart from the working tree). A file under examples/ that no check covers fails. Network: gsoci.azurecr.io.
