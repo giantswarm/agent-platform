@@ -59,6 +59,16 @@ The kubectl image the hooks run.
 {{- end -}}
 
 {{/*
+The ephemeral-storage request and limit of every hook container, and the
+sizeLimit of the /tmp emptyDir it mounts (the limit). Kyverno's
+require-emptydir-requests-and-limits refuses a container mounting an emptyDir
+without them. /tmp holds kubectl's discovery and HTTP cache, helm's cache and
+config and a script's few small files; nothing in it scales with the cluster.
+*/}}
+{{- define "agent-platform.hooks.tmpRequest" -}}16Mi{{- end -}}
+{{- define "agent-platform.hooks.tmpLimit" -}}256Mi{{- end -}}
+
+{{/*
 One hook Job. Arguments (a dict):
   root    the top-level context
   name    Job name suffix (the Job is <release>-<name>)
@@ -155,8 +165,10 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: {{ include "agent-platform.hooks.tmpRequest" $root }}
             limits:
               memory: 512Mi
+              ephemeral-storage: {{ include "agent-platform.hooks.tmpLimit" $root }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -167,7 +179,8 @@ spec:
             {{- end }}
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ include "agent-platform.hooks.tmpLimit" $root }}
         {{- with .configMap }}
         - name: manifests
           configMap:
