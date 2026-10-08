@@ -25,10 +25,11 @@ components:
   kagent:
     enabled: true
   agent-manager:
-    # The agent-manager that renders api.kagent.dev Agents is the dev build of
-    # giantswarm/agent-manager#100 until that chart releases; the released 1.9.x
-    # lists ModelConfigs at kagent.dev, which this line's kagent no longer serves.
-    versionRange: "1.9.3-r7fb489f8t20261006083455h6e36fcb"
+    # The agent-manager that renders api.kagent.dev Agents and takes
+    # kagent.controllerTarget is the dev build of giantswarm/agent-manager#101
+    # (on #100) until that chart releases; the released 1.9.x lists ModelConfigs
+    # at kagent.dev, which this line's kagent no longer serves.
+    versionRange: "1.9.3-rf107e304t20261006134136h2486711"
 
 agent-manager:
   agentChart:
