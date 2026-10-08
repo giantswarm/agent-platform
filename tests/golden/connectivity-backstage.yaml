@@ -11858,11 +11858,14 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 64Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi

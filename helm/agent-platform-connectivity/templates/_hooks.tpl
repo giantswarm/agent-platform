@@ -69,6 +69,16 @@ Usage of the Job include (a dict):
 {{- end -}}
 
 {{/*
+The ephemeral-storage request and limit of every hook container, and the
+sizeLimit of the /tmp emptyDir it mounts (the limit). Kyverno's
+require-emptydir-requests-and-limits refuses a container mounting an emptyDir
+without them. /tmp holds kubectl's discovery and HTTP cache and a script's
+few small files; nothing in it scales with the cluster.
+*/}}
+{{- define "agent-platform.hooks.tmpRequest" -}}16Mi{{- end -}}
+{{- define "agent-platform.hooks.tmpLimit" -}}256Mi{{- end -}}
+
+{{/*
 The hook events the identity is created for, comma-separated for the
 helm.sh/hook annotation: the install and upgrade events while the bootstrap,
 the databases hook or the cache claim hook renders, pre-delete while the
@@ -158,8 +168,10 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: {{ include "agent-platform.hooks.tmpRequest" $root }}
             limits:
               memory: 128Mi
+              ephemeral-storage: {{ include "agent-platform.hooks.tmpLimit" $root }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -188,8 +200,10 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: {{ include "agent-platform.hooks.tmpRequest" $root }}
             limits:
               memory: {{ $memory }}
+              ephemeral-storage: {{ include "agent-platform.hooks.tmpLimit" $root }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -200,10 +214,14 @@ spec:
             {{- end }}
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ include "agent-platform.hooks.tmpLimit" $root }}
         {{- if .init }}
+        # In memory, so it counts against the containers' memory limits; the
+        # key material it carries is a few KiB.
         - name: work
           emptyDir:
             medium: Memory
+            sizeLimit: 16Mi
         {{- end }}
 {{- end -}}
