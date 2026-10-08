@@ -291,6 +291,7 @@ else:
         gated = "gpuReadyLabel" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
         initialized = "giantswarm/storage-initializer:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
         hookpolicy = os.path.exists(f"{tree}/{CONN}/templates/substrate/hooks-netpol.yaml")
+        musteregress = os.path.exists(f"{tree}/{CONN}/templates/networkpolicy-muster-mcp-egress-kubernetes.yaml")
         resident = "residentWeightsGiB" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
         floored = "minComputeCapability" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
     finally:
@@ -662,6 +663,12 @@ else:
         for kind in ("NetworkPolicy", "CiliumNetworkPolicy"):
             head.pop((kind, "t-hooks"), None)
         print(f"note: the hook Jobs' network policy renders on this side (#367) and not on {ref}: it is left out of the comparison")
+    # muster's kubernetes-flavour egress policy renders on this side
+    # (giantswarm/agent-platform#840) and not on a golden from before, so it is
+    # left out of the head. Drop this once GOLDEN_REF carries #840.
+    if not musteregress:
+        head.pop(("NetworkPolicy", "muster-mcp-egress"), None)
+        print(f"note: muster's kubernetes-flavour egress policy renders on this side (#840) and not on {ref}: it is left out of the comparison")
     # A preset added to or retired from the shipped line-up renders its preset
     # ConfigMap on one side only: a line-up change, not the pool's scheduling,
     # so it is left out of the comparison (the presets both sides ship are
