@@ -8,12 +8,10 @@ namespace the FluxInstance labels warns on anything less), as the hook
 ServiceAccount (rbac.yaml, cluster-admin, itself a hook at the events its Jobs
 need) or — the self-management hooks — as the regular ServiceAccount
 <release>-self (self/rbac.yaml, a namespaced Role). Every hook but the
-storage-version pair and the serving teardown renders only with the bundled
-engine. Hook weights in use:
+serving teardown renders only with the bundled engine. Hook weights in use:
   -10  the hook ServiceAccount + ClusterRoleBinding (rbac.yaml, pre-delete; and
-       pre-install + pre-upgrade while the kagent namespace hook or the
-       storage-version backup hook renders, post-install + post-upgrade while
-       the storage-version restore hook renders) and the hook identity's
+       pre-install + pre-upgrade while the kagent namespace hook renders) and
+       the hook identity's
        network policy (netpol.yaml: egress to the apiserver for every pod
        labelled component: hooks, at every event a hook of this chart runs —
        a default-deny cluster admits nothing else, #413)
@@ -22,9 +20,6 @@ engine. Hook weights in use:
        their ConfigMap at -10)
    -8  create the namespace the kagent component installs into if it is
        missing (hooks/kagent-namespace.yaml; pre-install, pre-upgrade)
-   -7  record the objects of the kagent CRDs still stored at v1alpha2 and
-       delete those CRDs, so kagent-crds installs them at v1alpha3
-       (hooks/kagent-crds-storage-version.yaml; pre-install, pre-upgrade)
    -6  stop a resumer Job still running from the last operation (hooks/self.yaml;
        pre-delete — and pre-upgrade when self-management is off, the hand-back)
    -5  suspend the chart's own HelmRelease and drop the values Secret
@@ -35,9 +30,6 @@ engine. Hook weights in use:
        serving slice is switched off in place; a script in the helm image)
     0  delete the platform HelmReleases in reverse dependency order and wait
        per wave (teardown.yaml, pre-delete; a script in the helm image);
-       re-create the recorded ModelConfigs no Helm release owned at v1alpha3
-       once kagent-crds serves it (hooks/kagent-crds-storage-version.yaml,
-       post-install + post-upgrade);
        write the user-supplied values into the values Secret and start the
        resumer (hooks/self.yaml, post-install + post-upgrade);
        delete the FluxInstance, kept through Helm's pass, and wait for the
@@ -155,9 +147,7 @@ spec:
           # The requests stay small: a hook is a burst of kubectl runs. The limit
           # is headroom, not a budget — one kubectl run peaks near 50 MiB, the
           # Helm CLI near 80 MiB, the decode of one release Secret near 35 MiB,
-          # and nothing a hook does scales with the cluster (the storage-version
-          # backup reads the release Secrets one at a time and parses only a
-          # manifest that names a v1alpha2 object). A hook pod was OOM-killed at
+          # and nothing a hook does scales with the cluster. A hook pod was OOM-killed at
           # 128Mi three seconds into its first kubectl calls on a busy node
           # (giantswarm/agent-platform#593); 512Mi is four times that pod's
           # whole budget and is never approached in a normal run.

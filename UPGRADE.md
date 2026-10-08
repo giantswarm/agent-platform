@@ -42,6 +42,19 @@ giantswarm/backstage-catalogs#705: the Dev Portal creates agents through agent-m
 
 - **Remove `backstage.catalogs`** from the installation's values if it is set: the meta chart's render fails naming the key while it is left.
 - Nothing else. The app-config changes, so the config-reload hook rolls the Backstage pod once.
+## \<current\> → \<next\> (the kagent line on `api.kagent.dev`)
+
+The kagent line moves to the API group `api.kagent.dev` (version `v1alpha3` unchanged): an agent is an `Agent` that names its `Harness` by `spec.harnessRef` and carries its `AgentTemplate` inline or by `templateRef`; the `Harness` has no `allowedAgentTemplates` selector and the admission label `agent-platform.giantswarm.io/harness` means nothing to the platform; a conversation is a `Session` of an `Agent` (the controller's `SessionService`, in place of `AgentInstanceService`). The connectivity chart renders its catalog (`kagent.modelConfigs[]`, `kagent.remoteMcpServers[]`) at `api.kagent.dev/v1alpha3`, and the controller GRPCRoute carries `kagent.api.v1alpha1.AgentService` and `SessionService`. The line's controller does not migrate a 1.x kagent database: the cut-over of an installation is a fresh database, every session is lost, and `docs/kagent-v1alpha3-cutover.md` is the checklist (order, verification, rollback).
+
+The `kagent.dev` CRDs are no longer rendered by the kagent-crds chart of the line. The installed ones carry `helm.sh/resource-policy: keep` (the previous kagent-crds release rendered them so), so they stay after the upgrade, their objects with them, until the cleanup step of the cut-over deletes the six by hand once model-manager 1.14.0 runs and no GitOps-owned ModelConfig is left at `kagent.dev`. The storage-version hook pair of the 3.x → 4.x cut-over (giantswarm/agent-platform#396) is retired with them: the restore hook waited on `modelconfigs.kagent.dev`, which no longer exists after the cut-over, and would have failed every later upgrade. The meta chart renders no hook with the engine off any more (a cluster's own Flux gets a pure app-of-apps render; the serving slice's teardown aside), and the hook identity exists at `pre-install,pre-upgrade,pre-delete,post-delete` with the engine on.
+
+### Operator action
+
+- **Run the cut-over checklist** (`docs/kagent-v1alpha3-cutover.md`) per installation, in the order it gives: announce, back up the kagent database, CRD chart, producers (agent-manager, the Generic agent chart, Backstage), the kagent controller on a fresh database, verification. The components' `versionRange`s of this release select the line; do not raise them by hand on an installation.
+- **Remove `kagent.harness.allowedAgentTemplates` and `kagent.controller.substrate.defaultWorkerPool`** from the installation's values if they are set: the line's Harness has no selector and its chart no `defaultWorkerPool` key.
+- **`kagent.controller.auth.mode`** is `insecure` or `trusted-proxy` on the line (the spelling `unsecure` is gone); the platform's default `trusted-proxy` is unchanged.
+- **An installation still on a 3.x release** upgrades to a 4.x release that carries the storage-version hooks before this one; the hooks are gone here.
+- **Substrate goes from the 1.3 line to 1.5.0, not 1.4.0.** 1.4.0 reads the `ExternalSnapshot` source field a 1.3 pause upload wrote as the template UID (giantswarm/substrate#153): a resume treats the Actor as captured under a replaced template and the pause copy is uploaded again. 1.5.0 moves the field and rewrites those rows on read (giantswarm/substrate#165). An installation that pins `components.substrate{,-crds}.versionRange` keeps it at or above `1.5.0`.
 
 ## \<current\> → \<next\> (the Substrate snapshot store expires nothing)
 

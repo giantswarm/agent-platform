@@ -11,7 +11,7 @@ spelling at admission, after the render has said nothing. */}}
 not openai), and three providers have one. */}}
 {{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" $provider }}
 {{- if and .baseUrl (not $urlKey) }}
-{{- fail (printf "kagent.modelConfigs[].baseUrl is set on %q, whose provider %s has no baseUrl in ModelConfigSpec (Anthropic, OpenAI and SAPAICore have one; every other provider names its upstream through its own fields)" .name $provider) }}
+{{- fail (printf "kagent.modelConfigs[].baseUrl is set on %q, whose provider %s has no baseUrl in ModelConfigSpec (Anthropic, Mistral, OpenAI and SAPAICore have one; every other provider names its upstream through its own fields)" .name $provider) }}
 {{- end }}
 {{- /* The listener's ModelConfig provider is the first llmRouting.models
 entry's (agent-platform.llmRouting.provider). An entry for any other provider
@@ -22,7 +22,7 @@ keeps the direct path even with routing on. */}}
 {{- end }}
 {{- $baseUrl := .baseUrl | default (ternary $listener "" $onListener) }}
 ---
-apiVersion: kagent.dev/v1alpha3
+apiVersion: api.kagent.dev/v1alpha3
 kind: ModelConfig
 metadata:
   name: {{ $name | quote }}
@@ -64,6 +64,8 @@ spec:
   {{- $promptCaching := .promptCaching }}
   {{- if kindIs "invalid" $promptCaching }}{{ $promptCaching = $inherit.promptCaching }}{{ end }}
   {{- $cacheTTL := .cacheTTL | default $inherit.cacheTTL }}
+  {{- /* An entry that turns caching off inherits no TTL. */}}
+  {{- if and (not (kindIs "invalid" $promptCaching)) (not $promptCaching) }}{{ $cacheTTL = .cacheTTL }}{{ end }}
   {{- if and $cacheTTL (not (has (toString $cacheTTL) (list "5m" "1h"))) }}
   {{- fail (printf "kagent.modelConfigs[].cacheTTL %q on %q is not one of the CRD's values 5m, 1h" (toString $cacheTTL) .name) }}
   {{- end }}

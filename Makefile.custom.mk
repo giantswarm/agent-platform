@@ -487,7 +487,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 		echo "FAIL: the kagent-crds guard failed for the wrong reason"; cat $(VERIFY_TMP)/ap-kag-crds.out; exit 1; \
 	else echo "ok: kagent on without kagent-crds is refused"; fi
 	@echo "ok: the kagent line's wiring"
-	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease as release objects (no raw CRs; the storage-version hooks of #396 are Helm hooks, verify-kagent-storage-version's)"
+	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease as release objects (no raw CRs, no hook)"
 	@python3 -c 'import re,sys; docs=open("$(VERIFY_TMP)/ap-flux.out").read().split("\n---\n"); bad=[re.search(r"^kind: (\S+)$$", d, re.M).group(1) for d in docs if re.search(r"^kind: ", d, re.M) and "helm.sh/hook:" not in d and not re.search(r"^kind: (OCIRepository|HelmRelease)$$", d, re.M)]; sys.exit("FAIL: root rendered a non-app-of-apps kind: " + ", ".join(bad)) if bad else print("ok: pure renderer (only OCIRepository/HelmRelease besides the hooks)")'
 	@echo "--> Flux is the only engine: the render carries no argoproj.io object"
 	@if grep -q 'argoproj.io' $(VERIFY_TMP)/ap-flux.out; then \
@@ -1967,14 +1967,14 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	$(call kagent_route_doc,GRPCRoute,kagent-controller-public,$(VERIFY_TMP)/vkr.out,$(VERIFY_TMP)/vkr-public.out)
 	@if grep -A3 '^kind: HTTPRoute$$' $(VERIFY_TMP)/vkr.out | grep -q 'name: kagent-controller'; then echo "FAIL: a kagent-controller HTTPRoute still renders (the REST /kagent route was retired)"; exit 1; fi
 	@if grep -qE 'value: /kagent$$|pathPrefix|replacePrefixMatch: /$$' $(VERIFY_TMP)/vkr.out; then echo "FAIL: the render still carries a /kagent path prefix"; grep -nE 'value: /kagent$$|pathPrefix' $(VERIFY_TMP)/vkr.out | head; exit 1; fi
-	@for svc in kagent.api.v1alpha1.AgentInstanceService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService grpc.health.v1.Health; do \
+	@for svc in kagent.api.v1alpha1.AgentService kagent.api.v1alpha1.AgentTemplateService kagent.api.v1alpha1.ModelService kagent.api.v1alpha1.SessionService kagent.api.v1alpha1.SystemService lf.a2a.v1.A2AService grpc.health.v1.Health; do \
 		for f in $(VERIFY_TMP)/vkr-inner.out $(VERIFY_TMP)/vkr-public.out; do \
 			grep -B1 "^            service: $$svc$$" $$f | grep -q 'type: Exact' || { echo "FAIL: $$f has no exact match for $$svc"; exit 1; }; \
 		done; \
 	done
 	@for f in $(VERIFY_TMP)/vkr-inner.out $(VERIFY_TMP)/vkr-public.out; do \
-		[ "$$(grep -c '^    - matches:' $$f)" = "6" ] || { echo "FAIL: $$f does not carry one rule per service (the line's five and grpc.health.v1.Health)"; grep -c '^    - matches:' $$f; exit 1; }; \
-		[ "$$(grep -c '^            service: ' $$f)" = "6" ] || { echo "FAIL: $$f does not match exactly the line's five services and grpc.health.v1.Health once each"; grep -c '^            service: ' $$f; exit 1; }; \
+		[ "$$(grep -c '^    - matches:' $$f)" = "7" ] || { echo "FAIL: $$f does not carry one rule per service (the line's six and grpc.health.v1.Health)"; grep -c '^    - matches:' $$f; exit 1; }; \
+		[ "$$(grep -c '^            service: ' $$f)" = "7" ] || { echo "FAIL: $$f does not match exactly the line's six services and grpc.health.v1.Health once each"; grep -c '^            service: ' $$f; exit 1; }; \
 		if grep -q '^            method: ' $$f; then echo "FAIL: $$f lists methods by default — the default is one service-only match per service (agentgateway chart >= 2.1.1 translates it to the path prefix /<service>/)"; exit 1; fi; \
 		grep -q '^            service: lf.a2a.v1.A2AService$$' $$f || { echo "FAIL: $$f does not route lf.a2a.v1.A2AService"; exit 1; }; \
 	done
@@ -2084,7 +2084,7 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set-json 'kagent.controllerRoute.grpc.services={"kagent.api.v1alpha1.SystemService":["GetVersion","GetCurrentUser"]}' >$(VERIFY_TMP)/vkr-extra.out 2>&1 || { cat $(VERIFY_TMP)/vkr-extra.out; exit 1; }
 	@[ "$$(grep -c 'method: GetCurrentUser' $(VERIFY_TMP)/vkr-extra.out)" = "2" ] || { echo "FAIL: a listed RPC does not reach both GRPCRoutes"; exit 1; }
 	@[ "$$(grep -c '^            service: kagent.api.v1alpha1.SystemService$$' $(VERIFY_TMP)/vkr-extra.out)" = "4" ] || { echo "FAIL: the listed service does not render one match per RPC on both routes"; grep -c '^            service: kagent.api.v1alpha1.SystemService$$' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
-	@[ "$$(grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out)" = "14" ] || { echo "FAIL: the other services' and the Health service-only matches did not survive a one-service override"; grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
+	@[ "$$(grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out)" = "16" ] || { echo "FAIL: the other services' and the Health service-only matches did not survive a one-service override"; grep -c '^            service: ' $(VERIFY_TMP)/vkr-extra.out; exit 1; }
 	@[ "$$(grep -c '^            method: ' $(VERIFY_TMP)/vkr-extra.out)" = "4" ] || { echo "FAIL: methods rendered for a service without a list"; exit 1; }
 	@echo "ok: the RPC list is the per-service fallback (the map merges, a list replaces)"
 	@echo "--> every connectivity CI values file renders"
@@ -2095,17 +2095,17 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@echo "All kagent controller route behaviors verified."
 
 .PHONY: verify-kagent-discovery
-verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for muster (the Generic agent chart 1.x renders one per agent, with the toolset header and the discovery opt-out label), nothing it renders for muster carries a static header, the operator-defined kagent.remoteMcpServers are kagent.dev/v1alpha3 in the kagent namespace (tokenSecret = a Secret-sourced Authorization header, no opt-out label).
+verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for muster (the Generic agent chart 1.x renders one per agent, with the toolset header and the discovery opt-out label), nothing it renders for muster carries a static header, the operator-defined kagent.remoteMcpServers are api.kagent.dev/v1alpha3 in the kagent namespace (tokenSecret = a Secret-sourced Authorization header, no opt-out label).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> kagent + muster on (OAuth on, the default) with operator extras: no RemoteMCPServer for muster; every RemoteMCPServer kagent.dev/v1alpha3 in the kagent namespace"
+	@echo "--> kagent + muster on (OAuth on, the default) with operator extras: no RemoteMCPServer for muster; every RemoteMCPServer api.kagent.dev/v1alpha3 in the kagent namespace"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set-json 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp"}]' >$(VERIFY_TMP)/vkd-on.out 2>&1 || { cat $(VERIFY_TMP)/vkd-on.out; exit 1; }
 	@awk 'BEGIN{RS="\n---\n"} /\nkind: RemoteMCPServer\n/' $(VERIFY_TMP)/vkd-on.out >$(VERIFY_TMP)/vkd-on-rms.out
 	@[ "$$(grep -c '^kind: RemoteMCPServer$$' $(VERIFY_TMP)/vkd-on.out)" = "2" ] || { echo "FAIL: expected the two operator RemoteMCPServers and nothing else, got $$(grep -c '^kind: RemoteMCPServer$$' $(VERIFY_TMP)/vkd-on.out)"; grep -n -A3 '^kind: RemoteMCPServer$$' $(VERIFY_TMP)/vkd-on.out; exit 1; }
 	@if grep -qE '^  name: "?muster"?$$' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: a RemoteMCPServer named muster is back — the Generic agent chart 1.x renders one per agent (docs/authentication.md, tool discovery)"; exit 1; fi
 	@if grep -q 'svc.cluster.local:8090/mcp' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: a RemoteMCPServer of the platform's own targets muster — the per-agent carrier is the agent chart's; a static header here would override the propagated caller token in every agent"; exit 1; fi
-	@if grep -q 'allowedNamespaces' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: allowedNamespaces is back on a RemoteMCPServer (the v1alpha2 cross-namespace grant; an AgentTemplate binds a same-namespace server only)"; exit 1; fi
-	@[ "$$(grep -c '^apiVersion: kagent.dev/v1alpha3$$' $(VERIFY_TMP)/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not kagent.dev/v1alpha3"; grep -n apiVersion $(VERIFY_TMP)/vkd-on-rms.out; exit 1; }
-	@[ "$$(grep -c '^  namespace: kagent$$' $(VERIFY_TMP)/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not in the kagent namespace, where the AgentTemplates that bind it live"; exit 1; }
+	@if grep -q 'allowedNamespaces' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: allowedNamespaces is back on a RemoteMCPServer (the v1alpha2 cross-namespace grant; an Agent binds a same-namespace server only)"; exit 1; fi
+	@[ "$$(grep -c '^apiVersion: api.kagent.dev/v1alpha3$$' $(VERIFY_TMP)/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not api.kagent.dev/v1alpha3"; grep -n apiVersion $(VERIFY_TMP)/vkd-on-rms.out; exit 1; }
+	@[ "$$(grep -c '^  namespace: kagent$$' $(VERIFY_TMP)/vkd-on-rms.out)" = "2" ] || { echo "FAIL: a RemoteMCPServer is not in the kagent namespace, where the Agents that bind it live"; exit 1; }
 	@if grep -q 'kagent.dev/v1alpha2' $(VERIFY_TMP)/vkd-on.out; then echo "FAIL: a kagent.dev/v1alpha2 object renders"; grep -n 'v1alpha2' $(VERIFY_TMP)/vkd-on.out; exit 1; fi
 	@if grep -q 'kagent.dev/discovery' $(VERIFY_TMP)/vkd-on-rms.out; then echo "FAIL: the discovery opt-out label leaked onto an operator-defined RemoteMCPServer (the Generic agent chart sets it on the per-agent carrier)"; exit 1; fi
 	@echo "ok: no muster server, v1alpha3 in the kagent namespace, no allowedNamespaces, no v1alpha2, no opt-out label on the extras"
@@ -2134,7 +2134,7 @@ verify-model-catalog: ## Assert llmRouting.modelCatalog is an overlay of what th
 	@python3 tests/verify-model-catalog.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
 .PHONY: verify-kagent-crds
-verify-kagent-crds: ## Assert every kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
+verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — api.kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)
@@ -2339,6 +2339,14 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 		grep -A3 '^kind: NetworkPolicy$$' $(VERIFY_TMP)/vmg-k8s.out | grep -q "^  name: agent-platform-connectivity-$$n$$" || { echo "FAIL: NetworkPolicy agent-platform-connectivity-$$n missing from the kubernetes render"; exit 1; }; \
 	done
 	@echo "ok: kubernetes flavor"
+	@echo "--> agent-manager's session tools (giantswarm/agent-manager#3): with kagent.controllerRoute on, its egress admits the agentgateway data plane on the listener port in both flavors; with the route off, no such rule"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set kagent.controllerRoute.enabled=true >$(VERIFY_TMP)/vmg-sess-cilium.out 2>&1 || { cat $(VERIFY_TMP)/vmg-sess-cilium.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' $(VERIFY_TMP)/vmg-sess-cilium.out | grep -A6 'gateway.networking.k8s.io/gateway-name: agentgateway' | grep -q 'port: "8080"' || { echo "FAIL: cilium agent-manager egress lacks the data plane on 8080 with the controller route on"; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set kagent.controllerRoute.enabled=true --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmg-sess-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vmg-sess-k8s.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' $(VERIFY_TMP)/vmg-sess-k8s.out | grep -A4 'gateway.networking.k8s.io/gateway-name: agentgateway' | grep -q 'port: 8080' || { echo "FAIL: kubernetes agent-manager egress lacks the data plane on 8080 with the controller route on"; exit 1; }
+	@if awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' $(VERIFY_TMP)/vmg-k8s.out | grep -q 'gateway-name'; then echo "FAIL: agent-manager egress admits the data plane with the controller route off"; exit 1; fi
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set kagent.controllerRoute.enabled=true --set agent-manager.oauth.enabled=false 2>/dev/null | awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' | grep -q 'gateway-name'; then echo "FAIL: agent-manager egress admits the data plane with its OAuth off (no caller token, no session tools)"; exit 1; fi
+	@echo "ok: session tools egress"
 	@echo "--> networkPolicy.enabled=false renders no policy for either component"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set networkPolicy.enabled=false >$(VERIFY_TMP)/vmg-nonp.out 2>&1 || { cat $(VERIFY_TMP)/vmg-nonp.out; exit 1; }
 	@if grep -qE 'kind: (CiliumNetworkPolicy|NetworkPolicy)' $(VERIFY_TMP)/vmg-nonp.out; then echo "FAIL: network policies render with networkPolicy.enabled=false"; exit 1; else echo "ok: policy master switch"; fi
@@ -2488,6 +2496,14 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	elif ! grep -q "leave agent-manager.muster.url unset" $(VERIFY_TMP)/vid-url-guard.out; then \
 		echo "FAIL: the muster.url guard failed for the wrong reason"; cat $(VERIFY_TMP)/vid-url-guard.out; exit 1; \
 	else echo "ok: muster.url guard"; fi
+	@echo "--> agent-manager receives the kagent controller target of its session tools (kagent.controllerTarget) from the same derivation (agent-platform.kagentControllerTarget): the data plane's in-cluster address with kagent.controllerRoute on, empty with it off (over the chart's own default); a disagreeing agent-manager.kagent.controllerTarget fails naming the source"
+	@grep -q '^      controllerTarget: ""$$' $(VERIFY_TMP)/vid-meta-am-url.out || { echo "FAIL: agent-manager's kagent.controllerTarget is not empty with the controller route off"; grep -n -A4 '^    kagent:' $(VERIFY_TMP)/vid-meta-am-url.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.controllerRoute.enabled=true 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' | grep -q '^      controllerTarget: grpc://agentgateway.default.svc.cluster.local:8080$$' || { echo "FAIL: agent-manager's kagent.controllerTarget is not the data plane's address with the controller route on"; exit 1; }
+	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.controllerRoute.enabled=true --set agent-manager.kagent.controllerTarget=grpc://other:8080 >$(VERIFY_TMP)/vid-target-guard.out 2>&1; then \
+		echo "FAIL: a disagreeing agent-manager.kagent.controllerTarget was accepted"; exit 1; \
+	elif ! grep -q "leave agent-manager.kagent.controllerTarget unset" $(VERIFY_TMP)/vid-target-guard.out; then \
+		echo "FAIL: the controllerTarget guard failed for the wrong reason"; cat $(VERIFY_TMP)/vid-target-guard.out; exit 1; \
+	else echo "ok: controllerTarget guard"; fi
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.muster.url=http://muster.default.svc.cluster.local:8090/mcp >/dev/null 2>&1 || { echo "FAIL: an agreeing agent-manager.muster.url must pass"; exit 1; }
 	@grep -q 'define "agent-platform.musterMcpUrl"' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the connectivity chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
 	@grep -q 'define "agent-platform.musterMcpUrl"' $(CHART_DIR)/templates/_helpers.tpl || { echo "FAIL: the meta chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
@@ -3517,27 +3533,16 @@ verify-postgres-kagent-v2: ## Assert the kagent_v2 database entry (#346): the CN
 
 .PHONY: verify-identity-migration
 verify-identity: verify-identity-migration
-verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the chart's only cluster-scoped binding (#346): exactly one when the migration is on — named, bound to the CRD ClusterRole (get, delete on the five removed CRDs, nothing more) and to the tenant ServiceAccount, following a renamed identity — and none when the migration or agent-manager is off.
+verify-identity-migration: ## Assert the migration holds no cluster-scoped right: the 1.x -> 2.x run deletes no CRD, so no ClusterRole or ClusterRoleBinding renders with the migration on, off, or with agent-manager off; the per-GitOps-namespace Roles follow a renamed identity.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> migration on: exactly one ClusterRoleBinding and one ClusterRole, the CRD pair"
+	@echo "--> migration on: no ClusterRole, no ClusterRoleBinding"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
-	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vim-on.out)" = "1" ] || { echo "FAIL: expected exactly one ClusterRoleBinding with the migration on"; grep -n -A3 '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vim-on.out; exit 1; }
-	@[ "$$(grep -c '^kind: ClusterRole$$' $(VERIFY_TMP)/vim-on.out)" = "1" ] || { echo "FAIL: expected exactly one ClusterRole with the migration on"; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vim-on.out ClusterRoleBinding $(MIGRATION_JOB)-crds >$(VERIFY_TMP)/vim-crb.out || { echo "FAIL: the ClusterRoleBinding is not $(MIGRATION_JOB)-crds"; exit 1; }
-	@grep -A3 '^roleRef:' $(VERIFY_TMP)/vim-crb.out | grep -q 'kind: ClusterRole' || { echo "FAIL: the roleRef is not a ClusterRole"; exit 1; }
-	@grep -A3 '^roleRef:' $(VERIFY_TMP)/vim-crb.out | grep -q 'name: $(MIGRATION_JOB)-crds' || { echo "FAIL: the roleRef does not name the CRD ClusterRole"; exit 1; }
-	@grep -A3 '^subjects:' $(VERIFY_TMP)/vim-crb.out | grep -q 'name: kagent-flux' || { echo "FAIL: the subject is not the tenant ServiceAccount"; exit 1; }
-	@grep -A3 '^subjects:' $(VERIFY_TMP)/vim-crb.out | grep -q 'namespace: kagent' || { echo "FAIL: the subject is not in the kagent namespace"; exit 1; }
-	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vim-crb.out; then echo "FAIL: the binding is a hook resource; the migration's Job is plain and re-runs, its rights must outlive one hook event"; exit 1; fi
-	@$(PICK) $(VERIFY_TMP)/vim-on.out ClusterRole $(MIGRATION_JOB)-crds >$(VERIFY_TMP)/vim-cr.out || { echo "FAIL: no CRD ClusterRole"; exit 1; }
-	@for crd in agents.kagent.dev sandboxagents.kagent.dev agentharnesses.kagent.dev memories.kagent.dev toolservers.kagent.dev; do grep -q "^      - $$crd$$" $(VERIFY_TMP)/vim-cr.out || { echo "FAIL: the ClusterRole does not name $$crd"; exit 1; }; done
-	@[ "$$(grep -c '^      - .*\.kagent\.dev$$' $(VERIFY_TMP)/vim-cr.out)" = "5" ] || { echo "FAIL: the ClusterRole names more or fewer than the five removed CRDs"; exit 1; }
-	@grep -q 'verbs: \["get", "delete"\]' $(VERIFY_TMP)/vim-cr.out || { echo "FAIL: the ClusterRole's verbs are not exactly get, delete"; grep verbs $(VERIFY_TMP)/vim-cr.out; exit 1; }
-	@grep -q 'resources: \["customresourcedefinitions"\]' $(VERIFY_TMP)/vim-cr.out || { echo "FAIL: the ClusterRole is not confined to customresourcedefinitions"; exit 1; }
-	@echo "ok: the one ClusterRoleBinding"
-	@echo "--> a renamed identity: the subject follows kagent.fluxServiceAccountName"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x >$(VERIFY_TMP)/vim-x.out 2>&1 || { cat $(VERIFY_TMP)/vim-x.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vim-x.out ClusterRoleBinding $(MIGRATION_JOB)-crds | grep -A3 '^subjects:' | grep -q 'name: tenant-x' || { echo "FAIL: the subject did not follow the renamed identity"; exit 1; }
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
+	@if grep -q 'customresourcedefinitions' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: the migration is granted rights on customresourcedefinitions"; exit 1; fi
+	@echo "ok: nothing cluster-scoped"
+	@echo "--> a renamed identity: the GitOps-namespace RoleBinding follows kagent.fluxServiceAccountName"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' >$(VERIFY_TMP)/vim-x.out 2>&1 || { cat $(VERIFY_TMP)/vim-x.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vim-x.out RoleBinding $(MIGRATION_JOB) flux-giantswarm | grep -A3 '^subjects:' | grep -q 'name: tenant-x' || { echo "FAIL: the subject did not follow the renamed identity"; exit 1; }
 	@if grep -q 'kagent-flux' $(VERIFY_TMP)/vim-x.out; then echo "FAIL: the old name survives with a renamed identity"; grep -n kagent-flux $(VERIFY_TMP)/vim-x.out; exit 1; fi
 	@echo "ok: renamed identity"
 	@echo "--> off: no ClusterRoleBinding with the migration off, with agent-manager off (verify-identity's own kagent-only case), with kagent off"
@@ -3549,7 +3554,7 @@ verify-identity-migration: ## Assert the migration's ClusterRoleBinding is the c
 	@echo "ok: $@"
 
 .PHONY: verify-migration
-verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; no Job of the release (#378: a Failed one stalls the upgrade) but a suspended CronJob, whose run a post-install/post-upgrade hook starts as the tenant identity once the run's network policy is applied — both flavors —, the run named with the hash of its pod template — image, args, environment, identity, labels; a changed template starts a new run, an unchanged one finds its run started, the template byte-identical across chart versions while the CronJob's own labels follow them (#399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), its inputs as environment and no GitHub token; the RBAC set (the CRD pair, the per-namespace reads); the network policy in both flavors; the guards; the meta chart's forwarding.
+verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; no Job of the release (#378: a Failed one stalls the upgrade) but a suspended CronJob, whose run a post-install/post-upgrade hook starts as the tenant identity once the run's network policy is applied — both flavors —, the run named with the hash of its pod template — image, args, environment, identity, labels; a changed template starts a new run, an unchanged one finds its run started, the template byte-identical across chart versions while the CronJob's own labels follow them (#399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), its inputs as environment and no GitHub token; the RBAC set (the per-namespace reads, nothing cluster-scoped); the network policy in both flavors; the guards; the meta chart's forwarding.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@echo "--> off by default: kagent alone renders nothing of the migration; the ATS smoke keeps it off — its kagent is fresh, there is no 0.10 agent to migrate (agentlab#143 rehearses the migration)"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >$(VERIFY_TMP)/vmig-off.out 2>&1 || { cat $(VERIFY_TMP)/vmig-off.out; exit 1; }
@@ -3630,7 +3635,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -A1 'name: AGENT_MANAGER_MANAGED_NAMESPACES' $(VERIFY_TMP)/vmig-vals-job.out | grep -q 'value: team-a,team-b' || { echo "FAIL: the additional namespaces do not reach the Job"; exit 1; }
 	@grep -q 'serviceAccountName: tenant-x' $(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: the Job's ServiceAccount did not follow the renamed identity"; exit 1; }
 	@echo "ok: values"
-	@echo "--> RBAC: the CRD pair (verify-identity-migration asserts its shape) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
+	@echo "--> RBAC: nothing cluster-scoped (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
 	@if $(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' --set 'agentManager.migration.gitopsNamespaces[1]=flux-team' >$(VERIFY_TMP)/vmig-gitops.out 2>&1 || { cat $(VERIFY_TMP)/vmig-gitops.out; exit 1; }
 	@for ns in flux-giantswarm flux-team; do \
@@ -3640,7 +3645,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		[ "$$(grep -c 'verbs: \["get", "list"\]' $(VERIFY_TMP)/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding in $$ns does not bind the tenant identity"; exit 1; }; \
 	done
-	@[ "$$(grep -c '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out)" = "1" ] || { echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; }
+	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out; then echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; fi
 	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out CronJob $(MIGRATION_JOB) kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
 	@echo "ok: RBAC"
@@ -3699,17 +3704,14 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@echo "ok: forwarded"
 	@echo "ok: $@"
 
-# The kagent CRDs' storage-version hooks (giantswarm/agent-platform#396): the meta chart's renders.
-STORAGE_ON := -f $(CHART_DIR)/ci/ci-values.yaml
-STORAGE_BACKUP := t-kagent-storage-version-backup
-STORAGE_RESTORE := t-kagent-storage-version-restore
-STORAGE_CM := kagent-storage-version-migration
+# The meta chart's renders with kagent on (ci-values).
+HOOKS_ON := -f $(CHART_DIR)/ci/ci-values.yaml
 
 .PHONY: verify-hooks-netpol
-verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with networkPolicy on, ONE policy selecting app.kubernetes.io/instance=<release> + component=hooks with egress to the apiserver only — a CiliumNetworkPolicy (kube-apiserver entity) when the flavour resolves to cilium, a NetworkPolicy (networkPolicy.kubernetes.apiServerCIDR, Egress only) otherwise — as a hook object at weight -10 with the identity's delete policy, at all six events with the engine on, at the storage-version hooks' four with the engine off; none with networkPolicy off, none when no hook renders (engine off, kagent off); every hook Job's pod carries the selected labels.
+verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with networkPolicy on, ONE policy selecting app.kubernetes.io/instance=<release> + component=hooks with egress to the apiserver only — a CiliumNetworkPolicy (kube-apiserver entity) when the flavour resolves to cilium, a NetworkPolicy (networkPolicy.kubernetes.apiServerCIDR, Egress only) otherwise — as a hook object at weight -10 with the identity's delete policy, at all six events with the engine on; none with networkPolicy off, none with the engine off (no hook of this chart renders there, the serving slice's teardown aside); every hook Job's pod carries the selected labels.
 	@echo "====> $@ ($(CHART_DIR))"
 	@echo "--> engine on, cilium served: a CiliumNetworkPolicy hook at -10, all six events"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 >$(VERIFY_TMP)/vhn-cil.out 2>&1 || { cat $(VERIFY_TMP)/vhn-cil.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --api-versions cilium.io/v2 >$(VERIFY_TMP)/vhn-cil.out 2>&1 || { cat $(VERIFY_TMP)/vhn-cil.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vhn-cil.out CiliumNetworkPolicy t-hooks >$(VERIFY_TMP)/vhn-cnp.out || { echo "FAIL: no CiliumNetworkPolicy t-hooks"; exit 1; }
 	@if $(PICK) $(VERIFY_TMP)/vhn-cil.out NetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the kubernetes-flavour policy renders next to the cilium one"; exit 1; fi
 	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete$$' $(VERIFY_TMP)/vhn-cnp.out || { echo "FAIL: engine on: the policy is not at all six hook events"; grep helm.sh/hook $(VERIFY_TMP)/vhn-cnp.out; exit 1; }
@@ -3722,22 +3724,22 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 	@echo "--> every hook Job's pod carries the selected labels"
 	@python3 -c 'import sys,yaml; docs=[d for d in yaml.safe_load_all(open("$(VERIFY_TMP)/vhn-cil.out")) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; assert docs, "no hook Job rendered"; bad=[d["metadata"]["name"] for d in docs if d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/component")!="hooks" or d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/instance")!="t"]; assert not bad, "hook Jobs the policy does not select: %s" % bad; print("ok: %d hook Jobs selected: %s" % (len(docs), sorted(d["metadata"]["name"] for d in docs)))'
 	@echo "--> engine on, no cilium: a NetworkPolicy hook, Egress only, to networkPolicy.kubernetes.apiServerCIDR"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >$(VERIFY_TMP)/vhn-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vhn-k8s.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >$(VERIFY_TMP)/vhn-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vhn-k8s.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vhn-k8s.out NetworkPolicy t-hooks >$(VERIFY_TMP)/vhn-np.out || { echo "FAIL: no NetworkPolicy t-hooks in the kubernetes flavour"; exit 1; }
 	@if $(PICK) $(VERIFY_TMP)/vhn-k8s.out CiliumNetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the cilium policy renders without cilium.io/v2"; exit 1; fi
 	@grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete$$' $(VERIFY_TMP)/vhn-np.out || { echo "FAIL: kubernetes flavour: the policy is not at all six hook events"; exit 1; }
 	@grep -q 'policyTypes: \[Egress\]' $(VERIFY_TMP)/vhn-np.out || { echo "FAIL: the NetworkPolicy is not Egress only"; exit 1; }
 	@grep -q 'cidr: "10.9.0.1/32"' $(VERIFY_TMP)/vhn-np.out || { echo "FAIL: the NetworkPolicy does not use networkPolicy.kubernetes.apiServerCIDR"; grep cidr $(VERIFY_TMP)/vhn-np.out; exit 1; }
 	@echo "--> flavour forced: networkPolicy.flavor=cilium without the API renders the CiliumNetworkPolicy"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --set networkPolicy.flavor=cilium >$(VERIFY_TMP)/vhn-forced.out 2>&1 || { cat $(VERIFY_TMP)/vhn-forced.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --set networkPolicy.flavor=cilium >$(VERIFY_TMP)/vhn-forced.out 2>&1 || { cat $(VERIFY_TMP)/vhn-forced.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vhn-forced.out CiliumNetworkPolicy t-hooks >/dev/null || { echo "FAIL: networkPolicy.flavor=cilium does not force the CiliumNetworkPolicy"; exit 1; }
-	@echo "--> engine off (the fleet): the policy at the storage-version hooks' four events"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 --set components.flux.enabled=false >$(VERIFY_TMP)/vhn-off.out 2>&1 || { cat $(VERIFY_TMP)/vhn-off.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vhn-off.out CiliumNetworkPolicy t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade$$' || { echo "FAIL: engine off: the policy is not at pre-install,pre-upgrade,post-install,post-upgrade (the storage-version hooks' events, no pre-delete)"; $(PICK) $(VERIFY_TMP)/vhn-off.out CiliumNetworkPolicy t-hooks | grep helm.sh/hook; exit 1; }
-	@echo "--> networkPolicy off: none; engine off + kagent off (no hook): none"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 --set networkPolicy.enabled=false >$(VERIFY_TMP)/vhn-npoff.out 2>&1 || { cat $(VERIFY_TMP)/vhn-npoff.out; exit 1; }
+	@echo "--> engine off (the fleet): no hook, so no policy and no identity"
+	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --api-versions cilium.io/v2 --set components.flux.enabled=false >$(VERIFY_TMP)/vhn-off.out 2>&1 || { cat $(VERIFY_TMP)/vhn-off.out; exit 1; }
+	@if grep -q 't-hooks\|helm.sh/hook' $(VERIFY_TMP)/vhn-off.out; then echo "FAIL: engine off: a hook, the hook policy or the identity renders with no hook to police"; grep -n 't-hooks\|helm.sh/hook' $(VERIFY_TMP)/vhn-off.out | head; exit 1; fi
+	@echo "--> networkPolicy off: none; engine off + kagent off: none"
+	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --api-versions cilium.io/v2 --set networkPolicy.enabled=false >$(VERIFY_TMP)/vhn-npoff.out 2>&1 || { cat $(VERIFY_TMP)/vhn-npoff.out; exit 1; }
 	@if $(PICK) $(VERIFY_TMP)/vhn-npoff.out CiliumNetworkPolicy t-hooks >/dev/null 2>&1 || $(PICK) $(VERIFY_TMP)/vhn-npoff.out NetworkPolicy t-hooks >/dev/null 2>&1; then echo "FAIL: the hook policy renders with networkPolicy.enabled=false"; exit 1; fi
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --api-versions cilium.io/v2 --set components.flux.enabled=false --set components.kagent.enabled=false >$(VERIFY_TMP)/vhn-none.out 2>&1 || { cat $(VERIFY_TMP)/vhn-none.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --api-versions cilium.io/v2 --set components.flux.enabled=false --set components.kagent.enabled=false >$(VERIFY_TMP)/vhn-none.out 2>&1 || { cat $(VERIFY_TMP)/vhn-none.out; exit 1; }
 	@if grep -q 't-hooks' $(VERIFY_TMP)/vhn-none.out; then echo "FAIL: engine off, kagent off: the hook policy (or identity) renders with no hook to police"; exit 1; fi
 	@echo "ok: $@"
 
@@ -4063,169 +4065,6 @@ verify-otlp-global: ## Assert one OTLP collector for the platform (giantswarm/gi
 	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-otlp-global.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
-
-.PHONY: verify-kagent-storage-version
-verify-kagent-storage-version: ## Assert the kagent CRDs' storage-version hooks of the 3.x → 4.x cut-over (#396): with kagent on, the backup Job (pre-install,pre-upgrade, -7: records the objects of modelconfigs/modelproviderconfigs/remotemcpservers.kagent.dev still stored at v1alpha2 into the migration ConfigMap, sets the crds policy of the HelmRelease the CRDs' Flux labels name to Skip (#416), deletes those CRDs and watches them stay absent for 60 s — a re-created one is deleted again and fails the hook naming the owner) and the restore Job (post-install,post-upgrade, 0: waits for modelconfigs.kagent.dev to serve v1alpha3, re-creates the recorded ModelConfigs no Helm release owned at kagent.dev/v1alpha3, tolerates AlreadyExists, marks restored-at) as the hook identity in the helm image, the identity at their events; with the engine off (the fleet) the same pair and nothing else; with kagent off none of it; the kagent namespace follows kagent.namespaceOverride; helm lint.
-	@echo "====> $@ ($(CHART_DIR))"
-	@echo "--> engine on, kagent on (ci-values): both hook Jobs, their events and weights, the identity at theirs"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) >$(VERIFY_TMP)/vsv-on.out 2>&1 || { cat $(VERIFY_TMP)/vsv-on.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vsv-on.out Job $(STORAGE_BACKUP) >$(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: no backup hook Job $(STORAGE_BACKUP)"; exit 1; }
-	@grep -q 'helm.sh/hook: pre-install,pre-upgrade$$' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup hook is not pre-install,pre-upgrade"; grep helm.sh/hook $(VERIFY_TMP)/vsv-backup.out; exit 1; }
-	@grep -q 'helm.sh/hook-weight: "-7"' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup hook is not at weight -7 (after the kagent namespace hook at -8, ahead of the self hooks at -6)"; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vsv-on.out Job $(STORAGE_RESTORE) >$(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: no restore hook Job $(STORAGE_RESTORE)"; exit 1; }
-	@grep -q 'helm.sh/hook: post-install,post-upgrade$$' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore hook is not post-install,post-upgrade"; grep helm.sh/hook $(VERIFY_TMP)/vsv-restore.out; exit 1; }
-	@grep -q 'helm.sh/hook-weight: "0"' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore hook is not at weight 0"; exit 1; }
-	@for f in $(VERIFY_TMP)/vsv-backup.out $(VERIFY_TMP)/vsv-restore.out; do \
-		grep -q 'helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded' $$f || { echo "FAIL: $$f: the hook delete policy is not before-hook-creation,hook-succeeded"; exit 1; }; \
-		grep -q 'serviceAccountName: t-hooks' $$f || { echo "FAIL: $$f: the Job does not run as the hook identity t-hooks"; exit 1; }; \
-		grep -q 'image: "gsoci.azurecr.io/giantswarm/alpine-k8s:' $$f || { echo "FAIL: $$f: the Job does not run the helm image (a script needs sh, kubectl and jq)"; exit 1; }; \
-		grep -q 'command: \["/bin/sh", "-eu", "-c"\]' $$f || { echo "FAIL: $$f: the Job is not a script under sh -eu"; exit 1; }; \
-		grep -q 'ns="kagent"' $$f || { echo "FAIL: $$f: the script does not name the kagent namespace"; exit 1; }; \
-		grep -q 'cm="$(STORAGE_CM)"' $$f || { echo "FAIL: $$f: the script does not name the ConfigMap $(STORAGE_CM)"; exit 1; }; \
-		for needle in 'runAsNonRoot: true' 'readOnlyRootFilesystem: true' 'allowPrivilegeEscalation: false' 'type: RuntimeDefault' 'restartPolicy: Never'; do grep -q "$$needle" $$f || { echo "FAIL: $$f lacks $$needle"; exit 1; }; done; \
-	done
-	@echo "ok: two hook Jobs as t-hooks in the helm image, restricted pods"
-	@echo "--> the hook pods' memory (#593): requests stay small, the limit is headroom for a kubectl run's transient — 512Mi, never 128Mi again"
-	@for f in $(VERIFY_TMP)/vsv-backup.out $(VERIFY_TMP)/vsv-restore.out; do \
-		python3 -c 'import sys,yaml; d=[x for x in yaml.safe_load_all(open(sys.argv[1])) if x][0]; r=d["spec"]["template"]["spec"]["containers"][0]["resources"]; assert r["requests"]=={"cpu":"10m","memory":"32Mi"}, r; assert r["limits"]=={"memory":"512Mi"}, r; print("ok: %s requests 10m/32Mi, limit 512Mi" % d["metadata"]["name"])' $$f || exit 1; \
-	done
-	@echo "--> the backup script: the three CRDs, v1alpha2 as the stale version, status and server-set metadata stripped, the record written before the delete, kubectl delete crd --wait"
-	@grep -q 'for crd in modelconfigs.kagent.dev modelproviderconfigs.kagent.dev remotemcpservers.kagent.dev; do' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup does not walk exactly the three CRDs"; exit 1; }
-	@grep -q 'stale="v1alpha2"' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup does not name v1alpha2 as the stale storage version"; exit 1; }
-	@grep -q "jsonpath='{.status.storedVersions}'" $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup does not read status.storedVersions"; exit 1; }
-	@grep -q 'del(.status, .metadata.managedFields, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.generation)' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the record does not strip status and the server-set metadata (the 1 MiB ConfigMap limit)"; exit 1; }
-	@grep -q '\.data\["recorded-at"\] = \$$at' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the record carries no recorded-at"; exit 1; }
-	@grep -q 'kubectl delete customresourcedefinitions.apiextensions.k8s.io "\$$crd" --wait --timeout=3m' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup does not delete the CRD with --wait"; exit 1; }
-	@[ "$$(grep -n 'kubectl create -f /tmp/cm.json' $(VERIFY_TMP)/vsv-backup.out | cut -d: -f1)" -lt "$$(grep -n 'kubectl delete customresourcedefinitions' $(VERIFY_TMP)/vsv-backup.out | head -1 | cut -d: -f1)" ] || { echo "FAIL: the backup deletes a CRD before the record is written"; exit 1; }
-	@grep -q 'nothing to migrate' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup has no no-op branch (a fresh install, a second run)"; exit 1; }
-	@echo "--> the backup stops the HelmRelease the CRDs' helm.toolkit.fluxcd.io labels name from re-applying them before the delete (#416): crds Skip on install and upgrade, a gone owner tolerated; then watches the CRDs stay absent for 60 s, deletes a re-created one again and fails naming the owner"
-	@grep -qF 'helm\.toolkit\.fluxcd\.io/namespace}|{.metadata.labels.helm\.toolkit\.fluxcd\.io/name}' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup does not read the owner HelmRelease from the CRD's helm.toolkit.fluxcd.io/namespace + name labels"; exit 1; }
-	@grep -q 'kubectl patch helmreleases.helm.toolkit.fluxcd.io -n "\$$ons" "\$$oname" --type merge -p' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup does not patch the owner HelmRelease"; exit 1; }
-	@grep -qF '{"spec":{"install":{"crds":"Skip"},"upgrade":{"crds":"Skip"}}}' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the patch does not set spec.install.crds and spec.upgrade.crds to Skip"; exit 1; }
-	@grep -q 'kubectl get helmreleases.helm.toolkit.fluxcd.io -n "\$$ons" "\$$oname" -o jsonpath=.*--ignore-not-found' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: a gone owner HelmRelease must be tolerated (--ignore-not-found), not fail the hook"; exit 1; }
-	@grep -q 'is gone; nothing to stop' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup does not report a gone owner"; exit 1; }
-	@[ "$$(grep -n 'kubectl patch helmreleases' $(VERIFY_TMP)/vsv-backup.out | cut -d: -f1)" -lt "$$(grep -n 'kubectl delete customresourcedefinitions' $(VERIFY_TMP)/vsv-backup.out | head -1 | cut -d: -f1)" ] || { echo "FAIL: the owner must be patched before the first CRD is deleted"; exit 1; }
-	@[ "$$(grep -n 'kubectl create -f /tmp/cm.json' $(VERIFY_TMP)/vsv-backup.out | cut -d: -f1)" -lt "$$(grep -n 'kubectl patch helmreleases' $(VERIFY_TMP)/vsv-backup.out | cut -d: -f1)" ] || { echo "FAIL: the record must be written before the owner is touched"; exit 1; }
-	@grep -q 'deadline=\$$(( \$$(date +%s) + 60 ))' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup's watch is not 60 s"; exit 1; }
-	@[ "$$(grep -c 'kubectl delete customresourcedefinitions.apiextensions.k8s.io "\$$crd" --wait --timeout=3m' $(VERIFY_TMP)/vsv-backup.out)" = "2" ] || { echo "FAIL: the backup must delete a CRD twice: once after the record, once more in the watch when it comes back"; grep -n 'kubectl delete customresourcedefinitions' $(VERIFY_TMP)/vsv-backup.out; exit 1; }
-	@[ "$$(grep -n 'kubectl delete customresourcedefinitions' $(VERIFY_TMP)/vsv-backup.out | head -1 | cut -d: -f1)" -lt "$$(grep -n 'deadline=\$$(( \$$(date +%s) + 60 ))' $(VERIFY_TMP)/vsv-backup.out | cut -d: -f1)" ] || { echo "FAIL: the watch must follow the deletes"; exit 1; }
-	@grep -q 're-created at \$$state' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: a re-created CRD is not reported"; exit 1; }
-	@grep -qF 'by HelmRelease {.metadata.labels.helm\.toolkit\.fluxcd\.io/namespace}/{.metadata.labels.helm\.toolkit\.fluxcd\.io/name}' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the re-creation report does not name the owner HelmRelease from the CRD's labels"; exit 1; }
-	@grep -A1 're-created after the backup deleted them' $(VERIFY_TMP)/vsv-backup.out | grep -q 'exit 1' || { echo "FAIL: a re-creation must fail the hook (loudly, after deleting again)"; exit 1; }
-	@grep -q 'stayed absent for 60 s' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the watch does not report the CRDs stayed absent"; exit 1; }
-	@grep -q 'about: "record the objects .* stop the HelmRelease that applied them from applying them again (crds: Skip) and delete those CRDs' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup Job's about line does not say it stops the owner"; grep about: $(VERIFY_TMP)/vsv-backup.out; exit 1; }
-	@echo "--> the backup re-points the three kinds to v1alpha3 in every Helm release manifest that still names them at v1alpha2 (Helm reads a manifest back through a served version), on every run, one Secret at a time, the patch through a file"
-	@grep -q "kubectl get secrets -A -l owner=helm --field-selector type=helm.sh/release.v1 --no-headers --chunk-size=100 | awk '{print \$$1, \$$2}' > /tmp/releases.txt" $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the backup does not list the Helm release Secrets through the server-side Table (names only; a client-side printer collects every payload first and is OOM-killed at 128Mi, #414)"; grep -n 'kubectl get secrets' $(VERIFY_TMP)/vsv-backup.out; exit 1; }
-	@if grep -q 'kubectl get secrets.*-o jsonpath\|kubectl get secrets.*-o custom-columns\|kubectl get secrets.*-o name' $(VERIFY_TMP)/vsv-backup.out; then echo "FAIL: the release listing uses a client-side printer (collects every Secret whole, #414)"; exit 1; fi
-	@grep -qF "grep -qF 'apiVersion: kagent.dev/v1alpha2\n' /tmp/release.json || continue" $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: jq parses every release; a release whose manifest names no kagent.dev/v1alpha2 object must be skipped before jq on the encoded-newline marker (#414, #593)"; exit 1; }
-	@if grep -q "grep -q 'kagent.dev/v1alpha2' /tmp/release.json" $(VERIFY_TMP)/vsv-backup.out; then echo "FAIL: a plain grep for the version matches this chart's own release (the hook script under .hooks[] carries it) and sends every revision of it through jq on every upgrade (#593)"; exit 1; fi
-	@[ "$$(grep -n "grep -qF 'apiVersion: kagent.dev/v1alpha2" $(VERIFY_TMP)/vsv-backup.out | cut -d: -f1)" -lt "$$(grep -n 'n="$$(jq -r --arg k "$$kinds"' $(VERIFY_TMP)/vsv-backup.out | cut -d: -f1)" ] || { echo "FAIL: the grep pre-filter must run before jq"; exit 1; }
-	@echo "--> the marker against fixtures: this chart's own release (the rendered backup Job as a stored hook, a manifest without kagent objects) is skipped; a manifest naming a v1alpha2 object is not"
-	@python3 -c 'import json; hook=open("$(VERIFY_TMP)/vsv-backup.out").read(); assert "kagent.dev/v1alpha2" in hook; neg=json.dumps({"manifest":"---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n","hooks":[{"manifest":hook}]}); pos=json.dumps({"manifest":"---\napiVersion: kagent.dev/v1alpha2\nkind: ModelConfig\nmetadata:\n  name: x\n","hooks":[]}); open("$(VERIFY_TMP)/vsv-neg.json","w").write(neg); open("$(VERIFY_TMP)/vsv-pos.json","w").write(pos); print("fixtures: negative carries the version %d times in %d bytes, positive %d bytes" % (neg.count("kagent.dev/v1alpha2"), len(neg), len(pos)))'
-	@if grep -qF 'apiVersion: kagent.dev/v1alpha2\n' $(VERIFY_TMP)/vsv-neg.json; then echo "FAIL: the marker matches a release whose hook script carries the version but whose manifest names no v1alpha2 object"; exit 1; fi
-	@grep -qF 'apiVersion: kagent.dev/v1alpha2\n' $(VERIFY_TMP)/vsv-pos.json || { echo "FAIL: the marker misses a manifest that names a kagent.dev/v1alpha2 object"; exit 1; }
-	@echo "ok: marker pre-filter"
-	@grep -qF "kinds='(^|\n)kind: (ModelConfig|ModelProviderConfig|RemoteMCPServer)\n'" $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the re-point is not confined to documents of the three kinds"; grep -n "kinds=" $(VERIFY_TMP)/vsv-backup.out; exit 1; }
-	@grep -qF 'gsub("apiVersion: kagent.dev/v1alpha2\n"; "apiVersion: kagent.dev/v1alpha3\n")' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the re-point does not swap kagent.dev/v1alpha2 for v1alpha3"; exit 1; }
-	@grep -q 'base64 -d < /tmp/release.b64 | base64 -d | gzip -dc' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the re-point does not decode Helm storage (base64 twice, gzip)"; exit 1; }
-	@grep -q 'kubectl patch secret -n "\$$sns" "\$$sname" --type merge --patch-file /tmp/release-patch.json' $(VERIFY_TMP)/vsv-backup.out || { echo "FAIL: the re-point does not patch the Secret through a file"; exit 1; }
-	@[ "$$(grep -n 'kubectl delete customresourcedefinitions' $(VERIFY_TMP)/vsv-backup.out | tail -1 | cut -d: -f1)" -lt "$$(grep -n '^ *kinds=' $(VERIFY_TMP)/vsv-backup.out | cut -d: -f1)" ] || { echo "FAIL: the re-point must follow the CRD deletion and the watch"; exit 1; }
-	@if grep -qE '^ *exit 0' $(VERIFY_TMP)/vsv-backup.out; then echo "FAIL: the backup exits early; the re-point must run on every backup, also when no CRD stores v1alpha2 any more (a re-run after a failed first attempt)"; exit 1; fi
-	@echo "ok: backup script"
-	@echo "--> the restore script: waits for modelconfigs.kagent.dev Established serving v1alpha3, skips Helm-owned objects, swaps the apiVersion, tolerates AlreadyExists, fails otherwise, marks restored-at and runs once"
-	@grep -q 'crd="modelconfigs.kagent.dev"' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not wait on modelconfigs.kagent.dev"; exit 1; }
-	@grep -q 'version="v1alpha3"' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not name v1alpha3"; exit 1; }
-	@grep -q 'type=="Established"' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not wait for the CRD to be Established"; exit 1; }
-	@grep -q 'deadline=\$$(( \$$(date +%s) + 480 ))' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore's wait is not bounded at 480 s"; exit 1; }
-	@grep -q 'select(.metadata.annotations\["meta.helm.sh/release-name"\] == null)' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not skip the Helm-owned ModelConfigs (they come back from their releases)"; exit 1; }
-	@grep -q '{apiVersion: \$$v, kind, metadata: (.metadata | {name, namespace, labels, annotations} | with_entries(select(.value != null))), spec}' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not re-create name, namespace, labels, annotations and spec at the new apiVersion"; exit 1; }
-	@grep -q '\*AlreadyExists\*) echo "ModelConfig \$$ref: already present (re-created by its owner)"' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not tolerate AlreadyExists"; exit 1; }
-	@grep -q '\*) echo "ModelConfig \$$ref: \$$out" >&2; exit 1 ;;' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not fail the Job on another refusal"; exit 1; }
-	@grep -q 'restored-at' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not mark restored-at"; exit 1; }
-	@grep -q 'restored at \$$restored; nothing to do' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not run once (a ModelConfig removed after the cut-over would come back)"; exit 1; }
-	@grep -q 'recorded, not restored: \$$n \$$k' $(VERIFY_TMP)/vsv-restore.out || { echo "FAIL: the restore does not report the recorded RemoteMCPServers / ModelProviderConfigs"; exit 1; }
-	@echo "ok: restore script"
-	@echo "--> the hook identity is created for the hooks' events (pre-install,pre-upgrade,post-install,post-upgrade) and the engine's pre-delete"
-	@for kind in ServiceAccount ClusterRoleBinding; do \
-		$(PICK) $(VERIFY_TMP)/vsv-on.out $$kind t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete$$' || { echo "FAIL: the hook $$kind t-hooks is not created for pre-install,pre-upgrade,post-install,post-upgrade,pre-delete,post-delete"; $(PICK) $(VERIFY_TMP)/vsv-on.out $$kind t-hooks | grep helm.sh/hook; exit 1; }; \
-	done
-	@echo "ok: identity events"
-	@echo "--> engine off (the fleet, a cluster's own Flux): the same pair and the identity at their events, nothing else hooked"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --set components.flux.enabled=false >$(VERIFY_TMP)/vsv-off.out 2>&1 || { cat $(VERIFY_TMP)/vsv-off.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vsv-off.out Job $(STORAGE_BACKUP) >/dev/null || { echo "FAIL: the backup hook is gone with the engine off (every installation that ran kagent 0.10 needs it)"; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vsv-off.out Job $(STORAGE_RESTORE) >/dev/null || { echo "FAIL: the restore hook is gone with the engine off"; exit 1; }
-	@[ "$$(grep -c '^    helm.sh/hook: ' $(VERIFY_TMP)/vsv-off.out)" = "5" ] || { echo "FAIL: engine off must hook exactly the two Jobs, the identity (SA + CRB) and its network policy (#413)"; grep -n 'helm.sh/hook: ' $(VERIFY_TMP)/vsv-off.out; exit 1; }
-	@for kind in ServiceAccount ClusterRoleBinding; do \
-		$(PICK) $(VERIFY_TMP)/vsv-off.out $$kind t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade$$' || { echo "FAIL: engine off: the hook $$kind t-hooks is not at pre-install,pre-upgrade,post-install,post-upgrade (no pre-delete without the engine)"; exit 1; }; \
-	done
-	@if grep -q 'helm.sh/hook: .*pre-delete' $(VERIFY_TMP)/vsv-off.out; then echo "FAIL: engine off renders a pre-delete hook"; exit 1; fi
-	@echo "ok: engine off"
-	@echo "--> kagent off: none of it; the identity back to the engine's own events, pre-install,pre-upgrade,pre-delete,post-delete (engine on), gone (engine off)"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --set components.kagent.enabled=false >$(VERIFY_TMP)/vsv-kagoff.out 2>&1 || { cat $(VERIFY_TMP)/vsv-kagoff.out; exit 1; }
-	@if grep -q 'kagent-storage-version' $(VERIFY_TMP)/vsv-kagoff.out; then echo "FAIL: the storage-version hooks render with kagent off"; exit 1; fi
-	@$(PICK) $(VERIFY_TMP)/vsv-kagoff.out ServiceAccount t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,pre-delete,post-delete$$' || { echo "FAIL: kagent off: the hook identity is not back to the engine's own pre-install,pre-upgrade,pre-delete,post-delete"; exit 1; }
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --set components.kagent.enabled=false --set components.flux.enabled=false >$(VERIFY_TMP)/vsv-alloff.out 2>&1 || { cat $(VERIFY_TMP)/vsv-alloff.out; exit 1; }
-	@if grep -q 'helm.sh/hook\|t-hooks' $(VERIFY_TMP)/vsv-alloff.out; then echo "FAIL: engine off, kagent off: a hook or the hook identity renders (the pure app-of-apps render)"; exit 1; fi
-	@echo "ok: kagent off"
-	@echo "--> the kagent namespace: kagent.namespaceOverride, else the HelmReleases' target namespace"
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --set kagent.namespaceOverride=models >$(VERIFY_TMP)/vsv-ns.out 2>&1 || { cat $(VERIFY_TMP)/vsv-ns.out; exit 1; }
-	@[ "$$(grep -c 'ns="models"' $(VERIFY_TMP)/vsv-ns.out)" -ge 2 ] || { echo "FAIL: the hooks do not follow kagent.namespaceOverride"; exit 1; }
-	@$(HELM) template t $(CHART_DIR) $(STORAGE_ON) --set kagent.namespaceOverride= --set gitops.targetNamespace=plat --set components.flux.enabled=false >$(VERIFY_TMP)/vsv-ns2.out 2>&1 || { cat $(VERIFY_TMP)/vsv-ns2.out; exit 1; }
-	@[ "$$(grep -c 'ns="plat"' $(VERIFY_TMP)/vsv-ns2.out)" = "2" ] || { echo "FAIL: without an override the hooks do not fall back to gitops.targetNamespace"; grep -n 'ns=' $(VERIFY_TMP)/vsv-ns2.out; exit 1; }
-	@echo "ok: namespace"
-	@$(HELM) lint $(CHART_DIR) $(STORAGE_ON) >$(VERIFY_TMP)/vsv-lint.out 2>&1 || { cat $(VERIFY_TMP)/vsv-lint.out; exit 1; }
-	@echo "ok: helm lint"
-	@echo "ok: $@"
-
-# --- e2e ---------------------------------------------------------------------
-# One ATS scenario against any cluster its kubeconfig points at. The suite is
-# already kubeconfig-driven; this target only packages the chart and hands the
-# scenario its inputs (tests/ats/scenarios.py).
-#
-#   make e2e KUBECONFIG=~/.kube/lab.yaml
-#   make e2e KUBECONFIG=… SCENARIO=functional
-#   make e2e KUBECONFIG=… CLUSTER_TYPE=eks VALUES=helm/agent-platform/examples/managed-cloud-gs.yaml
-#
-# SECRETS AND THE DOMAIN STAY OUT OF THE REPOSITORY. The example files carry
-# placeholders; tests/e2e_overlay.py turns the environment into an overlay,
-# which this target writes to a temporary file that is removed on exit, and it
-# never prints a value.
-SCENARIO ?= smoke
-CLUSTER_TYPE ?= kind
-# The kubeconfig with a leading `~` expanded. zsh leaves the tilde of an
-# argument of the form KUBECONFIG=~/.kube/lab.yaml alone, and the recipe quotes
-# the value, so the shell never expands it either.
-E2E_KUBECONFIG := $(abspath $(subst ~,$(HOME),$(KUBECONFIG)))
-# The version the chart is packaged and installed under. A prerelease keeps a
-# published self HelmRelease from ever matching it.
-E2E_VERSION ?= 3.99.0-dev.local
-E2E_DIST ?= dist
-# The values files of the run, colon-separated, in Helm's order. This REPLACES
-# the smoke's own list, so it must be complete: the kind smoke needs
-# helm/agent-platform/examples/kind-lab-dex.yaml plus tests/ats/values-kagent.yaml
-# and tests/ats/values-round-trips.yaml. Empty (the default) keeps the
-# scenario's list, which is what a kind run wants. The overlay this target
-# writes from the environment is layered after these, whatever they are.
-# SCENARIO=functional installs the first of these files plus
-# tests/ats/values-kagent.yaml, with the overlay last: that scenario's shape is
-# the example with the engine off, not the smoke's round trips.
-VALUES ?=
-# The overlay this target writes from the environment, when any of these is set.
-# None of them is a credential: E2E_IDP_SECRET_NAME and E2E_IDP_CA_SECRET are
-# the NAMES of Secrets already on the cluster. The client secret itself never
-# passes through a command line; it lives in the Secret the chart reads
-# (global.identity.existingSecret) and, for the tests' own logins, in
-# ATS_CLIENT_SECRET in the caller's environment.
-#
-# Each of these names one fact, which the chart and the suite both need, so the
-# run names it once: the target passes them through, scenarios.load() reads each
-# as the fallback of the matching ATS_ variable, and an ATS_ variable that the
-# caller sets wins.
-E2E_DOMAIN ?=
-E2E_ISSUER_URL ?=
-E2E_CLIENT_ID ?=
-E2E_IDP_SECRET_NAME ?=
-E2E_IDP_CA_SECRET ?=
 
 .PHONY: e2e
 e2e: ## Run one ATS scenario against any cluster (KUBECONFIG=… [SCENARIO=smoke|functional] [CLUSTER_TYPE=kind|eks] [VALUES=a.yaml:b.yaml]). Packages the chart first; builds a values overlay from the environment so no secret or domain is committed.

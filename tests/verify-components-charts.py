@@ -138,9 +138,6 @@ MANAGERS = ["model-manager", "agent-manager"]
 # it as the container's `--kagent-api-version`, the pod-template change that
 # rolls the Deployments on the cut-over.
 KAGENT_API_VERSION = "v1alpha3"
-# The platform Harness's admission label (the Generic agent chart stamps it);
-# the rendered kagent chart must select by it alone.
-HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
@@ -149,7 +146,9 @@ UNRELEASED: dict[str, str] = {}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
-RENDER_AGAINST: dict[str, str] = {}
+RENDER_AGAINST: dict[str, str] = {
+    "agent-manager": "1.9.3-rf107e304t20261006134136h2486711",  # giantswarm/agent-manager#101
+}
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
 HELM_CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
@@ -493,23 +492,18 @@ def pull(url: str, version: str, dest: str) -> str:
 
 
 def check_harness_selector(manifest: str, what: str) -> None:
-    """The platform Harness the kagent chart renders admits templates by the ONE
-    label the Generic agent chart stamps. The meta chart blanks the chart's own
-    default key (kagent.dev/harness: "") and the line's template drops the empty
-    value — this is where that contract is proven against the chart the range
-    resolves to, on the rendered object (giantswarm/agent-platform#418)."""
+    """The platform Harness the kagent chart renders carries no admission
+    selector: an Agent names its Harness by spec.harnessRef, and the line's
+    Harness CRD (api.kagent.dev) has no allowedAgentTemplates. Proven here on
+    the rendered object of the chart the range resolves to."""
     harness = [d for d in manifest.split("\n---") if re.search(r"^kind: Harness$", d, re.M)]
     if len(harness) != 1:
         fail(f"{what} renders {len(harness)} Harness objects, expected the one platform Harness")
-    m = re.search(r"^ {6}matchLabels:\n((?: {8}\S.*\n)+)", harness[0] + "\n", re.M)
-    labels = dict(line.strip().split(": ", 1) for line in m.group(1).splitlines()) if m else {}
-    if labels != {HARNESS_LABEL: "kagent"}:
-        fail(
-            f"{what} renders the platform Harness selecting by {labels or 'nothing'}; the admission contract is "
-            f"{HARNESS_LABEL}=kagent alone — the chart's own kagent.dev/harness must be dropped (the meta chart forwards it "
-            "empty; the line's Harness template drops an empty-valued selector label, giantswarm/agent-platform#418)"
-        )
-    print(f"ok: {what} renders the platform Harness selecting by {HARNESS_LABEL}=kagent alone")
+    if not re.search(r"^apiVersion: api\.kagent\.dev/v1alpha3$", harness[0], re.M):
+        fail(f"{what} renders the platform Harness outside api.kagent.dev/v1alpha3, the group the line serves")
+    if re.search(r"^  allowedAgentTemplates:", harness[0], re.M):
+        fail(f"{what} renders the platform Harness with an admission selector; the line's Harness has none (an Agent names it by spec.harnessRef)")
+    print(f"ok: {what} renders the platform Harness at api.kagent.dev/v1alpha3 with no admission selector")
 
 
 def render_component(name: str, chart_dir: str, values: str, what: str, tmp: str) -> None:

@@ -81,9 +81,12 @@ def main(meta: str) -> int:
                     render(name, str(cc.REPO_ROOT / "helm" / chart), values, api_versions, f"{what} (working tree)", tmp)
                     continue
                 url, rng = cc.source(rendered[("OCIRepository", chart)])
-                version = cc.fluxsemver.resolve(cc.registry_tags(url), rng)
-                if not version:
+                tags = cc.registry_tags(url)
+                version = cc.fluxsemver.resolve(tags, rng)
+                if not version and name not in cc.UNRELEASED:
                     cc.fail(f"{what}: nothing published at {url} satisfies {rng!r}")
+                if not version:
+                    version = cc.fallback(name, url, rng, tags, "")
                 chart_dir = f"{tmp}/{name}/{version}"
                 if not os.path.isdir(f"{chart_dir}/{chart}"):
                     cc.pull(url, version, chart_dir)

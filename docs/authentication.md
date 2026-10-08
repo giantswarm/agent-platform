@@ -245,7 +245,7 @@ kagent line's controller honours the label — `Accepted=True`, reason
 `DiscoveryDisabled`, an empty inventory — an opt-out the line carries as a
 patch until upstream merges kagent-dev/kagent#2752. With discovery off a
 Harness cannot narrow the server to `muster.tools`; it exposes the server and
-may report a warning in `status.harnesses[].warnings` — the toolset header is
+may report a warning in the `Agent`'s `status.warnings` — the toolset header is
 the enforced narrowing, applied by muster per request.
 
 **Why the controller gets no credential of its own.** muster accepts Dex ID
@@ -347,7 +347,7 @@ otherwise. §5 describes why that layer is not optional there.
 
 ## 5. The kagent controller route
 
-The kagent controller (kagent API v2, `kagent.dev/v1alpha3`) is the second
+The kagent controller (kagent API v2, `api.kagent.dev/v1alpha3`) is the second
 protected API of the platform, next to muster. It serves native gRPC, gRPC-Web
 and A2A v1 on one port (`:8083`, unencrypted HTTP/2) and authorizes nothing on
 its own: it takes the caller from the `x-user-id` header (falling back to its
@@ -395,7 +395,7 @@ flowchart LR
 | Object | What it does |
 |---|---|
 | `AgentgatewayBackend kagent` | The controller Service with `policies.auth.passthrough` (the validated bearer is re-injected so the controller and, through `KAGENT_PROPAGATE_TOKEN` on the Harness, the actor see the person's token). No protocol pin: agentgateway infers HTTP/2 (h2c) for gRPC and keeps HTTP/1.1 for gRPC-Web, and the controller needs that split — it serves both on `:8083` and hands every HTTP/2 request whose content-type starts with `application/grpc` to its native gRPC server, so gRPC-Web pinned onto HTTP/2 is answered `415`. |
-| `GRPCRoute kagent-controller` | Matched by gRPC service — one rule per service, one service-only match each for `kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService, ModelService, SystemService}` and `lf.a2a.v1.A2AService` (`kagent.controllerRoute.grpc.services`), which the agentgateway controller (chart ≥ 2.1.1 running the line's release) translates into the path prefix `/<service>/`; a service with RPCs listed gets one exact service/method match per RPC instead (the shape an older controller needs, or a way to expose a subset). Either outranks the MCP catch-all's `PathPrefix: /`. On the data-plane Gateway, without a hostname so the in-cluster authority `agentgateway.<ns>.svc.cluster.local:8080` matches. No path prefix: the controller has no REST. gRPC-Web rides the same route (same `/<service>/<method>` paths over HTTP/1.1). |
+| `GRPCRoute kagent-controller` | Matched by gRPC service — one rule per service, one service-only match each for `kagent.api.v1alpha1.{AgentService, AgentTemplateService, ModelService, SessionService, SystemService}` and `lf.a2a.v1.A2AService` (`kagent.controllerRoute.grpc.services`), which the agentgateway controller (chart ≥ 2.1.1 running the line's release) translates into the path prefix `/<service>/`; a service with RPCs listed gets one exact service/method match per RPC instead (the shape an older controller needs, or a way to expose a subset). Either outranks the MCP catch-all's `PathPrefix: /`. On the data-plane Gateway, without a hostname so the in-cluster authority `agentgateway.<ns>.svc.cluster.local:8080` matches. No path prefix: the controller has no REST. gRPC-Web rides the same route (same `/<service>/<method>` paths over HTTP/1.1). |
 | `GRPCRoute kagent-controller-public` | The same matches on the public Gateway for `kagent.controllerRoute.hostname` (`agentgateway.<domain>`), forwarding to the agentgateway Service (Envoy Gateway carries HTTP/2 to a GRPCRoute backend); a `BackendTrafficPolicy` lifts Envoy's route timeout for streaming turns (`ingress.backendTrafficPolicy`). Not rendered when the chart-owned Gateway is the edge. |
 | `HTTPRoute kagent-mcp` + `MCPServer kagent` | `kagent.controllerRoute.mcp` (on with muster): the controller's MCP server (`/mcp`: `list_agent_instances`, `invoke_agent_instance`, the checkpoint and fork tools; `timeout: 300`, since an invoke answers when the receiving turn ends) at `/kagent/mcp` on the data plane's plaintext listener only (`sectionName: http`, in-cluster), rewritten to `/mcp` on `AgentgatewayBackend kagent`, and registered with muster in the `agent-platform` tool group with `forwardToken`. muster forwards the session's IdP token, `kagent-mcp-jwt` below validates it, and the controller acts as the person who ran the turn: a session lists and messages only the sessions its person may see. |
 | `AgentgatewayPolicy kagent-controller-jwt`, `kagent-mcp-jwt` | One per route, the CRD takes one kind of target per policy: the first on the GRPCRoute, its twin on the `kagent-mcp` HTTPRoute. Each: `jwtAuthentication` in `Strict` mode against `global.identity.issuerUrl` with the JWKS fetched from `jwtAuthentication.jwks` (a static `AgentgatewayBackend`, TLS-verified when `jwks.tls.enabled`); an `authorization` rule requiring the identity claim (`has(jwt.email)`); a `transformation` that **sets** `x-user-id` to `jwt.email`. `set` replaces every inbound value of the header, so a forged `x-user-id` never reaches the controller. |

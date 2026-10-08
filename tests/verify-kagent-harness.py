@@ -1,54 +1,36 @@
 #!/usr/bin/env python3
 """Assert the platform Harness is the kagent chart's since 4.8.0 (giantswarm/agent-platform#406)
-and that its admission selector survives the way a HelmRelease reaches the cluster (#418).
+and that the meta chart forwards its policy alone.
 
 On kagent API v2 how an agent runs is a Harness (giantswarm/agent-platform#344,
 bumblebee-plans#51 D5): a digest-pinned Go ADK runtime image, the environment
 that makes the caller's token reach muster (KAGENT_PROPAGATE_TOKEN), and the
-Substrate policy (a WorkerPool, a snapshot location). An AgentTemplate becomes
-Ready only when a Harness admits it (allowedAgentTemplates.selector); the Generic
-agent chart 1.x labels every template agent-platform.giantswarm.io/harness:
-kagent, and that one label is the whole admission contract.
-
-Through 4.7.19 the connectivity chart rendered that Harness from a digest the
-meta chart pinned. Since 4.8.0 the kagent chart renders it from
-its own Go ADK image at the digest stamped into the chart at publish, and the
-meta chart forwards only the GS policy. The chart's own default selector key
-(kagent.dev/harness: kagent) has to go, and Helm merges maps on coalesce: through
-4.9.3 the meta chart forwarded a null for it, which deletes the key on coalesce —
-but a kagent HelmRelease that pre-existed the cut-over is PATCHED, not created,
-and a JSON merge patch removes a null key instead of storing it, so the default
-came back and the live Harness admitted no template (graveler, 2026-09-13,
-giantswarm/agent-platform#418). The line's Harness template
-drops every selector label whose value is the empty string, and the meta chart
-forwards "" — a value every path stores. This test asserts:
+Substrate policy (a WorkerPool, a snapshot location). An Agent names its Harness
+by spec.harnessRef; the Harness has no admission selector. This test asserts:
   - the connectivity chart renders NO Harness and reads no kagent.harness key;
   - the meta chart forwards kagent.harness with create: true, the snapshot
-    location, the env, the admission label and the chart's own label key
-    (kagent.dev/harness) blanked — and no image, no workerPoolRef (the chart's
-    defaults: its stamped digest, the WorkerPool substrateWorkerPool.name);
+    location, the env and the compaction policy — no image, no workerPoolRef
+    (the chart's defaults: its stamped digest, the WorkerPool
+    substrateWorkerPool.name) and no allowedAgentTemplates;
   - the env follows the kagent OTel exporters the way the controller's tenant
     header does: KAGENT_PROPAGATE_TOKEN always; with an exporter on,
     OTEL_EXPORTER_OTLP_HEADERS (the tenant). Both exporters resolve off without
     the monitoring API (auto) or explicitly. The controller compiles every other
     telemetry setting into the actors from kagent.otel, whose export timeout
-    (500 ms) is the cap of the Go ADK's flush before a turn's response — the
-    turn's tail while the collector is slow or unreachable
+    (500 ms) is the cap of the Go ADK's flush before a turn's response
     (giantswarm/agent-platform#456);
-  - the live-shaped path: the kagent release's values carry no null anywhere,
-    and replayed as a merge patch onto a release that never held the key, then
-    coalesced with the chart's default and stripped of empty values the way the
-    line's template does, the selector is the platform label alone;
+  - the kagent release's values carry no null anywhere (a null is removed, not
+    stored, by the merge patch of a HelmRelease that already exists, #418);
   - an override kagent.harness.image (a dev loop's locally built image, by
     digest) reaches the kagent release's harness.image verbatim;
   - kagent.substrateWorkerPool.name follows an override (the Harness's
     workerPoolRef defaults to it in the chart);
   - kagent off forwards nothing.
 
-The rendered object itself is the kagent chart's (helm unittest there; and
-verify-components-charts renders the chart the range resolves to with these
-values and asserts the Harness it emits selects by the platform label alone);
-structural validation against the Harness CRD is verify-kagent-crds.
+The rendered object itself is the kagent chart's (verify-components-charts
+renders the chart the range resolves to with these values and asserts the
+Harness it emits carries no selector); structural validation against the
+Harness CRD is verify-kagent-crds.
 
 Usage: verify-kagent-harness.py <connectivity chart dir> <meta chart dir>
 """
@@ -59,9 +41,6 @@ import sys
 
 import yaml
 
-HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
-CHART_LABEL = "kagent.dev/harness"  # the kagent chart's own default selector key, forwarded empty so the line's template drops it
-CHART_DEFAULT_SELECTOR = {CHART_LABEL: "kagent"}  # helm/kagent/values.yaml harness.allowedAgentTemplates.selector.matchLabels
 DIGEST = "localhost:5001/golang-adk@sha256:" + "a" * 64
 SNAPSHOT = "s3://bucket/agents"
 CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true"]
@@ -134,17 +113,15 @@ def main(connectivity: str, meta: str) -> int:
         "create": True,
         "snapshotLocation": SNAPSHOT,
         "env": [ENV_PROPAGATE],
-        "allowedAgentTemplates": {"selector": {"matchLabels": {HARNESS_LABEL: "kagent", CHART_LABEL: ""}}},
         "compaction": {"tokenThreshold": 600000, "eventRetentionSize": 4},
     }
     if harness != expected:
         fail(f"the forwarded kagent.harness is not the GS policy alone:\n  got      {harness}\n  expected {expected}\n"
              "(no image by default — the chart's stamped digest is the Harness image; no workerPoolRef — the chart defaults it to "
-             f"substrateWorkerPool.name; {CHART_LABEL} is forwarded EMPTY, never null: the line's Harness template drops an "
-             "empty-valued selector label, while a null is lost on the patch of a pre-existing HelmRelease — #418; with both "
+             "substrateWorkerPool.name; no allowedAgentTemplates — an Agent names its Harness by spec.harnessRef; with both "
              "OTel exporters resolved off the env is KAGENT_PROPAGATE_TOKEN alone)")
-    print(f"ok: the meta chart forwards the platform Harness policy — create, the snapshot location, KAGENT_PROPAGATE_TOKEN "
-          f"(exporters off), {HARNESS_LABEL}: kagent with {CHART_LABEL} blanked; no image, no workerPoolRef")
+    print("ok: the meta chart forwards the platform Harness policy — create, the snapshot location, KAGENT_PROPAGATE_TOKEN "
+          "(exporters off), the compaction; no image, no workerPoolRef, no selector")
 
     # The actors' tenant header follows the exporters; the signals reach the
     # kagent chart resolved, in its SDK-spec shape.
@@ -176,20 +153,12 @@ def main(connectivity: str, meta: str) -> int:
     print("ok: the Harness env follows the exporters — the tenant header with either; kagent.otel reaches the chart with "
           f"resolved booleans and the {EXPORT_TIMEOUT} ms export timeout; the controller's header as before")
 
-    # The live-shaped path (#418): an installation upgraded from 3.x has a kagent
-    # HelmRelease already, and the meta chart's upgrade patches its spec.values.
+    # A null is removed, not stored, by the merge patch of a kagent HelmRelease
+    # that already exists (#418), so whatever it was meant to delete comes back.
     if paths := nulls(values):
         fail(f"the kagent release's values carry a null at {', '.join(paths)}; a null is removed — not stored — by the merge patch "
              "of a HelmRelease that already exists, so whatever it was meant to delete comes back on that installation (#418)")
-    live = merge_patch({"registry": "ghcr.io"}, values)  # a 3.x release: no harness block at all
-    forwarded = live["harness"]["allowedAgentTemplates"]["selector"]["matchLabels"]
-    coalesced = {**CHART_DEFAULT_SELECTOR, **forwarded}  # Helm coalesce: the release's values win, key by key
-    effective = {k: v for k, v in coalesced.items() if v != ""}  # the line's template drops an empty value
-    if effective != {HARNESS_LABEL: "kagent"}:
-        fail(f"replayed as a patch onto a pre-existing kagent release and coalesced with the chart's default, the Harness selects by "
-             f"{effective}; the admission contract is {HARNESS_LABEL}=kagent alone (#418)")
-    print(f"ok: the kagent release's values carry no null; patched onto a pre-existing release and coalesced with the chart's "
-          f"default, the Harness selector is {HARNESS_LABEL}=kagent alone")
+    print("ok: the kagent release's values carry no null")
 
     values = kagent_values(render(meta, [*base, "--set", f"kagent.harness.image={DIGEST}", "--set", "kagent.substrateWorkerPool.name=pool-b"]))
     if values["harness"].get("image") != DIGEST:

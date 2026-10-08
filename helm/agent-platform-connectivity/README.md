@@ -5,7 +5,7 @@ consumer-side wiring that turns the platform components into a working whole on
 a cluster: the public muster route and the agentgateway data-plane Gateway +
 AgentgatewayParameters + HTTPRoutes + BackendTrafficPolicies, the NetworkPolicies,
 the kagent and klaus-gateway routes, the kagent catalog (ModelConfigs and
-RemoteMCPServers at kagent.dev/v1alpha3) and tenant identity, the CloudNativePG
+RemoteMCPServers at api.kagent.dev/v1alpha3) and tenant identity, the CloudNativePG
 Cluster, and — gated on the component toggles — the Backstage app-config and
 route, the mcp-kubernetes MCPServer registration with muster and
 the KServe/vLLM model serving layer (runtime, presets, cache, policies). Ships NO
@@ -325,8 +325,8 @@ one field without restating the rest. A field is the place for what is per
 request: as a metric label it would make one series per value.
 
 The chart's one field is `agent_instance_id`, the session of an agent's model
-call. The kagent runtime names the `AgentInstance` a turn runs in (a Dev
-Portal conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
+call. The kagent runtime names the `Session` a turn runs in (a Dev Portal
+conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
 model call of that turn, and the field reads it behind the same Substrate
 egress predicate as the agent labels (`agent-platform.substrate.egressCall`),
 so a pod that is not the egress logs no session (the empty value drops the
@@ -1391,9 +1391,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
 | kagent.controllerRoute.parentRef.namespace | string | `"envoy-gateway-system"` |  |
-| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentInstanceService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SessionService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."lf.a2a.v1.A2AService" | list | `[]` |  |
 | kagent.controllerRoute.mcp.enabled | bool | `true` |  |
@@ -1641,7 +1642,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.7.0"` |  |
+| agentManager.migration.image.tag | string | `"1.10.0"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |

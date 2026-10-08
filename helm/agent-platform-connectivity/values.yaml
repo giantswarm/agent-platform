@@ -1263,7 +1263,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # having already validated the JWT. That boundary is agentgateway (which
       # validates the JWT) for the controllerRoute path, and the netpols restrict
       # controller ingress to agentgateway + the release/kagent namespaces, so the
-      # controller is never directly reachable. Use "unsecure" only for local dev
+      # controller is never directly reachable. Use "insecure" only for local dev
       # without any front proxy.
       mode: trusted-proxy
       # email, not sub: dex subs are opaque connector-prefixed identifiers
@@ -1606,8 +1606,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
   # (h2c to the controller) and a GRPCRoute in the release namespace, matched by
   # gRPC service (controllerRoute.grpc.services) —
-  # kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService, ModelService,
-  # SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
+  # kagent.api.v1alpha1.{AgentService, AgentTemplateService, ModelService,
+  # SessionService, SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
   # controller has no REST). Native gRPC over HTTP/2 from the public hostname
   # and from the in-cluster agentgateway Service
   # (grpc://agentgateway.<release namespace>.svc.cluster.local:8080, h2c), and
@@ -1635,13 +1635,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # controller before 2.1.1 translated a service-only match into an exact
       # path no request has). Either shape outranks the MCP catch-all route.
       services:
-        kagent.api.v1alpha1.AgentInstanceService: []
+        kagent.api.v1alpha1.AgentService: []
         kagent.api.v1alpha1.AgentTemplateService: []
         kagent.api.v1alpha1.ModelService: []
+        kagent.api.v1alpha1.SessionService: []
         kagent.api.v1alpha1.SystemService: []
         lf.a2a.v1.A2AService: []
-    # kagent's MCP server (the controller's /mcp: list_agent_instances, the
-    # ready sessions the caller may see, invoke_agent_instance, a message to
+    # kagent's MCP server (the controller's /mcp: list_sessions, the
+    # ready sessions the caller may see, invoke_session, a message to
     # one of them through the A2A gateway, and the checkpoint and fork tools)
     # registered with muster as
     # MCPServer kagent in the agent-platform tool group, so every session with
@@ -1655,7 +1656,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       pathPrefix: /kagent/mcp
       # Seconds muster waits for one call (MCPServer spec.timeout, 1-300).
-      # invoke_agent_instance answers when the receiving session's turn ends,
+      # invoke_session answers when the receiving session's turn ends,
       # so the default is the CRD's maximum; a longer turn runs through the
       # MCP Tasks extension.
       timeout: 300
@@ -1733,8 +1734,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # --- Admin-owned kagent CRs (read by connectivity templates, not the subchart) ---
   # Tenant agents — created with the generic agent chart
   # (https://github.com/giantswarm/agent), one release per agent — reference
-  # these by name. Every object here is kagent.dev/v1alpha3 (kagent API v2) in
-  # the kagent namespace, where the AgentTemplates that bind it live: a template
+  # these by name. Every object here is api.kagent.dev/v1alpha3 in
+  # the kagent namespace, where the Agents that bind it live: an Agent
   # binds a RemoteMCPServer of its own namespace only. There is no shared muster
   # RemoteMCPServer: the agent chart 1.x renders one per agent — muster's
   # in-cluster URL (its value muster.url; agent-manager composes it from the
@@ -2697,39 +2698,39 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       # and the cut-over Job alike. The cilium flavor adds them next to the
       # names.
       cidrs: []
-  # The per-installation cut-over of the agents to the kagent API v2 line
-  # (giantswarm/agent-platform#346; bumblebee-plans#51 D11): a run,
-  # <chart>-agent-manager-migrate-<8-hex hash of its image, args and
+  # The per-installation cut-over of the agents to the api.kagent.dev line
+  # (giantswarm/agent-platform#346 for the shape; bumblebee-plans#51 D11): a
+  # run, <chart>-agent-manager-migrate-<8-hex hash of its image, args and
   # environment> in the kagent namespace (templates/kagent/migrate-*.yaml),
   # created by a post-install/post-upgrade hook from the suspended CronJob
   # <chart>-agent-manager-migrate, runs `agent-manager migrate` from
-  # agent-manager's image as the tenant
-  # identity kagent.fluxServiceAccountName — the rewrite of every
-  # portal-created Generic-chart release to chart 1.x values (removed keys
-  # dropped, muster.toolNames → muster.tools, skills pinned to commits, the
-  # range moved to 1.x), a diff for each GitOps-owned release, and — once every
-  # AgentTemplate is Ready on the platform Harness — the deletion of the
-  # leftover v1alpha2 Agents and the five removed CRDs. No Job of the release:
-  # a migrate failure must never fail the upgrade that renders the Harness,
-  # and the run starts only once its network policy is applied (#378). The
-  # run starts when connectivity 4.0 first renders the migration; a changed
-  # image, args or environment starts a new run; the contract phase is a
-  # re-run — `kubectl create job --from=cronjob/…` by hand, or the next upgrade
-  # after its ttlSecondsAfterFinished (UPGRADE.md). Idempotent: a run with nothing
-  # left to do changes nothing. Rendered when kagent and agent-manager are on.
-  # The report is the ConfigMap agent-manager-migrate-report in the kagent
-  # namespace; a failed phase leaves the v1alpha2 objects in place. Retires,
-  # with its migration-only bindings, in a later 4.x release once the last
-  # installation is cut over.
+  # agent-manager's image as the tenant identity kagent.fluxServiceAccountName.
+  # With agent-manager.agentChart.semver on 2.x it moves the Generic chart 1.x
+  # releases to 2.x: every release validated against the 2.x schema, the
+  # portal-created ones rewritten (sub-agent bindings to subAgent, the 1.x
+  # Harness admission label to agent.harness) and their namespace's
+  # OCIRepository moved to 2.x, a diff for each GitOps-owned release, and —
+  # once every Agent is Ready — the deletion of the leftover kagent.dev
+  # AgentTemplates no release renders. No CRD is deleted. No Job of the
+  # release: a migrate failure must never fail the upgrade, and the run starts
+  # only once its network policy is applied (#378). A changed image, args or
+  # environment starts a new run; the contract phase is a re-run — `kubectl
+  # create job --from=cronjob/…` by hand, or the next upgrade after its
+  # ttlSecondsAfterFinished (UPGRADE.md). Idempotent: a run with nothing left
+  # to do changes nothing. Rendered when kagent and agent-manager are on. The
+  # report is the ConfigMap agent-manager-migrate-report in the kagent
+  # namespace. Retires, with its migration-only bindings, in a later 4.x
+  # release once the last installation is cut over.
   migration:
     enabled: true
     # agent-manager's image; the tag is the meta chart's BOM pin for the
-    # agent-manager component (components.agent-manager) and moves with it —
-    # `migrate` exists from 1.1.0.
+    # agent-manager component (components.agent-manager) and moves with it;
+    # the 1.x -> 2.x path of `migrate` exists from 1.10.0 (an older image
+    # reads the 2.x range as the 0.x -> 1.x path).
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.7.0
+      tag: 1.10.0
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false

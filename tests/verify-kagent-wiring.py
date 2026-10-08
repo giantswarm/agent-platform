@@ -76,12 +76,11 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 # chart's exporter configuration (the controller ConfigMap); the connectivity chart
 # reads the same endpoints for the OTLP egress of the controller and of the actors'
 # egress gateway (agent-platform.kagent.otlpTargets, giantswarm/agent-platform#456).
-UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness", "otel"}
+UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness", "harnesses", "otel"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
 LINE_REPOSITORY = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
 LINE_IMAGES = "giantswarm/kagent"
-HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 # What the release range must admit and refuse, by shape: the line's releases
 # of the pinned minor — the floor and its patches, which never change a runtime
 # contract — and nothing else: not the line's dev builds in gitsemver 3's
@@ -252,16 +251,16 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
         fail("kagent.harness.create is not true; since 4.8.0 the kagent chart renders the platform Harness")
     if re.search(r"^image:", harness, re.M):
         fail("kagent.harness.image forwarded by default; the chart's own Go ADK digest is the Harness image — an override travels only when set")
-    for needle, what in (("snapshotLocation: ", "the snapshot location"), ("- name: KAGENT_PROPAGATE_TOKEN", "KAGENT_PROPAGATE_TOKEN in env"),
-                         (f"{HARNESS_LABEL}: kagent", "the platform admission label"),
-                         ('kagent.dev/harness: ""', "the chart's own admission label blanked (an empty value, which the line's Harness "
-                                                    "template drops — never a null, which the patch of a pre-existing HelmRelease loses, #418)")):
+    for needle, what in (("snapshotLocation: ", "the snapshot location"), ("- name: KAGENT_PROPAGATE_TOKEN", "KAGENT_PROPAGATE_TOKEN in env")):
         if needle not in harness:
             fail(f"kagent.harness forwarded without {what}: the meta chart owns the GS policy of the platform Harness\n{harness}")
+    if "allowedAgentTemplates" in harness:
+        fail("kagent.harness.allowedAgentTemplates forwarded; the line's Harness has no admission selector (an Agent names its Harness by spec.harnessRef)")
     pool = scalar(values.get("substrateWorkerPool", []), "name")
-    if not pool or f"name: {pool}" not in controller:
-        fail("kagent.substrateWorkerPool.name and kagent.controller.substrate.defaultWorkerPool.name differ; "
-             "the Harness's workerPoolRef and the controller's default name one pool")
+    if not pool:
+        fail("kagent.substrateWorkerPool.name is empty; the Harness's workerPoolRef defaults to it")
+    if "defaultWorkerPool" in "\n".join(controller):
+        fail("kagent.controller.substrate.defaultWorkerPool forwarded; the line's chart has no such key (every ActorTemplate is pinned to its Harness's pool)")
     if "enabled: true" not in controller or "ateApiEndpoint:" not in "\n".join(controller):
         fail("kagent.controller.substrate is not on with its ate-api endpoint; the line has no runtime without Substrate")
     print(f"ok: one build of the line, named by the chart — no tag, no workerImage, no Harness digest forwarded; the Harness policy forwarded; WorkerPool {pool}")

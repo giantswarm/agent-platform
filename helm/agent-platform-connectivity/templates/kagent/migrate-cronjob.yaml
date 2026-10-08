@@ -1,22 +1,22 @@
 {{- /*
-The cut-over of one installation's agents to the kagent API v2 line
-(giantswarm/agent-platform#346; bumblebee-plans#51 D11, expand–contract):
-`agent-manager migrate`, run once per pod template, in the kagent namespace,
-as the tenant identity of the agents' Flux HelmReleases
+The cut-over of one installation's agents to the api.kagent.dev line
+(giantswarm/agent-platform#346 for the shape; bumblebee-plans#51 D11,
+expand–contract): `agent-manager migrate`, run once per pod template, in the
+kagent namespace, as the tenant identity of the agents' Flux HelmReleases
 (kagent.fluxServiceAccountName — never the literal; verify-identity forbids
-it). The command rewrites every portal-created Generic-chart release to chart
-1.x values (removed keys dropped, muster.toolNames → muster.tools, every git
-skill pinned to a commit, the per-namespace OCIRepository moved to 1.x), emits
+it). The 2.x range of agent-manager.agentChart.semver picks the 1.x -> 2.x
+path: the command validates every Generic-chart release against the chart
+2.x schema, rewrites the portal-created ones (sub-agent bindings `agent` ->
+`subAgent`, the 1.x Harness admission label -> agent.harness) and moves the
+per-namespace OCIRepository to 2.x once every release on it can move, emits
 the same rewrite as a diff for every GitOps-owned release (read in the
 namespaces of agentManager.migration.gitopsNamespaces, never written), records
 its report in the ConfigMap agent-manager-migrate-report of the kagent
-namespace, and — once every AgentTemplate is Ready on the platform Harness and
-no release is left on 0.x — deletes the leftover kagent.dev/v1alpha2 Agents and
-the five removed CRDs (agents, sandboxagents, agentharnesses, memories,
-toolservers), which the kagent upgrade leaves in place (helm.sh/resource-policy:
-keep). Every phase is idempotent and gated on the previous one; a failed phase
-leaves the v1alpha2 objects in place; a run that finds nothing left changes
-nothing.
+namespace, and — once every Agent is Ready and no release is left on 1.x —
+deletes the leftover kagent.dev AgentTemplates no release renders. It deletes
+no CRD: the kagent.dev CRDs stay until every component reads api.kagent.dev.
+Every phase is idempotent and gated on the previous one; a run that finds
+nothing left changes nothing.
 
 A suspended CronJob, started by a hook, deliberately not a Job of the
 release: this release also renders the platform Harness, and a migrate
@@ -52,15 +52,15 @@ nothing (the hook skips an existing name, finished or not). The pod template
 carries the stable labels only (never helm.sh/chart or
 app.kubernetes.io/version), so a chart release alone starts no run
 (giantswarm/agent-platform#399). So the command's expand phase runs when
-connectivity 4.0 first renders the migration, and the contract phase — once
-the templates are Ready — is a re-run: by hand from the CronJob, or the next
+the release first renders a new image or range, and the contract phase — once
+the Agents are Ready — is a re-run: by hand from the CronJob, or the next
 upgrade after ttlSecondsAfterFinished removed the finished run
 (giantswarm/agentlab#143 rehearses the sequence; `migrate` exits 0 while
 something is pending, so no in-Job waiting).
 
 The run takes its inputs the way `agent-manager serve` does, as environment:
 the kagent namespace, the further managed namespaces, the agent chart's OCI URL
-and range (1.x on the 4.0 meta chart), the GitOps namespaces the GitOps-owned
+and range (2.x on the api.kagent.dev line), the GitOps namespaces the GitOps-owned
 releases are read from, and the platform Harness name. It reads no GitHub
 token: public skill repositories resolve, private refs are reported as
 pending (agents read private skills through agent-manager's minted
@@ -87,7 +87,7 @@ over.
 {{- $env = append $env (dict "name" "AGENT_MANAGER_MANAGED_NAMESPACES" "value" (join "," .)) }}
 {{- end }}
 {{- $env = append $env (dict "name" "AGENT_CHART_OCI_URL" "value" (dig "agentChart" "ociUrl" "oci://gsoci.azurecr.io/charts/giantswarm/agent" $am)) }}
-{{- $env = append $env (dict "name" "AGENT_CHART_SEMVER" "value" (dig "agentChart" "semver" "1.x" $am | toString)) }}
+{{- $env = append $env (dict "name" "AGENT_CHART_SEMVER" "value" (dig "agentChart" "semver" "2.x" $am | toString)) }}
 {{- with (dig "agentChart" "semverFilter" "" $am) }}
 {{- $env = append $env (dict "name" "AGENT_CHART_SEMVER_FILTER" "value" .) }}
 {{- end }}
@@ -96,10 +96,9 @@ over.
 migrate-rbac.yaml grant exactly that read there). */ -}}
 {{- $env = append $env (dict "name" "AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES" "value" (join "," .)) }}
 {{- end }}
-{{- /* The platform Harness every migrated template must become Ready on. Its
-name is fixed by the kagent API v2 contract (the Harness `kagent`, admission
-label agent-platform.giantswarm.io/harness: kagent), so it is written here,
-not read from kagent.harness. */ -}}
+{{- /* The platform Harness every migrated Agent names. agent-manager's own
+default and the Harness the kagent chart renders are both `kagent`, so it is
+written here, not read from kagent.harness. */ -}}
 {{- $env = append $env (dict "name" "AGENT_HARNESS_NAME" "value" "kagent") }}
 {{- /* The chart's schema and the skill resolver cache under $HOME; the root
 filesystem is read-only. */ -}}
@@ -107,7 +106,7 @@ filesystem is read-only. */ -}}
 {{- $template := include "agent-platform.kagent.migration.podTemplate" (dict "root" . "serviceAccountName" $sa "image" $image "args" $args "env" $env) }}
 {{- $hash := $template | sha256sum | trunc 8 }}
 {{- $name := printf "%s-%s" (include "agent-platform.kagent.migration.name" .) $hash }}
-{{- $about := "agent-manager migrate: the cut-over of this installation's agents to chart 1.x on the kagent API v2 line; re-run with kubectl create job --from=cronjob/<this> (UPGRADE.md)" }}
+{{- $about := "agent-manager migrate: the cut-over of this installation's agents from Generic chart 1.x to 2.x on the api.kagent.dev line; re-run with kubectl create job --from=cronjob/<this> (UPGRADE.md)" }}
 ---
 apiVersion: batch/v1
 kind: CronJob

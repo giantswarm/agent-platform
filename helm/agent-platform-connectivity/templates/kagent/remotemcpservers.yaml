@@ -1,7 +1,7 @@
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.remoteMcpServers }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{/* Operator-owned RemoteMCPServers (kagent.remoteMcpServers[]), kagent API v2
-(kagent.dev/v1alpha3), in the kagent namespace: an AgentTemplate binds a
+(api.kagent.dev/v1alpha3), in the kagent namespace: an Agent binds a
 RemoteMCPServer of its own namespace only (tools[].mcp.server is a local
 reference), so every server an agent can use lives where the templates do.
 
@@ -23,7 +23,7 @@ for a server that has no notion of the caller, wrong for one that should see
 the person (docs/authentication.md explains). */}}
 {{- range .Values.kagent.remoteMcpServers }}
 ---
-apiVersion: kagent.dev/v1alpha3
+apiVersion: api.kagent.dev/v1alpha3
 kind: RemoteMCPServer
 metadata:
   name: {{ required "kagent.remoteMcpServers[].name is required" .name | quote }}

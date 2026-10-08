@@ -553,7 +553,7 @@ components:  # @schema additionalProperties: true
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing.
-    versionRange: ">=1.2.0 <1.3.0"
+    versionRange: ">=1.4.0 <1.5.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -663,12 +663,12 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.2.0 <1.3.0"
+    versionRange: ">=1.4.0 <1.5.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
     ownedCrds:
-      - modelconfigs.kagent.dev
+      - modelconfigs.api.kagent.dev
   substrate-crds:  # @schema additionalProperties: true
     chart: substrate-crds
     # Agent Substrate — kagent API v2's actor runtime: every agent runs as a
@@ -714,7 +714,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.3.1 <1.4.0"
+    versionRange: ">=1.5.0 <1.6.0"
     # Stable releases only, also where gitops.prereleases admits the
     # platform's release candidates: the worker image above follows the
     # floor, and a candidate's atelet next to the floor's worker fails every
@@ -743,7 +743,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.3.1 <1.4.0"
+    versionRange: ">=1.5.0 <1.6.0"
     # Stable releases only, the range of substrate-crds above.
     prereleases: false
     valuesFrom: substrate
@@ -860,7 +860,11 @@ components:  # @schema additionalProperties: true
     # and, on a unified-memory node, composes --gpu-memory-utilization from
     # the weights plus overhead, so devstral-small-2's 0.90 (sized for one
     # 48 GB L40S) serves on a Spark too (giantswarm/model-manager#223).
-    versionRange: ">=1.10.2 <2.0.0"
+    # 1.14.0 is the floor on the api.kagent.dev line: it discovers the group
+    # its ModelConfigs go to (api.kagent.dev first) with a bare apiVersion,
+    # so no installation keeps a model-manager that writes kagent.dev
+    # (giantswarm/model-manager#247).
+    versionRange: ">=1.14.0 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -889,8 +893,12 @@ components:  # @schema additionalProperties: true
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
     # (giantswarm/agent-manager#76, giantswarm/giantswarm#36711). 1.7.0 takes
     # agentChart.semverFilter, which gitops.prereleases sets
-    # (giantswarm/agent-manager#86).
-    versionRange: ">=1.7.0 <2.0.0"
+    # (giantswarm/agent-manager#86). 1.10.0 reads and composes the
+    # api.kagent.dev Agent of this kagent line and migrates Generic chart 1.x
+    # releases to 2.x (giantswarm/agent-manager#100).
+    # 1.10.0 takes kagent.controllerTarget, the kagent controller its session
+    # tools call (giantswarm/agent-manager#101).
+    versionRange: ">=1.10.0 <2.0.0"
     valuesFrom: agent-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -2530,22 +2538,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       ateApiEndpoint: dns:///api.ate-system.svc:443
       atenetRouterURL: http://atenet-router.ate-system.svc:80
-      # INERT on kagent API v2 — not a knob. The kagent chart renders it as the
-      # controller's SUBSTRATE_DEFAULT_WORKERPOOL_NAME / _NAMESPACE env, and
-      # nothing in the line reads them: every ActorTemplate is pinned to the
-      # pool of the Harness that admitted it (the Harness's workerPoolRef,
-      # kagent.harness), which follows substrateWorkerPool.name below. Kept in
-      # step with that name so the env is at least not misleading
-      # (giantswarm/agent-platform#472).
-      defaultWorkerPool:
-        name: kagent-default
     auth:
       # Default on GS clusters. trusted-proxy reads Authorization: Bearer JWT and
       # decodes claims WITHOUT signature verification — it relies on a front proxy
       # having already validated the JWT. That boundary is agentgateway (which
       # validates the JWT) for the controllerRoute path, and the netpols restrict
       # controller ingress to agentgateway + the release/kagent namespaces, so the
-      # controller is never directly reachable. Use "unsecure" only for local dev
+      # controller is never directly reachable. Use "insecure" only for local dev
       # without any front proxy.
       mode: trusted-proxy
       # email, not sub: dex subs are opaque connector-prefixed identifiers
@@ -2553,6 +2552,19 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # stable human identity and matches muster's trusted-issuer subjectClaim,
       # so UI (oauth2-proxy) and A2A sessions key identically.
       userIdClaim: email
+    # The line's session lifecycle knobs travel as written (the block is the
+    # kagent chart's; the chart renders each as its KAGENT_* env): sessionIdleTTL
+    # (KAGENT_SESSION_IDLE_TTL, 168h: an idle session is deleted; running tasks
+    # and turns waiting for input do not expire), sessionShareMaxTTL
+    # (KAGENT_SESSION_SHARE_MAX_TTL, 0: the longest lifetime a session share may
+    # request, and the lifetime a share created without one receives; 0 leaves a
+    # share valid until revoked or the session is deleted), stalledTurnTimeout
+    # (KAGENT_STALLED_TURN_TIMEOUT, 1h: a turn whose runtime recorded no event
+    # for that long is failed so the session takes its next message) and
+    # pausedRuntimeTTL (KAGENT_PAUSED_RUNTIME_TTL, 2m: a runtime paused for input
+    # is suspended to a durable snapshot once its pause is older than this). The
+    # platform sets none; an installation that bounds its shares sets
+    # sessionShareMaxTTL here (klaus-gateway's thread shares renew within it).
     # Voluntary disruption (giantswarm/agent-platform#431): the controller pod
     # holds every streaming turn (A2A SendStreamingMessage, the portal's SSE)
     # and the actor sessions behind them; an eviction mid-turn leaves the task
@@ -3046,16 +3058,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # image plus the Substrate policy (the WorkerPool above, a snapshot
   # location). The kagent chart renders ONE platform Harness, `kagent`, in the
   # kagent namespace from this block (harness.create) with its own Go ADK
-  # image at the digest it was published with (controller.agentImage.digest);
-  # the Generic agent chart 1.x labels every AgentTemplate
-  # agent-platform.giantswarm.io/harness: kagent to be admitted by it. Through
-  # 4.7.19 the connectivity chart rendered this object; 4.8.0 handed it to the
-  # kagent release in place (UPGRADE.md). The Harness carries no credential, by
-  # design: a private skill or plugin repository's credential is per source on
-  # the AgentTemplate (skills[].source.git.credentialRef, a Secret next to the
-  # template), so a missing Secret fails only the templates that name it and
-  # the token travels only with their requests (README "Private skill
-  # repositories").
+  # image at the digest it was published with (controller.agentImage.digest).
+  # An Agent names it by spec.harnessRef (the Generic agent chart renders
+  # harnessRef.name: kagent); there is no admission label or selector. The
+  # Harness carries no credential, by design: a private skill or plugin
+  # repository's credential is per source on the AgentTemplate
+  # (skills[].source.git.credentialRef, a Secret next to the template), so a
+  # missing Secret fails only the templates that name it and the token travels
+  # only with their requests (README "Private skill repositories").
   harness:
     create: true
     # An OVERRIDE of the runtime image, BY DIGEST (<repository>@sha256:<64 hex>;
@@ -3231,30 +3241,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         value: "true"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: auto
-    # The admission contract: a template is admitted by the ONE label the
-    # Generic agent chart 1.x stamps (the value is the Harness's name). Helm
-    # merges maps on coalesce, so the kagent chart's own default key
-    # (kagent.dev/harness: kagent) would join this one and a template would
-    # need both labels. The empty value removes it: the line's Harness
-    # template drops every selector label whose value is empty.
-    # Not a null — a null deletes the key on coalesce only while it reaches
-    # the chart, and the JSON merge patch that updates a kagent HelmRelease
-    # which pre-existed the cut-over removes a null key instead of storing it,
-    # so the chart default came back and the Harness admitted no template
-    # (giantswarm/agent-platform#418). An empty string survives create and
-    # patch alike. Keep the key: without it the selector requires both labels.
-    allowedAgentTemplates:
-      selector:
-        matchLabels:
-          agent-platform.giantswarm.io/harness: kagent
-          kagent.dev/harness: ""
 
   # --- Routing (read by umbrella templates/kagent/, not passed to subchart) ---
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
   # (h2c to the controller) and a GRPCRoute in the release namespace, matched by
   # gRPC service (controllerRoute.grpc.services) —
-  # kagent.api.v1alpha1.{AgentInstanceService, AgentTemplateService, ModelService,
-  # SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
+  # kagent.api.v1alpha1.{AgentService, AgentTemplateService, ModelService,
+  # SessionService, SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
   # controller has no REST). Native gRPC over HTTP/2 from the public hostname
   # and from the in-cluster agentgateway Service
   # (grpc://agentgateway.<release namespace>.svc.cluster.local:8080, h2c), and
@@ -3282,13 +3275,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # controller before 2.1.1 translated a service-only match into an exact
       # path no request has). Either shape outranks the MCP catch-all route.
       services:
-        kagent.api.v1alpha1.AgentInstanceService: []
+        kagent.api.v1alpha1.AgentService: []
         kagent.api.v1alpha1.AgentTemplateService: []
         kagent.api.v1alpha1.ModelService: []
+        kagent.api.v1alpha1.SessionService: []
         kagent.api.v1alpha1.SystemService: []
         lf.a2a.v1.A2AService: []
-    # kagent's MCP server (the controller's /mcp: list_agent_instances, the
-    # ready sessions the caller may see, invoke_agent_instance, a message to
+    # kagent's MCP server (the controller's /mcp: list_sessions, the
+    # ready sessions the caller may see, invoke_session, a message to
     # one of them through the A2A gateway, and the checkpoint and fork tools)
     # registered with muster as
     # MCPServer kagent in the agent-platform tool group, so every session with
@@ -3302,7 +3296,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       pathPrefix: /kagent/mcp
       # Seconds muster waits for one call (MCPServer spec.timeout, 1-300).
-      # invoke_agent_instance answers when the receiving session's turn ends,
+      # invoke_session answers when the receiving session's turn ends,
       # so the default is the CRD's maximum; a longer turn runs through the
       # MCP Tasks extension.
       timeout: 300
@@ -3380,8 +3374,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # --- Admin-owned kagent CRs (read by connectivity templates, not the subchart) ---
   # Tenant agents — created with the generic agent chart
   # (https://github.com/giantswarm/agent), one release per agent — reference
-  # these by name. Every object here is kagent.dev/v1alpha3 (kagent API v2) in
-  # the kagent namespace, where the AgentTemplates that bind it live: a template
+  # these by name. Every object here is api.kagent.dev/v1alpha3 in
+  # the kagent namespace, where the Agents that bind it live: an Agent
   # binds a RemoteMCPServer of its own namespace only. There is no shared muster
   # RemoteMCPServer: the agent chart 1.x renders one per agent — muster's
   # in-cluster URL (its value muster.url; agent-manager composes it from the
@@ -3414,43 +3408,30 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   description: "external MCP server"
 
   # --- Coding agents: further Harnesses (the kagent chart's harnesses[]) ---
-  # A coding agent is an AgentTemplate admitted by a claude Harness: Claude
-  # Code run headless by the kagent line's claude-harness image in a Substrate
-  # actor, calling muster as the person who sent the turn
+  # A coding agent is an Agent whose spec.harnessRef names a claude Harness:
+  # Claude Code run headless by the kagent line's claude-harness image in a
+  # Substrate actor, calling muster as the person who sent the turn
   # (giantswarm/giantswarm#37625; bumblebee-plans#60). This list is forwarded
-  # to the kagent chart as it is: one entry per further Harness — the
-  # claude-harness image, a toolchain image built from it, or another Go ADK
-  # Harness — with the policy shape of harness.* above plus runtime: claude
-  # (the default) or kagent. A claude entry takes the chart's claude-harness
-  # image at its published digest; its snapshotLocation is its own (a snapshot
-  # is the actor's whole memory and filesystem, and each store has its own
-  # retention); egress lists the git hosts and toolchain registries its agents
-  # may reach besides what their revision compiles. On the kagent 1.x line a
-  # template names its Harness by the label the agent chart stamps
-  # (agent-platform.giantswarm.io/harness: <name>; agent-manager's `harness`
-  # argument), so the selector pairs them; upstream's later Agent object names
-  # the Harness directly and the selectors go then. Empty (the default) renders
-  # no further Harness. Needs the kagent line release that carries harnesses[]
-  # (giantswarm/kagent-upstream#134); an earlier chart ignores the key.
+  # to the kagent chart as it is: one entry per further Harness, with the
+  # policy shape of harness.* above plus runtime: claude (the default) or
+  # kagent. A claude entry takes the chart's claude-harness image at its
+  # published digest; its snapshotLocation is its own (a snapshot is the
+  # actor's whole memory and filesystem, and each store has its own
+  # retention); limits (claude entries only, Harness.spec.claude.limits:
+  # budgetUSD as a decimal string, maxTurns) bound every turn of every agent
+  # on it. An Agent declares its own egress (spec.egress, the agent chart's
+  # agent.egress); a Harness carries none. Empty (the default) renders no
+  # further Harness.
   harnesses: []
   # - name: claude
   #   runtime: claude
   #   snapshotLocation: s3://<bucket>/claude
-  #   egress:
-  #     - github.com
-  #     - "*.githubusercontent.com"
-  #     - proxy.golang.org
-  #     - sum.golang.org
-  #     - registry.npmjs.org
   #   env:
   #     - name: KAGENT_PROPAGATE_TOKEN          # tool calls to muster as the person
   #       value: "true"
-  #     - name: KAGENT_CLAUDE_PROJECT_INSTRUCTIONS  # a cloned repository's CLAUDE.md, its hooks off
-  #       value: "true"
-  #   allowedAgentTemplates:
-  #     selector:
-  #       matchLabels:
-  #         agent-platform.giantswarm.io/harness: claude
+  #   limits:
+  #     budgetUSD: "2.00"
+  #     maxTurns: 40
 
 # === The platform's own Grafana boards ===
 # Forwarded to the connectivity chart, which renders one ConfigMap per board
@@ -4435,15 +4416,13 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
   agentChart:
     ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
     # The Generic agent chart line agent-manager composes into every agent's
-    # OCIRepository: 1.x (giantswarm/agent 1.0.0 and up) renders
-    # kagent.dev/v1alpha3 AgentTemplates for this release's kagent, 0.x the
-    # v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases of
-    # the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart. From 1.5.0 the chart renders no
-    # spec.context.compaction on the AgentTemplate: the kagent line from 1.1.0
-    # refuses the field and the platform Harness carries the compaction
-    # (kagent.harness.compaction). The floor moves with components.kagent.
-    semver: ">=1.5.0 <2.0.0"
+    # OCIRepository: 2.x renders one api.kagent.dev/v1alpha3 Agent (the
+    # template inline, the Harness by name) for this release's kagent line;
+    # 1.x rendered the kagent.dev AgentTemplate of the 1.x kagent line, 0.x
+    # the v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases
+    # of the line reach the agents on their own; the major is the API boundary
+    # and moves only with this chart. The floor moves with components.kagent.
+    semver: ">=2.0.0 <3.0.0"
   # The skill repositories list_skills offers — the same list the portal's
   # create flow reads.
   skills:
@@ -4600,7 +4579,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.7.0
+      tag: 1.10.0
     dryRun: false
     gitopsNamespaces: []
 
@@ -5163,7 +5142,8 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # schedules to — on a cluster whose control-plane nodes carry the
     # node-role.kubernetes.io/control-plane taint, the worker nodes. Pin it to
     # the node pool the WorkerPool runs on (kagent.substrateWorkerPool.template)
-    # with a nodeSelector; tolerate a dedicated pool's taint here.
+    # with a nodeSelector; tolerate a dedicated pool's taint here. The
+    # re-pinned Substrate line tolerates the ate.dev/sandboxClass taint itself.
     nodeSelector: {}
     tolerations: []
     affinity: {}

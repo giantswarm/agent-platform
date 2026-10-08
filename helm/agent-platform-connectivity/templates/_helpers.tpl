@@ -907,7 +907,7 @@ under the Gateway's own name.
 
 {{/*
 The spec.provider of a kagent.modelConfigs[] entry, checked against the
-ModelConfig CRD's enum (kagent.dev/v1alpha3). The enum is case-sensitive and
+ModelConfig CRD's enum (api.kagent.dev/v1alpha3). The enum is case-sensitive and
 the API server refuses any other value at admission, after the render has said
 nothing; failing here names the entry and the eleven values instead. Takes the
 entry.
@@ -1886,7 +1886,7 @@ Usage: include "agent-platform.kagent.controllerHostname" .
 {{/*
 The JWT claim the caller's identity is taken from — kagent.controller.auth.userIdClaim
 (default email), the ONE value both authentication layers read: the controller's
-AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation
+KAGENT_AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation
 (templates/kagent/controller-jwt-policy.yaml), so the two cannot disagree.
 Fails the render on a claim that is not a bare identifier: every reader puts it
 into CEL as jwt.<claim>, so the guard fires exactly where the claim is consumed.

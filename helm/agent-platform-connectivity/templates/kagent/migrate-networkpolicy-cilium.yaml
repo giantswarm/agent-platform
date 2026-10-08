@@ -3,8 +3,8 @@
 ---
 # Egress of the cut-over run (migrate-cronjob.yaml): DNS (with Cilium's proxy
 # clause so the FQDN selectors resolve), the Kubernetes API (HelmReleases,
-# OCIRepositories, Agents, AgentTemplates, the report ConfigMap, the CRDs) and
-# the agent chart's sources — its OCI registry (the 1.x tag and values schema
+# OCIRepositories, Agents, AgentTemplates, the report ConfigMap) and
+# the agent chart's sources — its OCI registry (the 2.x tag and values schema
 # the rewrite validates against), the storage front the registry redirects the
 # chart's blob downloads to, and the GitHub API (every git skill pinned to a
 # commit) — by name, on 443: the same destinations agent-manager's own egress

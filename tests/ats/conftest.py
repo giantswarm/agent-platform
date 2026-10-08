@@ -7,7 +7,7 @@ Two scenarios run on the one kind cluster the CI job creates, in this order:
                                 with the bundled engine and self-management ON
                                 against that registry — adoption, the auth round
                                 trip, the agent round trips (a declarative
-                                AgentTemplate Ready on the platform Harness,
+                                the Agent Ready on the platform Harness,
                                 agent-manager's create_agent through muster), the
                                 fixpoint, the refused CLI, the ordered teardown
   functional  test_own_flux.py  a cluster that runs its own Flux: the chart through
@@ -23,10 +23,10 @@ kubeconfig. Helm 4 and kubectl come with the ATS image. What the smoke leaves on
 the cluster is what the functional scenario expects to find (the lab Dex, the
 registry with the chart, the four operator CRDs, the kept kagent CRDs).
 
-The platform's kagent is the kagent line (kagent API v2, kagent.dev/v1alpha3):
-agents are AgentTemplates a Harness admits and runs as Agent Substrate actors in
+The platform's kagent is the kagent line (kagent API v2, api.kagent.dev/v1alpha3):
+agents are Agents, each naming the Harness that runs its template as an Agent Substrate actor in
 gVisor worker pods. Both scenarios get Substrate from the chart under test and
-assert readiness on the platform Harness (AgentTemplate.status.harnesses[]); the
+assert the Agent's Ready condition on the platform Harness; the
 CI job's kind cluster carries the feature gates Substrate needs
 (.ats/kind-config.yaml), on the `large` class (tests/ats/README.md).
 
@@ -79,13 +79,12 @@ NAMESPACE = "agent-platform"
 KAGENT_NAMESPACE = "kagent"
 TENANT_SA = "agent-platform-flux"
 KAGENT_FLUX_SA = "kagent-flux"
-# kagent API v2: the platform Harness the connectivity chart renders in the
-# kagent namespace, the label that places an AgentTemplate on it (the whole
-# admission contract; the agent chart 1.x sets it), the Substrate WorkerPool the
-# Harness runs on (the kagent chart renders it, sized in values-kagent.yaml) and
-# the namespace of Substrate's control plane.
+# The kagent line: the platform Harness the kagent release renders in the
+# kagent namespace, named by every Agent's spec.harnessRef (the Generic agent
+# chart renders one Agent per release with its template inline), the Substrate
+# WorkerPool the Harness runs on (the kagent chart renders it, sized in
+# values-kagent.yaml) and the namespace of Substrate's control plane.
 HARNESS = "kagent"
-HARNESS_LABEL = "agent-platform.giantswarm.io/harness"
 WORKER_POOL = "kagent-default"
 ATE_NAMESPACE = "ate-system"
 # Substrate's podcertificate-controller and the CA pools the connectivity
@@ -98,11 +97,11 @@ PODCERT_SIGNER_SUFFIX = ".podcert.ate.dev/identity"
 PODCERT_SIGNERS = {"servicedns.podcert.ate.dev/identity": "service-dns-ca-pool", "podidentity.podcert.ate.dev/identity": "pod-identity-ca-pool"}
 # The CRD charts' CRDs: their templates carry helm.sh/resource-policy: keep, so
 # uninstalling the kagent-crds release leaves the kagent CRDs — and every
-# AgentTemplate and RemoteMCPServer — in place, and uninstalling substrate-crds
+# Agent, AgentTemplate and RemoteMCPServer — in place, and uninstalling substrate-crds
 # leaves the three ate.dev CRDs (the Substrate line's CRD templates carry keep). A
 # consumer's uninstall can therefore always delete its CRs, whatever order a
 # concurrent uninstall finalizes the releases in (giantswarm/agent-platform#385).
-KAGENT_CRDS = {f"{plural}.kagent.dev" for plural in ("agenttemplates", "harnesses", "modelconfigs", "modelproviderconfigs", "remotemcpservers")}
+KAGENT_CRDS = {f"{plural}.api.kagent.dev" for plural in ("agents", "agenttemplates", "harnesses", "modelconfigs", "modelproviderconfigs", "remotemcpservers", "sandboxtemplates")}
 SUBSTRATE_CRDS = {f"{plural}.ate.dev" for plural in ("workerpools", "sandboxconfigs", "csidriverconfigs")}
 KEPT_CRDS = KAGENT_CRDS | SUBSTRATE_CRDS
 # The cluster-scoped SandboxConfig the substrate chart renders — the CR whose
@@ -116,7 +115,9 @@ MODEL_CONFIG = "default-model-config"
 PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API_KEY"}
 # The Generic agent chart, 1.x = kagent API v2 (0.x rendered the retired Agent).
 AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
-AGENT_CHART_SEMVER = ">=1.5.0 <2.0.0"  # agent-manager.agentChart.semver on the 1.1 lines: the Generic chart from 1.5.0 (no spec.context)
+# agent-manager.agentChart.semver as the connectivity chart defaults it: the
+# Generic chart 2.x renders one api.kagent.dev/v1alpha3 Agent.
+AGENT_CHART_SEMVER = ">=2.0.0 <3.0.0"
 # The toolset of the smoke's managed agents: a shipped muster preset, so the
 # agent chart renders the agent's own RemoteMCPServer — the toolset carrier,
 # the X-Muster-Toolset header on it; ["preset:none"] alone renders none.
@@ -378,41 +379,28 @@ def is_accepted(obj: Optional[Dict[str, Any]]) -> bool:
     return condition(obj, "Accepted").get("status") == "True"
 
 
-def harness_entry(template: Optional[Dict[str, Any]], harness: str = HARNESS) -> Optional[Dict[str, Any]]:
-    """The AgentTemplate's status entry for one Harness (status.harnesses[] is
-    keyed by harness), or None while no Harness admits it — a template the
-    platform Harness does not select (no label) has an empty list with
-    observedGeneration caught up."""
-    for entry in (template or {}).get("status", {}).get("harnesses", []) or []:
-        if entry.get("harness") == harness:
-            return entry
-    return None
+def agent_harness(agent: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The Harness an Agent runs on: spec.harnessRef.name, or None for an
+    inline spec.harness."""
+    return ((agent or {}).get("spec", {}).get("harnessRef") or {}).get("name")
 
 
-def harness_condition(template: Optional[Dict[str, Any]], kind: str = "Ready", harness: str = HARNESS) -> Dict[str, Any]:
-    for c in (harness_entry(template, harness) or {}).get("conditions", []) or []:
-        if c.get("type") == kind:
-            return c
-    return {}
+def agent_ready(agent: Optional[Dict[str, Any]]) -> bool:
+    """Ready: the controller compiled the Agent's template for its Harness and
+    Substrate booted the actor's golden snapshot on the WorkerPool (the Agent's
+    Ready condition; Accepted, ResolvedRefs and Compatible come first)."""
+    return condition(agent, "Ready").get("status") == "True"
 
 
-def template_ready(template: Optional[Dict[str, Any]], harness: str = HARNESS) -> bool:
-    """Ready on the platform Harness: admitted (an entry for the Harness) and
-    the entry's Ready condition True — the Harness booted the actor's golden
-    snapshot on the Substrate WorkerPool."""
-    return harness_condition(template, "Ready", harness).get("status") == "True"
-
-
-def template_state(template: Optional[Dict[str, Any]], harness: str = HARNESS) -> str:
-    """One line for a failure message: admitted or not, and the conditions."""
-    if not template:
+def agent_state(agent: Optional[Dict[str, Any]]) -> str:
+    """One line for a failure message: the Harness the Agent names, the
+    revisions and the conditions."""
+    if not agent:
         return "absent"
-    entry = harness_entry(template, harness)
-    if entry is None:
-        status = template.get("status", {})
-        return (f"not admitted by Harness {harness}: harnesses={status.get('harnesses')} "
-                f"observedGeneration={status.get('observedGeneration')} generation={template['metadata'].get('generation')}")
-    return ", ".join(f"{c.get('type')}={c.get('status')} ({c.get('reason')}: {str(c.get('message', ''))[:120]})" for c in entry.get("conditions", []) or []) or "admitted, no conditions yet"
+    status = agent.get("status", {})
+    conditions = ", ".join(f"{c.get('type')}={c.get('status')} ({c.get('reason')}: {str(c.get('message', ''))[:120]})" for c in status.get("conditions", []) or [])
+    return (f"harness={agent_harness(agent)} desiredRevision={status.get('desiredRevision')} latestSuccessfulRevision={status.get('latestSuccessfulRevision')} "
+            f"observedGeneration={status.get('observedGeneration')} generation={agent['metadata'].get('generation')}: {conditions or 'no conditions yet'}")
 
 
 # ---------------------------------------------------------------------------
@@ -625,33 +613,35 @@ def wait_for_substrate(kube: Kube, timeout: float = 600) -> Dict[str, Any]:
         return wp if wp and want and wp.get("status", {}).get("readyReplicas", 0) >= want else False
 
     wp = wait_for(f"WorkerPool {KAGENT_NAMESPACE}/{WORKER_POOL} with every worker Ready", workers_ready, timeout)
-    harness = kube.get("harnesses.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
+    harness = kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE)
     assert harness, f"the connectivity release rendered no Harness {HARNESS} in {KAGENT_NAMESPACE}"
     assert harness["spec"]["substrate"]["workerPoolRef"]["name"] == WORKER_POOL, harness["spec"]["substrate"]
-    assert harness["spec"]["allowedAgentTemplates"]["selector"]["matchLabels"] == {HARNESS_LABEL: HARNESS}, harness["spec"]["allowedAgentTemplates"]
+    assert "allowedAgentTemplates" not in harness["spec"], harness["spec"]
     TIMINGS.record(f"Substrate ready (ate-system control plane, WorkerPool {WORKER_POOL} {wp['status'].get('readyReplicas')}/{wp['spec']['replicas']} workers, Harness {HARNESS})", time.monotonic() - started)
     logger.info("Substrate ready: WorkerPool %s %s/%s workers on %s, Harness %s on %s",
                 WORKER_POOL, wp["status"].get("readyReplicas"), wp["spec"]["replicas"], wp["spec"].get("workerImage"), HARNESS, harness["spec"]["workload"]["image"])
     return wp
 
 
-def wait_for_template_ready(kube: Kube, name: str, timeout: float = 600) -> Dict[str, Any]:
-    """The AgentTemplate Ready on the platform Harness; the failure message
-    carries the template's state (not admitted, or which condition is off)."""
+def wait_for_agent_ready(kube: Kube, name: str, timeout: float = 600, harness: str = HARNESS) -> Dict[str, Any]:
+    """The Agent Ready, on the Harness it names; the failure message carries
+    the Agent's state (the Harness, the revisions, which condition is off)."""
     def ready() -> Any:
-        template = kube.get("agenttemplates.kagent.dev", name, namespace=KAGENT_NAMESPACE)
-        return template if template_ready(template) else False
+        agent = kube.get("agents.api.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        return agent if agent_ready(agent) else False
 
     try:
-        return wait_for(f"AgentTemplate {name} Ready on Harness {HARNESS}", ready, timeout)
+        agent = wait_for(f"Agent {name} Ready on Harness {harness}", ready, timeout)
     except AssertionError as exc:
-        template = kube.get("agenttemplates.kagent.dev", name, namespace=KAGENT_NAMESPACE)
-        raise AssertionError(f"{exc}; AgentTemplate {name}: {template_state(template)}") from exc
+        agent = kube.get("agents.api.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        raise AssertionError(f"{exc}; Agent {name}: {agent_state(agent)}") from exc
+    assert agent_harness(agent) == harness, f"Agent {name} runs on Harness {agent_harness(agent)!r}, not {harness}: {agent['spec']}"
+    return agent
 
 
 def assert_remote_mcp_server(kube: Kube, name: str, toolset: Optional[List[str]] = None) -> Dict[str, Any]:
     """The agent's own RemoteMCPServer — the toolset carrier the agent chart
-    renders next to the AgentTemplate: muster's in-cluster URL, the toolset as
+    renders next to the Agent: muster's in-cluster URL, the toolset as
     the X-Muster-Toolset header, controller-side tool discovery off (agents
     resolve the tools at run time as the caller), never a static Authorization
     header (the Harness propagates the caller's token; a static one would make
@@ -659,7 +649,7 @@ def assert_remote_mcp_server(kube: Kube, name: str, toolset: Optional[List[str]]
     toolset = TOOLSET if toolset is None else toolset
 
     def accepted() -> Any:
-        server = kube.get("remotemcpservers.kagent.dev", name, namespace=KAGENT_NAMESPACE)
+        server = kube.get("remotemcpservers.api.kagent.dev", name, namespace=KAGENT_NAMESPACE)
         return server if is_accepted(server) else False
 
     server = wait_for(f"RemoteMCPServer {name} Accepted", accepted, 300)
@@ -744,8 +734,8 @@ def dump_agents(kube: Kube) -> None:
     """The agent path's state when an assertion fails: the kagent API v2 objects,
     Substrate's control plane and the WorkerPool's workers, their logs."""
     kube.dump([
-        f"-n {KAGENT_NAMESPACE} get agenttemplates.kagent.dev,remotemcpservers.kagent.dev,modelconfigs.kagent.dev -o yaml",
-        f"-n {KAGENT_NAMESPACE} get harnesses.kagent.dev,workerpools.ate.dev -o yaml",
+        f"-n {KAGENT_NAMESPACE} get agents.api.kagent.dev,agenttemplates.api.kagent.dev,remotemcpservers.api.kagent.dev,modelconfigs.api.kagent.dev -o yaml",
+        f"-n {KAGENT_NAMESPACE} get harnesses.api.kagent.dev,workerpools.ate.dev -o yaml",
         f"-n {KAGENT_NAMESPACE} get helmreleases.helm.toolkit.fluxcd.io,ocirepositories.source.toolkit.fluxcd.io -o wide",
         f"-n {KAGENT_NAMESPACE} get pods -o wide",
         f"-n {ATE_NAMESPACE} get pods -o wide",

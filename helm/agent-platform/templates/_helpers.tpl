@@ -123,7 +123,12 @@ overwrite would hide a values file that still spells the old key.
     default ca.crt) while muster names no CA Secret of its own — the issuer's
     private CA its OAuth server verifies the provider against.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
-                 muster.url from the muster Service (agent-platform.musterMcpUrl).
+                 muster.url from the muster Service (agent-platform.musterMcpUrl);
+                 kagent.controllerTarget, the kagent controller its session
+                 tools call, from the agentgateway data plane
+                 (agent-platform.kagentControllerTarget). Empty while the
+                 controller route is off, which turns the session tools off
+                 over the chart's own default.
   klaus-gateway: with klausGateway.routing.store: valkey, the platform's own
     Valkey fills in what the routing.valkey block leaves unset — url from the
     valkey release's Service (agent-platform.valkeyAddress), existingSecret and
@@ -198,6 +203,12 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
 {{- end -}}
 {{- $_ := set $derived "muster" (dict "url" $url) -}}
+{{- $target := include "agent-platform.kagentControllerTarget" .root -}}
+{{- $ownTarget := dig "kagent" "controllerTarget" "" (index .root.Values "agent-manager" | default dict) -}}
+{{- if and $ownTarget (ne $ownTarget $target) -}}
+{{- fail (printf "agent-manager.kagent.controllerTarget (%s) differs from the platform's kagent controller target (%q): agent-manager's session tools reach the controller through the agentgateway data plane this chart installs, on kagent.controllerRoute; the target follows gateway.name and gateway.listeners[0].port; leave agent-manager.kagent.controllerTarget unset" $ownTarget $target) -}}
+{{- end -}}
+{{- $_ := set $derived "kagent" (dict "controllerTarget" $target) -}}
 {{- end -}}
 {{- if eq .name "cluster-manager" -}}
 {{- /* model-manager's namespace: where the model-manager component lands — the
@@ -1172,6 +1183,24 @@ Usage: include "agent-platform.musterMcpUrl" .
 {{- end -}}
 
 {{/*
+The in-cluster gRPC target of the kagent controller through the agentgateway
+data plane, the one agent-manager's session tools call as the caller:
+grpc://<gateway.name>.<target namespace>.svc.cluster.local:<gateway.listeners[0].port>
+while the kagent and agentgateway components are on and kagent.controllerRoute
+is enabled (the GRPCRoute that carries SessionService and lf.a2a.v1.A2AService),
+"" otherwise. The data plane lands with the connectivity release, in the
+platform's target namespace.
+Usage: include "agent-platform.kagentControllerTarget" .
+*/}}
+{{- define "agent-platform.kagentControllerTarget" -}}
+{{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
+{{- $gatewayOn := include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway") -}}
+{{- if and $kagentOn $gatewayOn (dig "controllerRoute" "enabled" false (.Values.kagent | default dict)) -}}
+{{- printf "grpc://%s.%s.svc.cluster.local:%v" .Values.gateway.name (include "agent-platform.targetNamespace" .) (index .Values.gateway.listeners 0).port -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Merged HTTPRoute labels for a named route. The shared base
 (ingress.httpRoute.labels) applies to every route; optional per-route overrides
 (ingress.httpRoute.<route>.labels) win on key collision, letting a downstream
@@ -1933,8 +1962,7 @@ Usage: include "agent-platform.kagent.hookNamespace" .
 {{/*
 The namespace the kagent component's objects live in: kagent.namespaceOverride,
 else the namespace the platform HelmReleases target (gitops.targetNamespace,
-else the release namespace). The storage-version hooks keep their record there
-(hooks/kagent-crds-storage-version.yaml).
+else the release namespace).
 Usage: include "agent-platform.kagent.namespace" .
 */}}
 {{- define "agent-platform.kagent.namespace" -}}
@@ -1942,36 +1970,20 @@ Usage: include "agent-platform.kagent.namespace" .
 {{- end -}}
 
 {{/*
-Whether the kagent CRDs' storage-version hooks render
-(hooks/kagent-crds-storage-version.yaml, giantswarm/agent-platform#396): whenever
-the kagent line's CRD component is on — with or without the bundled engine. A
-cluster's own Flux runs this chart's hooks too, and every installation that ran
-kagent 0.10 needs the step; the other hooks stay the engine's. Never with
-gitops.target set: a hook Job runs where the chart is installed, and there the
-kagent CRDs are another release's (the platform's own) — the target cluster
-starts on the kagent API v2 line and has no cut-over to run. Emits "true" or "".
-*/}}
-{{- define "agent-platform.kagent.storageVersionHooks" -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) (not (include "agent-platform.targetSecretName" .)) }}true{{ end -}}
-{{- end -}}
-
-{{/*
 The Helm hook events the hook ServiceAccount + ClusterRoleBinding (hooks/rbac.yaml)
 are created for, in Helm's order: pre-install,pre-upgrade while the kagent
-namespace hook or the storage-version backup hook renders (they run as that
-account — creating a namespace or deleting a CRD is cluster-scoped, the
-namespaced <release>-self identity cannot), post-install,post-upgrade while the
-storage-version restore hook renders; with the bundled engine pre-install,
-pre-upgrade for the Flux Operator CRD hook and pre-delete and post-delete for
-the ordered teardown; and the serving teardown's event while it renders
+namespace hook renders (it runs as that account — creating a namespace is
+cluster-scoped, the namespaced <release>-self identity cannot); with the
+bundled engine pre-install, pre-upgrade for the Flux Operator CRD hook and
+pre-delete and post-delete for the ordered teardown; and the serving
+teardown's event while it renders
 (agent-platform.serving.teardownEvent: pre-delete, or pre-upgrade when the
 slice is switched off in place). Empty when none of them renders — rbac.yaml
 renders nothing then.
 */}}
 {{- define "agent-platform.hooks.serviceAccountEvents" -}}
 {{- $events := list -}}
-{{- if or (include "agent-platform.kagent.hookNamespace" .) (include "agent-platform.kagent.storageVersionHooks" .) }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
-{{- if include "agent-platform.kagent.storageVersionHooks" . }}{{ $events = concat $events (list "post-install" "post-upgrade") }}{{ end -}}
+{{- if include "agent-platform.kagent.hookNamespace" . }}{{ $events = concat $events (list "pre-install" "pre-upgrade") }}{{ end -}}
 {{- if eq (include "agent-platform.engineEnabled" .) "true" }}{{ $events = concat $events (list "pre-install" "pre-upgrade" "pre-delete" "post-delete") }}{{ end -}}
 {{- with include "agent-platform.serving.teardownEvent" . }}{{ $events = append $events . }}{{ end -}}
 {{- join "," (uniq $events) -}}
