@@ -725,14 +725,30 @@ unset is read with that chart's default (memory, bolt, reviews off), so the
 default shape gets no policy. An out-of-band Valkey (`routing.valkey.url` outside the
 platform, the component off) gets no rule: nothing in the namespace to select,
 the installation adds that egress itself. The valkey release's own policy
-admits clients from the whole cluster on 6379, so the client side is the only
-missing half.
+(valkey-app v0.3.3 and later) admits every pod of the release namespace on 6379
+(`valkey.ciliumNetworkPolicy.ingress.clients`), klaus-gateway included, so the
+client side is the only missing half; naming muster and klaus-gateway there is
+the least-privilege form (`docs/mcp-backend-network-policy.md`).
 
 The first policy that selects the pod puts it in default-deny egress, so a
 store without its rule fails at start with `context deadline exceeded` on the
 API — not `forbidden`, which would be the Role — or hangs every binding write
 and the readiness probe on the Valkey connect. `make verify-klausgateway-netpol`
 asserts every gate and both flavours.
+
+## Who may call an MCP backend
+
+`networkPolicy.mcpBackends` admits muster (always), the namespace's own pods
+and the kubelet's probes, `networkPolicy.mcpBackendScrapers` (alloy-metrics)
+with `metrics: true`, and `additionalPeers`. A backend behind a Gateway route
+needs the Gateway's proxies there, and a backend reached through Teleport
+application access needs teleport-kube-agent there: a muster-only policy drops
+the Teleport path, and a local lab cannot show it. The mcp-* server charts
+name the same callers (`ingress.muster`, `gatewayPeers` while
+`gatewayAPI.enabled`, `teleportPeers`, `metricsScrapers`, `additionalPeers`).
+`docs/mcp-backend-network-policy.md` has the caller list with the value that
+admits each, the Valkey stores' clients, and why a stable without a
+release-candidate line is checked before the merge.
 
 ## `gateway.jwksEgress` — reaching the issuer's JWKS
 
