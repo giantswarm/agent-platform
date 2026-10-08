@@ -1,4 +1,8 @@
-{{- if (include "agent-platform.modelServing.enabled" .) }}
+{{- /* The preset catalog is published wherever the chart runs, model serving
+       off included: model-manager's check_fit answers a preset's declaration
+       before a GPU pool and its backend exist. What serving mounts (the chat
+       templates, in the serving namespace) stays behind the switch. */}}
+{{- $serving := include "agent-platform.modelServing.enabled" . }}
 {{- $ns := include "agent-platform.modelServing.namespace" . }}
 {{- $presets := include "agent-platform.modelServing.presets" . | fromJson }}
 {{- range $name, $entry := $presets }}
@@ -24,7 +28,7 @@ metadata:
 data:
   preset.yaml: |
     {{- toYaml $resolved.preset | nindent 4 }}
-{{- if $resolved.chatTemplate.render }}
+{{- if and $serving $resolved.chatTemplate.render }}
 ---
 # The chat template preset {{ $name }} mounts into its predictor at
 # spec.chatTemplate.mountPath; lives in the serving namespace because the
@@ -41,6 +45,5 @@ metadata:
 data:
   {{ $resolved.chatTemplate.key }}: |
     {{- $resolved.chatTemplate.content | nindent 4 }}
-{{- end }}
 {{- end }}
 {{- end }}

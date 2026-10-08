@@ -118,8 +118,14 @@ DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview agent-p
 # Drop those documents from a rendered manifest in place, by metadata.name, and
 # keep the leading document separator whatever was dropped — a stripped first
 # document would otherwise read as a one-line diff of its own.
+# The published ServingPreset ConfigMaps (label
+# agent-platform.giantswarm.io/serving-preset=true) go too: the chart renders
+# them with model serving off since giantswarm/agent-platform#847, a GOLDEN_REF
+# from before renders none; verify-preset-catalog asserts them. Drop the label
+# clause once GOLDEN_REF carries #847.
+GOLDEN_DROP := python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not ((re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex) or "agent-platform.giantswarm.io/serving-preset: \"true\"" in d)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")'
 define drop_dashboards
-	@python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' $(1) "$(DASHBOARDS_GOLDEN_DROP)"
+	@$(GOLDEN_DROP) $(1) "$(DASHBOARDS_GOLDEN_DROP)"
 endef
 # muster-valkey's budget is maxUnavailable: 1 here (giantswarm/agent-platform#697)
 # and minAvailable: 1 on a golden from before; both sides render it the same.
@@ -275,7 +281,7 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 		$(GOLDEN_RETIRED) $$out/golden; \
 		$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_GOLDEN) >$$out/head 2>&1 \
 			|| { echo "FAIL: the working-tree render failed"; cat $$out/head; exit 1; }; \
-		for f in golden head; do python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' $$out/$$f "$(GOLDEN_EXCLUDE)"; done; \
+		for f in golden head; do $(GOLDEN_DROP) $$out/$$f "$(GOLDEN_EXCLUDE)"; done; \
 		if diff -u $$out/golden $$out/head; then echo "ok: default render unchanged (excluding $(GOLDEN_EXCLUDE))"; \
 		else echo "FAIL: the default render drifted from $(GOLDEN_REF)"; exit 1; fi; \
 	fi
@@ -1464,6 +1470,11 @@ verify-model-images: ## Assert models as OCI images (giantswarm/agent-platform#5
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-model-images.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "Models as OCI images verified."
+
+.PHONY: verify-preset-catalog
+verify-preset-catalog: ## Assert the serving preset catalog is published wherever the connectivity chart runs (giantswarm/agent-platform#847): with components.modelServing.enabled off one ServingPreset ConfigMap per shipped preset in the release namespace — the serving-preset, preset and preset-source labels and the chart-version annotation model-manager's check_fit reads — and no discovery ConfigMap, chat-template ConfigMap or other model-serving object; shippedPresets.exclude, shippedPresets.enabled and modelServing.presets honoured with serving off; with it on the same preset ConfigMaps beside the discovery ConfigMap and the chat-template ConfigMaps in the serving namespace. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@VERIFY_TMP=$(VERIFY_TMP) python3 tests/verify-preset-catalog.py $(CONNECTIVITY_DIR)
 
 .PHONY: verify-labels
 verify-labels: ## Assert every label value stays valid at the versions the charts are installed under: helm-controller's +digest and a branch build's long prerelease, with the 63-character cut landing on each separator. HELM selects the binary.
@@ -2967,8 +2978,8 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		for flavor in cilium kubernetes; do \
 			$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-new-$$flavor.out; \
 			$(HELM) template t $(VERIFY_TMP)/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-old-$$flavor.out; \
-			python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' $(VERIFY_TMP)/vw-pg-new-$$flavor.out "$(DASHBOARDS_GOLDEN_DROP)"; \
-			python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not (re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")' $(VERIFY_TMP)/vw-pg-old-$$flavor.out "$(DASHBOARDS_GOLDEN_DROP)"; \
+			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-new-$$flavor.out "$(DASHBOARDS_GOLDEN_DROP)"; \
+			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-old-$$flavor.out "$(DASHBOARDS_GOLDEN_DROP)"; \
 			diff -u $(VERIFY_TMP)/vw-pg-old-$$flavor.out $(VERIFY_TMP)/vw-pg-new-$$flavor.out || { echo "FAIL: the $$flavor render changed with postgres.imagePullSecrets and .affinity unset"; git worktree remove --force $(VERIFY_TMP)/vw-pg-ref; exit 1; }; \
 		done; \
 		git worktree remove --force $(VERIFY_TMP)/vw-pg-ref; \
