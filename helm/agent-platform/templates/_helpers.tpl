@@ -983,6 +983,49 @@ at render time instead.
 {{- end -}}
 
 {{/*
+The api.kagent.dev line (kagent 1.3 and later) refuses a database that holds the
+1.x schema: its controller exits at start-up, the kagent upgrade times out with
+the line's resources half applied, and Helm's rollback cannot undo that in
+either direction (giantswarm/agent-platform#857). So the render refuses the
+crossing before any component moves while the running controller is on the 1.x
+line and the controller values mount no Secret it does not mount already, the
+documented crossing being a fresh database behind a new derived Secret
+(UPGRADE.md, docs/kagent-v1alpha3-cutover.md step 5). Running = the Deployment
+<kagent.fullnameOverride>-controller in the kagent namespace, its line read from
+its helm.sh/chart label. A first install, an installation already on the line
+and a range that stays below 1.3 render as before. Skipped with gitops.target
+set (the lookups see the installation, not the target); `lookup` is empty under
+`helm template`, where the guard is therefore silent.
+*/}}
+{{- define "agent-platform.validateKagentLineCrossing" -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
+{{- $floor := regexFind ">=\\s*[0-9][^ ,]*" (index .Values.components "kagent" "versionRange" | default "") | trimPrefix ">=" | trim -}}
+{{- if and $floor (semverCompare ">=1.3.0-0" $floor) -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $ns := include "agent-platform.kagent.namespace" . -}}
+{{- $name := printf "%s-controller" ($kagent.fullnameOverride | default "kagent") -}}
+{{- with (lookup "apps/v1" "Deployment" $ns $name) -}}
+{{- $chart := dig "metadata" "labels" "helm.sh/chart" "" . -}}
+{{- $running := regexFind "^[0-9]+\\.[0-9]+\\.[0-9]+" (trimPrefix "kagent-" $chart) -}}
+{{- if and $running (semverCompare "<1.3.0-0" $running) -}}
+{{- $mounted := list -}}
+{{- range (dig "spec" "template" "spec" "volumes" list .) -}}
+{{- with .secret }}{{ $mounted = append $mounted .secretName }}{{ end -}}
+{{- end -}}
+{{- $fresh := list -}}
+{{- range (dig "controller" "volumes" list $kagent) -}}
+{{- with .secret }}{{ if not (has .secretName $mounted) }}{{ $fresh = append $fresh .secretName }}{{ end }}{{ end -}}
+{{- end -}}
+{{- if not $fresh -}}
+{{- fail (printf "components.kagent selects the api.kagent.dev line (%s) while %s/%s runs kagent %s on its 1.x database (Secrets mounted: %s): the line's controller refuses the 1.x schema and the upgrade would half-apply. Cross with a fresh database first: add a postgres.databases entry for it (e.g. kagent-v3, name kagent_v3, component kagent) and mount its derived Secret <postgres.clusterName>-<key>-app in kagent.controller.volumes in place of the old one, then upgrade (UPGRADE.md, docs/kagent-v1alpha3-cutover.md); or hold components.kagent and components.kagent-crds below 1.3.0" (index .Values.components "kagent" "versionRange") $ns $name $running (join ", " ($mounted | default (list "none")))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Key paths (dot-joined, "block.path") of credentials set INLINE in the values,
 joined by ", ". Empty when none is set. Only the paths are emitted, never the
 values, so the string is safe to print in a fail message.
