@@ -3759,11 +3759,28 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 HOOKS_ALL := -f $(CONNECTIVITY_DIR)/ci/test-model-serving-oci-values.yaml $(VM) $(SUBSTRATE_ON) --set postgres.enabled=true --set modelServing.cache.enabled=true --set modelServing.prepull.enabled=true
 
 .PHONY: verify-hooks-memory
-verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every hook container requests 10m/32Mi and is limited to agent-platform.hooks.job's default 128Mi, except the Substrate bootstrap's kubectl container at 256Mi (two kubectl processes at once next to its in-memory /work); all four hook Jobs render. Needs PyYAML.
+verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every hook container requests 10m/32Mi and 16Mi ephemeral-storage, is limited to 256Mi ephemeral-storage (#780) and to agent-platform.hooks.job's default 128Mi of memory, except the Substrate bootstrap's kubectl container at 256Mi (two kubectl processes at once next to its in-memory /work); all four hook Jobs render. Needs PyYAML.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vhm.out 2>&1 || { cat $(VERIFY_TMP)/vhm.out; exit 1; }
-	@python3 -c 'import sys,yaml; R={"cpu":"10m","memory":"32Mi"}; lim=lambda m: (R, {"memory": m}); want={"t-substrate-bootstrap": {"openssl": lim("128Mi"), "sh": lim("256Mi")}, "t-postgres-databases": {"sh": lim("128Mi")}, "t-model-serving-cache": {"sh": lim("128Mi")}, "t-model-serving-prepull-cleanup": {"sh": lim("128Mi")}}; jobs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; got={j["metadata"]["name"]: {c["name"]: (c["resources"]["requests"], c["resources"]["limits"]) for c in j["spec"]["template"]["spec"].get("initContainers",[])+j["spec"]["template"]["spec"]["containers"]} for j in jobs}; sys.exit("FAIL: hook containers (requests, limits) are %s, want %s" % (got, want)) if got!=want else print("ok: four hook Jobs, 10m/32Mi requests; t-substrate-bootstrap sh limited to 256Mi, every other hook container to 128Mi")' $(VERIFY_TMP)/vhm.out
+	@python3 -c 'import sys,yaml; R={"cpu":"10m","memory":"32Mi","ephemeral-storage":"16Mi"}; lim=lambda m: (R, {"memory": m, "ephemeral-storage": "256Mi"}); want={"t-substrate-bootstrap": {"openssl": lim("128Mi"), "sh": lim("256Mi")}, "t-postgres-databases": {"sh": lim("128Mi")}, "t-model-serving-cache": {"sh": lim("128Mi")}, "t-model-serving-prepull-cleanup": {"sh": lim("128Mi")}}; jobs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; got={j["metadata"]["name"]: {c["name"]: (c["resources"]["requests"], c["resources"]["limits"]) for c in j["spec"]["template"]["spec"].get("initContainers",[])+j["spec"]["template"]["spec"]["containers"]} for j in jobs}; sys.exit("FAIL: hook containers (requests, limits) are %s, want %s" % (got, want)) if got!=want else print("ok: four hook Jobs, 10m/32Mi/16Mi ephemeral-storage requests; t-substrate-bootstrap sh limited to 256Mi, every other hook container to 128Mi; 256Mi ephemeral-storage each")' $(VERIFY_TMP)/vhm.out
+	@echo "ok: $@"
+
+.PHONY: verify-hooks-ephemeral-storage
+verify-hooks-ephemeral-storage: ## Assert every hook Job of both charts bounds its emptyDirs (#780, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's four hook Jobs, the Backstage config-reload and the migrate start, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vhe-conn.out 2>&1 || { cat $(VERIFY_TMP)/vhe-conn.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) >$(VERIFY_TMP)/vhe-backstage.out 2>&1 || { cat $(VERIFY_TMP)/vhe-backstage.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vhe-migrate.out 2>&1 || { cat $(VERIFY_TMP)/vhe-migrate.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) >$(VERIFY_TMP)/vhe-meta.out 2>&1 || { cat $(VERIFY_TMP)/vhe-meta.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --set components.flux.enabled=false --set components.kserve-llmisvc-crd.enabled=true --set components.kserve-llmisvc-resources.enabled=true --set components.kserve-runtime-configs.enabled=true >$(VERIFY_TMP)/vhe-serving.out 2>&1 || { cat $(VERIFY_TMP)/vhe-serving.out; exit 1; }
+	@python3 tests/verify-hooks-ephemeral-storage.py \
+		$(VERIFY_TMP)/vhe-conn.out=t-substrate-bootstrap,t-postgres-databases,t-model-serving-cache,t-model-serving-prepull-cleanup \
+		$(VERIFY_TMP)/vhe-backstage.out=agent-platform-connectivity-backstage-config-reload \
+		$(VERIFY_TMP)/vhe-migrate.out=t-agent-manager-migrate-start \
+		$(VERIFY_TMP)/vhe-meta.out=t-flux-operator-crds,t-kagent-namespace,t-self-stop-resumer,t-self-suspend,t-self-values,t-teardown-engine,t-teardown-operator,t-teardown-releases \
+		$(VERIFY_TMP)/vhe-serving.out=t-serving-teardown
 	@echo "ok: $@"
 
 .PHONY: verify-connectivity-hooks-netpol

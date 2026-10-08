@@ -1027,7 +1027,7 @@ spec:
           config:
             cacheTTL: 5m
             promptCaching: true
-          model: claude-sonnet-4-6
+          model: claude-sonnet-5-5
           provider: Anthropic
         default: anthropic
       registry: gsoci.azurecr.io
@@ -4510,8 +4510,10 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 512Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -4520,7 +4522,8 @@ spec:
               readOnly: true
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
         - name: manifests
           configMap:
             name: t-flux-operator-crds
@@ -4607,14 +4610,17 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 512Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 # Source: agent-platform/templates/hooks/self.yaml
 apiVersion: batch/v1
@@ -4704,14 +4710,17 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 512Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 # Source: agent-platform/templates/hooks/self.yaml
 apiVersion: batch/v1
@@ -4870,14 +4879,17 @@ spec:
                           requests:
                             cpu: 10m
                             memory: 32Mi
+                            ephemeral-storage: 16Mi
                           limits:
                             memory: 512Mi
+                            ephemeral-storage: 256Mi
                         volumeMounts:
                           - name: tmp
                             mountPath: /tmp
                     volumes:
                       - name: tmp
-                        emptyDir: {}
+                        emptyDir:
+                          sizeLimit: 256Mi
               EOF
                 echo "self HelmRelease $ns/$rel is suspended: resumer Job $ns/$rel-self-resume started"
               else
@@ -4905,14 +4917,17 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 512Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 # Source: agent-platform/templates/hooks/teardown.yaml
 apiVersion: batch/v1
@@ -4999,14 +5014,17 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 512Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 # Source: agent-platform/templates/hooks/teardown.yaml
 apiVersion: batch/v1
@@ -5092,14 +5110,17 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 512Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 # Source: agent-platform/templates/hooks/teardown.yaml
 apiVersion: batch/v1
@@ -5186,11 +5207,14 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 512Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi

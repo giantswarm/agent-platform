@@ -294,6 +294,7 @@ else:
         musteregress = os.path.exists(f"{tree}/{CONN}/templates/networkpolicy-muster-mcp-egress-kubernetes.yaml")
         resident = "residentWeightsGiB" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
         floored = "minComputeCapability" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
+        bounded = "agent-platform.hooks.tmpLimit" in open(f"{tree}/{CONN}/templates/_hooks.tpl", encoding="utf-8").read()
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
     head = dict(docs)
@@ -663,6 +664,15 @@ else:
         for kind in ("NetworkPolicy", "CiliumNetworkPolicy"):
             head.pop((kind, "t-hooks"), None)
         print(f"note: the hook Jobs' network policy renders on this side (#367) and not on {ref}: it is left out of the comparison")
+    # Every hook Job bounds its emptyDirs with ephemeral-storage requests,
+    # limits and sizeLimits on this side (giantswarm/agent-platform#780); a
+    # golden from before renders them unbounded, so the hook Jobs are left out
+    # of the comparison on both sides. Drop this once GOLDEN_REF carries #780.
+    if not bounded:
+        for side in (head, golden):
+            for key in [k for k in side if k[0] == "Job" and k[1].startswith("t-model-serving-")]:
+                side.pop(key)
+        print(f"note: the hook Jobs bound their emptyDirs on this side (#780) and not on {ref}: they are left out of the comparison")
     # muster's kubernetes-flavour egress policy renders on this side
     # (giantswarm/agent-platform#840) and not on a golden from before, so it is
     # left out of the head. Drop this once GOLDEN_REF carries #840.

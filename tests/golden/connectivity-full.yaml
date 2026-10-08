@@ -15179,8 +15179,10 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 128Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -15316,8 +15318,10 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 16Mi
             limits:
               memory: 256Mi
+              ephemeral-storage: 256Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -15326,10 +15330,14 @@ spec:
               readOnly: true
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
+        # In memory, so it counts against the containers' memory limits; the
+        # key material it carries is a few KiB.
         - name: work
           emptyDir:
             medium: Memory
+            sizeLimit: 16Mi
 ---
 # Source: agent-platform-connectivity/templates/substrate/hooks-netpol.yaml
 apiVersion: cilium.io/v2
