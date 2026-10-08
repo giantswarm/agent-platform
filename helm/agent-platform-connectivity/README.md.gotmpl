@@ -880,6 +880,10 @@ asserts that against `origin/main`, the controller policies first and then the
 whole render, and that a public issuer is opened on 443 with the proxy clause
 while every route's host is in-cluster.
 
+## The serving preset catalog
+
+The serving preset catalog is published wherever the chart runs, model serving off included: one ConfigMap `agent-platform-serving-preset-<name>` per preset in the release namespace (label `agent-platform.giantswarm.io/serving-preset=true`, annotation `agent-platform.giantswarm.io/chart-version`), from `files/model-serving/presets/*.yaml` and `modelServing.presets`, with `modelServing.shippedPresets.enabled` and `.exclude` honoured. model-manager's `check_fit` reads it to size a GPU pool before the pool and its backend exist. What serving runs and mounts stays behind `components.modelServing.enabled`: the discovery ConfigMap `agent-platform-model-serving`, the chat-template ConfigMaps in the serving namespace, the namespace, the policies, the cache claim and the pre-pull. List the catalog with `kubectl -n <release namespace> get configmap -l agent-platform.giantswarm.io/serving-preset=true`; `make verify-preset-catalog` asserts it with serving off and on.
+
 ## The GPU node pool
 
 A GPU node pool created through the platform (bumblebee-plans#46, the `gpu-node-pool` chart) arrives tainted `nvidia.com/gpu` `NoSchedule` — only accelerator work lands there — and labelled `giantswarm.io/machine-pool=<cluster>-<pool>`. `modelServing.gpuPool` is the serving layer's one input for both (giantswarm/agent-platform#315): `taint` (`key`, `value`, `effect`; the default is the pool chart's taint, tolerated with `operator: Exists` because the pool sets no value — a `value` narrows the toleration to `Equal`, an empty `key` is an untainted pool and renders nothing) and `nodeSelector` (the pool's label; per pool, so the slice release's values set it, empty by default).

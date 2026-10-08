@@ -11229,6 +11229,1774 @@ data:
       "weekStart": ""
     }
 ---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset devstral-small-2 (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-devstral-small-2
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "devstral-small-2"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: devstral-small-2
+    spec:
+      args:
+      - --gpu-memory-utilization=0.90
+      - --max-model-len=8192
+      - --enforce-eager
+      - --no-enable-log-requests
+      - --language-model-only
+      - --enable-auto-tool-choice
+      - --tool-call-parser=mistral
+      description: |
+        Dense 24B agentic coding model (SWE-bench Verified 68.0%) served from
+        the repository's FP8 checkpoint (fp8_e4m3 weights, BF16 vision tower
+        and lm_head; ~24 GiB of weights by its safetensors index, the
+        consolidated-* files are a second copy), language-only. Sized for one
+        48 GB GPU (L40S, g6e.2xlarge): at --gpu-memory-utilization=0.90 the
+        weights take 23.3 GiB and the KV cache 15.8 GiB (103k tokens, 12
+        concurrent 8k contexts), 41.5 of 46 GB used. On a unified-memory node
+        model-manager composes the utilization from weights plus overhead.
+      displayName: Devstral Small 2 24B
+      model:
+        capabilities:
+        - chat
+        - tools
+        - coding
+        contextLength: 8192
+        format: vLLM
+        id: mistralai/Devstral-Small-2-24B-Instruct-2512
+        license: apache-2.0
+        storageUri: hf://mistralai/Devstral-Small-2-24B-Instruct-2512
+      requirements:
+        minComputeCapability: "8.9"
+        overheadGiB: 16
+        weightsGiB: 25
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 64Gi
+        requests:
+          cpu: "4"
+          memory: 48Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset gemma-4-12b (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-gemma-4-12b
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "gemma-4-12b"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: gemma-4-12b
+    spec:
+      args:
+      - --gpu-memory-utilization=0.90
+      - --max-model-len=32768
+      - --max-num-seqs=4
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1, "audio": 0}'''
+      - --no-enable-log-requests
+      - --reasoning-parser=gemma4
+      - --enable-auto-tool-choice
+      - --tool-call-parser=gemma4
+      description: |
+        Gemma 4 12B: Google DeepMind's dense 12B model with tool calling,
+        thinking (off unless a request turns it on with enable_thinking or a
+        reasoning_effort) and image understanding, Apache 2.0. Served as the
+        official quantization-aware-trained W4A16 checkpoint in the
+        compressed-tensors format (9.6 GiB of weights — 4-bit weights trained
+        to keep the bf16 quality, not a post-hoc quantization) on one 24 GB GPU
+        of the L4 class, whose hybrid attention (sliding windows of 1024 tokens,
+        one global layer in six) keeps the KV cache small. 32k of the model's
+        256k context, four concurrent requests, chunked prefill and prefix
+        caching; --gpu-memory-utilization=0.90 leaves about 10 GiB to the KV
+        cache next to the weights — 10 + 8 GiB on the fit check. One image per
+        request, no audio (the 12B understands speech, this recipe does not
+        serve it: --limit-mm-per-prompt); reasoning with the gemma4 parser,
+        tools on with the gemma4 parser (agents always send tools, and vLLM
+        answers 400 without --enable-auto-tool-choice).
+        Weights: an OCI model image, giantswarm/models/gemma-4-12b-qat-w4a16 at
+        the checkpoint revision, pulled onto the node by containerd like any
+        image (KServe's modelcar path: no download, no cache claim, every
+        serving node a target); an installation serves it from a registry of
+        its own that holds the same path by setting
+        modelServing.modelImages.registry. The modelcar path runs the runtime as
+        a non-root uid on a read-only image, so HOME, HF_HOME and
+        VLLM_CACHE_ROOT live under /tmp.
+        Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+        node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+        follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+        its host memory is the runtime and the weights passing through the page
+        cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
+        (10 + 8 GiB, and the card predates bf16).
+      displayName: Gemma 4 12B (QAT W4A16, one 24 GB GPU)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        contextLength: 32768
+        format: vLLM
+        id: google/gemma-4-12B-it-qat-w4a16-ct
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/gemma-4-12b-qat-w4a16:1d2c2d7f2466
+      requirements:
+        minComputeCapability: "8.0"
+        overheadGiB: 8
+        weightsGiB: 10
+      resources:
+        gpus: 1
+        limits:
+          cpu: "4"
+          memory: 12Gi
+        requests:
+          cpu: "2"
+          memory: 10Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset gemma-4-31b (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-gemma-4-31b
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "gemma-4-31b"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: gemma-4-31b
+    spec:
+      args:
+      - --gpu-memory-utilization=0.92
+      - --max-model-len=32768
+      - --kv-cache-dtype=fp8
+      - --max-num-seqs=4
+      - --max-num-batched-tokens=8192
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1, "audio": 0}'''
+      - --no-enable-log-requests
+      - --reasoning-parser=gemma4
+      - --enable-auto-tool-choice
+      - --tool-call-parser=gemma4
+      - --chat-template=/mnt/chat-template/chat-template.jinja
+      chatTemplate:
+        configMap: agent-platform-chat-template-gemma-4-31b
+        key: chat-template.jinja
+        mountPath: /mnt/chat-template
+      description: |
+        Google's dense 31B instruction-tuned model with tool calling, thinking
+        and vision (the model also takes audio; this recipe switches it off),
+        served as Red Hat's FP8-dynamic quantization (31 GiB of weights) on one
+        48 GB GPU of the L40S family: g6e.2xlarge or g6e.4xlarge (g6e.xlarge
+        leaves a predictor 3 vCPU / 27 GiB, less than the 4 vCPU / 32 GiB
+        requested here). The model's own window is 262,144 tokens; the preset
+        serves 32k with an fp8 KV cache, what a 48 GB card holds beside 31 GiB
+        of weights at --gpu-memory-utilization=0.92 (four concurrent requests,
+        one image per prompt, no audio). Tool calls and thinking use Gemma 4's own
+        token protocol, parsed with vLLM's gemma4 tool and reasoning parsers
+        under vLLM's Gemma 4 chat template — the template the model card's vLLM
+        instructions and vLLM's Gemma 4 recipe both serve the model with,
+        shipped as chat-templates/gemma-4-31b.jinja from vLLM v0.23.0's
+        examples (the vLLM inside llm-d v0.8.0, the platform's runtime image).
+        Thinking is off by default; a request turns it on with enable_thinking.
+        Weights: an OCI model image, giantswarm/models/gemma-4-31b-fp8 at the
+        checkpoint revision, pulled onto the node by containerd (KServe's
+        modelcar path: no download, no cache claim); the runtime runs as a
+        non-root uid on the read-only image, so HOME, HF_HOME and
+        VLLM_CACHE_ROOT live under /tmp. 31 + 13 GiB exceed a 24 GB L4/A10G and
+        a 16 GB T4.
+      displayName: Gemma 4 31B (FP8, one 48 GB GPU)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        - coding
+        contextLength: 32768
+        format: vLLM
+        id: RedHatAI/gemma-4-31B-it-FP8-dynamic
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/gemma-4-31b-fp8:d4ab4f579dd3
+      requirements:
+        minComputeCapability: "8.9"
+        overheadGiB: 13
+        weightsGiB: 31
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 48Gi
+        requests:
+          cpu: "4"
+          memory: 32Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset gpt-oss-120b (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-gpt-oss-120b
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "gpt-oss-120b"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: gpt-oss-120b
+    spec:
+      args:
+      - --tensor-parallel-size=4
+      - --max-model-len=131072
+      - --max-num-seqs=8
+      - --max-num-batched-tokens=8192
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - --no-enable-log-requests
+      - --reasoning-parser=openai_gptoss
+      - --enable-auto-tool-choice
+      - --tool-call-parser=openai
+      - --gpu-memory-utilization=0.90
+      description: |
+        gpt-oss-120b: OpenAI's open-weight reasoning model, a 117B-parameter
+        mixture of experts with 5.1B active (128 experts, 4 per token, attention
+        sinks, 128k context) with tool calling through the harmony response
+        format and reasoning at low, medium or high effort (reasoning_effort on
+        the request; medium by default). Served as published — the experts in
+        MXFP4, the rest BF16, 61 GiB of weights — across four 48 GB GPUs of the
+        L40S family with tensor parallel 4: a g6e.12xlarge (4 GPUs, 48 vCPU,
+        384 GiB), the smallest curated size with more than one L40S; no two-GPU
+        size exists in the family. The GPUs have no native FP4, so vLLM runs the
+        MXFP4 experts through the Marlin kernels and the sink attention on the
+        Triton backend, both selected by the runtime itself on this GPU.
+        Memory per card: 61 / 4 = 15.2 GiB of weights, and the rest of
+        --gpu-memory-utilization=0.90 of the 48 GB — about 25 GiB — the KV cache
+        for eight concurrent requests of the full 128k context. The fit check
+        budgets the memory of the four requested cards, 4 x 48 = 192 GiB,
+        against weightsGiB + overheadGiB = 101 GiB: 40 GiB of overhead is 10 GiB
+        per card for the KV cache, CUDA graphs and the runtime. Requests 16 vCPU
+        / 96 GiB and limits 32 vCPU / 160 GiB of the size's 48 / 384 (the four
+        tensor-parallel workers stage the weights through host memory while
+        loading). Tools on with the openai parser, reasoning with the
+        openai_gptoss parser; the smaller gpt-oss-20b serves the same family on
+        one 24 GB GPU. Text only.
+        Weights: an OCI model image, giantswarm/models/gpt-oss-120b at the
+        checkpoint revision, pulled onto the node by containerd like any image
+        (KServe's modelcar path: no download, no cache claim, every serving node
+        a target); an installation serves it from a registry of its own that
+        holds the same path by setting modelServing.modelImages.registry. The
+        modelcar path runs the runtime as a non-root uid on a read-only image,
+        so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+        Licence: Apache 2.0.
+      displayName: gpt-oss-120b (MXFP4, four 48 GB GPUs, OCI model image)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      - name: TIKTOKEN_ENCODINGS_BASE
+        value: /mnt/models/tiktoken
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - coding
+        contextLength: 131072
+        format: vLLM
+        id: openai/gpt-oss-120b
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/gpt-oss-120b:b5c939de8f75-7abb6426
+      requirements:
+        minComputeCapability: "8.0"
+        overheadGiB: 40
+        weightsGiB: 61
+      resources:
+        gpus: 4
+        limits:
+          cpu: "32"
+          memory: 160Gi
+        requests:
+          cpu: "16"
+          memory: 96Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset gpt-oss-20b (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-gpt-oss-20b
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "gpt-oss-20b"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: gpt-oss-20b
+    spec:
+      args:
+      - --gpu-memory-utilization=0.90
+      - --max-model-len=32768
+      - --max-num-seqs=4
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - --no-enable-log-requests
+      - --reasoning-parser=openai_gptoss
+      - --enable-auto-tool-choice
+      - --tool-call-parser=openai
+      description: |
+        gpt-oss-20b: OpenAI's open-weight mixture of experts (21B parameters,
+        3.6B active) with reasoning at three effort levels and tool calling in
+        the harmony format, text only, Apache 2.0. Served as published — the
+        experts in MXFP4 (12.8 GiB of weights, the checkpoint's own quantization,
+        nothing to re-quantize) — on one 24 GB GPU of the L4 class. The GPU has
+        no native MXFP4, so vLLM runs the experts through the Marlin weight-only
+        kernel, which its backend selection picks for a pre-Hopper card on its
+        own (no flag, no environment). 32k of the model's 128k context, four
+        concurrent requests, chunked prefill and prefix caching;
+        --gpu-memory-utilization=0.90 leaves about 7 GiB to the KV cache next
+        to the weights — 13 + 9 GiB on the fit check. Reasoning with the
+        openai_gptoss parser (the effort follows the request's reasoning_effort,
+        medium by default), tools on with the openai parser (agents always send
+        tools, and vLLM answers 400 without --enable-auto-tool-choice); the
+        model's built-in browser and Python tools are not served.
+        Weights: an OCI model image, giantswarm/models/gpt-oss-20b at the
+        checkpoint revision, pulled onto the node by containerd like any image
+        (KServe's modelcar path: no download, no cache claim, every serving node
+        a target); an installation serves it from a registry of its own that
+        holds the same path by setting modelServing.modelImages.registry. The
+        modelcar path runs the runtime as a non-root uid on a read-only image,
+        so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+        Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+        node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+        follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+        its host memory is the runtime and the weights passing through the page
+        cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
+        (13 + 9 GiB, and the card predates bf16).
+      displayName: gpt-oss-20b (MXFP4, one 24 GB GPU)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      - name: TIKTOKEN_ENCODINGS_BASE
+        value: /mnt/models/tiktoken
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        contextLength: 32768
+        format: vLLM
+        id: openai/gpt-oss-20b
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/gpt-oss-20b:6cee5e81ee83-7abb6426
+      requirements:
+        minComputeCapability: "8.0"
+        overheadGiB: 9
+        weightsGiB: 13
+      resources:
+        gpus: 1
+        limits:
+          cpu: "4"
+          memory: 12Gi
+        requests:
+          cpu: "2"
+          memory: 10Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset kolibri-1 (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-kolibri-1
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "kolibri-1"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: kolibri-1
+    spec:
+      args:
+      - --gpu-memory-utilization=0.60
+      - --max-model-len=262144
+      - --max-num-seqs=8
+      - --kv-cache-dtype=fp8
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - --no-enable-log-requests
+      - --reasoning-parser=kolibri1
+      - --enable-auto-tool-choice
+      - --tool-call-parser=kolibri1
+      description: |
+        Aleph Alpha's mixture of experts for German and English: 78B
+        parameters, 3.5B active per token, tool calling and a reasoning mode
+        (on at effort high unless a request passes reasoning_effort low, medium
+        or none in chat_template_kwargs), served as Aleph Alpha's own FP8
+        checkpoint (73.4 GiB of weights, 128x128 blocks, an FP8 KV cache).
+        Sized for a split across two 128 GB unified-memory Blackwell nodes
+        (GB10) on a fast link, tensor parallel 2: each node holds 36.9 GiB of
+        weights at --gpu-memory-utilization=0.60 and a 34.8 GiB FP8 KV cache of
+        6.8M tokens, about 26 full 256k contexts (40 of its 50 layers are
+        sliding-window). Serve it split: on one such node the weights alone
+        exceed the 0.60 share. The model's own window is 1M tokens; the preset serves 256k,
+        Aleph Alpha's recommendation for serving efficiency. Tools are parsed
+        with the plugin's kolibri1 parser (Hermes-style tool_call tags),
+        reasoning with its kolibri1 reasoning parser, under the checkpoint's own
+        chat template. Runtime: giantswarm/vllm-aleph-alpha, vLLM's own server
+        image v0.29.0 with the aleph-alpha-inference plugin, the one vLLM minor
+        the plugin supports; this preset names its image for that reason only.
+        Weights: an OCI model image, giantswarm/models/kolibri-1 at the
+        checkpoint revision, pulled onto each node by containerd (KServe's
+        modelcar path: no download, no cache claim); the runtime runs as a
+        non-root uid on the read-only image, so HOME, HF_HOME and
+        VLLM_CACHE_ROOT live under /tmp.
+      displayName: Kolibri-1 (FP8 MoE, two 128 GB GB10 nodes)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - coding
+        contextLength: 262144
+        format: vLLM
+        id: Aleph-Alpha/Kolibri-1
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/kolibri-1:e52eb4627d11
+      requirements:
+        minComputeCapability: "8.9"
+        overheadGiB: 34
+        weightsGiB: 74
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 64Gi
+        requests:
+          cpu: "4"
+          memory: 32Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+      template:
+        containers:
+        - image: gsoci.azurecr.io/giantswarm/vllm-aleph-alpha:0.5.0
+          name: main
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset mistral-small-4 (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-mistral-small-4
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "mistral-small-4"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: mistral-small-4
+    spec:
+      args:
+      - --tensor-parallel-size=4
+      - --tokenizer-mode=mistral
+      - --config-format=mistral
+      - --load-format=mistral
+      - --attention-backend=TRITON_MLA
+      - --max-model-len=131072
+      - --max-num-seqs=8
+      - --max-num-batched-tokens=8192
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - --no-enable-log-requests
+      - --reasoning-parser=mistral
+      - --enable-auto-tool-choice
+      - --tool-call-parser=mistral
+      - --gpu-memory-utilization=0.90
+      description: |
+        Mistral Small 4: a 119B-parameter mixture of experts with 6.5B active
+        (128 experts, 4 routed per token plus 1 shared, MLA attention), the
+        successor of the Instruct, Magistral and Devstral lines in one
+        checkpoint — tool calling, reasoning on request (reasoning_effort=high;
+        none by default) and vision (Pixtral encoder, images up to 1540 px).
+        Served as Mistral's own NVFP4 checkpoint (66 GiB of weights, the mistral
+        format: params.json and consolidated safetensors, hence --tokenizer-mode,
+        --config-format and --load-format mistral) across four 48 GB GPUs of the
+        L40S family with tensor parallel 4: a g6e.12xlarge (4 GPUs, 48 vCPU,
+        384 GiB) — the smallest curated size with more than one L40S; no
+        two-GPU size exists in the family. The GPUs have no native FP4, so vLLM
+        takes the Marlin weight-only FP4 path, and the MLA attention runs on
+        TRITON_MLA as the model card recommends (FlashMLA is Hopper-only).
+        Memory per card: 66 / 4 = 16.5 GiB of weights, and the rest of
+        --gpu-memory-utilization=0.90 of the 48 GB — about 23 GiB — the KV cache
+        for eight concurrent requests of the 128k context served here (the model
+        carries 256k; halving it doubles the requests a card's cache holds). The
+        fit check budgets the memory of the four requested cards, 4 x 48 =
+        192 GiB, against weightsGiB + overheadGiB = 126 GiB: 60 GiB of overhead is
+        15 GiB per card for the KV cache, CUDA graphs and the runtime. Requests
+        16 vCPU / 96 GiB and limits 32 vCPU / 160 GiB of the size's 48 / 384
+        (the four tensor-parallel workers stage the weights through host memory
+        while loading). Tools on with the mistral parser, reasoning with the
+        mistral parser.
+        Weights: an OCI model image, giantswarm/models/mistral-small-4-nvfp4 at
+        the checkpoint revision, pulled onto the node by containerd like any
+        image (KServe's modelcar path: no download, no cache claim, every serving
+        node a target); an installation serves it from a registry of its own
+        that holds the same path by setting modelServing.modelImages.registry.
+        The modelcar path runs the runtime as a non-root uid on a read-only
+        image, so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+        Licence: Apache 2.0.
+      displayName: Mistral Small 4 119B (NVFP4, four 48 GB GPUs, OCI model image)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        - coding
+        contextLength: 131072
+        format: vLLM
+        id: mistralai/Mistral-Small-4-119B-2603-NVFP4
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/mistral-small-4-nvfp4:45331841b631
+      requirements:
+        minComputeCapability: "8.9"
+        overheadGiB: 60
+        weightsGiB: 66
+      resources:
+        gpus: 4
+        limits:
+          cpu: "32"
+          memory: 160Gi
+        requests:
+          cpu: "16"
+          memory: 96Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset muse-glimmer-30b (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-muse-glimmer-30b
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "muse-glimmer-30b"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: muse-glimmer-30b
+    spec:
+      args:
+      - --gpu-memory-utilization=0.92
+      - --max-model-len=32768
+      - --max-num-seqs=4
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1}'''
+      - --no-enable-log-requests
+      - --reasoning-parser=muse_glimmer
+      - --enable-auto-tool-choice
+      - --tool-call-parser=muse_glimmer
+      - --chat-template=/mnt/chat-template/chat-template.jinja
+      chatTemplate:
+        configMap: agent-platform-chat-template-muse-glimmer-30b
+        key: chat-template.jinja
+        mountPath: /mnt/chat-template
+      description: |
+        Meta's dense 30B instruction-tuned model with tool calling, reasoning
+        and vision, served as Red Hat AI's FP8 block quantization (32 GiB of
+        weights, compressed-tensors) on one 48 GB GPU of the L40S family:
+        g6e.2xlarge or g6e.4xlarge (g6e.xlarge leaves a predictor 3 vCPU /
+        27 GiB, less than the 4 vCPU / 32 GiB requested here). 32k of the
+        model's 128k context, four concurrent requests, one image per prompt:
+        52 layers with 2 KV heads of 128 dimensions keep a token's KV cache at
+        52 KiB, so four 32k sequences take 6.5 GiB beside the weights at
+        --gpu-memory-utilization=0.92. Tool calls and reasoning use the model's
+        own ATEM protocol, parsed with vLLM's muse_glimmer tool and reasoning
+        parsers under vLLM's Muse Glimmer chat template, shipped as
+        chat-templates/muse-glimmer-30b.jinja from vLLM v0.30.0's examples.
+        Runtime: vLLM's own server image, vllm/vllm-openai v0.30.0, from its
+        signed gsoci copy (giantswarm/vllm-openai, pinned by digest in
+        retagger). The model's architecture (MuseGlimmerForConditionalGeneration)
+        and its parsers first ship in vLLM 0.28.0, and the platform's llm-d
+        runtime carries vLLM 0.23 (llm-d v0.9.0 ships 0.26); this preset names
+        its image for that reason only, and moves to the well-known runtime once
+        an llm-d release carries vLLM 0.28 or later.
+        Weights: an OCI model image, giantswarm/models/muse-glimmer-30b-fp8 at
+        the checkpoint revision, pulled onto the node by containerd (KServe's
+        modelcar path: no download, no cache claim); the runtime runs as a
+        non-root uid on the read-only image, so HOME, HF_HOME and
+        VLLM_CACHE_ROOT live under /tmp. 33 + 11 GiB exceed a 24 GB L4/A10G and
+        a 16 GB T4.
+      displayName: Muse Glimmer 30B (FP8, one 48 GB GPU)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        - coding
+        contextLength: 32768
+        format: vLLM
+        id: RedHatAI/Muse-Glimmer-30B-FP8-block
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/muse-glimmer-30b-fp8:1deb4641ff84
+      requirements:
+        minComputeCapability: "8.9"
+        overheadGiB: 11
+        weightsGiB: 33
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 48Gi
+        requests:
+          cpu: "4"
+          memory: 32Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+      template:
+        containers:
+        - image: gsoci.azurecr.io/giantswarm/vllm-openai:v0.30.0
+          name: main
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset nemotron-3-super-nvfp4 (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-nemotron-3-super-nvfp4
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "nemotron-3-super-nvfp4"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: nemotron-3-super-nvfp4
+    spec:
+      args:
+      - --gpu-memory-utilization=0.72
+      - --max-model-len=8192
+      - --no-enable-log-requests
+      - '--default-chat-template-kwargs=''{"enable_thinking": false}'''
+      - --enable-auto-tool-choice
+      - --tool-call-parser=qwen3_coder
+      - --reasoning-parser=nemotron_v3
+      description: |
+        Large MoE reasoning model (120B total, 12B active) served from the NVFP4
+        checkpoint (~75 GiB of weights); thinking disabled by default (the chat
+        template enables it otherwise). Needs a Blackwell-class GPU for NVFP4.
+        Tuned on a single-GPU 128 GB unified-memory node
+        (--gpu-memory-utilization=0.72), with CUDA graphs: the pool they
+        capture counts inside the 0.72, and the first start compiles them.
+      displayName: Nemotron 3 Super 120B-A12B (NVFP4)
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        contextLength: 8192
+        format: vLLM
+        id: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+        license: nvidia-open-model-license
+        storageUri: hf://nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+      requirements:
+        minComputeCapability: "10.0"
+        overheadGiB: 12
+        weightsGiB: 75
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 64Gi
+        requests:
+          cpu: "4"
+          memory: 48Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+      split:
+        env:
+        - name: VLLM_ENABLE_ROCE_ALLREDUCE
+          value: "1"
+        - name: VLLM_ROCE_ALLREDUCE_MAX_SIZE
+          value: 2MB
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset qwen3-5-4b (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-qwen3-5-4b
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "qwen3-5-4b"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: qwen3-5-4b
+    spec:
+      args:
+      - --gpu-memory-utilization=0.90
+      - --max-model-len=32768
+      - --max-num-seqs=4
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1, "video": 0}'''
+      - --no-enable-log-requests
+      - --reasoning-parser=qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser=qwen3_coder
+      - '--default-chat-template-kwargs=''{"enable_thinking": false}'''
+      description: |
+        Qwen3.5 4B: the dense 4B general model of the Qwen3.5 lineage (hybrid
+        Gated DeltaNet and gated attention, 262k native context) with tool
+        calling, thinking and image and video understanding, Apache 2.0. Served
+        as published, BF16 (8.7 GiB of weights, nothing quantized), on one 24 GB
+        GPU of the L4 class: the smallest of the curated presets and the one
+        with the most room — --gpu-memory-utilization=0.90 leaves about 12 GiB
+        to the KV cache next to the weights (the linear-attention layers keep no
+        KV cache) — 9 + 6 GiB on the fit check. 32k context, four concurrent
+        requests, chunked prefill and prefix caching. Thinking is off by default
+        (a request turns it on with enable_thinking), reasoning with the qwen3
+        parser, tools on with the qwen3_coder parser the model card names for
+        vLLM (agents always send tools, and vLLM answers 400 without
+        --enable-auto-tool-choice), one image and no video per request
+        (--limit-mm-per-prompt), the model's own chat template.
+        Weights: an OCI model image, giantswarm/models/qwen3-5-4b at the
+        checkpoint revision, pulled onto the node by containerd like any image
+        (KServe's modelcar path: no download, no cache claim, every serving node
+        a target); an installation serves it from a registry of its own that
+        holds the same path by setting modelServing.modelImages.registry. The
+        modelcar path runs the runtime as a non-root uid on a read-only image,
+        so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+        Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+        node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+        follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+        its host memory is the runtime and the weights passing through the page
+        cache; the KV cache lives on the GPU. A 16 GB T4 would hold 9 + 6 GiB
+        but does not host it: the card predates bf16, the checkpoint's dtype
+        and what vLLM serves the Qwen3.5 hybrid layers in, and this recipe
+        carries no --dtype=half — it is an L4 (and A10G) recipe.
+      displayName: Qwen3.5 4B (BF16, one 24 GB GPU)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        contextLength: 32768
+        format: vLLM
+        id: Qwen/Qwen3.5-4B
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-5-4b:851bf6e806ef
+      requirements:
+        minComputeCapability: "8.0"
+        overheadGiB: 6
+        weightsGiB: 9
+      resources:
+        gpus: 1
+        limits:
+          cpu: "4"
+          memory: 12Gi
+        requests:
+          cpu: "2"
+          memory: 10Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset qwen3-5-4b-hf (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-qwen3-5-4b-hf
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "qwen3-5-4b-hf"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: qwen3-5-4b-hf
+    spec:
+      args:
+      - --gpu-memory-utilization=0.90
+      - --max-model-len=32768
+      - --max-num-seqs=4
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1, "video": 0}'''
+      - --no-enable-log-requests
+      - --reasoning-parser=qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser=qwen3_coder
+      - '--default-chat-template-kwargs=''{"enable_thinking": false}'''
+      description: |
+        Qwen3.5 4B, the qwen3-5-4b recipe served from the Hugging Face Hub
+        (hf://Qwen/Qwen3.5-4B) instead of the signed OCI model image: the same
+        arguments, resources and fit (9 + 6 GiB), BF16 at 32k context, four
+        concurrent requests, thinking off by default, reasoning with the qwen3
+        parser, tools on with qwen3_coder, one image and no video per request.
+        Weights: pull_model downloads them into the model cache claim
+        (hf-cache), and a predictor starts from the cache; with the cache off
+        KServe's storage-initializer downloads them into the pod at every start.
+        Use qwen3-5-4b for serving on an installation (no download, no cache
+        claim); this preset is the Hub path on the smallest GPU pool.
+        Sized for a g6.xlarge (4 vCPU, 16 GiB): requests 2 vCPU and 10 GiB,
+        limits 4 vCPU and 12 GiB. An L4 (or A10G) recipe: a T4 predates bf16.
+      displayName: Qwen3.5 4B from the Hub (BF16, one 24 GB GPU)
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        contextLength: 32768
+        format: vLLM
+        id: Qwen/Qwen3.5-4B
+        license: apache-2.0
+        storageUri: hf://Qwen/Qwen3.5-4B
+      requirements:
+        minComputeCapability: "8.0"
+        overheadGiB: 6
+        weightsGiB: 9
+      resources:
+        gpus: 1
+        limits:
+          cpu: "4"
+          memory: 12Gi
+        requests:
+          cpu: "2"
+          memory: 10Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset qwen3-5-9b-fp8 (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-qwen3-5-9b-fp8
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "qwen3-5-9b-fp8"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: qwen3-5-9b-fp8
+    spec:
+      args:
+      - --gpu-memory-utilization=0.90
+      - --max-model-len=32768
+      - --max-num-seqs=4
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1, "video": 0}'''
+      - --no-enable-log-requests
+      - --reasoning-parser=qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser=qwen3_coder
+      - '--default-chat-template-kwargs=''{"enable_thinking": false}'''
+      description: |
+        Qwen3.5 9B: the dense 9B general model of the Qwen3.5 lineage (hybrid
+        Gated DeltaNet and gated attention, 262k native context) with tool
+        calling, thinking and image and video understanding, Apache 2.0. Served
+        as Red Hat's FP8 dynamic quantization (compressed-tensors, weights and
+        activations in FP8: 13 GiB on disk, of which the multi-token-prediction
+        head — 0.4 GiB — is not loaded without speculative decoding) on one
+        24 GB GPU of the L4 class, whose FP8 tensor cores run it natively. 32k
+        context, four concurrent requests, chunked prefill and prefix caching;
+        --gpu-memory-utilization=0.90 leaves about 7 GiB to the KV cache next to
+        the weights (the linear-attention layers keep no KV cache, so it goes a
+        long way) — 14 + 9 GiB on the fit check. Thinking is off by default (a
+        request turns it on with enable_thinking), reasoning with the qwen3
+        parser, tools on with the qwen3_coder parser the model card names for
+        vLLM (agents always send tools, and vLLM answers 400 without
+        --enable-auto-tool-choice), one image and no video per request
+        (--limit-mm-per-prompt), the model's own chat template.
+        Weights: an OCI model image, giantswarm/models/qwen3-5-9b-fp8 at the
+        checkpoint revision, pulled onto the node by containerd like any image
+        (KServe's modelcar path: no download, no cache claim, every serving node
+        a target); an installation serves it from a registry of its own that
+        holds the same path by setting modelServing.modelImages.registry. The
+        modelcar path runs the runtime as a non-root uid on a read-only image,
+        so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+        Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
+        node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
+        follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
+        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
+        its host memory is the runtime and the weights passing through the page
+        cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
+        (14 + 9 GiB, and the card has neither FP8 nor bf16).
+      displayName: Qwen3.5 9B (FP8, one 24 GB GPU)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        contextLength: 32768
+        format: vLLM
+        id: RedHatAI/Qwen3.5-9B-FP8-dynamic
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-5-9b-fp8:790f0576d2d7
+      requirements:
+        minComputeCapability: "8.9"
+        overheadGiB: 9
+        weightsGiB: 14
+      resources:
+        gpus: 1
+        limits:
+          cpu: "4"
+          memory: 12Gi
+        requests:
+          cpu: "2"
+          memory: 10Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset qwen3-6-35b-a3b (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-qwen3-6-35b-a3b
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "qwen3-6-35b-a3b"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: qwen3-6-35b-a3b
+    spec:
+      args:
+      - --gpu-memory-utilization=0.92
+      - --max-model-len=16384
+      - --max-num-seqs=4
+      - --max-num-batched-tokens=8192
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1, "video": 0}'''
+      - --no-enable-log-requests
+      - --reasoning-parser=qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser=qwen3_coder
+      - '--default-chat-template-kwargs=''{"enable_thinking": false}'''
+      description: |
+        Mixture of experts with 35B parameters loaded and 3B active per token
+        (Qwen3.5 lineage), so decode runs at the pace of a 3B model: the fast
+        agent and coding model of the 48 GB shape, with tool calling (Claude
+        Code compatible), reasoning and vision, served as Qwen's own FP8
+        checkpoint (35 GiB of weights) on one 48 GB GPU of the L40S family:
+        g6e.2xlarge or g6e.4xlarge (g6e.xlarge leaves a predictor 3 vCPU /
+        27 GiB, less than the 4 vCPU / 32 GiB requested here). The model's own
+        window is 262,144 tokens; the preset serves 16k, what the KV cache of a
+        48 GB card holds beside 35 GiB of weights at
+        --gpu-memory-utilization=0.92 (four concurrent requests, one image per
+        prompt). Thinking is off by default (a request turns it on with
+        enable_thinking), tools on with the qwen3_coder parser, reasoning with
+        the qwen3 parser, the model's own chat template. Weights: an OCI model
+        image, giantswarm/models/qwen3-6-35b-a3b-fp8 at the checkpoint
+        revision, pulled onto the node by containerd (KServe's modelcar path: no
+        download, no cache claim); the runtime runs as a non-root uid on the
+        read-only image, so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+        35 + 9 GiB exceed a 24 GB L4/A10G and a 16 GB T4.
+      displayName: Qwen3.6 35B-A3B (FP8 MoE, one 48 GB GPU)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        - coding
+        contextLength: 16384
+        format: vLLM
+        id: Qwen/Qwen3.6-35B-A3B-FP8
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-6-35b-a3b-fp8:95a723d08a94
+      requirements:
+        minComputeCapability: "8.9"
+        overheadGiB: 9
+        weightsGiB: 35
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 48Gi
+        requests:
+          cpu: "4"
+          memory: 32Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset qwen3-8-27b (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-qwen3-8-27b
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "qwen3-8-27b"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: qwen3-8-27b
+    spec:
+      args:
+      - --gpu-memory-utilization=0.60
+      - --max-model-len=262144
+      - --max-num-seqs=4
+      - --max-num-batched-tokens=16384
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1, "video": 0}'''
+      - --speculative-config='{"method":"dflash","model":"z-lab/Qwen3.8-27B-DFlash2","num_speculative_tokens":7}'
+      - --no-enable-log-requests
+      - --reasoning-parser=qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser=qwen3_coder
+      - '--default-chat-template-kwargs=''{"enable_thinking": true}'''
+      - --chat-template=/mnt/chat-template/chat-template.jinja
+      chatTemplate:
+        configMap: agent-platform-chat-template-qwen3-8-27b
+        key: chat-template.jinja
+        mountPath: /mnt/chat-template
+      description: |
+        Dense 27B coding and agent model with 256k native context, tool calling
+        (Claude Code compatible) and vision. Served as the Inferact NVFP4 repack
+        (BF16 lm_head, required by the DFlash2 draft model), which cuts the
+        weights from ~52 GiB to ~25 GiB (six shards plus the MTP experts file)
+        and, with the 1.9B DFlash2 draft proposing 7 tokens per target pass,
+        lifts single-request decode from ~4 to ~29 tok/s on a bandwidth-bound
+        node. Target hardware: a single-GPU 128 GB unified-memory Blackwell node
+        (the CUTE_DSL_ARCH pin, --gpu-memory-utilization=0.60 and the 30 GiB of
+        overhead belong to that hardware; adjust all three elsewhere). As tuned,
+        the recipe needs 55 GiB (25 GiB of weights + 30 GiB of overhead): no
+        size of the curated AWS accelerator families (24 GiB L4/A10G, 16 GiB T4,
+        48 GiB L40S) hosts it. The chat template maps the Anthropic reasoning effort
+        "high" to the model's "xhigh", which the stock template rejects.
+        Known ceiling: the DFlash kernel can wedge at >100k-token prefill with
+        concurrency >= 2, hence --max-num-seqs=4.
+      displayName: Qwen3.8 27B (NVFP4, speculative decoding)
+      env:
+      - name: CUTE_DSL_ARCH
+        value: sm_121a
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        - coding
+        contextLength: 262144
+        format: vLLM
+        id: Inferact/Qwen3.8-27B-NVFP4
+        license: apache-2.0
+        storageUri: hf://Inferact/Qwen3.8-27B-NVFP4
+      requirements:
+        minComputeCapability: "10.0"
+        overheadGiB: 30
+        weightsGiB: 25
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 64Gi
+        requests:
+          cpu: "4"
+          memory: 48Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset qwen3-8-27b-l40s (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-qwen3-8-27b-l40s
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "qwen3-8-27b-l40s"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: qwen3-8-27b-l40s
+    spec:
+      args:
+      - --gpu-memory-utilization=0.92
+      - --max-model-len=65536
+      - --max-num-seqs=4
+      - --max-num-batched-tokens=8192
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      - '--limit-mm-per-prompt=''{"image": 1, "video": 0}'''
+      - --no-enable-log-requests
+      - --reasoning-parser=qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser=qwen3_coder
+      - '--default-chat-template-kwargs=''{"enable_thinking": false}'''
+      description: |
+        Dense 27B coding and agent model (Qwen3.5 lineage) with tool calling
+        (Claude Code compatible) and vision, served as NVIDIA's own NVFP4
+        checkpoint (20.4 GiB of weights: NVFP4 on the MLPs and the language-model
+        head, FP8 on the attention layers) on one 48 GB GPU of the L40S family:
+        g6e.2xlarge or g6e.4xlarge (g6e.xlarge leaves a predictor 3 vCPU /
+        27 GiB, less than the 4 vCPU / 32 GiB requested here). The GPU has no
+        native FP4, so vLLM runs the NVFP4 layers on the Marlin weight-only path
+        and the FP8 layers on the card's FP8 units; at
+        --gpu-memory-utilization=0.92 about 20 GiB stay for the KV cache, CUDA
+        graphs and the runtime — 64k context, four concurrent requests. Thinking
+        is off by default (a request turns it on with enable_thinking), tools on
+        with the qwen3_coder parser, reasoning with the qwen3 parser, the
+        model's own chat template. Weights: an OCI model image,
+        giantswarm/models/qwen3-8-27b-nvfp4 at the checkpoint revision, pulled
+        onto the node by containerd (KServe's modelcar path: no download, no
+        cache claim); the runtime runs as a non-root uid on the read-only image,
+        so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp. The qwen3-8-27b
+        preset is the same model (the Inferact repack) tuned for a 128 GB
+        unified-memory Blackwell node and adds what a 48 GB card has no room
+        for: the DFlash2 speculative decoder, 256k context and the patched chat
+        template. 21 + 20 GiB exceed a 24 GB L4/A10G and a 16 GB T4.
+      displayName: Qwen3.8 27B (NVFP4, one 48 GB GPU)
+      env:
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        - coding
+        contextLength: 65536
+        format: vLLM
+        id: nvidia/Qwen3.8-27B-NVFP4
+        license: apache-2.0
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-8-27b-nvfp4:482ca0f38322
+      requirements:
+        minComputeCapability: "8.9"
+        overheadGiB: 20
+        weightsGiB: 21
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 48Gi
+        requests:
+          cpu: "4"
+          memory: 32Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
+# Source: agent-platform-connectivity/templates/model-serving/presets.yaml
+# Serving preset qwen3-8-flash-next-nvfp4 (shipped): the published ServingPreset
+# the portal's serve flow turns into an LLMInferenceService. Schema:
+# files/model-serving/serving-preset.schema.json. List all presets with
+#   kubectl -n default get configmap -l agent-platform.giantswarm.io/serving-preset=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-serving-preset-qwen3-8-flash-next-nvfp4
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: model-serving
+    agent-platform.giantswarm.io/serving-preset: "true"
+    agent-platform.giantswarm.io/preset: "qwen3-8-flash-next-nvfp4"
+    agent-platform.giantswarm.io/preset-source: "shipped"
+  annotations:
+    agent-platform.giantswarm.io/chart-version: "1.1.35"
+data:
+  preset.yaml: |
+    apiVersion: agent-platform.giantswarm.io/v1alpha1
+    kind: ServingPreset
+    metadata:
+      name: qwen3-8-flash-next-nvfp4
+    spec:
+      args:
+      - --trust-remote-code
+      - --mamba-cache-mode=align
+      - --enable-prefix-caching
+      - --enable-chunked-prefill
+      - --dtype=bfloat16
+      - --kv-cache-dtype=fp8
+      - --quantization=modelopt_mixed
+      - --block-size=16
+      - --load-format=b12x
+      - --max-model-len=262144
+      - --max-num-seqs=8
+      - --max-num-batched-tokens=4096
+      - --speculative-config='{"method":"mtp","num_speculative_tokens":4}'
+      - --gdn-decode-kernel=b12x
+      - --linear-backend=b12x
+      - --moe-backend=b12x
+      - --no-enable-flashinfer-autotune
+      - --mm-encoder-tp-mode=data
+      - --reasoning-parser=qwen3
+      - --tool-call-parser=qwen3_xml
+      - --enable-auto-tool-choice
+      - --compilation-config='{"pass_config":{"fuse_act_quant":true}}'
+      - --gpu-memory-utilization=0.80
+      description: |
+        Qwen3.8-Flash-Next: a 125B-parameter mixture of experts with 6B active
+        (Qwen3-Next lineage, Gated DeltaNet hybrid) and a 51B n-gram embedding
+        table, 262k native context, tool calling, reasoning and vision. As
+        published by NVIDIA the NVFP4 checkpoint is 123.6 GiB on disk and does
+        not fit a 128 GB unified-memory node next to a KV cache; this preset
+        serves the quantization-aware-distilled repack
+        local-inference-lab/Qwen3.8-Flash-Next-NVFP4 (98.6 GiB, the n-gram
+        table in NVFP4 as well) with the table read from disk
+        (VLLM_PLE_TABLE_MEMORY=disk) and MTP speculative decoding proposing four
+        tokens per target pass.
+        Target hardware: one single-GPU 128 GB unified-memory Blackwell node
+        (GB10, the CUTE_DSL_ARCH sm_121a pin). Runtime: the B12X serving stack
+        (the community's spark-vllm-b12x build, which brings the b12x load format,
+        GDN decode kernel, linear and MoE backends this recipe selects) as the
+        runtime image of the well-known LLMInferenceServiceConfig the installation
+        serves such a node with (components.kserve-runtime-configs, the chart's
+        image field); the upstream vLLM image cannot serve this architecture on
+        the node.
+        Weights: an OCI model image, giantswarm/models/qwen3-8-flash-next-nvfp4
+        at the checkpoint revision, pulled onto the node by containerd like any
+        image (KServe's modelcar path: no download, no cache claim, every serving
+        node a target); an installation serves it from a registry of its own
+        that holds the same path by setting modelServing.modelImages.registry.
+        The modelcar path runs the runtime as a non-root uid on a read-only
+        image, so HOME, HF_HOME and VLLM_CACHE_ROOT live under /tmp.
+        Memory: 99 GiB on disk (the Hub's size), of which the 25 GiB n-gram
+        table stays on disk, so about 74 GiB of weights are resident and
+        --gpu-memory-utilization=0.80 of the 128 GB leaves the rest to the fp8 KV
+        cache — 20 GiB of overhead on top of the 74 resident. Eight concurrent requests at
+        4096 batched tokens; tools on with the qwen3_xml parser, reasoning with
+        the qwen3 parser. No size of the curated AWS accelerator families hosts
+        it. Licence: the Qwen community licence (license other).
+      displayName: Qwen3.8-Flash-Next (NVFP4, OCI model image, B12X serving stack)
+      env:
+      - name: VLLM_PLE_TABLE_MEMORY
+        value: disk
+      - name: CUTE_DSL_ARCH
+        value: sm_121a
+      - name: SAFETENSORS_FAST_GPU
+        value: "1"
+      - name: VLLM_WORKER_MULTIPROC_METHOD
+        value: spawn
+      - name: VLLM_SSM_CONV_STATE_LAYOUT
+        value: DS
+      - name: VLLM_USE_AOT_COMPILE
+        value: "1"
+      - name: VLLM_USE_MEGA_AOT_ARTIFACT
+        value: "1"
+      - name: VLLM_USE_V2_MODEL_RUNNER
+        value: "1"
+      - name: B12X_POLICY_MODE
+        value: auto
+      - name: HOME
+        value: /tmp
+      - name: HF_HOME
+        value: /tmp/hf
+      - name: VLLM_CACHE_ROOT
+        value: /tmp/vllm-cache
+      - name: USER
+        value: vllm
+      - name: LOGNAME
+        value: vllm
+      - name: TORCHINDUCTOR_CACHE_DIR
+        value: /tmp/torchinductor
+      model:
+        capabilities:
+        - chat
+        - tools
+        - reasoning
+        - vision
+        - coding
+        contextLength: 262144
+        format: vLLM
+        id: local-inference-lab/Qwen3.8-Flash-Next-NVFP4
+        license: other
+        storageUri: oci://gsoci.azurecr.io/giantswarm/models/qwen3-8-flash-next-nvfp4:7c4f1bc1a2d6
+      requirements:
+        minComputeCapability: "10.0"
+        overheadGiB: 20
+        residentWeightsGiB: 74
+        weightsGiB: 100
+      resources:
+        gpus: 1
+        limits:
+          cpu: "8"
+          memory: 118Gi
+        requests:
+          cpu: "4"
+          memory: 48Gi
+      scheduling:
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+---
 # Source: agent-platform-connectivity/templates/agentgateway/clusterrole-listenerset.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
