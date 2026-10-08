@@ -5,12 +5,20 @@
 ##@ Custom
 
 CHART_DIR ?= helm/agent-platform
-# The helm binary the golden renders of tests/golden/ are produced and checked with
-# (the minor CI pins; tests/verify-target.py refuses another one and says why).
-# Every recipe calls it, so HELM=<path> reaches each render. `make pinned-helm`
-# downloads the version CI pins.
+# The helm binary every recipe calls, so HELM=<path> reaches each render.
 HELM ?= helm
+# The committed renders of tests/golden/ are produced and checked with the helm CI
+# pins (tests/verify-target.py refuses another minor and says why). golden-update
+# and verify-target render them with GOLDEN_HELM: HELM when it is that version
+# (CI installs it on PATH), else the pinned binary `make pinned-helm` fetches into
+# .bin/ once. A HELM passed on the command line or in the environment is used as
+# given. Recursive (=), so `helm version` runs only when such a recipe does.
 HELM_PINNED_VERSION ?= v3.17.3
+HELM_PLATFORM = $(shell uname -s | tr A-Z a-z)-$(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+HELM_PINNED_DIR = .bin/helm-$(HELM_PINNED_VERSION)
+HELM_PINNED = $(CURDIR)/$(HELM_PINNED_DIR)/$(HELM_PLATFORM)/helm
+HELM_VERSION = $(shell $(HELM) version --short 2>/dev/null)
+GOLDEN_HELM = $(if $(filter file,$(origin HELM)),$(if $(filter $(HELM_PINNED_VERSION)+%,$(HELM_VERSION)),$(HELM),$(HELM_PINNED)),$(HELM))
 CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
 # Where the verify recipes write their scratch renders: TMPDIR when the
 # environment sets one (a sandbox can allow writes there only), /tmp otherwise.
@@ -1347,24 +1355,26 @@ sync-flux-crds: ## Write the flux-engine subchart's crds/ from the pinned releas
 	@HELM="$(HELM)" python3 tests/verify-flux-crds.py --write $(if $(FLUX_VERSION),--flux-version $(FLUX_VERSION)) $(FLUX_ENGINE_DIR)
 
 .PHONY: pinned-helm
-pinned-helm: ## Download the helm version CI pins (HELM_PINNED_VERSION) into .bin/, once, and print the HELM= that golden-update and the verify targets take.
-	@plat=$$(uname -s | tr A-Z a-z)-$$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'); \
-	dir=.bin/helm-$(HELM_PINNED_VERSION); \
-	if [ ! -x "$$dir/$$plat/helm" ]; then \
-		mkdir -p "$$dir" && curl -fsSL "https://get.helm.sh/helm-$(HELM_PINNED_VERSION)-$$plat.tar.gz" | tar xz -C "$$dir" || exit 1; \
-	fi; \
-	echo "HELM=$(CURDIR)/$$dir/$$plat/helm"
+pinned-helm: ## Resolve the helm golden-update and verify-target render tests/golden/ with (GOLDEN_HELM): HELM when it is HELM_PINNED_VERSION, else that version fetched from get.helm.sh into .bin/ once, the way CI fetches it. Prints the HELM= it resolved to.
+	@if [ "$(GOLDEN_HELM)" = "$(HELM_PINNED)" ] && [ ! -x "$(HELM_PINNED)" ]; then \
+		echo "--> fetching helm $(HELM_PINNED_VERSION) into $(HELM_PINNED_DIR) ($(HELM) is $(or $(HELM_VERSION),not runnable))"; \
+		rm -rf "$(HELM_PINNED_DIR)" "$(HELM_PINNED_DIR).tmp" && mkdir -p "$(HELM_PINNED_DIR).tmp" \
+			&& curl -fsSL --connect-timeout 20 --max-time 180 --retry 5 --retry-delay 10 --retry-all-errors "https://get.helm.sh/helm-$(HELM_PINNED_VERSION)-$(HELM_PLATFORM).tar.gz" | tar xz -C "$(HELM_PINNED_DIR).tmp" \
+			&& mv "$(HELM_PINNED_DIR).tmp" "$(HELM_PINNED_DIR)" && [ -x "$(HELM_PINNED)" ] \
+			|| { echo "FAIL: cannot fetch helm $(HELM_PINNED_VERSION) for $(HELM_PLATFORM) from get.helm.sh; pass HELM=<a $(HELM_PINNED_VERSION) binary>"; exit 1; }; \
+	fi
+	@echo "HELM=$(GOLDEN_HELM)"
 
 .PHONY: golden-update
-golden-update: ## Re-render the shapes of tests/golden/ and write them back. Run it when a change moves the rendered output on purpose, and commit the diff: it is what a reviewer reads to see which objects moved. Needs the helm minor CI pins (HELM=<path> to point at it).
+golden-update: pinned-helm ## Re-render the shapes of tests/golden/ and write them back. Run it when a change moves the rendered output on purpose, and commit the diff: it is what a reviewer reads to see which objects moved. Renders with the helm CI pins (pinned-helm resolves or fetches it).
 	@echo "====> $@ (tests/golden/)"
-	@HELM="$(HELM)" python3 tests/verify-target.py --update $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@HELM="$(GOLDEN_HELM)" python3 tests/verify-target.py --update $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "$@: review the tests/golden/ diff before committing — it is the rendered blast radius of this change"
 
 .PHONY: verify-target
-verify-target: ## Assert one release of this chart per target cluster (giantswarm/agent-platform#328): gitops.target.kubeConfig.secretRef stamps spec.kubeConfig.secretRef (name, key when set) onto every component HelmRelease and changes nothing else — unset, the meta and connectivity renders match the committed renders in tests/golden/ (`make golden-update` to regenerate); components.muster / components.dicebear gain enabled (off = no release, the roster says so, the connectivity chart drops the /mcp route, muster's egress policy, every rule selecting its pods and the avatars host in the portal's CSP); the knob with the bundled engine fails; no hook Job renders with the knob; the serving- and runtime-shaped toggle sets (ci/test-slice-*-values.yaml) render alone, combined (the union, the first slice's documents unchanged — an in-place upgrade) and with the knob (ci/test-target-values.yaml), agentgateway off beside the platform's release and on for a workload cluster; the schema. The lookup guards (a foreign helm-controller, a second owner of a component's CRDs — components.<name>.ownedCrds) need a live cluster: README "One release per target cluster". HELM selects the binary.
+verify-target: pinned-helm ## Assert one release of this chart per target cluster (giantswarm/agent-platform#328): gitops.target.kubeConfig.secretRef stamps spec.kubeConfig.secretRef (name, key when set) onto every component HelmRelease and changes nothing else — unset, the meta and connectivity renders match the committed renders in tests/golden/ (`make golden-update` to regenerate); components.muster / components.dicebear gain enabled (off = no release, the roster says so, the connectivity chart drops the /mcp route, muster's egress policy, every rule selecting its pods and the avatars host in the portal's CSP); the knob with the bundled engine fails; no hook Job renders with the knob; the serving- and runtime-shaped toggle sets (ci/test-slice-*-values.yaml) render alone, combined (the union, the first slice's documents unchanged — an in-place upgrade) and with the knob (ci/test-target-values.yaml), agentgateway off beside the platform's release and on for a workload cluster; the schema. The lookup guards (a foreign helm-controller, a second owner of a component's CRDs — components.<name>.ownedCrds) need a live cluster: README "One release per target cluster". It renders with the helm CI pins (pinned-helm resolves or fetches it).
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
-	@HELM="$(HELM)" python3 tests/verify-target.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@HELM="$(GOLDEN_HELM)" python3 tests/verify-target.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "target cluster shapes verified."
 
 .PHONY: verify-serving-slice
