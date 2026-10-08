@@ -5,13 +5,13 @@ A checklist for one installation at a time. Nothing here runs by itself; every s
 ## What changes, and why there is downtime
 
 - The kagent line moves from the API group `kagent.dev` to `api.kagent.dev` (version `v1alpha3` unchanged). An agent is now an `Agent` that names its `Harness` (`spec.harnessRef`) and carries its `AgentTemplate` inline or by `templateRef`. A conversation is a `Session` of an `Agent`; the controller serves `SessionService` in place of `AgentInstanceService`.
-- The kagent-crds chart of the line renders the `api.kagent.dev` CRDs only. The `kagent.dev` CRDs carry no `helm.sh/resource-policy: keep`, so Helm deletes them when the kagent-crds release upgrades, and the API server deletes every `kagent.dev` object with them: AgentTemplates, the Harness, ModelConfigs, ModelProviderConfigs, RemoteMCPServers. Agents are unavailable from this step until the producers have re-created their objects at `api.kagent.dev` and the controller is back.
+- The kagent-crds chart of the line renders the `api.kagent.dev` CRDs only. The installed `kagent.dev` CRDs carry `helm.sh/resource-policy: keep`, so they and their objects (AgentTemplates, the Harness, ModelConfigs, ModelProviderConfigs, RemoteMCPServers) stay through the upgrade; nothing reads them any more, and step 7 deletes the six CRDs by hand after the retention period. Agents are unavailable from this step until the producers have re-created their objects at `api.kagent.dev` and the controller is back.
 - The line rewrites its initial database migration (`000001_initial.sql`) in place. There is no forward migration: the controller refuses a database that holds the 1.x schema. The kagent database of the installation is dropped and re-created; every session, session share, scheduled-run execution and the klaus-gateway Slack thread bindings that point at sessions are lost. Agents, templates, ModelConfigs and schedules are Kubernetes objects and come back with their producers.
 - The meta chart release that selects the line retires the storage-version hooks of the 3.x to 4.x cut-over. Apply it before or with the CRD step: the retired restore hook waited on `modelconfigs.kagent.dev`, which does not exist after the cut-over.
 
 ## Before you start
 
-- [ ] Fill in the versions below once the tags exist. `1.3.0` is the first release of giantswarm/kagent-upstream on upstream `bf8afa56`; `1.4.0` is the Substrate release it was built against (the kagent WorkerPool's worker image is `ateom-gvisor:1.4.0`); `<META_VERSION>` is the agent-platform release whose `components.kagent.versionRange`, `components.kagent-crds.versionRange`, `components.substrate.versionRange` and `components.substrate-crds.versionRange` select them.
+- [ ] Fill in the versions below once the tags exist. `1.4.0` is the first release of giantswarm/kagent-upstream on upstream `bf8afa56` whose quiescence fence the Substrate release takes; `1.5.0` is the Substrate release it was built against (the kagent WorkerPool's worker image is `ateom-gvisor:1.5.0`); `<META_VERSION>` is the agent-platform release whose `components.kagent.versionRange`, `components.kagent-crds.versionRange`, `components.substrate.versionRange` and `components.substrate-crds.versionRange` select them.
 - [ ] Producers released and pinned in the meta chart: agent-manager (renders `Agent`, reads `Session`), the Generic agent chart (renders one `Agent` per release), Backstage (Agent and Session shapes), klaus-gateway (`SessionService`, the session id in `x-kagent-agent-instance-id`), agentlab.
 - [ ] Per installation, record the current versions for the rollback table at the end:
 
@@ -68,15 +68,15 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get actortemplat
 
 ### 3. Apply the CRD chart (and the meta chart release that selects the line)
 
-- [ ] Move the installation to `<META_VERSION>` (the meta chart's own `versionRange`, or the installation's pin of it in its gitops repository). That release raises `components.kagent-crds.versionRange` to `1.3.0` and retires the storage-version hooks.
-- [ ] Wait for the kagent-crds release and check the CRDs: the seven `api.kagent.dev` CRDs established, the five `kagent.dev` CRDs gone.
+- [ ] Move the installation to `<META_VERSION>` (the meta chart's own `versionRange`, or the installation's pin of it in its gitops repository). That release raises `components.kagent-crds.versionRange` to `1.4.0` and retires the storage-version hooks.
+- [ ] Wait for the kagent-crds release and check the CRDs: the seven `api.kagent.dev` CRDs established with `helm.sh/resource-policy: keep`; the six `kagent.dev` CRDs still present (step 7 deletes them).
 
 ```sh
 kubectl --kubeconfig <kubeconfig> --context <context> -n agent-platform wait helmrelease/kagent-crds --for=condition=Ready --timeout=10m
 kubectl --kubeconfig <kubeconfig> --context <context> get crd | grep -E '\.(api\.)?kagent\.dev'
 ```
 
-Expected: `agents`, `agenttemplates`, `harnesses`, `modelconfigs`, `modelproviderconfigs`, `remotemcpservers`, `sandboxtemplates` under `api.kagent.dev`, nothing under `kagent.dev`. If a `kagent.dev` CRD is still there (an object with a finalizer holds it), find the object and remove the finalizer.
+Expected: `agents`, `agenttemplates`, `harnesses`, `modelconfigs`, `modelproviderconfigs`, `remotemcpservers`, `sandboxtemplates` under `api.kagent.dev`; the `kagent.dev` CRDs still listed until step 7.
 
 ### 4. Flip the producers to the new Agent shape
 
@@ -112,8 +112,10 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get modelconfigs
 
 ### 5. kagent controller on a fresh database, with the new Substrate worker image
 
+- [ ] Suspend the kagent HelmRelease before the configs merge (`kubectl patch hr kagent --type merge -p '{"spec":{"suspend":true}}'`, check `spec.suspend` reads true): otherwise the controller still running the old line lays the 1.x schema on the fresh database before the new one starts.
+- [ ] A dev meta chart pin (an rc or a branch build) needs the dev-channel `semverFilter` under `gitops.prereleases`, or the range resolves to nothing.
 - [ ] Add the fresh database to the connectivity chart's values for the installation (the agent-platform#346 pattern: a new CNPG `Database` in `postgres.databases`, a new name such as `kagent_v2`, and the kagent release's `KAGENT_POSTGRES_DATABASE_URL` pointing at it). Keep the old database in place for the retention period.
-- [ ] Wait for the substrate and kagent releases; the WorkerPool's worker image is `ateom-gvisor:1.4.0` and the controller logs its migrations on the empty database instead of refusing a 1.x schema:
+- [ ] Wait for the substrate and kagent releases; the WorkerPool's worker image is `ateom-gvisor:1.5.0` and the controller logs its migrations on the empty database instead of refusing a 1.x schema:
 
 ```sh
 kubectl --kubeconfig <kubeconfig> --context <context> -n agent-platform wait helmrelease/substrate helmrelease/kagent --for=condition=Ready --timeout=15m
@@ -122,6 +124,8 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent logs deployment/
 ```
 
 A controller that logs the 1.x refusal is still pointed at the old database; fix the URL before anything else.
+
+- [ ] Substrate 1.5.x from a 1.3.x line needs a fresh substrate database too: ate-api-server crash-loops on the existing schema (`relation tuple already exists`). Recreate the schema (`DROP SCHEMA public CASCADE; CREATE SCHEMA public; ALTER SCHEMA public OWNER TO kagent; GRANT ALL ON SCHEMA public TO public;` on the `substrate` database), delete the crash-looping pod and wait for the substrate HelmRelease Ready. giantswarm/agent-platform#819 tracks a values knob for this.
 
 - [ ] Bring klaus-gateway back (undo step 1's scale to zero) once the controller is Ready.
 

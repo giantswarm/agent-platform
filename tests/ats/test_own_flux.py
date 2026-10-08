@@ -54,7 +54,6 @@ import yaml
 
 from conftest import (
     AGENT_CHART_SEMVER,
-    AGENT_CHART_SEMVER_FILTER,
     AGENT_CHART_URL,
     ATE_NAMESPACE,
     Abort,
@@ -337,7 +336,7 @@ def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_fl
         kube.apply([
             {"apiVersion": "source.toolkit.fluxcd.io/v1", "kind": "OCIRepository",
              "metadata": {"name": "agent", "namespace": KAGENT_NAMESPACE},
-             "spec": {"interval": "10m", "url": AGENT_CHART_URL, "ref": {"semver": AGENT_CHART_SEMVER, "semverFilter": AGENT_CHART_SEMVER_FILTER}}},
+             "spec": {"interval": "10m", "url": AGENT_CHART_URL, "ref": {"semver": AGENT_CHART_SEMVER}}},
             {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
              "metadata": {"name": AGENT, "namespace": KAGENT_NAMESPACE},
              "spec": {"interval": "10m", "releaseName": AGENT, "serviceAccountName": KAGENT_FLUX_SA,

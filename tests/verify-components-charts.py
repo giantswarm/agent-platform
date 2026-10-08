@@ -142,7 +142,7 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {"agent-manager": "1.11.0"}  # kagent.controllerTarget, giantswarm/agent-manager#101
+UNRELEASED: dict[str, str] = {}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.

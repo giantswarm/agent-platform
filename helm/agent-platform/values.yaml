@@ -553,7 +553,7 @@ components:  # @schema additionalProperties: true
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing.
-    versionRange: ">=1.3.0 <1.4.0"
+    versionRange: ">=1.4.0 <1.5.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -663,7 +663,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.3.0 <1.4.0"
+    versionRange: ">=1.4.0 <1.5.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -714,7 +714,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.4.0 <1.5.0"
+    versionRange: ">=1.5.0 <1.6.0"
     # Stable releases only, also where gitops.prereleases admits the
     # platform's release candidates: the worker image above follows the
     # floor, and a candidate's atelet next to the floor's worker fails every
@@ -743,7 +743,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.4.0 <1.5.0"
+    versionRange: ">=1.5.0 <1.6.0"
     # Stable releases only, the range of substrate-crds above.
     prereleases: false
     valuesFrom: substrate
@@ -860,7 +860,11 @@ components:  # @schema additionalProperties: true
     # and, on a unified-memory node, composes --gpu-memory-utilization from
     # the weights plus overhead, so devstral-small-2's 0.90 (sized for one
     # 48 GB L40S) serves on a Spark too (giantswarm/model-manager#223).
-    versionRange: ">=1.10.2 <2.0.0"
+    # 1.14.0 is the floor on the api.kagent.dev line: it discovers the group
+    # its ModelConfigs go to (api.kagent.dev first) with a bare apiVersion,
+    # so no installation keeps a model-manager that writes kagent.dev
+    # (giantswarm/model-manager#247).
+    versionRange: ">=1.14.0 <2.0.0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -892,9 +896,9 @@ components:  # @schema additionalProperties: true
     # (giantswarm/agent-manager#86). 1.10.0 reads and composes the
     # api.kagent.dev Agent of this kagent line and migrates Generic chart 1.x
     # releases to 2.x (giantswarm/agent-manager#100).
-    # 1.11.0 takes kagent.controllerTarget, the kagent controller its session
+    # 1.10.0 takes kagent.controllerTarget, the kagent controller its session
     # tools call (giantswarm/agent-manager#101).
-    versionRange: ">=1.11.0 <2.0.0"
+    versionRange: ">=1.10.0 <2.0.0"
     valuesFrom: agent-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)

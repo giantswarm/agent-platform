@@ -83,7 +83,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.3.0 <1.4.0"
+KAGENT_RANGE = ">=1.4.0 <1.5.0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
 # both landing in ate-system, both following components.kagent. The pin is the
@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.3.0 <1.4.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.4.0 <1.5.0"
-SUBSTRATE_PIN = "1.4.0"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.3.0-alpha3 (giantswarm/giantswarm#37705, the 2026-09-24 re-pin), whose atenet data plane is the agentgateway line's 2.1.2; the 1.0 line stays on release-1.0
+SUBSTRATE_RANGE = ">=1.5.0 <1.6.0"
+SUBSTRATE_PIN = "1.5.0"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.3.0-alpha3 (giantswarm/giantswarm#37705, the 2026-10-05 re-pin) plus the Actor API's fencing token (giantswarm/substrate#182) and the ExternalSnapshot field fix (giantswarm/substrate#165); the 1.0 and 1.3 lines stay on release-1.0 and release-1.3
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
@@ -101,11 +101,11 @@ LINE = {
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, ">=1.11.0 <2.0.0", ["muster", "kagent"]),
+    "agent-manager": (GSOCI, ">=1.10.0 <2.0.0", ["muster", "kagent"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
-    "model-manager": (GSOCI, ">=1.10.2 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
+    "model-manager": (GSOCI, ">=1.14.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
     # 0.22.0 carries serviceMonitor.enabled / .labels (giantswarm/vm-manager#73,
     # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
     # from the generated CircleCI pipeline with its guest image artifact
