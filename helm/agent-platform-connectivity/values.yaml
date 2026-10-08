@@ -681,9 +681,11 @@ networkPolicy:
   # pro / runbooks MCP servers on 8080, or tunnelport RemoteApp tunnels whose
   # ghostunnel sidecar terminates TLS on 8443). Muster's own CNP permits
   # cluster-entity egress only on 80/443, so those connections time out; this
-  # renders a supplementary CiliumNetworkPolicy that widens muster's egress to
-  # these ports (Cilium policies are additive — no sub-chart fork). cilium
-  # flavor only; [] disables the supplementary policy.
+  # renders a supplementary policy, <muster>-mcp-egress, that widens muster's
+  # egress to these ports (policies are additive — no sub-chart fork): the
+  # cluster entity in the cilium flavor, every pod of the cluster in the
+  # kubernetes flavor, where the same policy also opens DNS and each
+  # mcpBackends entry on its ports. [] drops the ports from it.
   musterInClusterMcpPorts:
     - 8080
     - 8443

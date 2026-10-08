@@ -1,0 +1,62 @@
+{{- /*
+muster's egress to the in-cluster MCP backends, the kubernetes flavour of
+-muster-mcp-egress. Every policy that selects muster for egress makes its
+egress default-deny beyond the union of their rules — -muster-to-agent-manager
+and -otlp-egress of this chart among them — so muster's reach to its backends
+and to DNS is opened here instead of resting on muster's own chart policy
+(which opens in-cluster egress on 80/443 only, and none when it is off):
+
+  - DNS (kube-dns / coredns / the node-local cache);
+  - networkPolicy.musterInClusterMcpPorts to every pod of the cluster, the
+    counterpart of the cilium flavour's cluster entity on those ports;
+  - each networkPolicy.mcpBackends entry: its namespace (and podSelector) on
+    its ports, the egress side of that entry's ingress policy.
+
+Vanilla NetworkPolicy is additive like Cilium's, so this widens muster's egress
+without forking the sub-chart. muster runs as its own release, so it is
+selected by name only.
+*/ -}}
+{{- if and .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agent-platform.musterFullname" . }}-mcp-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    {{- with .Values.networkPolicy.musterInClusterMcpPorts }}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        {{- range . }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- range $key, $b := .Values.networkPolicy.mcpBackends }}
+    # networkPolicy.mcpBackends.{{ $key }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $b.namespace }}
+          podSelector:
+            {{- if $b.podSelector }}
+            matchLabels:
+              {{- toYaml $b.podSelector | nindent 14 }}
+            {{- else }}
+            {}
+            {{- end }}
+      ports:
+        {{- range $b.ports }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+{{- end }}

@@ -132,6 +132,10 @@ endef
 # and minAvailable: 1 on a golden from before; both sides render it the same.
 # Drop the valkey pair once GOLDEN_REF carries #697.
 WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1
+# muster's kubernetes-flavour egress policy renders here (giantswarm/agent-platform#840)
+# and not on a golden from before; it is left out of both sides. Drop it once
+# GOLDEN_REF carries #840.
+WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
 # PolicyException is gone with them, the kagent controller's ingress policy
@@ -1574,7 +1578,7 @@ KAGENT_MM := $(KAGENT_NETPOL) --set components.model-manager.enabled=true --set 
 KAGENT_V1ALPHA2_TEMPLATES := $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-pod-security.yaml $(CONNECTIVITY_DIR)/templates/kagent/declarative-agent-srt-settings.yaml
 MCP_BACKENDS := $(VM) --namespace agent-platform -f tests/fixtures/mcp-backends-values.yaml
 .PHONY: verify-mcp-backend-netpol
-verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (networkPolicy.mcpBackends): one policy per entry in the backend's namespace admitting muster from the release namespace, the scrapers (metrics: true) and additionalPeers on the entry's ports, the namespace's own pods, and the kubelet's probes, in both flavours; none without entries or with networkPolicy.enabled off.
+verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (networkPolicy.mcpBackends): one policy per entry in the backend's namespace admitting muster from the release namespace, the scrapers (metrics: true) and additionalPeers on the entry's ports, the namespace's own pods, and the kubelet's probes, in both flavours; none without entries or with networkPolicy.enabled off. And muster's egress in the kubernetes flavour: the union of the policies selecting muster reaches agent-manager, each entry on its ports and DNS (giantswarm/agent-platform#840).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@for flavor in cilium kubernetes; do \
 		$(HELM) template t $(CONNECTIVITY_DIR) $(MCP_BACKENDS) --set networkPolicy.flavor=$$flavor >$(VERIFY_TMP)/vmbn-$$flavor.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-$$flavor.out; exit 1; }; \
@@ -1584,6 +1588,8 @@ verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (netwo
 	@python3 tests/verify-mcp-backend-netpol.py --off $(VERIFY_TMP)/vmbn-off.out
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --namespace agent-platform --set networkPolicy.flavor=cilium >$(VERIFY_TMP)/vmbn-none.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-none.out; exit 1; }
 	@python3 tests/verify-mcp-backend-netpol.py --off $(VERIFY_TMP)/vmbn-none.out
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) -f tests/fixtures/mcp-backends-values.yaml --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmbn-muster.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-muster.out; exit 1; }
+	@python3 tests/verify-mcp-backend-netpol.py --muster-egress $(VERIFY_TMP)/vmbn-muster.out
 
 .PHONY: verify-kagent-netpol
 verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim.
@@ -2981,8 +2987,8 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		for flavor in cilium kubernetes; do \
 			$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-new-$$flavor.out; \
 			$(HELM) template t $(VERIFY_TMP)/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-old-$$flavor.out; \
-			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-new-$$flavor.out "$(DASHBOARDS_GOLDEN_DROP)"; \
-			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-old-$$flavor.out "$(DASHBOARDS_GOLDEN_DROP)"; \
+			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-new-$$flavor.out "$(WIRING_PG_GOLDEN_DROP)"; \
+			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-old-$$flavor.out "$(WIRING_PG_GOLDEN_DROP)"; \
 			diff -u $(VERIFY_TMP)/vw-pg-old-$$flavor.out $(VERIFY_TMP)/vw-pg-new-$$flavor.out || { echo "FAIL: the $$flavor render changed with postgres.imagePullSecrets and .affinity unset"; git worktree remove --force $(VERIFY_TMP)/vw-pg-ref; exit 1; }; \
 		done; \
 		git worktree remove --force $(VERIFY_TMP)/vw-pg-ref; \
