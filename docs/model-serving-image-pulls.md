@@ -1,57 +1,18 @@
 # How a GPU node gets the serving runtime image
 
-A predictor runs the `llm-d-cuda` runtime (vLLM and its CUDA stack): 6.6 GB compressed and about 15 GB unpacked in the `llm-d-fast/` variant the slice uses. On a pool that scales from zero, every serve starts on a node that has never seen that image. This page describes how the image reaches the node, and why containerd still pulls and unpacks it whole instead of lazily.
+A predictor runs the `llm-d-cuda` runtime (vLLM and its CUDA stack), about 6.6 GB compressed and 15 GB unpacked. On a pool that scales from zero every serve starts on a node that has never seen it.
 
 ## What the platform does
 
-- **A fast-to-pull variant.** The well-known `LLMInferenceServiceConfig`s run `gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda`. It is the upstream image re-layered by [giantswarm/llm-d](https://github.com/giantswarm/llm-d) into zstd layers of at most 1.2 GB, so containerd pulls on several streams and decompresses faster than gzip.
-- **A pre-pull gated on the GPU.** `modelServing.prepull` renders a DaemonSet that pulls the runtime on every pool node once GPU feature discovery has labelled it. The GPU operator's own pulls therefore finish first, and the runtime pull overlaps the weight download ([#545](https://github.com/giantswarm/agent-platform/issues/545), [#737](https://github.com/giantswarm/agent-platform/issues/737)).
-- **The download at boot.** A pool node created by cluster-manager fetches the pre-pull's images while it joins: gpu-node-pool's `pool.prefetchImages`, set by `create_node_pool` from `modelServing.prepull.images`. A boot unit runs `ctr content fetch` into containerd's `prefetch` namespace once kubeadm has joined the node, without unpacking. The pre-pull's pull then finds every blob present and only unpacks. On a g6.xlarge the fetch of both images takes about 45 s and ends before node Ready, so the runtime is no longer downloaded after the GPU is usable ([#812](https://github.com/giantswarm/agent-platform/issues/812)).
-
-## Where the time goes on a cold node
-
-Seconds from node Ready on a cold g6.xlarge, serving `qwen3-5-4b-hf` from `hf://` without a cache claim:
-
-| variant | GPU allocatable | runtime pull | predictor's main container starts | node Ready → predictor Ready |
-|---|---|---|---|---|
-| pre-pull alone (two runs) | 52–55 | 155–160 | 208–211 | 471–482 |
-| download at boot (two runs) | 47–49 | 116–117, unpack only | 164–165 | **419–437** |
-| download and unpack at boot | 142 | before the GPU | 7 s after the weights | 462 |
-| the GPU operator's images, then download and unpack at boot | 56 | before the GPU | 9 s after the weights | 441 |
-
-Unpacking at boot slows every other image pull on the node, the GPU operator's (#737) and the node's DaemonSets alike, and costs more than it saves. With the download at boot, the unpack is what remains: the 15 GB unpacked runtime takes 80 s on four vCPUs alone and 117 s beside the weight download. The main container therefore starts about 47 s after the weights are on disk. A smaller runtime image is the lever left.
+- **A fast-to-pull variant.** The well-known `LLMInferenceServiceConfig`s run `gsoci.azurecr.io/giantswarm/llm-d-fast/llm-d-cuda`: the upstream image re-layered by [giantswarm/llm-d](https://github.com/giantswarm/llm-d) into zstd layers of at most 1.2 GB, which containerd pulls on several streams.
+- **A pre-pull gated on the GPU.** `modelServing.prepull` renders a DaemonSet that pulls `modelServing.prepull.images` (the storage-initializer first, then the runtime) on every pool node once it carries `modelServing.prepull.gpuReadyLabel` (`nvidia.com/gpu.count`), so the GPU operator's pulls finish first and the runtime pull overlaps the weight download ([#545](https://github.com/giantswarm/agent-platform/issues/545), [#737](https://github.com/giantswarm/agent-platform/issues/737), [#807](https://github.com/giantswarm/agent-platform/issues/807)).
+- **The download at boot.** A pool node created by cluster-manager fetches the same images into containerd's content store while it joins (gpu-node-pool's `pool.prefetchImages`, from `modelServing.prepull.images`), without unpacking; the pre-pull then only unpacks ([#812](https://github.com/giantswarm/agent-platform/issues/812)).
 
 ## Lazy pulling: evaluated, not adopted
 
-Lazy pulling mounts the image's layers over FUSE and fetches only the files the container reads, so the container starts before the image is on the node. The [SOCI snapshotter](https://github.com/awslabs/soci-snapshotter) does it with an index published beside the unchanged gzip image (SOCI index manifest v2). The [stargz snapshotter](https://github.com/containerd/stargz-snapshotter) does it with eStargz-encoded layers. Both were measured against the current setup on cold nodes in [#801](https://github.com/giantswarm/agent-platform/issues/801), in four configurations:
-
-- **baseline**: overlayfs and the `llm-d-fast/` image;
-- **SOCI**: SOCI v0.16.1, SOCI index v2, background fetch on;
-- **stargz**: stargz v0.18.2, an eStargz image optimized on the runtime's import path;
-- **SOCI parallel**: SOCI's parallel pull-and-unpack mode on the `llm-d-fast/` image, not lazy.
-
-Each snapshotter was installed at node boot as containerd's CRI snapshotter. Every run served `qwen3-5-4b-hf` from `hf://` without a cache claim; times are seconds from node Ready.
-
-| node | variant | runtime pull | predictor's main container starts | vLLM start | node Ready → predictor Ready | first request |
-|---|---|---|---|---|---|---|
-| g6.xlarge | baseline | 188 | 233 | 258 | **491** | 1.7 |
-| g6.xlarge | SOCI | 16 | 137 | 375 | **512** (+4 %) | 2.7 |
-| g6.xlarge | stargz | 3 | 182 | 468 | **650** (+32 %) | 2.7 |
-| g6.2xlarge | baseline | 168 | 220 | 252 | **472** | 1.7 |
-| g6.2xlarge | SOCI parallel | 97 | 210 | 250 | **460** (−3 %) | 1.6 |
-| g6.2xlarge | SOCI | 15 | 134 | 359 | **493** (+4 %) | 2.6 |
-| g6.2xlarge | stargz (two runs) | 3 | 182 | 458–477 | **640–660** (+36–40 %) | 0.5–3.2 |
-| g6e.16xlarge (L40S) | baseline | 63 | 147 | 218 | **365** | 2.3 |
-| g6e.16xlarge (L40S) | SOCI | 16 | 86 | 359 | **445** (+22 %) | 3.6 |
-| g6e.16xlarge (L40S) | stargz | 3 | 136 | 446 | **582** (+59 %) | 4.2 |
-
-**Lazy pulling makes a serve slower on every node type.** The container starts earlier (60–100 s with SOCI, 10–50 s with stargz), but vLLM's start then reads several gigabytes of Python, PyTorch and CUDA libraries through FUSE from the registry. That makes vLLM's start 105–140 s longer with SOCI and 205–230 s longer with stargz, more than the pull saved. A prefetch list helps less than it promises: stargz carried one, built by profiling the runtime's imports, and was still the slowest. SOCI's parallel mode is within the noise of a single run. None of the variants is worth a node-level snapshotter, its configuration on every pool node, a second image form on gsoci and FUSE on the serving path.
-
-No form of the runtime pull can shorten node Ready → predictor Ready by 30 %, either. Remove the pull entirely and the path stays: the GPU becoming allocatable (50–65 s), the storage-initializer, the weight download and vLLM's own start (220–260 s on a fresh node).
-
-**What the measurement found instead.** The predictor's storage-initializer image (96 MB) gates the weight download. Pulled beside the runtime, it takes 72–86 s on a g6.xlarge or g6.2xlarge; with nothing else pulling, 5–12 s. Pulling it first is [#807](https://github.com/giantswarm/agent-platform/issues/807).
+The SOCI and stargz snapshotters were measured on cold g6 and g6e nodes in [#801](https://github.com/giantswarm/agent-platform/issues/801). Both start the container earlier, but vLLM then reads gigabytes of libraries through FUSE, so node Ready → predictor Ready got slower on every node type (SOCI +4–22 %, stargz +32–59 %). None is worth a node-level snapshotter on the serving path.
 
 ## Revisit when
 
-- vLLM's import path becomes much smaller than the image. A slim runtime would cut the bytes read at start, and lazy pulling would then avoid most of the download.
-- Nodes have the image cached, for example a node image with the runtime baked in. That removes the pull without FUSE on the serving path.
+- vLLM's import path becomes much smaller than the image: a slim runtime would cut the bytes read at start, and lazy pulling would then avoid most of the download.
+- Nodes have the image cached, for example a node image with the runtime baked in.

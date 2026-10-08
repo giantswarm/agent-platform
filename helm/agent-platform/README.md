@@ -133,7 +133,7 @@ per-agent placement values are gone, capacity is the WorkerPool".
 The pool's `workerImage` — the gVisor worker every actor runs in — is **derived by
 this chart** from `components.substrate.versionRange`'s floor:
 `<substrate.image.registry>/ateom-gvisor:<floor>` (`gsoci.azurecr.io/giantswarm/
-substrate/ateom-gvisor:1.0.0` today), merged over the kagent block the chart forwards.
+substrate/ateom-gvisor:1.5.0` today), merged over the kagent block the chart forwards.
 The kagent chart stamps a worker of its own at publish (the Substrate its build was
 published against), and that stamp never reaches the cluster: the atelet the
 substrate release installs and the worker the WorkerPool runs are one Substrate
@@ -151,7 +151,7 @@ What follows from it:
   follows); another tag, or a digest alone, fails the render naming the key, the
   release and the derived image.
 - **The Substrate range confines one runtime contract**: an exact version (the
-  BOM's `1.0.0`) or `>=X.Y.Z <X.(Y+1).0`, the ceiling of the pinned minor and no
+  BOM's `1.5.0`) or `>=X.Y.Z <X.(Y+1).0`, the ceiling of the pinned minor and no
   `-0` anywhere — Flux's Masterminds semver skips every prerelease while no bound
   of a range carries one and evaluates them all once one does, so `<1.1.0-0`
   would admit the line's dev builds. A patch of the line is carried patches or a

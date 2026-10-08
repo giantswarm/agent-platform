@@ -2,7 +2,7 @@
 
 A **toolset** is the selector list an agent declares to say which of the gateway's tools it is composed with: the agent chart's `toolset` value (rendered as the `X-Muster-Toolset` header on the agent's muster tool entry), agent-manager's `toolset` argument, or the `toolset` argument of muster's `filter_tools`. muster evaluates it on every request as one more filter on the caller's own catalogue — it never widens access; the invoking human's identity and the backends' own authorization remain the boundary. The grammar, the built-in presets and the error texts are muster's: [docs/reference/toolsets.md](https://github.com/giantswarm/muster/blob/main/docs/reference/toolsets.md).
 
-A **preset** is a named selection an agent refers to as `preset:<name>`. Presets are muster configuration — `toolsetPresets` in muster's `config.yaml`, which the muster chart renders from its `muster.toolsetPresets` value. This meta-package forwards its `muster:` block to the muster release, so the presets an installation ships live under **`muster.muster.toolsetPresets`** in these values (the first `muster` is the component block, the second is the muster chart's own `muster:` key). The standalone chart mirrors the same values through curate.
+A **preset** is a named selection an agent refers to as `preset:<name>`. Presets are muster configuration — `toolsetPresets` in muster's `config.yaml`, which the muster chart renders from its `muster.toolsetPresets` value. This meta-package forwards its `muster:` block to the muster release, so the presets an installation ships live under **`muster.muster.toolsetPresets`** in these values (the first `muster` is the component block, the second is the muster chart's own `muster:` key).
 
 ## The presets muster builds in
 
@@ -36,13 +36,13 @@ muster:
 | Preset | Resolves to | Label stamped by |
 |---|---|---|
 | `infrastructure` | The mcp-kubernetes, mcp-capi and mcp-prometheus families — every management cluster's servers, one selector. | agent-platform-mcps ≥ 0.9.0 (`muster.families.<group>.toolGroup`, default `infrastructure`; per-entry `toolGroup` override) |
-| `agent-platform` | agent-manager, model-manager, vm-manager, cluster-manager, kagent's session tools (`x_kagent_list_agent_instances`, `x_kagent_invoke_agent_instance`, the checkpoint and fork tools: the person's other ready sessions, a message to one, a checkpoint or a fork of one) and muster's `core_*` tools — the meta agent's preset. | agent-manager ≥ 0.3.0, model-manager ≥ 0.18.0 (fixed `agent-platform`; `muster.mcpServer.labels` can override); the connectivity chart's `MCPServer kagent` (`kagent.controllerRoute.mcp`) |
+| `agent-platform` | agent-manager, model-manager, vm-manager, cluster-manager, kagent's session tools (`x_kagent_list_sessions`, `x_kagent_invoke_session`, the checkpoint and fork tools: the person's other ready sessions, a message to one, a checkpoint or a fork of one) and muster's `core_*` tools — the meta agent's preset. | agent-manager ≥ 0.3.0, model-manager ≥ 0.18.0 (fixed `agent-platform`; `muster.mcpServer.labels` can override); the connectivity chart's `MCPServer kagent` (`kagent.controllerRoute.mcp`) |
 
 `core_*` is what makes `agent-platform` the meta agent's preset. No other shipped preset reaches muster's core tools; an agent that needs one names it explicitly (`tool:core_workflow_list`) or uses `preset:full`.
 
 ### Requirements
 
-- **muster ≥ 5.12.0.** The `label:` rule arrived there; a 5.11.0 muster refuses to start on a preset that uses it. `components.muster.versionRange` floors at `>=5.12.0 <6.0.0` for that reason, and a BOM that pins muster must pin at least that.
+- **muster ≥ 5.12.0.** The `label:` rule arrived there; a 5.11.0 muster refuses to start on a preset that uses it. `components.muster.versionRange` (today `>=5.31.4 <6.0.0`) stays above that floor, and a BOM that pins muster must pin at least 5.12.0.
 - The labels come with the component versions above. On an installation still running an older agent-platform-mcps, `preset:infrastructure` resolves to nothing until the label arrives — no error, an empty toolset (the failure mode is closed). `filter_tools` reports the selector under `toolset_unmatched`.
 
 ## Adding an installation's own presets

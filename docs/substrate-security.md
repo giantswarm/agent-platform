@@ -1,6 +1,6 @@
 # Agent Substrate on an installation: what changes, what it needs, what protects it
 
-For the owner of an installation and for a security reviewer. Meta chart 4.0 ships [Agent Substrate](https://github.com/kagent-dev/substrate) — kagent API v2's runtime — as two components next to kagent (README "Agent Substrate"). This page is the honest account of what that puts on the cluster and its nodes, which of it steps outside the restricted Pod Security Standard and why, what compensates, and which risks are open upstream.
+For the owner of an installation and for a security reviewer. The meta chart ships [Agent Substrate](https://github.com/kagent-dev/substrate) — the runtime of the kagent line on `api.kagent.dev` — as two components next to kagent ([reference: Agent Substrate](reference.md#agent-substrate)). This page is the honest account of what that puts on the cluster and its nodes, which of it steps outside the restricted Pod Security Standard and why, what compensates, and which risks are open upstream.
 
 ## What Substrate is, in one paragraph
 
@@ -14,7 +14,7 @@ Every agent of the platform runs as a Substrate **actor**: a gVisor sandbox insi
 | A **privileged DaemonSet** (`atelet`) on every schedulable node, with hostPorts 8085 (its gRPC API, mTLS) and 9090 (metrics) and hostPath mounts of `/var/lib/ateom-gvisor` (the sandboxes' state, shared with the workers), `/var/lib/kubelet/plugins`, `/var/lib/kubelet/device-plugins` (the CSI and device plugins it registers) and `/dev` (read-only) | `ate-system` | it runs gVisor on the node's behalf: creates and restores sandboxes, mounts their filesystems, wires their network into the worker pod. There is no unprivileged form of that on today's Substrate. |
 | **Worker pods as root** with the capability set an unprivileged gVisor sandbox needs (`NET_ADMIN`, `SYS_ADMIN`, `SYS_CHROOT`, `SYS_PTRACE`, `SETUID`, `SETGID`, `SETPCAP`, `DAC_OVERRIDE`, `FOWNER`, `CHOWN`, `MKNOD`, `NET_RAW`, `SETFCAP`), AppArmor and seccomp `Unconfined`, a hostPath of `/var/lib/ateom-gvisor` with `HostToContainer` propagation — **not** privileged | the kagent namespace (every WorkerPool) | `runsc` installs its own seccomp filters and needs the capabilities to build the sandbox; the propagation shares the node agent's mounts into the worker. The sandbox, not the pod, is the isolation boundary for the agent's code. |
 | A **cluster-scoped `SandboxConfig`** naming the gVisor release asset `atelet` downloads (`gs://gvisor/releases/…`, verified by sha256) and a **`ValidatingAdmissionPolicy`** that holds `SandboxConfig`s to a valid shape | cluster scope | the runtime binary is not an image; a proxied installation mirrors the asset and points `spec.assets` at the mirror. |
-| Three **CRDs** (`workerpools`, `sandboxconfigs`, `csidriverconfigs.ate.dev`), ClusterRoles for `ate-controller` (pods, Deployments, WorkerPools), `atelet` (pods, `ClusterTrustBundle`s, `SandboxConfig`s, read-only) and `ate-api-server`, and the `podcertificate-controller`'s signer role | cluster scope | |
+| Three **CRDs** (`workerpools`, `sandboxconfigs`, `csidriverconfigs.ate.dev`, the substrate-crds chart at 1.5.0), ClusterRoles for `ate-controller` (pods, Deployments, WorkerPools), `atelet` (pods, `ClusterTrustBundle`s, `SandboxConfig`s, read-only) and `ate-api-server`, and the `podcertificate-controller`'s signer role | cluster scope | |
 | Two **namespaces**, `ate-system` and `podcertificate-controller-system`, holding the CA and JWT pools (Secrets) the platform bootstraps once and keeps | | the pools are the roots of every identity Substrate issues; access to those two namespaces' Secrets is access to those roots. |
 | Egress from the nodes to `storage.googleapis.com` (the gVisor asset), the image registries of the actors' images, and the snapshot store | `atelet` | |
 
@@ -28,6 +28,7 @@ A Giant Swarm cluster enforces the restricted standard through Kyverno. The conn
 | the worker pods (every WorkerPool, label `ate.dev/worker-pool`, the kagent namespace) | `host-path`, `restricted-volumes`, `adding-capabilities`, `adding-capabilities-strict`, `run-as-non-root`, `run-as-non-root-user`, `privilege-escalation`, `check-seccomp`, `check-seccomp-strict`, `app-armor` |
 | the control plane (`ate-api-server`, `ate-controller`, `atenet-router`, `atenet-egress`, `dns`) | `require-drop-all`, `run-as-non-root`, `privilege-escalation`, `check-seccomp-strict` — the Deployments declare no securityContext; the images are distroless and run as non-root users, the fields are what the standard checks |
 | `podcertificate-controller` | `run-as-non-root`, `check-seccomp-strict` |
+| the credential provider (`k8s-credential-provider`, `ate-system`) | `check-seccomp-strict` — non-root, drops ALL, no privilege escalation, read-only root, but no seccompProfile |
 
 Nothing else is excepted: no `app: kagent` selector remains (the v1alpha2 agent Deployments' exception is gone with them), the exceptions are scoped to the two Substrate namespaces (the control plane matched by workload name — its Deployments carry no labels of their own) and the WorkerPool label in the kagent namespace, and the hook Jobs of the connectivity release run under the restricted profile themselves.
 
@@ -54,7 +55,7 @@ Substrate is an early project; its own [threat model](https://github.com/kagent-
 
 ## What an installation owner does
 
-1. Kubernetes 1.35 and the three gates on all three components, ahead of the cut-over (UPGRADE.md).
+1. Kubernetes 1.35 and the three gates on all three components, before Substrate is enabled.
 2. The snapshot store: an S3 bucket and an IRSA role for `atelet` and `ate-api-server` (CAPA — `kagent.harness.snapshotStore.crossplane` renders both through Crossplane and derives the location; CAPZ — `provider: capz` renders the storage account, the container, the Workload Identity and the s3proxy façade Substrate talks S3 to, admitted only from atelet and ate-api-server), or an S3-compatible store with its credentials in a Secret; otherwise `kagent.harness.snapshotLocation` names it.
 3. Node placement, when the installation dedicates a node pool to the sandboxes: `substrate.atelet.nodeSelector` / `tolerations` and `kagent.substrateWorkerPool.template`.
 4. Nothing else: the bootstrap, the database on the platform's CNPG Cluster, the exceptions and the policies come with the chart.
