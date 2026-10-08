@@ -17,7 +17,7 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## 4.120.x → 4.121.0 and later (the kagent line crosses to `api.kagent.dev` on a fresh database)
 
-giantswarm/agent-platform#857: from 4.121.0, `components.kagent{,-crds}.versionRange` selects kagent 1.4 (the `api.kagent.dev` line). Its controller refuses a database that holds the 1.x schema. The meta chart therefore refuses the upgrade while the running `kagent-controller` is on 1.x and the controller values mount the same database Secret as before. The refusal comes before any component release moves. `docs/kagent-v1alpha3-cutover.md` is the full checklist (announcement, backup, verification, cleanup); this section is the values change.
+giantswarm/agent-platform#857: from 4.121.0, `components.kagent{,-crds}.versionRange` selects kagent 1.4 (the `api.kagent.dev` line). Its controller refuses a database that holds the 1.x schema. The meta chart therefore refuses the upgrade while the running `kagent-controller` is on 1.x and the Secret behind `kagent.database.postgres.urlFile` is still the one it runs on. The refusal comes before any component release moves. `docs/kagent-v1alpha3-cutover.md` is the full checklist (announcement, backup, verification, cleanup); this section is the values change.
 
 ### Operator action
 
@@ -43,8 +43,22 @@ giantswarm/agent-platform#857: from 4.121.0, `components.kagent{,-crds}.versionR
   ```
 
   The connectivity release creates the database and derives its Secret before the kagent release upgrades (kagent depends on it), so the 1.4 controller starts on the empty database and lays its own schema. The 1.x database `kagent_v2` stays (`reclaimPolicy: retain`) for the retention period. Every session is lost; Agents come back with their producers.
-- **To stay on 1.2 for now:** hold `components.kagent.versionRange` and `components.kagent-crds.versionRange` at `>=1.2.0 <1.3.0` together with the meta chart's version, or pin the meta chart below 4.121.0.
-- **An installation that already took 4.121.0 on its 1.x database** (kagent HelmRelease looping between `context deadline exceeded`, `no Harness with the name "kagent" found` and `no ConfigMap with the name "kagent-ui" found`; the 1.2 controller still serving): apply the values above. They change the kagent HelmRelease's spec, so helm-controller starts a new upgrade with fresh remediation counters. That upgrade starts the 1.4 controller on the fresh database and replaces the half-applied release. Do not roll Helm back.
+- **An installation on the kagent chart's bundled Postgres** (`kagent.database.postgres.bundled.enabled: true`, no CNPG Cluster): point the controller at another database of the same instance, so the bundled instance stays and the 1.x database `kagent` stays beside it. The instance's maintenance database `postgres` is empty:
+
+  ```yaml
+  kagent:
+    database:
+      postgres:
+        url: "postgres://kagent:$(POSTGRES_PASSWORD)@kagent-postgresql.<kagent namespace>.svc:5432/postgres?sslmode=disable"
+    controller:
+      envFrom:
+        - secretRef:
+            name: kagent-postgresql   # the bundled instance's password Secret; with url set the chart no longer injects POSTGRES_PASSWORD itself
+  ```
+
+  The meta chart treats a changed `kagent.database.postgres.url` as the fresh database, as it does a new Secret behind `urlFile`.
+- **To stay on 1.2 for now:** pin the meta chart below 4.121.0. Holding only `components.kagent{,-crds}` below 1.3.0 is not a supported shape: the rest of the line moves with 4.121.0 (Substrate 1.5, agent-manager 1.10, klaus-gateway on the Session API), and kagent 1.2 has not run agents on it.
+- **An installation that already took 4.121.0 on its 1.x database** (kagent HelmRelease looping between `context deadline exceeded`, `no Harness with the name "kagent" found` and `no ConfigMap with the name "kagent-ui" found`; the 1.2 controller still serving): apply the values above. They change the kagent HelmRelease's spec, so helm-controller starts a new upgrade with fresh remediation counters. That upgrade starts the 1.4 controller on the fresh database and adopts the half-applied objects (the `kagent-ui` ConfigMap, the `api.kagent.dev` Harness), which carry the release's own labels. Do not roll Helm back. The kagent release's rollback attempts can starve the meta chart release's interval, so request its reconcile once the values have merged (`flux reconcile helmrelease <meta release> -n <gitops namespace>`, or the `reconcile.fluxcd.io/requestedAt` annotation).
 - **Recognising it worked**: the kagent HelmRelease is Ready on 1.4.x; `kubectl -n kagent logs deploy/kagent-controller | grep -i migrat` shows migrations on the empty database, not the 1.x refusal; `kubectl -n kagent get harnesses.api.kagent.dev kagent` exists.
 
 ## \<current\> → \<next\> (the Substrate floor is `1.3.1`: worker and atelet move together)

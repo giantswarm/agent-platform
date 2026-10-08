@@ -115,6 +115,7 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get modelconfigs
 - [ ] Suspend the kagent HelmRelease before the configs merge (`kubectl patch hr kagent --type merge -p '{"spec":{"suspend":true}}'`, check `spec.suspend` reads true): otherwise the controller still running the old line lays the 1.x schema on the fresh database before the new one starts.
 - [ ] A dev meta chart pin (an rc or a branch build) needs the dev-channel `semverFilter` under `gitops.prereleases`, or the range resolves to nothing.
 - [ ] Add the fresh database to the connectivity chart's values for the installation (the agent-platform#346 pattern: a new CNPG `Database` in `postgres.databases`, a new name such as `kagent_v2`, and the kagent release's `KAGENT_POSTGRES_DATABASE_URL` pointing at it). Keep the old database in place for the retention period.
+- [ ] An installation on the kagent chart's bundled Postgres (no CNPG Cluster) points `kagent.database.postgres.url` at another database of the bundled instance instead (the empty maintenance database `postgres`, the password from `kagent.controller.envFrom` on the Secret `kagent-postgresql`); UPGRADE.md, "4.120.x → 4.121.0 and later", has the values.
 - [ ] Wait for the substrate and kagent releases; the WorkerPool's worker image is `ateom-gvisor:1.5.0` and the controller logs its migrations on the empty database instead of refusing a 1.x schema:
 
 ```sh
