@@ -1308,7 +1308,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | kagent.providers.default | string | `"anthropic"` |  |
 | kagent.providers.anthropic.provider | string | `"Anthropic"` |  |
-| kagent.providers.anthropic.model | string | `"claude-sonnet-4-6"` |  |
+| kagent.providers.anthropic.model | string | `"claude-sonnet-5-5"` |  |
 | kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
 | kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
 | kagent.providers.anthropic.apiKey | string | `""` |  |

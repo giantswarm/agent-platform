@@ -1027,7 +1027,7 @@ spec:
           config:
             cacheTTL: 5m
             promptCaching: true
-          model: claude-sonnet-4-6
+          model: claude-sonnet-5-5
           provider: Anthropic
         default: anthropic
       registry: gsoci.azurecr.io
