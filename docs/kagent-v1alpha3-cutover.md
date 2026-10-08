@@ -102,6 +102,7 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get configmap ag
 
 Expected: `run.path: 1.x -> 2.x`, no release `failed`, phase `wait` until Flux upgrades the releases and the Agents are Ready, then `complete`. A run that ended in `wait` is re-run once the Agents are Ready, which deletes the leftover `kagent.dev` AgentTemplates no release renders: `kubectl -n kagent create job --from=cronjob/agent-platform-connectivity-agent-manager-migrate agent-manager-migrate-rerun-1`. A release's `warnings` name a sub-agent `templateRef` with no `api.kagent.dev` AgentTemplate in the namespace; the parent Agent stays `ResolvedRefs=False` until one exists.
 
+- [ ] Hand-written kagent objects in the installation's gitops repository (ModelConfigs, ModelProviderConfigs, RemoteMCPServers, AgentTemplates the charts do not render) move to `apiVersion: api.kagent.dev/v1alpha3` in the same change: the line's controller resolves only that group, so an Agent naming a `kagent.dev` ModelConfig stays `ResolvedRefs=False` (ModelConfig not found). The schemas are the same; `api.kagent.dev` adds `stream`.
 - [ ] The connectivity release re-rendered the catalog at `api.kagent.dev` (ModelConfigs, RemoteMCPServers) and the kagent release its Harness:
 
 ```sh
@@ -115,6 +116,7 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get modelconfigs
 - [ ] Suspend the kagent HelmRelease before the configs merge (`kubectl patch hr kagent --type merge -p '{"spec":{"suspend":true}}'`, check `spec.suspend` reads true): otherwise the controller still running the old line lays the 1.x schema on the fresh database before the new one starts.
 - [ ] A dev meta chart pin (an rc or a branch build) needs the dev-channel `semverFilter` under `gitops.prereleases`, or the range resolves to nothing.
 - [ ] Add the fresh database to the connectivity chart's values for the installation (the agent-platform#346 pattern: a new CNPG `Database` in `postgres.databases`, a new name such as `kagent_v2`, and the kagent release's `KAGENT_POSTGRES_DATABASE_URL` pointing at it). Keep the old database in place for the retention period.
+- [ ] An installation on the kagent chart's bundled Postgres (no CNPG Cluster) points `kagent.database.postgres.url` at another database of the bundled instance instead (the empty maintenance database `postgres`, the password from `kagent.controller.envFrom` on the Secret `kagent-postgresql`); UPGRADE.md, "4.120.x → 4.121.0 and later", has the values.
 - [ ] Wait for the substrate and kagent releases; the WorkerPool's worker image is `ateom-gvisor:1.5.0` and the controller logs its migrations on the empty database instead of refusing a 1.x schema:
 
 ```sh

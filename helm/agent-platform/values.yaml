@@ -2894,7 +2894,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     default: anthropic
     anthropic:
       provider: Anthropic
-      model: claude-sonnet-4-6
+      model: claude-sonnet-5-5
       apiKeySecretRef: kagent-anthropic
       apiKeySecretKey: ANTHROPIC_API_KEY
       apiKey: ""  # Leave empty; pre-create the apiKeySecretRef Secret instead

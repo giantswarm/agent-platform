@@ -983,6 +983,82 @@ at render time instead.
 {{- end -}}
 
 {{/*
+The api.kagent.dev line (kagent 1.3 and later) refuses a database that holds the
+1.x schema: its controller exits at start-up, the kagent upgrade times out with
+the line's resources half applied, and Helm's rollback cannot undo that in
+either direction (giantswarm/agent-platform#857). So the render refuses the
+crossing before any component moves while all three hold:
+- components.kagent.versionRange admits a release of 1.3 or later (probed at
+  1.3.0 and at the start and end of every minor its literals name from 1.3 on,
+  so a floor, an exact pin, ~ and ^ are all read);
+- the running controller (the Deployment <kagent.fullnameOverride>-controller
+  in the kagent namespace) carries a 1.x helm.sh/chart label;
+- the controller's database is the one it runs on: the same Secret volume
+  mounted at the directory of kagent.database.postgres.urlFile (read from the
+  values and from the running Deployment alike; none on either side counts as
+  the same) and the same kagent.database.postgres.url (read from the values
+  and from the kagent HelmRelease's current spec.values; the URL is compared,
+  never printed).
+The documented crossings are a fresh postgres.databases entry whose derived
+Secret replaces the old one, or, with the bundled Postgres, a
+kagent.database.postgres.url naming another database of the instance
+(UPGRADE.md, docs/kagent-v1alpha3-cutover.md).
+A first install and an installation already on the line render as before.
+Skipped with gitops.target set (the lookups see the installation, not the
+target); `lookup` is empty under `helm template`, where the guard is silent.
+*/}}
+{{- define "agent-platform.validateKagentLineCrossing" -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
+{{- $range := index .Values.components "kagent" "versionRange" | default "" -}}
+{{- $probes := list "1.3.0" -}}
+{{- range (regexFindAll "[0-9]+\\.[0-9]+" $range -1) -}}
+{{- if semverCompare ">=1.3.0-0" (printf "%s.0" .) -}}
+{{- $probes = append (append $probes (printf "%s.0" .)) (printf "%s.99999" .) -}}
+{{- end -}}
+{{- end -}}
+{{- $crosses := false -}}
+{{- range $probes }}{{ if semverCompare $range . }}{{ $crosses = true }}{{ end }}{{ end -}}
+{{- if $crosses -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $urlFile := dig "database" "postgres" "urlFile" "" $kagent -}}
+{{- $ns := include "agent-platform.kagent.namespace" . -}}
+{{- $name := printf "%s-controller" ($kagent.fullnameOverride | default "kagent") -}}
+{{- with (lookup "apps/v1" "Deployment" $ns $name) -}}
+{{- $running := regexFind "^[0-9]+\\.[0-9]+\\.[0-9]+" (trimPrefix "kagent-" (dig "metadata" "labels" "helm.sh/chart" "" .)) -}}
+{{- if and $running (semverCompare "<1.3.0-0" $running) -}}
+{{- $pod := .spec.template.spec -}}
+{{- $mounts := list -}}
+{{- range $pod.containers }}{{ $mounts = concat $mounts (.volumeMounts | default list) }}{{ end -}}
+{{- $old := include "agent-platform.kagent.databaseSecret" (dict "urlFile" $urlFile "volumes" ($pod.volumes | default list) "mounts" $mounts) -}}
+{{- $new := include "agent-platform.kagent.databaseSecret" (dict "urlFile" $urlFile "volumes" (dig "controller" "volumes" list $kagent) "mounts" (dig "controller" "volumeMounts" list $kagent)) -}}
+{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" ($.Values.gitops.namespace | default $.Release.Namespace) (include "agent-platform.childName" (dict "root" $ "name" (index $.Values.components "kagent" "chart"))) -}}
+{{- $oldUrl := dig "spec" "values" "database" "postgres" "url" "" ($release | default dict) -}}
+{{- $newUrl := dig "database" "postgres" "url" "" $kagent -}}
+{{- if and (eq $old $new) (eq $oldUrl $newUrl) -}}
+{{- fail (printf "components.kagent selects the api.kagent.dev line (%s) while %s/%s runs kagent %s on its 1.x database (Secret %s, kagent.database.postgres.url unchanged): the line's controller refuses the 1.x schema and the upgrade would half-apply. Cross with a fresh database: add a postgres.databases entry for it (e.g. kagent-v3, name kagent_v3, component kagent) and mount its derived Secret <postgres.clusterName>-<key>-app in kagent.controller.volumes in place of %s, or with the bundled Postgres point kagent.database.postgres.url at another database of the instance; then upgrade (UPGRADE.md, docs/kagent-v1alpha3-cutover.md). Or pin agent-platform below 4.121.0" $range $ns $name $running ($old | default "none") ($old | default "the current one")) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The Secret behind the kagent controller's database URL file: the secretName of
+the Secret volume whose mount path is the directory of urlFile. Empty without a
+urlFile or without such a volume.
+Usage: include "agent-platform.kagent.databaseSecret" (dict "urlFile" <path> "volumes" <list> "mounts" <list>)
+*/}}
+{{- define "agent-platform.kagent.databaseSecret" -}}
+{{- if .urlFile -}}
+{{- $dir := dir .urlFile -}}
+{{- $volume := "" -}}
+{{- range .mounts }}{{ if eq (trimSuffix "/" .mountPath) $dir }}{{ $volume = .name }}{{ end }}{{ end -}}
+{{- range .volumes }}{{ if and $volume (eq .name $volume) .secret }}{{ .secret.secretName }}{{ end }}{{ end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Key paths (dot-joined, "block.path") of credentials set INLINE in the values,
 joined by ", ". Empty when none is set. Only the paths are emitted, never the
 values, so the string is safe to print in a fail message.
