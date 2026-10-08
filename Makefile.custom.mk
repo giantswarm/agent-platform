@@ -121,8 +121,9 @@ DASHBOARDS_GOLDEN_DROP := agent-platform-connectivity-dashboard-overview agent-p
 # The published ServingPreset ConfigMaps (label
 # agent-platform.giantswarm.io/serving-preset=true) go too: the chart renders
 # them with model serving off since giantswarm/agent-platform#847, a GOLDEN_REF
-# from before renders none; verify-preset-catalog asserts them. Drop the label
-# clause once GOLDEN_REF carries #847.
+# from before renders none; verify-preset-catalog asserts them, and
+# verify-managers drops them from its managers-off render too (their prose
+# names model-manager).
 GOLDEN_DROP := python3 -c 'import re,sys; ex=set(sys.argv[2].split()); docs=open(sys.argv[1]).read().split("\n---\n"); keep=[d for d in docs if not ((re.search(r"^  name: (\S+)", d, re.M) and re.search(r"^  name: (\S+)", d, re.M).group(1) in ex) or "agent-platform.giantswarm.io/serving-preset: \"true\"" in d)]; out="\n---\n".join(keep).lstrip("-\n"); open(sys.argv[1],"w").write("---\n"+out.rstrip("\n")+"\n")'
 define drop_dashboards
 	@$(GOLDEN_DROP) $(1) "$(DASHBOARDS_GOLDEN_DROP)"
@@ -2159,6 +2160,8 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> both components off render nothing of theirs (agent-manager is off by default; model-manager is on since giantswarm/agent-platform#329)"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.model-manager.enabled=false >$(VERIFY_TMP)/vmg-off.out 2>&1 || { cat $(VERIFY_TMP)/vmg-off.out; exit 1; }
+	@# The published ServingPreset ConfigMaps (giantswarm/agent-platform#847) render with the managers off and name model-manager in their prose: catalog, not wiring.
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmg-off.out ""
 	@if grep -vE '^\s+"' $(VERIFY_TMP)/vmg-off.out | grep -qE 'model-manager|agent-manager'; then echo "FAIL: model-manager / agent-manager objects render while the components are off (the boards' JSON payloads, which name the managers in prose, are not objects and are skipped)"; grep -vE '^\s+"' $(VERIFY_TMP)/vmg-off.out | grep -nE 'model-manager|agent-manager' | head; exit 1; else echo "ok: inert while off"; fi
 	@echo "--> the default (giantswarm/agent-platform#329): model-manager on with no backend — its policies render without a model-server or Hub egress, no endpoint is required"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >$(VERIFY_TMP)/vmg-default.out 2>&1 || { cat $(VERIFY_TMP)/vmg-default.out; exit 1; }
