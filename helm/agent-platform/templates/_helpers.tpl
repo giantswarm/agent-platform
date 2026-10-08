@@ -247,6 +247,34 @@ runtime-registration contract there. */ -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
 {{- end -}}
 {{- if eq .name "kagent" -}}
+{{- /* With a git grant on, every claude Harness entry learns where the
+Gateway serves it (KAGENT_CLAUDE_CALLER_ROUTES: host -> the Gateway's
+/route/<host>/) and may reach the Gateway (egress), unless it sets them itself. */ -}}
+{{- $routes := include "agent-platform.grants.git.routes" .root | fromJson -}}
+{{- if $routes -}}
+{{- $gateway := include "agent-platform.grants.gatewayHost" .root -}}
+{{- $harnesses := list -}}
+{{- range (.root.Values.kagent.harnesses | default list) -}}
+{{- $entry := deepCopy . -}}
+{{- if eq ($entry.runtime | default "claude") "claude" -}}
+{{- $env := $entry.env | default list -}}
+{{- $has := false -}}
+{{- range $env }}{{ if eq .name "KAGENT_CLAUDE_CALLER_ROUTES" }}{{ $has = true }}{{ end }}{{ end -}}
+{{- if not $has }}{{ $_ := set $entry "env" (append $env (dict "name" "KAGENT_CLAUDE_CALLER_ROUTES" "value" (toJson $routes))) }}{{ end -}}
+{{- $egress := $entry.egress | default list -}}
+{{- if not (has $gateway $egress) }}{{ $_ := set $entry "egress" (append $egress $gateway) }}{{ end -}}
+{{- end -}}
+{{- $harnesses = append $harnesses $entry -}}
+{{- end -}}
+{{- if $harnesses }}{{ $_ := set $derived "harnesses" $harnesses }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .name "muster" -}}
+{{- with include "agent-platform.grants.musterServer" .root | fromJson -}}
+{{- $_ := set $derived "muster" (dict "oauth" (dict "server" .)) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .name "kagent" -}}
 {{- /* The worker image follows the chart's Substrate pin, not the kagent build's
 stamp (giantswarm/agent-platform#466): a 0.0.30 worker under a 0.0.27 atelet
 booted no golden actor (bundles/pause became bundles/_pause) and nothing named
@@ -2614,3 +2642,108 @@ The helm-and-shell image the hooks that need helm run (gitops.hooks.helmImage).
 {{- $i := .Values.gitops.hooks.helmImage -}}
 {{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
 {{- end -}}
+
+{{/*
+The git grants that are on (muster.grants.<server>.git), as a map from server
+name to its entry, with `host`, `push` and `grantIssuer` resolved: grantIssuer
+from the mcpServers entry of the same name (auth.authorizationServer.issuer)
+when it is one, else the grant's own; missing fails the render. Only while
+kagent and muster are on. Usage: include "agent-platform.grants.git" . | fromJson
+*/}}
+{{- define "agent-platform.grants.git" -}}
+{{- $out := dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- range $server, $grant := (dig "grants" dict (.Values.muster | default dict)) -}}
+{{- $git := dig "git" dict $grant -}}
+{{- if $git.enabled -}}
+{{- $host := required (printf "muster.grants.%s.git.host is required" $server) $git.host -}}
+{{- $issuer := $git.grantIssuer | default "" -}}
+{{- range ($.Values.mcpServers | default list) -}}
+{{- if and (not $issuer) (eq (toString .name) $server) }}{{ $issuer = dig "auth" "authorizationServer" "issuer" "" . }}{{ end -}}
+{{- end -}}
+{{- if not $issuer -}}
+{{- fail (printf "muster.grants.%s.git: the grant's issuer is unknown — MCPServer %q is not in mcpServers with auth.authorizationServer.issuer, so set muster.grants.%s.git.grantIssuer to the issuer the MCPServer pins" $server $server $server) -}}
+{{- end -}}
+{{- $_ := set $out $server (dict "host" $host "push" (ternary true false (kindIs "invalid" $git.push) | ternary true $git.push) "grantIssuer" $issuer) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
+The routes the claude harness's forwarder dials for the git grants: a JSON
+map from host to http://<gateway>:8080/route/<host>/. Empty when none is on.
+*/}}
+{{- define "agent-platform.grants.git.routes" -}}
+{{- $routes := dict -}}
+{{- $base := printf "http://%s:8080/route/" (include "agent-platform.grants.gatewayHost" .) -}}
+{{- range $server, $grant := (include "agent-platform.grants.git" . | fromJson) -}}
+{{- $_ := set $routes $grant.host (printf "%s%s/" $base $grant.host) -}}
+{{- end -}}
+{{- toJson $routes -}}
+{{- end -}}
+
+{{/*
+The in-cluster host of the agentgateway Gateway's Service (the connectivity
+chart's gateway.name in the platform namespace), where the grants are served.
+*/}}
+{{- define "agent-platform.grants.gatewayHost" -}}
+{{- printf "%s.%s.svc.cluster.local" (dig "name" "agentgateway" (.Values.gateway | default dict)) (include "agent-platform.targetNamespace" .) -}}
+{{- end -}}
+
+{{/*
+muster's side of the git grants, as the muster.oauth.server keys merged over
+the installation's own: the broker client the Gateway exchanges with (seeded
+from the Secret the connectivity chart generates), its audiences (one per
+granted server), a grant target per server (grantIssuer), and a trustedIssuers
+entry for the platform Dex, whose ID tokens are the exchange's subject tokens
+(acceptedTypHeaders [""]: Dex sets no typ; allowPrivateIPJWKS follows
+dex.allowPrivateIPOIDC, the same Dex). An own client, target or issuer
+entry of the same name is kept as it is. Empty JSON when no grant is on.
+Usage: include "agent-platform.grants.musterServer" . | fromJson
+*/}}
+{{- define "agent-platform.grants.musterServer" -}}
+{{- $out := dict -}}
+{{- $grants := include "agent-platform.grants.git" . | fromJson -}}
+{{- if $grants -}}
+{{- $server := deepCopy (dig "muster" "oauth" "server" dict (.Values.muster | default dict)) -}}
+{{- $broker := deepCopy ($server.tokenExchangeBroker | default dict) -}}
+{{- $clients := deepCopy ($broker.brokerClients | default dict) -}}
+{{- $audiences := deepCopy ($broker.clientAudiences | default dict) -}}
+{{- $targets := deepCopy ($broker.targets | default dict) -}}
+{{- $clientID := include "agent-platform.grants.brokerClientID" . -}}
+{{- if not (hasKey $clients $clientID) }}{{ $_ := set $clients $clientID (dict "clientCredentialsSecretRef" (dict "name" (include "agent-platform.grants.brokerSecretName" .))) }}{{ end -}}
+{{- $list := index $audiences $clientID | default list -}}
+{{- range $name, $grant := $grants -}}
+{{- if not (has $name $list) }}{{ $list = append $list $name }}{{ end -}}
+{{- if not (hasKey $targets $name) }}{{ $_ := set $targets $name (dict "grantIssuer" $grant.grantIssuer) }}{{ end -}}
+{{- end -}}
+{{- $_ := set $audiences $clientID $list -}}
+{{- $_ := set $broker "brokerClients" $clients -}}
+{{- $_ := set $broker "clientAudiences" $audiences -}}
+{{- $_ := set $broker "targets" $targets -}}
+{{- $_ := set $out "tokenExchangeBroker" $broker -}}
+{{- $identity := dig "identity" dict (.Values.global | default dict) -}}
+{{- $issuer := dig "dex" "issuerUrl" "" $server | default (dig "issuerUrl" "" $identity) -}}
+{{- $clientId := dig "dex" "clientId" "" $server | default (dig "clientId" "" $identity) -}}
+{{- if not $issuer -}}
+{{- fail "muster.grants: the token broker validates the subject tokens against trustedIssuers, so the platform Dex must be known: set muster.muster.oauth.server.dex.issuerUrl (or global.identity.issuerUrl)" -}}
+{{- end -}}
+{{- $issuers := deepCopy ($server.trustedIssuers | default list) -}}
+{{- $known := false -}}
+{{- range $issuers }}{{ if eq (toString .issuer) $issuer }}{{ $known = true }}{{ end }}{{ end -}}
+{{- if not $known -}}
+{{- $entry := dict "issuer" $issuer "jwksUrl" (printf "%s/keys" (trimSuffix "/" $issuer)) "acceptedTypHeaders" (list "") -}}
+{{- if $clientId }}{{ $_ := set $entry "allowedAudiences" (list $clientId) }}{{ end -}}
+{{- if dig "dex" "allowPrivateIPOIDC" false $server }}{{ $_ := set $entry "allowPrivateIPJWKS" true }}{{ end -}}
+{{- $issuers = append $issuers $entry -}}
+{{- end -}}
+{{- $_ := set $out "trustedIssuers" $issuers -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/* The broker client the Gateway presents for every git grant, and its Secret (rendered by the connectivity chart). */}}
+{{- define "agent-platform.grants.brokerClientID" -}}agentgateway-grants{{- end -}}
+{{- define "agent-platform.grants.brokerSecretName" -}}muster-broker-agentgateway{{- end -}}

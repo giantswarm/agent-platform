@@ -332,6 +332,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.muster.versionRange | string | `">=5.31.4 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
+| components.muster.omitKeys[0] | string | `"grants"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.driftDetection.mode | string | `"enabled"` |  |
 | components.muster.enabled | bool | `true` |  |
@@ -667,6 +668,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | scheduling.singletons.nodeSelector | object | `{}` | Node labels the four stateful singletons (muster, muster-valkey, the kagent controller, klaus-gateway) must land on, merged into each component's own nodeSelector (its keys win). On a Karpenter spot installation: `karpenter.sh/capacity-type: on-demand`. Empty = as before. |
 | scheduling.singletons.tolerations | list | `[]` | Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint. |
 | extraObjects | list | `[]` |  |
+| muster.grants | object | `{}` |  |
 | muster.enabled | bool | `true` |  |
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
 | muster.fullnameOverride | string | `"muster"` |  |
