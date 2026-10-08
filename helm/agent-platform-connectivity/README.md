@@ -64,7 +64,7 @@ Two values turn the path on, and the order matters.
      -H 'content-type: application/json' \
      -H "x-api-key: $ANTHROPIC_API_KEY" \
      -H 'anthropic-version: 2023-06-01' \
-     -d '{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
+     -d '{"model":"claude-sonnet-5-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
    ```
 
 2. Point kagent's default ModelConfig at the listener. This is the cutover:
