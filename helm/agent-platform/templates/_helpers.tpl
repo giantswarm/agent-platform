@@ -999,7 +999,8 @@ set (the lookups see the installation, not the target); `lookup` is empty under
 */}}
 {{- define "agent-platform.validateKagentLineCrossing" -}}
 {{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
-{{- $floor := regexFind ">=\\s*[0-9][^ ,]*" (index .Values.components "kagent" "versionRange" | default "") | trimPrefix ">=" | trim -}}
+{{- $range := index .Values.components "kagent" "versionRange" | default "" -}}
+{{- $floor := regexFind ">=\\s*[0-9][^ ,]*" $range | trimPrefix ">=" | trim -}}
 {{- if and $floor (semverCompare ">=1.3.0-0" $floor) -}}
 {{- $kagent := .Values.kagent | default dict -}}
 {{- $ns := include "agent-platform.kagent.namespace" . -}}
@@ -1017,7 +1018,7 @@ set (the lookups see the installation, not the target); `lookup` is empty under
 {{- with .secret }}{{ if not (has .secretName $mounted) }}{{ $fresh = append $fresh .secretName }}{{ end }}{{ end -}}
 {{- end -}}
 {{- if not $fresh -}}
-{{- fail (printf "components.kagent selects the api.kagent.dev line (%s) while %s/%s runs kagent %s on its 1.x database (Secrets mounted: %s): the line's controller refuses the 1.x schema and the upgrade would half-apply. Cross with a fresh database first: add a postgres.databases entry for it (e.g. kagent-v3, name kagent_v3, component kagent) and mount its derived Secret <postgres.clusterName>-<key>-app in kagent.controller.volumes in place of the old one, then upgrade (UPGRADE.md, docs/kagent-v1alpha3-cutover.md); or hold components.kagent and components.kagent-crds below 1.3.0" (index .Values.components "kagent" "versionRange") $ns $name $running (join ", " ($mounted | default (list "none")))) -}}
+{{- fail (printf "components.kagent selects the api.kagent.dev line (%s) while %s/%s runs kagent %s on its 1.x database (Secrets mounted: %s): the line's controller refuses the 1.x schema and the upgrade would half-apply. Cross with a fresh database first: add a postgres.databases entry for it (e.g. kagent-v3, name kagent_v3, component kagent) and mount its derived Secret <postgres.clusterName>-<key>-app in kagent.controller.volumes in place of the old one, then upgrade (UPGRADE.md, docs/kagent-v1alpha3-cutover.md); or hold components.kagent and components.kagent-crds below 1.3.0" $range $ns $name $running (join ", " ($mounted | default (list "none")))) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
