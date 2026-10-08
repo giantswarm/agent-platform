@@ -597,6 +597,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PostgreSQL ImageVolume admission covers the documented restore Cluster** (giantswarm/agent-platform#852). The exception now allows Pods and Jobs labelled with the source Cluster name or its exact `<clusterName>-restore` name, within the source namespace.
 - **workspace-manager starts after its sign-in keys Secret exists** (giantswarm/agent-platform#911). With providers and `oauth.enabled` the manager seals each sign-in with the keys of the Secret `workspace-manager.signin.keys.secretName`, which the connectivity release renders, and exited with `sealing keys: Secret … not found` until that release had created it: a first deploy restarted the pod until the Secret appeared. `components.workspace-manager.dependsOn` is `[muster, agent-platform-connectivity]`, so Flux installs the manager only once the connectivity release is ready and the Secret is there. The connectivity release orders nothing after the manager, so the order has no cycle. `make verify-workspace-manager` asserts both references.
 
 ## [4.125.0] - 2026-10-10
