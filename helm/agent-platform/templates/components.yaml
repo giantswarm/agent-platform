@@ -216,6 +216,7 @@ knowledge:
 {{- include "agent-platform.validateRemovedComponents" . -}}
 {{- include "agent-platform.validateRemovedBackstageKeys" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
+{{- include "agent-platform.validateKagentLineCrossing" . -}}
 {{- include "agent-platform.validateSubstrate" . -}}
 {{- include "agent-platform.validateWorkerPool" . -}}
 {{- include "agent-platform.validateInlineSecrets" . -}}
